@@ -49,9 +49,10 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 pub use actions::{
-    Action, ActionPreview, ActionRunner, Approval, ArchiveThread, CalendarExecutor, CreateEvent,
-    DiffLine, DiffOp, DraftReply, DraftRequest, Drafter, ExecOutcome, Executors, MailExecutor,
-    NoteExecutor, PreparedAction, Reminder, ReminderExecutor, ResearchNote,
+    APPROVAL_KEY_LEN, Action, ActionPreview, ActionRunner, Approval, ArchiveThread,
+    CalendarExecutor, CreateEvent, DiffLine, DiffOp, DraftReply, DraftRequest, Drafter,
+    ExecOutcome, Executors, MailExecutor, NoteExecutor, PreparedAction, Reminder, ReminderExecutor,
+    ResearchNote, new_approval_key,
 };
 pub use brief::{BriefCard, BriefMeeting, MorningBrief};
 pub use candidate::{Candidate, CandidateKind, EvidenceRef, Features};
@@ -96,6 +97,8 @@ pub struct Proactive {
     judge: Option<Arc<dyn Judge>>,
     /// Serialises load-modify-save of the card state.
     lock: Mutex<()>,
+    /// Cards with an action executing: one at a time per card.
+    executing: Mutex<HashSet<String>>,
 }
 
 impl Proactive {
@@ -108,6 +111,7 @@ impl Proactive {
             cfg,
             judge: None,
             lock: Mutex::new(()),
+            executing: Mutex::new(HashSet::new()),
         }
     }
 
@@ -401,10 +405,13 @@ impl Proactive {
             .iter()
             .filter_map(|e| e.quote.clone())
             .collect();
-        runner.prepare(card_id, action, &context).await
+        runner.prepare(card_id, index, action, &context).await
     }
 
     /// Execute an approved action; on success the card is accepted (if it was not) and done.
+    ///
+    /// The action must be the one the card offers at `prepared.action_index` (only content
+    /// `prepare` fills in may differ), and only one action per card runs at a time.
     pub async fn run_action(
         &self,
         runner: &ActionRunner,
@@ -412,9 +419,20 @@ impl Proactive {
         approval: &Approval,
         now: OffsetDateTime,
     ) -> Result<ExecOutcome> {
+        let _running = ExecutingGuard::claim(&self.executing, &prepared.card_id)?;
         let card = self.card(&prepared.card_id)?;
         if card.state.is_terminal() {
             return Err(Error::Invalid(format!("card {} is closed", card.id)));
+        }
+        let offered = card
+            .actions
+            .get(prepared.action_index)
+            .is_some_and(|a| prepared.matches_offered(a));
+        if !offered {
+            return Err(Error::Integrity(format!(
+                "card {} does not offer this action",
+                card.id
+            )));
         }
         let out = runner.execute(prepared, approval).await?;
         if matches!(out, ExecOutcome::Executed(_)) {
@@ -444,6 +462,36 @@ impl Proactive {
         let corpus = self.corpus()?;
         let state = self.cards.load()?;
         Ok(brief::compose(&state, &corpus, &self.cfg, now))
+    }
+}
+
+/// Marks a card as executing until dropped.
+struct ExecutingGuard<'a> {
+    set: &'a Mutex<HashSet<String>>,
+    card_id: String,
+}
+
+impl<'a> ExecutingGuard<'a> {
+    fn claim(set: &'a Mutex<HashSet<String>>, card_id: &str) -> Result<Self> {
+        let mut s = set.lock().unwrap_or_else(PoisonError::into_inner);
+        if !s.insert(card_id.to_owned()) {
+            return Err(Error::Invalid(format!(
+                "an action for card {card_id} is already running"
+            )));
+        }
+        Ok(Self {
+            set,
+            card_id: card_id.to_owned(),
+        })
+    }
+}
+
+impl Drop for ExecutingGuard<'_> {
+    fn drop(&mut self) {
+        self.set
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.card_id);
     }
 }
 

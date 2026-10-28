@@ -731,3 +731,143 @@ fn card_stores_round_trip() {
         .unwrap();
     assert!(StoreCardStore::new(store).load().is_err());
 }
+
+// ---- approval binding (security review PA-4) ----
+
+#[tokio::test]
+async fn pa_run_action_executes_action_not_on_the_card() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let ana = card_of(&p, CandidateKind::UnansweredThread);
+    let evil = Action::CreateEvent(nugget_proactive::CreateEvent {
+        title: "x".into(),
+        start: now(),
+        end: now() + Duration::hours(1),
+        attendees: vec!["attacker@evil.example".into()],
+        description: None,
+    });
+    assert!(!ana.actions.contains(&evil));
+    // The runner signs it, but the card does not offer it at that position.
+    let forged = r.prepare(&ana.id, 0, &evil, &[]).await.unwrap();
+    assert!(
+        p.run_action(&r, &forged, &forged.approve(true), now())
+            .await
+            .is_err()
+    );
+    // Moving a real action to another position breaks its digest.
+    let mut moved = p.prepare_action(&r, &ana.id, 0).await.unwrap();
+    moved.action_index = 1;
+    assert!(
+        p.run_action(&r, &moved, &moved.approve(true), now())
+            .await
+            .is_err()
+    );
+    assert!(
+        !exec
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.starts_with("event"))
+    );
+    assert_ne!(p.card(&ana.id).unwrap().state, CardState::Done);
+}
+
+#[tokio::test]
+async fn approvals_are_keyed_by_the_runner() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let ours = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let theirs = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let c = card_of(&p, CandidateKind::Commitment);
+    // Minted by another runner (another key): refused, even though it is the card's action.
+    let foreign = p.prepare_action(&theirs, &c.id, 0).await.unwrap();
+    assert!(
+        p.run_action(&ours, &foreign, &foreign.approve(true), now())
+            .await
+            .is_err()
+    );
+    // The same key (e.g. the install's, after a restart) accepts it.
+    let key = nugget_proactive::new_approval_key().unwrap();
+    let a = runner(Arc::new(RecordingPolicy::default()), exec.clone()).with_key(key);
+    let b = runner(Arc::new(RecordingPolicy::default()), exec.clone()).with_key(key);
+    let prepared = p.prepare_action(&a, &c.id, 0).await.unwrap();
+    assert!(matches!(
+        p.run_action(&b, &prepared, &prepared.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Executed(_)
+    ));
+}
+
+#[tokio::test]
+async fn an_approval_executes_once() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    let approval = prepared.approve(true);
+    assert!(matches!(
+        r.execute(&prepared, &approval).await.unwrap(),
+        ExecOutcome::Executed(_)
+    ));
+    let err = r.execute(&prepared, &approval).await.unwrap_err();
+    assert!(err.to_string().contains("already used"), "{err}");
+    assert_eq!(exec.calls.lock().unwrap().len(), 1);
+}
+
+/// Reminders that wait for a signal, so two runs overlap.
+struct GatedReminders {
+    gate: tokio::sync::Notify,
+    calls: std::sync::Mutex<u32>,
+}
+
+#[async_trait::async_trait]
+impl nugget_proactive::ReminderExecutor for GatedReminders {
+    async fn create_reminder(&self, _: &nugget_proactive::Reminder) -> nugget_core::Result<String> {
+        self.gate.notified().await;
+        *self.calls.lock().unwrap() += 1;
+        Ok("rem-1".into())
+    }
+}
+
+#[tokio::test]
+async fn concurrent_runs_on_a_card_execute_once() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let gated = Arc::new(GatedReminders {
+        gate: tokio::sync::Notify::new(),
+        calls: std::sync::Mutex::new(0),
+    });
+    let r = ActionRunner::new(
+        Arc::new(RecordingPolicy::default()),
+        Executors {
+            reminders: Some(gated.clone()),
+            ..Default::default()
+        },
+    );
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    assert!(matches!(prepared.action, Action::Reminder(_)));
+    let approval = prepared.approve(true);
+    let (first, second) = tokio::join!(p.run_action(&r, &prepared, &approval, now()), async {
+        // Runs while the first is parked in the executor.
+        let out = p.run_action(&r, &prepared, &approval, now()).await;
+        gated.gate.notify_one();
+        out
+    });
+    assert_eq!(first.unwrap(), ExecOutcome::Executed("rem-1".into()));
+    assert!(second.is_err());
+    assert_eq!(*gated.calls.lock().unwrap(), 1);
+    // And afterwards the card is closed: no replay.
+    assert!(p.run_action(&r, &prepared, &approval, now()).await.is_err());
+}

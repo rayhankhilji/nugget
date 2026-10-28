@@ -43,8 +43,8 @@ use nugget_policy::{
     ActionDescriptor, Decision, JsonFilePolicyStore, KillSwitch, PolicyEngine, PolicyGate,
 };
 use nugget_proactive::{
-    Action, ActionRunner, CardState, Enrichment, ExecOutcome, Judge, JudgeInput, LlmJudge,
-    PreparedAction, Proactive, RefreshReport,
+    APPROVAL_KEY_LEN, Action, ActionRunner, CardState, Enrichment, ExecOutcome, Judge, JudgeInput,
+    LlmJudge, PreparedAction, Proactive, RefreshReport, new_approval_key,
 };
 use nugget_store::Store;
 use serde_json::{Value, json};
@@ -66,6 +66,8 @@ const PREVIEW_TTL: time::Duration = time::Duration::hours(1);
 const MAX_PREVIEWS: usize = 64;
 /// Store cursor key holding the local date the brief last fired.
 const BRIEF_MARK_KEY: &str = "proactive:brief";
+/// Store cursor key holding the install's approval key (bytes).
+const APPROVAL_KEY_KEY: &str = "proactive:approval_key";
 /// The clock wakes at least this often (reminders are checked on each wake).
 const CLOCK_TICK: Duration = Duration::from_secs(60);
 
@@ -89,7 +91,11 @@ pub(crate) async fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
     let executors = exec.executors();
     let paths = state.paths.clone();
     let policy = blocking(move || Ok(policy_gate(&paths))).await?;
-    let runner = ActionRunner::new(policy, executors).with_audit(state.store.clone());
+    let store = state.store.clone();
+    let key = blocking(move || approval_key(&store)).await?;
+    let runner = ActionRunner::new(policy, executors)
+        .with_key(key)
+        .with_audit(state.store.clone());
 
     let mut engine = Proactive::new(state.store.clone(), settings.engine.clone());
     if settings.judge != JudgeMode::Off {
@@ -125,6 +131,22 @@ pub(crate) async fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
 ///
 /// The seam for the shared engine: once the daemon owns one policy engine (W3), return it here.
 /// A rules file that cannot be read fails closed (every action is denied, with the reason).
+/// The install's key for binding approvals to previews (created on first start, kept in the
+/// encrypted store).
+fn approval_key(store: &Store) -> Result<[u8; APPROVAL_KEY_LEN]> {
+    let id = SourceId::new(APPROVAL_KEY_KEY);
+    let stored = store
+        .get_cursor(&id)?
+        .and_then(|v| serde_json::from_value::<Vec<u8>>(v).ok())
+        .and_then(|v| <[u8; APPROVAL_KEY_LEN]>::try_from(v).ok());
+    if let Some(key) = stored {
+        return Ok(key);
+    }
+    let key = new_approval_key()?;
+    store.set_cursor(&id, json!(key.to_vec()))?;
+    Ok(key)
+}
+
 pub(crate) fn policy_gate(paths: &Paths) -> Arc<dyn PolicyGate> {
     let path = paths.config.join("policy.json");
     let store = Arc::new(JsonFilePolicyStore::new(&path));
@@ -1348,6 +1370,7 @@ mod tests {
         let mut p = Previews::default();
         let prepared = |i: usize| PreparedAction {
             card_id: "a".into(),
+            action_index: 0,
             action: reminder_action(),
             preview: reminder_action().preview(),
             digest: format!("d{i}"),

@@ -6,16 +6,18 @@
 //! [`ActionRunner::execute`] (verifies the digest, asks the [`PolicyGate`], then calls the
 //! executor). Nothing executes without an approval whose digest matches what was previewed.
 
-use std::sync::Arc;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
+use hmac::{Hmac, Mac};
 use nugget_core::ids::ItemRef;
 use nugget_core::{Error, Result};
 use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
 use nugget_store::{AuditEntry, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -376,22 +378,27 @@ pub struct Executors {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedAction {
     pub card_id: String,
+    /// Position of the action in the card's actions.
+    pub action_index: usize,
     pub action: Action,
     pub preview: ActionPreview,
-    /// SHA-256 over the action and its preview; approvals are bound to it.
+    /// HMAC-SHA-256 (keyed by the [`ActionRunner`]) over the card, the action's position, the
+    /// action and its preview; approvals are bound to it, and only the runner can mint one.
     pub digest: String,
 }
 
 impl PreparedAction {
-    fn new(card_id: &str, action: Action) -> Result<Self> {
-        let preview = action.preview();
-        let digest = digest(card_id, &action, &preview)?;
-        Ok(Self {
-            card_id: card_id.to_owned(),
-            action,
-            preview,
-            digest,
-        })
+    /// Whether this is the card's offered `action`, ignoring content `prepare` filled in (a
+    /// drafted reply body).
+    pub fn matches_offered(&self, offered: &Action) -> bool {
+        match (&self.action, offered) {
+            (Action::DraftReply(mine), Action::DraftReply(theirs)) if theirs.body.is_none() => {
+                let mut mine = mine.clone();
+                mine.body = None;
+                &mine == theirs
+            }
+            (mine, theirs) => mine == theirs,
+        }
     }
 
     /// The user approved this exact preview. `confirmed` answers a policy `Confirm` (the UI
@@ -404,14 +411,65 @@ impl PreparedAction {
     }
 }
 
-fn digest(card_id: &str, action: &Action, preview: &ActionPreview) -> Result<String> {
-    let mut h = Sha256::new();
+/// Length of the key approvals are bound with.
+pub const APPROVAL_KEY_LEN: usize = 32;
+
+/// A fresh random key for [`ActionRunner::with_key`].
+pub fn new_approval_key() -> Result<[u8; APPROVAL_KEY_LEN]> {
+    let mut key = [0u8; APPROVAL_KEY_LEN];
+    getrandom::fill(&mut key).map_err(|e| Error::Other(format!("approval key: {e}")))?;
+    Ok(key)
+}
+
+/// Approvals remembered as used (older ones belong to closed cards, which refuse actions).
+const USED_APPROVALS: usize = 4096;
+
+fn digest(
+    key: &[u8; APPROVAL_KEY_LEN],
+    card_id: &str,
+    index: usize,
+    action: &Action,
+    preview: &ActionPreview,
+) -> Result<String> {
+    let mut h = <Hmac<Sha256> as Mac>::new_from_slice(key)
+        .map_err(|e| Error::Other(format!("approval key: {e}")))?;
     h.update(card_id.as_bytes());
-    h.update([0]);
-    h.update(serde_json::to_vec(action)?);
-    h.update([0]);
-    h.update(serde_json::to_vec(preview)?);
-    Ok(hex::encode(h.finalize()))
+    h.update(&[0]);
+    h.update(index.to_string().as_bytes());
+    h.update(&[0]);
+    h.update(&serde_json::to_vec(action)?);
+    h.update(&[0]);
+    h.update(&serde_json::to_vec(preview)?);
+    Ok(hex::encode(h.finalize().into_bytes()))
+}
+
+/// Digests of approvals that executed or are executing, oldest first.
+#[derive(Default)]
+struct UsedApprovals {
+    order: VecDeque<String>,
+    set: HashSet<String>,
+}
+
+impl UsedApprovals {
+    /// Claim `digest`; false when it was already used.
+    fn claim(&mut self, digest: &str) -> bool {
+        if !self.set.insert(digest.to_owned()) {
+            return false;
+        }
+        self.order.push_back(digest.to_owned());
+        while self.order.len() > USED_APPROVALS {
+            if let Some(old) = self.order.pop_front() {
+                self.set.remove(&old);
+            }
+        }
+        true
+    }
+
+    fn release(&mut self, digest: &str) {
+        if self.set.remove(digest) {
+            self.order.retain(|d| d != digest);
+        }
+    }
 }
 
 /// The user's explicit approval of one prepared action.
@@ -438,15 +496,32 @@ pub struct ActionRunner {
     policy: Arc<dyn PolicyGate>,
     executors: Executors,
     audit: Option<Store>,
+    key: [u8; APPROVAL_KEY_LEN],
+    used: Mutex<UsedApprovals>,
 }
 
 impl ActionRunner {
+    /// Approvals are bound with a random key for this runner; use [`ActionRunner::with_key`] to
+    /// keep one per install.
     pub fn new(policy: Arc<dyn PolicyGate>, executors: Executors) -> Self {
+        let key = new_approval_key().unwrap_or_else(|e| {
+            // Without randomness, no approval can be trusted: refuse every one.
+            tracing::error!(error = %e, "no approval key; actions are refused");
+            [0; APPROVAL_KEY_LEN]
+        });
         Self {
             policy,
             executors,
             audit: None,
+            key,
+            used: Mutex::new(UsedApprovals::default()),
         }
+    }
+
+    /// Bind approvals with this key (e.g. the install's, kept in the encrypted store).
+    pub fn with_key(mut self, key: [u8; APPROVAL_KEY_LEN]) -> Self {
+        self.key = key;
+        self
     }
 
     /// Record every decision and execution in the store's audit log.
@@ -459,6 +534,7 @@ impl ActionRunner {
     pub async fn prepare(
         &self,
         card_id: &str,
+        action_index: usize,
         action: &Action,
         context: &[String],
     ) -> Result<PreparedAction> {
@@ -482,7 +558,15 @@ impl ActionRunner {
                 .await?;
             d.body = Some(body);
         }
-        PreparedAction::new(card_id, action)
+        let preview = action.preview();
+        let digest = digest(&self.key, card_id, action_index, &action, &preview)?;
+        Ok(PreparedAction {
+            card_id: card_id.to_owned(),
+            action_index,
+            action,
+            preview,
+            digest,
+        })
     }
 
     /// Execute after the user's approval: the approval must match the preview's digest, the
@@ -494,12 +578,42 @@ impl ActionRunner {
         prepared: &PreparedAction,
         approval: &Approval,
     ) -> Result<ExecOutcome> {
-        let expected = digest(&prepared.card_id, &prepared.action, &prepared.preview)?;
-        if expected != prepared.digest || approval.digest != expected {
+        let expected = digest(
+            &self.key,
+            &prepared.card_id,
+            prepared.action_index,
+            &prepared.action,
+            &prepared.preview,
+        )?;
+        if self.key == [0; APPROVAL_KEY_LEN]
+            || expected != prepared.digest
+            || approval.digest != expected
+        {
             return Err(Error::Integrity(
                 "approval does not match the previewed action".into(),
             ));
         }
+        // Single shot: an approval runs once. It is released again when nothing ran (policy
+        // asked for confirmation, denied, halted, or the executor failed).
+        if !self.used().claim(&expected) {
+            return Err(Error::Integrity("this approval was already used".into()));
+        }
+        let out = self.execute_claimed(prepared, approval).await;
+        if !matches!(out, Ok(ExecOutcome::Executed(_))) {
+            self.used().release(&expected);
+        }
+        out
+    }
+
+    fn used(&self) -> std::sync::MutexGuard<'_, UsedApprovals> {
+        self.used.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn execute_claimed(
+        &self,
+        prepared: &PreparedAction,
+        approval: &Approval,
+    ) -> Result<ExecOutcome> {
         let task = format!("proactive:{}", prepared.card_id);
         if self.policy.halted() {
             self.audit("halted", &task, prepared, json!({}));

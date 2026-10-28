@@ -714,7 +714,7 @@ mod tests {
             body: None,
         });
         assert!(f.exec.supports(&draft));
-        let prepared = runner.prepare("card-1", &draft, &[]).await.unwrap();
+        let prepared = runner.prepare("card-1", 0, &draft, &[]).await.unwrap();
         let out = runner
             .execute(&prepared, &prepared.approve(false))
             .await
@@ -742,7 +742,7 @@ mod tests {
             at,
             about: Some(item("mail", "m1")),
         });
-        let prepared = runner.prepare("card-2", &rem, &[]).await.unwrap();
+        let prepared = runner.prepare("card-2", 0, &rem, &[]).await.unwrap();
         let out = runner
             .execute(&prepared, &prepared.approve(false))
             .await
@@ -777,7 +777,7 @@ mod tests {
         // Archiving is gated by confirmation before any executor runs.
         add_source(&f.exec, "imap-1", "imap", true, json!({}));
         let arch = archive(&["imap-1"]);
-        let prepared = runner.prepare("card-3", &arch, &[]).await.unwrap();
+        let prepared = runner.prepare("card-3", 0, &arch, &[]).await.unwrap();
         let out = runner
             .execute(&prepared, &prepared.approve(false))
             .await
