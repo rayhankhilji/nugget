@@ -27,6 +27,8 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::daemon::State;
 
+mod proactive;
+
 /// One wired-in subsystem.
 #[async_trait]
 pub(crate) trait Feature: Send + Sync {
@@ -112,7 +114,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     let mut list: Vec<Arc<dyn Feature>> = Vec::new();
     // W1 Double Tap:   start(&mut list, "draft", draft::start(cx).await);
     // W3 agent/safety: start(&mut list, "agent", agent::start(cx).await);
-    // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
+    start(&mut list, "proactive", proactive::start(cx).await);
     // W6 plugins:      start(&mut list, "plugins", plugins::start(cx).await);
     let _ = cx;
     let features = Features::new(std::mem::take(&mut list));

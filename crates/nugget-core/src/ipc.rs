@@ -84,6 +84,15 @@ pub mod method {
     pub const DRAFT_CANCEL: &str = "draft.cancel";
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
     pub const VOICE_STATUS: &str = "voice.status";
+    // Proactive (M5): see the `---- Proactive (M5) ----` block.
+    pub const CARDS_LIST: &str = "cards.list";
+    pub const CARDS_FEEDBACK: &str = "cards.feedback";
+    pub const CARDS_PREVIEW: &str = "cards.preview";
+    pub const CARDS_EXECUTE: &str = "cards.execute";
+    pub const BRIEF_GET: &str = "brief.get";
+    pub const PROACTIVE_METRICS: &str = "proactive.metrics";
+    pub const PROACTIVE_REFRESH: &str = "proactive.refresh";
+    pub const REMINDERS_LIST: &str = "reminders.list";
 }
 
 pub mod notification {
@@ -94,6 +103,12 @@ pub mod notification {
     pub const SOURCES_CHANGED: &str = "sources.changed";
     /// [`KnowledgeChanged`].
     pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
+    /// [`CardsChanged`].
+    pub const CARDS_CHANGED: &str = "cards.changed";
+    /// [`BriefView`], once a day at the configured brief time.
+    pub const BRIEF_READY: &str = "brief.ready";
+    /// [`ReminderView`], when a stored reminder is due (the desktop shows an OS notification).
+    pub const REMINDER_DUE: &str = "reminder.due";
 }
 
 // ---- status ----
@@ -877,4 +892,287 @@ pub struct VoiceStatus {
     pub channels: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
+}
+
+// ---- Proactive (M5) ----
+//
+// The daemon refreshes cards after ingest and knowledge runs and on a schedule. The desktop lists
+// them (`cards.list`), records feedback (`cards.feedback`), previews an action as a dry-run diff
+// (`cards.preview`) and executes it with an approval bound to that preview's digest
+// (`cards.execute`), through the policy gate. Wire shapes mirror `nugget-proactive`'s types.
+//
+// | method | params | result |
+// |---|---|---|
+// | `cards.list` | [`CardsListRequest`] | [`CardsList`] |
+// | `cards.feedback` | [`CardFeedbackRequest`] | [`CardView`] |
+// | `cards.preview` | [`CardPreviewRequest`] | [`CardPreview`] |
+// | `cards.execute` | [`CardExecuteRequest`] | [`CardExecuteResult`] |
+// | `brief.get` | `{}` | [`BriefView`] (today's, composed on demand) |
+// | `proactive.metrics` | `{}` | [`ProactiveMetrics`] |
+// | `proactive.refresh` | `{}` | [`CardsChanged`] (runs a refresh now) |
+// | `reminders.list` | `{}` | `Vec<`[`ReminderView`]`>` (pending, soonest first) |
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardsListRequest {
+    /// Also return snoozed, accepted and closed cards (default: the open inbox only).
+    #[serde(default)]
+    pub include_closed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct CardsList {
+    /// Open cards best first (then the rest, newest first, when `include_closed`).
+    pub cards: Vec<CardView>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_refresh: Option<time::OffsetDateTime>,
+    /// `[proactive] enabled`.
+    pub enabled: bool,
+}
+
+/// One feature's share of a card's score.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardFactor {
+    /// `urgency`, `importance`, `freshness`, `kind:<kind>`, ...
+    pub name: String,
+    pub value: f64,
+    pub weight: f64,
+    /// `value × weight` (log-odds).
+    pub contribution: f64,
+}
+
+/// A source item backing a card. `quote` is untrusted source text: render it as plain text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardEvidence {
+    pub item: ItemRef,
+    #[serde(default)]
+    pub quote: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// An action a card offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardActionView {
+    /// Position in the card's actions (`cards.preview`/`cards.execute` take it).
+    pub index: u32,
+    /// `draft_reply`, `create_event`, `reminder`, `archive_thread`, `research_note`.
+    pub kind: String,
+    /// Short label, e.g. "Draft a reply to Ana".
+    pub label: String,
+    /// Declared risk: `observe`, `edit`, `send`, `destroy`, `spend`, `security`.
+    pub risk: String,
+    /// Whether an executor is configured for it (e.g. archiving needs a connector that can).
+    pub supported: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardView {
+    pub id: String,
+    /// `unanswered_thread`, `commitment`, `meeting_prep`, `renewal`, `follow_up`.
+    pub kind: String,
+    pub title: String,
+    pub detail: String,
+    /// The judge's one-line summary, when it ran.
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub people: Vec<String>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub due: Option<time::OffsetDateTime>,
+    pub score: f64,
+    pub rank: f64,
+    /// Top factors of the score (why it is here).
+    pub factors: Vec<CardFactor>,
+    pub evidence: Vec<CardEvidence>,
+    pub actions: Vec<CardActionView>,
+    /// `new`, `seen`, `snoozed`, `accepted`, `dismissed`, `done`, `expired`.
+    pub state: String,
+    pub sensitive: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub snoozed_until: Option<time::OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardFeedbackRequest {
+    pub card_id: String,
+    /// `accept`, `dismiss`, `snooze`, `seen`, `done`.
+    pub feedback: String,
+    /// For `dismiss`: `not_relevant`, `already_handled`, `wrong_info`, `not_important`, `other`.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// For `dismiss` with `other`.
+    #[serde(default)]
+    pub reason_text: Option<String>,
+    /// For `snooze` (default: tomorrow at the brief time).
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub until: Option<time::OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardPreviewRequest {
+    pub card_id: String,
+    /// [`CardActionView::index`].
+    pub action: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PreviewLine {
+    /// `add`, `remove`, `context`.
+    pub op: String,
+    pub text: String,
+}
+
+/// A dry run: what the action would change. Nothing has executed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardPreview {
+    pub card_id: String,
+    pub action: u32,
+    pub kind: String,
+    pub summary: String,
+    pub risk: String,
+    /// Where the change lands, e.g. `mail:drafts`, `calendar`, `vault`.
+    pub target: String,
+    pub diff: Vec<PreviewLine>,
+    /// Approvals are bound to it: pass it back to `cards.execute`. Valid until the daemon
+    /// restarts or about an hour passes.
+    pub digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardExecuteRequest {
+    pub card_id: String,
+    pub action: u32,
+    /// [`CardPreview::digest`] of the preview the user approved.
+    pub digest: String,
+    /// The user confirmed the policy's (or the action's) confirmation reason.
+    #[serde(default)]
+    pub confirmed: bool,
+}
+
+/// Something the desktop finishes on the user's behalf after an action ran.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionArtifact {
+    /// `draft` (text to copy, `url` a `mailto:` link to open it in the mail app), `file` (open
+    /// `path` with the OS, e.g. an `.ics`), `note` (vault note at `path`), `event` (created on
+    /// the calendar server), `reminder` (stored; `reminder.due` fires at `at`), `archived`.
+    pub kind: String,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub at: Option<time::OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardExecuteResult {
+    /// `executed`, `needs_confirmation` (ask, then retry with `confirmed`), `denied`, `halted`.
+    pub outcome: String,
+    /// The executor's result id, or the policy's reason.
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub artifact: Option<ActionArtifact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BriefCardView {
+    pub card_id: String,
+    pub kind: String,
+    pub title: String,
+    pub summary: String,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub due: Option<time::OffsetDateTime>,
+    pub rank: f64,
+    pub factors: Vec<CardFactor>,
+    /// Offered action kinds, best first.
+    pub actions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BriefMeetingView {
+    pub title: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub start: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub end: Option<time::OffsetDateTime>,
+    pub all_day: bool,
+    #[serde(default)]
+    pub location: Option<String>,
+    pub attendees: Vec<String>,
+    /// Attendees outside the user's organisation.
+    pub external: Vec<String>,
+    #[serde(default)]
+    pub prep_card: Option<String>,
+    pub prep: Vec<CardEvidence>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BriefView {
+    /// The user's local date, `YYYY-MM-DD`.
+    pub date: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub generated_at: time::OffsetDateTime,
+    pub top: Vec<BriefCardView>,
+    pub meetings: Vec<BriefMeetingView>,
+    pub overdue: Vec<BriefCardView>,
+    pub renewals: Vec<BriefCardView>,
+    pub open_cards: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct KindMetricsView {
+    pub shown: u64,
+    pub accepted: u64,
+    pub dismissed: u64,
+    #[serde(default)]
+    pub precision: Option<f64>,
+}
+
+/// Card quality: precision = accepted / shown, time to action, dismiss reasons.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProactiveMetrics {
+    pub total: u64,
+    pub by_state: std::collections::BTreeMap<String, u64>,
+    pub shown: u64,
+    pub accepted: u64,
+    pub dismissed: u64,
+    pub snoozed: u64,
+    #[serde(default)]
+    pub precision: Option<f64>,
+    pub by_kind: std::collections::BTreeMap<String, KindMetricsView>,
+    #[serde(default)]
+    pub median_time_to_action_secs: Option<f64>,
+    #[serde(default)]
+    pub mean_time_to_action_secs: Option<f64>,
+    pub dismiss_reasons: std::collections::BTreeMap<String, u64>,
+    pub model_updates: u64,
+}
+
+/// `cards.changed`: the card set changed (refresh, feedback or an executed action). Refetch
+/// `cards.list`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CardsChanged {
+    /// `refresh`, `feedback`, `execute`.
+    pub reason: String,
+    pub open: u32,
+    pub created: u32,
+    pub resolved: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderView {
+    pub id: String,
+    pub text: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub at: time::OffsetDateTime,
+    #[serde(default)]
+    pub about: Option<ItemRef>,
+    /// The card it came from.
+    #[serde(default)]
+    pub card_id: Option<String>,
 }
