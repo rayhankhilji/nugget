@@ -8,6 +8,7 @@
 pub mod cli;
 pub mod config;
 pub mod daemon;
+mod features;
 mod fsutil;
 mod graphview;
 mod handler;

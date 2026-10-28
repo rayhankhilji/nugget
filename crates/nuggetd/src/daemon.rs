@@ -138,6 +138,8 @@ pub(crate) struct State {
     pub installs: Arc<InFlight>,
     pub tasks: TaskTracker,
     pub shutdown: CancellationToken,
+    /// Wired-in subsystems (`crate::features`); set once, right after `State` is built.
+    pub features: OnceLock<crate::features::Features>,
 }
 
 impl State {
@@ -520,6 +522,7 @@ impl Daemon {
             installs: Arc::new(InFlight::default()),
             tasks,
             shutdown,
+            features: OnceLock::new(),
         });
 
         // Forward ingest events to every client; start installed local models (not awaited).
@@ -534,6 +537,13 @@ impl Daemon {
                 }
             }
         }
+
+        let features = crate::features::build(&crate::features::FeatureContext {
+            state: &state,
+            config: &config,
+        })
+        .await;
+        let _ = state.features.set(features);
 
         Ok(Startup::Ready(Box::new(Daemon {
             state,
@@ -601,6 +611,9 @@ impl Daemon {
         // `serve_until` can also return early on a listener failure.
         if !state.shutdown.is_cancelled() {
             wind_down(&state).await;
+        }
+        if let Some(f) = state.features.get() {
+            f.shutdown().await;
         }
         if let Some(m) = &state.mcp {
             m.shutdown().await;

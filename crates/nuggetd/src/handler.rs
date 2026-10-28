@@ -104,13 +104,19 @@ impl Handler for RpcHandler {
                     .map(|l| l.status())
                     .unwrap_or_default(),
             ),
-            other => Err(RpcError::method_not_found(other)),
+            other => match self.state.features.get().and_then(|f| f.find(other)) {
+                Some(feature) => feature.call(other, params, notify).await,
+                None => Err(RpcError::method_not_found(other)),
+            },
         }
     }
 
     /// Every connection receives broadcast notifications (`ingest.progress`, `sources.changed`).
     fn connected(&self, notify: &Notifier) {
         self.state.hub.subscribe(notify);
+        if let Some(f) = self.state.features.get() {
+            f.connected(notify);
+        }
     }
 }
 

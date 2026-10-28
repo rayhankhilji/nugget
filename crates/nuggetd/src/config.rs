@@ -138,6 +138,26 @@ pub struct Config {
     pub mcp: McpSection,
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+    /// Sections owned by daemon features (`crate::features`), each parsed by its feature with
+    /// `features::section`. Kept raw here so a feature's settings live next to its code.
+    /// `[draft]`: Double Tap drafting and the voice profile.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub draft: toml::Table,
+    /// `[agent]`: the agent runtime and computer use.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub agent: toml::Table,
+    /// `[policy]`: the safety policy for actions.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub policy: toml::Table,
+    /// `[browser]`: the browser extension bridge.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub browser: toml::Table,
+    /// `[proactive]`: proactive cards and the morning brief.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub proactive: toml::Table,
+    /// `[plugins]`: WebAssembly plugins.
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub plugins: toml::Table,
 }
 
 /// `[knowledge]`: scheduling, plus every `nugget_knowledge::KnowledgeConfig` field (`me`, `llm`,
