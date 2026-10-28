@@ -247,8 +247,10 @@ impl Clipboard for X11Clipboard {
             return Ok(ClipboardSnapshot::default());
         };
         let mut atoms: Vec<Atom> = raw
-            .chunks_exact(4)
-            .map(|c| u32::from_ne_bytes([c[0], c[1], c[2], c[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| u32::from_ne_bytes(*c))
             .collect();
         atoms.dedup();
         let mut formats = Vec::new();
@@ -628,8 +630,7 @@ pub fn capture_png(r: crate::Rect) -> Result<Option<Vec<u8>>> {
     let mut rgb = Vec::with_capacity((usize::from(w) * 3 + 1) * usize::from(h));
     for row in img.data.chunks_exact(stride).take(usize::from(h)) {
         rgb.push(0); // filter: none
-        for p in row.chunks_exact(4) {
-            let b = [p[0], p[1], p[2], p[3]];
+        for &b in row.as_chunks::<4>().0 {
             let px = if lsb {
                 u32::from_le_bytes(b)
             } else {

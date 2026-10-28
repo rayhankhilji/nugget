@@ -169,7 +169,10 @@ export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
         <summary>{t("onboarding.perm.otherSystems")}</summary>
         {others.map((o) => (
           <section key={o} aria-labelledby={`ob-perm-${o}`}>
-            <h3 id={`ob-perm-${o}`}>{t(OS_LABEL[o])}</h3>
+            {/* Under "your system" (h2) when it is known; otherwise directly under the step's h1. */}
+            <OtherHeading id={`ob-perm-${o}`} level={mine ? 3 : 2}>
+              {t(OS_LABEL[o])}
+            </OtherHeading>
             <PermissionList os={o} />
           </section>
         ))}
@@ -177,6 +180,10 @@ export function PermissionsStep({ headingRef }: StepProps & { os?: Os }) {
       <p className="muted">{t("onboarding.perm.scope")}</p>
     </>
   );
+}
+
+function OtherHeading({ id, level, children }: { id: string; level: 2 | 3; children: ReactNode }) {
+  return level === 2 ? <h2 id={id}>{children}</h2> : <h3 id={id}>{children}</h3>;
 }
 
 // ---- 6. done ----

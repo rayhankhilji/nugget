@@ -57,6 +57,25 @@ describe("axe", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it.each([
+    ["an unknown OS", "Mozilla/5.0 (darwin) AppleWebKit/537.36 (KHTML, like Gecko) jsdom/26.1.0"],
+    ["macOS", "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15"],
+    ["Windows", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"],
+  ])("onboarding permissions on %s has no violations", async (_os, ua) => {
+    // The step's headings depend on the detected OS (CI runs this on all three).
+    const original = Object.getOwnPropertyDescriptor(window.navigator, "userAgent");
+    Object.defineProperty(window.navigator, "userAgent", { value: ua, configurable: true });
+    try {
+      const state: OnboardingState = { version: 1, step: "permissions", completed: [], skipped: [], ai: "local", finished: false };
+      await render(<Onboarding connected initial={state} onExit={() => {}} />);
+      await flush(5);
+      expect(await violations()).toEqual([]);
+    } finally {
+      if (original) Object.defineProperty(window.navigator, "userAgent", original);
+      else delete (window.navigator as { userAgent?: string }).userAgent;
+    }
+  });
+
   it("bring-your-own-key guidance has no violations", async () => {
     const state: OnboardingState = { version: 1, step: "ai", completed: [], skipped: [], ai: "byok", finished: false };
     await render(<Onboarding connected initial={state} onExit={() => {}} />);

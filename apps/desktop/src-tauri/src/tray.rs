@@ -192,7 +192,7 @@ mod tests {
     fn template_icon_is_black_and_alpha() {
         let icon = TEMPLATE_ICON;
         assert_eq!((icon.width(), icon.height()), (44, 44));
-        let px = icon.rgba().chunks_exact(4);
+        let px = icon.rgba().as_chunks::<4>().0.iter();
         assert!(px.clone().all(|p| p[..3] == [0, 0, 0]));
         assert!(px.clone().any(|p| p[3] == 255) && px.clone().any(|p| p[3] == 0));
     }

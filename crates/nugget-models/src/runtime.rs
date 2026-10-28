@@ -129,7 +129,7 @@ impl RuntimeEntry {
             return bad("license is empty".into());
         }
         for src in self.sources() {
-            validate_runtime_url(src, &self.version).or_else(&bad)?;
+            validate_runtime_url(src, &self.version).or_else(bad)?;
         }
         Ok(())
     }
