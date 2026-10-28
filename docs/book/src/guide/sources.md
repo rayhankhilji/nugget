@@ -13,10 +13,6 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`imap`](sources-imap-caldav.md) | Any IMAP mailbox over TLS | Password or app password | IMAP IDLE on the inbox, plus polling |
 | [`caldav`](sources-imap-caldav.md) | Any CalDAV calendar over https | Password or app password | Polled every 5 min (`sync-collection`) |
 
-> **Status: being wired in (wave W).** The kinds below are implemented in their connector crates and
-> are being registered in the daemon and the Sources wizard in this wave. Until then `sources.add`
-> refuses them.
-
 | Kind | What it indexes | Sign-in | How changes arrive |
 |---|---|---|---|
 | [`outlook`](sources-microsoft.md) | Outlook / Exchange Online mail, read-only | Your own Microsoft Entra app (client id) | Polled every 60 s (Graph delta queries) |
@@ -27,7 +23,7 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`github`](sources-saas.md#github) | Issues, pull requests and discussions involving you | Pasted token, or the device flow | Polled every 10 min, full listing daily |
 | [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | Pasted API key, or OAuth with PKCE | Polled every 5 min, full listing every 6 h |
 
-**Plugin connectors** (also being wired in, wave W) add kinds named `plugin:<plugin id>`, for example
+**Plugin connectors** (being wired in, wave W) add kinds named `plugin:<plugin id>`, for example
 `plugin:dev.nugget.example.feeds` for the example feed reader. They are WebAssembly plugins you install
 and approve on the [**Plugins**](plugins.md) page; each one reaches only the hosts it declared, and its
 traffic is in the egress ledger under `sync:plugin:<plugin id>`. A plugin connector signs in with

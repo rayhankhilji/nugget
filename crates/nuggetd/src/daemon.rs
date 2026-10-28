@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
-use nugget_connector::SecretStore;
+use nugget_connector::{Registry, SecretStore};
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
@@ -59,6 +59,8 @@ pub struct DaemonOptions {
     pub home: Option<PathBuf>,
     /// The `nuggetd` executable MCP setup snippets launch. Default: this executable.
     pub nuggetd_exe: Option<PathBuf>,
+    /// Connector registry override (tests). Default: `sources::registry()`.
+    pub connectors: Option<Registry>,
 }
 
 /// Test hooks for the local runtime and model manifest.
@@ -84,6 +86,7 @@ impl DaemonOptions {
             default_vault_dir: None,
             home: None,
             nuggetd_exe: None,
+            connectors: None,
         }
     }
 }
@@ -398,7 +401,7 @@ impl Daemon {
             }
             None => Arc::new(KeyringSecrets::new()),
         };
-        let mut registry = sources::registry();
+        let mut registry = opts.connectors.unwrap_or_else(sources::registry);
         crate::features::plugins::connector_factories(&paths, &config)
             .into_iter()
             .for_each(|f| registry.register(f));

@@ -3303,12 +3303,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
-name = "lazycell"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
-
-[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3651,18 +3645,6 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "memoffset",
-]
-
-[[package]]
-name = "nix"
-version = "0.30.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
-dependencies = [
- "bitflags 2.13.2",
- "cfg-if",
- "cfg_aliases",
- "libc",
 ]
 
 [[package]]
@@ -4107,6 +4089,7 @@ name = "nugget-ingest"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "core-foundation 0.10.1",
  "futures",
  "keyring",
  "nugget-connector",
@@ -4116,13 +4099,13 @@ dependencies = [
  "nugget-store",
  "serde",
  "serde_json",
- "starship-battery",
  "tempfile",
  "time",
  "tokio",
  "tokio-util",
  "toml 1.1.8+spec-1.1.0",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4412,6 +4395,8 @@ dependencies = [
  "nugget-connector-files",
  "nugget-connector-google",
  "nugget-connector-imap",
+ "nugget-connector-microsoft",
+ "nugget-connector-saas",
  "nugget-core",
  "nugget-graph",
  "nugget-infer",
@@ -6556,24 +6541,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "starship-battery"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b781e3db6801873ce18c19041da668920c46223cdc7059ea20e2f8fe1ba85a2"
-dependencies = [
- "cfg-if",
- "core-foundation 0.10.1",
- "lazycell",
- "libc",
- "mach2",
- "nix 0.30.1",
- "num-traits",
- "plist",
- "uom",
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7811,16 +7778,6 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
-
-[[package]]
-name = "uom"
-version = "0.37.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd5cfe7d84f6774726717f358a37f5bca8fca273bed4de40604ad129d1107b49"
-dependencies = [
- "num-traits",
- "typenum",
-]
 
 [[package]]
 name = "url"
