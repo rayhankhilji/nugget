@@ -1,0 +1,109 @@
+/* Shared page states (loading, empty) used by the primitives in components/ui.tsx. Prefixed `pg-`
+   so they never collide with the shell's own state classes. Tokens only, so dark mode follows. */
+
+.pg-loading {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.pg-loading-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pg-skeleton {
+  height: 14px;
+  border-radius: var(--radius-small);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 6%, transparent) 0%,
+    color-mix(in srgb, var(--text) 12%, transparent) 50%,
+    color-mix(in srgb, var(--text) 6%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  animation: pg-shimmer 1.4s ease-in-out infinite;
+}
+
+.pg-skeleton:nth-child(3n + 1) {
+  width: 92%;
+}
+.pg-skeleton:nth-child(3n + 2) {
+  width: 78%;
+}
+.pg-skeleton:nth-child(3n) {
+  width: 64%;
+}
+
+@keyframes pg-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.pg-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 32px 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+}
+
+.pg-empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pg-empty-body {
+  margin: 0;
+  max-width: 52ch;
+  color: var(--muted);
+}
+
+.pg-empty-action {
+  margin-top: 8px;
+}
+
+/* Stale data stays on screen while it refreshes; dim it a little so the refresh is visible. */
+.pg-stale {
+  opacity: 0.7;
+  transition: opacity 120ms ease;
+}
+
+.pg-results-heading {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.pg-results-heading:focus {
+  outline: none;
+}
+
+.pg-results-heading:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pg-skeleton {
+    animation: none;
+    background: color-mix(in srgb, var(--text) 9%, transparent);
+  }
+  .pg-stale {
+    transition: none;
+  }
+}

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { useAsync } from "../hooks";
 import { formatBytes, formatTime } from "../format";
-import { Empty, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import { EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [50, 200, 1000];
@@ -33,21 +33,21 @@ export function PrivacyPage() {
                 ))}
               </select>
             </label>
-            <button type="button" className="btn btn-ghost" onClick={egress.reload} disabled={egress.loading}>
+            <button type="button" className="btn btn-ghost" onClick={egress.reload}>
               {t("common.refresh")}
             </button>
           </>
         }
       />
       <ErrorNote error={egress.error} onRetry={egress.reload} />
-      {egress.loading && !egress.data && <Spinner />}
+      {egress.loading && !egress.data && <Loading label={t("privacy.loading")} lines={5} />}
 
       {egress.data && rows.length === 0 && (
-        <Empty title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</Empty>
+        <EmptyState title={t("privacy.emptyTitle")}>{t("privacy.emptyBody")}</EmptyState>
       )}
 
       {rows.length > 0 && (
-        <>
+        <div className={egress.loading ? "pg-stale" : undefined} aria-busy={egress.loading}>
           <dl className="stats">
             <div>
               <dt>{t("privacy.stat.requests")}</dt>
@@ -103,7 +103,7 @@ export function PrivacyPage() {
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

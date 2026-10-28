@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ApiError, errorMessage } from "../api";
 import { useT } from "../i18n";
+import "../styles-pages.css";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
@@ -42,6 +43,38 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
     <div className="empty">
       <p className="empty-title">{title}</p>
       {children && <p className="muted">{children}</p>}
+    </div>
+  );
+}
+
+/**
+ * First-load placeholder: a labelled status (announced once, politely) over a few skeleton
+ * lines. The skeleton is decorative; the shimmer stops under reduced motion.
+ */
+export function Loading({ label, lines = 3 }: { label?: string; lines?: number }) {
+  const t = useT();
+  return (
+    <div className="pg-loading" role="status" aria-live="polite">
+      <span className="pg-loading-label">
+        <span className="spinner" aria-hidden="true" />
+        {label ?? t("common.loading")}
+      </span>
+      <div className="pg-loading" aria-hidden="true">
+        {Array.from({ length: lines }, (_, i) => (
+          <span key={i} className="pg-skeleton" />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Empty state with a next step: what's missing, what to do about it, and optionally a button. */
+export function EmptyState({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
+  return (
+    <div className="pg-empty">
+      <p className="pg-empty-title">{title}</p>
+      {children && <p className="pg-empty-body">{children}</p>}
+      {action && <div className="pg-empty-action">{action}</div>}
     </div>
   );
 }
