@@ -1,0 +1,78 @@
+{
+  "install": [
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"C:\\\\Users\\\\ada\\\\AppData\\\\Local\\\\Programs\\\\Nugget\\\\nugget-browser-host.exe\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chrome\\dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "key": "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "set_registry_default",
+      "value": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chrome\\dev.nugget.browser.json"
+    },
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"C:\\\\Users\\\\ada\\\\AppData\\\\Local\\\\Programs\\\\Nugget\\\\nugget-browser-host.exe\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chromium\\dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "key": "HKCU\\Software\\Chromium\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "set_registry_default",
+      "value": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chromium\\dev.nugget.browser.json"
+    },
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"C:\\\\Users\\\\ada\\\\AppData\\\\Local\\\\Programs\\\\Nugget\\\\nugget-browser-host.exe\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\edge\\dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "key": "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "set_registry_default",
+      "value": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\edge\\dev.nugget.browser.json"
+    },
+    {
+      "contents": "{\n  \"allowed_extensions\": [\n    \"browser@nugget.dev\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"C:\\\\Users\\\\ada\\\\AppData\\\\Local\\\\Programs\\\\Nugget\\\\nugget-browser-host.exe\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\firefox\\dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "key": "HKCU\\Software\\Mozilla\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "set_registry_default",
+      "value": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\firefox\\dev.nugget.browser.json"
+    }
+  ],
+  "uninstall": [
+    {
+      "key": "HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "delete_registry_key"
+    },
+    {
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chrome\\dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "key": "HKCU\\Software\\Chromium\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "delete_registry_key"
+    },
+    {
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\chromium\\dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "key": "HKCU\\Software\\Microsoft\\Edge\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "delete_registry_key"
+    },
+    {
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\edge\\dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "key": "HKCU\\Software\\Mozilla\\NativeMessagingHosts\\dev.nugget.browser",
+      "step": "delete_registry_key"
+    },
+    {
+      "path": "C:\\Users\\ada\\AppData\\Local\\Nugget\\NativeMessagingHosts\\firefox\\dev.nugget.browser.json",
+      "step": "remove_file"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "install": [
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"/Applications/Nugget.app/Contents/MacOS/nugget-browser-host\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "/Users/ada/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"/Applications/Nugget.app/Contents/MacOS/nugget-browser-host\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "/Users/ada/Library/Application Support/Chromium/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "contents": "{\n  \"allowed_origins\": [\n    \"chrome-extension://gljflghdpajgdddaibpdgjibnkeggchn/\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"/Applications/Nugget.app/Contents/MacOS/nugget-browser-host\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "/Users/ada/Library/Application Support/Microsoft Edge/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "write_file"
+    },
+    {
+      "contents": "{\n  \"allowed_extensions\": [\n    \"browser@nugget.dev\"\n  ],\n  \"description\": \"Nugget browser bridge\",\n  \"name\": \"dev.nugget.browser\",\n  \"path\": \"/Applications/Nugget.app/Contents/MacOS/nugget-browser-host\",\n  \"type\": \"stdio\"\n}\n",
+      "path": "/Users/ada/Library/Application Support/Mozilla/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "write_file"
+    }
+  ],
+  "uninstall": [
+    {
+      "path": "/Users/ada/Library/Application Support/Google/Chrome/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "path": "/Users/ada/Library/Application Support/Chromium/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "path": "/Users/ada/Library/Application Support/Microsoft Edge/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "remove_file"
+    },
+    {
+      "path": "/Users/ada/Library/Application Support/Mozilla/NativeMessagingHosts/dev.nugget.browser.json",
+      "step": "remove_file"
+    }
+  ]
+}

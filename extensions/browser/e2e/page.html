@@ -1,0 +1,16 @@
+<!doctype html>
+<html>
+  <head><title>Nugget e2e</title></head>
+  <body>
+    <h1>Test page</h1>
+    <form id="f" onsubmit="event.preventDefault(); document.getElementById('out').textContent = 'Sent: ' + this.msg.value">
+      <label for="msg">Message</label>
+      <input id="msg" name="msg" />
+      <label for="pw">Password</label>
+      <input id="pw" type="password" value="do-not-read" />
+      <button type="submit">Send message</button>
+    </form>
+    <button id="more" onclick="this.insertAdjacentHTML('afterend', '<a href=&quot;/next&quot;>Next page</a>')">Show more</button>
+    <p id="out"></p>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head><title>Sign up</title><style>.gone { display: none } .ghost { visibility: hidden }</style></head>
+  <body>
+    <h1>Create your account</h1>
+    <p>Already a member? <a href="/login">Log in</a></p>
+    <form id="signup" action="/signup" method="post">
+      <label for="email">Email address</label>
+      <input id="email" name="email" type="email" value="ada@example.com" />
+      <label>Full name <input name="fullname" type="text" placeholder="Ada Lovelace" /></label>
+      <input id="pw" name="password" type="password" value="hunter2-secret" aria-label="Password" />
+      <input name="otp" autocomplete="one-time-code" value="123456" aria-label="Code" />
+      <select id="plan" name="plan" aria-label="Plan">
+        <option value="free">Free</option>
+        <option value="pro" selected>Pro</option>
+      </select>
+      <label><input id="tos" type="checkbox" name="tos" /> I agree to the terms</label>
+      <textarea id="bio" name="bio">My private bio</textarea>
+      <input type="hidden" name="csrf" value="tok" />
+      <button id="disabled-btn" type="button" disabled>Disabled</button>
+      <button id="go" type="submit">Create account</button>
+    </form>
+    <div class="gone"><button id="hidden-btn">Hidden</button></div>
+    <div class="ghost"><button id="ghost-btn">Ghost</button></div>
+    <div hidden><a href="/x">Hidden link</a></div>
+    <div role="button" tabindex="0" id="custom">Custom control</div>
+    <div contenteditable="true" id="editor">Draft <b>text</b></div>
+    <script>window.secret = "should not appear";</script>
+  </body>
+</html>

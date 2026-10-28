@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Nugget",
+  "short_name": "Nugget",
+  "version": "0.0.1",
+  "description": "Lets your local Nugget assistant read and act on sites you allow, with a visible stop button.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA77jL5bGNAJkVKpXKLI3E8WwKWp6Xgz1GlSMDe1mn830i9gHlXs59fKmzHrFYOeBOO7YJZz387O6csIIOw/wwmEbTXqXz6yD63Qk0sGgBzfU9PKGjOL4a3Al9XYTrZWxTlK3D3jJnG95roAnZEv79vySE7QiFpZVyrJLc1Dj7nMD6N1C0dVPhHL0UZnK6LteZ++95IJDuCITBQV+ErLCqXf+YpRgYqEx/TNky5aDldOtrEs9wytEEbY4vPG9/gHHBS8aAj9E2NwyvuR/FGxubxFB42+e9KZ7LB2OA9aERXZ4lulIj8F8H9bTKU6q9YMVrvjocyncD2ROixJ0RrhzofQIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["nativeMessaging", "scripting", "activeTab"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "action": {
+    "default_title": "Nugget",
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+  }
+}

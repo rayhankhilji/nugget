@@ -1,0 +1,274 @@
+{
+  "snapshot_id": "fx.1",
+  "url": "https://shop.example/page",
+  "title": "Sign up",
+  "captured_at_ms": 1700000000000,
+  "viewport": {
+    "width": 1024,
+    "height": 768,
+    "scroll_x": 0,
+    "scroll_y": 0
+  },
+  "elements": [
+    {
+      "id": "n1",
+      "role": "link",
+      "name": "Log in",
+      "tag": "a",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "href": "https://shop.example/login"
+    },
+    {
+      "id": "n2",
+      "role": "textbox",
+      "name": "Email address",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "email",
+      "value": "ada@example.com",
+      "form": "n3"
+    },
+    {
+      "id": "n4",
+      "role": "textbox",
+      "name": "Full name",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "value": "",
+      "form": "n3"
+    },
+    {
+      "id": "n5",
+      "role": "textbox",
+      "name": "Password",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "password",
+      "sensitive": "password",
+      "form": "n3"
+    },
+    {
+      "id": "n6",
+      "role": "textbox",
+      "name": "Code",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "password",
+      "form": "n3"
+    },
+    {
+      "id": "n7",
+      "role": "combobox",
+      "name": "Plan",
+      "tag": "select",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "value": "pro",
+      "options": [
+        {
+          "value": "free",
+          "label": "Free",
+          "selected": false
+        },
+        {
+          "value": "pro",
+          "label": "Pro",
+          "selected": true
+        }
+      ],
+      "form": "n3"
+    },
+    {
+      "id": "n8",
+      "role": "checkbox",
+      "name": "I agree to the terms",
+      "tag": "input",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "checkbox",
+      "checked": false,
+      "form": "n3"
+    },
+    {
+      "id": "n9",
+      "role": "textbox",
+      "name": "",
+      "tag": "textarea",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "value": "My private bio",
+      "form": "n3"
+    },
+    {
+      "id": "n10",
+      "role": "button",
+      "name": "Disabled",
+      "tag": "button",
+      "disabled": true,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "form": "n3"
+    },
+    {
+      "id": "n11",
+      "role": "button",
+      "name": "Create account",
+      "tag": "button",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "form": "n3"
+    },
+    {
+      "id": "n12",
+      "role": "button",
+      "name": "Ghost",
+      "tag": "button",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": false,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false
+    },
+    {
+      "id": "n13",
+      "role": "button",
+      "name": "Custom control",
+      "tag": "div",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false
+    },
+    {
+      "id": "n14",
+      "role": "textbox",
+      "name": "Draft text",
+      "tag": "div",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "value": "Draft text"
+    }
+  ],
+  "elements_truncated": false,
+  "text": "Create your account\nAlready a member? Log in\nEmail address Full name  I agree to the terms Disabled Create account\nCustom control\nDraft text",
+  "text_truncated": false,
+  "frames": []
+}
