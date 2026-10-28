@@ -33,6 +33,15 @@ pub struct States {
     /// Off screen or hidden.
     #[serde(skip_serializing_if = "is_false")]
     pub offscreen: bool,
+    /// Greyed out; actions will be refused by the app (M4).
+    #[serde(skip_serializing_if = "is_false")]
+    pub disabled: bool,
+    /// Check box, switch, radio or toggle button state; `None` when not checkable (M4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checked: Option<bool>,
+    /// Expandable elements: `Some(true)` expanded, `Some(false)` collapsed (M4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
 }
 
 impl States {
@@ -234,6 +243,19 @@ pub trait Element: Sized {
     fn parent(&self) -> Option<Self>;
     /// Whether two handles refer to the same element.
     fn same(&self, other: &Self) -> bool;
+
+    /// The actions this element supports (M4 computer use). Default: none advertised.
+    fn actions(&self) -> Vec<crate::computer::UiActionKind> {
+        Vec::new()
+    }
+
+    /// Perform `action` on this element through the accessibility API (M4 computer use). Only
+    /// performs it; [`Backend`](crate::Backend) checks policy before and verifies after.
+    fn perform(&self, _action: &crate::computer::UiAction) -> nugget_core::Result<()> {
+        Err(nugget_core::Error::Unsupported(
+            "this backend cannot act on elements".into(),
+        ))
+    }
 }
 
 /// Bounds for [`snapshot_around`].

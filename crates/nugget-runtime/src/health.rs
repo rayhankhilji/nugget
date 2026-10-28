@@ -1,5 +1,7 @@
-//! Loopback HTTP checks against a running `llama-server`: readiness and request activity.
+//! HTTP checks against a running `llama-server` (on its Unix socket or loopback port): readiness
+//! and request activity.
 
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -12,13 +14,75 @@ use crate::process::ServerProcess;
 
 /// HTTP client for 127.0.0.1 only: never through a proxy, never following redirects.
 pub(crate) fn loopback_client() -> Result<reqwest::Client> {
+    client_builder()
+        .build()
+        .map_err(|e| Error::Other(format!("cannot build HTTP client: {e}")))
+}
+
+fn client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|e| Error::Other(format!("cannot build HTTP client: {e}")))
+}
+
+/// Where one server listens, with a client that reaches it.
+#[derive(Clone)]
+pub(crate) struct Target {
+    client: reqwest::Client,
+    /// `http://127.0.0.1:<port>`, or `http://localhost` for a Unix socket.
+    origin: String,
+    port: u16,
+    socket: Option<PathBuf>,
+}
+
+impl Target {
+    /// `127.0.0.1:port`, through the shared loopback client.
+    pub(crate) fn tcp(client: &reqwest::Client, port: u16) -> Self {
+        Self {
+            client: client.clone(),
+            origin: format!("http://127.0.0.1:{port}"),
+            port,
+            socket: None,
+        }
+    }
+
+    /// The Unix socket at `path`, through a client of its own.
+    #[cfg(unix)]
+    pub(crate) fn unix(path: &Path) -> Result<Self> {
+        let client = client_builder()
+            .unix_socket(path.to_path_buf())
+            .build()
+            .map_err(|e| Error::Other(format!("cannot build HTTP client: {e}")))?;
+        Ok(Self {
+            client,
+            origin: "http://localhost".into(),
+            port: 0,
+            socket: Some(path.to_path_buf()),
+        })
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) fn unix(path: &Path) -> Result<Self> {
+        Err(Error::Unsupported(format!(
+            "Unix socket {} is not supported on this platform",
+            path.display()
+        )))
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.origin)
+    }
+
+    /// Who listens there: a socket in our private directory is ours (see [`crate::socket`]);
+    /// a TCP port is checked where the platform allows ([`crate::listener`]).
+    fn owner(&self, child_pid: u32) -> Ownership {
+        match &self.socket {
+            Some(_) => Ownership::Child,
+            None => owner(self.port, child_pid),
+        }
+    }
 }
 
 /// Outcome of one `/health` probe.
@@ -31,9 +95,8 @@ pub(crate) enum Health {
     Down,
 }
 
-pub(crate) async fn probe(client: &reqwest::Client, port: u16) -> Health {
-    let url = format!("http://127.0.0.1:{port}/health");
-    match client.get(&url).send().await {
+pub(crate) async fn probe(target: &Target) -> Health {
+    match target.client.get(target.url("/health")).send().await {
         Ok(r) if r.status().is_success() => match r.text().await {
             // llama-server answers {"status":"ok"} once the model is loaded.
             Ok(body) if body.contains("ok") => Health::Ready,
@@ -74,12 +137,12 @@ fn lock_slot(slot: &ProcSlot) -> std::sync::MutexGuard<'_, Option<ServerProcess>
 /// Poll `/health` until the server in `slot` is ready, its process exits, or `timeout` passes.
 ///
 /// Ready means: the process is alive before and after a `/health` probe that answered ok, and
-/// (on Linux) every listener reachable on `127.0.0.1:port` belongs to that process or its
+/// the listener is the server's: a Unix socket in the private socket directory, or (on Linux)
+/// a TCP port whose every listener reachable on `127.0.0.1:port` belongs to that process or its
 /// process group ([`crate::listener`]). Another process answering on the port fails the start
 /// at once.
 pub(crate) async fn wait_ready(
-    client: &reqwest::Client,
-    port: u16,
+    target: &Target,
     slot: &ProcSlot,
     timeout: Duration,
     poll: Duration,
@@ -100,10 +163,10 @@ pub(crate) async fn wait_ready(
             }
             Child::Gone => return Err(Error::Cancelled),
         };
-        if probe(client, port).await == Health::Ready
+        if probe(target).await == Health::Ready
             && matches!(child(slot), Child::Running(p) if p == pid)
         {
-            match owner(port, pid) {
+            match target.owner(pid) {
                 Ownership::Child | Ownership::Unverified => {
                     // Still the same live process after the ownership check.
                     if matches!(child(slot), Child::Running(p) if p == pid) {
@@ -134,14 +197,10 @@ pub(crate) async fn wait_ready(
 
 /// A fingerprint of the server's request counters from `/metrics` (Prometheus text), plus
 /// whether a request is in flight. `None` if metrics are unavailable.
-pub(crate) async fn activity(
-    client: &reqwest::Client,
-    port: u16,
-    key: &Secret,
-) -> Option<(f64, bool)> {
-    let url = format!("http://127.0.0.1:{port}/metrics");
-    let resp = client
-        .get(&url)
+pub(crate) async fn activity(target: &Target, key: &Secret) -> Option<(f64, bool)> {
+    let resp = target
+        .client
+        .get(target.url("/metrics"))
         .bearer_auth(key.expose())
         .send()
         .await

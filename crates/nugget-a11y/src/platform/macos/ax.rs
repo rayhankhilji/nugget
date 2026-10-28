@@ -1,6 +1,7 @@
-//! Safe wrappers over the few ApplicationServices (HIServices) AX calls the backend needs. All
-//! of this crate's macOS `unsafe` lives here: the AX functions are `unsafe` only because they
-//! take out-pointers, which these wrappers own.
+//! Safe wrappers over the few ApplicationServices (HIServices) AX calls the backend needs, and
+//! the one CGEvent call that takes a raw buffer. All of this crate's macOS `unsafe` lives here:
+//! the functions are `unsafe` only because they take out-pointers or buffers, which these
+//! wrappers own.
 #![allow(unsafe_code)]
 
 use std::ffi::c_void;
@@ -11,6 +12,7 @@ use objc2_core_foundation::{
     CFArray, CFBoolean, CFDictionary, CFIndex, CFRange, CFRetained, CFString, CFType, CGPoint,
     CGRect, CGSize,
 };
+use objc2_core_graphics::CGEvent;
 
 pub type Ax = CFRetained<AXUIElement>;
 
@@ -205,4 +207,60 @@ pub fn array_items(t: &CFType, max: usize) -> Vec<CFRetained<CFType>> {
     (0..typed.len().min(max))
         .filter_map(|i| typed.get(i))
         .collect()
+}
+
+/// The application element of a process (`AXUIElementCreateApplication`).
+pub fn application(pid: i32) -> Ax {
+    // SAFETY: no preconditions; an unknown pid yields an element whose calls fail.
+    unsafe { AXUIElement::new_application(pid) }
+}
+
+/// The element's action names (`AXPress`, `AXShowMenu`...), up to 32.
+pub fn action_names(el: &AXUIElement) -> Vec<String> {
+    let mut out: *const CFArray = std::ptr::null();
+    // SAFETY: `out` is a valid out-pointer; on success it receives a +1 CFArray we own.
+    let err = unsafe { el.copy_action_names(NonNull::from(&mut out)) };
+    if err != AXError::Success {
+        return Vec::new();
+    }
+    let Some(p) = NonNull::new(out.cast_mut()) else {
+        return Vec::new();
+    };
+    // SAFETY: a retained CFArray from AXUIElementCopyActionNames.
+    let arr: CFRetained<CFArray> = unsafe { CFRetained::from_raw(p) };
+    array_items(&arr, 32)
+        .iter()
+        .filter_map(|t| t.downcast_ref::<CFString>().map(|s| s.to_string()))
+        .collect()
+}
+
+pub fn perform_action(el: &AXUIElement, action: &str) -> Result<(), AXError> {
+    let action = CFString::from_str(action);
+    // SAFETY: `el` is a valid element and `action` a valid CFString.
+    let err = unsafe { el.perform_action(&action) };
+    if err == AXError::Success {
+        Ok(())
+    } else {
+        Err(err)
+    }
+}
+
+/// A value of a CFDictionary with string keys (`CGWindowListCopyWindowInfo` entries).
+pub fn dict_get(t: &CFType, key: &str) -> Option<CFRetained<CFType>> {
+    let dict = t.downcast_ref::<CFDictionary>()?;
+    let ptr: *const CFDictionary = dict;
+    // SAFETY: `CFDictionary<K, V>` is a marker view of the same opaque CFDictionary; the window
+    // server's dictionaries have CFString keys and CF object values, and the value is retained
+    // by `get` and downcast with a type check by callers.
+    let typed: &CFDictionary<CFString, CFType> =
+        unsafe { &*ptr.cast::<CFDictionary<CFString, CFType>>() };
+    typed.get(&CFString::from_str(key))
+}
+
+/// Attach UTF-16 text to a keyboard event (`CGEventKeyboardSetUnicodeString`). The system
+/// reads at most 20 units, so callers chunk longer text.
+pub fn set_unicode(ev: &CGEvent, units: &[u16]) {
+    // SAFETY: `units` is a valid buffer of `units.len()` UTF-16 code units for the call; the
+    // event copies them.
+    unsafe { CGEvent::keyboard_set_unicode_string(Some(ev), units.len() as _, units.as_ptr()) }
 }

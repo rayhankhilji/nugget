@@ -13,8 +13,9 @@
 //! 4. **Conversation**: a subject or recipients mean email; a thread means chat.
 //! 5. **Role**: a single-line field is a form field, a document role is a document.
 //!
-//! [`gate`] runs first and refuses secure fields (password, one-time code, card number) and
-//! excluded apps (password managers by default) before anything is classified or read further.
+//! [`gate`] runs first and refuses secure fields (password, one-time code, card number),
+//! excluded apps (password managers by default) and terminal emulators ([`DEFAULT_TERMINAL_APPS`],
+//! unless allowed with [`gate_with`]) before anything is classified or read further.
 
 use nugget_core::ipc::DraftContext;
 
@@ -29,6 +30,9 @@ pub enum Refusal {
     ExcludedApp(String),
     /// The field kind makes no sense to draft into (a search box).
     NotDraftable(FieldKind),
+    /// A terminal emulator ([`DEFAULT_TERMINAL_APPS`]): inserted text could run as a command.
+    /// Allowed only with `DraftConfig::allow_terminals`.
+    Terminal(String),
 }
 
 impl std::fmt::Display for Refusal {
@@ -41,6 +45,9 @@ impl std::fmt::Display for Refusal {
             Refusal::NotDraftable(kind) => {
                 write!(f, "nothing to draft in a {} field", kind.as_str())
             }
+            Refusal::Terminal(app) => {
+                write!(f, "drafting is disabled in terminals ({app})")
+            }
         }
     }
 }
@@ -48,7 +55,7 @@ impl std::fmt::Display for Refusal {
 impl From<Refusal> for nugget_core::Error {
     fn from(r: Refusal) -> Self {
         match r {
-            Refusal::SecureField | Refusal::ExcludedApp(_) => {
+            Refusal::SecureField | Refusal::ExcludedApp(_) | Refusal::Terminal(_) => {
                 nugget_core::Error::Invalid(r.to_string())
             }
             Refusal::NotDraftable(_) => nugget_core::Error::Unsupported(r.to_string()),
@@ -72,14 +79,85 @@ pub const DEFAULT_EXCLUDED_APPS: &[&str] = &[
     "com.apple.keychainaccess",
     "com.apple.passwords",
     "org.gnome.seahorse.application",
+    // Proton Pass.
+    "me.proton.pass.electron",
+    "me.proton.pass",
+    "protonpass",
+    "proton pass",
+    "proton-pass",
+    "pass.proton.me",
+    // Enpass.
+    "in.sinew.enpass-desktop",
+    "in.sinew.enpass",
+    "enpass",
+    // NordPass.
+    "com.nordsec.nordpass",
+    "nordpass",
+    "nordpass.com",
     "my.1password.com",
     "vault.bitwarden.com",
     "lastpass.com",
 ];
 
-/// Refuse secure fields and excluded apps, then classify. `excluded` holds app ids (matched
-/// after normalisation, see [`normalize_app_id`]) and page hosts (matched with subdomains).
+/// Terminal emulators: refused by default (text typed into a shell can run as a command),
+/// unless `DraftConfig::allow_terminals`. App ids are matched like excluded apps (bundle ids,
+/// executables without `.exe`, desktop-file ids, all case-insensitive).
+pub const DEFAULT_TERMINAL_APPS: &[&str] = &[
+    // macOS.
+    "com.apple.terminal",
+    "com.googlecode.iterm2",
+    "com.mitchellh.ghostty",
+    "com.github.wez.wezterm",
+    "org.alacritty",
+    "io.alacritty",
+    "net.kovidgoyal.kitty",
+    // Windows.
+    "windowsterminal",
+    "openconsole",
+    "conhost",
+    "cmd",
+    "powershell",
+    "powershell_ise",
+    "pwsh",
+    // Linux.
+    "org.gnome.terminal",
+    "gnome-terminal",
+    "gnome-terminal-server",
+    "org.gnome.console",
+    "kgx",
+    "org.kde.konsole",
+    "konsole",
+    "alacritty",
+    "kitty",
+    "wezterm",
+    "wezterm-gui",
+    "org.wezfurlong.wezterm",
+    "ghostty",
+    "xterm",
+];
+
+/// Whether the focused app is a terminal emulator ([`DEFAULT_TERMINAL_APPS`]).
+pub fn is_terminal(ctx: &DraftContext) -> bool {
+    let s = Signals::of(ctx);
+    !s.app_id.is_empty()
+        && DEFAULT_TERMINAL_APPS
+            .iter()
+            .any(|t| s.app_id == *t || s.app_id_raw == *t)
+}
+
+/// Refuse secure fields, excluded apps and terminals, then classify. `excluded` holds app ids
+/// (matched after normalisation, see [`normalize_app_id`]) and page hosts (matched with
+/// subdomains). Same as [`gate_with`] with terminals refused.
 pub fn gate(ctx: &DraftContext, excluded: &[String]) -> Result<FieldKind, Refusal> {
+    gate_with(ctx, excluded, false)
+}
+
+/// [`gate`], with terminal emulators allowed when `allow_terminals`.
+pub fn gate_with(
+    ctx: &DraftContext,
+    excluded: &[String],
+    allow_terminals: bool,
+) -> Result<FieldKind, Refusal> {
     if is_secure(ctx) {
         return Err(Refusal::SecureField);
     }
@@ -92,6 +170,9 @@ pub fn gate(ctx: &DraftContext, excluded: &[String]) -> Result<FieldKind, Refusa
         if s.app_id == normalize_app_id(e) || s.app_id_raw == host || host_is(&s.host, &host) {
             return Err(Refusal::ExcludedApp(display_app(ctx)));
         }
+    }
+    if !allow_terminals && is_terminal(ctx) {
+        return Err(Refusal::Terminal(display_app(ctx)));
     }
     let kind = classify(ctx);
     if !kind.draftable() {
@@ -1589,6 +1670,112 @@ mod tests {
             gate(&ctx, &["mybank.example".into()]),
             Ok(FieldKind::ChatMessage)
         );
+    }
+
+    #[test]
+    fn more_password_managers_are_excluded() {
+        let excluded: Vec<String> = DEFAULT_EXCLUDED_APPS
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        for id in [
+            "me.proton.pass.electron",
+            "ProtonPass.exe",
+            "proton-pass",
+            "in.sinew.Enpass-Desktop",
+            "Enpass.exe",
+            "enpass.desktop",
+            "com.nordsec.nordpass",
+            "NordPass.exe",
+            "nordpass",
+        ] {
+            let ctx = Case {
+                app_id: Some(id),
+                thread: true,
+                ..Default::default()
+            }
+            .ctx();
+            assert!(
+                matches!(gate(&ctx, &excluded), Err(Refusal::ExcludedApp(_))),
+                "{id}"
+            );
+        }
+        for url in [
+            "https://pass.proton.me/u/0",
+            "https://app.nordpass.com/vault",
+        ] {
+            let ctx = Case {
+                url: Some(url),
+                thread: true,
+                ..Default::default()
+            }
+            .ctx();
+            assert!(
+                matches!(gate(&ctx, &excluded), Err(Refusal::ExcludedApp(_))),
+                "{url}"
+            );
+        }
+        // Other Proton apps are not password managers.
+        let ctx = Case {
+            url: Some("https://mail.proton.me/u/0/inbox"),
+            thread: true,
+            ..Default::default()
+        }
+        .ctx();
+        assert!(gate(&ctx, &excluded).is_ok());
+    }
+
+    #[test]
+    fn terminals_are_refused_unless_allowed() {
+        for id in [
+            "com.apple.Terminal",
+            "com.googlecode.iterm2",
+            "WindowsTerminal.exe",
+            r"C:\Windows\System32\conhost.exe",
+            "cmd.exe",
+            "powershell.exe",
+            "pwsh.exe",
+            "org.gnome.Terminal",
+            "org.gnome.Terminal.desktop",
+            "org.kde.konsole",
+            "Alacritty",
+            "kitty",
+            "wezterm-gui.exe",
+            "com.mitchellh.ghostty",
+        ] {
+            let ctx = Case {
+                app_id: Some(id),
+                app_name: "Term",
+                thread: true,
+                ..Default::default()
+            }
+            .ctx();
+            assert!(is_terminal(&ctx), "{id}");
+            assert_eq!(
+                gate(&ctx, &[]),
+                Err(Refusal::Terminal("Term".into())),
+                "{id}"
+            );
+            assert!(gate_with(&ctx, &[], true).is_ok(), "{id}");
+        }
+        // Secure fields stay refused even where terminals are allowed.
+        let mut ctx = Case {
+            app_id: Some("com.apple.Terminal"),
+            ..Default::default()
+        }
+        .ctx();
+        ctx.field.secure = true;
+        assert_eq!(gate_with(&ctx, &[], true), Err(Refusal::SecureField));
+        // Not a terminal.
+        let ctx = Case {
+            app_id: Some("com.tinyspeck.slackmacgap"),
+            thread: true,
+            ..Default::default()
+        }
+        .ctx();
+        assert!(!is_terminal(&ctx));
+        let err: nugget_core::Error = Refusal::Terminal("Terminal".into()).into();
+        assert!(matches!(err, nugget_core::Error::Invalid(_)));
     }
 
     #[test]

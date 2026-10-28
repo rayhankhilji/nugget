@@ -6,7 +6,7 @@
 //! carry a heading-path prefix line before their body (see `nugget-extract`'s chunker); only
 //! the part of each chunk that matches the text and is not yet covered is referenced.
 //!
-//! Layouts live in the `item_text` table (schema v6) with `items.text` set to NULL. A layout
+//! Layouts live in the `item_text` table (schema v8) with `items.text` set to NULL. A layout
 //! is only written after decoding it back and comparing with the original text, so a stored
 //! layout always reproduces the exact text as long as the chunks it references are unchanged;
 //! `items.rs` re-plans the layout whenever an item's chunks are rewritten.

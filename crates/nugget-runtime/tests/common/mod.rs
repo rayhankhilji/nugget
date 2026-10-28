@@ -172,8 +172,42 @@ pub async fn wait_until(what: &str, timeout: Duration, mut f: impl FnMut() -> bo
     }
 }
 
-pub async fn get(port: u16, p: &str, key: Option<&str>) -> (u16, String) {
-    let mut req = no_proxy_client().get(format!("http://127.0.0.1:{port}{p}"));
+/// How a test reaches a server: through its config's Unix socket, or its loopback port.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Addr {
+    Port(u16),
+    Socket(PathBuf),
+}
+
+/// Where the server behind `cfg` listens.
+pub fn addr(cfg: &nugget_infer::ProviderConfig) -> Addr {
+    match &cfg.socket_path {
+        Some(p) => Addr::Socket(p.clone()),
+        None => Addr::Port(port_of(cfg.base_url.as_deref().unwrap())),
+    }
+}
+
+impl Addr {
+    pub fn client(&self) -> reqwest::Client {
+        let b = reqwest::Client::builder().no_proxy();
+        #[cfg(unix)]
+        let b = match self {
+            Addr::Socket(p) => b.unix_socket(p.clone()),
+            Addr::Port(_) => b,
+        };
+        b.build().unwrap()
+    }
+
+    pub fn url(&self, p: &str) -> String {
+        match self {
+            Addr::Port(port) => format!("http://127.0.0.1:{port}{p}"),
+            Addr::Socket(_) => format!("http://localhost{p}"),
+        }
+    }
+}
+
+pub async fn get(addr: &Addr, p: &str, key: Option<&str>) -> (u16, String) {
+    let mut req = addr.client().get(addr.url(p));
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }

@@ -47,6 +47,13 @@ nugget-graph.workspace = true
 nugget-knowledge.workspace = true
 nugget-vault.workspace = true
 nugget-mcp.workspace = true
+nugget-draft.workspace = true
+nugget-voice.workspace = true
+nugget-plugin.workspace = true
+nugget-agent.workspace = true
+nugget-policy.workspace = true
+nugget-browser.workspace = true
+nugget-computer.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -60,6 +67,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
+getrandom = "0.4"
 
 [dev-dependencies]
 nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }

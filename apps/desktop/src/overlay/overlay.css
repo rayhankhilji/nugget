@@ -1,0 +1,96 @@
+/* Double Tap caret overlay: one compact card filling its small, frameless window. */
+
+body.overlay-body {
+  font-size: 13px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.overlay {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.overlay-phase {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.overlay-badges {
+  display: inline-flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.overlay-text {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.overlay-editor {
+  flex: 1;
+  min-height: 60px;
+  width: 100%;
+  resize: none;
+  font: inherit;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.overlay-editor:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.overlay-msg {
+  margin: 0;
+}
+
+.overlay-msg-error {
+  color: var(--bad);
+}
+
+.overlay-msg-good {
+  color: var(--good);
+}
+
+.overlay-meta {
+  margin: 0;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.overlay-foot {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.overlay-foot kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  margin-inline-start: 6px;
+  opacity: 0.75;
+}

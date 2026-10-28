@@ -431,7 +431,7 @@ impl Store {
 
     /// Fetch an item by reference.
     pub fn get_item(&self, item: &ItemRef) -> Result<Option<Item>> {
-        let found = self.with_conn(|c| match find_item(c, item)? {
+        let found = self.with_read_conn(|c| match find_item(c, item)? {
             Some(row) => {
                 let text = row.text(c)?;
                 Ok(Some((row, text)))

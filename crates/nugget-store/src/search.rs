@@ -65,7 +65,7 @@ impl Store {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        self.with_conn(|c| text_hits(c, &q, limit))
+        self.with_read_conn(|c| text_hits(c, &q, limit))
     }
 
     /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).

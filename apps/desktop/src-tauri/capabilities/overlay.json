@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "overlay",
+  "description": "Double Tap caret overlay: listens to its own `doubletap:overlay` events and calls the app's own overlay commands (allowed without a core permission). Nothing else.",
+  "windows": [
+    "doubletap-overlay"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

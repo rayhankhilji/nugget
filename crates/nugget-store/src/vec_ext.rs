@@ -15,7 +15,7 @@ pub(crate) fn ensure_registered() -> Result<()> {
         .map_err(|e| Error::Storage(format!("cannot register sqlite-vec: {e}")))
 }
 
-/// The only `unsafe` in this crate.
+/// `unsafe` FFI: registers the statically linked extension entry point.
 #[allow(unsafe_code)]
 fn register() -> rusqlite::Result<()> {
     // SAFETY: `sqlite3_vec_init` is the extension entry point compiled (with `SQLITE_CORE`) and

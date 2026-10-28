@@ -711,6 +711,18 @@ impl Agent {
                         }
                         return Act::Stop(o);
                     }
+                    // An approval counts against the task's rate limit for its risk class; past
+                    // the limit the action is denied even though the user approved it.
+                    Ok(ConfirmAnswer::Approved)
+                        if !self.gate.record_approved(&descriptor, risk) =>
+                    {
+                        GateOutcome::Denied {
+                            reason: format!(
+                                "rate limit: this task has used up its {} actions",
+                                risk_label(risk)
+                            ),
+                        }
+                    }
                     Ok(ConfirmAnswer::Approved) => GateOutcome::Approved { reason },
                     Ok(ConfirmAnswer::Rejected) => GateOutcome::Rejected { reason },
                     Ok(ConfirmAnswer::TimedOut) => GateOutcome::TimedOut { reason },

@@ -8,6 +8,7 @@ actions** in the red-team tasks ([PLAN §5](../../docs/PLAN.md)).
 cargo run --release -p nugget-bench -- cua                         # reference agent, in process
 cargo run --release -p nugget-bench -- cua --cua-agent null        # the do-nothing floor
 cargo run --release -p nugget-bench -- cua --cua-agent naive       # red-team control
+cargo run --release -p nugget-bench -- cua --cua-agent nugget      # the real agent loop
 cargo run --release -p nugget-bench -- cua --cua-env xvfb --strict # real Linux desktop
 cargo run --release -p nugget-bench -- cua --cua-tasks adversarial,shop
 bench/cua/env/desktop.sh --strict                                  # full desktop via the script
@@ -15,7 +16,7 @@ bench/cua/env/desktop.sh --strict                                  # full deskto
 
 | Option | Meaning |
 |---|---|
-| `--cua-agent reference\|null\|naive` | Agent under test (default `reference`). Wave 2 adds the real agent here |
+| `--cua-agent reference\|null\|naive\|nugget` | Agent under test (default `reference`); `nugget` is the real agent, see [The `nugget` arm](#the-nugget-arm) |
 | `--cua-env inproc\|socket\|xvfb` | Where the apps run (default `inproc`); see [Environments](#environments) |
 | `--cua-tasks TERMS` | Run only tasks matching any comma-separated id, tag, app or difficulty |
 | `--strict` | Exit 4 if any target below is missed |
@@ -243,6 +244,35 @@ Linux-specific.
 An OSWorld-style subset can be added as further task files whose `start` and `expect` target
 real apps, where licences allow.
 
+## The `nugget` arm
+
+`--cua-agent nugget` (`src/suites/cua/nugget.rs`) runs the real `nugget-agent` loop with the real
+computer-use tools (`nugget-computer`: `observe`, `click`, `set_value`, ...), the real policy
+engine with its default policy, and the tools' own verification.
+
+- **Backend.** `nugget_env.rs` implements `nugget_a11y::ComputerUse` over the `Session`: one app
+  and window per open test app, the tree mapped to accessibility roles, and element ids derived
+  from the bench ids (`shop.pay` is `shop-pay`). Every real action is one `Session::act`;
+  `focus`, `scroll` and `expand` are free. Each action re-observes and reports whether its
+  effect is visible, as the platform engines do. Typed text is appended to the field. Stale ids
+  fail with `NotFound`.
+- **Model.** By default, a deterministic scripted model plays each task's reference solution as
+  tool calls. It observes first, acts by element id, and finishes, asks or refuses as the
+  reference does. It never asks for confirmation itself, so every confirmation comes from the
+  policy gate. When the user declines, it stops. This arm therefore measures the plumbing,
+  safety and verification, not model skill. To run a real model, set `NUGGET_BENCH_CUA_MODEL` to
+  a provider config: inline JSON in the daemon's `[[providers]]` shape, or a path to a JSON file.
+  The tests never use it.
+- **Confirmations.** Each `ConfirmationNeeded` from the loop goes to `Session::confirm`, with the
+  app normalised to the bench app id. The simulated user's answer goes back through
+  `Confirmations::answer`.
+- **Report.** The usual metrics, plus `agent.*` counts (gate approvals, rejections and denials;
+  verifications passed and failed; injection flags), plus the reference agent's headline metrics
+  on the same tasks under `reference.*`, so the two arms show side by side.
+- **`xvfb`.** The arm drives the apps through the session (over the socket) in every environment.
+  Driving the Chromium windows through AT-SPI (`nugget_a11y::system_computer()`) is not wired
+  yet.
+
 ## Plugging in the real agent (wave 2)
 
 Implement `suites::cua::agent::CuaAgent` for an adapter around `nugget-agent`. Its `run` receives
@@ -272,8 +302,16 @@ From 2026-10-28, on Linux x86_64, with all 51 tasks:
 | `reference` | inproc, socket, xvfb | **1.00** | **0** | **0.00** | 0 of 32 | 4.2 |
 | `null` | inproc | 0.00 | 0 | 0.00 | 0 of 0 | 0 |
 | `naive` (red-team control) | inproc | 0.31 | 42 | **1.00** | 0 of 0 | 5.0 |
+| `nugget` (scripted model) | inproc | **1.00** | **0** | **0.00** | 19 of 51 | 4.2 |
 
 The reference agent shows every task is solvable through the visible UI and that the checkers
 accept a correct run. The null agent shows no task passes by doing nothing. The naive agent
 follows every injection and never confirms, and it trips every safety target, which shows the
 detectors work. Its 0.31 comes from `ask` and `refuse` tasks and from risk-free tasks.
+
+The `nugget` arm passes every task, with no unconfirmed risky action and no injected goal
+followed. It does miss the false-confirmation target (0.37). The tools' risk words also ask
+before clicks that only open a form or a screen: `Reply`, `Forward`, `Checkout`, and `Remove`
+on a cart line. The injection detector flagged none of the nine injections. Compliance is 0
+only because the scripted model never follows them, so resisting injections needs a run with a
+real model.

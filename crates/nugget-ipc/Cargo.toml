@@ -21,6 +21,10 @@ tokio-util = { version = "0.7", features = ["codec"] }
 # Single-daemon lock file (same crate and version as nugget-models).
 fs4 = "1"
 
+[target.'cfg(unix)'.dependencies]
+# Safe `geteuid` for the server's peer-credential check.
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
 # Token/SID checks on the named pipe server (already in the tree via interprocess).

@@ -58,6 +58,7 @@ fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     let status = MenuItem::with_id(app, "status", "Status", true, None::<&str>)?;
     let update = MenuItem::with_id(app, "update", UPDATES_LABEL, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Nugget", true, None::<&str>)?;
+    let agents = crate::agent::tray_item(app)?;
     let menu = Menu::with_items(
         app,
         &[
@@ -66,6 +67,8 @@ fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             &open,
             &status,
             &update,
+            &PredefinedMenuItem::separator(app)?,
+            &agents,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -80,6 +83,7 @@ fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             // The update settings panel lives on the Status page.
             "status" | "update" => show_main(app, Some("status")),
             "quit" => app.exit(0),
+            id if id == crate::agent::tray_item_id() => crate::agent::tray_clicked(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, e| {

@@ -1,4 +1,4 @@
-//! Item text is stored once (schema v6): when chunks cover an item's text, `items.text` is NULL
+//! Item text is stored once (schema v8): when chunks cover an item's text, `items.text` is NULL
 //! and the text is rebuilt from a layout over the chunks. These tests check that every API keeps
 //! returning byte-identical text and unchanged search results, across all write paths.
 
@@ -300,7 +300,7 @@ fn search_results_match_a_store_with_duplicated_text() {
     for (i, (doc, chunks)) in docs.iter().enumerate() {
         let it = new_item(&i.to_string(), doc);
         compact.upsert_item_with_chunks(&it, chunks).unwrap();
-        // Item first, chunks separately: text stays in `items.text`, as before schema v6.
+        // Item first, chunks separately: text stays in `items.text`, as before schema v8.
         legacy.upsert_item(&it).unwrap();
         legacy.replace_chunks(&it.item, chunks).unwrap();
     }
@@ -448,8 +448,8 @@ fn a_corrupt_layout_is_an_integrity_error_not_wrong_text() {
     assert!(matches!(s.get_item(&iref("a")), Err(Error::Integrity(_))));
 }
 
-/// Database size for one corpus, stored the pre-v6 way (text in `items.text` and in chunks)
-/// and the v6 way. Prints the numbers; asserts a clear saving.
+/// Database size for one corpus, stored the pre-v8 way (text in `items.text` and in chunks)
+/// and the v8 way. Prints the numbers; asserts a clear saving.
 #[test]
 fn text_storage_size_before_and_after() {
     let dir = tempfile::tempdir().unwrap();

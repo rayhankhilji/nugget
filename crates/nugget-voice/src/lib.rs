@@ -13,6 +13,9 @@
 //!   and leftovers are stripped again here), chat messages flagged `from_me`, Markdown notes
 //!   and draft feedback recorded by [`StoreFeedbackSink`]. [`VoiceProfile::refresh`] is
 //!   incremental: only items whose connector version changed are read again.
+//!   [`VoiceProfile::save`] keeps a snapshot inside the encrypted store (never a plain file) and
+//!   [`VoiceProfile::load_or_build`] restores it at startup, so a restart only reads what
+//!   changed. `refresh` does not save: call `save` when [`RefreshReport::changed`] is true.
 //! - [`StyleStats`] per channel and per frequent recipient (see [`stats`] for definitions).
 //! - [`VoiceSource::hints`] returns stats plus 3–6 short exemplars, chosen by recipient, then
 //!   channel, then topic similarity to the current thread (hybrid store search restricted to
@@ -36,7 +39,9 @@ pub use feedback::{
 };
 pub use me::{MeIdentity, parse_address};
 pub use nugget_core::ipc::VoiceStatus;
-pub use profile::{RefreshReport, VOICE_CURSOR_SOURCE, VoiceConfig, VoiceProfile};
+pub use profile::{
+    RefreshReport, VOICE_CURSOR_SOURCE, VOICE_SNAPSHOT_SOURCE, VoiceConfig, VoiceProfile,
+};
 pub use stats::{similarity, style_distance};
 pub use text::{normalize_greeting, normalize_signoff};
 

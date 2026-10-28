@@ -62,6 +62,21 @@ fn every_plan_binds_loopback_and_never_carries_a_key() {
 }
 
 #[test]
+fn a_socket_plan_listens_on_the_socket_only() {
+    let mut p = plan(
+        RuntimeRole::Chat,
+        RuntimeAccel::Cpu,
+        &hw(16, 8),
+        &Tuning::default(),
+    );
+    p.socket = Some(PathBuf::from("/run/nugget/chat.sock"));
+    let a = strs(&p.args());
+    assert_eq!(val(&a, "--host").as_deref(), Some("/run/nugget/chat.sock"));
+    assert_eq!(a.iter().filter(|x| *x == "--host").count(), 1);
+    assert!(!a.contains(&"--port".to_string()));
+}
+
+#[test]
 fn chat_context_and_slots_scale_with_ram_and_cores() {
     let t = Tuning::default();
     let small = plan(RuntimeRole::Chat, RuntimeAccel::Cpu, &hw(8, 4), &t);

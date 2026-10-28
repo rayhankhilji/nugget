@@ -10,6 +10,9 @@ use crate::clipboard::{Clipboard, ClipboardFormat, ClipboardSnapshot, MAX_SNAPSH
 
 /// `NSPasteboardTypeString`.
 const UTF8_PLAIN_TEXT: &str = "public.utf8-plain-text";
+/// nspasteboard.org markers: clipboard managers skip transient and concealed items.
+const TRANSIENT: &str = "org.nspasteboard.TransientType";
+const CONCEALED: &str = "org.nspasteboard.ConcealedType";
 
 pub struct Pasteboard(Retained<NSPasteboard>);
 
@@ -50,10 +53,19 @@ impl Clipboard for Pasteboard {
 
     fn set_text(&mut self, text: &str) -> Result<()> {
         self.0.clearContents();
-        let ok = self.0.setString_forType(
+        // One item: the text, marked transient and concealed so clipboard history tools skip it.
+        let item = NSPasteboardItem::new();
+        let mut ok = item.setString_forType(
             &NSString::from_str(text),
             &NSString::from_str(UTF8_PLAIN_TEXT),
         );
+        let empty = NSData::new();
+        for marker in [TRANSIENT, CONCEALED] {
+            ok &= item.setData_forType(&empty, &NSString::from_str(marker));
+        }
+        let items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> =
+            vec![ProtocolObject::from_retained(item)];
+        ok = ok && self.0.writeObjects(&NSArray::from_retained_slice(&items));
         if ok {
             Ok(())
         } else {

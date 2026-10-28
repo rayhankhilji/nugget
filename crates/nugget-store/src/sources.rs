@@ -59,7 +59,7 @@ impl Store {
     /// Every item key of a source with its connector-reported version, for reconciling a
     /// connector's view (e.g. a directory scan) against what is stored.
     pub fn item_versions(&self, source: &SourceId) -> Result<HashMap<ItemKey, Option<String>>> {
-        self.with_conn(|conn| {
+        self.with_read_conn(|conn| {
             let mut stmt = conn
                 .prepare("SELECT key, version FROM items WHERE source = ?1")
                 .db("prepare item_versions")?;
@@ -90,7 +90,7 @@ impl Store {
              FROM chunks c JOIN items i ON i.id = c.item_id
              WHERE c.id IN ({placeholders})"
         );
-        let mut found: HashMap<ChunkId, Chunk> = self.with_conn(|conn| {
+        let mut found: HashMap<ChunkId, Chunk> = self.with_read_conn(|conn| {
             let mut stmt = conn.prepare(&sql).db("prepare get_chunks")?;
             let rows = stmt
                 .query_map(params_from_iter(ids.iter()), |r| {
@@ -114,7 +114,7 @@ impl Store {
                 "get_chunks_by_ord: at most {MAX_CHUNK_IDS} positions per call"
             )));
         }
-        let found: HashMap<u32, Chunk> = self.with_conn(|conn| {
+        let found: HashMap<u32, Chunk> = self.with_read_conn(|conn| {
             // One indexed point lookup per position, through the UNIQUE (item_id, ord) index.
             let mut stmt = conn
                 .prepare_cached(&format!(
@@ -152,7 +152,7 @@ impl Store {
     /// ids were assigned.
     pub fn neighbours(&self, chunk: ChunkId, radius: u32) -> Result<Vec<Chunk>> {
         let radius = i64::from(radius.min(MAX_NEIGHBOUR_RADIUS));
-        self.with_conn(|conn| {
+        self.with_read_conn(|conn| {
             let Some((item_id, ord)) = conn
                 .query_row(
                     "SELECT item_id, ord FROM chunks WHERE id = ?1",
@@ -192,7 +192,7 @@ impl Store {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.with_conn(|conn| {
+        self.with_read_conn(|conn| {
             let Some(dim) = embedding_dim(conn)? else {
                 return Ok(HashMap::new());
             };
@@ -236,7 +236,7 @@ impl Store {
         }
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
         let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
-        self.with_conn(|conn| {
+        self.with_read_conn(|conn| {
             // Without a vector table no chunk has a vector yet.
             let missing = if embedding_dim(conn)?.is_some() {
                 "NOT EXISTS (SELECT 1 FROM chunk_vec v WHERE v.rowid = c.id)"
@@ -263,7 +263,7 @@ impl Store {
 
     /// Item and chunk counts per source, sorted by source id.
     pub fn source_counts(&self) -> Result<Vec<SourceCounts>> {
-        self.with_conn(|conn| {
+        self.with_read_conn(|conn| {
             let mut stmt = conn
                 .prepare(
                     "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)

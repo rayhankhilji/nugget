@@ -24,7 +24,9 @@ mod wire;
 
 pub use client::Client;
 pub use error::{IpcError, RpcError, code, parse_params, to_result};
-pub use server::{Handler, Notifier, serve, serve_until};
+pub use server::{
+    DEFAULT_MAX_IN_FLIGHT, Handler, Notifier, ServerOptions, serve, serve_until, serve_with,
+};
 pub use transport::{LOCK_FILE, bind, connect_stream, lock_path, socket_display, socket_name};
 pub use wire::Notification;
 

@@ -3782,6 +3782,9 @@ dependencies = [
  "async-trait",
  "clap",
  "futures",
+ "nugget-a11y",
+ "nugget-agent",
+ "nugget-computer",
  "nugget-connector",
  "nugget-connector-files",
  "nugget-core",
@@ -3812,6 +3815,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "futures",
+ "nugget-agent",
  "nugget-core",
  "nugget-ipc",
  "nugget-policy",
@@ -3820,8 +3824,27 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "nugget-computer"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "nugget-a11y",
+ "nugget-agent",
+ "nugget-core",
+ "nugget-infer",
+ "nugget-policy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -3972,8 +3995,11 @@ name = "nugget-desktop"
 version = "0.0.1"
 dependencies = [
  "futures",
+ "nugget-a11y",
  "nugget-core",
+ "nugget-hotkey",
  "nugget-ipc",
+ "nugget-policy",
  "serde",
  "serde_json",
  "tauri",
@@ -4117,6 +4143,7 @@ dependencies = [
  "futures",
  "interprocess",
  "nugget-core",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
@@ -4226,9 +4253,12 @@ dependencies = [
  "async-trait",
  "ed25519-dalek",
  "futures",
+ "getrandom 0.4.3",
  "hex",
+ "nugget-agent",
  "nugget-connector",
  "nugget-core",
+ "nugget-policy",
  "reqwest",
  "semver",
  "serde",
@@ -4334,6 +4364,7 @@ version = "0.0.1"
 dependencies = [
  "getrandom 0.3.4",
  "hex",
+ "hmac",
  "keyring",
  "nugget-core",
  "nugget-graph",
@@ -4345,6 +4376,7 @@ dependencies = [
  "tempfile",
  "time",
  "tracing",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
@@ -4388,6 +4420,10 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "futures",
+ "getrandom 0.4.3",
+ "nugget-agent",
+ "nugget-browser",
+ "nugget-computer",
  "nugget-connector",
  "nugget-connector-caldav",
  "nugget-connector-files",
@@ -4396,6 +4432,7 @@ dependencies = [
  "nugget-connector-microsoft",
  "nugget-connector-saas",
  "nugget-core",
+ "nugget-draft",
  "nugget-graph",
  "nugget-infer",
  "nugget-ingest",
@@ -4403,10 +4440,13 @@ dependencies = [
  "nugget-knowledge",
  "nugget-mcp",
  "nugget-models",
+ "nugget-plugin",
+ "nugget-policy",
  "nugget-retrieve",
  "nugget-runtime",
  "nugget-store",
  "nugget-vault",
+ "nugget-voice",
  "nuggetd",
  "reqwest",
  "rmcp",

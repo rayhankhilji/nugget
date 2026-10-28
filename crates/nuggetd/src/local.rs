@@ -309,6 +309,15 @@ impl Provider for RuntimeSlot {
         }
         self.ready().await?.embed(texts).await
     }
+
+    /// Start the server if it stopped (Double Tap trigger), then warm the ready provider.
+    async fn prewarm(&self) -> Result<()> {
+        self.ready().await?.prewarm().await
+    }
+
+    async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+        self.ready().await?.prewarm_prefix(req).await
+    }
 }
 
 fn role_name(role: RuntimeRole) -> &'static str {
