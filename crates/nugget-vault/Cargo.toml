@@ -1,13 +1,37 @@
 [package]
 name = "nugget-vault"
+description = "Renders the Nugget knowledge graph as a Markdown vault and merges user edits back"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["store"]
+# `impl ItemLookup for nugget_store::Store` (citation titles and urls from the encrypted store).
+store = ["dep:nugget-store"]
+
 [dependencies]
 nugget-core.workspace = true
+nugget-graph.workspace = true
+nugget-store = { workspace = true, optional = true }
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+# Same versions as nugget-connector-files: notify is CC0-1.0, the debouncer MIT OR Apache-2.0. Use
+# the re-exported `notify_debouncer_full::notify` so the two never drift apart.
+notify-debouncer-full = "0.7"
+# NFC for file names (MIT OR Apache-2.0).
+unicode-normalization = "0.1.26"
+# Write fingerprints and short ids (MIT OR Apache-2.0).
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
