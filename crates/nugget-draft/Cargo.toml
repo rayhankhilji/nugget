@@ -1,5 +1,6 @@
 [package]
 name = "nugget-draft"
+description = "Double Tap drafting engine: rule-based field classification, voice- and context-grounded prompts, streaming post-processing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,21 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-store.workspace = true
+nugget-infer.workspace = true
+nugget-retrieve.workspace = true
+nugget-voice.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+tokio-util.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true
