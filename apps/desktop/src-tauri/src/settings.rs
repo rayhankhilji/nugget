@@ -1,5 +1,5 @@
-//! Desktop-only preferences (update channel, auto-install, start-at-login answer), kept in
-//! `settings.json` under the app's config directory. The daemon never reads this file.
+//! Desktop-only preferences (update channel, auto-install, start-at-login answer, autostart),
+//! kept in `settings.json` under the app's config directory. The daemon never reads this file.
 
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,9 @@ pub struct Settings {
     pub auto_install: bool,
     /// The user's answer to "start Nugget at login?": `None` until asked.
     pub start_at_login: Option<bool>,
+    /// Open the desktop app (hidden in the tray) at login. Distinct from `start_at_login`, which
+    /// is about the `nuggetd` service. Mirrors the OS entry `autostart.rs` writes.
+    pub autostart: bool,
 }
 
 impl Default for Settings {
@@ -35,6 +38,7 @@ impl Default for Settings {
             channel: Channel::Stable,
             auto_install: false,
             start_at_login: None,
+            autostart: false,
         }
     }
 }
@@ -79,10 +83,12 @@ mod tests {
         assert_eq!(s.channel, Channel::Stable);
         assert!(!s.auto_install);
         assert_eq!(s.start_at_login, None);
+        assert!(!s.autostart);
         // Older or partial files fill in the rest from the defaults.
         let s: Settings = serde_json::from_str(r#"{"channel":"beta"}"#).unwrap();
         assert_eq!(s.channel, Channel::Beta);
         assert!(!s.auto_install);
+        assert!(!s.autostart);
     }
 
     #[test]
@@ -95,6 +101,7 @@ mod tests {
             channel: Channel::Off,
             auto_install: true,
             start_at_login: Some(false),
+            autostart: true,
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
