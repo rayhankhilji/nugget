@@ -21,9 +21,12 @@ mod audit;
 mod changes;
 mod egress;
 mod error;
+mod fts;
 mod graph;
 mod items;
 mod key;
+#[cfg(test)]
+mod query_plans;
 mod schema;
 mod search;
 mod sources;

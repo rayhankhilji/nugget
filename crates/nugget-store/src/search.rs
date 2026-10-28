@@ -7,6 +7,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
 use crate::error::DbExt;
+use crate::fts;
 use crate::items::{embedding_dim, f32_blob, item_ref, validate_embedding};
 use crate::types::{ChunkId, Hit};
 
@@ -26,22 +27,8 @@ const HYBRID_OVERFETCH: usize = 4;
 const HYBRID_MIN_CANDIDATES: usize = 50;
 /// `sqlite-vec` caps `k` for kNN queries.
 const MAX_KNN: usize = 4096;
-/// Most query terms used for full-text search.
-const MAX_QUERY_TERMS: usize = 32;
 /// Snippet length for vector hits (characters).
 const SNIPPET_CHARS: usize = 200;
-
-/// Turn free text into a safe FTS5 query: alphanumeric terms, each quoted (so FTS5 syntax in user
-/// input is inert), OR-ed so bm25 ranks documents matching more terms higher.
-fn fts_query(query: &str) -> Option<String> {
-    let terms: Vec<String> = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .take(MAX_QUERY_TERMS)
-        .map(|t| format!("\"{t}\""))
-        .collect();
-    (!terms.is_empty()).then(|| terms.join(" OR "))
-}
 
 fn excerpt(text: &str) -> String {
     let text = text.trim();
@@ -61,15 +48,18 @@ fn excerpt(text: &str) -> String {
 impl Store {
     /// Full-text search over chunks **and item titles**, ranked by bm25 (best first).
     ///
-    /// The query is treated as plain words: punctuation and FTS5 operators are ignored. Words are
-    /// stemmed (Porter) and diacritics folded.
+    /// The query is plain words (OR-ed, so chunks matching more of them rank higher) plus a small
+    /// syntax: `"quoted phrases"`, `word*` prefixes (2+ characters) and `-word` / `-"phrase"`
+    /// exclusions (only alongside a positive term). Anything else, FTS5 operators included, is
+    /// treated as plain text; see the `fts` module for the exact rules. At most 32 words are
+    /// used. Words are stemmed (Porter) and diacritics folded.
     ///
     /// Titles live in their own FTS5 index. A title match adds [`TITLE_WEIGHT`] × its bm25 score
     /// to every matching chunk of that item, and an item whose title matches but none of whose
     /// chunks do is represented by its first chunk (snippet: the chunk's opening text). Items
     /// without chunks cannot be returned (a hit is a chunk).
     pub fn search_text(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
-        let Some(q) = fts_query(query) else {
+        let Some(q) = fts::match_expr(query) else {
             return Ok(Vec::new());
         };
         if limit == 0 {
@@ -197,22 +187,39 @@ impl Store {
     }
 }
 
+/// Chunk leg of text search: `?1` an FTS5 query, `?2` the limit.
+pub(crate) const TEXT_SEARCH_SQL: &str = "
+    SELECT ch.id, ch.item_id, i.source, i.key, i.title,
+           snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
+    FROM chunks_fts
+    JOIN chunks ch ON ch.id = chunks_fts.rowid
+    JOIN items i ON i.id = ch.item_id
+    WHERE chunks_fts MATCH ?1
+    ORDER BY bm25(chunks_fts), ch.id
+    LIMIT ?2";
+
+/// Title leg of text search: `?1` an FTS5 query, `?2` the limit.
+pub(crate) const TITLE_SEARCH_SQL: &str = "
+    SELECT rowid, bm25(items_fts) FROM items_fts
+    WHERE items_fts MATCH ?1
+    ORDER BY bm25(items_fts), rowid
+    LIMIT ?2";
+
+/// An item's first chunk (`?1` the item id), standing in for an item matched by title only.
+pub(crate) const FIRST_CHUNK_SQL: &str = "
+    SELECT ch.id, i.source, i.key, i.title, ch.text
+    FROM chunks ch JOIN items i ON i.id = ch.item_id
+    WHERE ch.item_id = ?1
+    ORDER BY ch.ord
+    LIMIT 1";
+
 /// Chunk and title full-text legs, fused (see [`Store::search_text`]). `q` is an FTS5 query
-/// from [`fts_query`].
+/// from [`fts::match_expr`].
 fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
     let lim = limit.min(i64::MAX as usize) as i64;
     let mut hits: Vec<(i64, Hit)> = {
         let mut stmt = c
-            .prepare_cached(
-                "SELECT ch.id, ch.item_id, i.source, i.key, i.title,
-                        snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
-                 FROM chunks_fts
-                 JOIN chunks ch ON ch.id = chunks_fts.rowid
-                 JOIN items i ON i.id = ch.item_id
-                 WHERE chunks_fts MATCH ?1
-                 ORDER BY bm25(chunks_fts), ch.id
-                 LIMIT ?2",
-            )
+            .prepare_cached(TEXT_SEARCH_SQL)
             .db("prepare text search")?;
         let rows = stmt
             .query_map(params![q, lim], |r| {
@@ -235,12 +242,7 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
     // Title leg: item id → weighted title score.
     let titles: Vec<(i64, f64)> = {
         let mut stmt = c
-            .prepare_cached(
-                "SELECT rowid, bm25(items_fts) FROM items_fts
-                 WHERE items_fts MATCH ?1
-                 ORDER BY bm25(items_fts), rowid
-                 LIMIT ?2",
-            )
+            .prepare_cached(TITLE_SEARCH_SQL)
             .db("prepare title search")?;
         let rows = stmt
             .query_map(params![q, lim], |r| {
@@ -261,13 +263,7 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
         }
     }
     let mut first_chunk = c
-        .prepare_cached(
-            "SELECT ch.id, i.source, i.key, i.title, ch.text
-             FROM chunks ch JOIN items i ON i.id = ch.item_id
-             WHERE ch.item_id = ?1
-             ORDER BY ch.ord
-             LIMIT 1",
-        )
+        .prepare_cached(FIRST_CHUNK_SQL)
         .db("prepare first chunk lookup")?;
     for (item_id, t) in titles {
         if with_chunk_hits.contains(&item_id) {
@@ -325,17 +321,6 @@ fn rrf_fuse<const N: usize>(lists: [Vec<Hit>; N], limit: usize) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fts_query_neutralises_syntax() {
-        assert_eq!(fts_query("  "), None);
-        assert_eq!(fts_query("\"(*)-^"), None);
-        assert_eq!(
-            fts_query("rust AND \"tokio\" NEAR(x"),
-            Some("\"rust\" OR \"AND\" OR \"tokio\" OR \"NEAR\" OR \"x\"".into())
-        );
-        assert_eq!(fts_query("café über"), Some("\"café\" OR \"über\"".into()));
-    }
 
     #[test]
     fn excerpt_truncates_on_char_and_word_boundaries() {
