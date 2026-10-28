@@ -5,12 +5,13 @@
 
 mod commands;
 mod daemon;
+mod login;
 mod open;
+mod settings;
 mod tray;
+mod updater;
 
-#[cfg(target_os = "macos")]
-use tauri::RunEvent;
-use tauri::{Manager, WindowEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 use tracing_subscriber::EnvFilter;
 
 fn main() {
@@ -24,6 +25,8 @@ fn main() {
         // Only the Rust API is used (`commands::pick_folders`); the webview is granted none of the
         // plugin's own commands.
         .plugin(tauri_plugin_dialog::init())
+        // Driven from `updater.rs` only; the webview has no `updater:` permission.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(daemon::Daemon::new())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
@@ -59,8 +62,14 @@ fn main() {
             commands::mcp_clients_revoke,
             commands::open_url,
             commands::pick_folders,
+            updater::updates_status,
+            updater::updates_set_settings,
+            updater::updates_check,
+            updater::updates_install,
+            updater::login_set,
         ])
         .setup(|app| {
+            app.manage(updater::Updates::new(app.handle()));
             if let Err(e) = tray::build(app) {
                 // E.g. no status-notifier host on some Linux desktops. The window still works,
                 // and closing it quits the app.
@@ -72,6 +81,7 @@ fn main() {
                 let daemon = handle.state::<daemon::Daemon>();
                 let _ = daemon.connection_info(&handle).await;
             });
+            updater::spawn_background_checks(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -87,11 +97,12 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("failed to build the Nugget app");
 
-    app.run(|_handle, _event| {
+    app.run(|handle, event| match event {
+        // An update the user opted to auto-install is applied as Nugget quits.
+        RunEvent::Exit => handle.state::<updater::Updates>().install_staged(),
         // macOS: clicking the Dock icon brings the hidden window back.
         #[cfg(target_os = "macos")]
-        if let RunEvent::Reopen { .. } = _event {
-            tray::show_main(_handle, None);
-        }
+        RunEvent::Reopen { .. } => tray::show_main(handle, None),
+        _ => {}
     });
 }
