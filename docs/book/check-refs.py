@@ -63,6 +63,13 @@ SOURCES: dict[str, tuple[str, str] | list[tuple[str, str]]] = {
     "connector.gcal": ("crates/nugget-connector-google/src/settings.rs", "CalendarSettings"),
     "connector.imap": ("crates/nugget-connector-imap/src/settings.rs", "ImapSettings"),
     "connector.caldav": ("crates/nugget-connector-caldav/src/lib.rs", "CalDavSettings"),
+    "connector.outlook": ("crates/nugget-connector-microsoft/src/settings.rs", "OutlookSettings"),
+    "connector.outlook_calendar": ("crates/nugget-connector-microsoft/src/settings.rs", "CalendarSettings"),
+    "connector.onedrive": ("crates/nugget-connector-microsoft/src/settings.rs", "OneDriveSettings"),
+    "connector.slack": ("crates/nugget-connector-saas/src/slack.rs", "SlackSettings"),
+    "connector.notion": ("crates/nugget-connector-saas/src/notion.rs", "NotionSettings"),
+    "connector.github": ("crates/nugget-connector-saas/src/github.rs", "GitHubSettings"),
+    "connector.linear": ("crates/nugget-connector-saas/src/linear.rs", "LinearSettings"),
 }
 
 # Config table path (dotted) -> group, for TOML validation and dotted-key references.
@@ -89,7 +96,17 @@ CONNECTOR_FILES = [
     "crates/nugget-connector-google/src/gcal.rs",
     "crates/nugget-connector-imap/src/lib.rs",
     "crates/nugget-connector-caldav/src/lib.rs",
+    "crates/nugget-connector-microsoft/src/outlook.rs",
+    "crates/nugget-connector-microsoft/src/calendar.rs",
+    "crates/nugget-connector-microsoft/src/onedrive.rs",
+    "crates/nugget-connector-saas/src/slack.rs",
+    "crates/nugget-connector-saas/src/notion.rs",
+    "crates/nugget-connector-saas/src/github.rs",
+    "crates/nugget-connector-saas/src/linear.rs",
 ]
+
+# Kind constants defined in a crate's lib.rs rather than next to the connector.
+CONNECTOR_CONSTS = ["crates/nugget-connector-saas/src/lib.rs"]
 
 # Documented as planned; they must NOT exist yet. When one lands, remove it here and update the
 # "planned" notes in the book. Example: "commands": {"mcp": "MCP stdio bridge (guide/mcp.md)"}.
@@ -123,7 +140,7 @@ def read(rel: str) -> str:
 
 
 def struct_body(text: str, name: str) -> str:
-    m = re.search(r"pub(?:\([a-z]+\))? struct " + name + r"\b[^{;]*\{(.*?)\n\}", text, re.S)
+    m = re.search(r"(?:pub(?:\([a-z]+\))? )?struct " + name + r"\b[^{;]*\{(.*?)\n\}", text, re.S)
     if not m:
         raise SystemExit(f"check-refs: cannot find struct {name}; update SOURCES")
     return m.group(1)
@@ -146,7 +163,8 @@ def struct_fields(rel: str, name: str) -> list[str]:
             if re.search(r"\bflatten\b", line):
                 flatten = True
             continue
-        m = re.match(r"pub(?:\([a-z]+\))?\s+(?:r#)?(\w+)\s*:", line)
+        # Private fields count too: settings structs are often deserialise-only.
+        m = re.match(r"(?:pub(?:\([a-z]+\))?\s+)?(?:r#)?(\w+)\s*:", line)
         if m:
             if not flatten:
                 fields.append(rename or m.group(1))
@@ -238,9 +256,10 @@ def mcp_tools() -> list[str]:
 
 def connector_kinds() -> dict[str, str]:
     out = {}
+    shared = {k: v for rel in CONNECTOR_CONSTS for k, v in str_consts(read(rel)).items()}
     for rel in CONNECTOR_FILES:
         text = read(rel)
-        consts = str_consts(text)
+        consts = shared | str_consts(text)
         for ident, display in re.findall(r'kind: (\w+),\s*display_name: "([^"]+)"', text):
             out[consts[ident]] = display
     return out
