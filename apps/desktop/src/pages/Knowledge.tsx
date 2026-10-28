@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, events, isMethodNotFound, type EntityKind, type SourceInfo } from "../api";
 import { useAsync, useDebounced, useEvent } from "../hooks";
 import { useT, type MessageKey } from "../i18n";
-import { kindLabel } from "../knowledge";
+import { graphSourceOptions, kindLabel } from "../knowledge";
 import { EntityDetailPanel } from "../components/EntityDetail";
 import { GraphPanel, KindChips } from "../components/GraphView";
 import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
@@ -23,6 +23,7 @@ export function KnowledgePage() {
   const status = useAsync(api.knowledgeStatus);
   const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
   const sourceNames = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  const sourceOptions = useMemo(() => graphSourceOptions(sources.data ?? []), [sources.data]);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ browse: null, graph: null });
 
   // Counts move with extraction; refresh them now and then rather than on every burst.
@@ -116,7 +117,7 @@ export function KnowledgePage() {
       )}
       {tab === "graph" && (
         <div id="kb-panel-graph" role="tabpanel" aria-labelledby="kb-tab-graph" className={selected ? "kb-graph kb-graph-with-detail" : "kb-graph"}>
-          <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} />
+          <GraphPanel center={center} onCenter={setCenter} selected={selected} onOpen={setSelected} sources={sourceOptions} />
           {selected && <div className="kb-detail kb-detail-side">{detail}</div>}
         </div>
       )}

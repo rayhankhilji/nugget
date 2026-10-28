@@ -307,8 +307,9 @@ export const ENTITY_KINDS: readonly EntityKind[] = [
   "topic",
 ];
 
-export type ClaimStatus = "active" | "superseded" | "retracted" | "user_asserted";
-export const CLAIM_STATUSES: readonly ClaimStatus[] = ["active", "superseded", "retracted", "user_asserted"];
+/** `retracted`: lost its evidence. `rejected`: rejected by the user (sticky). */
+export type ClaimStatus = "active" | "superseded" | "retracted" | "user_asserted" | "rejected";
+export const CLAIM_STATUSES: readonly ClaimStatus[] = ["active", "superseded", "retracted", "user_asserted", "rejected"];
 
 /** `knowledge.entities`: page through entities, optionally filtered by text and kind. */
 export interface EntitiesRequest {
@@ -391,6 +392,8 @@ export interface GraphRequest {
   depth: number;
   limit: number;
   kinds?: EntityKind[];
+  /** Only nodes and edges supported by items of this source. */
+  source?: string | null;
 }
 
 export interface GraphNodeView {
@@ -422,8 +425,7 @@ export interface MergeRequest {
 
 export interface ClaimStatusRequest {
   claim: number;
-  /** `retracted` rejects the fact; `active` restores it. */
-  status: "retracted" | "active";
+  status: ClaimDecision;
 }
 
 export interface VaultStatus {
@@ -921,7 +923,7 @@ export const api = {
   knowledgeGraph: (request: GraphRequest) => call<GraphView>("knowledge_graph", { request }),
   /** Merge `from` into `into`; `from`'s id keeps resolving to `into`. */
   knowledgeMerge: (request: MergeRequest) => call<void>("knowledge_merge", { request }),
-  /** Reject (`retracted`) or restore (`active`) a fact. */
+  /** Reject, restore, assert or un-assert a fact (see `ClaimDecision`). */
   knowledgeClaimStatus: (request: ClaimStatusRequest) => call<void>("knowledge_claim_status", { request }),
   knowledgeStatus: () => call<KnowledgeStatus>("knowledge_status"),
 
@@ -997,3 +999,29 @@ export const events = {
   /** Tray menu asked the window to show a page. */
   onNavigate: (h: (page: PageId) => void) => on(EVENT.navigate, h),
 };
+
+// ---- W7: knowledge ----
+
+/**
+ * What `knowledge.claim.status` accepts: `rejected` (sticky rejection), `active` (restore; a fact
+ * without sources comes back as `user_asserted`), `user_asserted` (the user vouches for it) and
+ * `unasserted` (undo the user's assertion: `active` if sources support it, else `retracted`).
+ */
+export type ClaimDecision = "rejected" | "active" | "user_asserted" | "unasserted";
+
+/** `knowledge.split`: move facts (and named aliases/identifiers) off an entity into a new one. */
+export interface SplitRequest {
+  entity: string;
+  claims: number[];
+  name: string;
+  /** Defaults to the split entity's kind. */
+  kind?: EntityKind | null;
+  aliases?: string[];
+  identifiers?: [string, string][];
+}
+
+/** Split facts off an entity; resolves to the new entity's id. */
+export async function knowledgeSplit(request: SplitRequest): Promise<string> {
+  const r = await call<EntityRef>("knowledge_split", { request });
+  return r.id;
+}

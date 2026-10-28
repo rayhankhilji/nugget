@@ -202,8 +202,8 @@ describe("knowledge guards", () => {
       expect(isEntityKind(k)).toBe(true);
     }
     for (const k of ["Person", "org", "", null, 3]) expect(isEntityKind(k)).toBe(false);
-    for (const s of ["active", "superseded", "retracted", "user_asserted"]) expect(isClaimStatus(s)).toBe(true);
-    for (const s of ["userAsserted", "rejected", undefined]) expect(isClaimStatus(s)).toBe(false);
+    for (const s of ["active", "superseded", "retracted", "user_asserted", "rejected"]) expect(isClaimStatus(s)).toBe(true);
+    for (const s of ["userAsserted", "unasserted", undefined]) expect(isClaimStatus(s)).toBe(false);
   });
 
   it("validate entity summaries", () => {
@@ -219,7 +219,8 @@ describe("knowledge guards", () => {
     expect(isClaimView(claim({ object: { literal: "London" } }))).toBe(true);
     expect(isClaimView(claim({ object: {} }))).toBe(false);
     expect(isClaimView(claim({ object: { literal: "x", entity: { id: "a", name: "A" } } }))).toBe(false);
-    expect(isClaimView(claim({ status: "rejected" }))).toBe(false);
+    expect(isClaimView(claim({ status: "rejected" }))).toBe(true);
+    expect(isClaimView(claim({ status: "unasserted" }))).toBe(false);
     expect(isClaimView(claim({ confidence: Number.NaN }))).toBe(false);
     expect(isClaimView(claim({ evidence: [{ item: { source: "x" } }] }))).toBe(false);
     expect(isEvidenceView({ item: { source: "a", key: "b" } })).toBe(true);

@@ -1,6 +1,15 @@
 /** Display helpers for the knowledge graph: labels, facts, evidence and vault links. */
 import { formatNumber, t, type MessageKey } from "./i18n";
-import { isOpenableUrl, type ClaimStatus, type ClaimView, type EvidenceView } from "./api";
+import {
+  isOpenableUrl,
+  type ClaimDecision,
+  type ClaimStatus,
+  type ClaimView,
+  type EntityDetail,
+  type EvidenceView,
+  type SourceInfo,
+  type SplitRequest,
+} from "./api";
 
 /** Label for a kind, tolerating kinds a newer daemon may add. */
 export function kindLabel(kind: string): string {
@@ -53,7 +62,7 @@ export function claimText(claim: ClaimView): string {
   return `${predicateLabel(claim.predicate)} ${claimObjectText(claim)}`.trim();
 }
 
-const STATUS_RANK: Record<ClaimStatus, number> = { user_asserted: 0, active: 0, superseded: 1, retracted: 2 };
+const STATUS_RANK: Record<ClaimStatus, number> = { user_asserted: 0, active: 0, superseded: 1, retracted: 2, rejected: 2 };
 
 export interface ClaimGroup {
   predicate: string;
@@ -186,4 +195,91 @@ export function attributeRows(attributes: unknown): [string, string][] {
   return Object.entries(attributes as Record<string, unknown>)
     .filter(([, v]) => v !== null && v !== undefined && v !== "")
     .map(([k, v]) => [predicateLabel(k), typeof v === "string" ? v : JSON.stringify(v)]);
+}
+
+// ---- fact decisions (reject, restore, undo a vault assertion) ----
+
+/** Whether a fact is current: shown to apps and written to the vault. */
+export function isCurrentStatus(status: string): boolean {
+  return status === "active" || status === "user_asserted";
+}
+
+/** Rejected by the user or without sources: shown struck through, with a Restore button. */
+export function isDroppedStatus(status: string): boolean {
+  return status === "rejected" || status === "retracted";
+}
+
+export type FactAction = "reject" | "unassert" | "restore";
+
+export interface FactActionPlan {
+  action: FactAction;
+  /** What to send to `knowledge.claim.status`. */
+  decision: ClaimDecision;
+  /** What undoes it (`null`: nothing to undo; the fact can simply be rejected again). */
+  undo: ClaimDecision | null;
+  /** The status the daemon will report afterwards (for an optimistic update). */
+  next: ClaimStatus;
+}
+
+/**
+ * The one action a fact offers: a fact the user added is withdrawn (undo of the assertion), a
+ * current fact is rejected (sticky), and anything else is restored.
+ */
+export function factAction(c: Pick<ClaimView, "status" | "evidence">): FactActionPlan {
+  const sourced = c.evidence.length > 0;
+  if (c.status === "user_asserted") {
+    return { action: "unassert", decision: "unasserted", undo: "user_asserted", next: sourced ? "active" : "retracted" };
+  }
+  if (c.status === "active") return { action: "reject", decision: "rejected", undo: "active", next: "rejected" };
+  return { action: "restore", decision: "active", undo: null, next: sourced ? "active" : "user_asserted" };
+}
+
+/** The status an undo decision leads back to. */
+export function undoStatus(undo: ClaimDecision, c: Pick<ClaimView, "evidence">): ClaimStatus {
+  if (undo === "user_asserted") return "user_asserted";
+  if (undo === "active") return c.evidence.length > 0 ? "active" : "user_asserted";
+  return undo === "rejected" ? "rejected" : c.evidence.length > 0 ? "active" : "retracted";
+}
+
+// ---- entity split ----
+
+export interface SplitDraft {
+  name: string;
+  claims: readonly number[];
+  aliases: readonly string[];
+  identifiers: readonly (readonly [string, string])[];
+}
+
+export type SplitProblem = "split.needName" | "split.needFacts" | "split.sameName";
+
+/** Why the split can't be sent yet, or `null`. */
+export function splitProblem(entity: Pick<EntityDetail, "name">, draft: SplitDraft): SplitProblem | null {
+  const name = draft.name.replace(/\s+/g, " ").trim();
+  if (!name) return "split.needName";
+  if (name.toLocaleLowerCase() === entity.name.trim().toLocaleLowerCase()) return "split.sameName";
+  if (draft.claims.length === 0) return "split.needFacts";
+  return null;
+}
+
+/** The request for a valid draft: trimmed name, unique claims, and only details the entity has. */
+export function splitRequest(entity: Pick<EntityDetail, "id" | "aliases" | "identifiers" | "claims">, draft: SplitDraft): SplitRequest {
+  const has = new Set(entity.claims.map((c) => c.id));
+  const aliases = new Set(entity.aliases);
+  const idents = new Set(entity.identifiers.map(([s, v]) => `${s}\u0000${v}`));
+  return {
+    entity: entity.id,
+    claims: [...new Set(draft.claims)].filter((id) => has.has(id)).sort((a, b) => a - b),
+    name: draft.name.replace(/\s+/g, " ").trim(),
+    aliases: [...new Set(draft.aliases)].filter((a) => aliases.has(a)),
+    identifiers: draft.identifiers.filter(([s, v]) => idents.has(`${s}\u0000${v}`)).map(([s, v]) => [s, v] as [string, string]),
+  };
+}
+
+// ---- graph source filter ----
+
+/** Sources to filter the graph by, by name. */
+export function graphSourceOptions(sources: readonly Pick<SourceInfo, "id" | "name">[]): { id: string; name: string }[] {
+  return sources
+    .map((s) => ({ id: s.id, name: s.name.trim() || s.id }))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
