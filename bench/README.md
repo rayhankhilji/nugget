@@ -294,7 +294,7 @@ M1 targets:
 | Target | smoke (debug) | quick | standard |
 |---|---|---|---|
 | `freshness.p95_s` ≤ 60 s | 0.44 s **pass** | 0.45 s **pass** | 0.60 s **pass** |
-| `retrieval.hybrid.recall@10` ≥ fake-index hybrid recall@10, same corpus and queries | 0.880 vs 0.880 **pass** (tie) | 0.955 vs 0.930 **pass** | 0.922 vs 0.938 **MISSED** (−0.016, 8 of 500 queries) |
+| `retrieval.hybrid.recall@10` ≥ fake-index hybrid recall@10, same corpus and queries | 0.880 vs 0.880 **pass** (tie) | 0.955 vs 0.930 **pass** | 0.936 vs 0.938 **MISSED** (−0.002, 1 of 500 queries; was 0.922 before the chunker fix) |
 | `propagation.{edit,insert,delete,rename}_rate` = 1, final keys and content match = 1 | all 1.0 **pass** | all 1.0 **pass** | all 1.0 **pass** |
 | `retrieval.eval.hybrid.recall@10` ≥ eval text-only recall@10 | 1.000 vs 0.905 **pass** | same | same |
 
@@ -350,6 +350,12 @@ Ingest and resources:
   0.968 and hybrid R@10 0.936, level with the fake's 0.938. Indexing them in the pipeline's form
   reproduces the real run's 0.966 and 0.922 exactly. The fix belongs in `nugget-extract` (don't
   repeat a heading the chunk already starts with). The corpus was not changed to hide it.
+  **Update (after the chunker fix in `nugget-extract`, 2026-10-28):** re-run at standard scale,
+  seed 42, release build: hybrid R@10 **0.936 vs 0.938**, still missed by 0.2 points (one query of
+  500). Freshness p95 0.61 s, all propagation rates 1.0 and the eval-set gate (R@10 1.000 vs
+  0.905 text-only) pass. Ranking was not tuned further against this synthetic corpus, because its
+  hash embedder has no semantic signal and tuning to it would overfit; the gap is tracked for a
+  re-run with a real embedding model (`--embed-url`).
 - **Two retrieval fixes came out of this benchmark.** The first run at quick scale had hybrid
   R@10 at 0.855, below the fake's 0.930. The retriever over-fetched candidates (8×) and the store
   over-fetched again (4×) for rank fusion, so each list fed 320 hits into RRF for 10 results.
