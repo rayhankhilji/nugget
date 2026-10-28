@@ -1,5 +1,6 @@
 [package]
 name = "nugget-store"
+description = "Encrypted local store for Nugget: items, chunks, search, cursors, egress ledger, audit log"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,32 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+# SQLCipher (SQLite + AES-256) built from source with a vendored OpenSSL, so every OS gets the same,
+# encrypted engine. The bundled build enables FTS5.
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
+sqlite-vec = "0.1.6"
+sha2 = "0.10"
+hex = "0.4"
+getrandom = "0.3"
+zeroize = "1"
+
+# OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6", features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3.6", features = ["windows-native"] }
+
+# Secret Service over a pure-Rust D-Bus client (zbus), so there is no libdbus system dependency.
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { version = "3.6", features = ["async-secret-service", "async-io", "crypto-rust"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
