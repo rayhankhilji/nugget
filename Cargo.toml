@@ -25,6 +25,11 @@ members = [
     "crates/nugget-hotkey",
     "crates/nugget-draft",
     "crates/nugget-voice",
+    "crates/nugget-policy",
+    "crates/nugget-agent",
+    "crates/nugget-browser",
+    "crates/nugget-proactive",
+    "crates/nugget-plugin",
     "apps/desktop/src-tauri",
     "bench",
 ]
@@ -54,6 +59,11 @@ default-members = [
     "crates/nugget-hotkey",
     "crates/nugget-draft",
     "crates/nugget-voice",
+    "crates/nugget-policy",
+    "crates/nugget-agent",
+    "crates/nugget-browser",
+    "crates/nugget-proactive",
+    "crates/nugget-plugin",
     "bench",
 ]
 
@@ -90,6 +100,11 @@ nugget-a11y = { path = "crates/nugget-a11y", version = "0.0.1" }
 nugget-hotkey = { path = "crates/nugget-hotkey", version = "0.0.1" }
 nugget-draft = { path = "crates/nugget-draft", version = "0.0.1" }
 nugget-voice = { path = "crates/nugget-voice", version = "0.0.1" }
+nugget-policy = { path = "crates/nugget-policy", version = "0.0.1" }
+nugget-agent = { path = "crates/nugget-agent", version = "0.0.1" }
+nugget-browser = { path = "crates/nugget-browser", version = "0.0.1" }
+nugget-proactive = { path = "crates/nugget-proactive", version = "0.0.1" }
+nugget-plugin = { path = "crates/nugget-plugin", version = "0.0.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
