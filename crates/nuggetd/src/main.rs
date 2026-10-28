@@ -3,6 +3,8 @@
 //! - `nuggetd`: run the daemon in the foreground until SIGINT/SIGTERM (Ctrl+C on Windows).
 //! - `nuggetd status [--json]`: ask the running daemon for its status.
 //! - `nuggetd install-service` / `uninstall-service`: run at login as a per-user service.
+//! - `nuggetd mcp --client <id>`: the stdio MCP bridge apps launch (token in `NUGGET_MCP_TOKEN`).
+//! - `nuggetd mcp install --client claude-desktop|claude-code|cursor`: set an app up.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -11,6 +13,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use nugget_core::ipc::{StatusResponse, method};
 use nugget_core::paths::Paths;
+use nuggetd::install::{App, InstallOptions};
 use nuggetd::{Daemon, DaemonOptions, Startup, cli, logging, service};
 
 /// How long exit waits for blocking work (hashing, SQLite) still running after the daemon stops.
@@ -39,6 +42,35 @@ enum Command {
     InstallService,
     /// Stop and remove the user-level service.
     UninstallService,
+    /// MCP: run the stdio bridge for a client (`--client <id>`, token in NUGGET_MCP_TOKEN), or
+    /// set an app up (`install`).
+    #[command(args_conflicts_with_subcommands = true)]
+    Mcp {
+        /// The MCP client id to bridge (from `mcp install` or the app's Connected AI apps page).
+        #[arg(long, value_name = "ID")]
+        client: Option<String>,
+        #[command(subcommand)]
+        action: Option<McpAction>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum McpAction {
+    /// Create an MCP client and add Nugget to an app's MCP configuration.
+    Install {
+        /// The app to set up.
+        #[arg(long, value_enum)]
+        client: App,
+        /// Name of the client in Nugget (default: the app's name).
+        #[arg(long)]
+        name: Option<String>,
+        /// Config file to merge into (default: the app's usual location).
+        #[arg(long, value_name = "PATH")]
+        config: Option<PathBuf>,
+        /// Do not ask for confirmation.
+        #[arg(long, short = 'y')]
+        yes: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -60,8 +92,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    let home = args.home.clone();
     let code = match args.command {
-        None => runtime.block_on(run(paths)),
+        None => runtime.block_on(run(paths, home)),
         Some(Command::Status { json }) => {
             logging::init_cli();
             runtime.block_on(status(paths, json))
@@ -74,6 +107,57 @@ fn main() -> ExitCode {
         Some(Command::UninstallService) => {
             logging::init_cli();
             report(service::uninstall())
+        }
+        Some(Command::Mcp {
+            action:
+                Some(McpAction::Install {
+                    client,
+                    name,
+                    config,
+                    yes,
+                }),
+            ..
+        }) => {
+            logging::init_cli();
+            let opts = InstallOptions {
+                app: client,
+                name,
+                config,
+                yes,
+            };
+            report(runtime.block_on(nuggetd::install::install(&paths, opts)))
+        }
+        Some(Command::Mcp {
+            client: Some(client),
+            action: None,
+        }) => {
+            // stdout carries MCP messages only; logs go to stderr.
+            logging::init_cli();
+            match std::env::var(nugget_mcp::TOKEN_ENV) {
+                Ok(token) if !token.trim().is_empty() => {
+                    match runtime.block_on(nuggetd::mcp_bridge::run(&paths, &client, token.trim()))
+                    {
+                        Ok(()) => ExitCode::SUCCESS,
+                        Err(e) => {
+                            eprintln!("nuggetd mcp: {e}");
+                            ExitCode::FAILURE
+                        }
+                    }
+                }
+                _ => {
+                    eprintln!(
+                        "nuggetd mcp: set {} to the client's token",
+                        nugget_mcp::TOKEN_ENV
+                    );
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some(Command::Mcp { .. }) => {
+            eprintln!(
+                "nuggetd mcp: use `nuggetd mcp --client <id>` (the stdio bridge) or `nuggetd mcp install --client <app>`"
+            );
+            ExitCode::FAILURE
         }
     };
     // Dropping the runtime would wait for every `spawn_blocking` job (a multi-GB model hash can
@@ -95,7 +179,7 @@ fn report(result: nugget_core::Result<String>) -> ExitCode {
     }
 }
 
-async fn run(paths: Paths) -> ExitCode {
+async fn run(paths: Paths, home_flag: Option<PathBuf>) -> ExitCode {
     let _log_guard = match logging::init_daemon(&paths) {
         Ok(g) => Some(g),
         Err(e) => {
@@ -103,7 +187,16 @@ async fn run(paths: Paths) -> ExitCode {
             None
         }
     };
-    let daemon = match Daemon::start(DaemonOptions::new(paths)).await {
+    let mut opts = DaemonOptions::new(paths);
+    match cli::home_override(home_flag) {
+        // A normal install keeps its vault in the home directory.
+        Ok(None) => {
+            opts.default_vault_dir = std::env::home_dir().map(|h| h.join("Nugget Vault"));
+        }
+        Ok(Some(home)) => opts.home = Some(home),
+        Err(e) => tracing::warn!(error = %e, "cannot resolve the home override"),
+    }
+    let daemon = match Daemon::start(opts).await {
         Ok(Startup::Ready(d)) => d,
         Ok(Startup::AlreadyRunning { socket }) => {
             tracing::info!(%socket, "another nuggetd is already running; exiting");

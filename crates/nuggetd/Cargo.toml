@@ -41,6 +41,10 @@ nugget-connector-caldav.workspace = true
 nugget-ingest.workspace = true
 nugget-retrieve.workspace = true
 nugget-runtime.workspace = true
+nugget-graph.workspace = true
+nugget-knowledge.workspace = true
+nugget-vault.workspace = true
+nugget-mcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -60,6 +64,13 @@ nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }
 base64 = "0.22"
 tempfile = "3"
 wiremock = "0.6"
+# The MCP SDK's own client, to talk to the daemon's MCP server over HTTP and the stdio bridge.
+rmcp = { version = "3.8.0", default-features = false, features = [
+    "client",
+    "transport-io",
+    "transport-streamable-http-client-reqwest",
+] }
+reqwest = { workspace = true, features = ["json"] }
 
 [lints]
 workspace = true
