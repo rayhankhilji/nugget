@@ -54,6 +54,9 @@ pub struct StatusResponse {
     pub items: u64,
     pub chunks: u64,
     pub providers: Vec<ProviderInfo>,
+    /// Result of verifying the audit hash chain at startup. `None` if not checked.
+    #[serde(default)]
+    pub audit_chain_ok: Option<bool>,
 }
 
 // ---- providers ----
@@ -69,6 +72,9 @@ pub struct ProviderInfo {
     pub tiers: Vec<Tier>,
     /// `None` until a probe has run.
     pub capabilities: Option<Capabilities>,
+    /// Why this provider is unavailable (e.g. it failed to build from config), if it is.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

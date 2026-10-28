@@ -138,6 +138,7 @@ mod tests {
                     locality: Locality::OnDevice,
                     tiers: vec![Tier::Triage, Tier::Light],
                     capabilities: None,
+                    error: None,
                 },
                 ProviderInfo {
                     id: ProviderId::new("cloud"),
@@ -150,8 +151,10 @@ mod tests {
                         tools: true,
                         ..Default::default()
                     }),
+                    error: None,
                 },
             ],
+            audit_chain_ok: None,
         };
         let out = format_status(&s, "/tmp/sock");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));

@@ -75,6 +75,7 @@ impl RpcHandler {
             items: counts.items,
             chunks: counts.chunks,
             providers: self.provider_infos(),
+            audit_chain_ok: None,
         })
     }
 
@@ -92,6 +93,7 @@ impl RpcHandler {
                     locality: meta.locality,
                     tiers: router.tiers_of(p.id()),
                     capabilities: router.capabilities(p.id()),
+                    error: None,
                 }
             })
             .collect()

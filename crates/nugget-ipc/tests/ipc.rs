@@ -32,6 +32,7 @@ impl Handler for TestHandler {
                 items: 10,
                 chunks: 20,
                 providers: vec![],
+                audit_chain_ok: None,
             }),
             "sleep" => {
                 let ms: u64 = parse_params::<Value>(params)?["ms"]
