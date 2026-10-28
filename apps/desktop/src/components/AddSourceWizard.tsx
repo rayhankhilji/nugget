@@ -4,8 +4,8 @@ import {
   ApiError,
   errorMessage,
   events,
-  SOURCE_KINDS,
   sourcesFromChange,
+  type ConnectorKind,
   type SourceInfo,
   type SourceKind,
   type SourceSettings,
@@ -13,8 +13,9 @@ import {
 import { useEvent } from "../hooks";
 import { t as tGlobal, Trans, useT, type MessageKey, type TagRenderer } from "../i18n";
 import { baseName, sourceKindLabel, splitList } from "../format";
+import { KindPicker } from "../sources/KindPicker";
+import { NEW_KIND_TITLE, NewKindForm, isNewKind } from "../sources/forms";
 import { Dialog } from "./Dialog";
-import { SourceIcon } from "./SourceIcon";
 import { Spinner } from "./ui";
 
 const KIND_BLURB: Record<SourceKind, MessageKey> = {
@@ -33,15 +34,17 @@ const GOOGLE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credential
 /** Wizard for `sources.add`: pick a kind, fill in its settings, then connect. */
 export function AddSourceWizard({ onClose, onAdded }: { onClose: () => void; onAdded: (s: SourceInfo) => void }) {
   const t = useT();
-  const [kind, setKind] = useState<SourceKind>("files");
+  const [kind, setKind] = useState<ConnectorKind>("files");
   const [step, setStep] = useState<"kind" | "form">("kind");
 
-  const title = step === "kind" ? t("addSource.title") : t(ADD_TITLE[kind]);
+  const title = step === "kind" ? t("addSource.title") : t(isNewKind(kind) ? NEW_KIND_TITLE[kind] : ADD_TITLE[kind]);
 
   return (
     <Dialog title={title} onClose={onClose} wide>
       {step === "kind" ? (
-        <KindPicker value={kind} onChange={setKind} onNext={() => setStep("form")} onCancel={onClose} />
+        <KindPicker value={kind} onChange={setKind} onNext={() => setStep("form")} onCancel={onClose} blurb={KIND_BLURB} />
+      ) : isNewKind(kind) ? (
+        <NewKindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} />
       ) : (
         <KindForm kind={kind} onBack={() => setStep("kind")} onClose={onClose} onAdded={onAdded} />
       )}
@@ -64,60 +67,6 @@ function useAutofocus<T extends HTMLElement>() {
     ref.current?.focus();
   }, []);
   return ref;
-}
-
-// ---- step 1: kind ----
-
-function KindPicker({
-  value,
-  onChange,
-  onNext,
-  onCancel,
-}: {
-  value: SourceKind;
-  onChange: (k: SourceKind) => void;
-  onNext: () => void;
-  onCancel: () => void;
-}) {
-  const t = useT();
-  const first = useAutofocus<HTMLInputElement>();
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    onNext();
-  };
-  return (
-    <form onSubmit={submit}>
-      <fieldset className="kind-picker">
-        <legend className="visually-hidden">{t("addSource.kindLegend")}</legend>
-        {SOURCE_KINDS.map((k) => (
-          <label key={k} className="kind-option">
-            <input
-              ref={k === value ? first : undefined}
-              data-autofocus={k === value ? "" : undefined}
-              type="radio"
-              name="source-kind"
-              value={k}
-              checked={k === value}
-              onChange={() => onChange(k)}
-            />
-            <SourceIcon kind={k} size={22} />
-            <span>
-              <span className="kind-label">{sourceKindLabel(k)}</span>
-              <span className="muted small">{t(KIND_BLURB[k])}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <div className="dialog-actions">
-        <button type="button" className="btn" onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
-        <button type="submit" className="btn btn-primary">
-          {t("common.next")}
-        </button>
-      </div>
-    </form>
-  );
 }
 
 // ---- step 2: settings ----

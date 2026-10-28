@@ -204,6 +204,7 @@ impl Connector for FakeConnector {
         let account = nugget_core::secrets::oauth_account(self.ctx.source.as_str());
         Ok(AuthFlow {
             url: "https://auth.example/authorize?x=1".into(),
+            user_code: None,
             done: Box::pin(async move {
                 rx.await.map_err(|_| Error::Cancelled)?;
                 secrets.set(&account, "{\"access_token\":\"t\"}")

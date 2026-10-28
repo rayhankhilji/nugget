@@ -1,0 +1,35 @@
+/* Add source wizard: kind groups and device codes (W5). */
+
+.kind-group {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.kind-group:first-of-type {
+  margin-top: 0;
+}
+
+.device-code {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.device-code p {
+  margin: 0;
+}
+
+.device-code-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}

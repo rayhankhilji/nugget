@@ -55,9 +55,9 @@ Items are grouped by where they'll most likely land.
 - Add `RuntimeState::Stopping` to the IPC contract.
 
 ## Dependencies
-- Replace `starship-battery` in nugget-ingest's power policy (it pins plist 1.7 → quick-xml 0.38,
-  RUSTSEC-2026-0194/0195, ignored as unreachable in `deny.toml`) with direct platform reads:
-  `/sys/class/power_supply` on Linux, IOKit on macOS, `GetSystemPowerStatus` on Windows.
+- ~~Replace `starship-battery` in nugget-ingest's power policy with direct platform reads~~ (done
+  in W5). quick-xml 0.38 (RUSTSEC-2026-0194/0195) is still pulled by tauri via plist 1.7, so the
+  `deny.toml` ignores stay until tauri updates.
 
 ## Process
 - The first five commits on this branch predate the DCO check and have no `Signed-off-by`. Add sign-off (rebase `--signoff`) before opening the first PR.

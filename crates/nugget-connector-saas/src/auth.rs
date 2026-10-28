@@ -290,6 +290,7 @@ pub(crate) fn clearing(
     let done = flow.done;
     AuthFlow {
         url: flow.url,
+        user_code: flow.user_code,
         done: Box::pin(async move {
             done.await?;
             cred.reset();
@@ -341,9 +342,9 @@ pub(crate) struct DeviceFlow {
     pub timeout: Duration,
 }
 
-/// Start GitHub's device flow (RFC 8628). The returned URL is GitHub's verification page with
-/// the user code appended (`?user_code=...`), the only channel `AuthFlow` has to show it; `done`
-/// polls the token endpoint and stores the token set under `oauth:<source>`.
+/// Start GitHub's device flow (RFC 8628). The returned flow carries the user code in
+/// [`AuthFlow::user_code`]; the URL is GitHub's verification page with the code also appended
+/// (`?user_code=...`) so it is pre-filled where supported. `done` polls the token endpoint and stores the token set under `oauth:<source>`.
 pub(crate) async fn github_device_flow(
     http: &MeteredHttp,
     opts: DeviceFlow,
@@ -370,11 +371,26 @@ pub(crate) async fn github_device_flow(
             "GitHub returned a non-https verification URL".into(),
         ));
     }
+    // The page is opened for the user to type the code into: it must be GitHub's (or the
+    // configured login root's host), never a page the response names, and carry no userinfo.
+    let root_host = url::Url::parse(&root)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
+    let host = url.host_str().map(str::to_ascii_lowercase);
+    let host_ok = host
+        .as_deref()
+        .is_some_and(|h| h == "github.com" || Some(h) == root_host.as_deref());
+    if !host_ok || !url.username().is_empty() || url.password().is_some() {
+        return Err(Error::Invalid(
+            "GitHub returned a verification URL outside GitHub".into(),
+        ));
+    }
     if code.user_code.len() > 64 || code.user_code.chars().any(char::is_control) {
         return Err(Error::Invalid("GitHub returned a bad user code".into()));
     }
     url.query_pairs_mut()
         .append_pair("user_code", &code.user_code);
+    let user_code = code.user_code;
     let http = http.clone();
     let account = oauth_account(source);
     let expires =
@@ -465,6 +481,7 @@ pub(crate) async fn github_device_flow(
     };
     Ok(AuthFlow {
         url: url.into(),
+        user_code: Some(user_code),
         done: Box::pin(done),
     })
 }

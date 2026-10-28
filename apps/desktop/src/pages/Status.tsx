@@ -15,7 +15,7 @@ import {
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
 import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
-import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
 
@@ -58,13 +58,13 @@ export function StatusPage() {
       <PageHeader
         title={t("status.title")}
         actions={
-          <button type="button" className="btn btn-ghost" onClick={refreshAll} disabled={status.loading}>
+          <button type="button" className="btn btn-ghost" onClick={refreshAll}>
             {t("common.refresh")}
           </button>
         }
       />
       <ErrorNote error={status.error} onRetry={status.reload} />
-      {status.loading && !s && <Spinner />}
+      {status.loading && !s && <Loading label={t("status.loading")} lines={4} />}
       {s && (
         <>
           {s.protocol !== PROTOCOL_VERSION && (
@@ -104,12 +104,13 @@ export function StatusPage() {
 
           <h2>{t("status.providers")}</h2>
           {s.providers.length === 0 ? (
-            <p className="muted">
+            <EmptyState title={t("status.noProvidersTitle")}>
               <Trans k="status.noProviders" tags={{ code: (c) => <code>{c}</code> }} />
-            </p>
+            </EmptyState>
           ) : (
             <div className="table-wrap" tabIndex={0} role="region" aria-label={t("status.providers")}>
               <table>
+                <caption className="visually-hidden">{t("status.providers")}</caption>
                 <thead>
                   <tr>
                     <th scope="col">{t("status.col.provider")}</th>
@@ -281,7 +282,7 @@ function IndexingCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Spinner />}
+          {loading && !data && <Loading lines={2} />}
           {data && (
             <>
               <dl className="stats">
@@ -371,13 +372,12 @@ function RuntimeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Spinner />}
-          {data && data.length === 0 && (
-            <p className="muted">{t("status.noRuntimes")}</p>
-          )}
+          {loading && !data && <Loading lines={2} />}
+          {data && data.length === 0 && <EmptyState title={t("status.noRuntimesTitle")}>{t("status.noRuntimes")}</EmptyState>}
           {data && data.length > 0 && (
             <div className="table-wrap" tabIndex={0} role="region" aria-label={t("status.localRuntimes")}>
               <table>
+                <caption className="visually-hidden">{t("status.localRuntimes")}</caption>
                 <thead>
                   <tr>
                     <th scope="col">{t("status.col.model")}</th>
@@ -444,7 +444,7 @@ function KnowledgeCard({
       ) : (
         <>
           <ErrorNote error={error} onRetry={onRetry} />
-          {loading && !data && <Spinner />}
+          {loading && !data && <Loading lines={2} />}
           {data && (
             <>
               <dl className="stats">

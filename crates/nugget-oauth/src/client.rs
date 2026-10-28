@@ -188,6 +188,7 @@ impl OAuthClient {
         };
         Ok(AuthFlow {
             url,
+            user_code: None,
             done: Box::pin(done),
         })
     }

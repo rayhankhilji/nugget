@@ -350,11 +350,17 @@ pub struct SourceSync {
     pub id: Option<SourceId>,
 }
 
-/// Start of an OAuth authorization: the client opens `url` in the user's browser; the daemon
-/// listens on a loopback redirect and emits `sources.changed` when done.
+/// Start of an interactive authorization: the client opens `url` in the user's browser; the
+/// daemon listens on a loopback redirect (or polls, for a device flow) and emits
+/// `sources.changed` when done. For an RFC 8628 device flow `user_code` is set and the client
+/// shows it so the user can type it on the verification page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthBegin {
     pub url: String,
+    /// The code the user enters on the verification page (device flows only); absent for
+    /// redirect flows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
 }
 
 /// Store a password or app password for a source in the OS keychain. Write-only.
@@ -877,4 +883,34 @@ pub struct VoiceStatus {
     pub channels: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_begin_user_code_is_optional_on_the_wire() {
+        let redirect = AuthBegin {
+            url: "https://example.com/authorize".into(),
+            user_code: None,
+        };
+        let v = serde_json::to_value(&redirect).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"url": "https://example.com/authorize"})
+        );
+        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), redirect);
+
+        let device = AuthBegin {
+            url: "https://example.com/device".into(),
+            user_code: Some("WDJB-MJHT".into()),
+        };
+        let v = serde_json::to_value(&device).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
+        );
+        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
+    }
 }

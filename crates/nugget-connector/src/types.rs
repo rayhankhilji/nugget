@@ -107,9 +107,13 @@ impl std::fmt::Debug for ConnectorContext {
 }
 
 /// An interactive authorization in progress: show `url` to the user (open it in the browser);
-/// `done` resolves once the redirect arrived and credentials are stored.
+/// `done` resolves once the redirect arrived (or the device flow was approved) and credentials
+/// are stored.
 pub struct AuthFlow {
     pub url: String,
+    /// The code the user types on the verification page, for RFC 8628 device flows; `None` for
+    /// redirect flows.
+    pub user_code: Option<String>,
     pub done: Pin<Box<dyn Future<Output = Result<()>> + Send>>,
 }
 
@@ -117,6 +121,7 @@ impl std::fmt::Debug for AuthFlow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AuthFlow")
             .field("url", &self.url)
+            .field("user_code", &self.user_code)
             .finish_non_exhaustive()
     }
 }

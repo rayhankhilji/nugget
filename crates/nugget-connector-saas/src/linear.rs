@@ -63,7 +63,7 @@ fn default_include() -> Vec<String> {
     INCLUDE.iter().map(|s| (*s).to_string()).collect()
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LinearSettings {
     #[serde(default)]
