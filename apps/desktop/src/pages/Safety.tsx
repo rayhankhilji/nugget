@@ -28,7 +28,7 @@ import {
 } from "../agent";
 import { useAsync, useEvent } from "../hooks";
 import { Dialog } from "../components/Dialog";
-import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
 
 const EFFECT_TONE = { allow: "good", confirm: "warn", deny: "bad" } as const;
@@ -90,7 +90,7 @@ export function SafetyPage() {
         {announce}
       </div>
       <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-      {loaded.loading && !state && <Spinner />}
+      {loaded.loading && !state && <Loading />}
 
       {state && config && (
         <>
@@ -205,7 +205,7 @@ function Approvals() {
     <section className="safety-section" aria-labelledby="safety-approvals-title">
       <h2 id="safety-approvals-title">{t("safety.approvals.title")}</h2>
       <ErrorNote error={approvals.error ?? error} onRetry={reload} />
-      {approvals.loading && !data && <Spinner />}
+      {approvals.loading && !data && <Loading />}
       {data && (
         <>
           <h3>{t("safety.approvals.pending")}</h3>
@@ -281,7 +281,7 @@ function RuleConditions({ rule }: { rule: PolicyRule }) {
 
 function UserRules({ rules, busy, onRemove }: { rules: PolicyRule[]; busy: boolean; onRemove: (id: string) => void }) {
   const t = useT();
-  if (!rules.length) return <Empty title={t("safety.rules.emptyTitle")}>{t("safety.rules.emptyBody")}</Empty>;
+  if (!rules.length) return <EmptyState title={t("safety.rules.emptyTitle")}>{t("safety.rules.emptyBody")}</EmptyState>;
   return (
     <div className="rule-groups">
       {rulesByTarget(rules).map(([target, list]) => (
@@ -638,7 +638,7 @@ function Browser() {
     <section className="safety-section" aria-labelledby="safety-browser-title">
       <h2 id="safety-browser-title">{t("safety.browser.title")}</h2>
       {isMethodNotFound(status.error) ? <NotAvailable what={t("safety.browser.title")} /> : <ErrorNote error={status.error} onRetry={status.reload} />}
-      {status.loading && !s && <Spinner />}
+      {status.loading && !s && <Loading />}
       {s && (
         <div className="card">
           <div className="card-head">

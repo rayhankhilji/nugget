@@ -31,7 +31,7 @@ import {
 import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { Dialog } from "../components/Dialog";
-import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 
 const LIVE_STATES = new Set(["running", "confirming", "needs_input"]);
@@ -556,8 +556,8 @@ function History({
         </button>
       </div>
       <ErrorNote error={history.error} onRetry={history.reload} />
-      {history.loading && !history.data && <Spinner />}
-      {history.data && rows.length === 0 && <Empty title={t("agent.history.emptyTitle")}>{t("agent.history.emptyBody")}</Empty>}
+      {history.loading && !history.data && <Loading />}
+      {history.data && rows.length === 0 && <EmptyState title={t("agent.history.emptyTitle")}>{t("agent.history.emptyBody")}</EmptyState>}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0} role="region" aria-label={t("agent.history.label")}>
           <table>
@@ -621,7 +621,7 @@ function DetailDialog({ taskId, onClose }: { taskId: string; onClose: () => void
   return (
     <Dialog title={t("agent.detail.title")} description={s?.goal} onClose={onClose} wide>
       <ErrorNote error={detail.error} onRetry={detail.reload} />
-      {detail.loading && !d && <Spinner />}
+      {detail.loading && !d && <Loading />}
       {d && s && (
         <>
           <p>

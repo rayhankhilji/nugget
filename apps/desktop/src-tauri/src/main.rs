@@ -4,13 +4,16 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod agent;
+mod autostart;
 mod commands;
 mod daemon;
+mod history;
 mod login;
 mod open;
 mod settings;
 mod tray;
 mod updater;
+mod window_state;
 
 use tauri::{Manager, RunEvent, WindowEvent};
 use tracing_subscriber::EnvFilter;
@@ -23,6 +26,13 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
+        // First, so a second launch exits before anything else starts; it focuses this window
+        // instead (an autostart launch while Nugget already runs changes nothing).
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !argv.iter().any(|a| a == autostart::HIDDEN_ARG) {
+                tray::show_main(app, None);
+            }
+        }))
         // Only the Rust API is used (`commands::pick_folders`); the webview is granted none of the
         // plugin's own commands.
         .plugin(tauri_plugin_dialog::init())
@@ -63,6 +73,10 @@ fn main() {
             commands::mcp_clients_revoke,
             commands::open_url,
             commands::pick_folders,
+            history::chat_history_load,
+            history::chat_history_save,
+            history::chat_history_delete,
+            history::chat_history_clear,
             updater::updates_status,
             updater::updates_set_settings,
             updater::updates_check,
@@ -81,14 +95,24 @@ fn main() {
             agent::commands::policy_resume,
             agent::commands::policy_log_export,
             agent::commands::browser_status,
+            autostart::autostart_get,
+            autostart::autostart_set,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
-            if let Err(e) = tray::build(app) {
-                // E.g. no status-notifier host on some Linux desktops. The window still works,
-                // and closing it quits the app.
-                tracing::warn!(error = %e, "tray icon unavailable");
+            tray::init(app);
+            // The window starts hidden (tauri.conf.json) so it can be placed before it shows,
+            // and stays hidden for an autostart launch, unless there is no tray to reopen it.
+            let window_state = window_state::init(app);
+            if let Some(main) = app.get_webview_window("main") {
+                window_state.restore(&main);
+                if !(autostart::launched_hidden() && tray::has_tray(app.handle())) {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
             }
+            app.manage(window_state);
+            autostart::reconcile(app.handle());
             agent::setup(app);
             // Connect early so the tray reflects the daemon state before the window asks.
             let handle = app.handle().clone();
@@ -100,13 +124,25 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // With a tray, closing the window hides it; Quit lives in the tray menu.
-            if let WindowEvent::CloseRequested { api, .. } = event
-                && window.label() == "main"
-                && tray::has_tray(window.app_handle())
-            {
-                api.prevent_close();
-                let _ = window.hide();
+            // Events can arrive before `setup` has managed the state.
+            let Some(state) = window.try_state::<window_state::WindowState>() else {
+                return;
+            };
+            if window.label() != "main" {
+                return;
+            }
+            match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => state.capture(window),
+                WindowEvent::CloseRequested { api, .. } => {
+                    state.capture(window);
+                    state.save();
+                    // With a tray, closing the window hides it; Quit lives in the tray menu.
+                    if tray::has_tray(window.app_handle()) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())
@@ -114,7 +150,12 @@ fn main() {
 
     app.run(|handle, event| match event {
         // An update the user opted to auto-install is applied as Nugget quits.
-        RunEvent::Exit => handle.state::<updater::Updates>().install_staged(),
+        RunEvent::Exit => {
+            if let Some(state) = handle.try_state::<window_state::WindowState>() {
+                state.save();
+            }
+            handle.state::<updater::Updates>().install_staged();
+        }
         // macOS: clicking the Dock icon brings the hidden window back.
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => tray::show_main(handle, None),

@@ -13,10 +13,11 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
+import { usePendingSearch } from "../hooks.nav";
 import { splitCitations, withheldNotice } from "../citations";
 import { sourceKindLabel } from "../format";
 import { SourceIcon } from "../components/SourceIcon";
-import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [10, 25, 50];
@@ -32,13 +33,16 @@ export function SearchPage() {
   const [busy, setBusy] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   const opener = useOpener();
-  // Source names and kinds for badges. Optional: older daemons don't have `sources.list`.
-  const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Source names and kinds for badges. Optional: older daemons don't have `sources.list` (null).
+  const sources = useAsync(() => api.sourcesList().catch(() => null));
   const byId = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
+  // Nothing to search yet: no sources, or none has indexed an item. Unknown (older daemon) is not "nothing".
+  const nothingIndexed = !!sources.data && sources.data.reduce((n, s) => n + s.items, 0) === 0;
 
-  const run = async (e?: FormEvent) => {
+  const run = async (e?: FormEvent, override?: string) => {
     e?.preventDefault();
-    const q = query.trim();
+    const q = (override ?? query).trim();
     if (!q) return;
     setBusy(true);
     setError(null);
@@ -51,6 +55,13 @@ export function SearchPage() {
       setBusy(false);
     }
   };
+
+  // A search from the command palette: fill the box and run it, keeping focus in the box.
+  usePendingSearch((q) => {
+    setQuery(q);
+    inputRef.current?.focus();
+    void run(undefined, q);
+  });
 
   return (
     <div className="page">
@@ -69,6 +80,7 @@ export function SearchPage() {
         </label>
         <input
           id="search-q"
+          ref={inputRef}
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -97,15 +109,24 @@ export function SearchPage() {
       <div aria-live="polite" className={opener.status ? (opener.status.error ? "note note-error" : "note") : "visually-hidden"}>
         {opener.status?.text}
       </div>
+      {/* Announces each finished search once; the visible heading below carries the same text. */}
       <div aria-live="polite" className="visually-hidden">
-        {hits && t("search.resultsFor", { n: hits.length, query: searched })}
+        {hits && !busy && t("search.resultsFor", { n: hits.length, query: searched })}
       </div>
 
+      {busy && !hits && <Loading label={t("search.searching")} lines={4} />}
+      {hits && (
+        <h2 id="search-results-heading" className="pg-results-heading">
+          {t("search.resultsFor", { n: hits.length, query: searched })}
+        </h2>
+      )}
       {hits && hits.length === 0 && (
-        <Empty title={t("search.noResults", { query: searched })}>{t("search.noResultsHint")}</Empty>
+        <EmptyState title={t("search.noResults", { query: searched })}>
+          {nothingIndexed ? t("search.noSourcesHint") : t("search.noResultsHint")}
+        </EmptyState>
       )}
       {hits && hits.length > 0 && (
-        <ol className="results">
+        <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy}>
           {hits.map((h, i) => {
             const title = h.title || h.item.key;
             return (
@@ -132,7 +153,12 @@ export function SearchPage() {
           })}
         </ol>
       )}
-      {!hits && !error && <Empty title={t("search.typeQuery")}>{t("search.typeQueryHint")}</Empty>}
+      {!hits && !busy && !error &&
+        (nothingIndexed ? (
+          <EmptyState title={t("search.noSourcesTitle")}>{t("search.noSourcesHint")}</EmptyState>
+        ) : (
+          <EmptyState title={t("search.typeQuery")}>{t("search.typeQueryHint")}</EmptyState>
+        ))}
     </div>
   );
 }
@@ -217,8 +243,8 @@ function AskPanel({
     sync(d.stream_id);
   });
 
-  const getContext = async (e: FormEvent) => {
-    e.preventDefault();
+  const getContext = async (e?: FormEvent) => {
+    e?.preventDefault();
     const q = question.trim();
     if (!q) return;
     setBusy(true);
@@ -298,7 +324,7 @@ function AskPanel({
         </button>
       </form>
 
-      {isMethodNotFound(error) ? <NotAvailable what={t("search.contextRetrieval")} /> : <ErrorNote error={error} />}
+      {isMethodNotFound(error) ? <NotAvailable what={t("search.contextRetrieval")} /> : <ErrorNote error={error} onRetry={() => void getContext()} />}
 
       {ctx && ctx.citations.length === 0 && <p className="muted">{t("search.nothingRelevant", { query: asked })}</p>}
       {ctx && ctx.citations.length > 0 && (
