@@ -1,13 +1,44 @@
 [package]
 name = "nuggetd"
+description = "Nugget background daemon: encrypted store, model providers and local IPC"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# The daemon is a binary; the library target exists so integration tests can run it in-process.
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "nuggetd"
+path = "src/main.rs"
+
 [dependencies]
 nugget-core.workspace = true
+nugget-store.workspace = true
+nugget-infer.workspace = true
+nugget-models.workspace = true
+nugget-ipc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+time.workspace = true
+clap = { version = "4.6", features = ["derive"] }
+toml = "1"
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+base64 = "0.22"
+tempfile = "3"
+wiremock = "0.6"
 
 [lints]
 workspace = true
