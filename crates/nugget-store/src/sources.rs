@@ -7,7 +7,8 @@ use nugget_core::{Error, Result};
 use rusqlite::{OptionalExtension, TransactionBehavior, params, params_from_iter};
 
 use crate::Store;
-use crate::error::DbExt;
+use crate::error::{DbExt, format_time};
+use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::items::{embedding_dim, f32_from_blob, item_ref};
 use crate::types::{Chunk, ChunkId, SourceCounts};
 
@@ -32,7 +33,12 @@ fn read_chunk(r: &rusqlite::Row<'_>) -> rusqlite::Result<Chunk> {
 impl Store {
     /// Delete every item of a source (with chunks, full-text entries and vectors) and its cursor.
     /// Returns the number of items removed.
+    ///
+    /// In the same transaction, all knowledge-graph evidence and mentions from the source are
+    /// dropped, claims left without evidence are retracted, and the affected entities enter the
+    /// graph change feed (as [`Store::delete_item`] does for one item).
     pub fn delete_source(&self, source: &SourceId) -> Result<u64> {
+        let now = format_time(time::OffsetDateTime::now_utc())?;
         self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -42,6 +48,9 @@ impl Store {
                 .db("delete source items")?;
             tx.execute("DELETE FROM cursors WHERE source = ?1", [source.as_str()])
                 .db("delete source cursor")?;
+            let mut touched = Touched::new(now);
+            retract_tx(&tx, ItemScope::Source(source), &mut touched)?;
+            touched.flush(&tx)?;
             tx.commit().db("commit delete_source")?;
             Ok(n as u64)
         })

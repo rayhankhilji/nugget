@@ -7,6 +7,7 @@ use time::OffsetDateTime;
 
 use crate::Store;
 use crate::error::{DbExt, format_time, parse_time};
+use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::types::{ChunkId, Item, NewChunk, NewItem, UpsertOutcome};
 
 /// Upper bound accepted by `sqlite-vec`'s `vec0` tables.
@@ -323,16 +324,30 @@ impl Store {
     }
 
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.
+    ///
+    /// In the same transaction, the item's knowledge-graph provenance is dropped as by
+    /// [`GraphStore::retract_item`](nugget_graph::GraphStore::retract_item): its evidence and
+    /// mentions are removed, claims left without evidence are retracted, and the affected
+    /// entities enter the graph change feed. This happens even if the item row is already gone,
+    /// so a retry cleans up after an earlier partial failure elsewhere.
     pub fn delete_item(&self, item: &ItemRef) -> Result<bool> {
-        self.with_conn(|c| {
+        let now = format_time(OffsetDateTime::now_utc())?;
+        self.with_conn(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .db("begin delete_item")?;
             // `ON DELETE CASCADE` removes chunks; chunk triggers clean FTS and vectors, and the
             // item trigger cleans the title index.
-            let n = c
+            let n = tx
                 .execute(
                     "DELETE FROM items WHERE source = ?1 AND key = ?2",
                     params![item.source.as_str(), item.key.as_str()],
                 )
                 .db("delete item")?;
+            let mut touched = Touched::new(now);
+            retract_tx(&tx, ItemScope::Item(item), &mut touched)?;
+            touched.flush(&tx)?;
+            tx.commit().db("commit delete_item")?;
             Ok(n > 0)
         })
     }

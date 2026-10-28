@@ -126,6 +126,149 @@ const MIGRATIONS: &[&str] = &[
     END;
     INSERT INTO items_fts (rowid, title) SELECT id, coalesce(title, '') FROM items;
     "#,
+    // v4: knowledge graph (see `graph`). Purely additive: no existing table changes, so a v3
+    // store with data migrates in place. Everything lives in the same SQLCipher database.
+    //
+    // - `entities` rows are never deleted: a merged entity stays as a tombstone whose
+    //   `merged_into` points at the survivor (chains are flattened on merge), so ids are never
+    //   reused and old ids keep resolving. `name_lower` is the Unicode-lowercased name (SQLite's
+    //   `lower()` is ASCII-only) used for ordering.
+    // - `entity_aliases` holds every name an entity answers to: its current name (`is_name = 1`,
+    //   kept in step with `entities.name`) and its aliases. One index on `alias_norm` therefore
+    //   serves name lookup, and `entity_names_fts` (trigram, external content) serves substring
+    //   search over names and aliases.
+    // - Claim ids use AUTOINCREMENT so a claim folded away by a merge never has its id reused.
+    // - `claim_evidence` and `mentions` reference items by `(source, key)` (not `items.id`) so
+    //   provenance survives an item being re-ingested, and `retract_item` is one index range.
+    //   `chunk_id` is deliberately not a foreign key: chunks are replaced on re-chunking.
+    // - `graph_changes` keeps the latest change seq per entity; `graph_seq` is the monotonic
+    //   counter behind it.
+    r#"
+    CREATE TABLE IF NOT EXISTS entities (
+        id          TEXT PRIMARY KEY,
+        kind        TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        name_lower  TEXT NOT NULL,
+        attributes  TEXT NOT NULL DEFAULT '{}',
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        merged_into TEXT REFERENCES entities (id),
+        merged_at   TEXT,
+        CHECK (merged_into IS NULL OR merged_into <> id)
+    );
+    CREATE INDEX IF NOT EXISTS entities_live_name
+        ON entities (name_lower, id) WHERE merged_into IS NULL;
+    CREATE INDEX IF NOT EXISTS entities_live_kind_name
+        ON entities (kind, name_lower, id) WHERE merged_into IS NULL;
+    CREATE INDEX IF NOT EXISTS entities_merged_into
+        ON entities (merged_into) WHERE merged_into IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS entity_aliases (
+        id          INTEGER PRIMARY KEY,
+        entity_id   TEXT NOT NULL REFERENCES entities (id),
+        alias       TEXT NOT NULL,
+        alias_norm  TEXT NOT NULL,
+        alias_lower TEXT NOT NULL,
+        is_name     INTEGER NOT NULL DEFAULT 0 CHECK (is_name IN (0, 1))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS entity_aliases_unique
+        ON entity_aliases (entity_id, is_name, alias);
+    CREATE UNIQUE INDEX IF NOT EXISTS entity_aliases_one_name
+        ON entity_aliases (entity_id) WHERE is_name = 1;
+    CREATE INDEX IF NOT EXISTS entity_aliases_norm ON entity_aliases (alias_norm);
+
+    CREATE VIRTUAL TABLE IF NOT EXISTS entity_names_fts USING fts5 (
+        alias_lower,
+        content = 'entity_aliases',
+        content_rowid = 'id',
+        tokenize = 'trigram'
+    );
+    CREATE TRIGGER IF NOT EXISTS entity_names_fts_ai AFTER INSERT ON entity_aliases BEGIN
+        INSERT INTO entity_names_fts (rowid, alias_lower) VALUES (new.id, new.alias_lower);
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_names_fts_ad AFTER DELETE ON entity_aliases BEGIN
+        INSERT INTO entity_names_fts (entity_names_fts, rowid, alias_lower)
+            VALUES ('delete', old.id, old.alias_lower);
+    END;
+    CREATE TRIGGER IF NOT EXISTS entity_names_fts_au AFTER UPDATE OF alias_lower ON entity_aliases
+        BEGIN
+        INSERT INTO entity_names_fts (entity_names_fts, rowid, alias_lower)
+            VALUES ('delete', old.id, old.alias_lower);
+        INSERT INTO entity_names_fts (rowid, alias_lower) VALUES (new.id, new.alias_lower);
+    END;
+
+    CREATE TABLE IF NOT EXISTS entity_identifiers (
+        id        INTEGER PRIMARY KEY,
+        entity_id TEXT NOT NULL REFERENCES entities (id),
+        scheme    TEXT NOT NULL,
+        value     TEXT NOT NULL,
+        UNIQUE (scheme, value)
+    );
+    CREATE INDEX IF NOT EXISTS entity_identifiers_entity ON entity_identifiers (entity_id);
+
+    CREATE TABLE IF NOT EXISTS claims (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject        TEXT NOT NULL REFERENCES entities (id),
+        predicate      TEXT NOT NULL,
+        object_entity  TEXT REFERENCES entities (id),
+        object_literal TEXT,
+        text           TEXT NOT NULL,
+        confidence     REAL NOT NULL,
+        status         TEXT NOT NULL
+            CHECK (status IN ('active', 'superseded', 'retracted', 'user_asserted')),
+        valid_from     TEXT,
+        valid_to       TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        CHECK ((object_entity IS NULL) <> (object_literal IS NULL))
+    );
+    -- "Find the active claim with this triple" and "claims with this subject".
+    CREATE INDEX IF NOT EXISTS claims_triple
+        ON claims (subject, predicate, object_entity, object_literal, status);
+    CREATE INDEX IF NOT EXISTS claims_object
+        ON claims (object_entity, status) WHERE object_entity IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS claim_evidence (
+        id         INTEGER PRIMARY KEY,
+        claim_id   INTEGER NOT NULL REFERENCES claims (id) ON DELETE CASCADE,
+        source     TEXT NOT NULL,
+        key        TEXT NOT NULL,
+        chunk_id   INTEGER,
+        quote      TEXT,
+        created_at TEXT NOT NULL
+    );
+    -- One row per (claim, item, chunk, quote). NULLs map to an empty blob, which never equals
+    -- an integer chunk id or a text quote, so "no chunk" / "no quote" are distinct values.
+    CREATE UNIQUE INDEX IF NOT EXISTS claim_evidence_unique
+        ON claim_evidence (claim_id, source, key, ifnull(chunk_id, X''), ifnull(quote, X''));
+    CREATE INDEX IF NOT EXISTS claim_evidence_item ON claim_evidence (source, key);
+
+    CREATE TABLE IF NOT EXISTS mentions (
+        id         INTEGER PRIMARY KEY,
+        entity_id  TEXT NOT NULL REFERENCES entities (id),
+        source     TEXT NOT NULL,
+        key        TEXT NOT NULL,
+        chunk_id   INTEGER,
+        surface    TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS mentions_unique
+        ON mentions (entity_id, source, key, ifnull(chunk_id, X''), surface);
+    CREATE INDEX IF NOT EXISTS mentions_entity ON mentions (entity_id, id);
+    CREATE INDEX IF NOT EXISTS mentions_item ON mentions (source, key);
+
+    CREATE TABLE IF NOT EXISTS graph_seq (
+        id  INTEGER PRIMARY KEY CHECK (id = 1),
+        seq INTEGER NOT NULL
+    );
+    INSERT OR IGNORE INTO graph_seq (id, seq) VALUES (1, 0);
+    CREATE TABLE IF NOT EXISTS graph_changes (
+        entity_id TEXT PRIMARY KEY,
+        seq       INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS graph_changes_seq ON graph_changes (seq);
+    "#,
 ];
 
 /// Schema version this build creates and understands.
@@ -267,6 +410,109 @@ mod tests {
 
         // Re-running is a no-op.
         assert_eq!(migrate(&mut conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn encrypted_v3_store_with_data_migrates_to_v4_graph() {
+        use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+        use nugget_graph::{
+            ClaimObject, ClaimStatus, EntityKind, Evidence, GraphStore, NewClaim, NewEntity,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let key = [5u8; 32];
+        // A v3 database exactly as the previous build left it: encrypted, with items, chunks,
+        // title/chunk FTS, a cursor and an audit entry.
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex::encode(key)))
+                .unwrap();
+            conn.pragma_update(None, "journal_mode", "WAL").unwrap();
+            migrate_to(&mut conn, 3);
+            conn.execute_batch(
+                "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at)
+                     VALUES (1, 'mail', 'm1', 'Quarterly boiler review', 'h1', 't', 't'),
+                            (2, 'mail', 'm2', 'Garden plan', 'h2', 't', 't');
+                 INSERT INTO chunks (item_id, ord, text)
+                     VALUES (1, 0, 'Sam from Acme serviced the boiler'), (2, 0, 'tulips');
+                 INSERT INTO cursors (source, value, updated_at) VALUES ('mail', '{\"n\":1}', 't');",
+            )
+            .unwrap();
+        }
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .starts_with(b"SQLite format 3"),
+            "fixture is encrypted"
+        );
+
+        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert_eq!(store.schema_version().unwrap(), LATEST_VERSION);
+        assert_eq!(store.counts().unwrap().items, 2);
+        assert_eq!(store.search_text("boiler", 5).unwrap().len(), 1);
+        assert_eq!(
+            store.get_cursor(&SourceId::new("mail")).unwrap(),
+            Some(serde_json::json!({"n": 1}))
+        );
+        store
+            .with_conn(|c| {
+                c.execute_batch(
+                    "INSERT INTO items_fts (items_fts) VALUES ('integrity-check');
+                 INSERT INTO entity_names_fts (entity_names_fts) VALUES ('integrity-check');
+                 PRAGMA foreign_key_check;",
+                )
+                .db("integrity")
+            })
+            .unwrap();
+
+        // The new graph works against the migrated items and their delete path.
+        let g = store.graph();
+        let m1 = ItemRef {
+            source: SourceId::new("mail"),
+            key: ItemKey::new("m1"),
+        };
+        let sam = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
+            .unwrap();
+        let claim = g
+            .add_claim(&NewClaim {
+                subject: sam.clone(),
+                predicate: "services".into(),
+                object: ClaimObject::Literal("the boiler".into()),
+                text: "Sam services the boiler".into(),
+                confidence: 0.8,
+                status: ClaimStatus::Active,
+                evidence: vec![Evidence {
+                    item: m1.clone(),
+                    chunk_id: Some(1),
+                    quote: Some("serviced the boiler".into()),
+                }],
+                valid_from: None,
+                valid_to: None,
+            })
+            .unwrap();
+        assert!(store.delete_item(&m1).unwrap());
+        assert_eq!(
+            g.get_claim(claim).unwrap().unwrap().status,
+            ClaimStatus::Retracted
+        );
+        drop(g);
+        drop(store);
+
+        // Still encrypted after migration, and re-opening is a no-op migration.
+        assert!(
+            !std::fs::read(&path)
+                .unwrap()
+                .starts_with(b"SQLite format 3")
+        );
+        assert!(
+            crate::Store::open(&path, &crate::StoreKey::from_bytes([6u8; 32])).is_err(),
+            "wrong key"
+        );
+        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert_eq!(store.migrate().unwrap(), 0);
+        assert_eq!(store.graph().get_entity(&sam).unwrap().unwrap().name, "Sam");
     }
 
     #[test]

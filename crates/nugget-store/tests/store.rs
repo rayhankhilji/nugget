@@ -932,7 +932,6 @@ mod m1j {
 
         let s = Store::open(&path, &key_a()).unwrap();
         assert_eq!(s.schema_version().unwrap(), SCHEMA_VERSION);
-        assert_eq!(SCHEMA_VERSION, 3);
         assert_eq!(keys(&s.search_text("tax", 5).unwrap()), ["a"], "backfilled");
         let got = s.get_item(&iref("files:test", "a")).unwrap().unwrap();
         assert_eq!(got.version.as_deref(), Some("v1"));
