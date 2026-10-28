@@ -30,3 +30,6 @@
 # (`* -text`); this line keeps the guarantee if that file is ever moved or removed.
 /manifests/** -text -eol
 *.sig -text -eol
+
+# Test fixtures are byte-exact (e.g. CRLF line endings in .ics/.eml samples).
+crates/**/tests/fixtures/** -text
