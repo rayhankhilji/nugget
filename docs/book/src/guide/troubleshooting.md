@@ -61,6 +61,54 @@ A cloud-only embedding tier is ignored unless you opt in (see [Privacy](privacy.
 | Changes in a folder are slow to appear | Network drives and some sync clients do not deliver file-system events. The periodic rescan (`rescan_interval_secs`) still catches changes; lower it for that source. |
 | Indexing pauses on a laptop | Backfills pause on battery below 20 % (`low_battery_threshold`) and resume when charging. |
 
+## The Knowledge page is empty or thin
+
+- Extraction runs shortly after indexing and then every 10 minutes; check the counts and the items
+  waiting on the **Knowledge** page.
+- Without a local or local-network model for the `synthesis` tier, only the deterministic extractors
+  run (mail headers, calendar attendees, Markdown frontmatter, tags and wikilinks, contacts). Cloud
+  models are used for extraction only for sources you list in `cloud_sources` under
+  `[knowledge.llm]`.
+- On battery below the power threshold, runs make no LLM requests until you are charging.
+- Set your name and addresses under `[knowledge.me]` if facts about you land on a separate person.
+
+## The vault
+
+- The vault is in `~/Nugget Vault` unless `path` under `[vault]` says otherwise (with `--home` or
+  `NUGGET_HOME`, it is `vault` inside the data directory).
+- If you and Nugget changed the same generated region of a page, your version is kept and Nugget's is
+  written under `.nugget/conflicts/` in the vault. Compare them, keep what you want, and delete the
+  conflict file.
+- A wrong fact keeps coming back: reject it on the Knowledge page or delete its line in the vault.
+  Either sets the sticky `rejected` status (see [Fact statuses](knowledge.md#fact-statuses)).
+
+## An AI app cannot connect over MCP
+
+- Run `nuggetd mcp install --client claude-desktop` (or `claude-code`, `cursor`) to write the app's
+  configuration, or copy the snippet from **Connected AI apps**. Restart the app afterwards.
+- The daemon must be running: `nuggetd mcp` is only a pipe to it.
+- "unknown or revoked MCP client, or wrong token": the token is wrong or the client was revoked.
+  Tokens are shown once; revoke the client and create a new one.
+- Over HTTP, check the port (`port` under `[mcp]`, 7319 by default) and that `http = true`. Requests
+  from a browser page are refused unless their origin is listed in `allowed_origins`.
+
+## Features being wired in (wave W)
+
+These apply once [Double Tap](double-tap.md), the [agent](agent.md), [Today](today.md) and
+[plugins](plugins.md) land in the app.
+
+| Problem | What to do |
+|---|---|
+| The Double Tap trigger does nothing on macOS | Allow Nugget under System Settings, Privacy & Security, Accessibility, then restart the app |
+| The Double Tap trigger does nothing on Linux Wayland | Double taps cannot be observed under Wayland. Choose a chord (the default there is `Ctrl+Alt+Space`) |
+| A chord cannot be registered | Another app already holds it. Choose another chord |
+| "drafting is refused in password and secure fields" or "drafting is disabled in …" | Expected: the field is secure, or the app is on the excluded list. Remove an app from the list on the **Double Tap** page if you added it by mistake |
+| Escape ×3 does not stop the agent | On macOS it needs Accessibility; on Wayland it is unsupported. Use **Stop all agents** in the tray, or set a chord as the kill switch |
+| Every agent action is denied | The kill switch may be engaged: resume on the **Safety** page. Otherwise a deny rule matches the app or site, or the task used up its rate limit |
+| A confirmation disappeared | It timed out after 2 minutes and counted as a denial |
+| A plugin will not install | It is unsigned, or signed by a key that is not in your trusted keys. An update is also refused if its version is not higher or it is signed by a different key |
+| A plugin request is refused | The host is not among the plugin's approved capabilities, or a tool tried to do something other than read |
+
 ## Running out of disk space
 
 Model installs refuse to start unless there is room for the model plus 10 % plus 1 GiB, and say so.
