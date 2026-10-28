@@ -31,6 +31,10 @@ pub struct Manifest {
     /// lower than the last one they accepted (freeze/rollback protection).
     pub version: u64,
     pub models: Vec<ModelEntry>,
+    /// Pinned inference-runtime builds (`llama-server`), one per OS/arch/accelerator. Optional so
+    /// manifests without runtimes stay valid; omitted from the JSON when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runtimes: Vec<crate::runtime::RuntimeEntry>,
 }
 
 /// One downloadable model file, pinned to an exact upstream revision and content hash.
@@ -212,7 +216,7 @@ fn validate_manifest(m: &Manifest) -> Result<()> {
             return Err(Error::Invalid(format!("duplicate model id `{}`", entry.id)));
         }
     }
-    Ok(())
+    crate::runtime::validate_runtimes(m)
 }
 
 fn decode_hex_array<const N: usize>(s: &str, what: &str) -> Result<[u8; N]> {

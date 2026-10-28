@@ -31,7 +31,14 @@ unmaintained = "workspace"
 yanked = "deny"
 # Each ignore needs an advisory id, a reason and an issue tracking its removal, e.g.
 # { id = "RUSTSEC-0000-0000", reason = "not reachable: we never call X; tracked in #123" },
-ignore = []
+ignore = [
+    # quick-xml 0.38 via plist 1.7 via starship-battery 0.10 (nugget-ingest power policy). plist only
+    # parses the OS's own IOKit battery dictionaries on macOS, never untrusted input, so neither
+    # the quadratic attribute check nor the namespace allocation DoS is reachable. Remove once the
+    # power policy reads battery state without starship-battery (docs/m0-followups.md).
+    { id = "RUSTSEC-2026-0194", reason = "not reachable: plist parses only OS battery data" },
+    { id = "RUSTSEC-2026-0195", reason = "not reachable: plist parses only OS battery data" },
+]
 
 [licenses]
 allow = [

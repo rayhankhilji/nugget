@@ -69,16 +69,16 @@ struct SlotsFile {
 ///
 /// One `ModelStore` per root is assumed (the daemon owns it); operations are serialised in-process.
 pub struct ModelStore {
-    root: PathBuf,
-    client: reqwest::Client,
-    egress: Arc<dyn EgressSink>,
-    disk: Arc<dyn DiskSpace>,
-    opts: DownloadOptions,
+    pub(crate) root: PathBuf,
+    pub(crate) client: reqwest::Client,
+    pub(crate) egress: Arc<dyn EgressSink>,
+    pub(crate) disk: Arc<dyn DiskSpace>,
+    pub(crate) opts: DownloadOptions,
     app_version: semver::Version,
     /// Serialises slot updates, blob placement and gc.
-    lock: tokio::sync::Mutex<()>,
+    pub(crate) lock: tokio::sync::Mutex<()>,
     /// SHA-256 of installs in flight.
-    installing: Mutex<HashSet<String>>,
+    pub(crate) installing: Mutex<HashSet<String>>,
 }
 
 impl std::fmt::Debug for ModelStore {
@@ -157,7 +157,7 @@ impl ModelStore {
         self.blob_dir().join(sha256)
     }
 
-    fn staging_dir(&self, sha256: &str) -> PathBuf {
+    pub(crate) fn staging_dir(&self, sha256: &str) -> PathBuf {
         self.root.join("staging").join(sha256)
     }
 
@@ -234,6 +234,7 @@ impl ModelStore {
             opts: &self.opts,
             reporter: reporter.clone(),
             egress: Arc::clone(&self.egress),
+            feature: crate::download::EGRESS_FEATURE,
         }
         .run()
         .await?;
@@ -509,7 +510,7 @@ fn not_installed(id: &str) -> Error {
     Error::NotFound(format!("model `{id}` is not installed"))
 }
 
-async fn hash_with_progress(
+pub(crate) async fn hash_with_progress(
     path: &Path,
     reporter: Reporter,
     cancel: &Arc<AtomicBool>,
@@ -524,7 +525,7 @@ async fn hash_with_progress(
     .map_err(|e| Error::Other(format!("hash task failed: {e}")))?
 }
 
-fn sync_file(path: &Path) -> Result<()> {
+pub(crate) fn sync_file(path: &Path) -> Result<()> {
     std::fs::OpenOptions::new()
         .write(true)
         .open(path)?
@@ -534,7 +535,7 @@ fn sync_file(path: &Path) -> Result<()> {
 
 /// Make a rename durable. Directories cannot be opened for sync on Windows; NTFS journals
 /// metadata, so this is a no-op there.
-fn sync_dir(dir: &Path) {
+pub(crate) fn sync_dir(dir: &Path) {
     #[cfg(unix)]
     if let Ok(d) = std::fs::File::open(dir) {
         let _ = d.sync_all();
@@ -543,13 +544,13 @@ fn sync_dir(dir: &Path) {
     let _ = dir;
 }
 
-struct InstallGuard<'a> {
+pub(crate) struct InstallGuard<'a> {
     set: &'a Mutex<HashSet<String>>,
     key: String,
 }
 
 impl<'a> InstallGuard<'a> {
-    fn acquire(set: &'a Mutex<HashSet<String>>, key: &str) -> Result<Self> {
+    pub(crate) fn acquire(set: &'a Mutex<HashSet<String>>, key: &str) -> Result<Self> {
         if !crate::download::lock(set).insert(key.to_string()) {
             return Err(Error::Invalid(format!(
                 "an install of {key} is already in progress"

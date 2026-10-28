@@ -9,7 +9,12 @@ use nugget_models::{
 };
 
 fn bytes_of(models: Vec<ModelEntry>) -> Vec<u8> {
-    serde_json::to_vec_pretty(&Manifest { version: 3, models }).unwrap()
+    serde_json::to_vec_pretty(&Manifest {
+        version: 3,
+        models,
+        runtimes: vec![],
+    })
+    .unwrap()
 }
 
 fn sample() -> Vec<u8> {

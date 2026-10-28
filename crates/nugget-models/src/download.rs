@@ -31,6 +31,8 @@ const STATE_FILE: &str = "state.json";
 const STATE_VERSION: u32 = 1;
 /// Egress feature name recorded for model downloads.
 pub const EGRESS_FEATURE: &str = "model_download";
+/// Egress feature name recorded for inference-runtime downloads.
+pub const RUNTIME_EGRESS_FEATURE: &str = "runtime_download";
 
 /// Tuning knobs for [`crate::ModelStore::install`].
 #[derive(Debug, Clone)]
@@ -285,6 +287,7 @@ pub(crate) fn staged_bytes(dir: &Path, entry: &ModelEntry) -> u64 {
 /// Per-host byte counts; recorded to the sink when dropped (success, failure or cancellation).
 struct EgressTally {
     sink: Arc<dyn EgressSink>,
+    feature: &'static str,
     hosts: Mutex<BTreeMap<String, (u64, u64)>>,
 }
 
@@ -309,7 +312,7 @@ impl Drop for EgressTally {
             self.sink.record(EgressEvent {
                 at: time::OffsetDateTime::now_utc(),
                 host,
-                feature: EGRESS_FEATURE.to_string(),
+                feature: self.feature.to_string(),
                 bytes_sent: sent,
                 bytes_received: received,
                 items: Vec::new(),
@@ -427,6 +430,8 @@ pub(crate) struct Download<'a> {
     pub opts: &'a DownloadOptions,
     pub reporter: Reporter,
     pub egress: Arc<dyn EgressSink>,
+    /// Egress feature name ([`EGRESS_FEATURE`] or [`RUNTIME_EGRESS_FEATURE`]).
+    pub feature: &'static str,
 }
 
 struct Ctx {
@@ -458,6 +463,7 @@ impl Download<'_> {
             opts,
             reporter,
             egress,
+            feature,
         } = self;
         std::fs::create_dir_all(&dir)?;
         let data = dir.join(DATA_FILE);
@@ -472,6 +478,7 @@ impl Download<'_> {
 
         let tally = Arc::new(EgressTally {
             sink: egress,
+            feature,
             hosts: Mutex::new(BTreeMap::new()),
         });
 

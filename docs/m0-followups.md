@@ -47,6 +47,11 @@ Items are grouped by where they'll most likely land.
   - Playwright UI tests.
 - **bench:** the real `draft` and `cua` suites (M3/M4); run `memory`/`perf` against the real store once ingest lands.
 
+## Dependencies
+- Replace `starship-battery` in nugget-ingest's power policy (it pins plist 1.7 → quick-xml 0.38,
+  RUSTSEC-2026-0194/0195, ignored as unreachable in `deny.toml`) with direct platform reads:
+  `/sys/class/power_supply` on Linux, IOKit on macOS, `GetSystemPowerStatus` on Windows.
+
 ## Process
 - The first five commits on this branch predate the DCO check and have no `Signed-off-by`. Add sign-off (rebase `--signoff`) before opening the first PR.
 - A `deny.toml` duplicate-version warning comes mostly from Tauri, toml and windows-sys; revisit when those dependencies update.

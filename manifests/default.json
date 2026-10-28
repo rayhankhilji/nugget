@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "models": [
     {
       "id": "qwen3-4b-q4km",
@@ -42,6 +42,112 @@
       "tiers": ["embedding"],
       "license": "Apache-2.0",
       "min_app_version": "0.0.1"
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "llama-server-macos-aarch64-metal",
+      "version": "b11940",
+      "os": "macos",
+      "arch": "aarch64",
+      "accel": "metal",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-macos-arm64.tar.gz",
+      "size": 16342909,
+      "sha256": "8d968b0c9678a21ab04622145fd44b66f4d6815e55b459a938d68c1ed1cc3b65",
+      "archive": "tar.gz",
+      "binary": "llama-b11940/llama-server",
+      "license": "MIT"
+    },
+    {
+      "id": "llama-server-macos-x86_64-cpu",
+      "version": "b11940",
+      "os": "macos",
+      "arch": "x86_64",
+      "accel": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-macos-x64.tar.gz",
+      "size": 12068845,
+      "sha256": "cffcd0982a6a240d1fb99e9933837f96d3560082d45a8b298341352e5370ee06",
+      "archive": "tar.gz",
+      "binary": "llama-b11940/llama-server",
+      "license": "MIT"
+    },
+    {
+      "id": "llama-server-linux-x86_64-cpu",
+      "version": "b11940",
+      "os": "linux",
+      "arch": "x86_64",
+      "accel": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-ubuntu-x64.tar.gz",
+      "size": 22521007,
+      "sha256": "29eb639b5369b044c40b6a4f3693c3e785a98dfc3c3ef0b12314314726c61d64",
+      "archive": "tar.gz",
+      "binary": "llama-b11940/llama-server",
+      "license": "MIT"
+    },
+    {
+      "id": "llama-server-linux-x86_64-vulkan",
+      "version": "b11940",
+      "os": "linux",
+      "arch": "x86_64",
+      "accel": "vulkan",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-ubuntu-vulkan-x64.tar.gz",
+      "size": 35292405,
+      "sha256": "46a058ae3aa4b070bc1b335ecd401bf08d852e0de2286c4a4473befc9db95de0",
+      "archive": "tar.gz",
+      "binary": "llama-b11940/llama-server",
+      "license": "MIT"
+    },
+    {
+      "id": "llama-server-linux-aarch64-cpu",
+      "version": "b11940",
+      "os": "linux",
+      "arch": "aarch64",
+      "accel": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-ubuntu-arm64.tar.gz",
+      "size": 18260402,
+      "sha256": "f8bb1c26f4cbba537361717264fb16d9316499ed470b24026187a8fd56b797ac",
+      "archive": "tar.gz",
+      "binary": "llama-b11940/llama-server",
+      "license": "MIT"
+    },
+    {
+      "id": "llama-server-windows-x86_64-cpu",
+      "version": "b11940",
+      "os": "windows",
+      "arch": "x86_64",
+      "accel": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-win-cpu-x64.zip",
+      "size": 24261453,
+      "sha256": "a2ea425f5aeb45cc51a75a72b1d2e1ac724d3f6d719bbc53d1e0b5666b113eaf",
+      "archive": "zip",
+      "binary": "llama-server.exe",
+      "license": "MIT AND Apache-2.0 WITH LLVM-exception"
+    },
+    {
+      "id": "llama-server-windows-x86_64-vulkan",
+      "version": "b11940",
+      "os": "windows",
+      "arch": "x86_64",
+      "accel": "vulkan",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-win-vulkan-x64.zip",
+      "size": 37186277,
+      "sha256": "414a1aba0dee3e91fae0fea2de3ee65e77380437a88de575deb21c0644a40f06",
+      "archive": "zip",
+      "binary": "llama-server.exe",
+      "license": "MIT AND Apache-2.0 WITH LLVM-exception"
+    },
+    {
+      "id": "llama-server-windows-aarch64-cpu",
+      "version": "b11940",
+      "os": "windows",
+      "arch": "aarch64",
+      "accel": "cpu",
+      "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11940/llama-b11940-bin-win-cpu-arm64.zip",
+      "size": 12879660,
+      "sha256": "6ce440cbf63c4d72f719463a36258dba6b9760651aebe2e80a52b0a41b3c55bd",
+      "archive": "zip",
+      "binary": "llama-server.exe",
+      "license": "MIT AND Apache-2.0 WITH LLVM-exception"
     }
   ]
 }

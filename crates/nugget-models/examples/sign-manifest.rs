@@ -80,9 +80,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
         };
         let m = verify_manifest(&bytes, &sig, &keys).map_err(|e| e.to_string())?;
         println!(
-            "OK: manifest version {} with {} models",
+            "OK: manifest version {} with {} models and {} runtimes",
             m.version,
-            m.models.len()
+            m.models.len(),
+            m.runtimes.len()
         );
         return Ok(());
     }
@@ -97,10 +98,11 @@ fn run(args: Vec<String>) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", sig_path.display()))?;
     let pk = hex::encode(vk.to_bytes());
     println!(
-        "signed {} (version {}, {} models) -> {}",
+        "signed {} (version {}, {} models, {} runtimes) -> {}",
         manifest.display(),
         m.version,
         m.models.len(),
+        m.runtimes.len(),
         sig_path.display()
     );
     println!("public key: {pk}");

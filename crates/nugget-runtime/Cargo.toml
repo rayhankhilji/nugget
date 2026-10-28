@@ -1,13 +1,62 @@
 [package]
 name = "nugget-runtime"
+description = "Supervisor for local llama.cpp llama-server processes (chat and embeddings) on loopback"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Builds the `fake-llama-server` test double. Enabled for this crate's own tests through the
+# self dev-dependency below; never needed by users of the library.
+fake-server = []
+
 [dependencies]
 nugget-core.workspace = true
+nugget-infer.workspace = true
+nugget-models.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+time.workspace = true
+tracing.workspace = true
+getrandom = "0.4"
+# Process groups (Unix) and kill-on-close job objects (Windows) without `unsafe` in this crate.
+process-wrap = { version = "10.0.1", default-features = false, features = [
+    "tokio1",
+    "process-group",
+    "job-object",
+    "kill-on-drop",
+    "creation-flags",
+] }
+# TLS stack and features come from the workspace; the health client is loopback-only.
+reqwest.workspace = true
+# Same line as nugget-models (0.39 needs a newer Rust than the workspace MSRV).
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
+
+# `CREATE_NO_WINDOW` for the child (same version as process-wrap's).
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", default-features = false, features = ["Win32_System_Threading"] }
+
+[dev-dependencies]
+nugget-runtime = { path = ".", version = "0.0.1", features = ["fake-server"] }
+futures.workspace = true
+tempfile = "3"
+wiremock = "0.6"
+flate2 = "1"
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+sha2 = "0.11"
+hex = "0.4"
+
+[[bin]]
+name = "fake-llama-server"
+path = "src/bin/fake-llama-server.rs"
+required-features = ["fake-server"]
+test = false
+doc = false
 
 [lints]
 workspace = true

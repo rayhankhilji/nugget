@@ -13,6 +13,11 @@
 //! 5. **Atomic install** into content-addressed storage (`blobs/sha256/<hex>`), then a slot update
 //!    that keeps the previous version for [`ModelStore::rollback`]. Egress is recorded.
 //!
+//! **Runtimes.** The manifest also pins `llama-server` release archives ([`RuntimeEntry`]: exact
+//! release tag, size, SHA-256). [`ModelStore::install_runtime`] downloads them through the same
+//! verified path and unpacks them with the hostile-input-safe [`archive::extract_archive`];
+//! [`select_runtime`] picks the best build for the detected hardware.
+//!
 //! Installed models are re-checkable at any time ([`ModelStore::verify`]), and
 //! [`ModelStore::needs_update`] tells whether a newer manifest pins different bytes.
 //!
@@ -21,13 +26,16 @@
 //! `cargo run -p nugget-models --example sign-manifest`; the private key is read from
 //! `NUGGET_MANIFEST_SIGNING_KEY` (hex) or a key file and is never committed.
 
+pub mod archive;
 mod download;
 mod hardware;
 mod manifest;
 mod preflight;
+mod runtime;
+mod runtime_store;
 mod store;
 
-pub use download::{DownloadOptions, EGRESS_FEATURE, Phase, Progress};
+pub use download::{DownloadOptions, EGRESS_FEATURE, Phase, Progress, RUNTIME_EGRESS_FEATURE};
 pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 pub use hardware::{GpuKind, Hardware, detect_hardware, recommend};
 pub use manifest::{
@@ -36,6 +44,11 @@ pub use manifest::{
     trusted_keys, verify_manifest,
 };
 pub use preflight::{DiskSpace, GIB, SystemDiskSpace, check_disk_space, required_bytes};
+pub use runtime::{
+    ArchiveFormat, MAX_RUNTIME_ARCHIVE_BYTES, RuntimeAccel, RuntimeEntry, accel_preference,
+    current_arch, current_os, runtime_candidates_for, select_runtime,
+};
+pub use runtime_store::InstalledRuntime;
 pub use semver;
 pub use store::{GcReport, InstalledModel, ModelStore, Slot, default_client};
 

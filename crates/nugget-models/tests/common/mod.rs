@@ -282,7 +282,12 @@ pub fn entry(id: &str, url: &str, bytes: &[u8]) -> ModelEntry {
 
 /// Round-trip entries through a signed manifest, as production code must.
 pub fn signed(models: Vec<ModelEntry>) -> Manifest {
-    let bytes = serde_json::to_vec_pretty(&Manifest { version: 1, models }).unwrap();
+    let bytes = serde_json::to_vec_pretty(&Manifest {
+        version: 1,
+        models,
+        runtimes: vec![],
+    })
+    .unwrap();
     let key = test_key();
     let sig = sign_manifest(&bytes, &key);
     verify_manifest(&bytes, sig.as_bytes(), &[key.verifying_key()]).unwrap()

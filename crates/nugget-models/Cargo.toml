@@ -15,13 +15,16 @@ time.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 ed25519-dalek = "3"
+flate2 = "1"
 fs4 = "1"
 hex = "0.4"
 # TLS stack and features come from the workspace (rustls + aws-lc-rs, OS certificate verifier).
 reqwest.workspace = true
 semver = "1"
 sha2 = "0.11"
+tar = { version = "0.4.46", default-features = false }
 url = "2"
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 # 0.38 is the newest line that builds on the workspace rust-version (0.39 needs Rust 1.95).
 sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 
