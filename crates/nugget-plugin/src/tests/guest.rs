@@ -87,6 +87,8 @@ fn load(crate_name: &str, kind: &str, caps: &str, limits: Limits) -> Option<Fx> 
         egress: egress.clone(),
         secrets: Some(secrets.clone()),
         http_client: None,
+        // The tests' servers listen on 127.0.0.1.
+        allow_private_network: true,
     })
     .unwrap();
     let plugin = host.load(&store.load(&id).unwrap()).unwrap();
@@ -374,6 +376,46 @@ async fn redirects_are_not_followed_off_host() {
 }
 
 #[tokio::test]
+async fn example_text_tools_need_no_capabilities() {
+    let Some(fx) = load("text_tools", "[\"tool\"]", "", test_limits()) else {
+        return;
+    };
+    let names: Vec<_> = fx
+        .plugin
+        .tools()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(names, ["text_stats", "top_words"]);
+    let text = "The cat sat. The cat ran!\n\nA dog barked?";
+    assert_eq!(
+        fx.tool("text_stats", json!({ "text": text }))
+            .await
+            .unwrap(),
+        json!({ "words": 9, "characters": 40, "characters_no_spaces": 31,
+                "sentences": 3, "paragraphs": 2, "reading_time_seconds": 3 })
+    );
+    assert_eq!(
+        fx.tool("top_words", json!({ "text": text, "limit": 2 }))
+            .await
+            .unwrap(),
+        json!({ "words": [{ "word": "cat", "count": 2 }, { "word": "the", "count": 2 }] })
+    );
+    assert!(matches!(
+        fx.tool("text_stats", json!({})).await,
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        fx.tool("nope", json!({})).await,
+        Err(Error::NotFound(_))
+    ));
+    assert!(PluginConnectorFactory::new(fx.plugin.clone()).is_err());
+    assert!(fx.egress.0.lock().unwrap().is_empty(), "no network");
+}
+
+#[tokio::test]
 async fn tools_are_read_only() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
@@ -636,6 +678,7 @@ async fn components_with_foreign_imports_are_refused() {
         egress: Arc::new(VecEgress::default()),
         secrets: None,
         http_client: None,
+        allow_private_network: false,
     })
     .unwrap();
     let err = host

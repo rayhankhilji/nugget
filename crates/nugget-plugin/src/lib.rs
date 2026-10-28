@@ -10,14 +10,17 @@
 //! - **Limits** ([`Limits`]): fuel, an epoch deadline and a `tokio` timeout per call, and a cap
 //!   on linear memory. Every call gets a fresh instance from a cached, pre-linked component.
 //! - **Packages** ([`PluginPackage`]) are signed with ed25519 over the SHA-256 of the manifest and
-//!   of the component; [`PluginStore`] installs, updates, removes and lists them in a
-//!   content-addressed directory under the data dir.
+//!   of the component, and ship as a directory or as one `.nuggetplugin` file
+//!   ([`PACKAGE_EXTENSION`]); [`PluginStore`] previews, installs, updates, enables/disables,
+//!   removes and lists them in a content-addressed directory under the data dir.
 //! - **Integration.** [`PluginConnectorFactory`] implements
 //!   [`nugget_connector::ConnectorFactory`], so plugin connectors run in the existing ingest
-//!   pipeline; [`LoadedPlugin::tools`] and [`LoadedPlugin::call_tool`] serve the agent.
+//!   pipeline; [`agent_tools`] wraps [`LoadedPlugin::tools`] as read-only, untrusted-output
+//!   [`nugget_agent::Tool`]s ([`PluginTool`]).
 //!
 //! The guest-side SDK lives in `sdk/` (its own cargo workspace, built for `wasm32-wasip2`).
 
+mod agent;
 mod connector;
 mod host;
 mod kv;
@@ -25,6 +28,7 @@ mod manifest;
 mod package;
 mod store;
 
+pub use agent::{AGENT_TOOL_PREFIX, MAX_AGENT_TOOL_NAME, PluginTool, agent_tool_name, agent_tools};
 pub use connector::{PluginConnector, PluginConnectorFactory, plugin_kind};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use host::{HostConfig, Limits, LoadedPlugin, PluginHost, ToolSpec, secret_account};
@@ -32,10 +36,10 @@ pub use manifest::{
     Capabilities, ConnectorAuth, ConnectorSection, HostRule, MANIFEST_FILE, Manifest, PluginKind,
 };
 pub use package::{
-    MAX_WASM_BYTES, PluginPackage, SIGNATURE_FILE, VerifiedPackage, WASM_FILE, decode_signature,
-    parse_signing_key, parse_verifying_key, sign_package, signing_payload,
+    MAX_WASM_BYTES, PACKAGE_EXTENSION, PluginPackage, SIGNATURE_FILE, VerifiedPackage, WASM_FILE,
+    decode_signature, parse_signing_key, parse_verifying_key, sign_package, signing_payload,
 };
-pub use store::{ApprovalRequest, InstalledPlugin, PluginStore, VerifiedPlugin};
+pub use store::{ApprovalRequest, InstallPreview, InstalledPlugin, PluginStore, VerifiedPlugin};
 
 /// The WIT source of the `nugget:plugin` world.
 pub const WIT: &str = include_str!("../wit/plugin.wit");

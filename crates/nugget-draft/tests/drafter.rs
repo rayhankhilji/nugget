@@ -692,6 +692,7 @@ async fn feedback_is_audited_and_sent_to_the_sink() {
         Some("Thursday works, see you at 3.")
     );
     assert_eq!(r.app_id.as_deref(), Some("com.tinyspeck.slackmacgap"));
+    assert!(!r.sensitive);
 
     tokio::time::sleep(Duration::from_millis(50)).await;
     let audit = s.store.recent_audit(10).unwrap();
@@ -716,6 +717,32 @@ async fn feedback_is_audited_and_sent_to_the_sink() {
         })
         .await;
     assert!(matches!(bad, Err(Error::Invalid(_))));
+}
+
+#[tokio::test]
+async fn feedback_marks_drafts_from_sensitive_passages() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let sink = Arc::new(Sink::default());
+    let s = setup(vec![local], DraftConfig::default(), Arc::new(NoVoice));
+    let drafter = s.drafter.clone().with_feedback_sink(sink.clone());
+    let (started, stream) = drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    assert!(keys(&started).contains(&"salaries"));
+    collect(stream).await;
+    drafter
+        .feedback(DraftFeedback {
+            stream_id: started.stream_id,
+            outcome: "accepted".into(),
+            final_text: None,
+            insert_verified: Some(true),
+        })
+        .await
+        .unwrap();
+    let records = sink.0.lock().unwrap().clone();
+    assert_eq!(records.len(), 1);
+    assert!(records[0].sensitive);
 }
 
 struct Voice(Mutex<Vec<VoiceQuery>>);

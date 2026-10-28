@@ -1042,6 +1042,7 @@ impl Ingest {
         }
         Ok(AuthFlow {
             url: flow.url,
+            user_code: flow.user_code,
             done: Box::pin(async move { rx.await.unwrap_or(Err(Error::Cancelled)) }),
         })
     }

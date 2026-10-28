@@ -4,7 +4,7 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{alive, env, get, port_of, read_all_logs, wait_until};
+use common::{addr, alive, env, get, read_all_logs, wait_until};
 use nugget_core::Error;
 use nugget_core::capability::{Locality, Tier};
 use nugget_core::egress::NullEgress;
@@ -45,10 +45,27 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
     assert_eq!(cfg.kind, ProviderKind::OpenaiCompatible);
     assert_eq!(cfg.model, "chat-model");
     let base = cfg.base_url.clone().unwrap();
-    assert!(
-        base.starts_with("http://127.0.0.1:") && base.ends_with("/v1"),
-        "{base}"
-    );
+    // On Unix the server listens on a socket in a private directory; elsewhere on loopback.
+    #[cfg(unix)]
+    let sock = {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(base, "http://localhost/v1");
+        let sock = cfg.socket_path.clone().expect("a Unix socket");
+        assert_eq!(sock, e.paths.data.join("run").join("chat.sock"));
+        let dir = std::fs::metadata(sock.parent().unwrap()).unwrap();
+        assert_eq!(dir.permissions().mode() & 0o777, 0o700);
+        let d = rt.details(RuntimeRole::Chat).unwrap();
+        assert_eq!((d.socket.as_ref(), d.port), (Some(&sock), None));
+        sock
+    };
+    #[cfg(not(unix))]
+    {
+        assert!(
+            base.starts_with("http://127.0.0.1:") && base.ends_with("/v1"),
+            "{base}"
+        );
+        assert_eq!(cfg.socket_path, None);
+    }
     assert_eq!(
         cfg.tiers,
         vec![Tier::Triage, Tier::Light],
@@ -76,21 +93,28 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
     assert_eq!(status[0].model_id, "chat-model");
 
     // Unauthenticated: only /health answers.
-    let port = port_of(&base);
-    assert_eq!(get(port, "/health", None).await.0, 200);
-    assert_eq!(get(port, "/v1/models", None).await.0, 401);
-    assert_eq!(get(port, "/v1/models", Some("wrong")).await.0, 401);
+    let port = addr(&cfg);
+    assert_eq!(get(&port, "/health", None).await.0, 200);
+    assert_eq!(get(&port, "/v1/models", None).await.0, 401);
+    assert_eq!(get(&port, "/v1/models", Some("wrong")).await.0, 401);
     let k = key(&rt, RuntimeRole::Chat);
     assert_eq!(k.len(), 64);
-    let (code, body) = get(port, "/v1/models", Some(&k)).await;
+    let (code, body) = get(&port, "/v1/models", Some(&k)).await;
     assert_eq!(code, 200);
     assert!(body.contains("chat-model"));
 
     // The key is not on the command line, and the environment is scrubbed.
-    let (_, info) = get(port, "/fake/info", Some(&k)).await;
+    let (_, info) = get(&port, "/fake/info", Some(&k)).await;
     let info: serde_json::Value = serde_json::from_str(&info).unwrap();
     let argv: Vec<String> = serde_json::from_value(info["argv"].clone()).unwrap();
     assert!(!argv.iter().any(|a| a.contains(&k)));
+    #[cfg(unix)]
+    {
+        let sock = sock.to_string_lossy().into_owned();
+        assert!(argv.windows(2).any(|w| w == ["--host", sock.as_str()]));
+        assert!(!argv.iter().any(|a| a == "--port"));
+    }
+    #[cfg(not(unix))]
     assert!(argv.windows(2).any(|w| w == ["--host", "127.0.0.1"]));
     assert!(argv.windows(2).any(|w| w == ["--alias", "chat-model"]));
     assert!(!argv.iter().any(|a| a == "--embedding"));
@@ -130,7 +154,7 @@ async fn configs_work_with_nugget_infer_providers() {
     let rt = e.runtime(common::opts());
     let chat_cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
     let emb_cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    assert_ne!(chat_cfg.base_url, emb_cfg.base_url, "one port per role");
+    assert_ne!(addr(&chat_cfg), addr(&emb_cfg), "one listener per role");
     assert_eq!(emb_cfg.tiers, vec![Tier::Embedding]);
     assert_eq!(emb_cfg.id.as_str(), "local-embedding");
 
@@ -214,12 +238,7 @@ async fn slow_start_is_awaited_and_a_hung_start_times_out() {
         "{:?}",
         t.elapsed()
     );
-    assert_eq!(
-        get(port_of(cfg.base_url.as_ref().unwrap()), "/health", None)
-            .await
-            .0,
-        200
-    );
+    assert_eq!(get(&addr(&cfg), "/health", None).await.0, 200);
     rt.shutdown().await;
 
     let mut o = with_extra(RuntimeRole::Chat, &["--fake-start-delay-ms", "60000"]);
@@ -275,31 +294,24 @@ async fn crashed_server_is_restarted_on_the_same_port() {
     let d = rt.details(RuntimeRole::Chat).unwrap();
     assert_ne!(d.pid.unwrap(), pid1);
     let cfg2 = d.config.clone().unwrap();
-    assert_eq!(cfg2.base_url, cfg.base_url, "same port");
+    assert_eq!(cfg2.base_url, cfg.base_url);
+    assert_eq!(addr(&cfg2), addr(&cfg), "same port or socket");
     assert_ne!(cfg2.api_key, cfg.api_key, "new key generation");
     assert!(!alive(pid1));
     // The port keeps working, with the new key.
     let k = key(&rt, RuntimeRole::Chat);
-    assert_eq!(
-        get(
-            port_of(cfg.base_url.as_ref().unwrap()),
-            "/v1/models",
-            Some(&k)
-        )
-        .await
-        .0,
-        200
-    );
+    assert_eq!(get(&addr(&cfg), "/v1/models", Some(&k)).await.0, 200);
 
     // A crash on request (exit 42) is handled the same way, and ensure() waits it out.
-    let port = port_of(cfg.base_url.as_ref().unwrap());
-    let _ = common::no_proxy_client()
-        .post(format!("http://127.0.0.1:{port}/fake/crash"))
+    let a = addr(&cfg);
+    let _ = a
+        .client()
+        .post(a.url("/fake/crash"))
         .bearer_auth(&k)
         .send()
         .await;
     let again = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    assert_eq!(again.base_url, cfg.base_url);
+    assert_eq!(addr(&again), a);
     wait_until("second restart", Duration::from_secs(10), || {
         rt.details(RuntimeRole::Chat)
             .is_some_and(|d| d.restarts == 2 && d.info.state == RuntimeState::Ready)
@@ -365,12 +377,11 @@ async fn stop_kills_the_server_and_its_process_group() {
     assert_eq!(d.info.state, RuntimeState::Stopped);
     assert!(d.config.is_none());
     assert!(!e.paths.data.join("runtime/chat.pid").exists());
-    assert_eq!(
-        get(port_of(cfg.base_url.as_ref().unwrap()), "/health", None)
-            .await
-            .0,
-        0
-    );
+    assert_eq!(get(&addr(&cfg), "/health", None).await.0, 0);
+    // The socket file is gone with the server.
+    if let Some(sock) = &cfg.socket_path {
+        assert!(!sock.exists());
+    }
     // Stopping again is a no-op; ensure brings it back.
     rt.stop(RuntimeRole::Chat).await;
     rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
@@ -423,15 +434,15 @@ async fn idle_servers_stop_and_come_back_on_ensure() {
     o.idle_check_interval = Duration::from_millis(100);
     let rt = e.runtime(o);
     let cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    let port = port_of(cfg.base_url.as_ref().unwrap());
+    let a = addr(&cfg);
 
     // Requests (seen through /metrics) keep it alive past the idle timeout.
     let k = key(&rt, RuntimeRole::Embedding);
-    let client = common::no_proxy_client();
+    let client = a.client();
     let busy_until = Instant::now() + Duration::from_millis(1500);
     while Instant::now() < busy_until {
         let r = client
-            .post(format!("http://127.0.0.1:{port}/v1/embeddings"))
+            .post(a.url("/v1/embeddings"))
             .bearer_auth(&k)
             .header("content-type", "application/json")
             .body(r#"{"input": ["x"], "model": "embed-model"}"#)
@@ -452,10 +463,7 @@ async fn idle_servers_stop_and_come_back_on_ensure() {
     // process may still be exiting here.
     wait_until("process exit", Duration::from_secs(10), || !alive(pid)).await;
     let again = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
-    assert_eq!(
-        again.base_url, cfg.base_url,
-        "the old port is reused when free"
-    );
+    assert_eq!(addr(&again), a, "the old port (or the socket) is reused");
     rt.shutdown().await;
 }
 
@@ -589,6 +597,50 @@ fn free_port_selection() {
     assert!(std::net::TcpListener::bind(("127.0.0.1", other)).is_ok());
 }
 
+/// With Unix sockets turned off (and always on Windows) servers listen on a loopback port.
+#[tokio::test]
+async fn tcp_listeners_when_unix_sockets_are_off() {
+    let e = env().await;
+    let mut o = common::opts();
+    o.unix_socket = false;
+    let rt = e.runtime(o);
+    let cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    let base = cfg.base_url.clone().unwrap();
+    assert!(
+        base.starts_with("http://127.0.0.1:") && base.ends_with("/v1"),
+        "{base}"
+    );
+    assert_eq!(cfg.socket_path, None);
+    assert_eq!(cfg.effective_locality().unwrap(), Locality::OnDevice);
+    let d = rt.details(RuntimeRole::Embedding).unwrap();
+    assert_eq!(d.socket, None);
+    let a = addr(&cfg);
+    assert_eq!(a, common::Addr::Port(d.port.unwrap()));
+    assert_eq!(get(&a, "/health", None).await.0, 200);
+    let (_, info) = get(&a, "/fake/info", Some(&key(&rt, RuntimeRole::Embedding))).await;
+    let info: serde_json::Value = serde_json::from_str(&info).unwrap();
+    let argv: Vec<String> = serde_json::from_value(info["argv"].clone()).unwrap();
+    assert!(argv.windows(2).any(|w| w == ["--host", "127.0.0.1"]));
+    assert!(!e.paths.data.join("run").exists());
+    rt.shutdown().await;
+}
+
+/// A socket file left behind by a server that died (or anything else at its path) does not
+/// stop the next server from binding it.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stale_socket_file_is_replaced() {
+    let e = env().await;
+    let dir = e.paths.data.join("run");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("chat.sock"), b"stale").unwrap();
+    let rt = e.runtime(common::opts());
+    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    assert_eq!(get(&addr(&cfg), "/health", None).await.0, 200);
+    rt.shutdown().await;
+    assert!(!dir.join("chat.sock").exists());
+}
+
 // ---- Regression tests: who is on the port, stale configs, key rotation, detached starts ----
 
 /// Another local process grabs the server's port before the server binds it, and answers
@@ -601,6 +653,8 @@ async fn a_squatter_on_the_servers_port_is_rejected() {
     let p = pidfile.to_string_lossy().into_owned();
     let mut o = with_extra(RuntimeRole::Chat, &["--fake-squat", &p]);
     o.health_timeout = Duration::from_secs(5);
+    // The port race exists only for TCP listeners.
+    o.unix_socket = false;
     let rt = e.runtime(o);
     let res = rt.ensure(RuntimeRole::Chat, &e.chat).await;
     let squatter = common::KillOnDrop(
@@ -647,8 +701,13 @@ async fn no_config_is_handed_out_while_stopping() {
     assert!(alive(pid), "still in its shutdown grace period");
     assert!(!stopping.is_finished());
     let d = rt.details(RuntimeRole::Chat).unwrap();
-    assert_ne!(d.info.state, RuntimeState::Ready);
+    assert_eq!(d.info.state, RuntimeState::Stopping);
     assert!(d.config.is_none(), "config handed out during stop");
+    assert_eq!(rt.status()[0].state, RuntimeState::Stopping);
+    assert_eq!(
+        serde_json::to_value(&rt.status()[0]).unwrap()["state"],
+        "stopping"
+    );
     stopping.await.unwrap();
     assert!(!alive(pid));
     assert_eq!(
@@ -679,8 +738,15 @@ async fn no_config_is_handed_out_during_an_idle_stop() {
         alive(pid),
         "the config was withdrawn only after the server was gone"
     );
-    assert!(rt.details(RuntimeRole::Embedding).unwrap().config.is_none());
+    let d = rt.details(RuntimeRole::Embedding).unwrap();
+    assert!(d.config.is_none());
+    assert_eq!(d.info.state, RuntimeState::Stopping);
     wait_until("idle server gone", Duration::from_secs(5), || !alive(pid)).await;
+    wait_until("stopped", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Embedding)
+            .is_some_and(|d| d.info.state == RuntimeState::Stopped)
+    })
+    .await;
     rt.shutdown().await;
 }
 
@@ -695,9 +761,10 @@ async fn a_crash_is_reported_at_once() {
     let rt = e.runtime(o);
     let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
     let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
-    let port = port_of(cfg.base_url.as_ref().unwrap());
-    let _ = common::no_proxy_client()
-        .post(format!("http://127.0.0.1:{port}/fake/crash"))
+    let a = addr(&cfg);
+    let _ = a
+        .client()
+        .post(a.url("/fake/crash"))
         .bearer_auth(key(&rt, RuntimeRole::Chat))
         .send()
         .await;
@@ -765,9 +832,9 @@ async fn the_api_key_rotates_on_every_restart() {
             .expose(),
         k2
     );
-    let port = port_of(cfg2.base_url.as_ref().unwrap());
-    assert_eq!(get(port, "/v1/models", Some(&k1)).await.0, 401);
-    assert_eq!(get(port, "/v1/models", Some(&k2)).await.0, 200);
+    let port = addr(&cfg2);
+    assert_eq!(get(&port, "/v1/models", Some(&k1)).await.0, 401);
+    assert_eq!(get(&port, "/v1/models", Some(&k2)).await.0, 200);
 
     // And after a stop and a new start.
     rt.stop(RuntimeRole::Chat).await;
@@ -775,9 +842,9 @@ async fn the_api_key_rotates_on_every_restart() {
     let k3 = key(&rt, RuntimeRole::Chat);
     assert_ne!(k2, k3);
     assert_ne!(cfg2.api_key, cfg3.api_key);
-    let port = port_of(cfg3.base_url.as_ref().unwrap());
-    assert_eq!(get(port, "/v1/models", Some(&k2)).await.0, 401);
-    assert_eq!(get(port, "/v1/models", Some(&k3)).await.0, 200);
+    let port = addr(&cfg3);
+    assert_eq!(get(&port, "/v1/models", Some(&k2)).await.0, 401);
+    assert_eq!(get(&port, "/v1/models", Some(&k3)).await.0, 200);
     // The other role's key is untouched.
     rt.shutdown().await;
 }

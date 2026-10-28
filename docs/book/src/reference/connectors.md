@@ -119,12 +119,12 @@ Sync: discovery through `current-user-principal` and `calendar-home-set`, then R
 `sync-collection` per calendar, or a `getctag` check plus an ETag listing when the server has no sync
 support. Polled every 5 minutes. Item keys are the event's absolute href path.
 
-## Kinds being wired in (wave W)
+## Microsoft 365, SaaS and plugin kinds
 
-> **Status: being wired in (wave W).** These kinds are implemented in `nugget-connector-microsoft`,
-> `nugget-connector-saas` and `nugget-plugin`, and are being registered in `nuggetd` in this wave.
-> This build's `sources.add` refuses them. Their tables are compared with the connector crates, not with the
-> daemon's registry.
+> The Microsoft 365 (`outlook`, `outlook-calendar`, `onedrive`) and SaaS (`slack`, `notion`,
+> `github`, `linear`) kinds are registered in `nuggetd` and offered by the Sources wizard. Plugin
+> kinds (`plugin:<id>`) are still being wired in (wave W). This table is compared with the connector
+> crates.
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |

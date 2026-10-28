@@ -11,13 +11,12 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use futures::StreamExt;
 use nugget_core::capability::Locality;
-use nugget_core::egress::{EgressEvent, EgressSink};
+use nugget_core::egress::{EgressExchange, EgressSink};
 use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Method, StatusCode};
 use serde_json::Value;
-use time::OffsetDateTime;
 use url::Url;
 
 use crate::sse::SseParser;
@@ -116,35 +115,35 @@ impl RequestClock {
     }
 }
 
-/// Records one HTTP exchange in the egress ledger when dropped (exactly once), unless the
-/// provider is on-device.
+/// Push running totals to the ledger after this many unflushed received bytes...
+const METER_FLUSH_BYTES: u64 = 256 * 1024;
+/// ...or this long after the last flush, whichever comes first.
+const METER_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+
+/// One HTTP exchange in the egress ledger: the row is opened before the request is sent,
+/// updated periodically while the response streams in, and finished when dropped (exactly once).
+/// Records nothing for on-device providers.
 pub(crate) struct EgressMeter {
-    sink: Option<Arc<dyn EgressSink>>,
-    host: String,
-    feature: String,
-    items: Vec<ItemRef>,
-    pub(crate) bytes_sent: u64,
-    pub(crate) bytes_received: u64,
+    exchange: EgressExchange,
+    unflushed: u64,
+    last_flush: Instant,
 }
 
 impl EgressMeter {
     pub(crate) fn add_received(&mut self, n: usize) {
-        self.bytes_received = self.bytes_received.saturating_add(n as u64);
-    }
-}
-
-impl Drop for EgressMeter {
-    fn drop(&mut self) {
-        if let Some(sink) = self.sink.take() {
-            sink.record(EgressEvent {
-                at: OffsetDateTime::now_utc(),
-                host: std::mem::take(&mut self.host),
-                feature: std::mem::take(&mut self.feature),
-                bytes_sent: self.bytes_sent,
-                bytes_received: self.bytes_received,
-                items: std::mem::take(&mut self.items),
-            });
+        self.exchange.add_received(n as u64);
+        self.unflushed = self.unflushed.saturating_add(n as u64);
+        if self.unflushed >= METER_FLUSH_BYTES || self.last_flush.elapsed() >= METER_FLUSH_INTERVAL
+        {
+            self.exchange.flush();
+            self.unflushed = 0;
+            self.last_flush = Instant::now();
         }
+    }
+
+    /// Nothing went out (the connection failed).
+    fn nothing_sent(&mut self) {
+        self.exchange.set_sent(0);
     }
 }
 
@@ -163,6 +162,8 @@ pub(crate) struct HttpSettings {
     pub pin: Option<(String, Vec<std::net::SocketAddr>)>,
     /// Bypass any proxy: the endpoint is on this machine or the LAN.
     pub direct: bool,
+    /// Connect to this Unix-domain socket instead of the URL's host (Unix only).
+    pub unix_socket: Option<std::path::PathBuf>,
 }
 
 /// One provider's HTTP endpoint.
@@ -219,6 +220,18 @@ impl Http {
             // Connect only to the addresses classified at build time (DNS-rebinding guard).
             builder = builder.resolve_to_addrs(host, addrs);
         }
+        if let Some(path) = &settings.unix_socket {
+            // Every connection goes to the socket: no DNS, no proxy, no TCP.
+            #[cfg(unix)]
+            {
+                builder = builder.no_proxy().unix_socket(path.clone());
+            }
+            #[cfg(not(unix))]
+            return Err(Error::Unsupported(format!(
+                "{provider}: Unix socket {} is not supported on this platform",
+                path.display()
+            )));
+        }
         let client = builder
             .build()
             .map_err(|e| Error::Provider(format!("{provider}: building HTTP client: {e}")))?;
@@ -250,14 +263,24 @@ impl Http {
         url
     }
 
+    /// Opens the ledger row (waiting briefly for it to be written), so call it right before
+    /// the request is sent.
     fn meter(&self, feature: &str, items: &[ItemRef], bytes_sent: u64) -> EgressMeter {
+        let exchange = if self.locality == Locality::OnDevice {
+            EgressExchange::disabled()
+        } else {
+            EgressExchange::begin(
+                self.egress.clone(),
+                self.host.clone(),
+                feature,
+                items.to_vec(),
+                bytes_sent,
+            )
+        };
         EgressMeter {
-            sink: (self.locality != Locality::OnDevice).then(|| self.egress.clone()),
-            host: self.host.clone(),
-            feature: feature.to_string(),
-            items: items.to_vec(),
-            bytes_sent,
-            bytes_received: 0,
+            exchange,
+            unflushed: 0,
+            last_flush: Instant::now(),
         }
     }
 
@@ -363,7 +386,7 @@ impl Http {
                 }
                 Err(e) => {
                     if e.is_connect() {
-                        meter.bytes_sent = 0;
+                        meter.nothing_sent();
                     }
                     drop(meter);
                     let transient = e.is_connect() || e.is_timeout();

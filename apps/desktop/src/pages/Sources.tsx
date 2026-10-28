@@ -14,11 +14,11 @@ import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_S
 import { useT, type TFunction } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Dialog } from "../components/Dialog";
-import { SourceIcon } from "../components/SourceIcon";
 import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
-
-const OAUTH_KINDS = new Set(["gmail", "gcal"]);
-const PASSWORD_KINDS = new Set(["imap", "caldav"]);
+import { DeviceSignInDialog } from "../sources/auth";
+import { connectMode, isSaasKind } from "../sources/kinds";
+import { KindIcon } from "../sources/KindIcon";
+import { TOKEN_LABEL } from "../sources/SaasForm";
 
 export function SourcesPage() {
   const t = useT();
@@ -28,6 +28,7 @@ export function SourcesPage() {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<SourceInfo | null>(null);
   const [passwordFor, setPasswordFor] = useState<SourceInfo | null>(null);
+  const [deviceFor, setDeviceFor] = useState<SourceInfo | null>(null);
   const [announce, setAnnounce] = useState("");
   const [syncAllError, setSyncAllError] = useState<string | null>(null);
   const now = useNow();
@@ -122,6 +123,7 @@ export function SourcesPage() {
                   onChanged={replace}
                   onRemove={() => setRemoving(s)}
                   onSetPassword={() => setPasswordFor(s)}
+                  onDeviceSignIn={() => setDeviceFor(s)}
                   onAnnounce={setAnnounce}
                 />
               ))}
@@ -166,6 +168,19 @@ export function SourcesPage() {
           }}
         />
       )}
+      {deviceFor && (
+        <DeviceSignInDialog
+          source={deviceFor}
+          onClose={() => {
+            setDeviceFor(null);
+            reloadSoon();
+          }}
+          onConnected={(s) => {
+            replace(s);
+            setAnnounce(t("sources.announce.connected", { name: s.name }));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -183,6 +198,7 @@ function SourceRow({
   onChanged,
   onRemove,
   onSetPassword,
+  onDeviceSignIn,
   onAnnounce,
 }: {
   source: SourceInfo;
@@ -191,6 +207,7 @@ function SourceRow({
   onChanged: (s: SourceInfo) => void;
   onRemove: () => void;
   onSetPassword: () => void;
+  onDeviceSignIn: () => void;
   onAnnounce: (text: string) => void;
 }) {
   const t = useT();
@@ -200,6 +217,8 @@ function SourceRow({
   const kindLabel = sourceKindLabel(s.kind);
   const tone = SOURCE_STATE_TONE[s.state] ?? "neutral";
   const headingId = `source-${s.id}`;
+  const mode = connectMode(s.kind, s.settings);
+  const signIn = mode === "browser" || mode === "device";
 
   const run = async (what: "toggle" | "sync" | "auth", f: () => Promise<void>) => {
     setBusy(what);
@@ -227,17 +246,20 @@ function SourceRow({
       onAnnounce(t("sources.announce.syncing", { name: s.name }));
     });
 
-  const reauth = () =>
-    run("auth", async () => {
+  const reauth = () => {
+    // A device code has to stay on screen until it is entered: that flow runs in a dialog.
+    if (mode === "device") return onDeviceSignIn();
+    return run("auth", async () => {
       const { url } = await api.sourcesAuthBegin({ id: s.id });
       await api.openUrl(url);
       setNote(t("sources.finishSignIn"));
     });
+  };
 
   return (
     <li className="source">
       <div className="source-icon-wrap">
-        <SourceIcon kind={s.kind} />
+        <KindIcon kind={s.kind} />
       </div>
       <div className="source-body">
         <div className="source-head">
@@ -267,11 +289,9 @@ function SourceRow({
             {s.last_error}
           </p>
         )}
-        {s.state === "needs_auth" && !s.last_error && (
+        {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
           <p className="note small">
-            {OAUTH_KINDS.has(s.kind)
-              ? t("sources.needsSignIn")
-              : t("sources.needsPassword")}
+            {signIn ? t("sources.needsSignIn") : mode === "token" ? t("sources.needsToken") : t("sources.needsPassword")}
           </p>
         )}
         {note && (
@@ -296,7 +316,7 @@ function SourceRow({
           <button type="button" className="btn btn-small" onClick={() => void sync()} disabled={!s.enabled || busy !== null}>
             {busy === "sync" ? <Spinner label={t("sources.startingSync")} /> : t("sources.syncNow")}
           </button>
-          {OAUTH_KINDS.has(s.kind) && (
+          {signIn && (
             <button type="button" className="btn btn-small" onClick={() => void reauth()} disabled={busy !== null}>
               {busy === "auth" ? (
                 <Spinner label={t("sources.openingSignIn")} />
@@ -307,9 +327,14 @@ function SourceRow({
               )}
             </button>
           )}
-          {PASSWORD_KINDS.has(s.kind) && (
+          {mode === "password" && (
             <button type="button" className="btn btn-small" onClick={onSetPassword} disabled={busy !== null}>
               {s.state === "needs_auth" ? t("sources.setPassword") : t("sources.changePassword")}
+            </button>
+          )}
+          {mode === "token" && (
+            <button type="button" className="btn btn-small" onClick={onSetPassword} disabled={busy !== null}>
+              {s.state === "needs_auth" ? t("sources.setToken") : t("sources.changeToken")}
             </button>
           )}
           <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
@@ -368,7 +393,10 @@ function RemoveDialog({ source, onClose, onRemoved }: { source: SourceInfo; onCl
   );
 }
 
-/** Set or replace an IMAP/CalDAV password. The value lives only in the input until sent. */
+/**
+ * Set or replace an IMAP/CalDAV password, or a pasted API token (Slack, Notion, GitHub, Linear).
+ * The value lives only in the input until sent.
+ */
 function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onClose: () => void; onSaved: () => void }) {
   const t = useT();
   const ref = useRef<HTMLInputElement>(null);
@@ -397,10 +425,11 @@ function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onCl
   };
 
   const username = typeof source.settings?.username === "string" ? source.settings.username : "";
+  const token = isSaasKind(source.kind);
 
   return (
     <Dialog
-      title={t("sources.passwordDialog.title", { name: source.name })}
+      title={token ? t("sources.tokenDialog.title", { name: source.name }) : t("sources.passwordDialog.title", { name: source.name })}
       description={t("sources.passwordDialog.description")}
       onClose={onClose}
     >
@@ -408,12 +437,13 @@ function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onCl
         {/* Lets password managers match the account. */}
         {username && <input type="text" name="username" autoComplete="username" value={username} readOnly hidden />}
         <div className="field">
-          <label htmlFor="source-password">{t("sources.passwordDialog.label")}</label>
+          <label htmlFor="source-password">{token ? t(TOKEN_LABEL[source.kind as keyof typeof TOKEN_LABEL]) : t("sources.passwordDialog.label")}</label>
           <input
             id="source-password"
             ref={ref}
             type="password"
-            autoComplete="current-password"
+            autoComplete={token ? "off" : "current-password"}
+            spellCheck={false}
             data-autofocus=""
             aria-invalid={empty || undefined}
             aria-describedby={empty ? "source-password-err" : undefined}
@@ -421,7 +451,7 @@ function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onCl
           />
           {empty && (
             <p id="source-password-err" className="field-error small">
-              {t("sources.passwordDialog.empty")}
+              {token ? t("addSource.saas.tokenMissing") : t("sources.passwordDialog.empty")}
             </p>
           )}
         </div>

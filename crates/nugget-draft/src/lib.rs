@@ -22,19 +22,27 @@
 //!   trigger; [`DraftTimings`] records retrieval, provider open, first token and total.
 //! - **Cancellation** ([`Drafter::cancel`], [`DraftStream::cancel`]) and **feedback**
 //!   ([`Drafter::feedback`]: an audit event plus the texts to a [`FeedbackSink`]).
+//! - **Adapters** to `nugget-voice`: [`ProfileVoice`] (a profile as the engine's
+//!   [`VoiceSource`]) and [`VoiceFeedback`] (the engine's [`FeedbackSink`] over the voice store
+//!   sink), each running the synchronous call on a blocking thread.
 
 pub mod classify;
 mod engine;
 pub mod post;
 pub mod prompt;
+mod voice;
 
-pub use classify::{DEFAULT_EXCLUDED_APPS, Refusal, classify, gate, is_secure};
+pub use classify::{
+    DEFAULT_EXCLUDED_APPS, DEFAULT_TERMINAL_APPS, Refusal, classify, gate, gate_with, is_secure,
+    is_terminal,
+};
 pub use engine::{
     DraftConfig, DraftStream, DraftTimings, Drafter, FeedbackOutcome, FeedbackRecord, FeedbackSink,
     MAX_BUDGET_TOKENS, NoVoice, Prewarm, VoiceQuery, VoiceSource, Warmer, post_options,
     retrieval_query,
 };
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
+pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldKind {

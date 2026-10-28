@@ -2,7 +2,7 @@
 # workspace (not a member of the root one): everything here builds for `wasm32-wasip2`
 # (see `.cargo/config.toml`), with its own lockfile.
 [workspace]
-members = [".", "examples/feed-reader", "test-guests/hostile"]
+members = [".", "examples/feed-reader", "examples/text-tools", "test-guests/hostile"]
 resolver = "3"
 
 [workspace.package]

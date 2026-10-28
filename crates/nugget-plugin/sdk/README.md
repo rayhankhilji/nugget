@@ -16,15 +16,21 @@ cargo build --release            # target comes from .cargo/config.toml
   its random seed needs WASI.
 - `examples/feed-reader/`: an RSS/Atom connector plus a `feed_headlines` tool, with its
   `nugget-plugin.toml`.
+- `examples/text-tools/`: two read-only tools (`text_stats`, `top_words`) that compute everything
+  locally and declare no capabilities at all.
 - `test-guests/hostile/`: a misbehaving plugin used by the host's security tests.
 
 ## Packaging
 
 1. Put `nugget-plugin.toml` and the built `.wasm` (renamed to `plugin.wasm`) in one directory.
-2. Sign the directory:
-   `NUGGET_PLUGIN_SIGNING_KEY=<hex seed> cargo run -p nugget-plugin --example sign-plugin -- <dir>`.
-   This writes `plugin.sig`, an ed25519 signature over the SHA-256 hashes of both files.
-3. The host's `PluginStore::install` verifies the signature against trusted keys. It then asks the
-   user to approve the declared capabilities.
+2. Sign the directory and bundle it into one file:
+   `NUGGET_PLUGIN_SIGNING_KEY=<hex seed> cargo run -p nugget-plugin --example sign-plugin -- <dir> --out <name>.nuggetplugin`.
+   This writes `plugin.sig` (an ed25519 signature over the SHA-256 hashes of both files) and, with
+   `--out`, the single-file `.nuggetplugin` package, and prints the public key for `trusted_keys`.
+3. Install the `.nuggetplugin` file from the app's Plugins page (or the `plugins.install` IPC
+   method). The daemon verifies the signature against `[plugins] trusted_keys`, then asks the user to
+   approve the declared capabilities.
 
-The interface is `../wit/plugin.wit` (`nugget:plugin@0.1.0`, world `plugin`).
+The interface is `../wit/plugin.wit` (`nugget:plugin@0.1.0`, world `plugin`). The author guide,
+covering the manifest, limits, signing and the trust model, is `docs/plugins.md` at the repository
+root.

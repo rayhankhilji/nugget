@@ -16,6 +16,10 @@ import {
   isIngestProgress,
   isMethodNotFound,
   isOpenableUrl,
+  isPluginInfo,
+  newPluginCapabilities,
+  parsePluginHost,
+  pluginCapabilitiesEmpty,
   isSourceInfo,
   isSourceKind,
   isSourceState,
@@ -282,5 +286,36 @@ describe("MCP guards", () => {
     expect(isMcpClientCreated({ ...created, token: "" })).toBe(false);
     expect(isMcpClientCreated({ ...created, setup: [{ app: "cursor" }] })).toBe(false);
     expect(isMcpClientCreated({ ...created, client: {} })).toBe(false);
+  });
+});
+
+describe("plugin capabilities", () => {
+  it("splits host entries for display", () => {
+    expect(parsePluginHost("feeds.example.com")).toEqual({ host: "feeds.example.com", wildcard: false, insecure: false });
+    expect(parsePluginHost("*.Example.org")).toEqual({ host: "example.org", wildcard: true, insecure: false });
+    expect(parsePluginHost("http://127.0.0.1:8080")).toEqual({ host: "127.0.0.1:8080", wildcard: false, insecure: true });
+    expect(parsePluginHost("https://api.example.com:8443")).toEqual({ host: "api.example.com:8443", wildcard: false, insecure: false });
+  });
+
+  it("reports only what an update adds", () => {
+    const prev = { hosts: ["feeds.example.com", "*.cdn.example"], secrets: ["token"], kv_max_bytes: 1000 };
+    expect(newPluginCapabilities(prev, null)).toEqual(prev);
+    expect(
+      newPluginCapabilities({ hosts: ["https://feeds.example.com", "*.cdn.example", "new.example"], secrets: ["token", "pw"], kv_max_bytes: 500 }, prev),
+    ).toEqual({ hosts: ["new.example"], secrets: ["pw"], kv_max_bytes: 0 });
+    expect(newPluginCapabilities({ hosts: ["http://feeds.example.com"], secrets: [], kv_max_bytes: 2000 }, prev)).toEqual({
+      hosts: ["http://feeds.example.com"],
+      secrets: [],
+      kv_max_bytes: 2000,
+    });
+    expect(pluginCapabilitiesEmpty({ hosts: [], secrets: [], kv_max_bytes: 0 })).toBe(true);
+  });
+
+  it("validates PluginInfo", () => {
+    const p = { id: "rss", name: "RSS", version: "1.0.0", kinds: ["connector"], enabled: true, loaded: false, signature: "dev" };
+    expect(isPluginInfo(p)).toBe(true);
+    expect(isPluginInfo({ ...p, signature: "Trusted" })).toBe(false);
+    expect(isPluginInfo({ ...p, enabled: "yes" })).toBe(false);
+    expect(isPluginInfo(null)).toBe(false);
   });
 });

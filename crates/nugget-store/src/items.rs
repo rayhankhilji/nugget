@@ -302,7 +302,7 @@ impl Store {
 
     /// Fetch an item by reference.
     pub fn get_item(&self, item: &ItemRef) -> Result<Option<Item>> {
-        let Some(row) = self.with_conn(|c| find_item(c, item))? else {
+        let Some(row) = self.with_read_conn(|c| find_item(c, item))? else {
             return Ok(None);
         };
         Ok(Some(Item {

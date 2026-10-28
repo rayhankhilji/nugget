@@ -615,7 +615,10 @@ impl RpcHandler {
             tracing::info!(source = %id, result = %detail["result"], "authorization finished");
             append_audit(&state, "source.auth.result", id.as_str(), detail).await;
         });
-        to_result(AuthBegin { url: flow.url })
+        to_result(AuthBegin {
+            url: flow.url,
+            user_code: flow.user_code,
+        })
     }
 
     /// Store a source credential (see `crate::sources` for where each kind's goes). The value

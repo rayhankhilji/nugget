@@ -264,6 +264,7 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `embed_batch_size` | integer | `64` | OpenAI-compatible only: texts per embeddings request |
 | `llama_cpp` | bool | `true` for on-device endpoints, else `false` | OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then ask it to reuse the cached prompt prefix, and the stable prefix can be evaluated ahead of a request. Ollama, LM Studio and vLLM ignore the extra fields |
 | `slot_affinity` | bool | `false` | OpenAI-compatible `llama-server` only: send requests that share a cache key to a fixed server slot. Off by default, because `llama-server` already picks the idle slot with the longest cached prefix, and a pinned request waits when its slot is busy |
+| `socket_path` | string | unset | Unix only, OpenAI-compatible on-device servers: send every request to this Unix socket. `base_url` then supplies only the scheme, `Host` header and path prefix (for example `http://localhost/v1`). The on-device runtime uses this for `llama-server` by default |
 
 ### Locality
 

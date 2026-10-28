@@ -504,3 +504,94 @@ async fn stale_socket_file_is_replaced() {
         .unwrap();
     assert_eq!(v["ok"], 1);
 }
+
+/// Counts concurrent `block` calls and holds each until the test releases a permit.
+struct GateHandler {
+    active: std::sync::atomic::AtomicUsize,
+    peak: std::sync::atomic::AtomicUsize,
+    gate: tokio::sync::Semaphore,
+}
+
+#[async_trait]
+impl Handler for GateHandler {
+    async fn call(&self, method: &str, _: Value, _: Notifier) -> Result<Value, RpcError> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if method != "block" {
+            return Err(RpcError::method_not_found(method));
+        }
+        let now = self.active.fetch_add(1, SeqCst) + 1;
+        self.peak.fetch_max(now, SeqCst);
+        self.gate.acquire().await.unwrap().forget();
+        self.active.fetch_sub(1, SeqCst);
+        Ok(Value::Null)
+    }
+}
+
+#[tokio::test]
+async fn in_flight_calls_per_connection_are_capped() {
+    use std::sync::atomic::Ordering::SeqCst;
+    const MAX: usize = 4;
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::rooted(dir.path().to_path_buf());
+    let listener = nugget_ipc::bind(&paths).await.unwrap();
+    let handler = Arc::new(GateHandler {
+        active: 0.into(),
+        peak: 0.into(),
+        gate: tokio::sync::Semaphore::new(0),
+    });
+    let options = nugget_ipc::ServerOptions::default().max_in_flight(MAX);
+    tokio::spawn(nugget_ipc::serve_with(
+        listener,
+        handler.clone(),
+        options,
+        std::future::pending(),
+    ));
+    let client = Client::connect(&paths).await.unwrap();
+
+    let calls: Vec<_> = (0..=MAX)
+        .map(|_| {
+            let c = client.clone();
+            tokio::spawn(async move { c.call_value("block", Value::Null).await })
+        })
+        .collect();
+    within(async {
+        while handler.active.load(SeqCst) < MAX {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    // The extra call stays unread while the connection is at the cap.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(handler.active.load(SeqCst), MAX);
+    assert_eq!(handler.peak.load(SeqCst), MAX);
+
+    // Another connection has its own budget.
+    let other = Client::connect(&paths).await.unwrap();
+    let extra = tokio::spawn(async move { other.call_value("block", Value::Null).await });
+    within(async {
+        while handler.active.load(SeqCst) < MAX + 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+
+    // Freeing slots lets the queued call run; every call completes.
+    handler.gate.add_permits(MAX + 2);
+    for call in calls {
+        within(call).await.unwrap().unwrap();
+    }
+    within(extra).await.unwrap().unwrap();
+    assert_eq!(handler.active.load(SeqCst), 0);
+}
+
+/// The server's peer-credential check admits a client running as the same user.
+#[tokio::test]
+async fn same_user_peer_passes_the_credential_check() {
+    let fx = Fixture::start().await;
+    let (mut r, mut w) = raw_connect(&fx.paths).await;
+    w.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"echo\",\"params\":[7]}\n")
+        .await
+        .unwrap();
+    let resp = read_json(&mut r).await.expect("connection was dropped");
+    assert_eq!(resp["result"], json!([7]));
+}

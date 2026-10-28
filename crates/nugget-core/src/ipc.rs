@@ -85,6 +85,8 @@ pub mod method {
     pub const DRAFT_BEGIN: &str = "draft.begin";
     pub const DRAFT_CANCEL: &str = "draft.cancel";
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
+    /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
+    pub const DRAFT_PREWARM: &str = "draft.prewarm";
     pub const VOICE_STATUS: &str = "voice.status";
 }
 
@@ -352,11 +354,17 @@ pub struct SourceSync {
     pub id: Option<SourceId>,
 }
 
-/// Start of an OAuth authorization: the client opens `url` in the user's browser; the daemon
-/// listens on a loopback redirect and emits `sources.changed` when done.
+/// Start of an interactive authorization: the client opens `url` in the user's browser; the
+/// daemon listens on a loopback redirect (or polls, for a device flow) and emits
+/// `sources.changed` when done. For an RFC 8628 device flow `user_code` is set and the client
+/// shows it so the user can type it on the verification page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthBegin {
     pub url: String,
+    /// The code the user enters on the verification page (device flows only); absent for
+    /// redirect flows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
 }
 
 /// Store a password or app password for a source in the OS keychain. Write-only.
@@ -497,6 +505,9 @@ pub enum RuntimeState {
     Stopped,
     Starting,
     Ready,
+    /// Asked to stop: no longer accepting requests, the server process is shutting down.
+    /// Becomes `Stopped` once it exited.
+    Stopping,
     /// Crashed or failed health checks; restarting with backoff.
     Failed,
 }
@@ -911,4 +922,441 @@ pub struct VoiceStatus {
     pub channels: Vec<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
+}
+
+// ---- Plugins (M6) ----
+
+/// IPC method names of the plugins feature.
+pub mod plugin_method {
+    pub const LIST: &str = "plugins.list";
+    pub const INSPECT: &str = "plugins.inspect";
+    pub const INSTALL: &str = "plugins.install";
+    pub const APPROVE: &str = "plugins.approve";
+    pub const REMOVE: &str = "plugins.remove";
+    pub const ENABLE: &str = "plugins.enable";
+}
+
+/// Capabilities a plugin requests or the user approved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginCapabilities {
+    /// Hosts reachable over HTTP (`example.com`, `*.example.com`, `http://host:port`, ...).
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    /// Names of the plugin's own keychain secrets.
+    #[serde(default)]
+    pub secrets: Vec<String>,
+    /// Size of the plugin's key-value store in bytes (`0` = none).
+    #[serde(default)]
+    pub kv_max_bytes: u64,
+}
+
+/// Who signed a plugin, as far as this daemon trusts it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSignature {
+    /// A key in `[plugins] trusted_keys`.
+    Trusted,
+    /// The daemon's local dev key (`[plugins] dev_mode = true`).
+    Dev,
+    /// Neither: the plugin is listed but not loaded.
+    #[default]
+    Untrusted,
+}
+
+/// One installed plugin.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// `connector` and/or `tool`.
+    pub kinds: Vec<String>,
+    pub enabled: bool,
+    /// Running in the plugin host right now.
+    pub loaded: bool,
+    /// Why it is not loaded (untrusted signer, load failure, ...).
+    #[serde(default)]
+    pub error: Option<String>,
+    pub signature: PluginSignature,
+    /// Hex ed25519 public key that signed the package.
+    pub signer: String,
+    pub approved: PluginCapabilities,
+    /// RFC 3339.
+    pub installed_at: String,
+    /// `plugin:<id>` for connector plugins.
+    #[serde(default)]
+    pub connector_kind: Option<String>,
+    /// Agent tool names.
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginListResult {
+    pub plugins: Vec<PluginInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginIdParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInspectResult {
+    pub plugin: PluginInfo,
+    /// What the installed version's manifest requests.
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub connector_display_name: Option<String>,
+}
+
+/// `plugins.install`: an absolute path to a `.nuggetplugin` file or a package directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginInstallParams {
+    pub path: String,
+}
+
+/// The verified package, staged under `token` (10 minutes) until `plugins.approve`. When
+/// `needs_approval` is false (an update within the approved capabilities) it was committed at
+/// once and `installed` is true.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInstallResult {
+    pub token: String,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub kinds: Vec<String>,
+    pub signature: PluginSignature,
+    pub signer: String,
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub previously_approved: Option<PluginCapabilities>,
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    pub needs_approval: bool,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginApproveParams {
+    pub token: String,
+    pub approve: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginApproveResult {
+    /// The installed plugin, or `None` when the install was rejected.
+    #[serde(default)]
+    pub plugin: Option<PluginInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginRemoveResult {
+    pub removed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginEnableParams {
+    pub id: String,
+    pub enabled: bool,
+}
+
+// ---- Agent (M4) ----
+//
+// The agent runtime (`nugget-agent`), the safety policy (`nugget-policy`) and the browser bridge
+// (`nugget-browser`), served by the daemon's `agent`, `policy` and `browser` features. Types
+// owned by those crates travel as JSON values (`serde_json::Value`); each field names the type
+// whose serialized form it carries.
+//
+// | Method | Params | Result |
+// |---|---|---|
+// | `agent.run` | [`AgentRunRequest`] | [`AgentStarted`], then `agent.event` notifications |
+// | `agent.cancel` | [`AgentTaskRef`] | `null` |
+// | `agent.confirm` | [`AgentConfirm`] | `null` |
+// | `agent.answer` | [`AgentAnswer`] | `null` (resumes a run waiting on `ask_user`) |
+// | `agent.list` | [`AgentListRequest`] | `Vec<`[`AgentTaskSummary`]`>`, newest first |
+// | `agent.get` | [`AgentTaskRef`] | [`AgentTaskDetail`] (with `explain`) |
+// | `policy.get` | `{}` | [`PolicyState`] |
+// | `policy.set` | [`PolicySet`] | [`PolicyState`] |
+// | `policy.approvals` | `{}` | [`PolicyApprovals`] |
+// | `policy.kill` | `{}` | [`KillState`] |
+// | `policy.resume` | `{}` | [`KillState`] |
+// | `policy.log.export` | `{}` | [`PolicyLogExport`] |
+// | `browser.status` | `{}` | [`BrowserStatus`] |
+// | `browser.host.attach` | `nugget_browser::bridge::AttachInfo` | `null` when detached; `browser.host.request` notifications meanwhile |
+// | `browser.host.deliver` | `nugget_browser::ExtensionMessage` | `null` |
+
+pub mod agent_method {
+    pub const AGENT_RUN: &str = "agent.run";
+    pub const AGENT_CANCEL: &str = "agent.cancel";
+    pub const AGENT_CONFIRM: &str = "agent.confirm";
+    pub const AGENT_ANSWER: &str = "agent.answer";
+    pub const AGENT_LIST: &str = "agent.list";
+    pub const AGENT_GET: &str = "agent.get";
+    pub const POLICY_GET: &str = "policy.get";
+    pub const POLICY_SET: &str = "policy.set";
+    pub const POLICY_APPROVALS: &str = "policy.approvals";
+    pub const POLICY_KILL: &str = "policy.kill";
+    pub const POLICY_RESUME: &str = "policy.resume";
+    pub const POLICY_LOG_EXPORT: &str = "policy.log.export";
+    pub const BROWSER_STATUS: &str = "browser.status";
+    /// Native host → daemon, long-lived: registers the host; returns when it is detached.
+    pub const BROWSER_HOST_ATTACH: &str = "browser.host.attach";
+    /// Native host → daemon: a reply or event from the extension.
+    pub const BROWSER_HOST_DELIVER: &str = "browser.host.deliver";
+}
+
+pub mod agent_notification {
+    /// [`AgentEventNotice`], broadcast to every connection.
+    pub const AGENT_EVENT: &str = "agent.event";
+    /// [`KillState`], broadcast when the kill switch is engaged or released.
+    pub const POLICY_KILL_CHANGED: &str = "policy.kill.changed";
+    /// Daemon → native host: a `nugget_browser::HostMessage` to forward to the extension.
+    pub const BROWSER_HOST_REQUEST: &str = "browser.host.request";
+}
+
+/// Optional limits for one run; unset fields use the `[agent]` config (or the crate defaults).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentBudgets {
+    #[serde(default)]
+    pub max_steps: Option<u32>,
+    #[serde(default)]
+    pub deadline_secs: Option<u64>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRunRequest {
+    pub goal: String,
+    /// Extra trusted context from the user.
+    #[serde(default)]
+    pub context: Option<String>,
+    /// Tool names the run may use (the built-ins `finish`, `ask_user`, `note` are always
+    /// available). `None` means every registered tool.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub budgets: AgentBudgets,
+    /// Use this provider instead of the router's agentic tier.
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentStarted {
+    pub task_id: String,
+    /// Tools the run can call.
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTaskRef {
+    pub task_id: String,
+}
+
+/// The user's answer to a confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmChoice {
+    /// Approve this action only.
+    Once,
+    /// Approve this action and the same risk class on the same target for the rest of the task
+    /// (only Send and Destroy can be approved for a task; others behave like `once`).
+    Task,
+    Deny,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfirm {
+    pub task_id: String,
+    /// `ConfirmationRequest::request_id` from the `confirmation_needed` event.
+    pub request_id: String,
+    pub choice: ConfirmChoice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentAnswer {
+    pub task_id: String,
+    pub answer: String,
+}
+
+/// One `agent.event` notification.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentEventNotice {
+    pub task_id: String,
+    /// A `nugget_agent::AgentEvent` (tagged by its `event` field).
+    pub event: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentListRequest {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Lifecycle of a task as the daemon tracks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTaskState {
+    Running,
+    /// Waiting for the user to answer a confirmation.
+    Confirming,
+    /// Suspended on `ask_user`; answer with `agent.answer`.
+    NeedsInput,
+    Finished,
+    /// Started before the daemon last restarted and never finished.
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentVerificationCounts {
+    pub passed: u32,
+    pub failed: u32,
+    pub unverifiable: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTaskSummary {
+    pub task_id: String,
+    pub goal: String,
+    pub state: AgentTaskState,
+    /// `nugget_agent::Outcome::label()` once finished (`succeeded`, `unverified`, `failed`, ...).
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// The outcome's detail or the model's summary.
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Unix milliseconds.
+    pub started_ms: u64,
+    #[serde(default)]
+    pub finished_ms: Option<u64>,
+    pub steps: u32,
+    #[serde(default)]
+    pub verification: AgentVerificationCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTaskDetail {
+    pub summary: AgentTaskSummary,
+    /// The task's `nugget_agent::LogEntry`s, in order.
+    pub entries: Vec<serde_json::Value>,
+    /// `nugget_agent::explain` over `entries`: a readable report.
+    pub explain: String,
+    /// Open `nugget_agent::ConfirmationRequest`s.
+    #[serde(default)]
+    pub pending: Vec<serde_json::Value>,
+    /// The `ask_user` question when the state is `needs_input`.
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+/// Status of the tamper-evident action log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionLogStatus {
+    pub entries: u64,
+    /// `(seq, hash)` of the last entry.
+    #[serde(default)]
+    pub head: Option<(u64, String)>,
+    pub chain_ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyState {
+    /// The user's `nugget_policy::PolicyConfig` (rules, disabled defaults, rate limits, timeout).
+    pub config: serde_json::Value,
+    /// Every built-in `nugget_policy::Rule`, with whether the user turned it off.
+    pub defaults: Vec<DefaultRuleView>,
+    pub halted: bool,
+    pub log: ActionLogStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefaultRuleView {
+    /// A `nugget_policy::Rule`.
+    pub rule: serde_json::Value,
+    pub enabled: bool,
+}
+
+/// Replace the user's policy configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicySet {
+    /// A `nugget_policy::PolicyConfig`.
+    pub config: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskApprovalView {
+    pub task_id: String,
+    /// `nugget_policy::RiskClass` as its snake_case name.
+    pub risk: String,
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyApprovals {
+    /// Open `nugget_agent::ConfirmationRequest`s across all tasks.
+    pub pending: Vec<serde_json::Value>,
+    /// Standing per-task approvals.
+    pub task: Vec<TaskApprovalView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KillState {
+    pub halted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyLogExport {
+    /// The whole hash-chained log, one entry per line.
+    pub jsonl: String,
+    pub status: ActionLogStatus,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserStatus {
+    /// A native host (and so the extension) is attached.
+    pub connected: bool,
+    /// The calling extension's origin.
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub host_version: Option<String>,
+    /// Browser tools registered for the agent.
+    pub tools: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_begin_user_code_is_optional_on_the_wire() {
+        let redirect = AuthBegin {
+            url: "https://example.com/authorize".into(),
+            user_code: None,
+        };
+        let v = serde_json::to_value(&redirect).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"url": "https://example.com/authorize"})
+        );
+        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), redirect);
+
+        let device = AuthBegin {
+            url: "https://example.com/device".into(),
+            user_code: Some("WDJB-MJHT".into()),
+        };
+        let v = serde_json::to_value(&device).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({"url": "https://example.com/device", "user_code": "WDJB-MJHT"})
+        );
+        assert_eq!(serde_json::from_value::<AuthBegin>(v).unwrap(), device);
+    }
 }

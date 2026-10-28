@@ -1,11 +1,5 @@
 # Slack, Notion, GitHub and Linear
 
-> **Status: being wired in (wave W).** The `slack`, `notion`, `github` and `linear` connectors are
-> implemented and tested in `nugget-connector-saas`, but this build of `nuggetd` does not register them
-> yet, so `sources.add` refuses these kinds and the **Sources** page does not offer them. The daemon
-> registration and the desktop wizard (including the GitHub device-code screen) are landing in this
-> wave. This page describes how they work once registered.
-
 Each connector reads the service's official API with **your own token**. No Nugget server and no model
 sits between Nugget and the API, so a sync is deterministic, free, and works with any AI setup or none.
 
@@ -107,8 +101,8 @@ read-only repository scope for OAuth Apps; Nugget still only reads. A GitHub App
 permissions avoids that, but its user tokens expire after 8 hours and refreshing them needs the app's
 client secret, which this wave has no way to store yet; prefer an OAuth App or a token for now.
 
-> In this build, `sources.auth.begin` returns only a URL, with the user code appended as `?user_code=`.
-> Wave W adds a separate `user_code` field to the response so the app can display it.
+> `sources.auth.begin` returns the device code in a separate `user_code` field, and the Sources
+> wizard shows it next to the link to GitHub.
 
 **What is indexed.** With `repos` unset: every issue, pull request and discussion that involves you
 (author, assignee, commenter or mentioned), updated in the last 365 days (`window_days`). With `repos`

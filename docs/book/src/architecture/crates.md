@@ -52,22 +52,20 @@ place; no feature is registered in it yet.
 | `nugget-knowledge` | M2 | in use | Extraction (deterministic and LLM), entity resolution, claim lifecycle, run by the daemon after ingest |
 | `nugget-vault` | M2 | in use | Markdown vault rendering, three-way merge, edits to graph changes, validators, watcher |
 | `nugget-mcp` | M2 | in use | The local MCP server: read-only tools, resources, per-client tokens and scopes, rate limits, audit, stdio and loopback HTTP |
-| `nugget-a11y` | M3 | being wired | Read the focused field and its thread; insert with read-back verification (macOS AX, Windows UI Automation, Linux AT-SPI); actions for computer use |
-| `nugget-hotkey` | M3 | being wired | Global trigger: a double tap of a modifier, or a chord, on macOS, Windows and Linux; observes only the configured trigger |
-| `nugget-draft` | M3 | being wired | Rule-based field classification, the secure-field and excluded-app gate, the drafting engine with budgeted, cited context |
-| `nugget-voice` | M3 | being wired | The user's writing-style profile and exemplars per channel and recipient |
-| `nugget-policy` | M4 | being wired | Action descriptors, risk classes, the policy engine (rules per app and site, classifier, approvals, rate limits), confirmations, the kill switch, the hash-chained action log |
-| `nugget-agent` | M4 | being wired | The agent loop: tool registry, policy-gated actions, budgets, verify-after-act, idempotent action ids |
-| `nugget-browser` | M4 | being wired | Browser control through the extension in `extensions/browser` and the `nugget-browser-host` native-messaging host; per-site consent |
+| `nugget-a11y` | M3 | in use | Read the focused field and its thread; insert with read-back verification (macOS AX, Windows UI Automation, Linux AT-SPI); actions for computer use |
+| `nugget-hotkey` | M3 | in use | Global trigger: a double tap of a modifier, or a chord, on macOS, Windows and Linux; observes only the configured trigger |
+| `nugget-draft` | M3 | in use | Rule-based field classification, the secure-field and excluded-app gate, the drafting engine with budgeted, cited context |
+| `nugget-voice` | M3 | in use | The user's writing-style profile and exemplars per channel and recipient |
+| `nugget-policy` | M4 | in use | Action descriptors, risk classes, the policy engine (rules per app and site, classifier, approvals, rate limits), confirmations, the kill switch, the hash-chained action log |
+| `nugget-agent` | M4 | in use | The agent loop: tool registry, policy-gated actions, budgets, verify-after-act, idempotent action ids |
+| `nugget-computer` | M4 | in use | Computer-use agent tools over `nugget-a11y`: observe a window as a bounded element tree, act by stable element id, verify every action by reading back, risk per target |
+| `nugget-browser` | M4 | in use | Browser control through the extension in `extensions/browser` and the `nugget-browser-host` native-messaging host; per-site consent |
 | `nugget-proactive` | M5 | being wired | Proactive cards: deterministic generators, a feedback-learned score, an optional judge, typed actions with dry-run diffs, the morning brief |
-| `nugget-plugin` | M6 | being wired | WASM component plugins: declared, user-approved capabilities enforced by the host, resource limits, signed packages, a guest SDK |
-| `nugget-connector-microsoft` | M6 | being wired | `outlook`, `outlook-calendar` and `onedrive` through Microsoft Graph delta queries |
-| `nugget-connector-saas` | M6 | being wired | `slack`, `notion`, `github` and `linear` through their official APIs |
+| `nugget-plugin` | M6 | in use | WASM component plugins: declared, user-approved capabilities enforced by the host, resource limits, signed packages, a guest SDK |
+| `nugget-connector-microsoft` | M6 | in use | `outlook`, `outlook-calendar` and `onedrive` through Microsoft Graph delta queries |
+| `nugget-connector-saas` | M6 | in use | `slack`, `notion`, `github` and `linear` through their official APIs |
 | `nugget-desktop` | M0 | in use | The Tauri shell (`apps/desktop`): typed commands proxying IPC, the React pages, the in-app updater |
 | `nugget-bench` | M0 | in use | The benchmark harness, suites and report schema (`bench/`); see [Benchmarks](benchmarks.md) |
-
-Wave W also adds a crate for computer-use tools over `nugget-a11y` (work package W2). It will get a
-row here when it joins the workspace.
 
 ## Rules that hold across crates
 
