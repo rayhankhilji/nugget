@@ -1,11 +1,5 @@
 # The knowledge graph and vault
 
-> **Status: built, not yet running in the daemon.** The extraction pipeline (`nugget-knowledge`), the
-> graph store and the vault renderer (`nugget-vault`) are implemented and tested as libraries, and the
-> desktop's **Knowledge** page and graph view are built. `nuggetd` does not run extraction or render
-> the vault yet, so the Knowledge page currently shows "not available". This page describes how they
-> behave once wired in.
-
 Search finds passages. The knowledge graph remembers **who and what** those passages are about: people,
 organisations, projects, commitments, preferences, events, places and topics, and the facts that link
 them. Every fact points back to the passages it came from.
@@ -24,7 +18,14 @@ The user is an entity too (marked `is_me`), recognised by the addresses in your 
 
 ## How facts are extracted
 
-Extraction runs on items after they are indexed:
+Extraction runs in the daemon: at startup, shortly after indexing commits changes (1.5 s after the
+last change), and every 10 minutes (which also retries LLM extraction that failed). A run that
+leaves items unprocessed is followed straight away by another one. While the power policy is
+constrained (on battery below the threshold), runs make no LLM requests, so the deterministic
+extractors still keep the graph fresh, and periodic runs are skipped. Set `enabled = false` under
+`[knowledge]` in [`config.toml`](../reference/config.md) to turn extraction off.
+
+Each run:
 
 1. **Deterministic extractors**, always on: mail headers (people by address, organisations by
    corporate domain, who corresponded with whom), calendar events (attendees, organiser, location),
@@ -35,15 +36,24 @@ Extraction runs on items after they are indexed:
 3. **Entity resolution** merges mentions of the same thing: identifiers first, then names and aliases,
    optionally embeddings; never across conflicting identifiers.
 
-Sending items to a cloud model for extraction is opt-in per source, and never applies to sensitive
-items.
+Sending items to a cloud model for extraction is opt-in per source (list the source ids in
+`cloud_sources` under `[knowledge.llm]`), and never applies to sensitive items or items whose
+sensitivity is unknown. Such requests are recorded in the [egress ledger](privacy.md) with feature
+`knowledge`. Without a usable local or local-network model, only the deterministic extractors run.
+
+Tell Nugget who you are under `[knowledge.me]` (your name and addresses) so mail and calendar facts
+attach to your own entity; otherwise it is inferred from your sent mail.
 
 When a source item is edited, its facts are re-extracted. When it is deleted, facts that relied only
 on it lose their evidence and are retracted.
 
 ## The vault
 
-The graph is rendered as a folder of Markdown pages you can read in any editor, including Obsidian:
+The graph is rendered as a folder of Markdown pages you can read in any editor, including Obsidian.
+By default the folder is `~/Nugget Vault` in your home directory (or `vault` inside the data
+directory when Nugget runs with `--home` or `NUGGET_HOME`); `path` under `[vault]` moves it, and
+moving it re-renders every page. Pages of changed entities are re-rendered after every extraction
+run, merge and fact status change, and the daemon watches the folder for your edits.
 
 ```text
 <vault>/README.md                          index of pages by kind
@@ -91,7 +101,7 @@ back into it with a three-way merge (the last render, your file and the new rend
 |---|---|
 | Write anything outside the generated regions (for example under `## Notes`) | Keeps it, in your order, on every re-render |
 | **Edit** a fact line | The old fact becomes `superseded`; your text becomes a new fact with status `user_asserted`, which is **yours**: it needs no source and shows a `(you)` tag |
-| **Delete** a fact line | The fact becomes `retracted` |
+| **Delete** a fact line | The fact becomes `rejected`: re-extraction never brings it back |
 | **Add** a bullet under a fact heading | A new `user_asserted` fact with that heading's relation (`note` outside any heading) |
 | Add an alias in the frontmatter | The alias is added to the entity |
 | Change a generated region that Nugget also changed | Your version is kept, and Nugget's is written next to it under `.nugget/conflicts/` for you to compare |
@@ -99,18 +109,31 @@ back into it with a three-way merge (the last render, your file and the new rend
 Removing a footnote citation is not treated as an edit. Before writing a page, Nugget re-reads your
 file and retries if it changed, so a render never overwrites an edit you just made.
 
-> **Known gap: deleted facts can come back.** A fact you delete is retracted, but if extraction later
-> finds the same fact in the same or another source, the current graph store treats the new evidence
-> as a reason to reactivate it. A separate "rejected by you" status that re-extraction cannot undo is
-> planned (it is listed as a wave-2 contract gap in the M2 spec) and is not implemented yet. Until
-> then, the dependable way to keep a wrong fact out is to edit it: your edited version is
-> `user_asserted` and outranks extracted facts.
+## Fact statuses
+
+| Status | Meaning |
+|---|---|
+| `active` | A current fact, backed by evidence |
+| `user_asserted` | A fact you wrote or edited in the vault; needs no source |
+| `superseded` | Replaced by a newer fact, for example a changed job title, or by your edit |
+| `retracted` | Lost its evidence: the sources it came from changed or were deleted |
+| `rejected` | Rejected by you. Sticky: re-extracting its sources adds evidence to it but never makes it active again, and losing its evidence does not change it. Only restoring it (or asserting the same fact yourself) revives it |
+
+Deleting a fact line in the vault, or rejecting a fact on the **Knowledge** page, sets `rejected`.
+
+> **Status: being finished in wave W.** The graph and the vault already use the sticky `rejected`
+> status. The IPC contract still reports it as `retracted`; adding `rejected` to
+> `knowledge.claim.status` and showing it on the Knowledge page (with undo of a fact you asserted)
+> is being done in this wave.
 
 ## In the desktop app
 
 The **Knowledge** page lists entities by kind, shows each entity's facts with a **Why?** button that
-opens the evidence, lets you merge duplicates, and opens the entity's vault page. The **graph view**
-draws the neighbourhood of an entity, filtered by kind.
+opens the evidence, lets you merge duplicates and reject wrong facts, and opens the entity's vault
+page. It also shows how many entities and facts there are and how many items are waiting for
+extraction. `knowledge.status` adds the last run, the model used for LLM extraction, and vault pages
+that failed validation or have merge conflicts. The **graph view** draws the neighbourhood of an entity, filtered by kind.
 
-Over IPC: [`knowledge.*`](../reference/ipc.md#knowledge-graph). Over MCP: `find_entities`, `get_entity`
-and `get_neighbourhood` (see [MCP tools](../reference/mcp.md)).
+Over IPC: [`knowledge.*`](../reference/ipc.md#knowledge-graph), with `knowledge.changed`
+notifications after each run. Over [MCP](mcp.md): `find_entities`, `get_entity` and
+`get_neighbourhood` (see [MCP tools](../reference/mcp.md)).

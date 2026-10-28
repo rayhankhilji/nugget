@@ -30,6 +30,46 @@ your own installation and data.
 
 Nugget is pre-1.0. Only the latest release and the `main` branch receive security fixes.
 
+## Scope
+
+In scope is everything in this repository that runs on a user's machine or ships in a release.
+The surfaces we most want reports on:
+
+- **Daemon IPC.** `nuggetd`'s JSON-RPC socket (a Unix socket in a `0700` directory, or a per-user
+  Windows named pipe), its message limits and parameter handling, and anything that lets another
+  local user reach it.
+- **MCP server.** The `nuggetd mcp --client <id>` stdio bridge and the optional HTTP listener on
+  `127.0.0.1`: per-client scoped tokens (sources, tools, sensitive items), revocation, Host and
+  Origin checks, rate limits, and leaks of out-of-scope or sensitive content through results.
+- **Connectors and OAuth.** Files and Obsidian, Gmail and Google Calendar, IMAP, CalDAV, Microsoft
+  365, Slack, Notion, GitHub and Linear; the OAuth flows (PKCE, loopback redirect, `state`), token
+  storage and refresh, and hostile content from any source reaching extraction.
+- **Encrypted store and secrets.** The SQLCipher store and its key, keychain handling and the
+  key-file fallback, the hash-chained audit log, and secrets leaking into config files, logs, IPC
+  responses or the audit log.
+- **Egress.** Requests that leave the device without an egress-ledger entry, locality
+  misclassification, redirects followed across hosts, and sensitive items reaching a cloud model.
+- **Models and runtime.** The signed model and runtime manifest, verified downloads and archive
+  unpacking, and the local `llama-server` processes on loopback.
+- **Agent and computer use** (being wired in now, wave W). The agent loop, the policy engine
+  (risk classes, allow and deny rules, confirmations, rate limits), the kill switch and the
+  hash-chained action log. Any way to make Nugget take a Send, Destroy, Spend or Security action
+  without the confirmation its policy requires is a high-severity bug, including through prompt
+  injection.
+- **Browser control** (being wired in now). The `nugget-browser-host` native-messaging host, its
+  framing and size caps, the browser extension in `extensions/browser`, and per-site consent.
+- **Plugins** (being wired in now). The WASM host in `nugget-plugin`: capability enforcement on
+  every import, fuel, time and memory limits, package signatures, and any escape to the
+  filesystem, network or other plugins' data.
+- **Double Tap** (being wired in now). Accessibility access (reading the focused field and its
+  thread, insertion with read-back and the clipboard fallback), secure-field and excluded-app
+  handling, and the global trigger listener, which must never record other keystrokes.
+- **Desktop app and updates.** The Tauri shell, its commands and webview permissions, and the
+  update path (signed payloads, channel feeds, installers).
+
+Reports about the surfaces marked "being wired in now" are welcome before they ship: the crates
+are in the repository today.
+
 ## Threat model (outline)
 
 This outline will become a full threat-model document before v1.0 (see

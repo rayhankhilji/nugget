@@ -13,9 +13,16 @@
   - [Obsidian](guide/sources-obsidian.md)
   - [Gmail and Google Calendar](guide/sources-google.md)
   - [IMAP and CalDAV](guide/sources-imap-caldav.md)
+  - [Microsoft 365](guide/sources-microsoft.md)
+  - [Slack, Notion, GitHub and Linear](guide/sources-saas.md)
 - [Search and Ask, with citations](guide/search-ask.md)
 - [The knowledge graph and vault](guide/knowledge.md)
 - [Connecting AI apps over MCP](guide/mcp.md)
+- [Double Tap: drafting in your voice](guide/double-tap.md)
+- [The agent and computer use](guide/agent.md)
+- [Safety: rules, confirmations and the kill switch](guide/safety.md)
+- [Today: proactive cards and the morning brief](guide/today.md)
+- [Plugins](guide/plugins.md)
 - [Privacy](guide/privacy.md)
 - [Troubleshooting](guide/troubleshooting.md)
 
@@ -31,6 +38,7 @@
 
 # Architecture
 
+- [Overview](architecture/overview.md)
 - [Crate map](architecture/crates.md)
 - [Data flow](architecture/data-flow.md)
 - [Security model](architecture/security.md)
