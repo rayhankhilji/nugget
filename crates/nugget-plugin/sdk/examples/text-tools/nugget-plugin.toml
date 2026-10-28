@@ -1,0 +1,10 @@
+# Manifest of the example text tools plugin. It computes everything locally, so it declares no
+# capabilities: no hosts, no secrets, no key-value store. The host denies every import call
+# except `log` and `clock`.
+id = "dev.nugget.example.text-tools"
+name = "Text tools"
+version = "0.1.0"
+description = "Counts words, characters and sentences, estimates reading time and lists the most frequent words of a text."
+kind = ["tool"]
+
+[capabilities]

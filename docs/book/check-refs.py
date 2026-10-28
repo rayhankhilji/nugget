@@ -198,10 +198,20 @@ def str_consts(text: str) -> dict[str, str]:
 
 
 def ipc_consts() -> tuple[dict[str, str], dict[str, str]]:
+    """Method and notification names from every `pub mod method` / `pub mod <feature>_method`
+    (and `notification` / `<feature>_notification`) module of `nugget_core::ipc`."""
     text = read("crates/nugget-core/src/ipc.rs")
-    methods = str_consts(re.search(r"pub mod method \{(.*?)\n\}", text, re.S).group(1))
-    notes = str_consts(re.search(r"pub mod notification \{(.*?)\n\}", text, re.S).group(1))
-    return methods, notes
+
+    def collect(kind: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for m in re.finditer(r"pub mod (?:\w+_)?" + kind + r" \{(.*?)\n\}", text, re.S):
+            for k, v in str_consts(m.group(1)).items():
+                if out.get(k, v) != v:
+                    fail(f"ipc.rs: constant `{k}` names both `{out[k]}` and `{v}` in different {kind} modules")
+                out[k] = v
+        return out
+
+    return collect("method"), collect("notification")
 
 
 def error_codes() -> dict[str, int]:

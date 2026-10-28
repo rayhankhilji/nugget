@@ -191,6 +191,8 @@ export interface SourceSync {
 
 export interface AuthBegin {
   url: string;
+  /** Device flows (GitHub): the code the user enters on the page at `url`. */
+  user_code?: string | null;
 }
 
 /** Write-only: the password goes to the OS keychain through the daemon. */
@@ -273,7 +275,7 @@ export interface AskStarted {
 // ---- local runtime ----
 
 export type RuntimeRole = "chat" | "embedding";
-export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "failed";
+export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "stopping" | "failed";
 
 export interface RuntimeInfo {
   model_id: string;
@@ -967,7 +969,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status";
+export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -1337,4 +1339,531 @@ export interface AutostartStatus {
 export const autostart = {
   get: () => call<AutostartStatus>("autostart_get"),
   set: (enabled: boolean) => call<AutostartStatus>("autostart_set", { enabled }),
+};
+
+// W5: connectors
+
+/** Microsoft 365 connector kinds (OAuth with the user's own Entra app registration). */
+export type MicrosoftKind = "outlook" | "outlook-calendar" | "onedrive";
+export const MICROSOFT_KINDS: readonly MicrosoftKind[] = ["outlook", "outlook-calendar", "onedrive"];
+
+/** SaaS connector kinds (a pasted token, or OAuth when settings carry `client_id`). */
+export type SaasKind = "slack" | "notion" | "github" | "linear";
+export const SAAS_KINDS: readonly SaasKind[] = ["slack", "notion", "github", "linear"];
+
+/** Every kind the Add source wizard offers. */
+export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind;
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS];
+
+export function isConnectorKind(v: unknown): v is ConnectorKind {
+  return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
+}
+
+// ---- W1 Double Tap ----
+// Tauri commands in apps/desktop/src-tauri/src/doubletap/ (the settings page and the overlay window).
+
+/** Modifier keys a double tap can use (mirrors `nugget_hotkey::Modifier`). */
+export type DoubleTapModifier =
+  | "left_command"
+  | "right_command"
+  | "left_control"
+  | "right_control"
+  | "left_option"
+  | "right_option"
+  | "left_shift"
+  | "right_shift";
+
+export type TriggerSpec =
+  | { kind: "double_tap"; modifier: DoubleTapModifier; window_ms: number }
+  /** A chord such as `Ctrl+Alt+Space`. */
+  | { kind: "chord"; chord: string };
+
+export interface DoubleTapSettings {
+  enabled: boolean;
+  trigger: TriggerSpec;
+  /** App id (bundle id, executable) or page host → provider id. */
+  app_providers: Record<string, string>;
+  /** Apps Double Tap never drafts in (password managers and banking by default). */
+  excluded_apps: string[];
+  /** Allow drafting in terminal emulators (off by default: text there can run as a command). */
+  allow_terminals: boolean;
+}
+
+export interface ModifierOption {
+  id: DoubleTapModifier;
+  /** As printed on this platform's keyboards. */
+  label: string;
+}
+
+export type PermissionState = "granted" | "denied" | "not_required" | "unknown";
+
+export interface DoubleTapStatus {
+  platform: "macos" | "windows" | "linux";
+  /** `macos`, `windows`, `x11`, `wayland` or `unknown`. */
+  session: string;
+  /** A listener is running with the current trigger. */
+  listening: boolean;
+  /** Why the trigger could not start (unsupported, taken…). */
+  trigger_error: string | null;
+  accessibility: "granted" | "denied" | "not_required";
+  /** macOS only; `not_required` elsewhere. */
+  input_monitoring: PermissionState;
+  /** i18n key of an onboarding hint, e.g. `doubletap.hint.atspi`. */
+  hint: string | null;
+  modifiers: ModifierOption[];
+  recommended_trigger: TriggerSpec;
+}
+
+/** `nugget_core::ipc::VoiceStatus`. */
+export interface VoiceStatus {
+  /** Messages written by the user that the profile was built from. */
+  samples: number;
+  /** Channels with enough samples for their own style (e.g. `email`, `chat`). */
+  channels: string[];
+  /** RFC 3339, or `null` when never built. */
+  last_built: string | null;
+}
+
+export type OverlayPhase = "reading" | "refused" | "streaming" | "done" | "inserting" | "inserted" | "error";
+export type InsertMethod = "accessibility" | "clipboard" | "typing";
+
+/** What the caret overlay shows; sent with every `doubletap:overlay` event. */
+export interface OverlayView {
+  phase: OverlayPhase;
+  /** Draft so far. */
+  text: string;
+  provider: string | null;
+  locality: Locality | null;
+  citations: number;
+  excluded_sensitive: number;
+  /** i18n key for refused/error (e.g. `doubletap.refused.secure`), or raw error text. */
+  message: string | null;
+  /** After insertion: whether reading the field back matched. */
+  verified: boolean | null;
+  method: InsertMethod | null;
+}
+
+export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
+
+export const doubletapApi = {
+  settingsGet: () => call<DoubleTapSettings>("doubletap_settings_get"),
+  /** Validates, saves and restarts the listener; returns what was saved. */
+  settingsSet: (settings: DoubleTapSettings) => call<DoubleTapSettings>("doubletap_settings_set", { settings }),
+  status: () => call<DoubleTapStatus>("doubletap_status"),
+  /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
+  requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
+  defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
+  /** Start a draft as if the trigger fired. */
+  fire: () => call<void>("doubletap_fire"),
+  voiceStatus: () => call<VoiceStatus>("voice_status"),
+
+  // Overlay window only.
+  overlayState: () => call<OverlayView>("overlay_state"),
+  /** `text` is `null` when accepted unchanged, else the edited text. */
+  overlayAccept: (text: string | null) => call<void>("overlay_accept", { text }),
+  overlayCancel: () => call<void>("overlay_cancel"),
+  onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
+};
+
+// ---- W6 plugins ----
+// Wire types mirror the `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+
+/** What a plugin may use. The host denies everything not listed. */
+export interface PluginCapabilities {
+  /** `example.com`, `example.com:8443`, `*.example.com` (any subdomain) or `http://host:port`. */
+  hosts: string[];
+  /** Names of the plugin's own secrets in the OS keychain. */
+  secrets: string[];
+  /** Size limit of the plugin's own key-value store; `0` means none. */
+  kv_max_bytes: number;
+}
+
+/** `trusted`: signer is in `[plugins] trusted_keys`; `dev`: this device's dev key; else `untrusted`. */
+export type PluginSignature = "trusted" | "dev" | "untrusted";
+export const PLUGIN_SIGNATURES: readonly PluginSignature[] = ["trusted", "dev", "untrusted"];
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** `connector` and/or `tool`. */
+  kinds: string[];
+  enabled: boolean;
+  /** Running in the plugin host right now. */
+  loaded: boolean;
+  /** Why it is not loaded (untrusted signer, load failure, …). */
+  error?: string | null;
+  signature: PluginSignature;
+  /** Hex ed25519 public key. */
+  signer: string;
+  approved: PluginCapabilities;
+  /** RFC 3339. */
+  installed_at: string;
+  /** `plugin:<id>` when the plugin provides a connector. */
+  connector_kind?: string | null;
+  /** Agent tool names. */
+  tools?: string[];
+}
+
+export interface PluginListResult {
+  plugins: PluginInfo[];
+}
+
+export interface PluginInspectResult {
+  plugin: PluginInfo;
+  requested: PluginCapabilities;
+  connector_display_name?: string | null;
+}
+
+/** A verified package staged under `token` (for 10 minutes) until approved or rejected. */
+export interface PluginInstallResult {
+  token: string;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  signature: PluginSignature;
+  signer: string;
+  requested: PluginCapabilities;
+  /** What the user approved for the installed version, when this is an update. */
+  previously_approved?: PluginCapabilities | null;
+  installed_version?: string | null;
+  needs_approval: boolean;
+  /** Already committed (an update within the approved capabilities). */
+  installed: boolean;
+}
+
+export interface PluginApproveResult {
+  plugin: PluginInfo | null;
+}
+
+export interface PluginRemoveResult {
+  removed: boolean;
+}
+
+/** One `hosts` entry, split for plain-language display. */
+export interface PluginHost {
+  /** Host name (without `*.`), with `:port` when one is given. */
+  host: string;
+  /** Any subdomain of `host` (not `host` itself). */
+  wildcard: boolean;
+  /** Plain `http` (unencrypted) was spelled out. */
+  insecure: boolean;
+}
+
+export function parsePluginHost(entry: string): PluginHost {
+  let rest = entry.trim();
+  let insecure = false;
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(rest);
+  if (scheme) {
+    insecure = scheme[1]!.toLowerCase() === "http";
+    rest = rest.slice(scheme[0].length);
+  }
+  const wildcard = rest.startsWith("*.");
+  if (wildcard) rest = rest.slice(2);
+  return { host: rest.toLowerCase().replace(/\.$/, ""), wildcard, insecure };
+}
+
+function hostKey(entry: string): string {
+  const h = parsePluginHost(entry);
+  return `${h.insecure ? "http" : "https"}://${h.wildcard ? "*." : ""}${h.host}`;
+}
+
+/** What `requested` adds over `previous` (everything, for a new install). */
+export function newPluginCapabilities(
+  requested: PluginCapabilities,
+  previous: PluginCapabilities | null | undefined,
+): PluginCapabilities {
+  if (!previous) return requested;
+  const oldHosts = new Set(previous.hosts.map(hostKey));
+  return {
+    hosts: requested.hosts.filter((h) => !oldHosts.has(hostKey(h))),
+    secrets: requested.secrets.filter((s) => !previous.secrets.includes(s)),
+    kv_max_bytes: requested.kv_max_bytes > previous.kv_max_bytes ? requested.kv_max_bytes : 0,
+  };
+}
+
+export function pluginCapabilitiesEmpty(c: PluginCapabilities): boolean {
+  return c.hosts.length === 0 && c.secrets.length === 0 && c.kv_max_bytes <= 0;
+}
+
+export function isPluginInfo(v: unknown): v is PluginInfo {
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  return (
+    typeof p.id === "string" &&
+    typeof p.name === "string" &&
+    typeof p.version === "string" &&
+    Array.isArray(p.kinds) &&
+    typeof p.enabled === "boolean" &&
+    typeof p.loaded === "boolean" &&
+    (PLUGIN_SIGNATURES as readonly unknown[]).includes(p.signature)
+  );
+}
+
+/** Installed plugins (`plugins.list`). */
+export const listPlugins = async (): Promise<PluginInfo[]> => {
+  const r = await call<PluginListResult>("plugins_list");
+  return Array.isArray(r?.plugins) ? r.plugins.filter(isPluginInfo) : [];
+};
+export const inspectPlugin = (id: string) => call<PluginInspectResult>("plugins_inspect", { request: { id } });
+/** Verify and stage a `.nuggetplugin` file; commit it with `approvePlugin` when `needs_approval`. */
+export const installPlugin = (path: string) => call<PluginInstallResult>("plugins_install", { request: { path } });
+/** `approve: false` discards the staged package. */
+export const approvePlugin = (token: string, approve: boolean) =>
+  call<PluginApproveResult>("plugins_approve", { request: { token, approve } });
+export const removePlugin = (id: string) => call<PluginRemoveResult>("plugins_remove", { request: { id } });
+export const setPluginEnabled = (id: string, enabled: boolean) =>
+  call<PluginInfo>("plugins_enable", { request: { id, enabled } });
+/** Native file picker for `.nuggetplugin` packages; `null` when cancelled. */
+export const pickPluginFile = () => call<string | null>("pick_plugin_file");
+// ---- W3: agent and safety ----
+//
+// Mirrors the `// ---- Agent (M4) ----` block of `nugget_core::ipc`. Values the daemon carries as
+// JSON (`nugget_agent::AgentEvent`, `nugget_policy::PolicyConfig`, ...) are typed here from their
+// serde form. Each method maps to the Tauri command of the same name with `.` → `_`
+// (`agent.run` → `agent_run`), whose argument is `{ request }` like the other commands.
+
+/** `nugget_policy::RiskClass`, lowest to highest. */
+export type RiskClass = "observe" | "edit" | "send" | "destroy" | "spend" | "security";
+export const RISK_CLASSES: readonly RiskClass[] = ["observe", "edit", "send", "destroy", "spend", "security"];
+/** Classes a confirmation can be approved for the rest of a task (`ConfirmChoice::Task`). */
+export const TASK_APPROVABLE_RISKS: readonly RiskClass[] = ["send", "destroy"];
+
+/** `nugget_policy::ActionDescriptor`. */
+export interface ActionDescriptor {
+  target_app: string;
+  verb: string;
+  target_label?: string | null;
+  text_preview?: string | null;
+  declared_risk: RiskClass;
+  task_id: string;
+}
+
+/** `nugget_agent::ConfirmationRequest`. */
+export interface ConfirmationRequest {
+  request_id: string;
+  action_id: string;
+  tool: string;
+  action: ActionDescriptor;
+  reason: string;
+  forced_by_injection: boolean;
+  timeout_ms: number;
+}
+
+/** `nugget_agent::Verification` (adjacently tagged: `{ status, detail }`). */
+export type Verification = { status: "passed"; detail: string } | { status: "failed"; detail: string } | { status: "unverifiable"; detail?: undefined };
+
+/** `nugget_agent::Budget`. */
+export type AgentBudget =
+  | { budget: "steps"; limit: number }
+  | { budget: "deadline"; limit_ms: number }
+  | { budget: "tokens"; limit: number }
+  | { budget: "tool_rate"; tool: string; max_calls: number; window_ms: number };
+
+/** `nugget_agent::Outcome` (adjacently tagged: `{ outcome, detail }`). */
+export type AgentOutcome =
+  | { outcome: "succeeded" | "partial" | "halted" | "cancelled"; detail?: undefined }
+  | { outcome: "unverified" | "failed" | "needs_input" | "refused" | "error"; detail: string }
+  | { outcome: "budget_exhausted"; detail: AgentBudget };
+
+export interface InjectionFinding {
+  patterns: string[];
+  excerpt: string;
+}
+
+export type ConfirmAnswer = "approved" | "rejected" | "timed_out";
+
+/** `nugget_agent::AgentEvent`, tagged by `event`. */
+export type AgentEvent =
+  | { event: "run_started"; task_id: string; goal: string }
+  | { event: "step_started"; task_id: string; step: number }
+  | { event: "model_replied"; task_id: string; step: number; text: string; tool_calls: string[] }
+  | { event: "action_proposed"; task_id: string; step: number; action_id: string; tool: string; action: ActionDescriptor }
+  | { event: "confirmation_needed"; task_id: string; request: ConfirmationRequest }
+  | { event: "confirmation_resolved"; task_id: string; request_id: string; answer: ConfirmAnswer }
+  | { event: "action_denied"; task_id: string; action_id: string; tool: string; reason: string }
+  | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
+  | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
+  | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
+  | { event: "suspended"; task_id: string; question: string }
+  | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
+
+/** One `agent.event` notification. */
+export interface AgentEventNotice {
+  task_id: string;
+  event: AgentEvent;
+}
+
+export interface AgentBudgets {
+  max_steps?: number | null;
+  deadline_secs?: number | null;
+  max_tokens?: number | null;
+}
+
+export interface AgentRunRequest {
+  goal: string;
+  context?: string | null;
+  /** `null`/absent: every registered tool. */
+  tools?: string[] | null;
+  budgets?: AgentBudgets;
+  provider?: string | null;
+}
+
+export interface AgentStarted {
+  task_id: string;
+  tools: string[];
+}
+
+export type ConfirmChoice = "once" | "task" | "deny";
+
+export type AgentTaskState = "running" | "confirming" | "needs_input" | "finished" | "interrupted";
+
+export interface AgentVerificationCounts {
+  passed: number;
+  failed: number;
+  unverifiable: number;
+}
+
+export interface AgentTaskSummary {
+  task_id: string;
+  goal: string;
+  state: AgentTaskState;
+  /** `Outcome::label()` once finished. */
+  outcome?: string | null;
+  detail?: string | null;
+  /** Unix milliseconds. */
+  started_ms: number;
+  finished_ms?: number | null;
+  steps: number;
+  verification: AgentVerificationCounts;
+}
+
+export interface AgentTaskDetail {
+  summary: AgentTaskSummary;
+  /** `nugget_agent::LogEntry`s (tagged by `kind`). */
+  entries: Record<string, unknown>[];
+  explain: string;
+  pending: ConfirmationRequest[];
+  question?: string | null;
+}
+
+export type PolicyEffect = "allow" | "confirm" | "deny";
+export const POLICY_EFFECTS: readonly PolicyEffect[] = ["allow", "confirm", "deny"];
+
+/** `nugget_policy::Rule`. Empty lists are omitted on the wire. */
+export interface PolicyRule {
+  id: string;
+  description?: string | null;
+  targets?: string[];
+  verbs?: string[];
+  risks?: RiskClass[];
+  labels?: string[];
+  effect: PolicyEffect;
+}
+
+/** `nugget_policy::PolicyConfig`. Unknown fields are kept when it is edited and sent back. */
+export interface PolicyConfig {
+  version?: number;
+  rules: PolicyRule[];
+  disabled_defaults: string[];
+  /** Per-task maximum per risk class; a missing class is unlimited. */
+  rate_limits: Partial<Record<RiskClass, number>>;
+  confirm_timeout_secs: number;
+  [extra: string]: unknown;
+}
+
+export interface DefaultRuleView {
+  rule: PolicyRule;
+  enabled: boolean;
+}
+
+export interface ActionLogStatus {
+  entries: number;
+  /** `[seq, hash]` of the last entry. */
+  head?: [number, string] | null;
+  chain_ok: boolean;
+  error?: string | null;
+}
+
+export interface PolicyState {
+  config: PolicyConfig;
+  defaults: DefaultRuleView[];
+  halted: boolean;
+  log: ActionLogStatus;
+}
+
+export interface TaskApprovalView {
+  task_id: string;
+  risk: string;
+  target?: string | null;
+}
+
+export interface PolicyApprovals {
+  pending: ConfirmationRequest[];
+  task: TaskApprovalView[];
+}
+
+export interface KillState {
+  halted: boolean;
+}
+
+export interface PolicyLogExport {
+  jsonl: string;
+  status: ActionLogStatus;
+}
+
+export interface BrowserStatus {
+  connected: boolean;
+  origin?: string | null;
+  host_version?: string | null;
+  tools: string[];
+}
+
+/** Daemon notification methods (`nugget_core::ipc::agent_notification`). */
+export const AGENT_NOTIFICATION = {
+  agentEvent: "agent.event",
+  killChanged: "policy.kill.changed",
+} as const;
+
+export function isAgentEventNotice(v: unknown): v is AgentEventNotice {
+  return isRecord(v) && typeof v.task_id === "string" && isRecord(v.event) && typeof v.event.event === "string";
+}
+
+export function isKillState(v: unknown): v is KillState {
+  return isRecord(v) && typeof v.halted === "boolean";
+}
+
+export const agentApi = {
+  /** Events for the returned task arrive as `agent.event` notifications (see `agentEvents`). */
+  agentRun: (request: AgentRunRequest) => call<AgentStarted>("agent_run", { request }),
+  agentCancel: (taskId: string) => call<void>("agent_cancel", { request: { task_id: taskId } }),
+  agentConfirm: (taskId: string, requestId: string, choice: ConfirmChoice) =>
+    call<void>("agent_confirm", { request: { task_id: taskId, request_id: requestId, choice } }),
+  agentAnswer: (taskId: string, answer: string) => call<void>("agent_answer", { request: { task_id: taskId, answer } }),
+  agentList: (limit?: number) => call<AgentTaskSummary[]>("agent_list", { request: { limit: limit ?? null } }),
+  agentGet: (taskId: string) => call<AgentTaskDetail>("agent_get", { request: { task_id: taskId } }),
+
+  policyGet: () => call<PolicyState>("policy_get"),
+  policySet: (config: PolicyConfig) => call<PolicyState>("policy_set", { request: { config } }),
+  policyApprovals: () => call<PolicyApprovals>("policy_approvals"),
+  policyKill: () => call<KillState>("policy_kill"),
+  policyResume: () => call<KillState>("policy_resume"),
+  policyLogExport: () => call<PolicyLogExport>("policy_log_export"),
+  browserStatus: () => call<BrowserStatus>("browser_status"),
+};
+
+export const agentEvents = {
+  /** `agent.event` notifications; malformed payloads are dropped. */
+  onAgentEvent: (h: (n: AgentEventNotice) => void) =>
+    events.onNotification((n) => {
+      if (n.method === AGENT_NOTIFICATION.agentEvent && isAgentEventNotice(n.params)) h(n.params);
+    }),
+  /** The kill switch was engaged or released. */
+  onKillChanged: (h: (k: KillState) => void) =>
+    events.onNotification((n) => {
+      if (n.method === AGENT_NOTIFICATION.killChanged && isKillState(n.params)) h(n.params);
+    }),
 };

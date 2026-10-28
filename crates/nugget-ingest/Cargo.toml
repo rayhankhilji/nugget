@@ -27,17 +27,16 @@ toml = "1"
 # nugget-infer's exactly; see the `keyring` entry in the root Cargo.toml.
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { workspace = true, features = ["apple-native"] }
+# IOKit power sources for the power policy (CoreFoundation types).
+core-foundation = "0.10"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { workspace = true, features = ["windows-native"] }
+# GetSystemPowerStatus for the power policy.
+windows-sys = { version = "0.61", features = ["Win32_System_Power"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
 keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
-
-# Battery state for power-aware scheduling (ISC). 0.10 is the last line with MSRV <= 1.88.
-# Only on the platforms it supports; everything else uses the no-op policy.
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd"))'.dependencies]
-starship-battery = { version = "0.10.2", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

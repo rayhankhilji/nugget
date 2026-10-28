@@ -7,13 +7,16 @@ use nugget_core::ipc::{
     ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
     EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
     McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelInfo, ModelInstallRequest,
-    ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest, SourceInfo, SourceRef,
-    SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse, method,
+    PluginApproveParams, PluginApproveResult, PluginEnableParams, PluginIdParams, PluginInfo,
+    PluginInspectResult, PluginInstallParams, PluginInstallResult, PluginListResult,
+    PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest,
+    SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate,
+    StatusResponse, method, plugin_method,
 };
 use nugget_core::ipc::{
     BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest, CardPreview,
     CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest, ProactiveMetrics,
-    ReminderView,
+    ReminderView, proactive_method,
 };
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
@@ -499,6 +502,85 @@ pub async fn mcp_clients_revoke(
     Ok(())
 }
 
+// ---- plugins (M6) ----
+
+/// Longest file path the UI may hand to `plugins.install`.
+const MAX_PATH_LEN: usize = 4096;
+
+fn check_plugin_field(what: &str, value: &str) -> Result<()> {
+    if value.trim().is_empty() {
+        return Err(CmdError::Other(format!("the plugin {what} is missing")));
+    }
+    check_text(what, value)
+}
+
+fn check_plugin_install(request: &PluginInstallParams) -> Result<()> {
+    if request.path.len() > MAX_PATH_LEN {
+        return Err(CmdError::Other("the plugin path is too long".into()));
+    }
+    if !std::path::Path::new(&request.path).is_absolute() {
+        return Err(CmdError::Other("choose a plugin file".into()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugins_list(app: AppHandle, daemon: State<'_, Daemon>) -> Result<PluginListResult> {
+    daemon.call(&app, plugin_method::LIST, &()).await
+}
+
+#[tauri::command]
+pub async fn plugins_inspect(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: PluginIdParams,
+) -> Result<PluginInspectResult> {
+    check_plugin_field("id", &request.id)?;
+    daemon.call(&app, plugin_method::INSPECT, &request).await
+}
+
+/// Verifies and stages a package; it is committed only by `plugins_approve` (unless it is an
+/// update within the capabilities the user already approved).
+#[tauri::command]
+pub async fn plugins_install(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: PluginInstallParams,
+) -> Result<PluginInstallResult> {
+    check_plugin_install(&request)?;
+    daemon.call(&app, plugin_method::INSTALL, &request).await
+}
+
+#[tauri::command]
+pub async fn plugins_approve(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: PluginApproveParams,
+) -> Result<PluginApproveResult> {
+    check_plugin_field("install token", &request.token)?;
+    daemon.call(&app, plugin_method::APPROVE, &request).await
+}
+
+#[tauri::command]
+pub async fn plugins_remove(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: PluginIdParams,
+) -> Result<PluginRemoveResult> {
+    check_plugin_field("id", &request.id)?;
+    daemon.call(&app, plugin_method::REMOVE, &request).await
+}
+
+#[tauri::command]
+pub async fn plugins_enable(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: PluginEnableParams,
+) -> Result<PluginInfo> {
+    check_plugin_field("id", &request.id)?;
+    daemon.call(&app, plugin_method::ENABLE, &request).await
+}
+
 // ---- shell helpers ----
 
 /// Opens an `https:`, `obsidian:` or local `file:` URL with the OS default handler. Anything else
@@ -604,7 +686,9 @@ pub async fn cards_list(
     daemon: State<'_, Daemon>,
     request: CardsListRequest,
 ) -> Result<CardsList> {
-    daemon.call(&app, method::CARDS_LIST, &request).await
+    daemon
+        .call(&app, proactive_method::CARDS_LIST, &request)
+        .await
 }
 
 #[tauri::command]
@@ -614,7 +698,9 @@ pub async fn cards_feedback(
     request: CardFeedbackRequest,
 ) -> Result<CardView> {
     check_card_feedback(&request)?;
-    daemon.call(&app, method::CARDS_FEEDBACK, &request).await
+    daemon
+        .call(&app, proactive_method::CARDS_FEEDBACK, &request)
+        .await
 }
 
 #[tauri::command]
@@ -624,7 +710,9 @@ pub async fn cards_preview(
     request: CardPreviewRequest,
 ) -> Result<CardPreview> {
     check_card_id(&request.card_id)?;
-    daemon.call(&app, method::CARDS_PREVIEW, &request).await
+    daemon
+        .call(&app, proactive_method::CARDS_PREVIEW, &request)
+        .await
 }
 
 #[tauri::command]
@@ -639,12 +727,16 @@ pub async fn cards_execute(
             "preview the action before approving it".into(),
         ));
     }
-    daemon.call(&app, method::CARDS_EXECUTE, &request).await
+    daemon
+        .call(&app, proactive_method::CARDS_EXECUTE, &request)
+        .await
 }
 
 #[tauri::command]
 pub async fn brief_get(app: AppHandle, daemon: State<'_, Daemon>) -> Result<BriefView> {
-    daemon.call(&app, method::BRIEF_GET, &json!({})).await
+    daemon
+        .call(&app, proactive_method::BRIEF_GET, &json!({}))
+        .await
 }
 
 #[tauri::command]
@@ -653,14 +745,14 @@ pub async fn proactive_metrics(
     daemon: State<'_, Daemon>,
 ) -> Result<ProactiveMetrics> {
     daemon
-        .call(&app, method::PROACTIVE_METRICS, &json!({}))
+        .call(&app, proactive_method::PROACTIVE_METRICS, &json!({}))
         .await
 }
 
 #[tauri::command]
 pub async fn proactive_refresh(app: AppHandle, daemon: State<'_, Daemon>) -> Result<CardsChanged> {
     daemon
-        .call(&app, method::PROACTIVE_REFRESH, &json!({}))
+        .call(&app, proactive_method::PROACTIVE_REFRESH, &json!({}))
         .await
 }
 
@@ -669,7 +761,9 @@ pub async fn reminders_list(
     app: AppHandle,
     daemon: State<'_, Daemon>,
 ) -> Result<Vec<ReminderView>> {
-    daemon.call(&app, method::REMINDERS_LIST, &json!({})).await
+    daemon
+        .call(&app, proactive_method::REMINDERS_LIST, &json!({}))
+        .await
 }
 
 /// Show an OS notification (morning brief, due reminder). Text is shown as plain text.
@@ -697,6 +791,36 @@ pub async fn open_mailto(url: String) -> Result<()> {
     .await
     .map_err(|e| CmdError::Other(e.to_string()))?
     .map_err(CmdError::Other)
+}
+
+/// Native file picker for a `.nuggetplugin` package. Returns its absolute path, or `None` when
+/// cancelled.
+#[tauri::command]
+pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog
+        .set_title("Choose a plugin")
+        .add_filter("Nugget plugin", &["nuggetplugin"])
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx
+        .await
+        .map_err(|_| CmdError::Other("the file picker closed unexpectedly".into()))?;
+    picked
+        .map(|p| {
+            let path = p
+                .into_path()
+                .map_err(|e| CmdError::Other(format!("unsupported file: {e}")))?;
+            path.into_os_string()
+                .into_string()
+                .map_err(|_| CmdError::Other("file paths must be valid Unicode".into()))
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -737,6 +861,30 @@ mod tests {
         let ctx: ContextRequest =
             serde_json::from_value(json!({ "query": "q", "budget_tokens": 2000 })).unwrap();
         assert_eq!(ctx.budget_tokens, 2000);
+    }
+
+    /// The plugin `request` objects `api.ts` sends decode into the IPC types and are checked.
+    #[test]
+    fn plugin_requests_match_the_ipc_types() {
+        let id: PluginIdParams = serde_json::from_value(json!({ "id": "rss" })).unwrap();
+        assert!(check_plugin_field("id", &id.id).is_ok());
+        assert!(check_plugin_field("id", " ").is_err());
+
+        let install: PluginInstallParams =
+            serde_json::from_value(json!({ "path": "/home/me/rss.nuggetplugin" })).unwrap();
+        assert!(check_plugin_install(&install).is_ok());
+        let relative = PluginInstallParams {
+            path: "rss.nuggetplugin".into(),
+        };
+        assert!(check_plugin_install(&relative).is_err());
+
+        let approve: PluginApproveParams =
+            serde_json::from_value(json!({ "token": "tok-1", "approve": false })).unwrap();
+        assert!(!approve.approve);
+
+        let enable: PluginEnableParams =
+            serde_json::from_value(json!({ "id": "rss", "enabled": true })).unwrap();
+        assert!(enable.enabled);
     }
 
     /// The knowledge and MCP `request` objects `api.ts` builds decode into the IPC types.

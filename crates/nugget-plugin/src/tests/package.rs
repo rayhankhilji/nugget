@@ -89,3 +89,116 @@ fn package_dir_round_trip_and_key_parsing() {
     pkg.verify(&[vk]).unwrap();
     assert!(parse_verifying_key("abcd").is_err());
 }
+
+const MAGIC: &[u8] = b"NUGGETPKG\x01";
+
+fn section(out: &mut Vec<u8>, bytes: &[u8]) {
+    out.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    out.extend_from_slice(bytes);
+}
+
+#[test]
+fn single_file_round_trip() {
+    let k = key(1);
+    let pkg = package(&manifest(), EMPTY_COMPONENT, &k);
+    let bytes = pkg.to_bytes();
+    assert!(bytes.starts_with(MAGIC));
+    let mut expected = MAGIC.to_vec();
+    section(&mut expected, &pkg.manifest);
+    section(&mut expected, &pkg.wasm);
+    section(&mut expected, &pkg.signature);
+    assert_eq!(bytes, expected);
+    let back = PluginPackage::from_bytes(&bytes).unwrap();
+    assert_eq!(back.manifest, pkg.manifest);
+    assert_eq!(back.wasm, pkg.wasm);
+    assert_eq!(back.signature, pkg.signature);
+    back.verify(&[k.verifying_key()]).unwrap();
+
+    // An unsigned package (empty signature section) round-trips but does not verify.
+    let unsigned = PluginPackage {
+        signature: Vec::new(),
+        ..pkg
+    };
+    let back = PluginPackage::from_bytes(&unsigned.to_bytes()).unwrap();
+    assert!(back.signature.is_empty());
+    assert!(back.verify(&[k.verifying_key()]).is_err());
+}
+
+#[test]
+fn malformed_single_files_are_rejected() {
+    let bytes = package(&manifest(), EMPTY_COMPONENT, &key(1)).to_bytes();
+    let invalid = |b: &[u8]| {
+        matches!(
+            PluginPackage::from_bytes(b),
+            Err(nugget_core::Error::Invalid(_))
+        )
+    };
+
+    // Every truncation, including inside a length prefix and the empty input.
+    for n in 0..bytes.len() {
+        assert!(invalid(&bytes[..n]), "truncated to {n} bytes");
+    }
+    // Trailing bytes.
+    let mut trailing = bytes.clone();
+    trailing.push(0);
+    assert!(invalid(&trailing));
+    // Bad magic and an unknown format version.
+    let mut magic = bytes.clone();
+    magic[0] = b'X';
+    assert!(invalid(&magic));
+    let mut version = bytes.clone();
+    version[9] = 2;
+    assert!(invalid(&version));
+
+    // Oversized sections are refused from their length prefix alone.
+    let mut big_manifest = MAGIC.to_vec();
+    big_manifest.extend_from_slice(&(crate::manifest::MAX_MANIFEST_BYTES as u32 + 1).to_le_bytes());
+    assert!(invalid(&big_manifest));
+    let mut big_wasm = MAGIC.to_vec();
+    section(&mut big_wasm, b"m");
+    big_wasm.extend_from_slice(&(crate::MAX_WASM_BYTES as u32 + 1).to_le_bytes());
+    assert!(invalid(&big_wasm));
+    let mut big_sig = MAGIC.to_vec();
+    section(&mut big_sig, b"m");
+    section(&mut big_sig, b"w");
+    section(&mut big_sig, &[b'a'; 1025]);
+    assert!(invalid(&big_sig));
+    let mut max_sig = MAGIC.to_vec();
+    section(&mut max_sig, b"m");
+    section(&mut max_sig, b"w");
+    section(&mut max_sig, &[b'a'; 1024]);
+    assert!(PluginPackage::from_bytes(&max_sig).is_ok());
+}
+
+#[test]
+fn from_path_reads_directories_and_files() {
+    let k = key(1);
+    let trusted = [k.verifying_key()];
+    let pkg = package(&manifest(), EMPTY_COMPONENT, &k);
+    let tmp = tempfile::tempdir().unwrap();
+
+    let dir = tmp.path().join("pkg");
+    pkg.write_dir(&dir).unwrap();
+    PluginPackage::from_path(&dir)
+        .unwrap()
+        .verify(&trusted)
+        .unwrap();
+
+    let file = tmp
+        .path()
+        .join("nested")
+        .join(format!("test.{}", crate::PACKAGE_EXTENSION));
+    pkg.write_file(&file).unwrap();
+    let back = PluginPackage::from_path(&file).unwrap();
+    assert_eq!(back.manifest, pkg.manifest);
+    back.verify(&trusted).unwrap();
+    assert_eq!(
+        PluginPackage::from_file(&file).unwrap().to_bytes(),
+        pkg.to_bytes()
+    );
+
+    let junk = tmp.path().join("junk.nuggetplugin");
+    std::fs::write(&junk, b"not a package").unwrap();
+    assert!(PluginPackage::from_path(&junk).is_err());
+    assert!(PluginPackage::from_path(&tmp.path().join("missing")).is_err());
+}

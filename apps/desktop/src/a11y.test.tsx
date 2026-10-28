@@ -21,6 +21,7 @@ const PAGES: [PageId, string][] = [
   ["knowledge", "Ada Lovelace"],
   ["sources", "Work mail"],
   ["apps", "Claude Desktop"],
+  ["plugins", "RSS feeds"],
   ["models", "qwen3-4b-q4"],
   ["privacy", "api.anthropic.com"],
   ["status", "local-chat"],

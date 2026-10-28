@@ -640,6 +640,7 @@ impl ActionRunner {
                 return Ok(ExecOutcome::Denied(reason));
             }
         };
+        let policy_confirm = policy_reason.is_some();
         let reason =
             policy_reason.or_else(|| prepared.action.requires_confirmation().map(str::to_owned));
         if let Some(reason) = reason
@@ -652,6 +653,16 @@ impl ActionRunner {
                 json!({"reason": reason}),
             );
             return Ok(ExecOutcome::NeedsConfirmation(reason));
+        }
+        // The user approved a policy `Confirm`: it counts against the task's rate limit.
+        if policy_confirm
+            && !self
+                .policy
+                .record_approved(&descriptor, prepared.preview.risk)
+        {
+            let reason = "the rate limit for approved actions is reached".to_owned();
+            self.audit("denied", &task, prepared, json!({"reason": reason}));
+            return Ok(ExecOutcome::Denied(reason));
         }
         let id = match &prepared.action {
             Action::DraftReply(d) => {

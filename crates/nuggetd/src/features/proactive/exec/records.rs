@@ -110,6 +110,7 @@ impl DraftStore {
         Ok(id)
     }
 
+    #[cfg(test)]
     pub(crate) fn get(&self, id: &str) -> Result<Option<StoredDraft>> {
         Ok(self.0.read()?.drafts.into_iter().find(|d| d.id == id))
     }

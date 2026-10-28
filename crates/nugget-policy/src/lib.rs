@@ -48,13 +48,16 @@ pub use broker::{
     ConfirmOutcome, ConfirmationBroker, ConfirmationRequest, DenyReason, UserDecision,
 };
 pub use classify::{Classification, RiskClassifier};
-pub use engine::{Assessment, PolicyEngine, PolicyEngineBuilder, TaskApproval};
+pub use engine::{Assessment, PolicyEngine, PolicyEngineBuilder, RecheckGate, TaskApproval};
 pub use glob::glob_match;
 pub use kill::KillSwitch;
 pub use log::{ActionLog, ChainError, LogEntry, LogEvent};
 pub use redact::RedactedAction;
 pub use rules::{Effect, PolicyConfig, Rule, default_rules};
 pub use store::{JsonFilePolicyStore, MemoryPolicyStore, PolicyStore};
+pub use text::{
+    fold_confusables, normalize as normalize_text, normalize_spaced as normalize_text_spaced,
+};
 
 /// What kind of consequence an action can have. Higher classes need stronger consent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -202,5 +205,11 @@ pub trait PolicyGate: Send + Sync {
     ) -> Decision {
         let _ = context;
         self.evaluate(action)
+    }
+    /// A user approved this `Confirm`: count it against the task's rate limit. `false` means
+    /// the limit is reached and the action must be denied.
+    fn record_approved(&self, action: &ActionDescriptor, risk: RiskClass) -> bool {
+        let _ = (action, risk);
+        true
     }
 }

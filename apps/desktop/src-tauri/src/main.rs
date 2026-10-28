@@ -3,9 +3,11 @@
 // No console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent;
 mod autostart;
 mod commands;
 mod daemon;
+mod doubletap;
 mod history;
 mod login;
 mod open;
@@ -84,6 +86,13 @@ fn main() {
             commands::reminders_list,
             commands::notify,
             commands::open_mailto,
+            commands::plugins_list,
+            commands::plugins_inspect,
+            commands::plugins_install,
+            commands::plugins_approve,
+            commands::plugins_remove,
+            commands::plugins_enable,
+            commands::pick_plugin_file,
             history::chat_history_load,
             history::chat_history_save,
             history::chat_history_delete,
@@ -93,8 +102,31 @@ fn main() {
             updater::updates_check,
             updater::updates_install,
             updater::login_set,
+            agent::commands::agent_run,
+            agent::commands::agent_cancel,
+            agent::commands::agent_confirm,
+            agent::commands::agent_answer,
+            agent::commands::agent_list,
+            agent::commands::agent_get,
+            agent::commands::policy_get,
+            agent::commands::policy_set,
+            agent::commands::policy_approvals,
+            agent::commands::policy_kill,
+            agent::commands::policy_resume,
+            agent::commands::policy_log_export,
+            agent::commands::browser_status,
             autostart::autostart_get,
             autostart::autostart_set,
+            doubletap::commands::doubletap_settings_get,
+            doubletap::commands::doubletap_settings_set,
+            doubletap::commands::doubletap_status,
+            doubletap::commands::doubletap_request_permissions,
+            doubletap::commands::doubletap_default_excluded,
+            doubletap::commands::doubletap_fire,
+            doubletap::commands::voice_status,
+            doubletap::commands::overlay_state,
+            doubletap::commands::overlay_accept,
+            doubletap::commands::overlay_cancel,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
@@ -111,6 +143,7 @@ fn main() {
             }
             app.manage(window_state);
             autostart::reconcile(app.handle());
+            agent::setup(app);
             // Connect early so the tray reflects the daemon state before the window asks.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -118,9 +151,11 @@ fn main() {
                 let _ = daemon.connection_info(&handle).await;
             });
             updater::spawn_background_checks(app.handle());
+            doubletap::setup(app);
             Ok(())
         })
         .on_window_event(|window, event| {
+            doubletap::on_window_event(window, event);
             // Events can arrive before `setup` has managed the state.
             let Some(state) = window.try_state::<window_state::WindowState>() else {
                 return;

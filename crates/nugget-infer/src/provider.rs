@@ -152,6 +152,7 @@ impl Common {
             // Traffic to this machine or the LAN never goes through a proxy (which would also
             // re-resolve the name and defeat the pin).
             direct: resolved.locality != Locality::Cloud,
+            unix_socket: cfg.socket_path.clone(),
         };
         let http = Http::new(cfg.id.clone(), base, locality, egress, settings, auth)?;
         Ok(Self {
@@ -313,5 +314,54 @@ mod tests {
             assert_eq!(p.meta().locality, want, "{url}");
         }
         assert_eq!(r.calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// With `socket_path` every request goes to the Unix socket (the URL's host is never looked
+    /// up or connected to), and the endpoint is on-device: nothing reaches the egress ledger.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unix_socket_endpoints_skip_the_network() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let sock = std::env::temp_dir().join(format!("nugget-infer-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock);
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut got = Vec::new();
+            // Headers, then the (small) JSON body.
+            while !String::from_utf8_lossy(&got).contains("\"input\"") {
+                let n = conn.read(&mut buf).await.unwrap();
+                assert_ne!(n, 0, "connection closed early");
+                got.extend_from_slice(&buf[..n]);
+            }
+            let body = r#"{"data": [{"index": 0, "embedding": [0.25]}]}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+                 connection: close\r\n\r\n{body}",
+                body.len()
+            );
+            conn.write_all(resp.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&got).into_owned()
+        });
+        let r = FakeResolver::new(vec![]);
+        let c = cfg(
+            "http://unreachable.invalid/v1",
+            &format!("socket_path = \"{}\"", sock.display()),
+        );
+        let (p, sink) = build(&c, &r).unwrap();
+        assert_eq!(p.meta().locality, Locality::OnDevice);
+        assert_eq!(p.embed(&["x".into()]).await.unwrap(), vec![vec![0.25]]);
+        let request = server.await.unwrap();
+        assert!(request.starts_with("POST /v1/embeddings "), "{request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("host: unreachable.invalid"),
+            "{request}"
+        );
+        assert_eq!(r.calls.load(Ordering::SeqCst), 0, "no DNS lookup");
+        assert!(sink.0.lock().unwrap().is_empty());
+        let _ = std::fs::remove_file(&sock);
     }
 }

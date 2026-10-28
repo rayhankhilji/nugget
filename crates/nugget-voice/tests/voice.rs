@@ -7,7 +7,7 @@ use nugget_core::ipc::DraftFeedback;
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use nugget_voice::{
     Channel, FeedbackContext, FeedbackSink, MeIdentity, StoreFeedbackSink, VOICE_CURSOR_SOURCE,
-    VoiceConfig, VoiceProfile, VoiceQuery, VoiceSource, style_distance,
+    VOICE_SNAPSHOT_SOURCE, VoiceConfig, VoiceProfile, VoiceQuery, VoiceSource, style_distance,
 };
 use serde_json::{Value, json};
 
@@ -718,4 +718,171 @@ fn configured_address_claims_mail_outside_sent_folders() {
     )
     .unwrap();
     assert_eq!(p.status().samples, 1);
+}
+
+/// Everything observable about a profile, for comparing a loaded one with a built one.
+fn observe(p: &VoiceProfile) -> Vec<String> {
+    let mut out = vec![
+        format!("{:?}", p.me()),
+        format!("{:?}", p.status().samples),
+        format!("{:?}", p.status().channels),
+        format!("{:?}", p.overall_stats()),
+    ];
+    for c in [
+        Channel::Email,
+        Channel::Chat,
+        Channel::Document,
+        Channel::Other,
+    ] {
+        out.push(format!("{:?}", p.channel_stats(c)));
+        for sensitive in [false, true] {
+            out.push(format!("{:?}", all_exemplars(p, c, sensitive)));
+        }
+    }
+    for r in [SAM, OKAFOR, PRIYA, "jamie"] {
+        out.push(format!("{:?}", p.recipient_stats(r)));
+        let q = VoiceQuery::new(Channel::Email)
+            .with_recipients([r])
+            .with_thread("offsite venue friday");
+        out.push(format!(
+            "{:?}",
+            p.hints(Channel::Email, &[r.to_string()], "offsite")
+        ));
+        out.push(format!("{:?}", VoiceSource::hints(p, &q)));
+    }
+    out.push(format!(
+        "{}",
+        p.similarity("hey Sam! sounds good 🙂\n\ncheers,\nAlex")
+    ));
+    out
+}
+
+#[test]
+fn snapshot_roundtrip_equals_built_profile() {
+    let store = seeded();
+    let me = MeIdentity::new(["alex@morgan.example"], ["Alex Morgan"]);
+    let config = VoiceConfig::default();
+    assert!(
+        VoiceProfile::load(&store, me.clone(), config.clone())
+            .unwrap()
+            .is_none()
+    );
+    let built = VoiceProfile::build(&store, me.clone(), config.clone()).unwrap();
+    built.save().unwrap();
+    // Kept inside the (encrypted) store.
+    assert!(
+        store
+            .get_cursor(&SourceId::new(VOICE_SNAPSHOT_SOURCE))
+            .unwrap()
+            .is_some()
+    );
+    let loaded = VoiceProfile::load(&store, me, config).unwrap().unwrap();
+    assert_eq!(observe(&loaded), observe(&built));
+    assert_eq!(loaded.status(), built.status());
+    assert_eq!(loaded.last_refresh(), Default::default());
+}
+
+#[test]
+fn load_or_build_reads_only_changed_items() {
+    let store = seeded();
+    let me = MeIdentity::default();
+    let config = VoiceConfig::default();
+    let first = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let full = first.last_refresh();
+    assert!(full.fetched > 1 && full.changed());
+    let before = first.status().samples;
+
+    // A restart without changes reads nothing.
+    let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    assert_eq!(p.last_refresh().fetched, 0);
+    assert!(!p.last_refresh().changed());
+    assert_eq!(observe(&p), observe(&first));
+
+    // One new sent message: only it is read, and the snapshot is updated.
+    put_mail(
+        &store,
+        Mail {
+            key: "after-restart",
+            to: &[SAM],
+            date: "2026-10-06T09:00:00Z",
+            subject: "Paddles",
+            body: "hey Sam! got the paddles too 🙂\n\ncheers,\nAlex",
+            ..Default::default()
+        },
+    );
+    let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    assert_eq!(p.last_refresh().fetched, 1);
+    assert_eq!(p.last_refresh().scanned, full.scanned + 1);
+    assert_eq!(p.status().samples, before + 1);
+    let again = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    assert_eq!(again.last_refresh().fetched, 0);
+    assert_eq!(again.status().samples, before + 1);
+    let rebuilt = VoiceProfile::build(&store, me, config).unwrap();
+    assert_eq!(observe(&again), observe(&rebuilt));
+}
+
+#[test]
+fn stale_snapshots_are_rebuilt() {
+    let store = seeded();
+    let me = MeIdentity::default();
+    let config = VoiceConfig::default();
+    let p = VoiceProfile::load_or_build(&store, me.clone(), config.clone()).unwrap();
+    let scanned = p.last_refresh().scanned;
+
+    // Another configured identity: the snapshot is ignored and the profile rebuilt.
+    let other_me = MeIdentity::new(["alex@work.example"], ["Alex"]);
+    assert!(
+        VoiceProfile::load(&store, other_me.clone(), config.clone())
+            .unwrap()
+            .is_none()
+    );
+    let p = VoiceProfile::load_or_build(&store, other_me.clone(), config.clone()).unwrap();
+    assert_eq!(p.last_refresh().fetched, scanned);
+    // ...and saved for the new identity.
+    assert!(
+        VoiceProfile::load(&store, other_me, config.clone())
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        VoiceProfile::load(&store, me.clone(), config.clone())
+            .unwrap()
+            .is_none()
+    );
+
+    // Other settings.
+    let other_config = VoiceConfig {
+        max_exemplars: 3,
+        ..Default::default()
+    };
+    assert!(
+        VoiceProfile::load(&store, me.clone(), other_config)
+            .unwrap()
+            .is_none()
+    );
+
+    // Another snapshot version, or an unreadable snapshot.
+    VoiceProfile::build(&store, me.clone(), config.clone())
+        .unwrap()
+        .save()
+        .unwrap();
+    let key = SourceId::new(VOICE_SNAPSHOT_SOURCE);
+    let mut snap = store.get_cursor(&key).unwrap().unwrap();
+    snap["v"] = json!(999);
+    store.set_cursor(&key, snap).unwrap();
+    assert!(
+        VoiceProfile::load(&store, me.clone(), config.clone())
+            .unwrap()
+            .is_none()
+    );
+    store
+        .set_cursor(&key, json!({ "v": 1, "records": "garbage" }))
+        .unwrap();
+    assert!(
+        VoiceProfile::load(&store, me.clone(), config.clone())
+            .unwrap()
+            .is_none()
+    );
+    let p = VoiceProfile::load_or_build(&store, me, config).unwrap();
+    assert_eq!(p.last_refresh().fetched, scanned);
 }

@@ -901,3 +901,48 @@ async fn concurrent_runs_on_a_card_execute_once() {
     // And afterwards the card is closed: no replay.
     assert!(p.run_action(&r, &prepared, &approval, now()).await.is_err());
 }
+
+/// Asks for confirmation and refuses to count any approval (the rate limit is reached).
+struct ExhaustedPolicy;
+
+impl nugget_policy::PolicyGate for ExhaustedPolicy {
+    fn evaluate(&self, _: &nugget_policy::ActionDescriptor) -> Decision {
+        Decision::Confirm("check this".into())
+    }
+    fn halted(&self) -> bool {
+        false
+    }
+    fn record_approved(&self, _: &nugget_policy::ActionDescriptor, _: RiskClass) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn a_confirmed_action_over_the_rate_limit_is_denied() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = ActionRunner::new(
+        Arc::new(ExhaustedPolicy),
+        Executors {
+            reminders: Some(exec.clone()),
+            ..Default::default()
+        },
+    );
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    assert!(matches!(
+        p.run_action(&r, &prepared, &prepared.approve(false), now())
+            .await
+            .unwrap(),
+        ExecOutcome::NeedsConfirmation(_)
+    ));
+    assert!(matches!(
+        p.run_action(&r, &prepared, &prepared.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Denied(_)
+    ));
+    assert!(exec.calls.lock().unwrap().is_empty());
+}

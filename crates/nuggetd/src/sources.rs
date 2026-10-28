@@ -1,12 +1,22 @@
 //! Sources: the connector registry, settings reconciliation and credential routing.
 //!
 //! **Secrets.** `sources.secret.set` stores, by the kind's [`AuthKind`]:
-//! - `Password` (imap, caldav): the password under `password:<id>` ([`Ingest::set_password`]);
-//! - `OAuth` (gmail, gcal): the OAuth **client secret** under `oauth_client_secret:<id>`. It is
-//!   never persisted in `sources.toml`: [`client_secret_resolver`] adds it to the settings handed
-//!   to `ConnectorFactory::build` as `client_secret`, and the source is rebuilt
-//!   ([`Ingest::reload`]) after it changes. `client_secret` in `sources.add`/`update` settings is
-//!   refused.
+//! - `Password` (imap, caldav, slack, notion, github, linear): the password or pasted API token
+//!   under `password:<id>` ([`Ingest::set_password`]);
+//! - `OAuth` (gmail, gcal, outlook, outlook-calendar, onedrive): the OAuth **client secret**
+//!   under `oauth_client_secret:<id>`. It is never persisted in `sources.toml`:
+//!   [`client_secret_resolver`] adds it to the settings handed to `ConnectorFactory::build` as
+//!   `client_secret`, and the source is rebuilt ([`Ingest::reload`]) after it changes. Google
+//!   needs one; Microsoft Entra public clients (the recommended "Mobile and desktop" platform)
+//!   need none, so for Microsoft it is optional and only set for confidential app
+//!   registrations. `client_secret` in `sources.add`/`update` settings is refused, for every
+//!   kind.
+//!
+//! OAuth access/refresh tokens from `sources.auth.begin` live under `oauth:<id>`, including
+//! the optional interactive flows of the `Password` kinds GitHub (device flow, settings carry
+//! a `client_id`; no client secret) and Linear (PKCE, settings carry a `client_id`). Linear's
+//! client secret is optional with PKCE; those connectors read `oauth_client_secret:<id>`
+//! themselves when it is present, so the injection here is not needed for them.
 //!
 //! Every account is written through [`Ingest::set_secret`], which records the account *name* in
 //! `sources.toml`, so removing the source deletes it (the daemon also deletes
@@ -29,13 +39,28 @@ pub(crate) fn client_secret_account(id: &SourceId) -> String {
     format!("oauth_client_secret:{id}")
 }
 
-/// Every connector kind shipped in M1: files, obsidian, gmail, gcal, imap, caldav.
+/// Kinds whose optional settings fields may arrive blank from a form (see
+/// [`reconcile_settings`]).
+const FORM_NORMALISED_KINDS: &[&str] = &[
+    "outlook",
+    "outlook-calendar",
+    "onedrive",
+    nugget_connector_saas::SLACK_KIND,
+    nugget_connector_saas::NOTION_KIND,
+    nugget_connector_saas::GITHUB_KIND,
+    nugget_connector_saas::LINEAR_KIND,
+];
+
+/// Every connector kind shipped: files, obsidian, gmail, gcal, imap, caldav (M1); outlook,
+/// outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS).
 pub(crate) fn registry() -> Registry {
     let mut r = Registry::new();
     nugget_connector_files::register(&mut r);
     nugget_connector_google::register(&mut r);
     r.register(Arc::new(nugget_connector_imap::ImapFactory::new()));
     r.register(Arc::new(nugget_connector_caldav::CalDavFactory::new()));
+    nugget_connector_microsoft::register(&mut r);
+    nugget_connector_saas::register(&mut r);
     r
 }
 
@@ -53,6 +78,10 @@ pub(crate) fn auth_kind(ingest: &Ingest, kind: &str) -> Option<AuthKind> {
 /// - `files`: an empty `include` list means "the default types" (the desktop sends `[]` when
 ///   the field is left blank; the connector requires a non-empty list or none), so it is
 ///   dropped. An empty `exclude` is fine.
+/// - Microsoft 365 and SaaS kinds: top-level fields that are `null`, blank strings or empty
+///   arrays are dropped, so blank form fields fall back to the connector's default (their
+///   schemas reject an empty `client_id`, `tenant` or `token_env` and an empty Linear
+///   `include`; an empty list elsewhere means the same as no list).
 /// - Any kind: a non-null `client_secret` is refused (use `sources.secret.set`).
 pub(crate) fn reconcile_settings(kind: &str, settings: Value) -> Result<Value> {
     let mut settings = settings;
@@ -69,6 +98,14 @@ pub(crate) fn reconcile_settings(kind: &str, settings: Value) -> Result<Value> {
                 .is_some_and(|v| v.as_array().is_some_and(Vec::is_empty) || v.is_null())
         {
             map.remove("include");
+        }
+        if FORM_NORMALISED_KINDS.contains(&kind) {
+            map.retain(|_, v| match v {
+                Value::Null => false,
+                Value::String(s) => !s.trim().is_empty(),
+                Value::Array(a) => !a.is_empty(),
+                _ => true,
+            });
         }
     }
     Ok(settings)
@@ -126,22 +163,52 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn registers_every_m1_kind() {
+    fn registers_every_shipped_kind() {
         let r = registry();
         let mut kinds: Vec<&str> = r.kinds().iter().map(|k| k.kind).collect();
         kinds.sort_unstable();
         assert_eq!(
             kinds,
-            ["caldav", "files", "gcal", "gmail", "imap", "obsidian"]
+            [
+                "caldav",
+                "files",
+                "gcal",
+                "github",
+                "gmail",
+                "imap",
+                "linear",
+                "notion",
+                "obsidian",
+                "onedrive",
+                "outlook",
+                "outlook-calendar",
+                "slack",
+            ]
         );
+        // OAuth kinds get their client secret injected; the SaaS kinds take a pasted token.
         let mut oauth = oauth_kinds(&r);
         oauth.sort();
-        assert_eq!(oauth, ["gcal", "gmail"]);
+        assert_eq!(
+            oauth,
+            ["gcal", "gmail", "onedrive", "outlook", "outlook-calendar"]
+        );
+        for kind in FORM_NORMALISED_KINDS {
+            assert!(r.get(kind).is_ok(), "{kind}");
+        }
+        for kind in ["slack", "notion", "github", "linear"] {
+            assert_eq!(
+                r.get(kind).unwrap().info().auth,
+                AuthKind::Password,
+                "{kind}"
+            );
+        }
     }
 
-    /// The settings the desktop wizard sends validate against each connector.
+    const ENTRA_APP: &str = "00000000-1111-2222-3333-444444444444";
+
+    /// The settings the desktop wizard sends validate against each connector, for every kind.
     #[test]
-    fn desktop_wizard_settings_validate() {
+    fn desktop_wizard_settings_validate_for_every_kind() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_str().unwrap().to_string();
         let r = registry();
@@ -175,7 +242,68 @@ mod tests {
                 "caldav",
                 json!({"url": "https://caldav.example.com/", "username": "me"}),
             ),
+            // Microsoft 365: `{client_id, tenant?}` plus kind-specific optional fields; blank
+            // strings and empty lists from untouched form fields are dropped.
+            ("outlook", json!({"client_id": ENTRA_APP})),
+            (
+                "outlook",
+                json!({"client_id": ENTRA_APP, "tenant": "", "account_hint": "", "folders": []}),
+            ),
+            (
+                "outlook",
+                json!({"client_id": ENTRA_APP, "tenant": "organizations", "account_hint": "me@contoso.com", "folders": ["inbox", "archive"], "window_days": 90}),
+            ),
+            ("outlook-calendar", json!({"client_id": ENTRA_APP})),
+            (
+                "outlook-calendar",
+                json!({"client_id": ENTRA_APP, "tenant": "contoso.onmicrosoft.com", "past_days": 30, "future_days": 0}),
+            ),
+            (
+                "onedrive",
+                json!({"client_id": ENTRA_APP, "tenant": " ", "include_folders": [], "exclude_folders": []}),
+            ),
+            (
+                "onedrive",
+                json!({"client_id": ENTRA_APP, "tenant": "consumers", "include_folders": ["/Documents"], "exclude_folders": ["/Documents/Private"], "max_file_mb": 50}),
+            ),
+            // SaaS: `{}` or optional fields; the token goes through sources.secret.set.
+            ("slack", json!({})),
+            (
+                "slack",
+                json!({"token_env": "", "conversations": [], "include_dms": true}),
+            ),
+            (
+                "slack",
+                json!({"conversations": ["general", "C0123"], "include_dms": false, "window_days": 30}),
+            ),
+            ("notion", json!({})),
+            (
+                "notion",
+                json!({"token_env": "", "include_databases": false, "max_pages": 100}),
+            ),
+            ("github", json!({})),
+            (
+                "github",
+                json!({"client_id": "", "repos": [], "token_env": ""}),
+            ),
+            ("github", json!({"client_id": "Iv1.0123456789abcdef"})),
+            (
+                "github",
+                json!({"repos": ["octo/hello"], "all_activity": true, "include_discussions": false}),
+            ),
+            ("linear", json!({})),
+            (
+                "linear",
+                json!({"client_id": "", "include": [], "teams": [], "token_env": null}),
+            ),
+            ("linear", json!({"client_id": "0123abcd"})),
+            (
+                "linear",
+                json!({"include": ["assigned", "created"], "teams": ["ENG"], "window_days": 60}),
+            ),
         ];
+        let kinds: std::collections::BTreeSet<&str> = cases.iter().map(|(k, _)| *k).collect();
+        assert_eq!(kinds.len(), r.kinds().len(), "every kind has a case");
         for (kind, settings) in cases {
             let s = reconcile_settings(kind, settings.clone()).unwrap();
             r.get(kind)
@@ -183,6 +311,33 @@ mod tests {
                 .validate(&s)
                 .unwrap_or_else(|e| panic!("{kind} {settings}: {e}"));
         }
+    }
+
+    #[test]
+    fn blank_form_fields_are_dropped_only_for_the_new_kinds() {
+        assert_eq!(
+            reconcile_settings(
+                "outlook",
+                json!({"client_id": "x", "tenant": "", "folders": [], "window_days": 30, "account_hint": null})
+            )
+            .unwrap(),
+            json!({"client_id": "x", "window_days": 30})
+        );
+        assert_eq!(
+            reconcile_settings("linear", json!({"include": [], "client_id": "  "})).unwrap(),
+            json!({})
+        );
+        // Older kinds keep what they were sent (e.g. an empty `exclude`).
+        assert_eq!(
+            reconcile_settings("caldav", json!({"url": "u", "username": ""})).unwrap(),
+            json!({"url": "u", "username": ""})
+        );
+        // `client_secret` is refused for the new kinds too.
+        assert!(
+            reconcile_settings("onedrive", json!({"client_id": "x", "client_secret": "s"}))
+                .is_err()
+        );
+        assert!(reconcile_settings("linear", json!({"client_secret": "s"})).is_err());
     }
 
     #[test]

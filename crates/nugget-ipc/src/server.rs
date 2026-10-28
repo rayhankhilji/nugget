@@ -24,6 +24,36 @@ use crate::wire::{self, EncodeError, Incoming, JSONRPC, OutRequest};
 /// Outgoing messages queued per connection before [`Notifier::send`] applies backpressure.
 const OUTBOX: usize = 1024;
 
+/// Default for [`ServerOptions::max_in_flight`].
+pub const DEFAULT_MAX_IN_FLIGHT: usize = 64;
+
+/// Tuning for [`serve_with`]. [`serve`] and [`serve_until`] use [`ServerOptions::default`].
+#[derive(Debug, Clone)]
+pub struct ServerOptions {
+    max_in_flight: usize,
+}
+
+impl Default for ServerOptions {
+    fn default() -> Self {
+        Self {
+            max_in_flight: DEFAULT_MAX_IN_FLIGHT,
+        }
+    }
+}
+
+impl ServerOptions {
+    /// Cap on requests one connection may have running at once (default
+    /// [`DEFAULT_MAX_IN_FLIGHT`]; 0 is treated as 1). At the cap the server stops reading
+    /// from that connection until a call finishes, so the client's further requests wait in
+    /// the socket buffer instead of piling up as tasks. A handler must therefore not wait
+    /// for a later request on its own connection.
+    #[must_use]
+    pub fn max_in_flight(mut self, max: usize) -> Self {
+        self.max_in_flight = max.max(1);
+        self
+    }
+}
+
 /// Handles every request on every connection. One `call` runs per request, concurrently.
 #[async_trait]
 pub trait Handler: Send + Sync + 'static {
@@ -100,6 +130,22 @@ pub async fn serve_until<F>(
 where
     F: Future<Output = ()>,
 {
+    serve_with(listener, handler, ServerOptions::default(), shutdown).await
+}
+
+/// [`serve_until`] with explicit [`ServerOptions`].
+///
+/// On Unix every accepted connection whose peer is not running as this process's effective
+/// user is logged and dropped before anything is read from it.
+pub async fn serve_with<F>(
+    listener: Listener,
+    handler: Arc<dyn Handler>,
+    options: ServerOptions,
+    shutdown: F,
+) -> io::Result<()>
+where
+    F: Future<Output = ()>,
+{
     let mut connections = JoinSet::new();
     let mut consecutive_errors = 0u32;
     tokio::pin!(shutdown);
@@ -109,7 +155,15 @@ where
             accepted = listener.accept() => match accepted {
                 Ok(stream) => {
                     consecutive_errors = 0;
-                    connections.spawn(handle_connection(stream, handler.clone()));
+                    if let Err(e) = crate::transport::verify_client(&stream) {
+                        tracing::warn!(error = %e, "rejected connection");
+                        continue;
+                    }
+                    connections.spawn(handle_connection(
+                        stream,
+                        handler.clone(),
+                        options.max_in_flight,
+                    ));
                 }
                 Err(e) => {
                     consecutive_errors += 1;
@@ -128,7 +182,7 @@ where
     Ok(())
 }
 
-async fn handle_connection(stream: Stream, handler: Arc<dyn Handler>) {
+async fn handle_connection(stream: Stream, handler: Arc<dyn Handler>, max_in_flight: usize) {
     let (read, write) = tokio::io::split(stream);
     let (tx, rx) = mpsc::channel::<String>(OUTBOX);
     let closed = CancellationToken::new();
@@ -146,7 +200,8 @@ async fn handle_connection(stream: Stream, handler: Arc<dyn Handler>) {
 
     loop {
         tokio::select! {
-            line = lines.next() => match line {
+            // Backpressure: at the cap, leave further requests unread until a call finishes.
+            line = lines.next(), if calls.len() < max_in_flight => match line {
                 Some(Ok(line)) => {
                     if line.trim().is_empty() {
                         continue;

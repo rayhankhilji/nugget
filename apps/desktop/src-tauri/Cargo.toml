@@ -15,6 +15,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 nugget-core.workspace = true
 nugget-ipc.workspace = true
+# W1 Double Tap: the global trigger and the accessibility read/insert (`src/doubletap/`).
+nugget-hotkey.workspace = true
+nugget-a11y.workspace = true
+nugget-policy.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

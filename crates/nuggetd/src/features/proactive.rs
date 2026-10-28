@@ -32,16 +32,13 @@ use nugget_core::ids::SourceId;
 use nugget_core::ipc::{
     self, ActionArtifact, BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest,
     CardPreview, CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest,
-    ProactiveMetrics, ReminderView, method, notification,
+    ProactiveMetrics, ReminderView, proactive_method, proactive_notification,
 };
-use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
 use nugget_infer::{Provider, Router};
 use nugget_ingest::IngestEvent;
 use nugget_ipc::{Notifier, RpcError, parse_params, to_result};
-use nugget_policy::{
-    ActionDescriptor, Decision, JsonFilePolicyStore, KillSwitch, PolicyEngine, PolicyGate,
-};
+use nugget_policy::{ActionDescriptor, Decision, KillSwitch, PolicyGate};
 use nugget_proactive::{
     APPROVAL_KEY_LEN, Action, ActionRunner, CardState, Enrichment, ExecOutcome, Judge, JudgeInput,
     LlmJudge, PreparedAction, Proactive, RefreshReport, new_approval_key,
@@ -54,6 +51,7 @@ use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use self::settings::{Debounce, JudgeMode, Settings};
+use super::policy::Safety;
 use super::{Feature, FeatureContext};
 use crate::daemon::{State, blocking};
 use crate::hub::Hub;
@@ -72,25 +70,27 @@ const APPROVAL_KEY_KEY: &str = "proactive:approval_key";
 const CLOCK_TICK: Duration = Duration::from_secs(60);
 
 const METHODS: &[&str] = &[
-    method::CARDS_LIST,
-    method::CARDS_FEEDBACK,
-    method::CARDS_PREVIEW,
-    method::CARDS_EXECUTE,
-    method::BRIEF_GET,
-    method::PROACTIVE_METRICS,
-    method::PROACTIVE_REFRESH,
-    method::REMINDERS_LIST,
+    proactive_method::CARDS_LIST,
+    proactive_method::CARDS_FEEDBACK,
+    proactive_method::CARDS_PREVIEW,
+    proactive_method::CARDS_EXECUTE,
+    proactive_method::BRIEF_GET,
+    proactive_method::PROACTIVE_METRICS,
+    proactive_method::PROACTIVE_REFRESH,
+    proactive_method::REMINDERS_LIST,
 ];
 
-pub(crate) async fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
+pub(crate) async fn start(
+    cx: &FeatureContext<'_>,
+    safety: Option<&Arc<Safety>>,
+) -> Result<Arc<dyn Feature>> {
     let state = cx.state.clone();
     let table = cx.config.proactive.clone();
     let settings = blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
 
     let exec = exec::Exec::new(&state)?;
     let executors = exec.executors();
-    let paths = state.paths.clone();
-    let policy = blocking(move || Ok(policy_gate(&paths))).await?;
+    let policy = policy_gate(safety);
     let store = state.store.clone();
     let key = blocking(move || approval_key(&store)).await?;
     let runner = ActionRunner::new(policy, executors)
@@ -147,18 +147,14 @@ fn approval_key(store: &Store) -> Result<[u8; APPROVAL_KEY_LEN]> {
     Ok(key)
 }
 
-pub(crate) fn policy_gate(paths: &Paths) -> Arc<dyn PolicyGate> {
-    let path = paths.config.join("policy.json");
-    let store = Arc::new(JsonFilePolicyStore::new(&path));
-    match PolicyEngine::load(store, PolicyEngine::builder()) {
-        Ok(engine) => Arc::new(engine),
-        Err(e) => {
-            tracing::error!(path = %path.display(), error = %e, "cannot read the action policy; proactive actions are denied");
-            Arc::new(DenyAll(format!(
-                "the action policy at {} cannot be read: {e}",
-                path.display()
-            )))
-        }
+/// The daemon's shared safety policy (`features::policy`), which also holds the kill switch and
+/// the action log. Without it (it failed to start), every proactive action is denied.
+pub(crate) fn policy_gate(safety: Option<&Arc<Safety>>) -> Arc<dyn PolicyGate> {
+    match safety {
+        Some(s) => s.engine.clone(),
+        None => Arc::new(DenyAll(
+            "the safety policy did not start; proactive actions are disabled".into(),
+        )),
     }
 }
 
@@ -397,7 +393,7 @@ impl Core {
 
     fn announce(&self, changed: &CardsChanged) {
         self.out.broadcast(
-            notification::CARDS_CHANGED,
+            proactive_notification::CARDS_CHANGED,
             serde_json::to_value(changed).unwrap_or(Value::Null),
         );
     }
@@ -623,7 +619,7 @@ impl Core {
             Ok(due) => {
                 for r in &due {
                     self.out.broadcast(
-                        notification::REMINDER_DUE,
+                        proactive_notification::REMINDER_DUE,
                         serde_json::to_value(r).unwrap_or(Value::Null),
                     );
                 }
@@ -664,10 +660,13 @@ impl Core {
         self.refresh_logged(now).await;
         match self.brief(now).await {
             Ok(view) => {
-                self.out.broadcast(
-                    notification::BRIEF_READY,
-                    serde_json::to_value(&view).unwrap_or(Value::Null),
-                );
+                // Nothing to say (e.g. a fresh install): no notification, but today counts.
+                if worth_announcing(&view) {
+                    self.out.broadcast(
+                        proactive_notification::BRIEF_READY,
+                        serde_json::to_value(&view).unwrap_or(Value::Null),
+                    );
+                }
                 let today = self.settings.local_date(now);
                 if let Err(e) = self.set_brief_mark(today).await {
                     tracing::warn!(error = %e, "cannot record that the brief fired");
@@ -681,6 +680,14 @@ impl Core {
             }
         }
     }
+}
+
+/// Whether a brief has anything to tell the user.
+fn worth_announcing(view: &BriefView) -> bool {
+    !(view.top.is_empty()
+        && view.meetings.is_empty()
+        && view.overdue.is_empty()
+        && view.renewals.is_empty())
 }
 
 /// Whether a refresh changed what the user sees.
@@ -715,7 +722,9 @@ fn spawn_background(state: &Arc<State>, core: &Arc<Core>) {
     state
         .tasks
         .spawn(trigger_loop(core.clone(), rx, STARTUP_DELAY, stop.clone()));
-    state.tasks.spawn(clock_loop(core.clone(), stop));
+    state
+        .tasks
+        .spawn(clock_loop(core.clone(), STARTUP_DELAY, stop));
 }
 
 fn poke(tx: &mpsc::Sender<()>) {
@@ -802,12 +811,19 @@ async fn trigger_loop(
     }
 }
 
-/// The morning brief and due reminders.
-async fn clock_loop(core: Arc<Core>, stop: CancellationToken) {
+/// The morning brief and due reminders. A brief that came due while the daemon was off waits
+/// for `startup` (the first refresh), so it is composed from fresh cards.
+async fn clock_loop(core: Arc<Core>, startup: Duration, stop: CancellationToken) {
+    let brief_from = Instant::now() + startup;
     loop {
         let now = OffsetDateTime::now_utc();
         core.fire_due_reminders(now).await;
-        let next = core.brief_tick(now).await;
+        let next = if Instant::now() >= brief_from {
+            core.brief_tick(now).await
+        } else {
+            now + time::Duration::try_from(brief_from - Instant::now())
+                .unwrap_or(time::Duration::ZERO)
+        };
         let left = next - OffsetDateTime::now_utc();
         let wait = Duration::try_from(left)
             .unwrap_or(Duration::ZERO)
@@ -851,17 +867,23 @@ impl Core {
     ) -> Result<Value, RpcError> {
         let params = if params.is_null() { json!({}) } else { params };
         match name {
-            method::CARDS_LIST => to_result(self.list(parse_params(params)?).await?),
-            method::CARDS_FEEDBACK => to_result(self.feedback(parse_params(params)?, now).await?),
-            method::CARDS_PREVIEW => to_result(self.preview(parse_params(params)?, now).await?),
-            method::CARDS_EXECUTE => to_result(self.execute(parse_params(params)?, now).await?),
-            method::BRIEF_GET => to_result(self.brief(now).await?),
-            method::PROACTIVE_METRICS => to_result(self.metrics().await?),
-            method::PROACTIVE_REFRESH => {
+            proactive_method::CARDS_LIST => to_result(self.list(parse_params(params)?).await?),
+            proactive_method::CARDS_FEEDBACK => {
+                to_result(self.feedback(parse_params(params)?, now).await?)
+            }
+            proactive_method::CARDS_PREVIEW => {
+                to_result(self.preview(parse_params(params)?, now).await?)
+            }
+            proactive_method::CARDS_EXECUTE => {
+                to_result(self.execute(parse_params(params)?, now).await?)
+            }
+            proactive_method::BRIEF_GET => to_result(self.brief(now).await?),
+            proactive_method::PROACTIVE_METRICS => to_result(self.metrics().await?),
+            proactive_method::PROACTIVE_REFRESH => {
                 self.require_enabled()?;
                 to_result(self.refresh(now).await?)
             }
-            method::REMINDERS_LIST => to_result(self.reminders().await?),
+            proactive_method::REMINDERS_LIST => to_result(self.reminders().await?),
             other => Err(RpcError::method_not_found(other)),
         }
     }
@@ -871,6 +893,7 @@ impl Core {
 mod tests {
     use std::collections::BTreeMap;
 
+    use nugget_policy::PolicyEngine;
     use nugget_proactive::cards::STATE_VERSION;
     use nugget_proactive::{
         CandidateKind, Card, CardStore, Executors, Features, MemCardStore, ProactiveState,
@@ -1189,7 +1212,7 @@ mod tests {
         let f = fixture("", &["a", "b"]);
         let list: CardsList = serde_json::from_value(
             f.core
-                .call(method::CARDS_LIST, Value::Null, t0())
+                .call(proactive_method::CARDS_LIST, Value::Null, t0())
                 .await
                 .unwrap(),
         )
@@ -1200,9 +1223,9 @@ mod tests {
         // seen: announced once, not again for a card already seen.
         let v = f.core.feedback(feedback("a", "seen"), t0()).await.unwrap();
         assert_eq!(v.state, "seen");
-        assert_eq!(f.out.take(notification::CARDS_CHANGED).len(), 1);
+        assert_eq!(f.out.take(proactive_notification::CARDS_CHANGED).len(), 1);
         f.core.feedback(feedback("a", "seen"), t0()).await.unwrap();
-        assert!(f.out.take(notification::CARDS_CHANGED).is_empty());
+        assert!(f.out.take(proactive_notification::CARDS_CHANGED).is_empty());
 
         // snooze without `until`: tomorrow at the brief time.
         let v = f
@@ -1216,13 +1239,14 @@ mod tests {
             Some(f.core.settings.default_snooze_until(t0()))
         );
         let changed: CardsChanged =
-            serde_json::from_value(f.out.take(notification::CARDS_CHANGED).remove(0)).unwrap();
+            serde_json::from_value(f.out.take(proactive_notification::CARDS_CHANGED).remove(0))
+                .unwrap();
         assert_eq!((changed.reason.as_str(), changed.open), ("feedback", 1));
 
         let mut d = feedback("b", "dismiss");
         d.reason = Some("not_relevant".into());
         assert_eq!(f.core.feedback(d, t0()).await.unwrap().state, "dismissed");
-        assert_eq!(f.out.take(notification::CARDS_CHANGED).len(), 1);
+        assert_eq!(f.out.take(proactive_notification::CARDS_CHANGED).len(), 1);
 
         // Closed cards only with include_closed.
         let list = f.core.list(CardsListRequest::default()).await.unwrap();
@@ -1253,7 +1277,7 @@ mod tests {
             code(
                 f.core
                     .call(
-                        method::CARDS_FEEDBACK,
+                        proactive_method::CARDS_FEEDBACK,
                         json!({"card_id": "zzz", "feedback": "accept"}),
                         t0()
                     )
@@ -1320,7 +1344,8 @@ mod tests {
         assert_eq!(r.artifact.unwrap().kind, "reminder");
         assert_eq!(f.exec.created.lock().unwrap().len(), 1);
         let changed: CardsChanged =
-            serde_json::from_value(f.out.take(notification::CARDS_CHANGED).remove(0)).unwrap();
+            serde_json::from_value(f.out.take(proactive_notification::CARDS_CHANGED).remove(0))
+                .unwrap();
         assert_eq!(changed.reason, "execute");
         let err = f
             .core
@@ -1336,7 +1361,7 @@ mod tests {
             code(
                 f.core
                     .call(
-                        method::CARDS_EXECUTE,
+                        proactive_method::CARDS_EXECUTE,
                         json!({"card_id": "a", "action": 0, "digest": "x"}),
                         t0()
                     )
@@ -1401,13 +1426,13 @@ mod tests {
         let f = fixture("", &["a"]);
         let c = f.core.refresh(t0()).await.unwrap();
         assert_eq!((c.reason.as_str(), c.resolved, c.open), ("refresh", 1, 0));
-        assert_eq!(f.out.take(notification::CARDS_CHANGED).len(), 1);
+        assert_eq!(f.out.take(proactive_notification::CARDS_CHANGED).len(), 1);
         assert_eq!(f.core.refreshes.load(Ordering::Relaxed), 1);
         let list = f.core.list(CardsListRequest::default()).await.unwrap();
         assert_eq!(list.last_refresh, Some(t0()));
         // Nothing changed the second time.
         f.core.refresh(t0()).await.unwrap();
-        assert!(f.out.take(notification::CARDS_CHANGED).is_empty());
+        assert!(f.out.take(proactive_notification::CARDS_CHANGED).is_empty());
     }
 
     #[tokio::test]
@@ -1423,7 +1448,7 @@ mod tests {
         assert_eq!(
             code(
                 f.core
-                    .call(method::PROACTIVE_REFRESH, Value::Null, t0())
+                    .call(proactive_method::PROACTIVE_REFRESH, Value::Null, t0())
                     .await
             ),
             nugget_ipc::code::UNSUPPORTED
@@ -1431,31 +1456,51 @@ mod tests {
         let b = f.core.brief(t0()).await.unwrap();
         assert_eq!((b.date.as_str(), b.open_cards), ("2026-03-10", 0));
         f.core
-            .call(method::PROACTIVE_METRICS, Value::Null, t0())
+            .call(proactive_method::PROACTIVE_METRICS, Value::Null, t0())
             .await
             .unwrap();
         f.core
-            .call(method::REMINDERS_LIST, Value::Null, t0())
+            .call(proactive_method::REMINDERS_LIST, Value::Null, t0())
             .await
             .unwrap();
     }
 
     #[tokio::test]
+    async fn an_empty_brief_is_not_announced() {
+        let f = fixture("brief_time = \"08:00\"", &[]);
+        let next = f.core.brief_tick(t0()).await;
+        assert!(f.out.take(proactive_notification::BRIEF_READY).is_empty());
+        // Today still counts as done.
+        assert_eq!(next, t0() + time::Duration::hours(23));
+
+        let mut view = f.core.brief(t0()).await.unwrap();
+        assert!(!worth_announcing(&view));
+        view.overdue.push(ipc::BriefCardView {
+            card_id: "a".into(),
+            kind: "commitment".into(),
+            title: "Send the deck".into(),
+            summary: String::new(),
+            due: None,
+            rank: 0.9,
+            factors: Vec::new(),
+            actions: Vec::new(),
+        });
+        assert!(worth_announcing(&view));
+    }
+
+    #[tokio::test]
     async fn brief_fires_once_a_day_and_reminders_when_due() {
         let f = fixture("brief_time = \"08:00\"", &[]);
-        // 09:00 UTC, not fired yet: fires now and schedules tomorrow.
+        // 09:00 UTC, not fired yet: fires now (empty here, so not announced; see
+        // `an_empty_brief_is_not_announced`) and schedules tomorrow.
         let next = f.core.brief_tick(t0()).await;
-        let briefs = f.out.take(notification::BRIEF_READY);
-        assert_eq!(briefs.len(), 1);
-        let b: BriefView = serde_json::from_value(briefs[0].clone()).unwrap();
-        assert_eq!(b.date, "2026-03-10");
         assert_eq!(next, t0() + time::Duration::hours(23));
         // The mark persists: a second tick (or a restart) the same day does not fire.
         assert_eq!(
             f.core.brief_tick(t0() + time::Duration::hours(1)).await,
             next
         );
-        assert!(f.out.take(notification::BRIEF_READY).is_empty());
+        assert!(f.out.take(proactive_notification::BRIEF_READY).is_empty());
 
         // A reminder created by an executed action fires when due, once.
         f.exec.created.lock().unwrap().push(Reminder {
@@ -1467,7 +1512,7 @@ mod tests {
         assert_eq!(f.core.reminders().await.unwrap().len(), 1);
         let later = t0() + time::Duration::minutes(6);
         assert_eq!(f.core.fire_due_reminders(later).await, 1);
-        assert_eq!(f.out.take(notification::REMINDER_DUE).len(), 1);
+        assert_eq!(f.out.take(proactive_notification::REMINDER_DUE).len(), 1);
         assert_eq!(f.core.fire_due_reminders(later).await, 0);
     }
 
@@ -1528,16 +1573,14 @@ mod tests {
     }
 
     #[test]
-    fn unreadable_policy_fails_closed() {
-        let dir = tempfile::tempdir().unwrap();
-        let paths = Paths::rooted(dir.path().to_path_buf());
-        std::fs::create_dir_all(&paths.config).unwrap();
-        // No file: the engine with built-in defaults.
-        let gate = policy_gate(&paths);
+    fn policy_is_the_shared_safety_or_denies() {
         let d = reminder_action().descriptor("t");
+        assert!(matches!(policy_gate(None).evaluate(&d), Decision::Deny(_)));
+        let dir = tempfile::tempdir().unwrap();
+        let safety = Safety::open_in(dir.path()).unwrap();
+        let gate = policy_gate(Some(&safety));
         assert!(!matches!(gate.evaluate(&d), Decision::Deny(_)));
-        std::fs::write(paths.config.join("policy.json"), b"{not json").unwrap();
-        let gate = policy_gate(&paths);
-        assert!(matches!(gate.evaluate(&d), Decision::Deny(_)));
+        safety.kill.halt();
+        assert!(gate.halted());
     }
 }

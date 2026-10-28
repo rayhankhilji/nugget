@@ -19,6 +19,11 @@ use crate::{Channel, StyleStats, VoiceHints, VoiceQuery, VoiceSource};
 
 /// Cursor key under which the profile records its last build (`Store::get_cursor`).
 pub const VOICE_CURSOR_SOURCE: &str = "nugget-voice:profile";
+/// Cursor key under which [`VoiceProfile::save`] keeps the profile snapshot. The snapshot holds
+/// the user's own message text, so it lives only inside the encrypted store.
+pub const VOICE_SNAPSHOT_SOURCE: &str = "nugget-voice:snapshot";
+/// Snapshot format version; snapshots of another version are ignored (rebuilt).
+const SNAPSHOT_VERSION: u32 = 1;
 
 /// Folder names (last path segment, lowercase) that hold sent mail.
 const SENT_FOLDERS: &[&str] = &[
@@ -110,7 +115,15 @@ pub struct RefreshReport {
     pub samples: u64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+impl RefreshReport {
+    /// Whether the refresh changed the profile (items were read or dropped), i.e. whether a
+    /// saved snapshot is now out of date and [`VoiceProfile::save`] should be called.
+    pub fn changed(&self) -> bool {
+        self.fetched > 0 || self.removed > 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 enum Origin {
     Mail {
         from: Option<String>,
@@ -122,7 +135,7 @@ enum Origin {
     Feedback(Channel),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Sample {
     item: ItemRef,
     channel: Channel,
@@ -130,14 +143,17 @@ struct Sample {
     recipients: Vec<String>,
     recipient_names: Vec<String>,
     text: String,
+    #[serde(with = "time::serde::rfc3339::option", default)]
     at: Option<OffsetDateTime>,
     sensitive: bool,
     message_id: Option<String>,
     features: Features,
+    /// Recomputed from `text` when a snapshot is loaded.
+    #[serde(skip)]
     terms: HashMap<String, f32>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Record {
     origin: Origin,
     sample: Option<Sample>,
@@ -159,6 +175,33 @@ pub struct VoiceProfile {
     channels: HashMap<Channel, StyleStats>,
     recipients: HashMap<String, StyleStats>,
     samples: u64,
+    last_built: Option<OffsetDateTime>,
+    last_report: RefreshReport,
+}
+
+/// What [`VoiceProfile::save`] writes (borrowed).
+#[derive(Serialize)]
+struct SnapshotRef<'a> {
+    v: u32,
+    configured: &'a MeIdentity,
+    config: &'a VoiceConfig,
+    me: &'a MeIdentity,
+    seen: &'a HashMap<SourceId, HashMap<ItemKey, Option<String>>>,
+    records: Vec<(&'a ItemRef, &'a Record)>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    last_built: Option<OffsetDateTime>,
+}
+
+/// What [`VoiceProfile::load`] reads.
+#[derive(Deserialize)]
+struct Snapshot {
+    v: u32,
+    configured: MeIdentity,
+    config: VoiceConfig,
+    me: MeIdentity,
+    seen: HashMap<SourceId, HashMap<ItemKey, Option<String>>>,
+    records: Vec<(ItemRef, Record)>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
     last_built: Option<OffsetDateTime>,
 }
 
@@ -188,9 +231,110 @@ impl VoiceProfile {
             recipients: HashMap::new(),
             samples: 0,
             last_built: None,
+            last_report: RefreshReport::default(),
         };
         p.refresh()?;
         Ok(p)
+    }
+
+    /// Write a snapshot of the profile (identity, configuration, the incremental cursor and
+    /// every record with its sample text and features) into the encrypted store, under the
+    /// cursor key [`VOICE_SNAPSHOT_SOURCE`]. It is never written to a plain file.
+    ///
+    /// [`VoiceProfile::refresh`] does not save: call this after a refresh whose
+    /// [`RefreshReport::changed`] is true (it takes `&self`, so a read lock is enough).
+    pub fn save(&self) -> Result<()> {
+        let mut records: Vec<(&ItemRef, &Record)> = self.records.iter().collect();
+        records.sort_by(|a, b| {
+            a.0.source
+                .cmp(&b.0.source)
+                .then_with(|| a.0.key.cmp(&b.0.key))
+        });
+        let snap = SnapshotRef {
+            v: SNAPSHOT_VERSION,
+            configured: &self.configured,
+            config: &self.config,
+            me: &self.me,
+            seen: &self.seen,
+            records,
+            last_built: self.last_built,
+        };
+        let value = serde_json::to_value(&snap)?;
+        self.store
+            .set_cursor(&SourceId::new(VOICE_SNAPSHOT_SOURCE), value)
+    }
+
+    /// Load the profile saved by [`VoiceProfile::save`], as it was then (call
+    /// [`VoiceProfile::refresh`] to catch up with the store). `None` when there is no snapshot,
+    /// or it is unreadable or stale: another snapshot version, or saved for a different
+    /// configured identity `me` or `config`.
+    pub fn load(store: &Store, me: MeIdentity, config: VoiceConfig) -> Result<Option<Self>> {
+        let Some(value) = store.get_cursor(&SourceId::new(VOICE_SNAPSHOT_SOURCE))? else {
+            return Ok(None);
+        };
+        if value.get("v").and_then(Value::as_u64) != Some(u64::from(SNAPSHOT_VERSION)) {
+            tracing::info!("voice: profile snapshot has another version; rebuilding");
+            return Ok(None);
+        }
+        let snap: Snapshot = match serde_json::from_value(value) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "voice: unreadable profile snapshot; rebuilding");
+                return Ok(None);
+            }
+        };
+        if snap.v != SNAPSHOT_VERSION || snap.configured != me || snap.config != config {
+            tracing::info!("voice: identity or settings changed since the snapshot; rebuilding");
+            return Ok(None);
+        }
+        let records = snap
+            .records
+            .into_iter()
+            .map(|(r, mut rec)| {
+                if let Some(s) = rec.sample.as_mut() {
+                    s.terms = text::terms(&s.text);
+                }
+                (r, rec)
+            })
+            .collect();
+        let mut p = Self {
+            store: store.clone(),
+            config: snap.config,
+            configured: snap.configured,
+            me: snap.me,
+            seen: snap.seen,
+            records,
+            overall: StyleStats::default(),
+            channels: HashMap::new(),
+            recipients: HashMap::new(),
+            samples: 0,
+            last_built: snap.last_built,
+            last_report: RefreshReport::default(),
+        };
+        p.recompute();
+        Ok(Some(p))
+    }
+
+    /// The saved profile brought up to date with [`VoiceProfile::refresh`] (only new or changed
+    /// items are read), else a full [`VoiceProfile::build`]. Saves the snapshot when anything
+    /// changed. [`VoiceProfile::last_refresh`] tells what was read.
+    pub fn load_or_build(store: &Store, me: MeIdentity, config: VoiceConfig) -> Result<Self> {
+        if let Some(mut p) = Self::load(store, me.clone(), config.clone())? {
+            let report = p.refresh()?;
+            if report.changed() {
+                p.save()?;
+            }
+            return Ok(p);
+        }
+        let p = Self::build(store, me, config)?;
+        p.save()?;
+        Ok(p)
+    }
+
+    /// What the last [`VoiceProfile::refresh`] (or build) did; all zero after a bare
+    /// [`VoiceProfile::load`].
+    pub fn last_refresh(&self) -> RefreshReport {
+        self.last_report
     }
 
     /// Bring the profile up to date: read only items that are new or whose connector version
@@ -323,6 +467,7 @@ impl VoiceProfile {
 
         self.recompute();
         report.samples = self.samples;
+        self.last_report = report;
         let now = OffsetDateTime::now_utc();
         self.last_built = Some(now);
         self.store.set_cursor(

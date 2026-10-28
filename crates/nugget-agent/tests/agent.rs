@@ -800,3 +800,82 @@ async fn log_failure_stops_the_run_before_acting() {
     assert_eq!(world.increments.load(Ordering::SeqCst), 0);
     assert!(model.requests().is_empty());
 }
+
+/// PA-6: an approved confirmation counts against the task's rate limit; past it the action is
+/// denied even though the user approved it.
+#[tokio::test]
+async fn approvals_count_against_the_rate_limit() {
+    use nugget_policy::{PolicyConfig, PolicyEngine};
+
+    let world = World::new();
+    fn send(id: &'static str, body: &str) -> (&'static str, &'static str, serde_json::Value) {
+        (id, "send_email", json!({"to": "a@b.c", "body": body}))
+    }
+    let model = Scripted::new(vec![
+        turn(vec![send("c1", "one")]),
+        turn(vec![send("c2", "two")]),
+        turn(vec![finish("partial")]),
+    ]);
+    let mut config = PolicyConfig::default();
+    config.rate_limits.insert(RiskClass::Send, 1);
+    let engine = Arc::new(PolicyEngine::new(config));
+    let agent = nugget_agent::Agent::new(
+        nugget_agent::Model::Provider(model.clone()),
+        registry(&world),
+        engine,
+    );
+    let (agent, events) = events(agent, Some(true));
+    let run = agent.run(Task::new("t-rate", "email twice"), cfg()).await;
+    drop(agent);
+    let events = events.await.unwrap();
+
+    // The first was asked and approved, which used up the limit: the second is denied without
+    // asking.
+    let asked = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ConfirmationNeeded { .. }))
+        .count();
+    assert_eq!(asked, 1);
+    assert_eq!(world.sent.lock().unwrap().len(), 1);
+    assert!(matches!(
+        run.actions[0].decision,
+        GateOutcome::Approved { .. }
+    ));
+    match &run.actions[1].decision {
+        GateOutcome::Denied { reason } => {
+            assert!(reason.to_lowercase().contains("rate limit"), "{reason}")
+        }
+        other => panic!("second send was {other:?}"),
+    }
+    assert!(!run.actions[1].executed);
+}
+
+/// PA-6: when the gate refuses to count an approval, the approved action does not run.
+#[tokio::test]
+async fn an_approval_past_the_limit_is_denied() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        turn(vec![(
+            "c1",
+            "send_email",
+            json!({"to": "a@b.c", "body": "hi"}),
+        )]),
+        turn(vec![finish("failure")]),
+    ]);
+    let gate = FakeGate::new().rule("send_email", Decision::Confirm("sends an email".into()));
+    gate.approvals_left
+        .store(0, std::sync::atomic::Ordering::SeqCst);
+    let (agent, events) = events(agent(&model, registry(&world), &gate), Some(true));
+    let run = agent.run(Task::new("t-limit", "email"), cfg()).await;
+    drop(agent);
+    let _ = events.await.unwrap();
+
+    assert!(world.sent.lock().unwrap().is_empty());
+    assert_eq!(gate.approved.lock().unwrap().len(), 1);
+    assert!(matches!(
+        &run.actions[0].decision,
+        GateOutcome::Denied { reason } if reason.contains("rate limit")
+    ));
+    let second = &model.requests()[1];
+    assert!(format!("{:?}", second.messages.last().unwrap()).contains("Denied by policy"));
+}

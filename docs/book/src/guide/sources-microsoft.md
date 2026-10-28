@@ -1,11 +1,5 @@
 # Microsoft 365
 
-> **Status: being wired in (wave W).** The `outlook`, `outlook-calendar` and `onedrive` connectors are
-> implemented and tested in `nugget-connector-microsoft`, but this build of `nuggetd` does not register
-> them yet, so `sources.add` refuses these kinds and the **Sources** page does not offer them. The
-> daemon registration and the desktop wizard are landing in this wave. This page describes how they
-> work once registered.
-
 Nugget talks to Microsoft Graph directly, with **your own app registration** in Microsoft Entra ID (the
 new name for Azure Active Directory). No Nugget server sits in between and no Nugget-owned Microsoft app
 sees your data. It works with work or school accounts (Microsoft 365, Exchange Online) and personal

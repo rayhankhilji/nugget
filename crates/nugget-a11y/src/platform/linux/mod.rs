@@ -10,7 +10,11 @@
 //! - Insertion: `EditableText.DeleteText` + `InsertText`, then the caret is moved after the
 //!   text. Fallback: clipboard + `EditableText.PasteText` (works on Wayland too), else an XTest
 //!   Ctrl+V on X11.
+//! - Computer use (`computer`): apps and windows from the registry, element actions through the
+//!   AT-SPI interfaces, key input (`input`: XTest, else the device event controller).
 
+mod computer;
+mod input;
 mod wayland;
 mod x11;
 
@@ -306,6 +310,7 @@ impl AtspiEl {
         } else {
             None
         };
+        let (disabled, checked, expanded) = computer::extra_states(&role_name, &st);
         let states = States {
             focused: st.contains(State::Focused),
             editable: st.contains(State::Editable) && !st.contains(State::ReadOnly),
@@ -313,6 +318,9 @@ impl AtspiEl {
             multiline,
             selected: st.contains(State::Selected),
             offscreen: !st.contains(State::Showing),
+            disabled,
+            checked,
+            expanded,
         };
         let name = acc.name().ok().filter(|s| !s.trim().is_empty());
         let description = if name.is_none() {
@@ -403,6 +411,14 @@ impl Element for AtspiEl {
 
     fn same(&self, other: &Self) -> bool {
         self.dest == other.dest && self.path == other.path
+    }
+
+    fn actions(&self) -> Vec<crate::computer::UiActionKind> {
+        self.ui_actions()
+    }
+
+    fn perform(&self, action: &crate::computer::UiAction) -> Result<()> {
+        self.ui_perform(action)
     }
 }
 
@@ -666,6 +682,26 @@ impl Platform for AtspiPlatform {
         } else {
             Err(Error::Unsupported("PasteText refused".into()))
         }
+    }
+
+    fn apps(&self) -> Result<Vec<crate::computer::AppEntry>> {
+        self.cu_apps()
+    }
+
+    fn windows(&self) -> Result<Vec<crate::engine::PlatformWindow<AtspiEl>>> {
+        self.cu_windows()
+    }
+
+    fn key_input(&self, input: &crate::computer::KeyInput) -> Result<()> {
+        self.cu_key_input(input)
+    }
+
+    fn open_app(&self, name: &str) -> Result<()> {
+        self.cu_open_app(name)
+    }
+
+    fn screenshot(&self, window: &AtspiEl) -> Result<Option<Vec<u8>>> {
+        self.cu_screenshot(window)
     }
 }
 

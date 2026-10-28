@@ -1,7 +1,7 @@
 //! `Store`: connection lifecycle, encryption, cursors and counts.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 
 use nugget_core::ids::SourceId;
 use nugget_core::{Error, Result};
@@ -15,10 +15,12 @@ use crate::key::{StoreKey, create_private_dir};
 use crate::types::Counts;
 use crate::{schema, vec_ext};
 
-/// Handle to the encrypted store. Cheap to clone; all clones share one connection.
+/// Handle to the encrypted store. Cheap to clone; all clones share its connections.
 ///
-/// Calls are serialized on an internal mutex. M0 traffic (one daemon, light writes) does not
-/// need more; a reader pool can be added behind the same API later.
+/// Writes (and reads inside write transactions) are serialized on one writer connection behind
+/// a mutex. A file-backed store also keeps a small pool of read-only connections, so plain reads
+/// run concurrently with each other and with the writer (WAL); an in-memory store reads through
+/// its writer connection.
 ///
 /// Egress events recorded through [`EgressSink`](nugget_core::egress::EgressSink) are written by
 /// a dedicated thread so async callers never wait on SQLite. Dropping the last clone writes every
@@ -32,11 +34,18 @@ struct Inner {
     db: Arc<Db>,
     /// Owns the ledger writer thread; dropping it drains the queue and joins the thread.
     egress: EgressWriter,
+    /// Audit chain MAC key and head anchor.
+    audit: crate::audit::AuditState,
 }
 
-/// The connection, shared by [`Store`] clones and the egress writer thread.
+/// Read-only connections kept by a file-backed store: the most reads that run at once.
+const READ_POOL_SIZE: usize = 4;
+
+/// The connections, shared by [`Store`] clones and the egress writer thread.
 pub(crate) struct Db {
     conn: Mutex<Connection>,
+    /// `None` for in-memory stores (a second connection would open a different database).
+    readers: Option<ReadPool>,
     encrypted: bool,
 }
 
@@ -46,6 +55,82 @@ impl Db {
         // rolled back when dropped), so a poisoned mutex is safe to reuse.
         let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
         f(&mut conn)
+    }
+
+    /// Run a read on a pooled read-only connection (waiting for a free one), or on the writer
+    /// connection for in-memory stores. Each statement sees every write committed before it
+    /// started. Never call this from inside [`Db::with_conn`]: a read that must see the
+    /// writer's uncommitted changes belongs on the writer connection.
+    pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        match &self.readers {
+            Some(pool) => f(&pool.take()),
+            None => self.with_conn(|c| f(c)),
+        }
+    }
+}
+
+/// Idle read-only connections; a reader takes one and puts it back when done.
+struct ReadPool {
+    idle: Mutex<Vec<Connection>>,
+    returned: Condvar,
+}
+
+impl ReadPool {
+    fn open(path: &Path, key: &StoreKey) -> Result<Self> {
+        let idle = (0..READ_POOL_SIZE)
+            .map(|_| open_reader(path, key))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
+            idle: Mutex::new(idle),
+            returned: Condvar::new(),
+        })
+    }
+
+    fn take(&self) -> PooledConn<'_> {
+        // Poisoning is harmless here: the vector is only pushed to and popped from.
+        let mut idle = self.idle.lock().unwrap_or_else(PoisonError::into_inner);
+        loop {
+            if let Some(conn) = idle.pop() {
+                return PooledConn {
+                    pool: self,
+                    conn: Some(conn),
+                };
+            }
+            idle = self
+                .returned
+                .wait(idle)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+    }
+}
+
+/// A connection borrowed from a [`ReadPool`], returned on drop (also when the read panics: a
+/// read-only connection holds no state worth discarding once its statements are dropped).
+struct PooledConn<'a> {
+    pool: &'a ReadPool,
+    conn: Option<Connection>,
+}
+
+impl std::ops::Deref for PooledConn<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.conn
+            .as_ref()
+            .expect("connection is present until drop")
+    }
+}
+
+impl Drop for PooledConn<'_> {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            self.pool
+                .idle
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(conn);
+            self.pool.returned.notify_one();
+        }
     }
 }
 
@@ -69,49 +154,7 @@ impl Store {
         if let Some(dir) = path.parent() {
             create_private_dir(dir)?;
         }
-        let conn = Connection::open_with_flags(
-            path,
-            OpenFlags::SQLITE_OPEN_READ_WRITE
-                | OpenFlags::SQLITE_OPEN_CREATE
-                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )
-        .db("open store")?;
-
-        // Fail closed if this SQLite has no SQLCipher: `PRAGMA key` would silently do nothing.
-        let cipher: Option<String> = conn
-            .query_row("PRAGMA cipher_version", [], |r| r.get(0))
-            .optional()
-            .db("query cipher version")?;
-        if cipher.as_deref().is_none_or(str::is_empty) {
-            return Err(Error::Unsupported(
-                "SQLite was built without SQLCipher; refusing to open an unencrypted store".into(),
-            ));
-        }
-
-        // SQLCipher logs decryption failures to stderr by default; we report them as errors.
-        conn.execute_batch("PRAGMA cipher_log_level = NONE;")
-            .db("configure SQLCipher logging")?;
-
-        // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
-        let pragma = Zeroizing::new(format!(
-            "PRAGMA key = \"x'{}'\";",
-            hex::encode(key.as_bytes())
-        ));
-        conn.execute_batch(&pragma).db("set store key")?;
-
-        // The key is only checked on first read of the header.
-        match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
-            r.get::<_, i64>(0)
-        }) {
-            Ok(_) => {}
-            Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
-                return Err(Error::Integrity(format!(
-                    "cannot decrypt store at {}: wrong key or not a Nugget database",
-                    path.display()
-                )));
-            }
-            Err(e) => return Err(Error::Storage(format!("read store header: {e}"))),
-        }
+        let conn = open_keyed(path, key, OpenFlags::SQLITE_OPEN_CREATE)?;
 
         // WAL for concurrent readers; temp_store=MEMORY so SQLite never spills plaintext temp
         // files to disk.
@@ -119,7 +162,7 @@ impl Store {
             .db("enable WAL")?;
         set_common_pragmas(&conn)?;
         restrict_file_permissions(path);
-        Self::finish(conn, true)
+        Self::finish(conn, Some((path, key)))
     }
 
     /// An unencrypted, in-memory store (tests and tooling).
@@ -127,19 +170,31 @@ impl Store {
         vec_ext::ensure_registered()?;
         let conn = Connection::open_in_memory().db("open in-memory store")?;
         set_common_pragmas(&conn)?;
-        Self::finish(conn, false)
+        Self::finish(conn, None)
     }
 
-    fn finish(mut conn: Connection, encrypted: bool) -> Result<Self> {
+    /// Migrate, then build the shared state. `file` is the database path and key of a
+    /// file-backed (encrypted) store, which gets a read pool; `None` for an in-memory one.
+    fn finish(mut conn: Connection, file: Option<(&Path, &StoreKey)>) -> Result<Self> {
         schema::migrate(&mut conn)?;
+        // Opened after migrating, so readers start on the current schema.
+        let readers = file
+            .map(|(path, key)| ReadPool::open(path, key))
+            .transpose()?;
         let db = Arc::new(Db {
             conn: Mutex::new(conn),
-            encrypted,
+            readers,
+            encrypted: file.is_some(),
         });
         let egress = EgressWriter::spawn(db.clone())?;
-        Ok(Self {
-            inner: Arc::new(Inner { db, egress }),
-        })
+        let audit = crate::audit::AuditState::ephemeral()?;
+        let store = Self {
+            inner: Arc::new(Inner { db, egress, audit }),
+        };
+        if let Some((_, key)) = file {
+            crate::audit::attach_store_key(&store, key)?;
+        }
+        Ok(store)
     }
 
     /// Whether the database file is encrypted (false only for [`Store::open_in_memory`]).
@@ -149,7 +204,7 @@ impl Store {
 
     /// Current schema version (`PRAGMA user_version`).
     pub fn schema_version(&self) -> Result<u32> {
-        self.with_conn(|c| schema::user_version(c))
+        self.with_read_conn(schema::user_version)
     }
 
     /// Run any pending migrations; returns how many were applied (0 when current).
@@ -161,13 +216,22 @@ impl Store {
         self.inner.db.with_conn(f)
     }
 
+    /// A read on a pooled read-only connection; see [`Db::with_read_conn`].
+    pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+        self.inner.db.with_read_conn(f)
+    }
+
     pub(crate) fn egress_writer(&self) -> &EgressWriter {
         &self.inner.egress
     }
 
+    pub(crate) fn audit_state(&self) -> &crate::audit::AuditState {
+        &self.inner.audit
+    }
+
     /// Number of items and chunks.
     pub fn counts(&self) -> Result<Counts> {
-        self.with_conn(|c| {
+        self.with_read_conn(|c| {
             let (items, chunks): (i64, i64) = c
                 .query_row(
                     "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
@@ -184,7 +248,7 @@ impl Store {
 
     /// The sync cursor stored for `source`, if any.
     pub fn get_cursor(&self, source: &SourceId) -> Result<Option<Value>> {
-        let raw: Option<String> = self.with_conn(|c| {
+        let raw: Option<String> = self.with_read_conn(|c| {
             c.query_row(
                 "SELECT value FROM cursors WHERE source = ?1",
                 [source.as_str()],
@@ -227,8 +291,64 @@ impl Store {
 
     /// Embedding dimension fixed for this database, once the first embedding was stored.
     pub fn embedding_dim(&self) -> Result<Option<usize>> {
-        self.with_conn(|c| crate::items::embedding_dim(c))
+        self.with_read_conn(crate::items::embedding_dim)
     }
+}
+
+/// Open the database at `path` (read-write, plus `extra` flags), check that SQLite has SQLCipher,
+/// and key it, failing with `Error::Integrity` when `key` does not decrypt it.
+fn open_keyed(path: &Path, key: &StoreKey, extra: OpenFlags) -> Result<Connection> {
+    let conn = Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX | extra,
+    )
+    .db("open store")?;
+
+    // Fail closed if this SQLite has no SQLCipher: `PRAGMA key` would silently do nothing.
+    let cipher: Option<String> = conn
+        .query_row("PRAGMA cipher_version", [], |r| r.get(0))
+        .optional()
+        .db("query cipher version")?;
+    if cipher.as_deref().is_none_or(str::is_empty) {
+        return Err(Error::Unsupported(
+            "SQLite was built without SQLCipher; refusing to open an unencrypted store".into(),
+        ));
+    }
+
+    // SQLCipher logs decryption failures to stderr by default; we report them as errors.
+    conn.execute_batch("PRAGMA cipher_log_level = NONE;")
+        .db("configure SQLCipher logging")?;
+
+    // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
+    let pragma = Zeroizing::new(format!(
+        "PRAGMA key = \"x'{}'\";",
+        hex::encode(key.as_bytes())
+    ));
+    conn.execute_batch(&pragma).db("set store key")?;
+
+    // The key is only checked on first read of the header.
+    match conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    }) {
+        Ok(_) => {}
+        Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == ErrorCode::NotADatabase => {
+            return Err(Error::Integrity(format!(
+                "cannot decrypt store at {}: wrong key or not a Nugget database",
+                path.display()
+            )));
+        }
+        Err(e) => return Err(Error::Storage(format!("read store header: {e}"))),
+    }
+    Ok(conn)
+}
+
+/// A read-only (`query_only`) connection to the existing, migrated, WAL-mode database at `path`.
+fn open_reader(path: &Path, key: &StoreKey) -> Result<Connection> {
+    let conn = open_keyed(path, key, OpenFlags::empty())?;
+    set_common_pragmas(&conn)?;
+    conn.execute_batch("PRAGMA query_only = ON;")
+        .db("make reader connection read-only")?;
+    Ok(conn)
 }
 
 fn set_common_pragmas(conn: &Connection) -> Result<()> {
@@ -265,4 +385,96 @@ fn restrict_file_permissions(path: &Path) {
     }
     #[cfg(not(unix))]
     let _ = path;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::*;
+    use crate::{NewChunk, NewItem, content_hash};
+
+    fn file_store(dir: &tempfile::TempDir) -> Store {
+        Store::open(
+            dir.path().join("nugget.db"),
+            &StoreKey::from_bytes([7u8; 32]),
+        )
+        .unwrap()
+    }
+
+    fn cursor(c: &Connection, source: &str) -> Result<String> {
+        c.query_row(
+            "SELECT value FROM cursors WHERE source = ?1",
+            [source],
+            |r| r.get(0),
+        )
+        .db("read cursor")
+    }
+
+    /// Two reads are inside the database at the same time while another thread holds the
+    /// writer connection, and both see the last committed write.
+    #[test]
+    fn reads_run_concurrently_while_the_writer_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = file_store(&dir);
+        let src = SourceId::new("files:test");
+        s.set_cursor(&src, json!({"n": 1})).unwrap();
+
+        s.with_conn(|_writer| {
+            let (entered_tx, entered) = mpsc::channel();
+            let mut releases = Vec::new();
+            let readers: Vec<_> = (0..2)
+                .map(|_| {
+                    let (release, wait) = mpsc::channel::<()>();
+                    releases.push(release);
+                    let (s, entered_tx) = (s.clone(), entered_tx.clone());
+                    std::thread::spawn(move || {
+                        s.with_read_conn(|c| {
+                            entered_tx.send(()).unwrap();
+                            // Stay inside the read until released (or the test gave up).
+                            let _ = wait.recv_timeout(Duration::from_secs(10));
+                            cursor(c, "files:test")
+                        })
+                    })
+                })
+                .collect();
+            let both_in = (0..2).all(|_| entered.recv_timeout(Duration::from_secs(10)).is_ok());
+            drop(releases);
+            assert!(both_in, "reads did not run concurrently beside the writer");
+            for r in readers {
+                assert_eq!(r.join().unwrap().unwrap(), r#"{"n":1}"#);
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    /// Pooled reads see every committed write, and pooled connections cannot write.
+    #[test]
+    fn reads_see_committed_writes_and_cannot_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = file_store(&dir);
+        let src = SourceId::new("files:test");
+        for n in 0..(READ_POOL_SIZE * 2) {
+            s.set_cursor(&src, json!({"n": n})).unwrap();
+            assert_eq!(s.get_cursor(&src).unwrap(), Some(json!({"n": n})));
+        }
+
+        let item = NewItem::new("files:test", "a.txt", content_hash("body")).with_text("body");
+        s.upsert_item_with_chunks(&item, &[NewChunk::embedded("body", vec![1.0, 0.0])])
+            .unwrap();
+        assert!(s.get_item(&item.item).unwrap().is_some());
+        assert_eq!(s.counts().unwrap().chunks, 1);
+        assert_eq!(s.embedding_dim().unwrap(), Some(2));
+        let chunk = s.get_chunks_by_ord(&item.item, &[0]).unwrap()[0].id;
+        assert_eq!(s.get_embeddings(&[chunk]).unwrap()[&chunk], vec![1.0, 0.0]);
+
+        let write =
+            s.with_read_conn(|c| c.execute("DELETE FROM cursors", []).db("write on a reader"));
+        assert!(write.is_err(), "reader connection accepted a write");
+        assert!(s.get_cursor(&src).unwrap().is_some());
+    }
 }

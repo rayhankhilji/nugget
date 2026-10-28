@@ -2,7 +2,8 @@
 //! feature).
 //!
 //! It accepts the arguments `nugget-runtime` passes (and rejects anything else, like the real
-//! server), listens on `--host`/`--port`, requires the `LLAMA_API_KEY` bearer token on every
+//! server), listens on `--host`/`--port` (or, on Unix, on the socket `--host <path>.sock`, like
+//! llama-server), requires the `LLAMA_API_KEY` bearer token on every
 //! endpoint except `/health`, and serves:
 //! - `GET /health`: 503 while "loading" (see `--fake-start-delay-ms`), then `{"status":"ok"}`;
 //! - `GET /v1/models`;
@@ -36,8 +37,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::TcpListener;
+
+/// A connection, over TCP or a Unix socket.
+trait Conn: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Conn for T {}
 
 #[derive(Debug, Default)]
 struct Opts {
@@ -177,7 +182,8 @@ async fn main() -> ExitCode {
         eprintln!("fake: exiting immediately with {code}");
         return ExitCode::from(code);
     }
-    if opts.host != "127.0.0.1" {
+    let unix = opts.host.ends_with(".sock");
+    if opts.host != "127.0.0.1" && !(unix && cfg!(unix)) {
         eprintln!("fake: refusing non-loopback host {}", opts.host);
         return ExitCode::from(3);
     }
@@ -248,14 +254,18 @@ async fn main() -> ExitCode {
             });
         }
     }
-    let listener = match TcpListener::bind((opts.host.as_str(), opts.port)).await {
+    let listener = match Listener::bind(&opts.host, opts.port).await {
         Ok(l) => l,
         Err(e) => {
             eprintln!("fake: couldn't bind HTTP server socket: {e}");
             return ExitCode::from(1);
         }
     };
-    println!("fake: listening on {}:{}", opts.host, opts.port);
+    if unix {
+        println!("fake: listening on {}", opts.host);
+    } else {
+        println!("fake: listening on {}:{}", opts.host, opts.port);
+    }
     eprintln!("main: model loaded (alias {})", opts.alias);
     let srv = Arc::new(Server {
         opts,
@@ -266,13 +276,37 @@ async fn main() -> ExitCode {
         argv,
     });
     loop {
-        let Ok((conn, _)) = listener.accept().await else {
+        let Ok(conn) = listener.accept().await else {
             continue;
         };
         let srv = srv.clone();
         tokio::spawn(async move {
             let _ = handle(conn, &srv).await;
         });
+    }
+}
+
+enum Listener {
+    Tcp(TcpListener),
+    #[cfg(unix)]
+    Unix(tokio::net::UnixListener),
+}
+
+impl Listener {
+    async fn bind(host: &str, port: u16) -> std::io::Result<Self> {
+        #[cfg(unix)]
+        if host.ends_with(".sock") {
+            return tokio::net::UnixListener::bind(host).map(Listener::Unix);
+        }
+        Ok(Listener::Tcp(TcpListener::bind((host, port)).await?))
+    }
+
+    async fn accept(&self) -> std::io::Result<Box<dyn Conn>> {
+        match self {
+            Listener::Tcp(l) => Ok(Box::new(l.accept().await?.0)),
+            #[cfg(unix)]
+            Listener::Unix(l) => Ok(Box::new(l.accept().await?.0)),
+        }
     }
 }
 
@@ -317,7 +351,7 @@ struct Request {
     body: Vec<u8>,
 }
 
-async fn read_request(conn: &mut TcpStream) -> std::io::Result<Option<Request>> {
+async fn read_request(conn: &mut (impl AsyncRead + Unpin)) -> std::io::Result<Option<Request>> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 4096];
     let head_end = loop {
@@ -363,7 +397,11 @@ async fn read_request(conn: &mut TcpStream) -> std::io::Result<Option<Request>> 
     }))
 }
 
-async fn respond(conn: &mut TcpStream, status: u16, body: &Value) -> std::io::Result<()> {
+async fn respond(
+    conn: &mut (impl AsyncWrite + Unpin),
+    status: u16,
+    body: &Value,
+) -> std::io::Result<()> {
     let text = body.to_string();
     let reason = match status {
         200 => "OK",
@@ -386,7 +424,7 @@ fn error(code: u16, msg: &str) -> (u16, Value) {
     (code, json!({"error": {"code": code, "message": msg}}))
 }
 
-async fn handle(mut conn: TcpStream, srv: &Server) -> std::io::Result<()> {
+async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
     let Some(req) = read_request(&mut conn).await? else {
         return Ok(());
     };

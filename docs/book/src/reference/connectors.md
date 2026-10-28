@@ -68,6 +68,7 @@ OAuth client.
 | `account_hint` | string | none | Email address to pre-select on Google's consent screen |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
 | `include_spam_trash` | bool | `false` | Also index Spam and Trash |
+| `allow_modify` | bool | `false` | Let approved proactive actions archive threads (remove the `INBOX` label). Asks for the `gmail.modify` scope, so reconnect the account after turning it on |
 
 Sync: newest-first backfill, then `history.list` deltas every 60 s. An expired history id triggers a
 bounded resync.
@@ -119,12 +120,12 @@ Sync: discovery through `current-user-principal` and `calendar-home-set`, then R
 `sync-collection` per calendar, or a `getctag` check plus an ETag listing when the server has no sync
 support. Polled every 5 minutes. Item keys are the event's absolute href path.
 
-## Kinds being wired in (wave W)
+## Microsoft 365, SaaS and plugin kinds
 
-> **Status: being wired in (wave W).** These kinds are implemented in `nugget-connector-microsoft`,
-> `nugget-connector-saas` and `nugget-plugin`, and are being registered in `nuggetd` in this wave.
-> This build's `sources.add` refuses them. Their tables are compared with the connector crates, not with the
-> daemon's registry.
+> The Microsoft 365 (`outlook`, `outlook-calendar`, `onedrive`) and SaaS (`slack`, `notion`,
+> `github`, `linear`) kinds are registered in `nuggetd` and offered by the Sources wizard. Plugin
+> kinds (`plugin:<id>`) are still being wired in (wave W). This table is compared with the connector
+> crates.
 
 <!-- check-refs: connector.kinds -->
 | Kind | Display name | Sign-in | Keychain accounts |

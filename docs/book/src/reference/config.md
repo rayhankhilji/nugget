@@ -264,6 +264,7 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `embed_batch_size` | integer | `64` | OpenAI-compatible only: texts per embeddings request |
 | `llama_cpp` | bool | `true` for on-device endpoints, else `false` | OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then ask it to reuse the cached prompt prefix, and the stable prefix can be evaluated ahead of a request. Ollama, LM Studio and vLLM ignore the extra fields |
 | `slot_affinity` | bool | `false` | OpenAI-compatible `llama-server` only: send requests that share a cache key to a fixed server slot. Off by default, because `llama-server` already picks the idle slot with the longest cached prefix, and a pinned request waits when its slot is busy |
+| `socket_path` | string | unset | Unix only, OpenAI-compatible on-device servers: send every request to this Unix socket. `base_url` then supplies only the scheme, `Host` header and path prefix (for example `http://localhost/v1`). The on-device runtime uses this for `llama-server` by default |
 
 ### Locality
 
@@ -292,6 +293,23 @@ is logged) and the rest of the daemon runs normally. The keys are not final; the
 | `plugins` | `trusted_keys` (trusted publisher keys) and a developer-mode switch that allows unsigned plugins |
 
 When a feature lands, its keys get their own table on this page.
+
+### `[proactive]`
+
+Proactive cards and the morning brief (the Today page). Unknown keys are an error.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | `false`: no background refreshes and no brief; `cards.list` reports `enabled: false` |
+| `brief_time` | `"HH:MM"` | `"08:00"` | Local time of the morning brief (`brief.ready`). A brief missed while the daemon was off is sent after the first refresh |
+| `judge` | `"local"`, `"cloud"` or `"off"` | `"local"` | Where the optional card judge may run. `cloud` never receives sensitive candidates |
+| `refresh_minutes` | integer ≥ 1 | `30` | Refresh cards this often (also after ingest and knowledge runs) |
+| `debounce_secs` | integer | `60` | Wait this long after the last ingest or knowledge event before refreshing |
+| `utc_offset` | `"+HH:MM"` | the machine's | The user's offset for "today" and the brief time; read once at start |
+
+`[proactive.engine]` tunes the card generators and ranking (`nugget_proactive::ProactiveConfig`),
+e.g. `min_score` (`0.45`, cards ranked below it are kept but not offered), `max_inbox`,
+`user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
 
 ## Example
 

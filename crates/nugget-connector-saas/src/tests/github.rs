@@ -487,6 +487,7 @@ async fn device_flow_stores_tokens_and_sync_uses_them() {
         flow.url,
         "https://github.com/login/device?user_code=WDJB-MJHT"
     );
+    assert_eq!(flow.user_code.as_deref(), Some("WDJB-MJHT"));
     flow.done.await.unwrap();
     let stored = h
         .secrets

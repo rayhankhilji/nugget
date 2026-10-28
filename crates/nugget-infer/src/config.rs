@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use nugget_core::capability::{Locality, Tier};
@@ -199,6 +200,11 @@ pub struct ProviderConfig {
     /// `openai_responses`: `https://api.openai.com/v1`; required for `openai_compatible`).
     #[serde(default)]
     pub base_url: Option<String>,
+    /// Unix only: connect to this Unix-domain socket (absolute path) instead of the network.
+    /// `base_url` then only supplies the scheme, the `Host` header and the path prefix (e.g.
+    /// `http://localhost/v1`), and the endpoint is on-device. Rejected on other platforms.
+    #[serde(default)]
+    pub socket_path: Option<PathBuf>,
     pub model: String,
     /// `env:VAR` or `keychain:NAME`. Omit for local servers that need no key.
     #[serde(default)]
@@ -346,6 +352,9 @@ impl ProviderConfig {
     /// [`crate::ProviderMeta::locality`]).
     pub fn effective_locality(&self) -> Result<Locality> {
         let url = self.base_url()?;
+        if self.socket_path.is_some() {
+            return self.apply_locality_override(Locality::OnDevice, &url);
+        }
         match literal_locality(&url)? {
             Some(classified) => self.apply_locality_override(classified, &url),
             None => Ok(Locality::Cloud),
@@ -372,6 +381,16 @@ impl ProviderConfig {
         resolver: &dyn HostResolver,
     ) -> Result<(Locality, Resolved)> {
         let url = self.base_url()?;
+        if self.socket_path.is_some() {
+            // A Unix socket on this machine: no name to resolve, nothing to pin.
+            let locality = self.apply_locality_override(Locality::OnDevice, &url)?;
+            let resolved = Resolved {
+                locality: Locality::OnDevice,
+                pin: None,
+                unresolved: false,
+            };
+            return Ok((locality, resolved));
+        }
         let resolved = resolve_url(&url, resolver)?;
         if url.scheme() == "http" && resolved.locality == Locality::Cloud {
             let why = if resolved.unresolved {
@@ -399,9 +418,22 @@ impl ProviderConfig {
             return Err(Error::Invalid(format!("provider {id}: model is empty")));
         }
         let url = self.base_url()?;
-        // Host names are classified (and plaintext http to them refused) only once they are
-        // resolved, when the provider is built. Literals are checked here.
-        if let Some(classified) = literal_locality(&url)? {
+        if let Some(socket) = &self.socket_path {
+            if !cfg!(unix) {
+                return Err(Error::Unsupported(format!(
+                    "provider {id}: socket_path (Unix-domain sockets) is only supported on Unix"
+                )));
+            }
+            if !socket.is_absolute() {
+                return Err(Error::Invalid(format!(
+                    "provider {id}: socket_path must be an absolute path"
+                )));
+            }
+            // Traffic stays on this machine whatever the URL's host says.
+            self.apply_locality_override(Locality::OnDevice, &url)?;
+        } else if let Some(classified) = literal_locality(&url)? {
+            // Host names are classified (and plaintext http to them refused) only once they are
+            // resolved, when the provider is built. Literals are checked here.
             self.apply_locality_override(classified, &url)?;
             if url.scheme() == "http" && classified == Locality::Cloud {
                 return Err(Error::Invalid(format!(
@@ -640,6 +672,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.effective_locality().unwrap(), Locality::LocalNetwork);
+    }
+
+    #[test]
+    fn unix_socket_endpoints_are_on_device_and_unix_only() {
+        let base = "id='l'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://localhost/v1'\n";
+        let res = cfg(&format!("{base}socket_path='/run/nugget/chat.sock'"));
+        #[cfg(unix)]
+        {
+            let c = res.unwrap();
+            assert_eq!(
+                c.socket_path.as_deref(),
+                Some(std::path::Path::new("/run/nugget/chat.sock"))
+            );
+            assert_eq!(c.effective_locality().unwrap(), Locality::OnDevice);
+            // Even a URL that names an internet host: the socket decides where traffic goes.
+            let c = cfg("id='l'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://example.com/v1'\nsocket_path='/s.sock'").unwrap();
+            assert_eq!(c.effective_locality().unwrap(), Locality::OnDevice);
+            let (loc, resolved) = c.resolve_network(&crate::locality::SystemResolver).unwrap();
+            assert_eq!((loc, resolved.pin), (Locality::OnDevice, None));
+            // The override may still raise it.
+            let c = cfg(&format!("{base}socket_path='/s.sock'\nlocality='cloud'")).unwrap();
+            assert_eq!(c.effective_locality().unwrap(), Locality::Cloud);
+            // Relative paths are refused.
+            assert!(cfg(&format!("{base}socket_path='chat.sock'")).is_err());
+        }
+        #[cfg(not(unix))]
+        assert!(matches!(res, Err(Error::Unsupported(_))), "{res:?}");
     }
 
     #[test]

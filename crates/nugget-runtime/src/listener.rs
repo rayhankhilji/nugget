@@ -1,4 +1,6 @@
-//! Who owns the TCP listener on a loopback port?
+//! Who owns the TCP listener on a loopback port? (Only for TCP listeners: Windows, or Unix with
+//! [`crate::RuntimeOptions::unix_socket`] off. A Unix socket lives in a private directory, see
+//! [`crate::socket`].)
 //!
 //! Between picking a free port and the server binding it, another local user can bind the port
 //! first and answer `/health` with ok. Requests would then carry the API key, prompts and

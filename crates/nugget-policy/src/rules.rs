@@ -79,10 +79,18 @@ impl Rule {
     pub(crate) fn matches(&self, m: &MatchInput<'_>) -> Option<usize> {
         let mut score = 0;
         if !self.targets.is_empty() {
+            // Deny rules see every target the action names or mentions; Allow and Confirm rules
+            // only what the action is actually performed on (a page cannot borrow an allowed
+            // host by putting its URL in a button label).
+            let candidates = if self.effect == Effect::Deny {
+                m.targets
+            } else {
+                m.primary
+            };
             let best = self
                 .targets
                 .iter()
-                .filter(|g| m.targets.iter().any(|t| glob_match(g, t)))
+                .filter(|g| candidates.iter().any(|t| glob_match(g, t)))
                 .map(|g| specificity(g))
                 .max()?;
             score += 1000 + best;
@@ -119,7 +127,10 @@ impl Rule {
 
 /// What rules are matched against.
 pub(crate) struct MatchInput<'a> {
+    /// Every candidate ([`target_candidates`]): matched by Deny rules.
     pub targets: &'a [String],
+    /// The primary candidates ([`target_sets`]): matched by Allow and Confirm rules.
+    pub primary: &'a [String],
     pub verb: &'a str,
     pub risk: RiskClass,
     pub labels: &'a [String],
@@ -186,27 +197,44 @@ impl PolicyConfig {
 
 /// Every target the rules should see for this action: the app id, the hosts of URLs and deep
 /// links in the action and context, deep-link schemes and settings panes. All lowercase.
+/// This is the union of the two lists of [`target_sets`].
 pub fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut push = |s: String| {
+    let (mut primary, mentioned) = target_sets(action, ctx);
+    for m in mentioned {
+        if !primary.contains(&m) {
+            primary.push(m);
+        }
+    }
+    primary
+}
+
+/// The action's target candidates split in two, all lowercase and without duplicates:
+/// - `primary`: what the action is performed on: `target_app` and the page URL from the
+///   context (each with its host, scheme and pane), plus links in the label or preview when the
+///   action navigates to them (`open x-apple.systempreferences:...`, a domain typed into an
+///   address bar).
+/// - `mentioned`: links found in the label or the typed text of an action that does not
+///   navigate. A page or a model controls those, so only Deny rules look at them.
+pub fn target_sets(action: &ActionDescriptor, ctx: &ActionContext) -> (Vec<String>, Vec<String>) {
+    fn push(out: &mut Vec<String>, s: String) {
         let s = s.trim().to_lowercase();
         if !s.is_empty() && !out.contains(&s) {
             out.push(s);
         }
-    };
-    let add_link = |text: &str, push: &mut dyn FnMut(String)| {
+    }
+    fn add_link(text: &str, out: &mut Vec<String>) {
         let text = text.trim();
-        push(text.to_string());
+        push(out, text.to_string());
         if let Some(host) = host_of(text) {
-            push(host.clone());
+            push(out, host.clone());
             if let Some(stripped) = host.strip_prefix("www.") {
-                push(stripped.to_string());
+                push(out, stripped.to_string());
             }
         }
         if let Some((scheme, rest)) = text.split_once(':')
             && is_scheme(scheme)
         {
-            push(scheme.to_string());
+            push(out, scheme.to_string());
             // `x-apple.systempreferences:com.apple.preference.security?Privacy`
             let pane = rest
                 .trim_start_matches('/')
@@ -214,14 +242,17 @@ pub fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<
                 .next()
                 .unwrap_or("");
             if !pane.is_empty() {
-                push(pane.to_string());
+                push(out, pane.to_string());
             }
         }
-    };
-    add_link(&action.target_app, &mut push);
-    if let Some(url) = &ctx.url {
-        add_link(url, &mut push);
     }
+    let mut primary: Vec<String> = Vec::new();
+    let mut mentioned: Vec<String> = Vec::new();
+    add_link(&action.target_app, &mut primary);
+    if let Some(url) = &ctx.url {
+        add_link(url, &mut primary);
+    }
+    let navigating = navigates(action);
     for text in [
         action.target_label.as_deref(),
         action.text_preview.as_deref(),
@@ -232,14 +263,20 @@ pub fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<
         for token in text.split(char::is_whitespace) {
             let token =
                 token.trim_matches(|c: char| matches!(c, '"' | '\'' | '<' | '>' | '(' | ')'));
+            let out = if navigating {
+                &mut primary
+            } else {
+                &mut mentioned
+            };
             if token.contains("://") || is_deep_link(token) {
-                add_link(token, &mut push);
-            } else if is_bare_domain(token) && navigates(action) {
-                add_link(&format!("https://{token}"), &mut push);
+                add_link(token, out);
+            } else if is_bare_domain(token) && navigating {
+                add_link(&format!("https://{token}"), out);
             }
         }
     }
-    out
+    mentioned.retain(|m| !primary.contains(m));
+    (primary, mentioned)
 }
 
 /// Host of `scheme://host/...`; `None` for anything else.
@@ -712,6 +749,7 @@ mod tests {
         let targets = vec!["com.apple.mail".to_string()];
         let input = |risk| MatchInput {
             targets: &targets,
+            primary: &targets,
             verb: "click",
             risk,
             labels: &[],

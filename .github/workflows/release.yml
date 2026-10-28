@@ -101,6 +101,10 @@ jobs:
           $perl = 'C:\Strawberry\perl\bin\perl.exe'
           if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
 
+      # NASM for the x86_64 assembly in vendored OpenSSL and aws-lc-sys, as in ci.yml.
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+
       # No cache restore on release builds: every byte comes from this run.
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:

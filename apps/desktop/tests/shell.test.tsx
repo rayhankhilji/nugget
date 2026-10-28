@@ -37,7 +37,7 @@ describe("navigation", () => {
 
   it("Ctrl+1…n jumps to the nth page and moves focus into it", async () => {
     await render(<App />);
-    for (let i = 0; i < PAGES.length; i++) {
+    for (let i = 0; i < Math.min(PAGES.length, 9); i++) {
       await key({ key: String(i + 1), code: `Digit${i + 1}`, ctrlKey: true }, document.body);
       await flush(3);
       expect(mainLabel()).toBe(t(PAGES[i]!.label));

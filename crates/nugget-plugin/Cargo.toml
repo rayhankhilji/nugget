@@ -12,9 +12,12 @@ exclude = ["sdk/target"]
 [dependencies]
 nugget-core.workspace = true
 nugget-connector.workspace = true
+nugget-agent.workspace = true
+nugget-policy.workspace = true
 async-trait.workspace = true
 ed25519-dalek = "3"
 futures.workspace = true
+getrandom = "0.4"
 hex = "0.4"
 reqwest.workspace = true
 semver = { version = "1", features = ["serde"] }
