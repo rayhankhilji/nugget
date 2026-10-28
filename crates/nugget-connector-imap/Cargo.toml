@@ -1,5 +1,6 @@
 [package]
 name = "nugget-connector-imap"
+description = "IMAP mail connector for Nugget (TLS only, UIDVALIDITY/UID tracking, CONDSTORE/QRESYNC, IDLE)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,23 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-connector.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+# IMAP framing, tagging and response parsing (imap-proto, re-exported). MIT OR Apache-2.0, MSRV 1.88.
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio"] }
+# The workspace TLS stack: rustls with the aws-lc-rs provider only, OS trust store through
+# rustls-platform-verifier (same as reqwest's `rustls` feature). Never `ring`.
+rustls = { version = "0.23.46", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+tokio-rustls = { version = "0.26.6", default-features = false, features = ["tls12", "aws_lc_rs"] }
+rustls-platform-verifier = "0.7.1"
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem"] }
 
 [lints]
 workspace = true
