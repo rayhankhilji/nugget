@@ -65,7 +65,7 @@ describe("knowledge flow", () => {
     const detail = await findByRole("region", { name: "Ada Lovelace" });
 
     await click(within(detail).getByRole("button", { name: /^Reject this fact/ }));
-    expect(d.callsTo("knowledge_claim_status")).toEqual([{ request: { claim: 1, status: "retracted" } }]);
+    expect(d.callsTo("knowledge_claim_status")).toEqual([{ request: { claim: 1, status: "rejected" } }]);
     await click(within(detail).getByRole("button", { name: t("entity.undo") }));
     expect(d.last("knowledge_claim_status")).toEqual({ request: { claim: 1, status: "active" } });
   });
