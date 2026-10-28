@@ -20,11 +20,11 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::args::{LaunchPlan, Tuning};
-use crate::health::{activity, loopback_client, wait_ready};
+use crate::health::{ProcSlot, activity, loopback_client, wait_ready};
 use crate::logs::{RollingLog, SharedLog, lock as lock_log};
 use crate::orphan::{self, PidRecord};
 use crate::process::ServerProcess;
-use crate::secrets::{RuntimeSecrets, api_key_ref, random_key};
+use crate::secrets::{RuntimeSecrets, api_key_ref_gen, random_key};
 
 /// Provider id of the local chat server (`local-chat`).
 pub const CHAT_PROVIDER_ID: &str = "local-chat";
@@ -62,7 +62,8 @@ pub struct RuntimeOptions {
     pub health_timeout: Duration,
     /// First interval between `/health` polls during start-up (grows to 500 ms).
     pub health_poll: Duration,
-    /// How often the supervisor checks whether the server is still alive.
+    /// How often the supervisor checks whether the server is still alive. (Status reads and
+    /// [`Runtime::ensure`] also notice a dead server at once.)
     pub watch_interval: Duration,
     /// First restart delay after a crash; doubles per consecutive failure.
     pub restart_backoff_base: Duration,
@@ -126,9 +127,11 @@ impl RuntimeOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeDetails {
     pub info: RuntimeInfo,
-    /// The provider config callers should use (port included), once started.
+    /// The provider config callers should use (port included), while the server is ready.
     pub config: Option<ProviderConfig>,
     pub port: Option<u16>,
+    /// The server process, from spawn (so also while it is loading) until it is stopped or
+    /// found dead.
     pub pid: Option<u32>,
     /// Restarts after crashes since the last successful `ensure`.
     pub restarts: u32,
@@ -151,8 +154,8 @@ struct Config {
 /// Supervises local `llama-server` processes (one per [`RuntimeRole`]) on `127.0.0.1`.
 ///
 /// Cheap to clone; clones share the servers. When the last clone is dropped every server's
-/// process group (Unix) or job object (Windows) is killed. Prefer [`Runtime::shutdown`] for a
-/// graceful stop.
+/// process group (Unix) or job object (Windows) is killed, including one still starting.
+/// Prefer [`Runtime::shutdown`] for a graceful stop.
 #[derive(Clone)]
 pub struct Runtime {
     cfg: Arc<Config>,
@@ -169,7 +172,7 @@ impl std::fmt::Debug for Runtime {
 
 struct State {
     /// Serialises runtime installs (both roles usually need the same build).
-    install: tokio::sync::Mutex<()>,
+    install: Arc<tokio::sync::Mutex<()>>,
     secrets: RuntimeSecrets,
     client: reqwest::Client,
     roles: [Arc<RoleState>; 2],
@@ -178,19 +181,68 @@ struct State {
 impl Drop for State {
     fn drop(&mut self) {
         for rs in &self.roles {
+            if let Some(start) = lock(&rs.start).take() {
+                start.cancel.cancel();
+                start.handle.abort();
+            }
             if let Some(task) = lock(&rs.task).take() {
                 task.cancel.cancel();
                 task.handle.abort();
             }
-            // Synchronous: SIGKILL to the group / terminate the job right now.
+            // Synchronous: SIGKILL to the group / terminate the job right now. (A start task
+            // that is still being aborted holds the role state; when it lets go, any process it
+            // left in the slot is killed by `ServerProcess`'s own Drop.)
             drop(lock(&rs.proc).take());
             orphan::remove(&rs.pid_file);
         }
     }
 }
 
+/// What a start task (and a supervisor) needs, without keeping [`State`] alive: dropping the
+/// last [`Runtime`] must still kill everything.
+#[derive(Clone)]
+struct Ctx {
+    cfg: Arc<Config>,
+    install: Arc<tokio::sync::Mutex<()>>,
+    secrets: RuntimeSecrets,
+    client: reqwest::Client,
+}
+
+impl Ctx {
+    async fn install_entry(
+        &self,
+        entry: &RuntimeEntry,
+        on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
+    ) -> Result<PathBuf> {
+        let _install = self.install.lock().await;
+        if let Some(bin) = self.cfg.store.runtime_binary(entry)? {
+            return Ok(bin);
+        }
+        tracing::info!(runtime = %entry.id, release = %entry.version, "installing llama-server");
+        self.cfg
+            .store
+            .install_runtime_with_egress(entry, Arc::clone(&self.cfg.egress), move |p| {
+                on_progress(p)
+            })
+            .await
+    }
+}
+
 struct Task {
     cancel: CancellationToken,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+/// Outcome of a start, shared by every caller waiting for it.
+type StartResult = std::result::Result<ProviderConfig, Arc<Error>>;
+
+/// A start running detached from the [`Runtime::ensure`] calls that wait for it, so a caller
+/// giving up (a timeout dropping its future) neither kills the loading server nor leaves the
+/// status behind.
+struct Start {
+    model_sha: String,
+    cancel: CancellationToken,
+    result: watch::Receiver<Option<StartResult>>,
     handle: tokio::task::JoinHandle<()>,
 }
 
@@ -209,14 +261,19 @@ struct Status {
 
 struct RoleState {
     role: RuntimeRole,
-    /// Serialises `ensure` and `stop` for this role.
+    /// Serialises the decisions of `ensure` and `stop` for this role (never held while waiting
+    /// for a start).
     op: tokio::sync::Mutex<()>,
-    proc: Mutex<Option<ServerProcess>>,
+    /// The server process, from spawn on (also while loading).
+    proc: ProcSlot,
     status: Mutex<Status>,
     /// Bumped on every state change (waiters re-check `status`).
     changed: watch::Sender<u64>,
     activity: Mutex<Instant>,
+    /// The supervisor of a ready server.
     task: Mutex<Option<Task>>,
+    /// The latest start (running, or finished).
+    start: Mutex<Option<Start>>,
     log: Mutex<Option<SharedLog>>,
     log_file: PathBuf,
     pid_file: PathBuf,
@@ -236,20 +293,74 @@ impl RoleState {
         *lock(&self.activity) = Instant::now();
     }
 
+    /// The role's log, now also redacting `key`.
     fn log(&self, opts: &RuntimeOptions, key: &Secret) -> Result<SharedLog> {
         let mut g = lock(&self.log);
-        if let Some(l) = g.as_ref() {
-            return Ok(l.clone());
-        }
-        let mut log = RollingLog::open(self.log_file.clone(), opts.log_max_bytes, opts.log_keep)?;
-        log.set_secrets(vec![key.expose().to_string()]);
-        let l = Arc::new(Mutex::new(log));
-        *g = Some(l.clone());
+        let l = match g.as_ref() {
+            Some(l) => l.clone(),
+            None => {
+                let log =
+                    RollingLog::open(self.log_file.clone(), opts.log_max_bytes, opts.log_keep)?;
+                let l = Arc::new(Mutex::new(log));
+                *g = Some(l.clone());
+                l
+            }
+        };
+        lock_log(&l).add_secret(key.expose());
         Ok(l)
     }
 
+    /// The live server process's pid (`None` once it exited, even before it is reaped).
     fn pid(&self) -> Option<u32> {
-        lock(&self.proc).as_ref().and_then(ServerProcess::pid)
+        let mut g = lock(&self.proc);
+        let p = g.as_mut()?;
+        if p.try_wait().is_some() {
+            return None;
+        }
+        p.pid()
+    }
+
+    /// If the server died while reported ready, say so now (no config for a dead server's port,
+    /// which anybody could bind), without waiting for the supervisor's next tick.
+    fn refresh(&self) {
+        let mut g = lock(&self.proc);
+        let Some(status) = g.as_mut().and_then(ServerProcess::try_wait) else {
+            return;
+        };
+        // Under the process lock, so a restart cannot slip in between check and update.
+        if lock(&self.status).state == Some(RuntimeState::Ready) {
+            self.set(|st| {
+                st.state = Some(RuntimeState::Failed);
+                st.config = None;
+                st.error = Some(format!("llama-server exited unexpectedly ({status})"));
+            });
+        }
+        drop(g);
+    }
+
+    /// A start for this model that is still running.
+    fn joinable_start(&self, model_sha: &str) -> Option<watch::Receiver<Option<StartResult>>> {
+        let g = lock(&self.start);
+        let s = g.as_ref()?;
+        (s.model_sha == model_sha && !s.handle.is_finished()).then(|| s.result.clone())
+    }
+
+    /// A supervised server for this model (ready, or restarting after a crash).
+    fn serving(&self, model_sha: &str) -> bool {
+        let task_alive = lock(&self.task)
+            .as_ref()
+            .is_some_and(|t| !t.handle.is_finished());
+        task_alive && lock(&self.status).model_sha.as_deref() == Some(model_sha)
+    }
+
+    /// Withdraw the config (and say `Stopped`) before a server is signalled to stop.
+    fn mark_stopping(&self) {
+        self.set(|st| {
+            if st.state.is_some() {
+                st.state = Some(RuntimeState::Stopped);
+            }
+            st.config = None;
+        });
     }
 }
 
@@ -260,6 +371,44 @@ struct Launch {
     accel: RuntimeAccel,
     plan: LaunchPlan,
     entry: ModelEntry,
+}
+
+type Launches = Vec<(Option<RuntimeEntry>, Launch)>;
+
+fn clone_err(e: &Error) -> Error {
+    match e {
+        Error::NotFound(m) => Error::NotFound(m.clone()),
+        Error::Invalid(m) => Error::Invalid(m.clone()),
+        Error::Integrity(m) => Error::Integrity(m.clone()),
+        Error::Unsupported(m) => Error::Unsupported(m.clone()),
+        Error::Provider(m) => Error::Provider(m.clone()),
+        Error::Storage(m) => Error::Storage(m.clone()),
+        Error::Network(m) => Error::Network(m.clone()),
+        Error::RateLimited { retry_after_ms } => Error::RateLimited {
+            retry_after_ms: *retry_after_ms,
+        },
+        Error::Unauthorized(m) => Error::Unauthorized(m.clone()),
+        Error::InsufficientSpace { needed, available } => Error::InsufficientSpace {
+            needed: *needed,
+            available: *available,
+        },
+        Error::Io(io) => Error::Io(std::io::Error::new(io.kind(), io.to_string())),
+        Error::Cancelled => Error::Cancelled,
+        other => Error::Other(other.to_string()),
+    }
+}
+
+/// Wait for a start's outcome. A start that was abandoned (its runtime dropped) is `Cancelled`.
+async fn await_start(mut rx: watch::Receiver<Option<StartResult>>) -> Result<ProviderConfig> {
+    let res = match rx.wait_for(Option::is_some).await {
+        Ok(v) => v.clone(),
+        Err(_) => return Err(Error::Cancelled),
+    };
+    match res {
+        Some(Ok(cfg)) => Ok(cfg),
+        Some(Err(e)) => Err(clone_err(&e)),
+        None => Err(Error::Cancelled),
+    }
 }
 
 impl Runtime {
@@ -286,6 +435,7 @@ impl Runtime {
                 changed: watch::Sender::new(0),
                 activity: Mutex::new(Instant::now()),
                 task: Mutex::new(None),
+                start: Mutex::new(None),
                 log: Mutex::new(None),
                 log_file: paths
                     .data
@@ -308,7 +458,7 @@ impl Runtime {
                 server_override: None,
             }),
             state: Arc::new(State {
-                install: tokio::sync::Mutex::new(()),
+                install: Arc::new(tokio::sync::Mutex::new(())),
                 secrets,
                 client: loopback_client()?,
                 roles: [mk(RuntimeRole::Chat), mk(RuntimeRole::Embedding)],
@@ -351,8 +501,21 @@ impl Runtime {
 
     /// Resolver for the `api_key` references in the configs this runtime returns. Pass it to
     /// [`nugget_infer::build_provider_with`]; other references go to the OS env/keychain.
+    ///
+    /// Every server (re)start gets a new key, and the configs name the key generation they were
+    /// issued for: a config from before a restart no longer resolves. Call [`Runtime::ensure`]
+    /// (or read [`Runtime::details`]) again and rebuild the provider when the config changed.
     pub fn secrets(&self) -> RuntimeSecrets {
         self.state.secrets.clone()
+    }
+
+    fn ctx(&self) -> Ctx {
+        Ctx {
+            cfg: Arc::clone(&self.cfg),
+            install: Arc::clone(&self.state.install),
+            secrets: self.state.secrets.clone(),
+            client: self.state.client.clone(),
+        }
     }
 
     /// Manifest runtime builds usable on this machine, best first.
@@ -381,26 +544,11 @@ impl Runtime {
                     current_arch()
                 ))
             })?;
-        let bin = self.install_entry(entry, Arc::new(on_progress)).await?;
+        let bin = self
+            .ctx()
+            .install_entry(entry, Arc::new(on_progress))
+            .await?;
         Ok((bin, entry.accel))
-    }
-
-    async fn install_entry(
-        &self,
-        entry: &RuntimeEntry,
-        on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
-    ) -> Result<PathBuf> {
-        let _install = self.state.install.lock().await;
-        if let Some(bin) = self.cfg.store.runtime_binary(entry)? {
-            return Ok(bin);
-        }
-        tracing::info!(runtime = %entry.id, release = %entry.version, "installing llama-server");
-        self.cfg
-            .store
-            .install_runtime_with_egress(entry, Arc::clone(&self.cfg.egress), move |p| {
-                on_progress(p)
-            })
-            .await
     }
 
     /// Make sure a server for `role` is running `model` and ready; returns the provider config to
@@ -409,19 +557,21 @@ impl Runtime {
     ///
     /// Cheap when the server is already up: callers can (and after a connection error, should)
     /// call it before using the config, which also counts as activity for the idle timer.
+    ///
+    /// The start itself runs detached: dropping this future (a caller's timeout) does not stop
+    /// it. Later calls for the same model join the start in progress instead of restarting it.
     pub async fn ensure(&self, role: RuntimeRole, model: &ModelEntry) -> Result<ProviderConfig> {
         self.ensure_with_progress(role, model, |_| {}).await
     }
 
-    /// [`Runtime::ensure`], reporting runtime download progress.
+    /// [`Runtime::ensure`], reporting runtime download progress (of a start this call begins).
     pub async fn ensure_with_progress(
         &self,
         role: RuntimeRole,
         model: &ModelEntry,
         on_progress: impl Fn(Progress) + Send + Sync + 'static,
     ) -> Result<ProviderConfig> {
-        let rs = self.role(role);
-        let _op = rs.op.lock().await;
+        let rs = Arc::clone(self.role(role));
         rs.touch();
         let model_path = self.cfg.store.path(&model.id)?;
         let model_sha = self
@@ -433,50 +583,54 @@ impl Runtime {
 
         // Validate everything before touching a running server.
         let launches = self.launches(role, model, model_path)?;
-
-        // Already serving this model?
-        let task_alive = lock(&rs.task)
-            .as_ref()
-            .is_some_and(|t| !t.handle.is_finished());
-        let same_model = lock(&rs.status).model_sha.as_deref() == Some(model_sha.as_str());
-        if task_alive
-            && same_model
-            && let Some(cfg) = self.wait_ready_state(rs).await?
-        {
-            return Ok(cfg);
-        }
-        self.stop_locked(rs).await;
-
         let on_progress: Arc<dyn Fn(Progress) + Send + Sync> = Arc::new(on_progress);
-        let mut last_err = None;
-        let n = launches.len();
-        for (i, launch) in launches.into_iter().enumerate() {
-            match self
-                .start_new(rs, launch, &model_sha, on_progress.clone())
-                .await
-            {
-                Ok(cfg) => return Ok(cfg),
-                Err(e) => {
-                    if i + 1 < n {
-                        tracing::warn!(role = role_name(role), error = %e,
-                            "runtime build failed to start; trying the next one");
-                    }
-                    last_err = Some(e);
+
+        let mut reuse = true;
+        loop {
+            let start = {
+                let _op = rs.op.lock().await;
+                rs.refresh();
+                if let Some(rx) = rs.joinable_start(&model_sha) {
+                    Some(rx)
+                } else if reuse && rs.serving(&model_sha) {
+                    None
+                } else {
+                    self.stop_locked(&rs).await;
+                    Some(self.spawn_start(
+                        &rs,
+                        launches.clone(),
+                        model_sha.clone(),
+                        on_progress.clone(),
+                    ))
                 }
+            };
+            match start {
+                Some(rx) => {
+                    let res = await_start(rx).await;
+                    rs.touch();
+                    return res;
+                }
+                // Already serving this model: wait out a restart in progress, if any.
+                None => match self.wait_ready_state(&rs).await? {
+                    Some(cfg) => return Ok(cfg),
+                    None => reuse = false,
+                },
             }
         }
-        Err(last_err.unwrap_or_else(|| Error::Unsupported("no runtime".into())))
     }
 
-    /// While a restart is in progress, wait for it. `Ok(None)` if the server gave up.
+    /// While a restart is in progress, wait for it. `Ok(None)` if the server gave up or stopped.
     async fn wait_ready_state(&self, rs: &RoleState) -> Result<Option<ProviderConfig>> {
         let mut rx = rs.changed.subscribe();
         let deadline = tokio::time::Instant::now() + self.cfg.opts.health_timeout;
         loop {
+            rs.refresh();
             {
                 let st = lock(&rs.status);
                 match st.state {
-                    Some(RuntimeState::Ready) => return Ok(st.config.clone()),
+                    Some(RuntimeState::Ready) if st.config.is_some() => {
+                        return Ok(st.config.clone());
+                    }
                     Some(RuntimeState::Starting | RuntimeState::Failed) => {}
                     _ => return Ok(None),
                 }
@@ -487,10 +641,17 @@ impl Runtime {
             if finished {
                 return Ok(None);
             }
-            match tokio::time::timeout_at(deadline, rx.changed()).await {
-                Ok(Ok(())) => {}
-                Ok(Err(_)) => return Ok(None),
-                Err(_) => {
+            // Wake on a state change, or poll: a dead server is noticed by `refresh`.
+            let wait =
+                tokio::time::sleep(self.cfg.opts.watch_interval.min(Duration::from_millis(250)));
+            tokio::select! {
+                r = rx.changed() => {
+                    if r.is_err() {
+                        return Ok(None);
+                    }
+                }
+                _ = wait => {}
+                _ = tokio::time::sleep_until(deadline) => {
                     let err = lock(&rs.status).error.clone().unwrap_or_default();
                     return Err(Error::Provider(format!(
                         "local {} runtime is restarting: {err}",
@@ -507,7 +668,7 @@ impl Runtime {
         role: RuntimeRole,
         model: &ModelEntry,
         model_path: PathBuf,
-    ) -> Result<Vec<(Option<RuntimeEntry>, Launch)>> {
+    ) -> Result<Launches> {
         let tuning = self.cfg.opts.tuning(role);
         let builds: Vec<(Option<RuntimeEntry>, PathBuf, RuntimeAccel)> =
             match &self.cfg.server_override {
@@ -551,83 +712,56 @@ impl Runtime {
             .collect()
     }
 
-    async fn start_new(
+    /// Begin a detached start (with `op` held and nothing running). Returns its outcome channel.
+    fn spawn_start(
         &self,
         rs: &Arc<RoleState>,
-        (runtime, mut launch): (Option<RuntimeEntry>, Launch),
-        model_sha: &str,
+        launches: Launches,
+        model_sha: String,
         on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
-    ) -> Result<ProviderConfig> {
-        let key = self.state.secrets.key(rs.role).clone();
-        // Reuse the previous port when it is free, so configs handed out before a stop (idle,
-        // explicit) work again.
+    ) -> watch::Receiver<Option<StartResult>> {
+        // `Starting` right away, so the status never lags behind the start.
         let previous = lock(&rs.status).port;
+        let model_id = launches.first().map(|(_, l)| l.entry.id.clone());
         rs.set(|st| {
             *st = Status {
                 port: previous,
-                model_id: Some(launch.entry.id.clone()),
-                model_sha: Some(model_sha.to_string()),
+                model_id,
+                model_sha: Some(model_sha.clone()),
                 state: Some(RuntimeState::Starting),
-                accel: Some(launch.accel),
+                accel: launches.first().map(|(_, l)| l.accel),
                 ..Status::default()
             };
         });
-        let res = async {
-            if let Some(entry) = &runtime {
-                launch.binary = self.install_entry(entry, on_progress).await?;
-            }
-            launch.plan.port = choose_port(previous)?;
-            let log = rs.log(&self.cfg.opts, &key)?;
-            let proc = start_once(&self.state.client, &self.cfg.opts, &launch, &key, &log).await?;
-            Ok::<_, Error>(proc)
-        }
-        .await;
-        let proc = match res {
-            Ok(p) => p,
-            Err(e) => {
-                rs.set(|st| {
-                    st.state = Some(RuntimeState::Failed);
-                    st.error = Some(e.to_string());
-                });
-                return Err(e);
-            }
-        };
-        let cfg = provider_config(rs.role, &launch.entry, &launch.plan)?;
-        if let Some(pid) = proc.pid() {
-            orphan::write(
-                &rs.pid_file,
-                &PidRecord {
-                    pid,
-                    exe: launch.binary.clone(),
-                    port: launch.plan.port,
-                },
-            );
-        }
-        *lock(&rs.proc) = Some(proc);
-        rs.set(|st| {
-            st.state = Some(RuntimeState::Ready);
-            st.error = None;
-            st.port = Some(launch.plan.port);
-            st.config = Some(cfg.clone());
-            st.binary = Some(launch.binary.clone());
-        });
-        tracing::info!(role = role_name(rs.role), model = %launch.entry.id,
-            port = launch.plan.port, accel = launch.accel.as_str(), "local runtime ready");
-
+        let (tx, rx) = watch::channel(None);
         let cancel = CancellationToken::new();
-        let handle = tokio::spawn(supervise(
-            Arc::clone(rs),
-            self.state.client.clone(),
-            self.cfg.opts.clone(),
-            launch,
-            key,
-            cancel.clone(),
-        ));
-        *lock(&rs.task) = Some(Task { cancel, handle });
-        Ok(cfg)
+        let handle = tokio::spawn({
+            let (ctx, rs, cancel, sha) = (
+                self.ctx(),
+                Arc::clone(rs),
+                cancel.clone(),
+                model_sha.clone(),
+            );
+            async move {
+                let res = tokio::select! {
+                    // Cancelled by a stop, which also takes care of the process and the status.
+                    _ = cancel.cancelled() => Err(Error::Cancelled),
+                    r = start_launches(&ctx, &rs, launches, &sha, on_progress) => r,
+                };
+                let _ = tx.send(Some(res.map_err(Arc::new)));
+            }
+        });
+        *lock(&rs.start) = Some(Start {
+            model_sha,
+            cancel,
+            result: rx.clone(),
+            handle,
+        });
+        rx
     }
 
-    /// Stop the server for `role` (graceful, then forced). No-op if none is running.
+    /// Stop the server for `role` (graceful, then forced), including one still starting. No-op
+    /// if none is running.
     pub async fn stop(&self, role: RuntimeRole) {
         let rs = self.role(role);
         let _op = rs.op.lock().await;
@@ -635,11 +769,21 @@ impl Runtime {
     }
 
     async fn stop_locked(&self, rs: &RoleState) {
+        // Nobody gets this server's config from now on: withdrawn before anything is signalled.
+        rs.mark_stopping();
+        let start = lock(&rs.start).take();
+        if let Some(s) = start {
+            s.cancel.cancel();
+            let _ = s.handle.await;
+        }
+        // Taken only now: a start that completed while being cancelled installed a supervisor.
         let task = lock(&rs.task).take();
         if let Some(t) = task {
             t.cancel.cancel();
             let _ = t.handle.await;
         }
+        // Again: a task may have published a config while it was being cancelled.
+        rs.mark_stopping();
         let proc = lock(&rs.proc).take();
         if let Some(mut p) = proc {
             p.shutdown(self.cfg.opts.shutdown_grace).await;
@@ -648,12 +792,6 @@ impl Runtime {
             }
         }
         orphan::remove(&rs.pid_file);
-        rs.set(|st| {
-            if st.state.is_some() {
-                st.state = Some(RuntimeState::Stopped);
-            }
-            st.config = None;
-        });
     }
 
     /// Gracefully stop every server.
@@ -674,6 +812,7 @@ impl Runtime {
     /// Detailed state of one role, if it has been started at least once.
     pub fn details(&self, role: RuntimeRole) -> Option<RuntimeDetails> {
         let rs = self.role(role);
+        rs.refresh();
         let st = lock(&rs.status).clone();
         let model_id = st.model_id?;
         let state = st.state.unwrap_or(RuntimeState::Stopped);
@@ -714,6 +853,108 @@ impl Runtime {
     }
 }
 
+/// Try each launch in turn (best build first). Runs in the detached start task.
+async fn start_launches(
+    ctx: &Ctx,
+    rs: &Arc<RoleState>,
+    launches: Launches,
+    model_sha: &str,
+    on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
+) -> Result<ProviderConfig> {
+    let mut last_err = None;
+    let n = launches.len();
+    for (i, launch) in launches.into_iter().enumerate() {
+        match start_new(ctx, rs, launch, model_sha, on_progress.clone()).await {
+            Ok(cfg) => return Ok(cfg),
+            Err(e) => {
+                if i + 1 < n {
+                    tracing::warn!(role = role_name(rs.role), error = %e,
+                        "runtime build failed to start; trying the next one");
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| Error::Unsupported("no runtime".into())))
+}
+
+async fn start_new(
+    ctx: &Ctx,
+    rs: &Arc<RoleState>,
+    (runtime, mut launch): (Option<RuntimeEntry>, Launch),
+    model_sha: &str,
+    on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
+) -> Result<ProviderConfig> {
+    let opts = &ctx.cfg.opts;
+    // Reuse the previous port when it is free, so configs handed out before a stop (idle,
+    // explicit) point at the right place again (they still need the new key's generation).
+    let previous = lock(&rs.status).port;
+    rs.set(|st| {
+        *st = Status {
+            port: previous,
+            model_id: Some(launch.entry.id.clone()),
+            model_sha: Some(model_sha.to_string()),
+            state: Some(RuntimeState::Starting),
+            accel: Some(launch.accel),
+            ..Status::default()
+        };
+    });
+    let res = async {
+        if let Some(entry) = &runtime {
+            launch.binary = ctx.install_entry(entry, on_progress).await?;
+        }
+        launch.plan.port = choose_port(previous)?;
+        // A fresh key for every server process.
+        let (generation, key) = ctx.secrets.rotate(rs.role)?;
+        let log = rs.log(opts, &key)?;
+        start_once(&ctx.client, opts, rs, &launch, &key, &log).await?;
+        Ok::<_, Error>((generation, key))
+    }
+    .await;
+    let (generation, key) = match res {
+        Ok(v) => v,
+        Err(e) => {
+            rs.set(|st| {
+                st.state = Some(RuntimeState::Failed);
+                st.error = Some(e.to_string());
+            });
+            return Err(e);
+        }
+    };
+    let cfg = provider_config(rs.role, &launch.entry, &launch.plan, generation)?;
+    if let Some(pid) = rs.pid() {
+        orphan::write(
+            &rs.pid_file,
+            &PidRecord {
+                pid,
+                exe: launch.binary.clone(),
+                port: launch.plan.port,
+            },
+        );
+    }
+    tracing::info!(role = role_name(rs.role), model = %launch.entry.id,
+        port = launch.plan.port, accel = launch.accel.as_str(), "local runtime ready");
+    let binary = launch.binary.clone();
+    let port = launch.plan.port;
+    let cancel = CancellationToken::new();
+    let handle = tokio::spawn(supervise(
+        Arc::clone(rs),
+        ctx.clone(),
+        launch,
+        key,
+        cancel.clone(),
+    ));
+    *lock(&rs.task) = Some(Task { cancel, handle });
+    rs.set(|st| {
+        st.state = Some(RuntimeState::Ready);
+        st.error = None;
+        st.port = Some(port);
+        st.config = Some(cfg.clone());
+        st.binary = Some(binary);
+    });
+    Ok(cfg)
+}
+
 fn check_role(role: RuntimeRole, model: &ModelEntry) -> Result<()> {
     let embeds = model.tiers.contains(&Tier::Embedding);
     let chats = model.tiers.iter().any(|t| *t != Tier::Embedding);
@@ -730,11 +971,12 @@ fn check_role(role: RuntimeRole, model: &ModelEntry) -> Result<()> {
     }
 }
 
-/// The `openai_compatible` provider config for a started server.
+/// The `openai_compatible` provider config for a started server, whose key has `generation`.
 pub(crate) fn provider_config(
     role: RuntimeRole,
     model: &ModelEntry,
     plan: &LaunchPlan,
+    generation: u64,
 ) -> Result<ProviderConfig> {
     let tiers: Vec<Tier> = match role {
         RuntimeRole::Embedding => vec![Tier::Embedding],
@@ -751,7 +993,7 @@ pub(crate) fn provider_config(
         "kind": "openai_compatible",
         "base_url": format!("http://127.0.0.1:{}/v1", plan.port),
         "model": model.id,
-        "api_key": api_key_ref(role).to_string(),
+        "api_key": api_key_ref_gen(role, generation).to_string(),
         "tiers": tiers,
         "locality": "on_device",
         "context_tokens": plan.ctx_per_slot,
@@ -762,6 +1004,10 @@ pub(crate) fn provider_config(
 }
 
 /// A free loopback port: `preferred` if it can still be bound, otherwise one from the OS.
+///
+/// The port is released again before the server binds it, so somebody else may take it in
+/// between; the supervisor therefore checks who answers on it before trusting it (see
+/// [`crate`]'s security notes).
 pub fn choose_port(preferred: Option<u16>) -> Result<u16> {
     if let Some(p) = preferred
         && p != 0
@@ -773,13 +1019,16 @@ pub fn choose_port(preferred: Option<u16>) -> Result<u16> {
     Ok(l.local_addr()?.port())
 }
 
+/// Spawn the server into the role's process slot and wait until it is ready (and verified to
+/// be the one listening). On failure the process is gone again.
 async fn start_once(
     client: &reqwest::Client,
     opts: &RuntimeOptions,
+    rs: &RoleState,
     launch: &Launch,
     key: &Secret,
     log: &SharedLog,
-) -> Result<ServerProcess> {
+) -> Result<()> {
     check_binary(&launch.binary)?;
     lock_log(log).note(&format!(
         "starting {} on 127.0.0.1:{} (ctx {}x{}, ngl {}, accel {})",
@@ -790,21 +1039,29 @@ async fn start_once(
         launch.plan.gpu_layers.as_arg(),
         launch.accel.as_str()
     ));
-    let mut proc = ServerProcess::spawn(&launch.binary, &launch.plan.args(), key, log)?;
+    let proc = ServerProcess::spawn(&launch.binary, &launch.plan.args(), key, log)?;
+    // Dropping a previous (dead) process kills whatever it left in its group.
+    let previous = lock(&rs.proc).replace(proc);
+    drop(previous);
     match wait_ready(
         client,
         launch.plan.port,
-        &mut proc,
+        &rs.proc,
         opts.health_timeout,
         opts.health_poll,
         log,
     )
     .await
     {
-        Ok(()) => Ok(proc),
+        Ok(()) => Ok(()),
         Err(e) => {
-            proc.shutdown(Duration::from_millis(200)).await;
-            lock_log(log).note(&format!("start failed: {e}"));
+            let proc = lock(&rs.proc).take();
+            if let Some(mut p) = proc {
+                p.shutdown(Duration::from_millis(200)).await;
+            }
+            if !matches!(e, Error::Cancelled) {
+                lock_log(log).note(&format!("start failed: {e}"));
+            }
             Err(e)
         }
     }
@@ -828,16 +1085,16 @@ enum Event {
 /// Watch one server: restart it with backoff when it dies, stop it when idle.
 async fn supervise(
     rs: Arc<RoleState>,
-    client: reqwest::Client,
-    opts: RuntimeOptions,
+    ctx: Ctx,
     mut launch: Launch,
-    key: Secret,
+    mut key: Secret,
     cancel: CancellationToken,
 ) {
+    let opts = &ctx.cfg.opts;
     let mut failures = 0u32;
     let mut last_idle_check = Instant::now();
     let mut last_counters: Option<f64> = None;
-    let Ok(log) = rs.log(&opts, &key) else {
+    let Ok(log) = rs.log(opts, &key) else {
         return;
     };
     loop {
@@ -856,6 +1113,13 @@ async fn supervise(
             p.try_wait().map(|s| (s, p.started.elapsed()))
         };
         if let Some((status, uptime)) = exited {
+            let msg = format!("llama-server exited unexpectedly ({status})");
+            // Not ready, and no config for the dead server's port, before anything else.
+            rs.set(|st| {
+                st.state = Some(RuntimeState::Failed);
+                st.error = Some(msg.clone());
+                st.config = None;
+            });
             if let Some(mut p) = lock(&rs.proc).take() {
                 p.kill_stragglers();
             }
@@ -863,26 +1127,11 @@ async fn supervise(
                 failures = 0;
             }
             failures += 1;
-            let msg = format!("llama-server exited unexpectedly ({status})");
             tracing::warn!(role = role_name(rs.role), %status, failures, "local runtime crashed");
             lock_log(&log).note(&msg);
-            rs.set(|st| {
-                st.state = Some(RuntimeState::Failed);
-                st.error = Some(msg);
-            });
-            if !restart(
-                &rs,
-                &client,
-                &opts,
-                &mut launch,
-                &key,
-                &log,
-                &cancel,
-                &mut failures,
-            )
-            .await
-            {
-                return;
+            match restart(&rs, &ctx, &mut launch, &log, &cancel, &mut failures).await {
+                Some(k) => key = k,
+                None => return,
             }
             last_counters = None;
             continue;
@@ -893,7 +1142,7 @@ async fn supervise(
             && last_idle_check.elapsed() >= opts.idle_check_interval
         {
             last_idle_check = Instant::now();
-            match activity(&client, launch.plan.port, &key).await {
+            match activity(&ctx.client, launch.plan.port, &key).await {
                 Some((counters, busy)) => {
                     if busy || last_counters.is_some_and(|c| c != counters) {
                         rs.touch();
@@ -906,34 +1155,34 @@ async fn supervise(
             if lock(&rs.activity).elapsed() >= idle {
                 tracing::info!(role = role_name(rs.role), "stopping idle local runtime");
                 lock_log(&log).note("stopping: idle");
-                let proc = lock(&rs.proc).take();
-                if let Some(mut p) = proc {
-                    p.shutdown(opts.shutdown_grace).await;
-                }
-                orphan::remove(&rs.pid_file);
+                // Withdraw the config before the server is signalled.
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Stopped);
                     st.error = None;
                     st.config = None;
                 });
+                let proc = lock(&rs.proc).take();
+                if let Some(mut p) = proc {
+                    p.shutdown(opts.shutdown_grace).await;
+                }
+                orphan::remove(&rs.pid_file);
                 return;
             }
         }
     }
 }
 
-/// Restart after a crash. `false` if cancelled or given up.
-#[allow(clippy::too_many_arguments)]
+/// Restart after a crash, with a new API key. Returns the new key, or `None` if cancelled or
+/// given up.
 async fn restart(
     rs: &RoleState,
-    client: &reqwest::Client,
-    opts: &RuntimeOptions,
+    ctx: &Ctx,
     launch: &mut Launch,
-    key: &Secret,
     log: &SharedLog,
     cancel: &CancellationToken,
     failures: &mut u32,
-) -> bool {
+) -> Option<Secret> {
+    let opts = &ctx.cfg.opts;
     loop {
         if *failures > opts.max_restarts {
             let msg = format!(
@@ -947,27 +1196,37 @@ async fn restart(
                 st.error = Some(msg);
                 st.config = None;
             });
-            return false;
+            return None;
         }
         tokio::select! {
-            _ = cancel.cancelled() => return false,
+            _ = cancel.cancelled() => return None,
             _ = tokio::time::sleep(opts.backoff(*failures)) => {}
         }
-        // Keep the port (and so every handed-out config) unless something else took it.
+        // Keep the port unless something else took it. Whoever holds it now, the new server
+        // must turn out to be the listener before it is trusted (see `wait_ready`).
         let port = match choose_port(Some(launch.plan.port)) {
             Ok(p) => p,
             Err(_) => launch.plan.port,
         };
         launch.plan.port = port;
-        rs.set(|st| st.state = Some(RuntimeState::Starting));
+        rs.set(|st| {
+            st.state = Some(RuntimeState::Starting);
+            st.config = None;
+        });
+        let started = async {
+            let (generation, key) = ctx.secrets.rotate(rs.role)?;
+            lock_log(log).add_secret(key.expose());
+            start_once(&ctx.client, opts, rs, launch, &key, log).await?;
+            Ok::<_, Error>((generation, key))
+        };
         let started = tokio::select! {
-            _ = cancel.cancelled() => return false,
-            r = start_once(client, opts, launch, key, log) => r,
+            _ = cancel.cancelled() => return None,
+            r = started => r,
         };
         match started {
-            Ok(proc) => {
-                let cfg = provider_config(rs.role, &launch.entry, &launch.plan).ok();
-                if let Some(pid) = proc.pid() {
+            Ok((generation, key)) => {
+                let cfg = provider_config(rs.role, &launch.entry, &launch.plan, generation).ok();
+                if let Some(pid) = rs.pid() {
                     orphan::write(
                         &rs.pid_file,
                         &PidRecord {
@@ -977,7 +1236,6 @@ async fn restart(
                         },
                     );
                 }
-                *lock(&rs.proc) = Some(proc);
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Ready);
                     st.error = None;
@@ -986,7 +1244,7 @@ async fn restart(
                     st.restarts += 1;
                 });
                 tracing::info!(role = role_name(rs.role), port, "local runtime restarted");
-                return true;
+                return Some(key);
             }
             Err(e) => {
                 *failures += 1;

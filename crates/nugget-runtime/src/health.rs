@@ -1,10 +1,12 @@
 //! Loopback HTTP checks against a running `llama-server`: readiness and request activity.
 
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use nugget_core::{Error, Result};
 use nugget_infer::Secret;
 
+use crate::listener::{Ownership, owner};
 use crate::logs::{SharedLog, lock};
 use crate::process::ServerProcess;
 
@@ -42,11 +44,43 @@ pub(crate) async fn probe(client: &reqwest::Client, port: u16) -> Health {
     }
 }
 
-/// Poll `/health` until ready, the process exits, or `timeout` passes.
+/// The server process slot of a role: `None` once a stop took the process.
+pub(crate) type ProcSlot = Mutex<Option<ServerProcess>>;
+
+/// Liveness of the process in `slot`.
+enum Child {
+    Running(u32),
+    Exited(std::process::ExitStatus),
+    /// Taken by a stop (or never had a pid).
+    Gone,
+}
+
+fn child(slot: &ProcSlot) -> Child {
+    let mut g = lock_slot(slot);
+    match g.as_mut() {
+        None => Child::Gone,
+        Some(p) => match p.try_wait() {
+            Some(status) => Child::Exited(status),
+            None => p.pid().map_or(Child::Gone, Child::Running),
+        },
+    }
+}
+
+fn lock_slot(slot: &ProcSlot) -> std::sync::MutexGuard<'_, Option<ServerProcess>> {
+    slot.lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Poll `/health` until the server in `slot` is ready, its process exits, or `timeout` passes.
+///
+/// Ready means: the process is alive before and after a `/health` probe that answered ok, and
+/// (on Linux) every listener reachable on `127.0.0.1:port` belongs to that process or its
+/// process group ([`crate::listener`]). Another process answering on the port fails the start
+/// at once.
 pub(crate) async fn wait_ready(
     client: &reqwest::Client,
     port: u16,
-    proc: &mut ServerProcess,
+    slot: &ProcSlot,
     timeout: Duration,
     poll: Duration,
     log: &SharedLog,
@@ -54,16 +88,37 @@ pub(crate) async fn wait_ready(
     let start = Instant::now();
     let mut delay = poll.max(Duration::from_millis(10));
     loop {
-        if let Some(status) = proc.try_wait() {
-            // Give the log pumps a moment to drain the last lines.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let tail = lock(log).tail(5).join(" | ");
-            return Err(Error::Provider(format!(
-                "llama-server exited during start-up ({status}); last output: {tail}"
-            )));
-        }
-        if probe(client, port).await == Health::Ready {
-            return Ok(());
+        let pid = match child(slot) {
+            Child::Running(pid) => pid,
+            Child::Exited(status) => {
+                // Give the log pumps a moment to drain the last lines.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let tail = lock(log).tail(5).join(" | ");
+                return Err(Error::Provider(format!(
+                    "llama-server exited during start-up ({status}); last output: {tail}"
+                )));
+            }
+            Child::Gone => return Err(Error::Cancelled),
+        };
+        if probe(client, port).await == Health::Ready
+            && matches!(child(slot), Child::Running(p) if p == pid)
+        {
+            match owner(port, pid) {
+                Ownership::Child | Ownership::Unverified => {
+                    // Still the same live process after the ownership check.
+                    if matches!(child(slot), Child::Running(p) if p == pid) {
+                        return Ok(());
+                    }
+                }
+                Ownership::Foreign(who) => {
+                    return Err(Error::Provider(format!(
+                        "another process answered on the server's port: {who}; refusing to \
+                         use it"
+                    )));
+                }
+                // Raced with the listener going away; the next round sees why.
+                Ownership::NotListening => {}
+            }
         }
         if start.elapsed() >= timeout {
             let tail = lock(log).tail(3).join(" | ");

@@ -20,6 +20,13 @@
 //! - `--fake-spawn-child PIDFILE`: start a sleeping child process and write its pid (process
 //!   group cleanup tests);
 //! - `--fake-print-key`: print the API key to stderr (log redaction tests);
+//! - `--fake-ignore-sigterm`: survive SIGTERM (Unix), so a stop takes the whole grace period;
+//! - `--fake-squat PIDFILE`: do not listen; instead start a *separate* process (own process
+//!   group, so not one of ours) that listens on `--port`, and write its pid. Simulates another
+//!   local user grabbing the port before the server binds it;
+//! - `--fake-squatter LOGFILE`: be that process: answer `/health` with ok on `--port` and append
+//!   every request line (and whether it carried an `authorization` header) to LOGFILE; exits
+//!   after 60 s;
 //! - `--fake-sleeper`: just sleep (used for the spawned child).
 
 use std::collections::BTreeMap;
@@ -47,6 +54,9 @@ struct Opts {
     spawn_child: Option<String>,
     print_key: bool,
     sleeper: bool,
+    ignore_sigterm: bool,
+    squat: Option<String>,
+    squatter: Option<String>,
 }
 
 const FLAGS_WITH_VALUE: &[&str] = &[
@@ -66,6 +76,8 @@ const FLAGS_WITH_VALUE: &[&str] = &[
     "--fake-crash-once",
     "--fake-exit-immediately",
     "--fake-spawn-child",
+    "--fake-squat",
+    "--fake-squatter",
 ];
 const SWITCHES: &[&str] = &[
     "--embedding",
@@ -75,6 +87,7 @@ const SWITCHES: &[&str] = &[
     "--metrics",
     "--fake-print-key",
     "--fake-sleeper",
+    "--fake-ignore-sigterm",
 ];
 
 fn parse(args: &[String]) -> Result<Opts, String> {
@@ -91,6 +104,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
                 "--metrics" => o.metrics = true,
                 "--fake-print-key" => o.print_key = true,
                 "--fake-sleeper" => o.sleeper = true,
+                "--fake-ignore-sigterm" => o.ignore_sigterm = true,
                 _ => {}
             }
             continue;
@@ -116,6 +130,8 @@ fn parse(args: &[String]) -> Result<Opts, String> {
             "--fake-crash-once" => o.crash_once = Some(v),
             "--fake-exit-immediately" => o.exit_immediately = Some(num(&v)? as u8),
             "--fake-spawn-child" => o.spawn_child = Some(v),
+            "--fake-squat" => o.squat = Some(v),
+            "--fake-squatter" => o.squatter = Some(v),
             "--ctx-size" | "--parallel" | "--threads" | "--batch-size" | "--ubatch-size" => {
                 num(&v)?;
             }
@@ -154,6 +170,9 @@ async fn main() -> ExitCode {
         tokio::time::sleep(Duration::from_secs(3600)).await;
         return ExitCode::SUCCESS;
     }
+    if let Some(log) = &opts.squatter {
+        return squatter(opts.port, log).await;
+    }
     if let Some(code) = opts.exit_immediately {
         eprintln!("fake: exiting immediately with {code}");
         return ExitCode::from(code);
@@ -181,6 +200,36 @@ async fn main() -> ExitCode {
         std::fs::write(pidfile, child.id().to_string()).expect("write pid file");
         // Deliberately not waited for: it must die with the process group.
         std::mem::forget(child);
+    }
+    #[cfg(not(unix))]
+    let _ = opts.ignore_sigterm;
+    #[cfg(unix)]
+    if opts.ignore_sigterm {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut term = signal(SignalKind::terminate()).expect("SIGTERM handler");
+        tokio::spawn(async move {
+            while term.recv().await.is_some() {
+                eprintln!("fake: ignoring SIGTERM");
+            }
+        });
+    }
+    if let Some(pidfile) = &opts.squat {
+        let me = std::env::current_exe().expect("own path");
+        let log = format!("{pidfile}.log");
+        let mut cmd = std::process::Command::new(me);
+        cmd.args(["--fake-squatter", &log, "--port", &opts.port.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        // Not in our process group: it stands for somebody else's process.
+        #[cfg(unix)]
+        std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+        let child = cmd.spawn().expect("spawn squatter");
+        std::fs::write(pidfile, child.id().to_string()).expect("write pid file");
+        std::mem::forget(child);
+        // Stay alive (like a server still loading its model), but never listen.
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+        return ExitCode::SUCCESS;
     }
     if let Some(after) = opts.crash_after {
         let armed = match &opts.crash_once {
@@ -225,6 +274,40 @@ async fn main() -> ExitCode {
             let _ = handle(conn, &srv).await;
         });
     }
+}
+
+/// `--fake-squatter`: somebody else's server on our port.
+async fn squatter(port: u16, log: &str) -> ExitCode {
+    let Ok(listener) = TcpListener::bind(("127.0.0.1", port)).await else {
+        return ExitCode::from(1);
+    };
+    let log = log.to_string();
+    let serve = async move {
+        loop {
+            let Ok((mut conn, _)) = listener.accept().await else {
+                continue;
+            };
+            let log = log.clone();
+            tokio::spawn(async move {
+                let Ok(Some(req)) = read_request(&mut conn).await else {
+                    return;
+                };
+                let auth = req.headers.contains_key("authorization");
+                let line = format!("{} {} authorization={auth}\n", req.method, req.path);
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log)
+                {
+                    use std::io::Write;
+                    let _ = f.write_all(line.as_bytes());
+                }
+                let _ = respond(&mut conn, 200, &json!({"status": "ok"})).await;
+            });
+        }
+    };
+    let _ = tokio::time::timeout(Duration::from_secs(60), serve).await;
+    ExitCode::SUCCESS
 }
 
 struct Request {

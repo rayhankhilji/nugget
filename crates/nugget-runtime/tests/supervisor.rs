@@ -55,9 +55,18 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
         "embedding tier dropped for chat"
     );
     assert_eq!(cfg.effective_locality().unwrap(), Locality::OnDevice);
+    // A reference to this server's key generation, resolved only by the runtime.
+    assert!(
+        matches!(&cfg.api_key, Some(ApiKeyRef::Env(n)) if n.starts_with("NUGGET_RUNTIME_API_KEY_CHAT_")),
+        "{:?}",
+        cfg.api_key
+    );
     assert_eq!(
-        cfg.api_key,
-        Some(ApiKeyRef::Env("NUGGET_RUNTIME_API_KEY_CHAT".into()))
+        rt.secrets()
+            .resolve(cfg.api_key.as_ref().unwrap())
+            .unwrap()
+            .expose(),
+        key(&rt, RuntimeRole::Chat)
     );
 
     let status = rt.status();
@@ -265,9 +274,11 @@ async fn crashed_server_is_restarted_on_the_same_port() {
     assert!(marker.exists());
     let d = rt.details(RuntimeRole::Chat).unwrap();
     assert_ne!(d.pid.unwrap(), pid1);
-    assert_eq!(d.config.as_ref(), Some(&cfg), "same port, same config");
+    let cfg2 = d.config.clone().unwrap();
+    assert_eq!(cfg2.base_url, cfg.base_url, "same port");
+    assert_ne!(cfg2.api_key, cfg.api_key, "new key generation");
     assert!(!alive(pid1));
-    // The handed-out config keeps working.
+    // The port keeps working, with the new key.
     let k = key(&rt, RuntimeRole::Chat);
     assert_eq!(
         get(
@@ -288,7 +299,7 @@ async fn crashed_server_is_restarted_on_the_same_port() {
         .send()
         .await;
     let again = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
-    assert_eq!(again, cfg);
+    assert_eq!(again.base_url, cfg.base_url);
     wait_until("second restart", Duration::from_secs(10), || {
         rt.details(RuntimeRole::Chat)
             .is_some_and(|d| d.restarts == 2 && d.info.state == RuntimeState::Ready)
@@ -574,4 +585,306 @@ fn free_port_selection() {
     let other = choose_port(Some(taken)).unwrap();
     assert_ne!(other, taken);
     assert!(std::net::TcpListener::bind(("127.0.0.1", other)).is_ok());
+}
+
+// ---- Regression tests: who is on the port, stale configs, key rotation, detached starts ----
+
+/// Another local process grabs the server's port before the server binds it, and answers
+/// `/health` with ok. The runtime must not take it for the server: no config, no key, no prompt.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn a_squatter_on_the_servers_port_is_rejected() {
+    let e = env().await;
+    let pidfile = e.tmp.path().join("squatter.pid");
+    let p = pidfile.to_string_lossy().into_owned();
+    let mut o = with_extra(RuntimeRole::Chat, &["--fake-squat", &p]);
+    o.health_timeout = Duration::from_secs(5);
+    let rt = e.runtime(o);
+    let res = rt.ensure(RuntimeRole::Chat, &e.chat).await;
+    let squatter = common::KillOnDrop(
+        std::fs::read_to_string(&pidfile)
+            .ok()
+            .and_then(|s| s.trim().parse().ok()),
+    );
+    let squatter_pid = squatter.0.expect("the fake server started a squatter");
+    assert!(alive(squatter_pid), "the squatter is still listening");
+
+    let err = res.expect_err("a foreign listener must not count as ready");
+    assert!(
+        matches!(&err, Error::Provider(m) if m.contains("another process")),
+        "{err}"
+    );
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.info.state, RuntimeState::Failed);
+    assert!(d.config.is_none());
+    assert_eq!(d.pid, None, "our server was stopped");
+    // The squatter only ever saw unauthenticated health probes: neither the key nor a request.
+    let seen = std::fs::read_to_string(format!("{p}.log")).unwrap_or_default();
+    assert!(seen.contains("GET /health"), "{seen}");
+    assert!(!seen.contains("authorization=true"), "{seen}");
+    assert!(!seen.contains("/v1/"), "{seen}");
+}
+
+/// While a server is shutting down (here it ignores SIGTERM for the whole grace period), its
+/// port must not be handed out: the next owner of the port could be anybody.
+#[cfg(unix)]
+#[tokio::test]
+async fn no_config_is_handed_out_while_stopping() {
+    let e = env().await;
+    let mut o = with_extra(RuntimeRole::Chat, &["--fake-ignore-sigterm"]);
+    o.shutdown_grace = Duration::from_millis(1500);
+    let rt = e.runtime(o);
+    rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+
+    let stopping = tokio::spawn({
+        let rt = rt.clone();
+        async move { rt.stop(RuntimeRole::Chat).await }
+    });
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(alive(pid), "still in its shutdown grace period");
+    assert!(!stopping.is_finished());
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_ne!(d.info.state, RuntimeState::Ready);
+    assert!(d.config.is_none(), "config handed out during stop");
+    stopping.await.unwrap();
+    assert!(!alive(pid));
+    assert_eq!(
+        rt.details(RuntimeRole::Chat).unwrap().info.state,
+        RuntimeState::Stopped
+    );
+}
+
+/// Same for an idle stop, which the supervisor does on its own.
+#[cfg(unix)]
+#[tokio::test]
+async fn no_config_is_handed_out_during_an_idle_stop() {
+    let e = env().await;
+    let mut o = with_extra(RuntimeRole::Embedding, &["--fake-ignore-sigterm"]);
+    o.shutdown_grace = Duration::from_millis(1500);
+    o.idle_shutdown = Some(Duration::from_millis(200));
+    o.idle_check_interval = Duration::from_millis(50);
+    let rt = e.runtime(o);
+    rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
+    let pid = rt.details(RuntimeRole::Embedding).unwrap().pid.unwrap();
+    wait_until("idle stop begins", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Embedding)
+            .is_some_and(|d| d.info.state != RuntimeState::Ready)
+    })
+    .await;
+    // The server has been asked to stop but is still there: no config for it any more.
+    assert!(
+        alive(pid),
+        "the config was withdrawn only after the server was gone"
+    );
+    assert!(rt.details(RuntimeRole::Embedding).unwrap().config.is_none());
+    wait_until("idle server gone", Duration::from_secs(5), || !alive(pid)).await;
+    rt.shutdown().await;
+}
+
+/// A crashed server is reported as not ready as soon as anybody looks, not on the
+/// supervisor's next tick, so its (now free) port is not handed out.
+#[tokio::test]
+async fn a_crash_is_reported_at_once() {
+    let e = env().await;
+    let mut o = common::opts();
+    // The supervisor would only notice after 30 s.
+    o.watch_interval = Duration::from_secs(30);
+    let rt = e.runtime(o);
+    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    let port = port_of(cfg.base_url.as_ref().unwrap());
+    let _ = common::no_proxy_client()
+        .post(format!("http://127.0.0.1:{port}/fake/crash"))
+        .bearer_auth(key(&rt, RuntimeRole::Chat))
+        .send()
+        .await;
+    wait_until("server exited", Duration::from_secs(5), || !alive(pid)).await;
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_ne!(d.info.state, RuntimeState::Ready);
+    assert!(d.config.is_none());
+    assert_eq!(d.pid, None, "a dead server has no pid");
+    assert!(
+        d.info
+            .error
+            .as_deref()
+            .is_some_and(|m| m.contains("exited unexpectedly")),
+        "{:?}",
+        d.info.error
+    );
+    rt.shutdown().await;
+}
+
+/// Every server process gets a new API key: a key captured while the port was unguarded (or
+/// held by a stale client) does not open the restarted server, and old configs fail closed.
+#[tokio::test]
+async fn the_api_key_rotates_on_every_restart() {
+    let e = env().await;
+    let marker = e.tmp.path().join("crashed-once");
+    let marker_s = marker.to_string_lossy().into_owned();
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &[
+            "--fake-crash-after-ms",
+            "300",
+            "--fake-crash-once",
+            &marker_s,
+        ],
+    ));
+    let cfg1 = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let k1 = key(&rt, RuntimeRole::Chat);
+    let secrets = rt.secrets();
+    assert_eq!(
+        secrets
+            .resolve(cfg1.api_key.as_ref().unwrap())
+            .unwrap()
+            .expose(),
+        k1
+    );
+
+    // Crash and restart by the supervisor.
+    wait_until("crash and restart", Duration::from_secs(10), || {
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.restarts == 1 && d.info.state == RuntimeState::Ready)
+    })
+    .await;
+    let cfg2 = rt.details(RuntimeRole::Chat).unwrap().config.unwrap();
+    let k2 = key(&rt, RuntimeRole::Chat);
+    assert_ne!(k1, k2, "the key changed with the restart");
+    assert_ne!(cfg1.api_key, cfg2.api_key);
+    assert!(
+        secrets.resolve(cfg1.api_key.as_ref().unwrap()).is_err(),
+        "a config from before the restart no longer resolves"
+    );
+    assert_eq!(
+        secrets
+            .resolve(cfg2.api_key.as_ref().unwrap())
+            .unwrap()
+            .expose(),
+        k2
+    );
+    let port = port_of(cfg2.base_url.as_ref().unwrap());
+    assert_eq!(get(port, "/v1/models", Some(&k1)).await.0, 401);
+    assert_eq!(get(port, "/v1/models", Some(&k2)).await.0, 200);
+
+    // And after a stop and a new start.
+    rt.stop(RuntimeRole::Chat).await;
+    let cfg3 = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    let k3 = key(&rt, RuntimeRole::Chat);
+    assert_ne!(k2, k3);
+    assert_ne!(cfg2.api_key, cfg3.api_key);
+    let port = port_of(cfg3.base_url.as_ref().unwrap());
+    assert_eq!(get(port, "/v1/models", Some(&k2)).await.0, 401);
+    assert_eq!(get(port, "/v1/models", Some(&k3)).await.0, 200);
+    // The other role's key is untouched.
+    rt.shutdown().await;
+}
+
+/// A caller that gives up on `ensure` (a timeout drops its future) must not kill a server that
+/// is still loading, nor leave the status stuck: the start goes on, and the next `ensure`
+/// gets the same server.
+#[tokio::test]
+async fn an_abandoned_ensure_does_not_cancel_the_start() {
+    let e = env().await;
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &["--fake-start-delay-ms", "1500"],
+    ));
+    let r = tokio::time::timeout(
+        Duration::from_millis(300),
+        rt.ensure(RuntimeRole::Chat, &e.chat),
+    )
+    .await;
+    assert!(r.is_err(), "the caller timed out");
+
+    // Still starting, with a live server process behind it.
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.info.state, RuntimeState::Starting);
+    let pid = d.pid.expect("the loading server keeps running");
+    assert!(alive(pid));
+
+    // Another impatient caller joins the same start instead of restarting it.
+    let r = tokio::time::timeout(
+        Duration::from_millis(200),
+        rt.ensure(RuntimeRole::Chat, &e.chat),
+    )
+    .await;
+    assert!(r.is_err());
+    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().pid, Some(pid));
+
+    // It becomes ready with nobody waiting...
+    wait_until("ready without a caller", Duration::from_secs(10), || {
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.info.state == RuntimeState::Ready)
+    })
+    .await;
+    // ...and a later ensure returns it without restarting.
+    let t = Instant::now();
+    let cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    assert!(
+        t.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        t.elapsed()
+    );
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.pid, Some(pid), "same server");
+    assert_eq!(d.config, Some(cfg));
+    rt.shutdown().await;
+}
+
+/// A caller that waits for a start in progress gets its result.
+#[tokio::test]
+async fn concurrent_ensures_share_one_start() {
+    let e = env().await;
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &["--fake-start-delay-ms", "500"],
+    ));
+    let (a, b) = tokio::join!(
+        rt.ensure(RuntimeRole::Chat, &e.chat),
+        rt.ensure(RuntimeRole::Chat, &e.chat)
+    );
+    assert_eq!(a.unwrap(), b.unwrap());
+    assert_eq!(rt.details(RuntimeRole::Chat).unwrap().restarts, 0);
+    rt.shutdown().await;
+}
+
+/// `stop` (and dropping the runtime) also ends a start nobody waits for any more.
+#[tokio::test]
+async fn stop_and_drop_end_a_detached_start() {
+    let e = env().await;
+    let rt = e.runtime(with_extra(
+        RuntimeRole::Chat,
+        &["--fake-start-delay-ms", "60000"],
+    ));
+    let waiter = tokio::spawn({
+        let (rt, m) = (rt.clone(), e.chat.clone());
+        async move { rt.ensure(RuntimeRole::Chat, &m).await }
+    });
+    wait_until("spawned", Duration::from_secs(5), || {
+        rt.details(RuntimeRole::Chat)
+            .is_some_and(|d| d.pid.is_some())
+    })
+    .await;
+    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    rt.stop(RuntimeRole::Chat).await;
+    assert!(!alive(pid));
+    let err = waiter.await.unwrap().unwrap_err();
+    assert!(matches!(err, Error::Cancelled), "{err}");
+    let d = rt.details(RuntimeRole::Chat).unwrap();
+    assert_eq!(d.info.state, RuntimeState::Stopped);
+    assert_eq!(d.pid, None);
+
+    // Abandoned, then the runtime is dropped: the loading server dies with it.
+    let _ = tokio::time::timeout(
+        Duration::from_millis(200),
+        rt.ensure(RuntimeRole::Chat, &e.chat),
+    )
+    .await;
+    let pid = rt.details(RuntimeRole::Chat).unwrap().pid.unwrap();
+    drop(rt);
+    wait_until("server killed on drop", Duration::from_secs(5), || {
+        !alive(pid)
+    })
+    .await;
 }

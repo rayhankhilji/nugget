@@ -50,9 +50,17 @@ impl RollingLog {
         })
     }
 
-    /// Strings that must never reach the file (replaced with `<redacted>`).
-    pub(crate) fn set_secrets(&mut self, secrets: Vec<String>) {
-        self.secrets = secrets.into_iter().filter(|s| !s.is_empty()).collect();
+    /// Never write `secret` (an API key) to the file: it is replaced with `<redacted>`. The most recent few are kept, so output of a
+    /// server that is still shutting down stays redacted too.
+    pub(crate) fn add_secret(&mut self, secret: &str) {
+        const KEEP: usize = 4;
+        if secret.is_empty() || self.secrets.iter().any(|s| s == secret) {
+            return;
+        }
+        self.secrets.push(secret.to_string());
+        if self.secrets.len() > KEEP {
+            self.secrets.remove(0);
+        }
     }
 
     /// Append one line, tagged with its stream. Errors are swallowed: logging must never take the
@@ -158,7 +166,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("logs/x.log");
         let mut log = RollingLog::open(path.clone(), 4096, 2).unwrap();
-        log.set_secrets(vec!["s3cr3t-key".into()]);
+        log.add_secret("s3cr3t-key");
         for i in 0..400 {
             log.line("stderr", &format!("line {i} key=s3cr3t-key"));
         }

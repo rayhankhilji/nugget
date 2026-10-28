@@ -47,6 +47,13 @@ Items are grouped by where they'll most likely land.
   - Playwright UI tests.
 - **bench:** the real `draft` and `cua` suites (M3/M4); run `memory`/`perf` against the real store once ingest lands.
 
+## Local runtime
+- Serve `llama-server` on a Unix socket in a 0700 dir (b11940 supports `--host <path>.sock`; reqwest
+  0.13 has `ClientBuilder::unix_socket`). Needs an optional socket path on nugget-infer's
+  `ProviderConfig`. Until then, the TCP listener is ownership-checked on Linux only; macOS/Windows rely
+  on liveness checks and per-restart key rotation.
+- Add `RuntimeState::Stopping` to the IPC contract.
+
 ## Dependencies
 - Replace `starship-battery` in nugget-ingest's power policy (it pins plist 1.7 → quick-xml 0.38,
   RUSTSEC-2026-0194/0195, ignored as unreachable in `deny.toml`) with direct platform reads:

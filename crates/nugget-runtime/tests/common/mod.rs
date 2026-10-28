@@ -200,3 +200,24 @@ pub fn read_all_logs(dir: &Path) -> String {
     }
     out
 }
+
+/// Kill `pid` (if it still runs) when dropped: for processes deliberately started outside the
+/// runtime's process groups.
+pub struct KillOnDrop(pub Option<u32>);
+
+impl Drop for KillOnDrop {
+    fn drop(&mut self) {
+        use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+        let Some(pid) = self.0 else { return };
+        let pid = Pid::from_u32(pid);
+        let mut sys = System::new();
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        if let Some(p) = sys.process(pid) {
+            p.kill();
+        }
+    }
+}
