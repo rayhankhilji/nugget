@@ -11,6 +11,8 @@
 //! folder, and `nugget-retrieve`.
 //! `draft` compares Nugget's drafting prompt with a Sentient-style whole-vault baseline on a
 //! fictional fixture corpus, against a deterministic fake model or a real provider.
+//! `proactive` scores proactive cards over a 30-day fixture world (reference engine until the
+//! real `nugget-proactive` crate is wired in).
 //! `cua` is registered but not yet implemented; its methodology is in `bench/README.md`.
 
 pub mod corpus;

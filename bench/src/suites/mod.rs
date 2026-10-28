@@ -4,6 +4,7 @@ pub mod draft;
 pub mod memory;
 pub mod perf;
 pub mod planned;
+pub mod proactive;
 
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 

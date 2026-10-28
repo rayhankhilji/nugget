@@ -3812,20 +3812,7 @@ dependencies = [
 name = "nugget-proactive"
 version = "0.0.1"
 dependencies = [
- "async-trait",
- "futures",
- "hex",
  "nugget-core",
- "nugget-graph",
- "nugget-infer",
- "nugget-policy",
- "nugget-store",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "time",
- "tokio",
- "tracing",
 ]
 
 [[package]]

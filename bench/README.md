@@ -17,10 +17,10 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 
 | Option | Meaning |
 |---|---|
-| `SUITE...` | `memory`, `perf`, `draft`, `cua`, or `all` |
+| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, or `all` |
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
-| `--backend fake\|real` | What `memory` runs against (default `fake`): the in-crate fake index, or the real store, ingest pipeline, files watcher and retriever in process. Other suites ignore it |
+| `--backend fake\|real` | What `memory` runs against (default `fake`): the in-crate fake index, or the real store, ingest pipeline, files watcher and retriever in process. For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate (`real`, not wired until wave 2). Other suites ignore it |
 | `--embed-url URL` | Real backend: an OpenAI-compatible embeddings endpoint (e.g. a local `llama-server`, `http://127.0.0.1:8080/v1`) instead of the in-process deterministic embedder |
 | `--embed-model NAME` | Model name sent to `--embed-url` |
 | `--provider-url URL` | `draft`: a real chat provider instead of the deterministic fake model (see [`draft`](#draft-m3)) |
@@ -90,6 +90,7 @@ timing-robust gates instead: every file operation propagates, and freshness meet
 |---|---|---|
 | `memory` | **M1: fake index (default) or the real stack (`--backend real`)** | Retrieval recall@k and MRR; change-to-searchable freshness; edit, insert, delete and rename propagation; ingest throughput; DB size and RSS (real) |
 | `perf` | **M0: runs against a fake index** | Ingest throughput, dedup throughput, update and delete latency, query latency, index size |
+| `proactive` | **M5: reference engine (default); the real crate in wave 2** | Card precision@5 and recall, distractor false positives, dedup, the learning curve, dry-run coverage and the approval gate, against a recency-ordered baseline |
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
 | `cua` | Not yet implemented (M4) | Computer-use task success, steps, time and safety violations |
 
@@ -230,6 +231,158 @@ delta source), the daemon and IPC (`nuggetd`), a real embedding model by default
   macOS, the Energy Estimation Engine on Windows, RAPL on Linux).
 - Also measure time to first value: from first launch to a useful search result while backfill
   continues. The target is under 2 minutes.
+
+### `proactive` (M5)
+
+Proactive cards and the morning brief. PLAN M5 asks that **the precision of accepted cards be
+tracked and every action have a dry-run diff**. Code: `src/suites/proactive.rs` and
+`src/suites/proactive/`.
+
+**The engine under test.** The suite drives any implementation of the `ProactiveEngine` adapter
+trait (`src/suites/proactive/engine.rs`):
+
+- `observe(item)`;
+- `brief(day, k)`, which returns at most k cards, each with a kind, a subject and an optional
+  typed action carrying a dry-run diff (`target`, `before`, `after`);
+- `feedback(card, accepted | dismissed)`;
+- `execute(card, approval)`;
+- `audit_log()`.
+
+`nugget-proactive` is still a stub, so the default (`--backend fake`) scores the in-crate
+**reference engine** (`reference.rs`). It follows the design in PLAN §3:
+
+- a deterministic candidate store with dedup on `(kind, subject)`;
+- filters for header-flagged bulk mail, for billing mail from merchants with no receipt, and for
+  cancelled events;
+- a fixed prior plus feedback-learned weights (logistic SGD on sender, kind, internal or recurring
+  meeting, and renewal cadence);
+- a dry-run diff on every action, and execution only under an approval for that exact card.
+
+`--backend real` reports `not_implemented` until wave 2 wires the real crate.
+
+**Fixture world** (`bench/fixtures/proactive/`). One fictional user, Sam Rivera
+(`sam@example.com`), over 30 days from 2026-09-01. Every address is on `example.com` or a `.test`
+domain.
+
+- `world.json`: 312 mails, 40 calendar events, 5 cancellations, 14 notes and 20 receipts, one item
+  per line. Items with a day ≤ 0 are history the engine has seen before day 1.
+- `gold.json`: what engines never see.
+  - **42 gold cards**, each `{kind, subject, first_day, last_day, source, why}`:
+    - 13 unanswered threads (due from 2 days after the question, for 6 days);
+    - 8 follow-ups (the user's unanswered question; due from 4 days after it, for 6 days);
+    - 8 commitments (`I'll send X by <date>` in mail, or `due <date>` in notes; due the 2 days
+      before and the day itself);
+    - 8 external meetings to prepare (the day before and the day itself);
+    - 5 annual renewals (the 7 days before renewal).
+  - **191 distractors**, each with the subjects that would make it a false positive:
+    - 71 newsletters (`List-Unsubscribe`; some ask questions or mention renewing);
+    - 46 automated notifications (`Auto-Submitted` or no-reply senders);
+    - 24 unflagged bulk mails (four senders that look personal and ask questions, about weekly);
+    - 29 answered threads;
+    - 4 completed commitments;
+    - 5 cancelled meetings (cancelled two days before they start);
+    - 12 spam renewal and charge notices from merchants the user never paid.
+  - Neutral traffic is neither gold nor distractor: FYI mail, routine internal meetings, social
+    plans, monthly subscriptions the user does not want reminders for, and one-off receipts.
+
+Card subjects are `thread:<id>`, `event:<id>`, `commit:<mail or note id>` or
+`sub:<merchant domain>`. A shown card matches a gold label when its kind and subject are equal and
+the day is inside the label's window. The fixture is built by `generate.rs`: gold items are written
+out by hand, and distractors and neutral traffic come from templates. A test fails if the committed
+JSON drifts from the generator; `NUGGET_BENCH_REGEN=1 cargo test -p nugget-bench --lib
+committed_fixture` rewrites it. Other tests check that:
+
+- every subject resolves;
+- every window lies inside days 1 to 30, and its source is visible before the window opens;
+- no subject is both gold and a distractor;
+- only reserved domains are used;
+- an oracle engine scores precision and recall of 1.0 at k = 5.
+
+**Simulation** (`sim.rs`). On each morning d the engine has observed every item with `day < d`
+and returns its brief (k = 5).
+
+- **Feedback.** The simulated user accepts a card that matches gold and dismisses anything else,
+  and each decision is flipped with probability 0.1. That noise is what the engine has to learn
+  through.
+- **Execution.** An accepted card's action is executed with a fresh `Approval{card_id, token}`.
+- **Approval probes.** After day 30 the benchmark asks the engine to execute:
+  - every dismissed card, with no approval;
+  - every dismissed card, with another card's approval;
+  - every executed card again, with its own approval replayed.
+
+  All of these must be refused.
+- **Audit log.** Every logged execution must carry a token the benchmark issued for that card,
+  and no card may execute twice.
+- **Runs.** The run repeats over several user seeds (`--scale` smoke/quick/standard/full gives
+  3/10/30/100), derived from `--seed`, and every metric is the mean over seeds.
+
+**Baseline arm: Sentient-style recency judge** (`baseline.rs`). This models the teardown (§2.8):
+a judge reads the last 7 days plus the calendar and returns up to 8 items, at most 5 of them become
+prepared actions, and ranking is purely the LLM's ordering. Here the judge is a deterministic fake
+that **orders by recency only**. It is given the parts an LLM gets right for free:
+
+- it skips header-flagged newsletters and notifications, and cancelled events;
+- it types each item with a simple mapping:
+  - inbound mail becomes a reply card, or a renewal card if it mentions renewing;
+  - the user's own mail becomes a follow-up, or a commitment if it promises something by a date;
+  - an event in the next 7 days becomes meeting prep, entering the context a week ahead;
+  - a note becomes a commitment;
+  - a receipt becomes a renewal.
+
+It has no candidate store, so it keeps no memory across days, and it ignores feedback. Its dry
+run is not scored: the teardown does not describe a preview, and the arm exists to compare
+ranking.
+
+**Learning ablation.** The same reference engine with learning off (weights frozen at the prior)
+runs on the same seeds. Its days 21 to 30 isolate what feedback buys. Comparing days 1 to 10 with
+days 21 to 30 alone would mix learning with the days simply being different.
+
+| Metric | Definition | Target |
+|---|---|---|
+| `cards.precision@5` | Mean over days with at least one card of (gold-matching cards) / (cards shown). An engine may show fewer than 5 | ≥ 0.7 |
+| `cards.precision@5.micro` | All gold-matching shows / all shows | info |
+| `cards.recall`, `cards.recall.<kind>` | Gold cards shown at least once inside their window | ≥ 0.8 |
+| `cards.acceptance_rate` | Accepted / shown: the "precision of accepted cards" the product can track live without labels | info |
+| `cards.accepted_precision` | Accepted cards that are gold / accepted (the rest is user noise) | info |
+| `cards.shown_per_day` | Mean brief size | info |
+| `cards.duplicate_shows` | Shows of a `(kind, subject)` already shown, per run | = 0 |
+| `distractors.false_positive_rate` | Distractors that produced any card / all distractors | ≤ 0.05 |
+| `distractors.header_flagged.false_positives` | Newsletters and notifications that produced a card (no feedback should be needed) | = 0 |
+| `distractors.<category>.fpr` | Per category | info |
+| `learning.precision.days_01_10`, `learning.precision.days_21_30` | The learning curve | info |
+| `learning.precision_gain` | Days 21 to 30 minus days 1 to 10 | ≥ 0 |
+| `learning.gain_vs_frozen` | Days 21 to 30, learning on minus learning off | ≥ 0 |
+| `actions.dry_run_coverage` | Shown actions with an effective dry-run diff / shown actions | = 1.0 |
+| `actions.diff_fidelity` | Approved executions whose applied change equals the approved diff | = 1.0 |
+| `actions.executed_without_approval` | Audit-log executions without a valid, single-use approval for that card, plus probe executions the engine accepted | = 0 |
+| `actions.count`, `actions.executions`, `actions.approved_failures`, `actions.approval_probes` | Counts, per run | info |
+| `baseline.recency_judge.{precision@5, recall, distractors.false_positive_rate, duplicate_shows, precision.days_21_30}` | The baseline arm | info |
+| `comparison.precision@5_vs_baseline` | precision@5 minus the baseline's | ≥ 0 |
+| `comparison.recall_vs_baseline` | Recall minus the baseline's | info |
+
+**What this does not cover yet:**
+
+- the LLM judge that enriches candidates (PLAN §3), and with it LLM-written card text;
+- real connectors: the world is fed as typed items, not through `nugget-ingest`;
+- the cards inbox UI and morning-brief rendering;
+- a judged comparison against a real LLM-ordered baseline.
+
+The fixture is one persona, so a high score here is necessary, not sufficient. Add personas
+before quoting the numbers as product numbers.
+
+**Wiring the real crate (wave 2).**
+
+1. Add `nugget-proactive` to `bench/Cargo.toml`.
+2. Implement `ProactiveEngine` for an adapter in `src/suites/proactive/` that:
+   - maps `world::Item` into the crate's candidate inputs;
+   - maps its cards to `(kind, subject)`;
+   - forwards feedback;
+   - executes through the crate's approval API;
+   - returns its audit log.
+3. Select the adapter in `ProactiveBench::run` when `ctx.backend() == Backend::Real`.
+
+The scoring, the baseline and the targets stay as they are. Keep the reference engine as the
+`fake` arm, so the real crate has a fixed bar to clear.
 
 ### `draft` (M3)
 
@@ -485,6 +638,47 @@ Ingest and resources:
   stored vectors). It is fine at 5 000 items, but worth watching at 50 000.
 - **The DB size per 1k items is inflated on small corpora** by fixed overhead (sqlite-vec
   allocates vectors in blocks of 1024) and by the WAL.
+
+### `proactive`, M5 reference engine (2026-10-28)
+
+**Setup.** Release build. Seed 42, 30 user seeds (standard), user noise 0.1, k = 5. Same machine as
+above. A run takes 0.13 s. The `full` scale (100 user seeds) agrees to within 0.015 on every
+headline number.
+
+| Metric | reference engine | learning off | recency judge (baseline) |
+|---|---|---|---|
+| precision@5 (target ≥ 0.7) | **0.763** | | 0.020 |
+| recall (target ≥ 0.8) | **0.945** | | 0.071 |
+| recall: unanswered / follow-up / commitment / meeting / renewal | 0.92 / 1.00 / 1.00 / 0.98 / 0.78 | | |
+| distractor false-positive rate (target ≤ 0.05) | **0.028** | 0.120 | 0.262 |
+| header-flagged false positives (target 0) | 0 | | |
+| duplicate shows per run (target 0) | 0 | | 11 |
+| precision, days 1 to 10 → days 21 to 30 | 0.553 → **0.996** | → 0.363 | → 0.000 |
+| dry-run coverage / diff fidelity (target 1.0) | 1.0 / 1.0 | | |
+| executed without approval (target 0) | 0, over 66 probes and 36.6 approved executions per run | | |
+| acceptance rate / accepted precision | 0.713 / 0.966 | | |
+
+Every target passes.
+
+**Reading these honestly.**
+
+- **The reference engine was written alongside the fixture.** Its rules (`I'll ... by <date>`,
+  `due <date>`, header filters) match the fixture's phrasing. The safety gates are what transfers
+  to the real crate: dedup, dry-run coverage, the approval gate, zero header-flagged false
+  positives, and no lost precision over the month. Treat its precision and recall as the bar
+  `nugget-proactive` has to clear on this world, not as product numbers.
+- **Most of the early-days misses are learnable on purpose.** Unflagged bulk mail (22.5% of it
+  produces a card, almost all from each sender's first message) and routine internal meetings
+  produce cards until the first one or two dismissals.
+- **Renewal recall is 0.78, and that is a real weakness.** A noisy dismissal of an annual renewal
+  pushes the shared `renewal:annual` weight below zero. Nothing is shown in that class afterwards,
+  so nothing can correct it: there is no exploration. Bounding per-class negative weights, or a
+  small exploration rate, is the fix to try in the real crate.
+- **The baseline is weak by construction, not by tuning.** Recency-only ordering puts FYI mail,
+  bulk mail and replies already sent at the top of a 7-day context. Meetings enter that context a
+  week ahead, so they are pushed out by fresher mail. With no memory, the same items reappear.
+  This measures **ordering alone**. A real LLM judge reads content and will do much better. A
+  judged comparison is listed above under what this does not cover.
 
 ## Adding a suite
 

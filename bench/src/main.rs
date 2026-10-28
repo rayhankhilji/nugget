@@ -27,7 +27,7 @@ const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results"
     about = "Run Nugget benchmark suites and write JSON reports"
 )]
 struct Cli {
-    /// Suites to run (`memory`, `perf`, `draft`, `cua`), or `all`.
+    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `cua`), or `all`.
     #[arg(value_name = "SUITE")]
     suites: Vec<String>,
 
@@ -48,7 +48,8 @@ struct Cli {
     seed: u64,
 
     /// What `memory` runs against: the in-crate fake index (fast), or the real store, ingest
-    /// pipeline, files watcher and retriever in process. Other suites ignore it.
+    /// pipeline, files watcher and retriever in process. `proactive`: the reference engine
+    /// (fake) or the real `nugget-proactive` crate (real; wave 2). Other suites ignore it.
     #[arg(long, value_enum, default_value_t = Backend::Fake)]
     backend: Backend,
 
@@ -342,10 +343,13 @@ mod tests {
             select(&owned).map(|s| s.iter().map(|b| b.name()).collect())
         };
         assert_eq!(names(&["perf"]).unwrap(), ["perf"]);
-        assert_eq!(names(&["all"]).unwrap(), ["memory", "perf", "draft", "cua"]);
+        assert_eq!(
+            names(&["all"]).unwrap(),
+            ["memory", "perf", "proactive", "draft", "cua"]
+        );
         assert_eq!(
             names(&["perf", "all", "perf"]).unwrap(),
-            ["perf", "memory", "draft", "cua"]
+            ["perf", "memory", "proactive", "draft", "cua"]
         );
         assert!(names(&[]).is_err());
         assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));
