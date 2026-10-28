@@ -32,6 +32,15 @@ nugget-infer.workspace = true
 tokio.workspace = true
 # Temporary NUGGET_HOME and watched folder for the real backend.
 tempfile = "3"
+# `draft`: contract types of the drafting and voice crates, token estimates, provider streams.
+nugget-draft.workspace = true
+nugget-voice.workspace = true
+nugget-extract.workspace = true
+futures.workspace = true
+
+[dev-dependencies]
+# `draft` against a mocked OpenAI-compatible provider.
+wiremock = "0.6"
 
 [lints]
 workspace = true
