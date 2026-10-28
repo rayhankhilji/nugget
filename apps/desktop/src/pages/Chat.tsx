@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { api, CHAT_TIERS, events, errorMessage, type ChatDone, type ChatMessage, type ProviderInfo, type Tier } from "../api";
 import { useAsync, useEvent } from "../hooks";
-import { LOCALITY_LABEL, TIER_LABEL } from "../format";
+import { localityLabel, tierLabel } from "../format";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
 
 interface Turn {
@@ -161,7 +161,7 @@ export function ChatPage() {
               <select value={tier} onChange={(e) => setTier(e.target.value as Tier)}>
                 {CHAT_TIERS.map((t) => (
                   <option key={t} value={t}>
-                    {TIER_LABEL[t]}
+                    {tierLabel(t)}
                   </option>
                 ))}
               </select>
@@ -172,7 +172,7 @@ export function ChatPage() {
                 <option value="">Auto (route by tier)</option>
                 {list.map((p) => (
                   <option key={p.id} value={p.id} disabled={!!p.error}>
-                    {p.id} · {p.model} ({LOCALITY_LABEL[p.locality] ?? p.locality}){p.error ? " – unavailable" : ""}
+                    {p.id} · {p.model} ({localityLabel(p.locality)}){p.error ? " – unavailable" : ""}
                   </option>
                 ))}
               </select>
@@ -188,7 +188,7 @@ export function ChatPage() {
       <ol className="chat-log" ref={logRef} role="log" aria-label="Conversation" aria-busy={!!active}>
         {turns.length === 0 && (
           <li className="chat-empty muted">
-            Ask anything. Replies stream from the provider routed for the <strong>{TIER_LABEL[tier]}</strong> tier
+            Ask anything. Replies stream from the provider routed for the <strong>{tierLabel(tier)}</strong> tier
             {provider ? ` (pinned to ${provider})` : ""}.
           </li>
         )}

@@ -14,7 +14,7 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
-import { formatDuration, formatLatency, formatRelative, LOCALITY_LABEL, SOURCE_KIND_LABEL, TIER_LABEL } from "../format";
+import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
 import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 export function StatusPage() {
@@ -181,9 +181,9 @@ function ProviderRow({ provider: p, onProbed }: { provider: ProviderInfo; onProb
           <code>{p.model}</code>
         </td>
         <td>
-          <Badge tone={tone}>{LOCALITY_LABEL[p.locality] ?? p.locality}</Badge>
+          <Badge tone={tone}>{localityLabel(p.locality)}</Badge>
         </td>
-        <td>{p.tiers.map((t) => TIER_LABEL[t] ?? t).join(", ") || "–"}</td>
+        <td>{p.tiers.map((t) => tierLabel(t)).join(", ") || "–"}</td>
         <td>
           <Badge tone="bad">Unavailable</Badge>
           <div className="note note-error small" role="status">
@@ -203,9 +203,9 @@ function ProviderRow({ provider: p, onProbed }: { provider: ProviderInfo; onProb
         <code>{p.model}</code>
       </td>
       <td>
-        <Badge tone={tone}>{LOCALITY_LABEL[p.locality] ?? p.locality}</Badge>
+        <Badge tone={tone}>{localityLabel(p.locality)}</Badge>
       </td>
-      <td>{p.tiers.map((t) => TIER_LABEL[t] ?? t).join(", ") || "–"}</td>
+      <td>{p.tiers.map((t) => tierLabel(t)).join(", ") || "–"}</td>
       <td>
         {p.capabilities ? (
           <span className="badges">
@@ -307,7 +307,7 @@ function IndexingCard({
                   <ul className="error-list">
                     {failing.map((s) => (
                       <li key={s.id}>
-                        <b>{s.name}</b> <span className="muted small">({SOURCE_KIND_LABEL[s.kind] ?? s.kind}, synced {formatRelative(s.last_sync, now)})</span>
+                        <b>{s.name}</b> <span className="muted small">({sourceKindLabel(s.kind)}, synced {formatRelative(s.last_sync, now)})</span>
                         <div className="note note-error small">{s.last_error}</div>
                       </li>
                     ))}

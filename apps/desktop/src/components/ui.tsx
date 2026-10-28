@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { ApiError, errorMessage, NOT_AVAILABLE } from "../api";
+import { ApiError, errorMessage } from "../api";
+import { useT } from "../i18n";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
@@ -19,16 +20,17 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
 
 /** Inline error. Offline errors are handled app-wide, so they render as a quiet hint here. */
 export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const t = useT();
   if (!error) return null;
   const e = ApiError.from(error);
   if (e.isMethodNotFound) return <NotAvailable />;
   return (
     <div className={e.isOffline ? "note" : "note note-error"} role="alert">
-      <span>{e.isOffline ? "Nugget isn't reachable right now." : errorMessage(e)}</span>
-      {e.kind === "rpc" && e.code !== null && <span className="muted small"> (code {e.code})</span>}
+      <span>{e.isOffline ? t("common.offlineHint") : errorMessage(e)}</span>
+      {e.kind === "rpc" && e.code !== null && <span className="muted small"> {t("common.errorCode", { code: e.code })}</span>}
       {onRetry && (
         <button type="button" className="btn btn-ghost btn-small" onClick={onRetry}>
-          Retry
+          {t("common.retry")}
         </button>
       )}
     </div>
@@ -44,19 +46,18 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   );
 }
 
-export function Spinner({ label = "Loading" }: { label?: string }) {
-  return <span className="spinner" role="status" aria-label={label} />;
+export function Spinner({ label }: { label?: string }) {
+  const t = useT();
+  return <span className="spinner" role="status" aria-label={label ?? t("common.loading")} />;
 }
 
 /** The daemon doesn't implement this yet (JSON-RPC "method not found"). */
 export function NotAvailable({ what }: { what?: string }) {
+  const t = useT();
   return (
     <div className="note" role="status">
-      <span>
-        {what ? `${what}: ` : ""}
-        {NOT_AVAILABLE}.
-      </span>
-      <span className="small">Update the Nugget background service to use this.</span>
+      <span>{what ? t("common.notAvailableWhat", { what }) : t("common.notAvailableSentence")}</span>
+      <span className="small">{t("common.updateDaemon")}</span>
     </div>
   );
 }

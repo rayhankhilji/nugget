@@ -10,7 +10,7 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useNow } from "../hooks";
-import { formatRelative, formatTime, SOURCE_KIND_LABEL, SOURCE_STATE_LABEL, SOURCE_STATE_TONE } from "../format";
+import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_STATE_TONE } from "../format";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Dialog } from "../components/Dialog";
 import { SourceIcon } from "../components/SourceIcon";
@@ -194,7 +194,7 @@ function SourceRow({
   const [busy, setBusy] = useState<null | "toggle" | "sync" | "auth">(null);
   const [error, setError] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
-  const kindLabel = SOURCE_KIND_LABEL[s.kind] ?? s.kind;
+  const kindLabel = sourceKindLabel(s.kind);
   const tone = SOURCE_STATE_TONE[s.state] ?? "neutral";
   const headingId = `source-${s.id}`;
 
@@ -241,7 +241,7 @@ function SourceRow({
           <h2 id={headingId} className="source-name">
             {s.name}
           </h2>
-          <Badge tone={tone}>{SOURCE_STATE_LABEL[s.state] ?? s.state}</Badge>
+          <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>
         </div>
         <p className="muted small source-meta">
           {kindLabel} · <code>{s.id}</code>

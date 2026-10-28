@@ -14,7 +14,7 @@ import {
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { splitCitations, withheldNotice } from "../citations";
-import { SOURCE_KIND_LABEL } from "../format";
+import { sourceKindLabel } from "../format";
 import { SourceIcon } from "../components/SourceIcon";
 import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
@@ -140,7 +140,7 @@ export function SearchPage() {
 function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefined }) {
   const kind = source?.kind ?? "";
   return (
-    <span className="source-badge" title={source ? `${SOURCE_KIND_LABEL[kind] ?? kind} · ${id}` : id}>
+    <span className="source-badge" title={source ? `${sourceKindLabel(kind)} · ${id}` : id}>
       <SourceIcon kind={kind} size={13} />
       {source?.name ?? id}
     </span>

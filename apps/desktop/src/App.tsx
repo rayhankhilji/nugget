@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
 import { useEvent } from "./hooks";
+import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
 import { Offline } from "./components/Offline";
 import { ChatPage } from "./pages/Chat";
@@ -12,15 +13,15 @@ import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
 
-const PAGES: { id: PageId; label: string }[] = [
-  { id: "chat", label: "Chat" },
-  { id: "search", label: "Search" },
-  { id: "knowledge", label: "Knowledge" },
-  { id: "sources", label: "Sources" },
-  { id: "apps", label: "Connected apps" },
-  { id: "models", label: "Models" },
-  { id: "privacy", label: "Privacy" },
-  { id: "status", label: "Status" },
+const PAGES: { id: PageId; label: MessageKey }[] = [
+  { id: "chat", label: "app.nav.chat" },
+  { id: "search", label: "app.nav.search" },
+  { id: "knowledge", label: "app.nav.knowledge" },
+  { id: "sources", label: "app.nav.sources" },
+  { id: "apps", label: "app.nav.apps" },
+  { id: "models", label: "app.nav.models" },
+  { id: "privacy", label: "app.nav.privacy" },
+  { id: "status", label: "app.nav.status" },
 ];
 
 const PAGE_KEY = "nugget.page";
@@ -39,6 +40,7 @@ function initialPage(): PageId {
 type Connection = ConnectionInfo | null;
 
 export function App() {
+  const t = useT();
   const [page, setPage] = useState<PageId>(initialPage);
   const [conn, setConn] = useState<Connection>(null);
   const mainRef = useRef<HTMLElement>(null);
@@ -93,14 +95,14 @@ export function App() {
   return (
     <div className="shell">
       <a className="skip-link" href="#main">
-        Skip to content
+        {t("app.skipToContent")}
       </a>
       <aside className="sidebar">
         <div className="brand">
           <Logo />
-          <span>Nugget</span>
+          <span>{t("app.name")}</span>
         </div>
-        <nav aria-label="Main" onKeyDown={onNavKey}>
+        <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
           <ul>
             {PAGES.map((p) => (
               <li key={p.id}>
@@ -110,7 +112,7 @@ export function App() {
                   aria-current={p.id === page ? "page" : undefined}
                   onClick={() => go(p.id)}
                 >
-                  {p.label}
+                  {t(p.label)}
                 </button>
               </li>
             ))}
@@ -118,9 +120,9 @@ export function App() {
         </nav>
         <ConnectionPill conn={conn} />
       </aside>
-      <main id="main" ref={mainRef} tabIndex={-1} aria-label={current.label}>
+      <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
         {conn === null ? (
-          <div className="center muted">Connecting to Nugget…</div>
+          <div className="center muted">{t("app.connecting")}</div>
         ) : !conn.connected ? (
           <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
         ) : (
@@ -153,8 +155,9 @@ function Page({ id }: { id: PageId }) {
 }
 
 function ConnectionPill({ conn }: { conn: Connection }) {
+  const t = useT();
   const state = conn === null ? "pending" : conn.connected ? "up" : "down";
-  const label = state === "pending" ? "Connecting" : state === "up" ? "Connected" : "Not running";
+  const label = t(`app.conn.${state}`);
   return (
     <div className={`conn conn-${state}`} role="status" title={conn?.socket || undefined}>
       <span className="dot" aria-hidden="true" />

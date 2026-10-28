@@ -4,7 +4,6 @@ import {
   ApiError,
   errorMessage,
   events,
-  NOT_AVAILABLE,
   SOURCE_KINDS,
   sourcesFromChange,
   type SourceInfo,
@@ -12,7 +11,8 @@ import {
   type SourceSettings,
 } from "../api";
 import { useEvent } from "../hooks";
-import { baseName, SOURCE_KIND_LABEL, splitList } from "../format";
+import { t } from "../i18n";
+import { baseName, sourceKindLabel, splitList } from "../format";
 import { Dialog } from "./Dialog";
 import { SourceIcon } from "./SourceIcon";
 import { Spinner } from "./ui";
@@ -98,7 +98,7 @@ function KindPicker({
             />
             <SourceIcon kind={k} size={22} />
             <span>
-              <span className="kind-label">{SOURCE_KIND_LABEL[k]}</span>
+              <span className="kind-label">{sourceKindLabel(k)}</span>
               <span className="muted small">{KIND_BLURB[k]}</span>
             </span>
           </label>
@@ -200,7 +200,7 @@ function FormError({ error }: { error: unknown }) {
   const e = ApiError.from(error);
   return (
     <p className="note note-error" role="alert">
-      {e.isMethodNotFound ? `${NOT_AVAILABLE}.` : e.message}
+      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.message}
     </p>
   );
 }
@@ -431,7 +431,7 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
 type AuthPhase = "form" | "waiting" | "done";
 
 function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
-  const label = SOURCE_KIND_LABEL[kind] ?? kind;
+  const label = sourceKindLabel(kind);
   const apiName = kind === "gmail" ? "Gmail API" : "Google Calendar API";
   const [clientId, setClientId] = useState("");
   const [name, setName] = useState("");

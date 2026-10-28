@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent 
 import { api, MCP_TOOLS, type McpClientCreated, type McpClientInfo, type SourceInfo } from "../api";
 import { useAsync } from "../hooks";
 import { DEFAULT_SCOPE_FORM, MAX_CLIENT_NAME, scopesFromForm, setupAppLabel, sortSnippets, validateScopeForm, type ScopeForm, type ScopeFormErrors } from "../mcp";
-import { SOURCE_KIND_LABEL } from "../format";
+import { sourceKindLabel } from "../format";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { ErrorNote, Spinner } from "./ui";
@@ -154,7 +154,7 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
                   data-field={i === 0 ? "sources" : undefined}
                 />
                 <span>
-                  {s.name} <span className="muted small">{SOURCE_KIND_LABEL[s.kind] ?? s.kind}</span>
+                  {s.name} <span className="muted small">{sourceKindLabel(s.kind)}</span>
                 </span>
               </label>
             ))}

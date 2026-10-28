@@ -6,6 +6,7 @@
  */
 import { invoke, type InvokeArgs } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { t } from "./i18n";
 
 /** Must match `nugget_core::ipc::PROTOCOL_VERSION`. */
 export const PROTOCOL_VERSION = 1;
@@ -846,8 +847,10 @@ export function isMethodNotFound(err: unknown): boolean {
   return err != null && ApiError.from(err).isMethodNotFound;
 }
 
-/** Shown wherever a feature needs a newer daemon. */
-export const NOT_AVAILABLE = "Not available in this daemon version";
+/** Shown wherever a feature needs a newer daemon (a getter, so it follows the current locale). */
+export function notAvailable(): string {
+  return t("common.notAvailable");
+}
 
 /** Human-readable message for any thrown value. */
 export function errorMessage(err: unknown): string {
@@ -862,7 +865,7 @@ export function inTauri(): boolean {
 
 async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   if (!inTauri()) {
-    throw new ApiError({ kind: "unavailable", message: "Not running inside the Nugget app." });
+    throw new ApiError({ kind: "unavailable", message: t("common.notInApp") });
   }
   try {
     return await invoke<T>(command, args);

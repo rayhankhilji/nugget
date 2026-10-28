@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { api, errorMessage } from "./api";
+import { t } from "./i18n";
 
 /**
  * Subscribe to a Tauri event for the component's lifetime. `handler` may change between
@@ -87,14 +88,11 @@ export function useOpener() {
     try {
       const r = await api.openUrl(url);
       setStatus({
-        text:
-          r === "revealed"
-            ? `Showed “${label}” in its folder instead of opening it, because this kind of file can run programs.`
-            : `Opened “${label}”.`,
+        text: r === "revealed" ? t("hooks.open.revealed", { label }) : t("hooks.open.opened", { label }),
         error: false,
       });
     } catch (e) {
-      setStatus({ text: `Couldn't open “${label}”: ${errorMessage(e)}`, error: true });
+      setStatus({ text: t("hooks.open.failed", { label, error: errorMessage(e) }), error: true });
     }
   };
   return { status, open };

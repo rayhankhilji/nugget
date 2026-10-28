@@ -1,5 +1,9 @@
-const UNITS = ["B", "KB", "MB", "GB", "TB"];
+import { currentLocale, formatDate, t, type MessageKey } from "./i18n";
+import { numberFormat } from "./i18n/icu";
 
+const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/** Decimal (SI) units, named and spaced for the current locale ("1.5 GB", "1,5 GB", "1.5 GB"). */
 export function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n < 0) return "–";
   let i = 0;
@@ -8,7 +12,14 @@ export function formatBytes(n: number): string {
     v /= 1000;
     i++;
   }
-  return `${i === 0 ? v : v.toFixed(v < 10 ? 1 : 0)} ${UNITS[i]}`;
+  const digits = i === 0 ? 0 : v < 10 ? 1 : 0;
+  return numberFormat(currentLocale(), {
+    style: "unit",
+    unit: UNITS[i],
+    unitDisplay: "short",
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(v);
 }
 
 export function formatDuration(secs: number): string {
@@ -16,17 +27,15 @@ export function formatDuration(secs: number): string {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${m}m`;
-  if (m > 0) return `${m}m ${s % 60}s`;
-  return `${s}s`;
+  if (d > 0) return t("format.duration.dh", { d, h });
+  if (h > 0) return t("format.duration.hm", { h, m });
+  if (m > 0) return t("format.duration.ms", { m, s: s % 60 });
+  return t("format.duration.s", { s });
 }
-
-const dateFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
 
 export function formatTime(rfc3339: string): string {
   const d = new Date(rfc3339);
-  return Number.isNaN(d.getTime()) ? rfc3339 : dateFmt.format(d);
+  return Number.isNaN(d.getTime()) ? rfc3339 : formatDate(d, { dateStyle: "medium", timeStyle: "medium" });
 }
 
 export function percent(done: number, total: number): number {
@@ -34,24 +43,22 @@ export function percent(done: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
 }
 
-export const LOCALITY_LABEL = {
-  on_device: "On device",
-  local_network: "Local network",
-  cloud: "Cloud",
-} as const;
+/** Label for a known enum value, else the raw value (a newer daemon may send new ones). */
+function label(prefix: string, value: string): string {
+  const key = `${prefix}.${value}` as MessageKey;
+  const out = t(key);
+  return out === key ? value : out;
+}
 
-export const TIER_LABEL = {
-  triage: "Triage",
-  light: "Light",
-  synthesis: "Synthesis",
-  agentic: "Agentic",
-  embedding: "Embedding",
-} as const;
+export const localityLabel = (l: string) => label("format.locality", l);
+export const tierLabel = (tier: string) => label("format.tier", tier);
+export const sourceKindLabel = (kind: string) => label("format.sourceKind", kind);
+export const sourceStateLabel = (state: string) => label("format.sourceState", state);
 
 const relFmts = new Map<string, Intl.RelativeTimeFormat>();
 
-function relFmt(locale: string | undefined): Intl.RelativeTimeFormat {
-  const key = locale ?? "";
+function relFmt(locale: string): Intl.RelativeTimeFormat {
+  const key = locale;
   let f = relFmts.get(key);
   if (!f) {
     f = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
@@ -78,44 +85,35 @@ export function formatRelative(
   now: number = Date.now(),
   locale?: string,
 ): string {
-  if (!rfc3339) return "never";
-  const t = new Date(rfc3339).getTime();
-  if (Number.isNaN(t)) return rfc3339;
-  const secs = Math.round((t - now) / 1000);
+  const loc = locale ?? currentLocale();
+  if (!rfc3339) return t("format.never");
+  const at = new Date(rfc3339).getTime();
+  if (Number.isNaN(at)) return rfc3339;
+  const secs = Math.round((at - now) / 1000);
   const abs = Math.abs(secs);
-  if (abs < 45) return "just now";
+  if (abs < 45) return t("format.justNow");
   for (const [unit, size] of REL_UNITS) {
-    if (abs >= size) return relFmt(locale).format(Math.round(secs / size), unit);
+    if (abs >= size) return relFmt(loc).format(Math.round(secs / size), unit);
   }
   // 45–59 s rounds to a minute.
-  return relFmt(locale).format(Math.sign(secs), "minute");
+  return relFmt(loc).format(Math.sign(secs), "minute");
 }
 
 /** Latency in ms as "850 ms", "4.2 s", "3m 5s"; `null` as "–". */
 export function formatLatency(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return "–";
-  if (ms < 1000) return `${Math.round(ms)} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+  const unit = (v: number, u: "millisecond" | "second", digits: number) =>
+    numberFormat(currentLocale(), {
+      style: "unit",
+      unit: u,
+      unitDisplay: "short",
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    }).format(v);
+  if (ms < 1000) return unit(Math.round(ms), "millisecond", 0);
+  if (ms < 60_000) return unit(ms / 1000, "second", ms < 10_000 ? 1 : 0);
   return formatDuration(ms / 1000);
 }
-
-export const SOURCE_KIND_LABEL: Record<string, string> = {
-  files: "Folder",
-  obsidian: "Obsidian vault",
-  gmail: "Gmail",
-  gcal: "Google Calendar",
-  imap: "IMAP mail",
-  caldav: "CalDAV calendar",
-};
-
-export const SOURCE_STATE_LABEL = {
-  idle: "Idle",
-  syncing: "Syncing",
-  watching: "Watching",
-  needs_auth: "Needs sign-in",
-  disabled: "Disabled",
-  error: "Error",
-} as const;
 
 export const SOURCE_STATE_TONE = {
   idle: "neutral",

@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useT } from "../i18n";
 
 const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -23,6 +24,7 @@ export function Dialog({
   children: ReactNode;
   wide?: boolean;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const descId = useId();
@@ -59,7 +61,7 @@ export function Dialog({
     >
       <div className="dialog-head">
         <h2 id={titleId}>{title}</h2>
-        <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">
+        <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label={t("common.close")}>
           <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
             <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
           </svg>
