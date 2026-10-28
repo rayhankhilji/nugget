@@ -777,6 +777,9 @@ fn mime_for(name: &str) -> Option<&'static str> {
 fn valid_item_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 256
+        // Dot-segments: the URL builder drops them, so `..` would address another endpoint.
+        && id != "."
+        && id != ".."
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'-' | b'_' | b'.'))
@@ -821,6 +824,7 @@ mod unit {
         assert!(valid_item_id("D4648F06C91D9D3D!54927"));
         assert!(valid_item_id("01BYE5RZ6QN3ZWBTUFOFD3GSPGOHDJD36K"));
         assert!(!valid_item_id("a/b"));
+        assert!(!valid_item_id("..") && !valid_item_id("."));
         assert!(!valid_item_id(""));
         assert_eq!(version_parent(Some("\"{x},1\"|docs")), Some("docs"));
         assert_eq!(version_parent(Some("e|")), None);

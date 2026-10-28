@@ -35,7 +35,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::api::{GoogleApi, OAuthSettings, api_url};
+use crate::api::{GoogleApi, OAuthSettings, PageGuard, api_url};
 use crate::settings::CalendarSettings;
 use crate::text::{strip_html, truncate_chars};
 use crate::{GoogleEndpoints, RetryPolicy};
@@ -414,10 +414,14 @@ impl CalendarConnector {
         };
         let mut seen: HashSet<String> = HashSet::new();
         let mut restarts = 0u32;
+        let mut pages = PageGuard::default();
         if state.resync && state.page_token.is_some() {
             // Pages listed before the interruption are not remembered: list again from the
             // start (same window) rather than take their events for missing.
             state.page_token = None;
+        }
+        if let Some(t) = &state.page_token {
+            pages.next(t, "gcal events.list")?;
         }
         loop {
             if cancel.is_cancelled() {
@@ -450,6 +454,7 @@ impl CalendarConnector {
                     // Sync token (or page token) invalidated: full resync of this calendar.
                     tracing::info!(source = %self.ctx.source, calendar = cal, "gcal token expired (410); full resync");
                     restarts += 1;
+                    pages = PageGuard::default();
                     state = CalState {
                         resync: true,
                         reconcile: state.reconcile,
@@ -485,6 +490,7 @@ impl CalendarConnector {
                 }
             }
             if let Some(t) = page.next_page_token.filter(|t| !t.is_empty()) {
+                pages.next(&t, "gcal events.list")?;
                 state.page_token = Some(t);
                 cur.calendars.insert(cal.to_string(), state.clone());
                 sink.checkpoint(cur.to_value()).await?;
@@ -664,12 +670,20 @@ fn missing_candidates(
 }
 
 fn valid_calendar_id(id: &str) -> bool {
-    !id.is_empty() && id.len() <= 1024 && !id.contains('/') && !id.chars().any(char::is_control)
+    !id.is_empty()
+        && id != "."
+        && id != ".."
+        && id.len() <= 1024
+        && !id.contains('/')
+        && !id.chars().any(char::is_control)
 }
 
 /// Event ids are base32hex, plus `_` and an instance suffix for recurring instances.
 fn valid_event_id(id: &str) -> bool {
+    // `.` and `..` are dropped from URL paths, so they would address the collection instead.
     !id.is_empty()
+        && id != "."
+        && id != ".."
         && id.len() <= 1024
         && id
             .bytes()

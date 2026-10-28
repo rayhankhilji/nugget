@@ -2,6 +2,14 @@
 // read nor restyle it. Stop engages the kill switch (see background.ts).
 
 const OVERLAY_ATTR = "data-nugget-overlay";
+/** Our overlay hosts, by identity: the page can copy the attribute but not get into this set. */
+const hosts = new WeakSet<Element>();
+/** Inline `!important` beats any page stylesheet, so the page cannot hide or shrink the bar. */
+const HOST_STYLE: [string, string][] = [
+  ["all", "initial"], ["display", "block"], ["visibility", "visible"], ["opacity", "1"],
+  ["position", "fixed"], ["z-index", "2147483647"], ["top", "12px"], ["right", "12px"],
+  ["pointer-events", "auto"],
+];
 
 export interface Overlay {
   show(label?: string): void;
@@ -16,7 +24,8 @@ export function createOverlay(doc: Document, onStop: () => void): Overlay {
   const build = () => {
     host = doc.createElement("div");
     host.setAttribute(OVERLAY_ATTR, "");
-    host.style.cssText = "all:initial;position:fixed;z-index:2147483647;top:12px;right:12px;";
+    hosts.add(host);
+    for (const [k, v] of HOST_STYLE) host.style.setProperty(k, v, "important");
     const root = host.attachShadow({ mode: "closed" });
     const style = doc.createElement("style");
     style.textContent = `
@@ -45,13 +54,31 @@ export function createOverlay(doc: Document, onStop: () => void): Overlay {
     root.append(style, bar);
   };
 
+  let shown = false;
+  let observer: MutationObserver | undefined;
+  const attach = () => {
+    if (shown && host && !host.isConnected) (doc.body ?? doc.documentElement).appendChild(host);
+  };
+  // While shown, put the bar back if the page removes it (or replaces <body>).
+  const watch = () => {
+    const MO = doc.defaultView?.MutationObserver;
+    if (observer || !MO) return;
+    observer = new MO(attach);
+    observer.observe(doc.documentElement, { childList: true, subtree: true });
+  };
+
   return {
     show(label = "Nugget is acting on this page") {
       if (!host) build();
       labelEl!.textContent = label;
-      if (!host!.isConnected) (doc.body ?? doc.documentElement).appendChild(host!);
+      shown = true;
+      attach();
+      watch();
     },
     hide() {
+      shown = false;
+      observer?.disconnect();
+      observer = undefined;
       host?.remove();
     },
     get visible() {
@@ -62,5 +89,5 @@ export function createOverlay(doc: Document, onStop: () => void): Overlay {
 
 /** True if `el` belongs to our overlay (snapshots skip it). */
 export function isOverlay(el: Element): boolean {
-  return el.hasAttribute(OVERLAY_ATTR);
+  return hosts.has(el);
 }

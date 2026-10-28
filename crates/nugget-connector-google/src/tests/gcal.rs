@@ -584,3 +584,44 @@ async fn an_interrupted_resync_lists_again_instead_of_taking_listed_events_for_m
     assert_eq!(sink.summary(), vec!["+primary/e1", "+primary/e2"]);
     assert_eq!(out["calendars"]["primary"], json!({"sync_token": "st"}));
 }
+
+#[tokio::test]
+async fn a_repeating_events_page_token_stops_the_listing() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/calendars/primary/events")))
+        .respond_with(page(vec![event("e1", "One")], Some("again"), None))
+        .mount(&h.server)
+        .await;
+    let conn = gcal(&h, primary());
+    let r = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        run(&conn, None, &RecSink::default()),
+    )
+    .await
+    .expect("events listing never ended");
+    assert!(
+        matches!(&r, Err(Error::Network(m)) if m.contains("repeated a page token")),
+        "{r:?}"
+    );
+}
+
+#[tokio::test]
+async fn dot_event_ids_are_not_indexed() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/calendars/primary/events")))
+        .respond_with(page(
+            vec![event("..", "Dots"), event(".", "Dot"), event("ok1", "Fine")],
+            None,
+            Some("s1"),
+        ))
+        .mount(&h.server)
+        .await;
+    let conn = gcal(&h, primary());
+    let sink = RecSink::default();
+    run(&conn, None, &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["+primary/ok1"]);
+}

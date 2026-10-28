@@ -172,3 +172,8 @@ scope. We still try to limit the damage it can do, for example through keychain-
 - Vulnerabilities in a provider's own service, unless Nugget's use of it makes them worse.
 - Content a user deliberately sends to a cloud provider they configured. The egress ledger records
   it, but it is not a leak.
+
+## Security reviews
+
+- [M3–M6 adversarial review](docs/reviews/security-m3-m6.md) (wave W, W8): findings, fixes and
+  open items with proof-of-concept tests.

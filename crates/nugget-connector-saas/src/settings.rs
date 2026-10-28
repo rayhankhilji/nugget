@@ -105,3 +105,31 @@ pub(crate) fn client_id_prop(help: &str) -> Value {
         "description": help
     })
 }
+
+#[cfg(test)]
+mod unit {
+    /// `true` when `T: Debug` (inherent method wins), `false` otherwise (trait fallback).
+    struct Probe<T>(std::marker::PhantomData<T>);
+    trait NotDebug {
+        fn is_debug(&self) -> bool {
+            false
+        }
+    }
+    impl<T> NotDebug for Probe<T> {}
+    impl<T: std::fmt::Debug> Probe<T> {
+        #[allow(dead_code)]
+        fn is_debug(&self) -> bool {
+            true
+        }
+    }
+
+    /// Settings carry the OAuth `client_secret`: they must not be `Debug`, so no `{:?}` or
+    /// `tracing` field can print it.
+    #[test]
+    fn settings_holding_secrets_are_not_debug() {
+        use std::marker::PhantomData;
+        assert!(!Probe::<crate::github::GitHubSettings>(PhantomData).is_debug());
+        assert!(!Probe::<crate::linear::LinearSettings>(PhantomData).is_debug());
+        assert!(Probe::<String>(PhantomData).is_debug());
+    }
+}
