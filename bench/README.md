@@ -21,7 +21,7 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`, or `all` |
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
-| `--backend fake\|real` | What `memory` runs against (default `fake`): the in-crate fake index, or the real store, ingest pipeline, files watcher and retriever in process. For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate (`real`, not wired until wave 2). Other suites ignore it |
+| `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate (`real`, not wired until wave 2). Other suites ignore it |
 | `--embed-url URL` | Real backend: an OpenAI-compatible embeddings endpoint (e.g. a local `llama-server`, `http://127.0.0.1:8080/v1`) instead of the in-process deterministic embedder |
 | `--embed-model NAME` | Model name sent to `--embed-url` |
 | `--provider-url URL` | `draft`: a real chat provider instead of the deterministic fake model (see [`draft`](#draft-m3)) |
@@ -99,7 +99,7 @@ citation targets for real pipeline reasons (see the results below). TODO (wave 2
 | Suite | Status | Measures |
 |---|---|---|
 | `memory` | **M1: fake index (default) or the real stack (`--backend real`)** | Retrieval recall@k and MRR; change-to-searchable freshness; edit, insert, delete and rename propagation; ingest throughput; DB size and RSS (real) |
-| `perf` | **M0: runs against a fake index** | Ingest throughput, dedup throughput, update and delete latency, query latency, index size |
+| `perf` | **M0: fake index (default); W12: the real store and retriever (`--backend real`)** | Ingest throughput, dedup throughput, update and delete latency, query latency, index size; real: text, vector, hybrid, `Retriever::search` and `build_context` latency, vector recall against exact search, edit freshness |
 | `proactive` | **M5: reference engine (default); the real crate in wave 2** | Card precision@5 and recall, distractor false positives, dedup, the learning curve, dry-run coverage and the approval gate, against a recency-ordered baseline |
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
 | `cua` | **M4: 51 tasks on six local test apps; in process, over a socket, or on an Xvfb desktop** | Verified task success, steps, wall time, unconfirmed risky actions, false confirmations, injection compliance, token cost |
@@ -107,7 +107,7 @@ citation targets for real pipeline reasons (see the results below). TODO (wave 2
 
 ### The M0 fake index
 
-By default (and always for `perf`), `memory` and `perf` run against `FakeIndex`
+By default, `memory` and `perf` run against `FakeIndex`
 (`src/index.rs`). It is an in-memory stand-in with the same shape as `nugget-store`:
 
 - content-hash dedup on upsert (`Inserted`, `Updated` or `Unchanged`)
@@ -231,6 +231,36 @@ delta source), the daemon and IPC (`nuggetd`), a real embedding model by default
 | `update.latency.{p50,p95}_us` | Replacing one existing item's content |
 | `query.{bm25,vector,hybrid}.latency.{p50,p95}_us` | Top-10 queries (vector includes embedding the query) |
 | `delete.latency.{p50,p95}_us` | Deleting one item from every index |
+
+### `perf --backend real` (W12)
+
+The real encrypted `nugget-store` (SQLCipher, temporary directory) and `nugget-retrieve`
+(`RetrieveConfig::default()`), in process (`src/suites/scale.rs`). The synthetic corpus of the
+fake `perf` run (same size and seed) is written **directly** with
+`Store::upsert_item_with_chunks`, one transaction per item, not through the ingest pipeline:
+that isolates the store and retriever, and `memory --backend real` already covers the pipeline.
+Each item is split into 2 chunks, embedded with `nugget_retrieve::eval::HashEmbedder` (256
+dimensions, deterministic) outside the timed region; the retriever embeds queries with the same
+embedder through a `Router`. Every report records `params.backend = "real_store"`.
+
+| Metric | Definition |
+|---|---|
+| `ingest.{items,chunks}_per_s`, `ingest.ms_per_1k_items` | Store write throughput (item, chunks, full-text and vectors per transaction) |
+| `ingest.embed_ms_per_1k_chunks` | Hash-embedder time per 1k chunks, for reference (not in the write numbers) |
+| `reingest_unchanged.items_per_s` | Re-upsert of unchanged items (content-hash dedup) |
+| `query.store.{text,vector,hybrid}.latency.{p50,p95}_us` | `Store::search_text`, `search_vector`, `search_hybrid`, top 10 (query embedding excluded) |
+| `query.retriever.{search,build_context}.latency.{p50,p95}_us` | `Retriever::search` (top 10) and `Retriever::build_context` (2,000 tokens), query embedding included |
+| `query.exact.vector.latency.{p50,p95}_us` | A brute-force cosine top 10 in Rust over the in-memory vectors (reference for the store's vector search) |
+| `retrieval.{store.text,store.vector,store.hybrid,retriever}.{recall@10,mrr@10}` | Known-item recall and MRR of each path, by item |
+| `retrieval.store.vector.recall_vs_exact@10` | Share of `search_vector`'s top 10 in the exact top 10 (ties at the boundary count as correct). 1.0 while the store searches by brute force; what an approximate index must keep high |
+| `update.latency.{p50,p95}_us` | Rewriting one item with its chunks and vectors |
+| `freshness.edit.{p50,p95,max}_ms` | From starting a rewrite until the new marker is found by full-text search and `Retriever::search`, the new embedding by vector search, and the old marker is gone |
+| `propagation.edit_rate` | Share of rewrites fully searchable within the timeout (**target 1.0**) |
+| `delete.latency.{p50,p95}_us` | Deleting one item with its chunks, full-text entries and vectors |
+| `resources.db_bytes_per_1k_items`, `resources.db_bytes`, `resources.peak_rss_mib` | Database on disk; process peak RSS (Linux) |
+
+The same code runs the 100k-item scale test (`tests/scale.rs`, ignored by default; see
+[W12: retrieval at scale](#w12-retrieval-at-scale)).
 
 **Plan:**
 
@@ -879,6 +909,89 @@ change fail.
   extracted headers and frontmatter; only the gold vocabulary is scored; organisation domains moved
   from `*.example.com` subdomains to `.test` domains (the pipeline rightly groups by registrable
   domain, which made every `example.com` address one "Example" organisation).
+
+### W12: retrieval at scale
+
+Before/after for the W12 store and retriever work. "Before" is commit `340d98d` (brute-force
+`sqlite-vec` kNN, one store connection), measured 2026-10-28 on the dev container (Linux x86_64,
+release build, nothing else running), seed 42. The "after" column is filled from the same
+commands on the W12 merge.
+
+Commands (from the workspace root; reports land in `bench/results/`):
+
+```sh
+export CARGO_INCREMENTAL=0
+cargo build --release -p nugget-bench
+./target/release/nugget-bench perf --scale standard                    # fake index (harness only)
+./target/release/nugget-bench perf --backend real --scale standard     # real store, 10k items
+./target/release/nugget-bench memory --backend real --scale standard   # real pipeline, 5k files
+cargo test --release -p nugget-bench --test scale -- --ignored --nocapture   # 100k items, ~10 min
+```
+
+**100k items** (`tests/scale.rs`: 100,000 items written directly with
+`upsert_item_with_chunks`, one 384-dimensional chunk each, hash embeddings; 100 queries, 50 for
+exact recall, 30 edits; the run takes about 10 minutes plus the build):
+
+| Metric | Before | After |
+|---|---|---|
+| `query.store.text.latency.p50_us` / `p95_us` | 414,579 / 587,928 | TBD |
+| `query.store.vector.latency.p50_us` / `p95_us` | 550,113 / 624,651 | TBD |
+| `query.store.hybrid.latency.p50_us` / `p95_us` | 992,779 / 1,190,455 | TBD |
+| `query.retriever.search.latency.p50_us` / `p95_us` | 1,035,014 / 1,275,814 | TBD |
+| `query.retriever.build_context.latency.p50_us` / `p95_us` | 1,035,110 / 1,252,583 | TBD |
+| `query.exact.vector.latency.p50_us` (Rust brute force, reference) | 33,686 | TBD |
+| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | TBD |
+| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.84 / 0.11 / 0.79 | TBD |
+| `retrieval.retriever.recall@10` / `mrr@10` | 0.77 / 0.393 | TBD |
+| `freshness.edit.p50_ms` / `p95_ms` | 1,173 / 1,354 | TBD |
+| `propagation.edit_rate` | 1.0 | TBD |
+| `update.latency.p50_us` / `p95_us` | 4,309 / 9,041 | TBD |
+| `delete.latency.p50_us` / `p95_us` | 839 / 3,357 | TBD |
+| `ingest.items_per_s` (store writes) | 743 | TBD |
+| `resources.db_bytes_per_1k_items` | 3.62 MB | TBD |
+| `resources.peak_rss_mib` | 625 | TBD |
+
+Edit freshness at 100k is dominated by the probe itself: each check runs two full-text
+searches, a vector search and `Retriever::search` (about a second together), and the write is
+4 ms. It falls with query latency.
+
+**`perf --backend real --scale standard`** (10,000 items, 2 chunks each, 256 dimensions; 300
+queries, 100 for exact recall, 100 edits):
+
+| Metric | Before | After |
+|---|---|---|
+| `query.store.text.latency.p50_us` / `p95_us` | 27,572 / 64,359 | TBD |
+| `query.store.vector.latency.p50_us` / `p95_us` | 12,589 / 60,447 | TBD |
+| `query.store.hybrid.latency.p50_us` / `p95_us` | 20,784 / 178,470 | TBD |
+| `query.retriever.search.latency.p50_us` / `p95_us` | 23,265 / 172,397 | TBD |
+| `query.retriever.build_context.latency.p50_us` / `p95_us` | 23,593 / 141,588 | TBD |
+| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | TBD |
+| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.853 / 0.223 / 0.763 | TBD |
+| `retrieval.retriever.recall@10` / `mrr@10` | 0.763 / 0.401 | TBD |
+| `freshness.edit.p50_ms` / `p95_ms` | 20.8 / 34.3 | TBD |
+| `update.latency.p50_us` / `p95_us` | 1,504 / 5,485 | TBD |
+| `ingest.items_per_s` / `chunks_per_s` | 587 / 1,175 | TBD |
+| `resources.db_bytes_per_1k_items` | 4.92 MB | TBD |
+
+**`memory --backend real --scale standard`** (5,000 files through the pipeline, 500 queries,
+300 file operations):
+
+| Metric | Before | After |
+|---|---|---|
+| `freshness.p50_s` / `p95_s` / `max_s` | 0.364 / 0.401 / 0.419 | TBD |
+| `query.latency.p50_ms` / `p95_ms` (`Retriever::search`, hybrid + MMR) | 9.11 / 15.99 | TBD |
+| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.recall@10` | 0.968 / 0.338 / 0.936 / 0.854 | TBD |
+| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.mrr@10` | 0.888 / 0.169 / 0.580 / 0.544 | TBD |
+| `retrieval.hybrid.recall@10` vs its target (fake baseline 0.938) | **missed** by 1 query in 500 | TBD |
+| `retrieval.eval.{text_only,hybrid,hybrid_mmr}.recall@10` | 0.905 / 1.000 / 0.976 | TBD |
+| `retrieval.eval.{text_only,hybrid,hybrid_mmr}.mrr@10` | 0.768 / 0.883 / 0.865 | TBD |
+| `ingest.files_per_s` | 531 | TBD |
+| `propagation.*` | all 1.0 | TBD |
+| `resources.peak_rss_mib` | 85 | TBD |
+
+`perf --scale standard` (fake index, harness only, for completeness): BM25 / vector / hybrid
+query p50 188 / 1,780 / 2,230 us, ingest 21,566 items/s. It does not touch the store, so W12
+should not move it.
 
 ## Adding a suite
 

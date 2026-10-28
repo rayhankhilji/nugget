@@ -1,15 +1,17 @@
 //! `perf`: cost of the indexing and query paths.
 //!
-//! M0 measures the in-crate [`FakeIndex`] so the harness, schema and CI plumbing are exercised
-//! end to end. In M1 the same metrics are taken against `nugget-store` and the ingest pipeline,
-//! and process RAM, CPU and battery cost per 1k items are added (see `bench/README.md`).
+//! `--backend fake` (the default) measures the in-crate [`FakeIndex`] so the harness, schema and
+//! CI plumbing are exercised end to end. `--backend real` measures the real encrypted
+//! `nugget-store` and `nugget-retrieve` (written directly, without the ingest pipeline): write
+//! throughput, text, vector and hybrid search, `Retriever::search` and `build_context` latency,
+//! vector recall against exact search and edit freshness (see [`crate::suites::scale`]).
 
 use std::time::Instant;
 
 use crate::corpus::{Corpus, CorpusConfig, Rng};
 use crate::index::{FakeIndex, UpsertOutcome};
 use crate::report::{Direction, Metric};
-use crate::runner::{BenchError, Benchmark, RunContext, Scale};
+use crate::runner::{Backend, BenchError, Benchmark, RunContext, Scale};
 use crate::stats::summarize;
 use crate::suites::{doc_text, item_ref, secs};
 
@@ -44,19 +46,22 @@ impl Benchmark for PerfBench {
     }
 
     fn description(&self) -> &'static str {
-        "Ingest throughput, dedup, update/delete latency and query latency (M0: in-crate fake index)"
+        "Ingest throughput, dedup, update/delete and query latency (--backend fake: in-crate index; real: nugget-store + nugget-retrieve)"
     }
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        run_with(ctx, &PerfParams::for_scale(ctx.scale()))
+        match ctx.backend() {
+            Backend::Fake => run_with(ctx, &PerfParams::for_scale(ctx.scale())),
+            Backend::Real => crate::suites::scale::run(ctx),
+        }
     }
 }
 
-fn us(d: std::time::Duration) -> f64 {
+pub(crate) fn us(d: std::time::Duration) -> f64 {
     d.as_secs_f64() * 1e6
 }
 
-fn latency_metrics(
+pub(crate) fn latency_metrics(
     out: &mut Vec<Metric>,
     prefix: &str,
     what: &str,
