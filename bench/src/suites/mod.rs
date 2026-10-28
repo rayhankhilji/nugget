@@ -1,5 +1,6 @@
 //! Registered suites. See `bench/README.md` for methodology.
 
+pub mod cua;
 pub mod memory;
 pub mod perf;
 pub mod planned;

@@ -158,7 +158,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::memory::MemoryBench),
         Box::new(suites::perf::PerfBench),
         Box::new(suites::planned::DraftBench),
-        Box::new(suites::planned::CuaBench),
+        Box::new(suites::cua::CuaBench::default()),
     ]
 }
 
@@ -297,7 +297,7 @@ mod tests {
         assert!(find("perf").is_some_and(|b| b.implemented()));
         assert!(find("memory").is_some_and(|b| b.implemented()));
         assert!(find("draft").is_some_and(|b| !b.implemented()));
-        assert!(find("cua").is_some_and(|b| !b.implemented()));
+        assert!(find("cua").is_some_and(|b| b.implemented()));
         assert!(find("nope").is_none());
         for b in registry() {
             assert!(valid_metric_name(b.name()));
@@ -368,12 +368,10 @@ mod tests {
 
     #[test]
     fn planned_suites_report_not_implemented() {
-        for name in ["draft", "cua"] {
-            let r = run_benchmark(find(name).unwrap().as_ref(), &RunConfig::default());
-            assert_eq!(r.status, Status::NotImplemented);
-            assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
-            assert!(r.metrics.is_empty());
-        }
+        let r = run_benchmark(find("draft").unwrap().as_ref(), &RunConfig::default());
+        assert_eq!(r.status, Status::NotImplemented);
+        assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
+        assert!(r.metrics.is_empty());
     }
 
     #[test]

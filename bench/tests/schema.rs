@@ -264,15 +264,15 @@ fn every_suite_report_conforms() {
     assert_eq!(status("memory"), "ok");
     assert_eq!(status("perf"), "ok");
     assert_eq!(status("draft"), "not_implemented");
-    assert_eq!(status("cua"), "not_implemented");
-    // The fake memory suite has targets; the planned suites have none and omit the field.
+    assert_eq!(status("cua"), "ok");
+    // Suites with targets list them; the planned suite has none and omits the field.
     let memory = reports.iter().find(|r| r["suite"] == "memory").unwrap();
     let targets = memory["targets"].as_array().unwrap();
     assert!(targets.iter().any(|t| t["metric"] == "freshness.p95_s"));
     assert!(
         reports
             .iter()
-            .find(|r| r["suite"] == "cua")
+            .find(|r| r["suite"] == "draft")
             .unwrap()
             .get("targets")
             .is_none()

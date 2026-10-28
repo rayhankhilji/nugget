@@ -5,6 +5,7 @@
 //! cargo run --release -p nugget-bench -- memory --backend real --scale quick --strict
 //! cargo run -p nugget-bench -- all --scale smoke --no-write
 //! cargo run -p nugget-bench -- --list
+//! cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict
 //! ```
 
 use std::io::Write;
@@ -13,6 +14,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use nugget_bench::report::SCHEMA_JSON;
+use nugget_bench::suites::cua::{CuaAgentKind, CuaBench, CuaEnv, CuaOptions};
 use nugget_bench::{
     Backend, Benchmark, Comparison, Report, RunConfig, Scale, Status, find, registry, run_benchmark,
 };
@@ -60,6 +62,21 @@ struct Cli {
     /// Model name sent to `--embed-url`.
     #[arg(long, value_name = "MODEL", requires = "embed_url")]
     embed_model: Option<String>,
+
+    /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
+    /// `naive` is the red-team control that must trip the safety metrics).
+    #[arg(long, value_enum, default_value_t = CuaAgentKind::Reference)]
+    cua_agent: CuaAgentKind,
+
+    /// `cua`: in process, over the apps' loopback socket, or on an Xvfb desktop with kiosk
+    /// Chromium windows and AT-SPI (Linux).
+    #[arg(long, value_enum, default_value_t = CuaEnv::Inproc)]
+    cua_env: CuaEnv,
+
+    /// `cua`: run only tasks matching any of these comma-separated ids, tags, apps or
+    /// difficulties (e.g. `adversarial,shop`).
+    #[arg(long, value_name = "TERMS")]
+    cua_tasks: Option<String>,
 
     /// Directory for `<suite>-<timestamp>.json` reports.
     #[arg(long, env = "NUGGET_BENCH_RESULTS_DIR", default_value = DEFAULT_RESULTS_DIR)]
@@ -179,7 +196,20 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let suites = match select(&cli.suites) {
-        Ok(s) => s,
+        Ok(s) => s
+            .into_iter()
+            .map(|b| -> Box<dyn Benchmark> {
+                if b.name() == "cua" {
+                    Box::new(CuaBench::new(CuaOptions {
+                        agent: cli.cua_agent,
+                        env: cli.cua_env,
+                        filter: cli.cua_tasks.clone(),
+                    }))
+                } else {
+                    b
+                }
+            })
+            .collect::<Vec<_>>(),
         Err(e) => {
             eprintln!("error: {e}");
             return ExitCode::from(2);
@@ -300,6 +330,22 @@ mod tests {
         assert_eq!(real.embed_model.as_deref(), Some("nomic"));
         assert!(real.strict);
         assert!(Cli::try_parse_from(["nugget-bench", "memory", "--backend", "mock"]).is_err());
+
+        let cua = Cli::try_parse_from([
+            "nugget-bench",
+            "cua",
+            "--cua-agent",
+            "null",
+            "--cua-env",
+            "socket",
+            "--cua-tasks",
+            "adversarial",
+        ])
+        .unwrap();
+        assert_eq!(cua.cua_agent, CuaAgentKind::Null);
+        assert_eq!(cua.cua_env, CuaEnv::Socket);
+        assert_eq!(cua.cua_tasks.as_deref(), Some("adversarial"));
+        assert!(Cli::try_parse_from(["nugget-bench", "cua", "--cua-env", "vm"]).is_err());
         assert!(
             Cli::try_parse_from(["nugget-bench", "memory", "--embed-model", "x"]).is_err(),
             "--embed-model needs --embed-url"
