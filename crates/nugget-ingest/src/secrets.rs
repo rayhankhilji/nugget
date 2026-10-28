@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use nugget_connector::SecretStore;
+use nugget_connector::{CancellationToken, SecretStore};
 use nugget_core::ids::SourceId;
 use nugget_core::secrets::KEYCHAIN_SERVICE;
 use nugget_core::{Error, Result};
@@ -199,6 +199,10 @@ pub(crate) struct ScopedSecrets {
     pub(crate) source: SourceId,
     pub(crate) inner: Arc<dyn SecretStore>,
     pub(crate) on_written: OnAccountWritten,
+    /// Cancelled when the source is removed: from then on nothing may be written for it (a
+    /// late OAuth completion would otherwise leave an orphaned token that a source re-added
+    /// under the same id inherits).
+    pub(crate) retired: CancellationToken,
 }
 
 impl ScopedSecrets {
@@ -222,6 +226,9 @@ impl SecretStore for ScopedSecrets {
 
     fn set(&self, account: &str, value: &str) -> Result<()> {
         self.check(account)?;
+        if self.retired.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         self.inner.set(account, value)?;
         (self.on_written)(&self.source, account);
         Ok(())
@@ -260,6 +267,7 @@ mod tests {
             source: SourceId::new("gmail-1"),
             inner: Arc::new(mem.clone()),
             on_written: Arc::new(move |_, a| w.lock().unwrap().push(a.to_owned())),
+            retired: CancellationToken::new(),
         };
         scoped.set("oauth:gmail-1", "tok").unwrap();
         assert_eq!(scoped.get("oauth:gmail-1").unwrap().as_deref(), Some("tok"));
@@ -268,5 +276,24 @@ mod tests {
         assert_eq!(*written.lock().unwrap(), vec!["oauth:gmail-1".to_owned()]);
         scoped.delete("oauth:gmail-1").unwrap();
         assert!(mem.accounts().is_empty());
+    }
+
+    #[test]
+    fn a_removed_source_can_no_longer_write_secrets() {
+        let mem = MemorySecrets::new();
+        let retired = CancellationToken::new();
+        let scoped = ScopedSecrets {
+            source: SourceId::new("gmail-1"),
+            inner: Arc::new(mem.clone()),
+            on_written: Arc::new(|_, _| {}),
+            retired: retired.clone(),
+        };
+        scoped.set("oauth:gmail-1", "a").unwrap();
+        retired.cancel();
+        assert!(matches!(
+            scoped.set("oauth:gmail-1", "b"),
+            Err(Error::Cancelled)
+        ));
+        assert_eq!(mem.get("oauth:gmail-1").unwrap().as_deref(), Some("a"));
     }
 }

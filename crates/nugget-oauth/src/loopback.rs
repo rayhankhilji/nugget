@@ -2,8 +2,10 @@
 //!
 //! Binds `127.0.0.1` on a random port. Every connection is read in its own task (so a browser's
 //! speculative pre-connect cannot stall the real redirect); requests for anything but the
-//! callback path get a 404. The first callback request decides the outcome: `state` must match
-//! and a `code` must be present. The browser gets a minimal page either way.
+//! callback path get a 404. A callback whose `state` does not match gets a 400 and is otherwise
+//! ignored (any local process can reach the port; it must not be able to abort the flow). The
+//! first callback with the right `state` decides the outcome: a `code` must be present. At most
+//! [`MAX_CONNS`] connections are served at once. The browser gets a minimal page either way.
 
 use std::time::Duration;
 
@@ -19,6 +21,8 @@ use crate::pkce::ct_eq;
 const MAX_REQUEST: usize = 16 * 1024;
 /// How long one connection may take to send its request head.
 const CONN_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// Connections served at once; further ones wait in the listen backlog.
+const MAX_CONNS: usize = 16;
 /// The redirect path.
 pub(crate) const CALLBACK_PATH: &str = "/";
 
@@ -51,17 +55,23 @@ impl Loopback {
     pub(crate) async fn wait(self, expected_state: &str, timeout: Duration) -> Result<String> {
         let (tx, mut rx) = mpsc::channel::<(TcpStream, Callback)>(4);
         let mut conns = JoinSet::new();
+        let mut ignored = 0usize;
         let deadline = tokio::time::sleep(timeout);
         tokio::pin!(deadline);
         loop {
             tokio::select! {
                 _ = &mut deadline => {
+                    let note = if ignored > 0 {
+                        format!(" ({ignored} redirect(s) with a wrong OAuth state were ignored)")
+                    } else {
+                        String::new()
+                    };
                     return Err(Error::Unauthorized(format!(
-                        "timed out after {}s waiting for the browser redirect",
+                        "timed out after {}s waiting for the browser redirect{note}",
                         timeout.as_secs()
                     )));
                 }
-                accepted = self.listener.accept() => match accepted {
+                accepted = self.listener.accept(), if conns.len() < MAX_CONNS => match accepted {
                     Ok((stream, _)) => {
                         let tx = tx.clone();
                         conns.spawn(handle_conn(stream, tx));
@@ -69,6 +79,14 @@ impl Loopback {
                     Err(e) => tracing::debug!("oauth loopback accept failed: {e}"),
                 },
                 Some((mut stream, cb)) = rx.recv() => {
+                    if !state_matches(&cb, expected_state) {
+                        ignored += 1;
+                        tracing::warn!("ignoring an OAuth redirect with a wrong state");
+                        conns.spawn(async move {
+                            let _ = respond(&mut stream, false).await;
+                        });
+                        continue;
+                    }
                     let outcome = validate(cb, expected_state);
                     let _ = respond(&mut stream, outcome.is_ok()).await;
                     return outcome;
@@ -80,14 +98,17 @@ impl Loopback {
     }
 }
 
+fn state_matches(cb: &Callback, expected_state: &str) -> bool {
+    cb.state
+        .as_deref()
+        .is_some_and(|s| ct_eq(s, expected_state))
+}
+
 fn validate(cb: Callback, expected_state: &str) -> Result<String> {
-    match cb.state.as_deref() {
-        Some(s) if ct_eq(s, expected_state) => {}
-        _ => {
-            return Err(Error::Unauthorized(
-                "OAuth state mismatch on the redirect; authorization aborted".into(),
-            ));
-        }
+    if !state_matches(&cb, expected_state) {
+        return Err(Error::Unauthorized(
+            "OAuth state mismatch on the redirect; authorization aborted".into(),
+        ));
     }
     if let Some(err) = cb.error {
         let desc = cb

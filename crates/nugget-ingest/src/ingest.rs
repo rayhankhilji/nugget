@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
 use nugget_connector::{
@@ -18,7 +19,7 @@ use nugget_infer::Router;
 use nugget_store::{SourceCounts, Store};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
-use tokio::sync::{Semaphore, broadcast, oneshot};
+use tokio::sync::{Notify, Semaphore, broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::task::TaskTracker;
 
@@ -27,9 +28,11 @@ use crate::config::IngestConfig;
 use crate::known::{StoreKnownItems, join_err};
 use crate::metrics::Metrics;
 use crate::power::{PowerPolicy, SystemPowerPolicy};
+use crate::reembed::{self, ReembedState, ReembedStats};
 use crate::secrets::{KeyringSecrets, ScopedSecrets, account_belongs_to, default_accounts};
 use crate::sources::{self, SourceEntry};
 use crate::supervisor::{Control, run_source};
+use crate::util::cap_error;
 
 /// Capacity of the event broadcast; slow subscribers miss old events (`RecvError::Lagged`).
 const EVENT_CAPACITY: usize = 1024;
@@ -96,6 +99,13 @@ struct Running {
     join: JoinHandle<()>,
 }
 
+/// An interactive authorization in flight for a source (see [`Ingest::begin_auth`]).
+struct AuthTask {
+    generation: u64,
+    cancel: CancellationToken,
+    join: JoinHandle<()>,
+}
+
 struct Slot {
     entry: SourceEntry,
     status: SourceStatus,
@@ -103,6 +113,26 @@ struct Slot {
     connector: Option<Arc<dyn Connector>>,
     /// Set while `update` / `remove` reconfigure the source: nothing may (re)start it.
     reconfiguring: bool,
+    /// The OAuth flow started by `begin_auth`, if one is running. Cancelled (and awaited) by
+    /// `remove`, `update`, `reload` and a second `begin_auth`.
+    auth: Option<AuthTask>,
+    /// Cancelled when the source is removed; its connectors' secret writes then fail.
+    retired: CancellationToken,
+}
+
+impl Slot {
+    fn new(entry: SourceEntry) -> Self {
+        let status = SourceStatus::new(entry.enabled);
+        Self {
+            entry,
+            status,
+            running: None,
+            connector: None,
+            reconfiguring: false,
+            auth: None,
+            retired: CancellationToken::new(),
+        }
+    }
 }
 
 /// State shared by the API, supervisors and pipeline workers.
@@ -124,12 +154,20 @@ pub(crate) struct Inner {
     /// Serializes writes of `sources.toml`.
     file_lock: Mutex<()>,
     sources_file: PathBuf,
-    shutdown: CancellationToken,
+    pub shutdown: CancellationToken,
     tracker: TaskTracker,
     weak: Weak<Inner>,
+    /// Held around every store write of items (pipeline upserts and deletes, purges, the
+    /// re-embed job), so the re-embed job can check an item and replace its chunks without a
+    /// concurrent write in between. Only taken on blocking threads.
+    pub write_lock: Mutex<()>,
+    /// Wakes the re-embed job.
+    pub reembed: Notify,
+    pub reembed_state: Mutex<ReembedState>,
+    auth_generation: AtomicU64,
 }
 
-fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+pub(crate) fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
@@ -139,6 +177,7 @@ impl Inner {
     }
 
     pub fn record_item_error(&self, id: &SourceId, key: Option<ItemKey>, message: String) {
+        let message = cap_error(message);
         let cap = self.cfg.error_ring.max(1);
         let mut slots = lock(&self.slots);
         if let Some(s) = slots.get_mut(id) {
@@ -186,7 +225,7 @@ impl Inner {
     pub async fn sync_failed(&self, id: &SourceId, state: SourceState, message: String) {
         if let Some(s) = lock(&self.slots).get_mut(id) {
             s.status.state = state;
-            s.status.last_error = Some(message);
+            s.status.last_error = Some(cap_error(message));
         }
         self.emit_source(id).await;
     }
@@ -253,7 +292,7 @@ impl Inner {
         }
     }
 
-    fn context(&self, id: &SourceId) -> ConnectorContext {
+    fn context(&self, id: &SourceId, retired: CancellationToken) -> ConnectorContext {
         let weak = self.weak.clone();
         ConnectorContext {
             source: id.clone(),
@@ -267,6 +306,7 @@ impl Inner {
                         inner.note_secret_account(source, account);
                     }
                 }),
+                retired,
             }),
             known: Arc::new(StoreKnownItems::new(self.store.clone(), id.clone())),
         }
@@ -274,7 +314,7 @@ impl Inner {
 
     /// The source's connector, built (and cached) on first use.
     fn connector(&self, id: &SourceId) -> Result<Arc<dyn Connector>> {
-        let (kind, settings) = {
+        let (kind, settings, retired) = {
             let slots = lock(&self.slots);
             let s = slots
                 .get(id)
@@ -282,14 +322,18 @@ impl Inner {
             if let Some(c) = &s.connector {
                 return Ok(c.clone());
             }
-            (s.entry.kind.clone(), s.entry.settings.clone())
+            (
+                s.entry.kind.clone(),
+                s.entry.settings.clone(),
+                s.retired.clone(),
+            )
         };
         let factory = self.registry.get(&kind)?;
         let settings = match &self.settings_resolver {
             Some(resolve) => resolve(id, &kind, settings)?,
             None => settings,
         };
-        let connector = factory.build(&settings, self.context(id))?;
+        let connector = factory.build(&settings, self.context(id, retired))?;
         if let Some(s) = lock(&self.slots).get_mut(id) {
             s.connector = Some(connector.clone());
         }
@@ -311,10 +355,11 @@ impl Inner {
         let connector = match self.connector(id) {
             Ok(c) => c,
             Err(e) => {
-                tracing::warn!(source = %id, error = %e, "cannot start source");
+                let msg = cap_error(e.to_string());
+                tracing::warn!(source = %id, error = %msg, "cannot start source");
                 if let Some(s) = lock(&self.slots).get_mut(id) {
                     s.status.state = SourceState::Error;
-                    s.status.last_error = Some(e.to_string());
+                    s.status.last_error = Some(msg);
                 }
                 return;
             }
@@ -352,6 +397,17 @@ impl Inner {
     fn set_reconfiguring(&self, id: &SourceId, on: bool) {
         if let Some(s) = lock(&self.slots).get_mut(id) {
             s.reconfiguring = on;
+        }
+    }
+
+    /// Cancel the source's OAuth flow, if one is running, and wait until it has stopped (so it
+    /// can no longer write credentials).
+    async fn cancel_auth(&self, id: &SourceId) {
+        let task = lock(&self.slots).get_mut(id).and_then(|s| s.auth.take());
+        if let Some(t) = task {
+            tracing::info!(source = %id, "cancelling the running authorization");
+            t.cancel.cancel();
+            let _ = t.join.await;
         }
     }
 
@@ -463,27 +519,22 @@ impl IngestBuilder {
             shutdown: CancellationToken::new(),
             tracker: TaskTracker::new(),
             weak: weak.clone(),
+            write_lock: Mutex::new(()),
+            reembed: Notify::new(),
+            reembed_state: Mutex::new(ReembedState::default()),
+            auth_generation: AtomicU64::new(0),
         });
         {
             let mut slots = lock(&inner.slots);
             for e in entries {
-                let status = SourceStatus::new(e.enabled);
-                slots.insert(
-                    e.id.clone(),
-                    Slot {
-                        entry: e,
-                        status,
-                        running: None,
-                        connector: None,
-                        reconfiguring: false,
-                    },
-                );
+                slots.insert(e.id.clone(), Slot::new(e));
             }
         }
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
         for id in &ids {
             inner.start_source(id);
         }
+        inner.tracker.spawn(reembed::run(inner.clone()));
         Ok(Ingest { inner })
     }
 }
@@ -605,16 +656,7 @@ impl Ingest {
             settings,
             secret_accounts: Vec::new(),
         };
-        lock(&inner.slots).insert(
-            id.clone(),
-            Slot {
-                entry,
-                status: SourceStatus::new(true),
-                running: None,
-                connector: None,
-                reconfiguring: false,
-            },
-        );
+        lock(&inner.slots).insert(id.clone(), Slot::new(entry));
         if let Err(e) = inner.persist_async().await {
             lock(&inner.slots).remove(&id);
             return Err(e);
@@ -659,6 +701,8 @@ impl Ingest {
         if reconfigure {
             inner.set_reconfiguring(&id, true);
             inner.stop_source(&id).await;
+            // A flow started under the old settings (client id, enabled state) must not finish.
+            inner.cancel_auth(&id).await;
         }
         let result = self
             .apply_update(&id, &old, &new, settings_changed, enabled_changed)
@@ -714,6 +758,9 @@ impl Ingest {
         }
         if settings_changed {
             // Start over so the next pass reconciles everything against the new settings.
+            // Items stay indexed meanwhile: connectors treat `cursor = None` with known items
+            // as a reconciling full pass (see `nugget_connector::Connector::sync`), re-sending
+            // what is still there (cheap: version skip) and deleting what no longer is.
             let store = inner.store.clone();
             let sid = id.clone();
             tokio::task::spawn_blocking(move || store.set_cursor(&sid, serde_json::Value::Null))
@@ -745,6 +792,8 @@ impl Ingest {
         }
         inner.set_reconfiguring(id, true);
         inner.stop_source(id).await;
+        // Before any account is deleted: a flow finishing later would write `oauth:<id>` again.
+        inner.cancel_auth(id).await;
         let Some(mut slot) = lock(&inner.slots).remove(id) else {
             return Err(Error::NotFound(format!("source `{id}`")));
         };
@@ -754,6 +803,8 @@ impl Ingest {
             inner.start_source(id);
             return Err(e);
         }
+        // From now on the removed source's connectors cannot write credentials.
+        slot.retired.cancel();
         let mut accounts: Vec<String> = default_accounts(id).into();
         for a in &slot.entry.secret_accounts {
             if !accounts.contains(a) && account_belongs_to(a, id) {
@@ -771,11 +822,14 @@ impl Ingest {
         })
         .await;
         if purge {
-            let store = inner.store.clone();
+            let me = inner.clone();
             let sid = id.clone();
-            let n = tokio::task::spawn_blocking(move || store.delete_source(&sid))
-                .await
-                .map_err(join_err)??;
+            let n = tokio::task::spawn_blocking(move || {
+                let _w = lock(&me.write_lock);
+                me.store.delete_source(&sid)
+            })
+            .await
+            .map_err(join_err)??;
             tracing::info!(source = %id, items = n, "purged source");
         }
         inner.emit(IngestEvent::SourceRemoved(id.clone()));
@@ -887,8 +941,20 @@ impl Ingest {
     /// Start interactive authorization (`sources.auth.begin`). Show `url` to the user. The
     /// completion is also handled here: on success the source leaves `NeedsAuth`, re-syncs and a
     /// [`IngestEvent::SourceChanged`] is emitted; awaiting `done` is optional.
+    ///
+    /// The flow belongs to the source: starting another one cancels it, and so do
+    /// [`remove`](Self::remove), [`update`](Self::update) (when settings or the enabled state
+    /// change) and [`reload`](Self::reload), which wait for it to stop before going on. `done`
+    /// then resolves to `Error::Cancelled`. A removed source's connector can no longer write
+    /// credentials, and if a flow still completes for a source that no longer exists, the token
+    /// it wrote is deleted.
     pub async fn begin_auth(&self, id: &SourceId) -> Result<AuthFlow> {
         let inner = self.inner.clone();
+        // Serialised with add / update / remove / reload, so a flow is never started for a
+        // source that is being removed.
+        let _g = inner.ops.lock().await;
+        // A second authorization replaces the first.
+        inner.cancel_auth(id).await;
         let connector = {
             let inner = inner.clone();
             let id = id.clone();
@@ -897,13 +963,22 @@ impl Ingest {
                 .map_err(join_err)??
         };
         let flow = connector.begin_auth().await?;
+        let retired = lock(&inner.slots)
+            .get(id)
+            .map(|s| s.retired.clone())
+            .ok_or_else(|| Error::NotFound(format!("source `{id}`")))?;
         let (tx, rx) = oneshot::channel();
+        let generation = inner.auth_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let cancel = inner.shutdown.child_token();
         let id = id.clone();
         let done = flow.done;
         let task_inner = inner.clone();
-        inner.tracker.spawn(async move {
-            let inner = task_inner;
-            // Dropping `done` (timeout, shutdown) aborts the flow and closes its listener.
+        let task_cancel = cancel.clone();
+        let task_id = id.clone();
+        let join = inner.tracker.spawn(async move {
+            let (inner, id) = (task_inner, task_id);
+            // Dropping `done` (timeout, cancellation, shutdown) aborts the flow and closes its
+            // listener.
             let r = tokio::select! {
                 r = tokio::time::timeout(AUTH_TIMEOUT, done) => r.unwrap_or_else(|_| {
                     Err(Error::Other(format!(
@@ -911,8 +986,21 @@ impl Ingest {
                         AUTH_TIMEOUT.as_secs()
                     )))
                 }),
-                _ = inner.shutdown.cancelled() => Err(Error::Cancelled),
+                _ = task_cancel.cancelled() => Err(Error::Cancelled),
             };
+            if retired.is_cancelled() {
+                // The source was removed meanwhile. Its writes fail from then on, but a token
+                // written just before must not outlive it (or be inherited by a source added
+                // later under the same id).
+                if r.is_ok() && !lock(&inner.slots).contains_key(&id) {
+                    let secrets = inner.secrets.clone();
+                    let account = nugget_core::secrets::oauth_account(id.as_str());
+                    let _ = tokio::task::spawn_blocking(move || secrets.delete(&account)).await;
+                    tracing::warn!(source = %id, "authorization finished after the source was removed; its token was deleted");
+                }
+                let _ = tx.send(r.and(Err(Error::Cancelled)));
+                return;
+            }
             match &r {
                 Ok(()) => {
                     tracing::info!(source = %id, "authorization completed");
@@ -927,13 +1015,31 @@ impl Ingest {
                     }
                     inner.emit_source(&id).await;
                 }
+                Err(Error::Cancelled) => {
+                    tracing::info!(source = %id, "authorization cancelled");
+                }
                 Err(e) => {
                     inner.record_item_error(&id, None, format!("authorization failed: {e}"));
                     inner.emit_source(&id).await;
                 }
             }
+            if let Some(s) = lock(&inner.slots).get_mut(&id)
+                && s.auth.as_ref().is_some_and(|a| a.generation == generation)
+            {
+                s.auth = None;
+            }
             let _ = tx.send(r);
         });
+        match lock(&inner.slots).get_mut(&id) {
+            Some(s) => {
+                s.auth = Some(AuthTask {
+                    generation,
+                    cancel,
+                    join,
+                });
+            }
+            None => cancel.cancel(),
+        }
         Ok(AuthFlow {
             url: flow.url,
             done: Box::pin(async move { rx.await.unwrap_or(Err(Error::Cancelled)) }),
@@ -980,6 +1086,8 @@ impl Ingest {
         }
         inner.set_reconfiguring(id, true);
         inner.stop_source(id).await;
+        // The flow was started by the connector being replaced (e.g. with an old client secret).
+        inner.cancel_auth(id).await;
         if let Some(s) = lock(&inner.slots).get_mut(id) {
             s.connector = None;
             s.reconfiguring = false;
@@ -996,6 +1104,19 @@ impl Ingest {
             value,
         )
         .await
+    }
+
+    /// Look for items indexed without embeddings (for example before an embedder was routable)
+    /// and embed them now, in the background. Cheap to call: it only wakes the re-embed job,
+    /// which also runs at start and every [`IngestConfig::reembed_interval_ms`]. Call it when an
+    /// embedding provider becomes available.
+    pub fn reembed_now(&self) {
+        self.inner.reembed.notify_one();
+    }
+
+    /// Progress of the re-embed job.
+    pub fn reembed_stats(&self) -> ReembedStats {
+        lock(&self.inner.reembed_state).stats.clone()
     }
 
     /// Stop every supervisor and worker and wait for them. Changes queued but not yet applied

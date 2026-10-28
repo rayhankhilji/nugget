@@ -993,3 +993,78 @@ async fn oversized_passage_is_cut_with_a_marker() {
             .starts_with("[1] Long (notes)\nzephyr lorem")
     );
 }
+
+/// Index a text-only item with explicit `sensitive` metadata (`None`: no flag at all).
+fn add_flagged(store: &Store, key: &str, text: &str, sensitive: Option<bool>) {
+    let meta = match sensitive {
+        Some(s) => serde_json::json!({ "sensitive": s }),
+        None => serde_json::json!({}),
+    };
+    let item = NewItem::new("notes", key, content_hash(text))
+        .with_title(key)
+        .with_metadata(meta);
+    store.upsert_item(&item).unwrap();
+    store
+        .replace_chunks(&item.item, &[NewChunk::text(text)])
+        .unwrap();
+}
+
+#[tokio::test]
+async fn sensitive_items_can_be_left_out_of_the_context() {
+    let store = Store::open_in_memory().unwrap();
+    add_flagged(
+        &store,
+        "bank",
+        "Heron account number 4111 for the heron savings.",
+        Some(true),
+    );
+    add_flagged(
+        &store,
+        "walk",
+        "We watched a heron by the river on Sunday.",
+        Some(false),
+    );
+    add_flagged(
+        &store,
+        "legacy",
+        "A heron note without a sensitivity flag.",
+        None,
+    );
+    let r = Retriever::new(store, None, RetrieveConfig::default());
+
+    // Default: everything relevant is packed, each citation flagged.
+    let all = r.build_context("heron", 4000).await.unwrap();
+    assert_eq!(all.citations.len(), 3);
+    assert_eq!(all.excluded_sensitive, 0);
+    let flag = |key: &str| {
+        all.citations
+            .iter()
+            .find(|c| c.item.key.as_str() == key)
+            .unwrap()
+            .sensitive
+    };
+    assert!(flag("bank"));
+    assert!(!flag("walk"));
+    assert!(flag("legacy"), "a missing flag fails closed");
+    assert!(all.text.contains("4111"));
+
+    // For a cloud model: sensitive (and unflagged) items never reach the packed text.
+    let opts = nugget_retrieve::ContextOptions {
+        exclude_sensitive: true,
+    };
+    let cloud = r.build_context_with("heron", 4000, opts).await.unwrap();
+    assert_eq!(cloud.excluded_sensitive, 2);
+    let keys: Vec<&str> = cloud
+        .citations
+        .iter()
+        .map(|c| c.item.key.as_str())
+        .collect();
+    assert_eq!(keys, vec!["walk"]);
+    assert!(cloud.citations.iter().all(|c| !c.sensitive));
+    assert!(!cloud.text.contains("4111"));
+    assert!(!cloud.text.contains("sensitivity flag"));
+    assert_eq!(
+        cloud.citations[0].n, 1,
+        "numbering restarts after exclusion"
+    );
+}

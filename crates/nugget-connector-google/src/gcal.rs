@@ -2,10 +2,23 @@
 //!
 //! Cursor (JSON): `{"v":1,"calendars":{"<calendarId>":<state>}}` where `<state>` is
 //! - `{"sync_token":"<tok>"}` once a calendar is in incremental mode, or
-//! - `{"time_min":"<rfc3339>","time_max":"<rfc3339>","page_token":"<tok>"|null,"resync":bool}`
-//!   while a full (windowed) listing is in progress.
+//! - `{"time_min":"<rfc3339>","time_max":"<rfc3339>","page_token":"<tok>"|null,"resync":bool,"reconcile":bool}`
+//!   while a full (windowed) listing is in progress,
+//!
+//! plus `"verify":["<key>",...]` (omitted when empty): indexed events a resync did not list and
+//! that are still to be checked, [`MAX_VERIFY`] per pass.
+//!
+//! Calendars that are no longer synced are found from the indexed keys (`<calendarId>/<eventId>`),
+//! not only from the cursor, so a reset cursor still drops them. A calendar with indexed events
+//! but no cursor state (a settings update resets the cursor) gets a *reconciling* full listing:
+//! indexed events it does not return are deleted when they lie outside the (possibly new)
+//! window, and checked otherwise. A plain resync (410) checks only events inside the window;
+//! the others are expected to be missing and stay. A resync interrupted part-way
+//! restarts its listing, so no event is wrongly taken as missing.
+//!
+//! Versions are `<etag>#<start>:<end>` (Unix seconds), so the window test needs no request.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,7 +43,12 @@ use crate::{GoogleEndpoints, RetryPolicy};
 pub(crate) const KIND: &str = "gcal";
 const FEATURE: &str = "sync:gcal";
 const EVENTS_PAGE: &str = "250";
+/// Unlisted events checked per pass; the rest wait in the cursor.
 const MAX_VERIFY: usize = 500;
+/// Longest list of events carried in the cursor for later checks.
+const MAX_CARRY: usize = 20_000;
+/// Slack on the window boundary when deciding whether an unlisted event should have been listed.
+const WINDOW_SLACK_SECS: i64 = 86_400;
 const VERIFY_CONCURRENCY: usize = 4;
 const MAX_DESCRIPTION: usize = 20_000;
 const MAX_ATTENDEES: usize = 200;
@@ -49,6 +67,12 @@ struct CalState {
     page_token: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     resync: bool,
+    /// With `resync`: check every indexed event the listing misses, not only those in the window.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    reconcile: bool,
+    /// Keys still to be checked after a resync.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    verify: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,16 +302,23 @@ impl Connector for CalendarConnector {
             None => self.selected_calendars(cancel).await?,
         };
 
-        // Calendars no longer synced: drop their events from the index.
+        // Calendars no longer synced: drop their events from the index. They are found from the
+        // indexed keys as well as the cursor, which a settings update resets.
+        let known = self.ctx.known.versions().await?;
+        let known_cals: BTreeSet<&str> = known
+            .keys()
+            .filter_map(|k| k.as_str().split_once('/').map(|(c, _)| c))
+            .collect();
         let wanted: HashSet<&str> = calendars.iter().map(String::as_str).collect();
-        let dropped: Vec<String> = cur
+        let dropped: BTreeSet<String> = cur
             .calendars
             .keys()
-            .filter(|c| !wanted.contains(c.as_str()))
-            .cloned()
+            .map(String::as_str)
+            .chain(known_cals.iter().copied())
+            .filter(|c| !wanted.contains(c))
+            .map(str::to_string)
             .collect();
         if !dropped.is_empty() {
-            let known = self.ctx.known.versions().await?;
             for cal in &dropped {
                 let prefix = format!("{cal}/");
                 for key in known.keys().filter(|k| k.as_str().starts_with(&prefix)) {
@@ -297,6 +328,21 @@ impl Connector for CalendarConnector {
             }
             sink.checkpoint(cur.to_value()).await?;
         }
+        // Indexed events but no cursor state: a reconciling full listing.
+        for cal in &calendars {
+            if !cur.calendars.contains_key(cal) && known_cals.contains(cal.as_str()) {
+                tracing::info!(source = %self.ctx.source, calendar = %cal, "gcal cursor reset; reconciling resync");
+                cur.calendars.insert(
+                    cal.clone(),
+                    CalState {
+                        resync: true,
+                        reconcile: true,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        drop(known);
 
         for cal in &calendars {
             if cancel.is_cancelled() {
@@ -368,6 +414,11 @@ impl CalendarConnector {
         };
         let mut seen: HashSet<String> = HashSet::new();
         let mut restarts = 0u32;
+        if state.resync && state.page_token.is_some() {
+            // Pages listed before the interruption are not remembered: list again from the
+            // start (same window) rather than take their events for missing.
+            state.page_token = None;
+        }
         loop {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -401,6 +452,7 @@ impl CalendarConnector {
                     restarts += 1;
                     state = CalState {
                         resync: true,
+                        reconcile: state.reconcile,
                         ..Default::default()
                     };
                     seen.clear();
@@ -438,10 +490,24 @@ impl CalendarConnector {
                 sink.checkpoint(cur.to_value()).await?;
                 continue;
             }
-            // Last page.
+            // Last page: check unlisted events (a fresh resync's, or those carried over).
+            let mut verify = std::mem::take(&mut state.verify);
             if full && state.resync {
-                self.verify_missing(cal, &seen, sink, cancel).await?;
+                let known = self.ctx.known.versions().await?;
+                let window = parse_window(&state);
+                let missing = missing_candidates(cal, &known, &seen, window);
+                if state.reconcile {
+                    // Out of scope after a settings change (e.g. a shorter window): drop them.
+                    for key in missing.out_of_window {
+                        sink.send(Change::Delete(ItemKey::new(key))).await?;
+                    }
+                }
+                verify = missing.check;
+            } else if !verify.is_empty() {
+                let known = self.ctx.known.versions().await?;
+                verify.retain(|k| known.contains_key(&ItemKey::new(k.as_str())));
             }
+            let verify = self.verify_batch(cal, verify, sink, cancel).await?;
             let sync_token = page
                 .next_sync_token
                 .filter(|t| !t.is_empty())
@@ -449,37 +515,44 @@ impl CalendarConnector {
             let done = match sync_token {
                 Some(t) => CalState {
                     sync_token: Some(t),
+                    verify,
                     ..Default::default()
                 },
                 // No sync token offered: the next pass lists the window again.
-                None => CalState::default(),
+                None => CalState {
+                    verify,
+                    ..Default::default()
+                },
             };
             cur.calendars.insert(cal.to_string(), done);
             return Ok(());
         }
     }
 
-    /// After a resync: indexed events of this calendar not listed again are either outside the
-    /// window or gone. Check a bounded number and delete the gone or cancelled ones.
-    async fn verify_missing(
+    /// Check the first [`MAX_VERIFY`] keys of `missing` (in order) and delete the gone or
+    /// cancelled events; return the rest (capped at [`MAX_CARRY`]) for the next pass.
+    async fn verify_batch(
         &self,
         cal: &str,
-        seen: &HashSet<String>,
+        mut missing: Vec<String>,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
         let prefix = format!("{cal}/");
-        let mut missing: Vec<String> = self
-            .ctx
-            .known
-            .versions()
-            .await?
-            .into_keys()
-            .map(|k| k.0)
-            .filter(|k| k.starts_with(&prefix) && !seen.contains(k))
-            .collect();
-        missing.sort();
-        missing.truncate(MAX_VERIFY);
+        missing.retain(|k| k.starts_with(&prefix));
+        let rest = if missing.len() > MAX_VERIFY {
+            let mut rest = missing.split_off(MAX_VERIFY);
+            tracing::info!(
+                source = %self.ctx.source,
+                calendar = cal,
+                "gcal: checking {MAX_VERIFY} unlisted events now, {} on later passes",
+                rest.len()
+            );
+            rest.truncate(MAX_CARRY);
+            rest
+        } else {
+            Vec::new()
+        };
         let plen = prefix.len();
         let mut checks = futures::stream::iter(missing)
             .map(|key: String| async move {
@@ -492,7 +565,7 @@ impl CalendarConnector {
                 sink.send(Change::Delete(ItemKey::new(key))).await?;
             }
         }
-        Ok(())
+        Ok(rest)
     }
 
     async fn event_exists(&self, cal: &str, id: &str, cancel: &CancellationToken) -> Result<bool> {
@@ -509,6 +582,84 @@ impl CalendarConnector {
             }
             s => Err(Error::Other(format!("gcal events.get: HTTP {s}"))),
         }
+    }
+}
+
+/// The listing window of a full pass, in Unix seconds.
+fn parse_window(state: &CalState) -> Option<(i64, i64)> {
+    let p = |s: Option<&str>| {
+        OffsetDateTime::parse(s?, &Rfc3339)
+            .ok()
+            .map(OffsetDateTime::unix_timestamp)
+    };
+    Some((p(state.time_min.as_deref())?, p(state.time_max.as_deref())?))
+}
+
+/// An event's `(start, end)` in Unix seconds (all-day dates at UTC midnight).
+fn event_span(ev: &Event) -> Option<(i64, i64)> {
+    let secs = |t: &EventTime| {
+        parse_time(t)
+            .map(OffsetDateTime::unix_timestamp)
+            .or_else(|| {
+                let d = time::Date::parse(
+                    t.date.as_deref()?,
+                    &time::format_description::well_known::Iso8601::DATE,
+                )
+                .ok()?;
+                Some(d.midnight().assume_utc().unix_timestamp())
+            })
+    };
+    let start = secs(ev.start.as_ref()?)?;
+    let end = ev.end.as_ref().and_then(secs).unwrap_or(start);
+    Some((start, end))
+}
+
+/// The span in a version written by [`event_document`].
+fn version_span(version: Option<&str>) -> Option<(i64, i64)> {
+    let (_, span) = version?.rsplit_once('#')?;
+    let (s, e) = span.split_once(':')?;
+    Some((s.parse().ok()?, e.parse().ok()?))
+}
+
+/// Indexed events of one calendar a resync listing did not return.
+struct Missing {
+    /// Inside the window (or of unknown time): gone or cancelled unless a check says otherwise.
+    check: Vec<String>,
+    /// Known to lie outside the window: expected to be missing from the listing.
+    out_of_window: Vec<String>,
+}
+
+/// Google's window keeps events that end after `timeMin` and start before `timeMax`.
+fn missing_candidates(
+    cal: &str,
+    known: &HashMap<ItemKey, Option<String>>,
+    seen: &HashSet<String>,
+    window: Option<(i64, i64)>,
+) -> Missing {
+    let prefix = format!("{cal}/");
+    let mut check = Vec::new();
+    let mut out_of_window = Vec::new();
+    for (k, v) in known {
+        if !k.as_str().starts_with(&prefix) || seen.contains(k.as_str()) {
+            continue;
+        }
+        let in_window = match (version_span(v.as_deref()), window) {
+            (Some((s, e)), Some((min, max))) => {
+                e > min - WINDOW_SLACK_SECS && s < max + WINDOW_SLACK_SECS
+            }
+            _ => true,
+        };
+        if in_window {
+            check.push(k.as_str().to_string());
+        } else {
+            out_of_window.push(k.as_str().to_string());
+        }
+    }
+    check.sort();
+    out_of_window.sort();
+    Missing {
+        check,
+        out_of_window,
     }
 }
 
@@ -693,9 +844,17 @@ fn event_document(cal: &CalInfo, ev: Event) -> Document {
         "updated": ev.updated,
     });
 
+    let span = event_span(&ev);
     let mut doc = Document::new(key, "text/plain", Content::Text(text));
     doc.title = title;
-    doc.version = ev.etag.clone().or_else(|| ev.updated.clone());
+    doc.version = ev
+        .etag
+        .clone()
+        .or_else(|| ev.updated.clone())
+        .map(|v| match span {
+            Some((s, e)) => format!("{v}#{s}:{e}"),
+            None => v,
+        });
     doc.modified_at = ev
         .updated
         .as_deref()

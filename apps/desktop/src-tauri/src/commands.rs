@@ -3,10 +3,10 @@
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
-    AuthBegin, ChatCancel, ChatRequest, ChatStarted, ContextRequest, ContextResponse,
-    EgressRecentRequest, IngestStatus, ModelInfo, ModelInstallRequest, ProbeRequest, ProviderInfo,
-    RuntimeInfo, SearchHit, SearchRequest, SourceInfo, SourceRef, SourceRemove, SourceSecret,
-    SourceSpec, SourceSync, SourceUpdate, StatusResponse, method,
+    AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ContextRequest,
+    ContextResponse, EgressRecentRequest, IngestStatus, ModelInfo, ModelInstallRequest,
+    ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest, SourceInfo, SourceRef,
+    SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse, method,
 };
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
@@ -232,6 +232,27 @@ pub async fn retrieve_context(
         ..request
     };
     daemon.call(&app, method::RETRIEVE_CONTEXT, &req).await
+}
+
+/// Answer a question from retrieved context. The daemon chooses the model, then packs the
+/// context for it (sensitive passages never go to cloud models); output arrives as
+/// `nugget:chat-delta` / `nugget:chat-done` events for the returned stream.
+#[tauri::command]
+pub async fn retrieve_ask(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: AskRequest,
+) -> Result<AskStarted> {
+    if request.query.trim().is_empty() {
+        return Err(CmdError::Other("the question is empty".into()));
+    }
+    let req = AskRequest {
+        budget_tokens: request
+            .budget_tokens
+            .clamp(MIN_CONTEXT_BUDGET, MAX_CONTEXT_BUDGET),
+        ..request
+    };
+    daemon.call(&app, method::RETRIEVE_ASK, &req).await
 }
 
 #[tauri::command]

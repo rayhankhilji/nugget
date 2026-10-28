@@ -517,6 +517,32 @@ async fn star_selects_all_but_trash_and_junk_and_dropped_folders_are_deleted() {
 }
 
 #[tokio::test]
+async fn star_skips_virtual_all_flagged_and_important_views() {
+    let mut st = mailbox_state();
+    for (name, uv, special) in [
+        ("AllMail", 21, "\\All"),
+        ("Starred", 23, "\\Flagged"),
+        ("Important", 25, "\\Important"),
+    ] {
+        st.mailbox(name, uv).special = Some(special);
+        st.add(name, &msg(name, name));
+    }
+    let h = Harness::new(st, Mode::Implicit, json!({"folders": ["*"]})).await;
+    h.sync(None).await.unwrap();
+    let mut keys = upserts(&h.store.take_log());
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec!["INBOX/7/1", "INBOX/7/2", "INBOX/7/3", "Sent/11/1"]
+    );
+    // Named explicitly, a virtual view is still honoured.
+    let mut h2 = h;
+    h2.settings["folders"] = json!(["AllMail"]);
+    h2.sync(None).await.unwrap();
+    assert!(upserts(&h2.store.take_log()).contains(&"AllMail/21/1".to_string()));
+}
+
+#[tokio::test]
 async fn large_mailboxes_checkpoint_per_batch() {
     let mut st = State::new();
     st.mailbox("INBOX", 3);
@@ -583,6 +609,61 @@ async fn malformed_server_responses_error_without_panicking() {
     let h = Harness::new(st, Mode::Implicit, json!({})).await;
     let err = h.sync(None).await.unwrap_err();
     assert!(matches!(err, Error::Network(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn huge_literal_headers_are_refused_before_buffering() {
+    // The server announces a 400 MB body for a tiny message, then stalls. async-imap alone
+    // would zero-fill a 400 MB buffer and wait for the bytes; the guard rejects the header.
+    let mut st = mailbox_state();
+    st.lie_literal = Some(400_000_000);
+    let h = Harness::new(st, Mode::Implicit, json!({"max_message_mb": 1})).await;
+    let c = h
+        .connector()
+        .with_timeouts(Duration::from_secs(2), Duration::from_secs(30));
+    let started = std::time::Instant::now();
+    let err = c
+        .sync(None, &*h.store, &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Network(m) if m.contains("400000000-byte literal")),
+        "{err:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "no timeout wait"
+    );
+
+    // The same in a metadata response (EXAMINE), where literals are bounded by the budget.
+    let mut st = mailbox_state();
+    st.raw_examine = Some(b"* 1 FETCH (UID 1 BODY[] {300000000}\r\nabc".to_vec());
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let err = h.sync(None).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Network(m) if m.contains("300000000-byte literal")),
+        "{err:?}"
+    );
+}
+
+#[tokio::test]
+async fn parse_errors_keep_only_a_short_escaped_excerpt() {
+    // A tagged line with an unknown status fails imap-proto at once; async-imap's error then
+    // carries the whole receive buffer.
+    let mut raw = b"A9 FOO \x00\x01\x1b[31m ".to_vec();
+    raw.extend(std::iter::repeat_n(b'S', 50_000));
+    raw.extend_from_slice(b" secret-tail\r\n");
+    let mut st = mailbox_state();
+    st.raw_examine = Some(raw);
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let err = h.sync(None).await.unwrap_err();
+    let Error::Network(m) = &err else {
+        panic!("{err:?}")
+    };
+    assert!(m.contains("malformed response"), "{m}");
+    assert!(m.len() < 400, "message is {} bytes", m.len());
+    assert!(!m.chars().any(char::is_control), "{m:?}");
+    assert!(!m.contains("secret-tail"));
 }
 
 #[tokio::test]
@@ -662,6 +743,73 @@ async fn idle_watch_delivers_new_mail_and_stops_on_cancel() {
         .unwrap();
     assert!(h.server.log().iter().any(|l| l == "DONE"));
     assert!(h.server.with(|s| s.flags("INBOX", uid)).is_empty());
+}
+
+#[tokio::test]
+async fn idle_watches_the_selected_mailbox_when_inbox_is_not_selected() {
+    let mut st = mailbox_state();
+    st.mailbox("Archive", 19);
+    st.add("Archive", &msg("arch", "arch"));
+    let h = Harness::new(st, Mode::Implicit, json!({"folders": ["Archive"]})).await;
+    let c = Arc::new(h.connector());
+    c.sync(None, &*h.store, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(h.store.keys(), vec!["Archive/19/1"]);
+    h.store.take_log();
+    let log_start = h.server.log().len();
+
+    let cancel = CancellationToken::new();
+    let task = {
+        let (c, sink, cancel) = (
+            c.clone(),
+            h.store.clone() as Arc<dyn ChangeSink>,
+            cancel.clone(),
+        );
+        tokio::spawn(async move { c.watch(sink, cancel).await })
+    };
+    for _ in 0..200 {
+        if h.server.log()[log_start..]
+            .iter()
+            .any(|l| l.ends_with("IDLE"))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let examined: Vec<String> = h.server.log()[log_start..]
+        .iter()
+        .filter(|l| l.contains("EXAMINE"))
+        .cloned()
+        .collect();
+    assert_eq!(examined.len(), 1, "{examined:?}");
+    assert!(examined[0].contains("\"Archive\""), "{examined:?}");
+
+    let uid = h.server.with(|s| s.add("Archive", &msg("live", "live")));
+    h.server.push(&format!("* {uid} EXISTS"));
+    let mut got = Vec::new();
+    for _ in 0..300 {
+        got = upserts(&h.store.log.lock().unwrap());
+        if !got.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(got, vec![format!("Archive/19/{uid}")]);
+    cancel.cancel();
+    tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+#[test]
+fn watch_prefers_inbox_then_the_first_selected_mailbox() {
+    let f = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(watch_folder(&f(&["Sent", "INBOX"])).unwrap(), "INBOX");
+    assert_eq!(watch_folder(&f(&["Archive", "Sent"])).unwrap(), "Archive");
+    assert!(watch_folder(&[]).is_none());
 }
 
 #[tokio::test]

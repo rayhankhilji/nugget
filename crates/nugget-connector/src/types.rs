@@ -128,6 +128,14 @@ pub trait Connector: Send + Sync {
     fn kind(&self) -> &'static str;
 
     /// Run one sync pass from `cursor` (`None` = first run) and return the cursor to resume from.
+    ///
+    /// `cursor = None` does not only mean "first run": ingest also resets the cursor when the
+    /// source's settings change (`sources.update`), while the items indexed under the old
+    /// settings stay in the store. A pass without a cursor must therefore be a **reconciling
+    /// full pass**: compare what the source holds now against the known items
+    /// ([`ConnectorContext::known`]), send an upsert for every current document (unchanged
+    /// versions are skipped cheaply by the pipeline) and a [`Change::Delete`] for every known
+    /// key that is no longer in scope (e.g. outside the new folders, roots or backfill window).
     async fn sync(
         &self,
         cursor: Option<Value>,

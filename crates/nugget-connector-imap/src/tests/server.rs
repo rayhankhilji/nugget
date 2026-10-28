@@ -72,6 +72,10 @@ pub struct State {
     pub pending: Vec<String>,
     /// Answer EXAMINE with malformed data.
     pub garbage: bool,
+    /// Answer EXAMINE with these raw bytes, then go silent (connection kept open).
+    pub raw_examine: Option<Vec<u8>>,
+    /// Announce this literal length for message bodies, send a few bytes, then go silent.
+    pub lie_literal: Option<u64>,
     pub logins: usize,
 }
 
@@ -87,6 +91,8 @@ impl State {
             log: Vec::new(),
             pending: Vec::new(),
             garbage: false,
+            raw_examine: None,
+            lie_literal: None,
             logins: 0,
         }
     }
@@ -413,6 +419,8 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
         let tag = toks[0].clone();
         let cmd = toks[1].to_ascii_uppercase();
         let mut out: Vec<u8> = Vec::new();
+        // Raw bytes to send instead of `out`, after which the server goes silent.
+        let mut silent_after: Option<Vec<u8>> = None;
         let put = |out: &mut Vec<u8>, s: &str| {
             out.extend_from_slice(s.as_bytes());
             out.extend_from_slice(b"\r\n");
@@ -478,7 +486,9 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
             "SELECT" | "EXAMINE" => {
                 let s = state.lock().unwrap();
                 let name = toks.get(2).cloned().unwrap_or_default();
-                if s.garbage {
+                if let Some(raw) = s.raw_examine.clone() {
+                    silent_after = Some(raw);
+                } else if s.garbage {
                     out.extend_from_slice(b"* 1 FETCH (UID \x00\xff garbage ((((\r\n");
                     out.extend_from_slice(b")))) nonsense {99999999999}\r\n");
                 } else if let Some(mb) = s.mailboxes.get(&name) {
@@ -575,6 +585,8 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                             }
                         }
                         let condstore = s.condstore;
+                        let s_lie = s.lie_literal;
+                        let mut lie_out: Option<Vec<u8>> = None;
                         let mb = s.mailboxes.get_mut(&mbname).unwrap();
                         if vanished && qresync_on {
                             let since = changed_since.unwrap_or(0);
@@ -632,6 +644,15 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                                 let mut p = format!("BODY[HEADER] {{{end}}}\r\n").into_bytes();
                                 p.extend_from_slice(&m.body[..end]);
                                 parts.push(p);
+                            } else if (items.contains("BODY.PEEK[]") || items.contains("BODY[]"))
+                                && let Some(n) = s_lie
+                            {
+                                let mut raw =
+                                    format!("* {} FETCH (UID {uid} BODY[] {{{n}}}\r\n", seqs[&uid])
+                                        .into_bytes();
+                                raw.extend_from_slice(&m.body);
+                                lie_out = Some(raw);
+                                break;
                             } else if items.contains("BODY.PEEK[]") || items.contains("BODY[]") {
                                 let mut p = format!("BODY[] {{{}}}\r\n", m.body.len()).into_bytes();
                                 p.extend_from_slice(&m.body);
@@ -642,6 +663,9 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                             out.extend_from_slice(b")\r\n");
                         }
                         mb.modseq = bump;
+                        if let Some(raw) = lie_out {
+                            silent_after = Some(raw);
+                        }
                         put(&mut out, &format!("{tag} OK fetch done"));
                     }
                     "STORE" => {
@@ -674,6 +698,12 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                 put(&mut out, &format!("{tag} OK IDLE terminated"));
             }
             _ => put(&mut out, &format!("{tag} BAD unknown command")),
+        }
+        if let Some(raw) = silent_after {
+            w.write_all(&raw).await?;
+            w.flush().await?;
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+            return Ok(());
         }
         w.write_all(&out).await?;
         w.flush().await?;

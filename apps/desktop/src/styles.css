@@ -1164,7 +1164,8 @@ h2.source-name {
   min-width: 200px;
 }
 
-h3.ask-sub {
+h3.ask-sub,
+h4.ask-sub {
   font-size: 13px;
   font-weight: 600;
   margin: 14px 0 6px;

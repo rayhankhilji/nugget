@@ -119,18 +119,17 @@ impl MeteredHttp {
                 None => h.to_string(),
             })
             .unwrap_or_default();
-        let sent = approx_request_bytes(&req);
-        let mut received = 0u64;
-        let result = self.exchange(req, &mut received).await;
-        self.egress.record(EgressEvent {
-            at: OffsetDateTime::now_utc(),
+        // The guard records on drop, so an exchange cancelled mid-flight (the future dropped)
+        // still leaves a ledger row with the bytes counted so far.
+        let mut meter = EgressMeter {
+            egress: &*self.egress,
             host,
-            feature: self.feature.clone(),
-            bytes_sent: sent,
-            bytes_received: received,
-            items: items.to_vec(),
-        });
-        result
+            feature: &self.feature,
+            sent: approx_request_bytes(&req),
+            received: 0,
+            items,
+        };
+        self.exchange(req, &mut meter.received).await
     }
 
     async fn exchange(&self, req: reqwest::Request, received: &mut u64) -> Result<Response> {
@@ -153,6 +152,30 @@ impl MeteredHttp {
             headers,
             body,
         })
+    }
+}
+
+/// Counts one exchange and writes its ledger row when dropped: on completion, on error, and when
+/// the request future is cancelled part-way.
+struct EgressMeter<'a> {
+    egress: &'a dyn EgressSink,
+    host: String,
+    feature: &'a str,
+    sent: u64,
+    received: u64,
+    items: &'a [ItemRef],
+}
+
+impl Drop for EgressMeter<'_> {
+    fn drop(&mut self) {
+        self.egress.record(EgressEvent {
+            at: OffsetDateTime::now_utc(),
+            host: std::mem::take(&mut self.host),
+            feature: self.feature.to_string(),
+            bytes_sent: self.sent,
+            bytes_received: self.received,
+            items: self.items.to_vec(),
+        });
     }
 }
 

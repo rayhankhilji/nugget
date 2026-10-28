@@ -205,6 +205,7 @@ async fn notifications_stream_to_the_calling_connection() {
             role: Role::User,
             text: "one two three".into(),
         }],
+        items: Vec::new(),
     };
     let started: ChatStarted = within(client.call(method::CHAT, &req)).await.unwrap();
 

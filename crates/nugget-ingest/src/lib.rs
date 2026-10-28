@@ -9,7 +9,7 @@
 //!                                                   extract (blocking, timeout)
 //!                                                   PII scan ─▶ triage (local only)
 //!                                                   chunk ─▶ embed (batched, local by default)
-//!                                                   store: item, chunks, then version
+//!                                                   store: item + chunks + version (atomic)
 //!                                checkpoint(cursor) ─▶ set_cursor after everything before it
 //! ```
 //!
@@ -28,8 +28,18 @@
 //!   only after every change sent before it was written. If a change failed to persist during
 //!   the pass, the checkpoint fails and the pass is retried from the last stored cursor. A crash
 //!   therefore never skips data; at worst changes are re-applied (cheap: version skip).
-//! - **Crash-safe items.** An item's version is written after its chunks, so a half-written item
-//!   is re-processed, never skipped.
+//! - **Crash-safe items.** An item, its chunks and its version are written in one transaction
+//!   (`Store::upsert_item_with_chunks`): a failed or interrupted write leaves the previous item
+//!   and chunks intact, never an item without chunks.
+//! - **Late embeddings.** Items indexed text-only (no embedder was routable, or embedding
+//!   failed) are embedded later by a background job: at start, on [`Ingest::reembed_now`] and
+//!   every [`IngestConfig::reembed_interval_ms`], under the same privacy rules. Embedders that
+//!   return NaN or infinite values are treated as failed (text-only, retried later).
+//! - **Authorization.** An OAuth flow belongs to its source: removing, reconfiguring or
+//!   reloading the source (or starting another flow) cancels it first, and a removed source can
+//!   no longer write credentials.
+//! - **Bounded errors.** `last_error`, item errors and progress errors are capped at
+//!   [`MAX_ERROR_CHARS`] characters (see [`cap_error`]).
 //! - **Privacy.** Items with PII findings (or flagged by triage) are *sensitive*. Triage never
 //!   uses `Cloud` providers; embeddings use `Cloud` providers only when
 //!   [`IngestConfig::allow_cloud_embeddings`] is set **and** the item is not sensitive.
@@ -54,9 +64,11 @@ mod metrics;
 mod pii;
 mod pipeline;
 mod power;
+mod reembed;
 mod secrets;
 mod sources;
 mod supervisor;
+mod util;
 
 pub use ai::{FEATURE_TRIAGE, SUMMARY_MAX_WORDS, Triage};
 pub use config::IngestConfig;
@@ -64,7 +76,9 @@ pub use ingest::{AUTH_TIMEOUT, Ingest, IngestBuilder, IngestEvent, ItemError, Se
 pub use known::StoreKnownItems;
 pub use pii::{PiiFindings, scan as scan_pii};
 pub use power::{NoPowerPolicy, PowerPolicy, SystemPowerPolicy};
+pub use reembed::ReembedStats;
 pub use secrets::{KeyringSecrets, MemorySecrets, account_belongs_to};
+pub use util::{MAX_ERROR_CHARS, cap_error};
 
 pub use nugget_connector::{AuthFlow, SecretStore};
 

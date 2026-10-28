@@ -694,6 +694,60 @@ mod sources {
     }
 
     #[test]
+    fn items_missing_embeddings_lists_text_only_items_in_pages() {
+        let store = Store::open_in_memory().unwrap();
+        // No vector table yet: every item with chunks is listed; chunkless items never are.
+        put(&store, "b", "two", None, &["beta"]);
+        put(&store, "a", "one", None, &["alpha", "alpha 2"]);
+        put(&store, "a", "empty", None, &[]);
+        let r = |s: &str, k: &str| nugget_core::ids::ItemRef {
+            source: SourceId::new(s),
+            key: ItemKey::new(k),
+        };
+        assert_eq!(
+            store.items_missing_embeddings(None, 10).unwrap(),
+            vec![r("a", "one"), r("b", "two")]
+        );
+        // Embed one item: it drops out; pagination continues after the given item.
+        store
+            .replace_chunks(
+                &r("a", "one"),
+                &[
+                    NewChunk::embedded("alpha", vec![1.0, 0.0]),
+                    NewChunk::embedded("alpha 2", vec![0.0, 1.0]),
+                ],
+            )
+            .unwrap();
+        put(&store, "a", "three", None, &["gamma"]);
+        assert_eq!(
+            store.items_missing_embeddings(None, 1).unwrap(),
+            vec![r("a", "three")]
+        );
+        assert_eq!(
+            store
+                .items_missing_embeddings(Some(&r("a", "three")), 10)
+                .unwrap(),
+            vec![r("b", "two")]
+        );
+        assert!(store.items_missing_embeddings(None, 0).unwrap().is_empty());
+        // A partially embedded item is listed too.
+        let mixed = r("c", "mixed");
+        store.upsert_item(&NewItem::new("c", "mixed", "h")).unwrap();
+        store
+            .replace_chunks(
+                &mixed,
+                &[NewChunk::embedded("x", vec![1.0, 1.0]), NewChunk::text("y")],
+            )
+            .unwrap();
+        assert!(
+            store
+                .items_missing_embeddings(Some(&r("b", "two")), 10)
+                .unwrap()
+                .contains(&mixed)
+        );
+    }
+
+    #[test]
     fn versions_are_stored_and_listed_per_source() {
         let store = Store::open_in_memory().unwrap();
         put(&store, "files", "a.md", Some("1:10"), &["alpha"]);

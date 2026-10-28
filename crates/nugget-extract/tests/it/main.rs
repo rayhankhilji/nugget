@@ -2,5 +2,6 @@
 
 mod chunking;
 mod common;
+mod files;
 mod formats;
 mod fuzz;

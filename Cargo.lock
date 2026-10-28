@@ -3562,6 +3562,7 @@ dependencies = [
  "encoding_rs",
  "html5ever",
  "image",
+ "libc",
  "mail-parser",
  "nugget-core",
  "ocrs",

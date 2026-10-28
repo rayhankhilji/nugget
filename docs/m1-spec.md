@@ -90,3 +90,17 @@ query ──▶ nugget-retrieve (hybrid + MMR + packing with citations) ──�
 - **`search`** uses `Retriever::search`: hybrid when an embedder is usable, one hit per item, with `url`. **`retrieve.context`** uses `build_context` (budget capped at 128k tokens). Both run on the blocking pool.
 - **`runtime.status`** returns `Runtime::status()`, plus each selected role not started yet, as `not_installed` or `stopped`. It returns `[]` when the runtime is disabled.
 - **Shutdown order:** stop accepting and close connections (chat streams first get `chat.done`), then `Ingest::shutdown`, then `Runtime::shutdown`, then flush the store's egress writer.
+
+## Post-review additions
+- **`retrieve.ask`** (`AskRequest` → `AskStarted`, then streamed through `chat.delta` / `chat.done`). The daemon chooses the provider *before* packing context:
+  - For a Cloud provider, sensitive items are left out. Items without an explicit `sensitive: false` count as sensitive.
+  - The context is repacked on every fallback.
+  - Cited items are recorded on the egress row with feature `ask`.
+  - `Citation.sensitive` and `ContextResponse.excluded_sensitive` report what was withheld.
+  - The desktop "Ask with context" uses this method.
+- **`ChatRequest.items`.** It is forwarded to the egress ledger, so plain chats that include item content are attributed too.
+- **Re-embed job (`nugget-ingest`).**
+  - It embeds items that were stored text-only (no embedder at the time, or an embedding failure).
+  - It runs at startup, whenever the local embedding runtime becomes ready, and every `reembed_interval_ms` (default 10 min).
+  - It follows the same privacy gates and power policy as the pipeline, and writes atomically with `upsert_item_with_chunks`.
+- **Cursor reset contract.** A sync with `cursor = None` while known items exist must be a reconciling full pass: it deletes known keys that are now out of scope.

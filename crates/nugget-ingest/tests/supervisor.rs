@@ -308,3 +308,146 @@ async fn shutdown_stops_watchers_and_hung_connectors() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     assert_eq!(hung.calls(), 1, "nothing restarts after shutdown");
 }
+
+/// Script an OAuth flow for `fake-1`: completing it (`tx.send`) makes the connector write
+/// `oauth:fake-1`. A cancelled flow drops its receiver, so `send` then fails.
+fn script_auth(h: &Harness) -> tokio::sync::oneshot::Sender<()> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    *h.factory.state("fake-1").auth_done.lock().unwrap() = Some(rx);
+    tx
+}
+
+#[tokio::test]
+async fn removing_a_source_cancels_its_authorization() {
+    let h = start(Opts::default()).await;
+    h.add("fake-1").await;
+    let tx = script_auth(&h);
+    let flow = h.ingest.begin_auth(&id()).await.unwrap();
+
+    h.ingest.remove(&id(), true).await.unwrap();
+    let r = tokio::time::timeout(Duration::from_secs(5), flow.done)
+        .await
+        .expect("the flow ends with the source");
+    assert!(matches!(r, Err(nugget_core::Error::Cancelled)), "{r:?}");
+    // The browser redirect arriving now reaches nothing.
+    assert!(
+        tx.send(()).is_err(),
+        "the flow must be aborted, not left running"
+    );
+
+    // A source re-added under the same id inherits no token.
+    h.add("fake-1").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        h.secrets.accounts().is_empty(),
+        "orphaned credentials: {:?}",
+        h.secrets.accounts()
+    );
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_second_authorization_cancels_the_first() {
+    let h = start(Opts::default()).await;
+    h.add("fake-1").await;
+    let first_tx = script_auth(&h);
+    let first = h.ingest.begin_auth(&id()).await.unwrap();
+    let second_tx = script_auth(&h);
+    let second = h.ingest.begin_auth(&id()).await.unwrap();
+
+    let r = tokio::time::timeout(Duration::from_secs(5), first.done)
+        .await
+        .expect("the first flow ends");
+    assert!(matches!(r, Err(nugget_core::Error::Cancelled)), "{r:?}");
+    assert!(first_tx.send(()).is_err());
+
+    second_tx.send(()).unwrap();
+    second.done.await.unwrap();
+    assert_eq!(h.secrets.accounts(), vec!["oauth:fake-1".to_owned()]);
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
+async fn reconfiguring_or_reloading_cancels_the_authorization() {
+    let h = start(Opts::default()).await;
+    h.add("fake-1").await;
+
+    // New settings (e.g. another OAuth client id).
+    let tx = script_auth(&h);
+    let flow = h.ingest.begin_auth(&id()).await.unwrap();
+    h.ingest
+        .update(nugget_core::ipc::SourceUpdate {
+            id: id(),
+            name: None,
+            enabled: None,
+            settings: Some(json!({"root": "/tmp/other"})),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        flow.done.await,
+        Err(nugget_core::Error::Cancelled)
+    ));
+    assert!(tx.send(()).is_err());
+
+    // A rebuilt connector (e.g. a new client secret).
+    let tx = script_auth(&h);
+    let flow = h.ingest.begin_auth(&id()).await.unwrap();
+    h.ingest.reload(&id()).await.unwrap();
+    assert!(matches!(
+        flow.done.await,
+        Err(nugget_core::Error::Cancelled)
+    ));
+    assert!(tx.send(()).is_err());
+
+    // A name change alone leaves the flow running.
+    let tx = script_auth(&h);
+    let flow = h.ingest.begin_auth(&id()).await.unwrap();
+    h.ingest
+        .update(nugget_core::ipc::SourceUpdate {
+            id: id(),
+            name: Some("Renamed".into()),
+            enabled: None,
+            settings: None,
+        })
+        .await
+        .unwrap();
+    tx.send(()).unwrap();
+    flow.done.await.unwrap();
+    assert_eq!(h.secrets.accounts(), vec!["oauth:fake-1".to_owned()]);
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
+async fn huge_errors_are_capped_in_status_and_item_errors() {
+    let h = start(Opts::default()).await;
+    let st = h.factory.state("fake-1");
+    st.script(vec![Step::Fail(ErrKind::Huge)]);
+    let mut events = h.ingest.subscribe();
+    h.add("fake-1").await;
+    h.wait_state("fake-1", SourceState::Error).await;
+
+    let max = nugget_ingest::MAX_ERROR_CHARS;
+    let last = h.ingest.get(&id()).await.unwrap().last_error.unwrap();
+    assert_eq!(last.chars().count(), max, "{last}");
+    assert!(last.ends_with('…'));
+    assert!(
+        !last.chars().any(char::is_control),
+        "raw bytes leak: {last:?}"
+    );
+    let errors = h.ingest.errors(&id()).unwrap();
+    assert!(!errors.is_empty());
+    assert!(errors.iter().all(|e| e.message.chars().count() <= max));
+    // Progress events carry the capped message too.
+    let mut saw = false;
+    while let Ok(ev) = events.try_recv() {
+        if let IngestEvent::Progress(p) = ev
+            && let Some(e) = p.error
+        {
+            assert!(e.chars().count() <= max);
+            saw = true;
+        }
+    }
+    assert!(saw, "an error progress event was emitted");
+    h.ingest.shutdown().await;
+}

@@ -23,6 +23,7 @@
 //! `{"v":1,"folders":{"INBOX":{"uidvalidity":7,"last_uid":1234,"highest_modseq":99}}}`
 
 mod conn;
+mod guard;
 mod settings;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -237,6 +238,8 @@ impl ImapConnector {
             username: self.settings.username.clone(),
             tls_config,
             io_timeout: self.io_timeout,
+            max_literal: u64::from(self.settings.max_message_mb) * 1024 * 1024
+                + conn::LITERAL_SLACK,
         })
     }
 
@@ -376,14 +379,21 @@ impl ImapConnector {
                 "IMAP server does not support IDLE".into(),
             ));
         }
-        let folder = "INBOX";
+        // Watch INBOX when it is selected, otherwise the first selected mailbox. Never a mailbox
+        // outside the selection: its items would be deleted again by the next sync.
+        let folders = self.resolve_folders(&mut imap).await?;
+        let Some(folder) = watch_folder(&folders) else {
+            imap.logout().await;
+            return Ok(()); // nothing to watch: the pipeline falls back to polling
+        };
+        let folder = folder.as_str();
         let sel = imap
             .examine(folder)
             .await?
-            .ok_or_else(|| Error::NotFound("INBOX".into()))?;
+            .ok_or_else(|| Error::NotFound(format!("mailbox {folder}")))?;
         let uv = sel
             .uidvalidity
-            .ok_or_else(|| Error::Network("EXAMINE INBOX returned no UIDVALIDITY".into()))?;
+            .ok_or_else(|| Error::Network(format!("EXAMINE {folder} returned no UIDVALIDITY")))?;
         let mut last = match sel.uidnext {
             Some(n) => n.saturating_sub(1),
             None => imap.uid_search("ALL").await?.last().copied().unwrap_or(0),
@@ -810,6 +820,14 @@ fn imap_date(t: OffsetDateTime) -> String {
     )
 }
 
+/// The mailbox IDLE watches: INBOX if selected, else the first selected mailbox.
+fn watch_folder(folders: &[String]) -> Option<&String> {
+    folders
+        .iter()
+        .find(|f| f.as_str() == "INBOX")
+        .or_else(|| folders.first())
+}
+
 fn normalize_inbox(name: &str) -> String {
     if name.eq_ignore_ascii_case("INBOX") {
         "INBOX".into()
@@ -825,8 +843,10 @@ fn leaf(mb: &ListedMailbox) -> &str {
     }
 }
 
+/// Mailboxes `"*"` leaves out: Trash and Junk, and virtual views (`\All`, `\Flagged`,
+/// `\Important`) whose messages already live in a real mailbox and would be indexed twice.
 fn is_excluded(mb: &ListedMailbox) -> bool {
-    if matches!(mb.special, Some(Special::Trash | Special::Junk)) {
+    if mb.virtual_view || matches!(mb.special, Some(Special::Trash | Special::Junk)) {
         return true;
     }
     let l = leaf(mb).to_ascii_lowercase();

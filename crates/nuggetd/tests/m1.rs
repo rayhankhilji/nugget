@@ -37,6 +37,8 @@ struct Harness {
     secrets: MemorySecrets,
     store: Store,
     client: Client,
+    /// The daemon's local runtime, when enabled.
+    runtime: Option<nugget_runtime::Runtime>,
     stop: Option<oneshot::Sender<()>>,
     server: Option<JoinHandle<nugget_core::Result<()>>>,
 }
@@ -67,6 +69,7 @@ impl Harness {
             Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
         };
         let store = daemon.store();
+        let local_runtime = daemon.runtime();
         let (tx, rx) = oneshot::channel::<()>();
         let server = tokio::spawn(daemon.run_until(async {
             let _ = rx.await;
@@ -78,6 +81,7 @@ impl Harness {
             secrets,
             store,
             client,
+            runtime: local_runtime,
             stop: Some(tx),
             server: Some(server),
         }
@@ -662,6 +666,135 @@ async fn local_runtime_serves_embeddings_and_chat_and_starts_after_install() {
     // Shutdown stops the servers.
     h.stop().await;
     assert!(pid_files_gone(&home.join("data").join("runtime")));
+}
+
+/// `models.install` of an update for a model whose server is running restarts the server on
+/// the new weights (the runtime compares the installed model's SHA-256).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installing_a_model_update_restarts_its_running_server() {
+    let tmp = temp_home();
+    let home = tmp.path().join("home");
+    let models_server = wiremock::MockServer::start().await;
+    let manifest = test_manifest(&models_server).await;
+
+    // An older copy of the embedding model is installed: same id, other weights.
+    let mut old = manifest.get("embed-model").unwrap().clone();
+    let old_bytes = b"GGUF older fake weights for embed-model".to_vec();
+    let old_path = format!("/embed-model/resolve/{REV}/old.gguf");
+    wiremock::Mock::given(wiremock::matchers::path(old_path.clone()))
+        .respond_with(wiremock::ResponseTemplate::new(200).set_body_bytes(old_bytes.clone()))
+        .mount(&models_server)
+        .await;
+    old.url = format!("{}{old_path}", models_server.uri());
+    old.size = old_bytes.len() as u64;
+    old.sha256 = sha256_hex(&old_bytes);
+    let paths = Paths::rooted(home.clone());
+    let store = ModelStore::open(&paths, Arc::new(NoEgress)).unwrap();
+    store.install(&old, |_| {}).await.unwrap();
+    drop(store);
+
+    let overrides = RuntimeOverrides {
+        server_binary: Some((fake_server(), RuntimeAccel::Cpu)),
+        options: Some(fast_runtime()),
+        manifest: Some(manifest),
+        hardware: Some(Hardware {
+            total_ram: 16 << 30,
+            available_ram: 8 << 30,
+            cpu_cores: 4,
+            gpu: GpuKind::Unknown,
+        }),
+    };
+    let config = "[runtime]\nchat_model = \"chat-model\"\nembedding_model = \"embed-model\"\nidle_stop_minutes = 0\n";
+    let mut h = Harness::start_in(tmp, config, overrides).await;
+    let runtime = h.runtime.clone().expect("runtime enabled");
+    eventually("embedding runtime ready", || {
+        runtime_ready(&h, RuntimeRole::Embedding)
+    })
+    .await;
+    let before = runtime.details(RuntimeRole::Embedding).unwrap();
+    let models: Vec<nugget_core::ipc::ModelInfo> = h.call(method::MODELS_LIST, json!({})).await;
+    assert!(
+        models
+            .iter()
+            .any(|m| m.id == "embed-model" && m.update_available),
+        "{models:?}"
+    );
+
+    let _: Value = h
+        .call(method::MODELS_INSTALL, json!({"id": "embed-model"}))
+        .await;
+    eventually("server restarted on the new weights", || {
+        let runtime = runtime.clone();
+        let before = before.clone();
+        async move {
+            runtime
+                .details(RuntimeRole::Embedding)
+                .is_some_and(|d| d.info.state == RuntimeState::Ready && d.pid != before.pid)
+        }
+    })
+    .await;
+    let models: Vec<nugget_core::ipc::ModelInfo> = h.call(method::MODELS_LIST, json!({})).await;
+    assert!(
+        models
+            .iter()
+            .any(|m| m.id == "embed-model" && m.installed && !m.update_available)
+    );
+    h.stop().await;
+}
+
+/// Files indexed while no embedder is installed are text-only; installing the embedding model
+/// starts its server, whose readiness triggers the ingest re-embed job.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn items_indexed_before_the_embedder_is_installed_get_vectors_once_it_is_ready() {
+    let tmp = temp_home();
+    let models_server = wiremock::MockServer::start().await;
+    let manifest = test_manifest(&models_server).await;
+    let overrides = RuntimeOverrides {
+        server_binary: Some((fake_server(), RuntimeAccel::Cpu)),
+        options: Some(fast_runtime()),
+        manifest: Some(manifest),
+        hardware: Some(Hardware {
+            total_ram: 16 << 30,
+            available_ram: 8 << 30,
+            cpu_cores: 4,
+            gpu: GpuKind::Unknown,
+        }),
+    };
+    let config = "[runtime]\nchat_model = \"chat-model\"\nembedding_model = \"embed-model\"\nidle_stop_minutes = 0\n";
+    let mut h = Harness::start_in(tmp, config, overrides).await;
+
+    let docs = h.tmp.path().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    std::fs::write(docs.join("n.md"), "Saffron risotto needs patience.").unwrap();
+    let _: SourceInfo = h
+        .call(
+            method::SOURCES_ADD,
+            json!({"kind": "files", "name": "Docs", "settings": {"roots": [docs]}}),
+        )
+        .await;
+    eventually("text-only file searchable", || async {
+        !h.search("saffron").await.is_empty()
+    })
+    .await;
+    assert_eq!(h.store.embedding_dim().unwrap(), None);
+    assert_eq!(h.store.items_missing_embeddings(None, 10).unwrap().len(), 1);
+
+    let _: Value = h
+        .call(method::MODELS_INSTALL, json!({"id": "embed-model"}))
+        .await;
+    eventually("the indexed file gained vectors", || async {
+        h.store
+            .items_missing_embeddings(None, 10)
+            .unwrap()
+            .is_empty()
+    })
+    .await;
+    assert_eq!(h.store.embedding_dim().unwrap(), Some(8));
+    assert!(
+        !h.store.search_vector(&[0.5; 8], 5).unwrap().is_empty(),
+        "reachable by vector search"
+    );
+    h.stop().await;
 }
 
 fn pid_files_gone(dir: &Path) -> bool {

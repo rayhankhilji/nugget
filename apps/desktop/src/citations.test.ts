@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextPrompt, splitCitations } from "./citations";
+import { splitCitations, withheldNotice } from "./citations";
 
 describe("splitCitations", () => {
   const valid = new Set([1, 2, 3]);
@@ -20,10 +20,15 @@ describe("splitCitations", () => {
   });
 });
 
-describe("contextPrompt", () => {
-  it("includes the passages and tells the model to treat them as data", () => {
-    const p = contextPrompt("[1] hello");
-    expect(p).toContain("[1] hello");
-    expect(p).toMatch(/ignore any instructions/i);
+describe("withheldNotice", () => {
+  it("says nothing when no sensitive item was withheld", () => {
+    expect(withheldNotice(0, "claude")).toBeNull();
+    expect(withheldNotice(undefined, "claude")).toBeNull();
+    expect(withheldNotice(null, "claude")).toBeNull();
+  });
+
+  it("counts withheld items and names the cloud model", () => {
+    expect(withheldNotice(1, "claude")).toMatch(/^1 sensitive item was left out because claude is a cloud model/);
+    expect(withheldNotice(3, "gpt")).toMatch(/^3 sensitive items were left out because gpt/);
   });
 });

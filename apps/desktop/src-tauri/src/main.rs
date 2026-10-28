@@ -46,6 +46,7 @@ fn main() {
             commands::sources_secret_set,
             commands::ingest_status,
             commands::retrieve_context,
+            commands::retrieve_ask,
             commands::runtime_status,
             commands::open_url,
             commands::pick_folders,

@@ -8,11 +8,12 @@ import {
   type ChatDone,
   type Citation,
   type ContextResponse,
+  type Locality,
   type SearchHit,
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent } from "../hooks";
-import { contextPrompt, splitCitations } from "../citations";
+import { splitCitations, withheldNotice } from "../citations";
 import { SOURCE_KIND_LABEL } from "../format";
 import { SourceIcon } from "../components/SourceIcon";
 import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
@@ -169,7 +170,27 @@ function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefine
 
 // ---- Ask with context ----
 
-type Answer = { streamId: string | null; provider: string | null; text: string; done: ChatDone | null; error: string | null };
+type Answer = {
+  streamId: string | null;
+  provider: string | null;
+  locality: Locality | null;
+  /** The passages the model was given (they can differ from the preview, e.g. for a cloud model). */
+  citations: Citation[];
+  excludedSensitive: number;
+  text: string;
+  done: ChatDone | null;
+  error: string | null;
+};
+
+const NO_ANSWER: Omit<Answer, "error"> = {
+  streamId: null,
+  provider: null,
+  locality: null,
+  citations: [],
+  excludedSensitive: 0,
+  text: "",
+  done: null,
+};
 
 function AskPanel({
   initialQuestion,
@@ -193,6 +214,9 @@ function AskPanel({
 
   const valid = useMemo(() => new Set((ctx?.citations ?? []).map((c) => c.n)), [ctx]);
   const byN = useMemo(() => new Map((ctx?.citations ?? []).map((c) => [c.n, c])), [ctx]);
+  // The answer cites the context it was given, which is numbered on its own.
+  const answerValid = useMemo(() => new Set((answer?.citations ?? []).map((c) => c.n)), [answer?.citations]);
+  const answerByN = useMemo(() => new Map((answer?.citations ?? []).map((c) => [c.n, c])), [answer?.citations]);
 
   const sync = (id: string) => {
     const s = streams.current.get(id);
@@ -233,38 +257,39 @@ function AskPanel({
   const ask = async () => {
     if (!ctx) return;
     streams.current.clear();
-    setAnswer({ streamId: null, provider: null, text: "", done: null, error: null });
+    setAnswer({ ...NO_ANSWER, error: null });
     try {
-      const started = await api.chat({
-        provider: null,
-        tier: "synthesis",
-        messages: [
-          { role: "system", text: contextPrompt(ctx.text) },
-          { role: "user", text: asked },
-        ],
-      });
+      // The daemon picks the model first and packs the context for it: sensitive passages are
+      // withheld from cloud models, and the cited items are recorded in the egress ledger.
+      const started = await api.retrieveAsk({ query: asked, budget_tokens: budget, provider: null, tier: "synthesis" });
       const s = streams.current.get(started.stream_id);
       setAnswer({
         streamId: started.stream_id,
         provider: started.provider,
+        locality: started.locality,
+        citations: started.citations,
+        excludedSensitive: started.excluded_sensitive ?? 0,
         text: s?.text ?? "",
         done: s?.done ?? null,
         error: s?.done?.error ?? null,
       });
     } catch (err) {
-      setAnswer({ streamId: null, provider: null, text: "", done: null, error: errorMessage(err) });
+      setAnswer({ ...NO_ANSWER, error: errorMessage(err) });
     }
   };
 
-  const cite = (n: number) => {
-    const c = byN.get(n);
+  const openOrFocus = (c: Citation | undefined, list: HTMLOListElement | null, prefix: string) => {
     if (!c) return;
     if (isOpenableUrl(c.url)) {
       void onOpen(c.url, c.title || c.item.key);
     } else {
-      listRef.current?.querySelector<HTMLElement>(`#cite-${n}`)?.focus();
+      list?.querySelector<HTMLElement>(`#${prefix}-${c.n}`)?.focus();
     }
   };
+  const cite = (n: number) => openOrFocus(byN.get(n), listRef.current, "cite");
+  const answerListRef = useRef<HTMLOListElement>(null);
+  const answerCite = (n: number) => openOrFocus(answerByN.get(n), answerListRef.current, "answer-cite");
+  const withheld = answer?.provider ? withheldNotice(answer.excludedSensitive, answer.provider) : null;
 
   const streaming = answer !== null && answer.done === null && answer.error === null;
 
@@ -314,7 +339,10 @@ function AskPanel({
             <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
               {streaming ? <Spinner label="Answering" /> : answer ? "Ask again" : "Ask with this context"}
             </button>
-            <span className="muted small">The question and this context go to the model for the Synthesis tier.</span>
+            <span className="muted small">
+              The question and the most relevant passages go to the model for the Synthesis tier. Sensitive passages are only sent
+              to models on this device or your network.
+            </span>
           </div>
         </>
       )}
@@ -322,16 +350,42 @@ function AskPanel({
       {answer && (
         <div className="answer" aria-live="polite" aria-busy={streaming}>
           <h3 className="ask-sub">
-            Answer{answer.provider && <span className="muted small"> · {answer.provider}</span>}
+            Answer
+            {answer.provider && (
+              <span className="muted small">
+                {" "}
+                · {answer.provider}
+                {answer.locality === "cloud" ? " (cloud)" : answer.locality === "on_device" ? " (on this device)" : ""}
+              </span>
+            )}
           </h3>
+          {withheld && (
+            <p className="note" role="status">
+              {withheld}
+            </p>
+          )}
           {answer.error ? (
             <p className="note note-error" role="alert">
               {answer.error}
             </p>
           ) : (
             <div className="answer-text">
-              {answer.text ? <CitedText text={answer.text} valid={valid} byN={byN} onCite={cite} /> : <Spinner label="Waiting for the model" />}
+              {answer.text ? (
+                <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
+              ) : (
+                <Spinner label="Waiting for the model" />
+              )}
             </div>
+          )}
+          {answer.citations.length > 0 && (
+            <>
+              <h4 className="ask-sub">Passages sent to the model</h4>
+              <ol className="citations" ref={answerListRef}>
+                {answer.citations.map((c) => (
+                  <CitationItem key={c.n} c={c} idPrefix="answer-cite" source={byId.get(c.item.source)} onOpen={onOpen} />
+                ))}
+              </ol>
+            </>
           )}
         </div>
       )}
@@ -377,17 +431,29 @@ function CitationItem({
   c,
   source,
   onOpen,
+  idPrefix = "cite",
 }: {
   c: Citation;
   source: SourceInfo | undefined;
   onOpen: (url: string, label: string) => Promise<void>;
+  idPrefix?: string;
 }) {
   const title = c.title || c.item.key;
   return (
-    <li id={`cite-${c.n}`} tabIndex={-1} className="citation">
+    <li id={`${idPrefix}-${c.n}`} tabIndex={-1} className="citation">
       <span className="cite-n">[{c.n}]</span>
       <span className="citation-body">
-        <span className="citation-title">{title}</span>
+        <span className="citation-title">
+          {title}
+          {c.sensitive && (
+            <>
+              {" "}
+              <span className="badge badge-warn" title="Contains personal or confidential details: never sent to cloud models">
+                Sensitive
+              </span>
+            </>
+          )}
+        </span>
         <span className="muted small">
           <SourceBadge id={c.item.source} source={source} />
         </span>

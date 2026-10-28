@@ -29,6 +29,8 @@ pub(crate) struct PackItem {
     pub item: ItemRef,
     pub title: Option<String>,
     pub url: Option<String>,
+    /// The item is marked sensitive (see `Citation::sensitive`).
+    pub sensitive: bool,
     pub primary: Chunk,
     /// Chunks at `ord - 1` and `ord + 1` that exist.
     pub neighbours: Vec<Chunk>,
@@ -233,6 +235,7 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
                 chunk_id: it.primary.id,
                 title: it.title.clone(),
                 url: it.url.clone(),
+                sensitive: it.sensitive,
             }
         })
         .collect();
@@ -245,7 +248,14 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
             truncated: b.truncated,
         })
         .collect();
-    (ContextResponse { text, citations }, passages)
+    (
+        ContextResponse {
+            text,
+            citations,
+            excluded_sensitive: 0,
+        },
+        passages,
+    )
 }
 
 #[cfg(test)]
@@ -275,6 +285,7 @@ mod tests {
             item: iref(key),
             title: Some(key.to_uppercase()),
             url: None,
+            sensitive: false,
             primary,
             neighbours,
             secondary,

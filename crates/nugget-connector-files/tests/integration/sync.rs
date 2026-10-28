@@ -308,6 +308,62 @@ async fn changing_roots_forces_a_full_rescan() {
 }
 
 #[tokio::test]
+async fn a_reset_cursor_with_known_items_is_a_forced_full_pass() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = root_in(&tmp, "r");
+    write(&root, "a.md", "a");
+    write(&root, "b.md", "b");
+    let mut h = Harness::files(json!({ "roots": [root] }));
+    assert_eq!(h.sync().await.len(), 2);
+    assert!(h.sync().await.is_empty());
+
+    // A settings update resets the cursor while the store keeps the items: every file is
+    // re-sent (the root list may have changed meaning), and vanished ones are deleted.
+    std::fs::remove_file(path(&root, "b.md")).unwrap();
+    h.cursor = None;
+    let c = h.sync().await;
+    assert_eq!(upserts(&c), set(["0:a.md"]));
+    assert_eq!(deletes(&c), set(["0:b.md"]));
+    // Back to incremental.
+    assert!(h.sync().await.is_empty());
+
+    // A first run (nothing known) is not "forced": nothing to reconcile against.
+    let mut fresh = Harness::files(json!({ "roots": [root] }));
+    assert_eq!(upserts(&fresh.sync().await), set(["0:a.md"]));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_pipeline_refuses_a_file_swapped_after_the_scan() {
+    use nugget_extract::{ExtractOptions, FileExpect, Source, extract, is_file_changed};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = root_in(&tmp, "r");
+    let outside = root_in(&tmp, "outside");
+    let secret = write(&outside, "secret.md", "outside secret");
+    let p = write(&root, "note.md", "note");
+    let mut h = Harness::files(json!({ "roots": [root] }));
+    let c = h.sync().await;
+    let doc = docs(&c)["0:note.md"].clone();
+    let Content::File(file) = &doc.content else {
+        panic!("{:?}", doc.content)
+    };
+    let expect = FileExpect::from_metadata(&doc.metadata).expect("file_check metadata");
+    let checked = |f: &std::path::Path| {
+        extract(
+            &doc.mime,
+            Source::CheckedFile { path: f, expect },
+            &ExtractOptions::default(),
+        )
+    };
+    assert_eq!(checked(file).unwrap().text, "note");
+    // Between scan and extraction the file becomes a link to something outside the root.
+    std::fs::remove_file(&p).unwrap();
+    std::os::unix::fs::symlink(&secret, &p).unwrap();
+    let err = checked(file).unwrap_err();
+    assert!(is_file_changed(&err), "{err}");
+}
+
+#[tokio::test]
 async fn long_passes_checkpoint() {
     let tmp = tempfile::tempdir().unwrap();
     let root = root_in(&tmp, "r");

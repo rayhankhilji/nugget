@@ -62,6 +62,8 @@ export interface ChatRequest {
   provider: string | null;
   tier: Tier;
   messages: ChatMessage[];
+  /** Items whose content the messages include; recorded in the egress ledger. */
+  items?: ItemRef[];
 }
 
 export interface ChatStarted {
@@ -233,12 +235,38 @@ export interface Citation {
   chunk_id: number;
   title: string | null;
   url?: string | null;
+  /** The item is marked sensitive (PII or triage): it is never sent to cloud models. */
+  sensitive?: boolean;
 }
 
 export interface ContextResponse {
   /** Packed passages, each prefixed with its `[n]` marker. */
   text: string;
   citations: Citation[];
+  /** Relevant sensitive items left out of `text`. */
+  excluded_sensitive?: number;
+}
+
+/** `retrieve.ask`: the daemon picks the model first, then packs context fit for it. */
+export interface AskRequest {
+  query: string;
+  /** Approximate token budget for the packed context. */
+  budget_tokens: number;
+  /** Explicit provider id, or `null` to route by `tier`. */
+  provider?: string | null;
+  /** Default `synthesis`. */
+  tier?: Tier;
+}
+
+/** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
+export interface AskStarted {
+  stream_id: string;
+  provider: string;
+  locality: Locality;
+  /** Passages sent to the model, numbered as the answer cites them. */
+  citations: Citation[];
+  /** Relevant sensitive items withheld because the model is a cloud model. */
+  excluded_sensitive?: number;
 }
 
 // ---- local runtime ----
@@ -487,6 +515,8 @@ export const api = {
   sourcesSecretSet: (request: SourceSecret) => call<void>("sources_secret_set", { request }),
   ingestStatus: () => call<IngestStatus>("ingest_status"),
   retrieveContext: (request: ContextRequest) => call<ContextResponse>("retrieve_context", { request }),
+  /** Answer from retrieved context; output arrives as chat events for the returned stream. */
+  retrieveAsk: (request: AskRequest) => call<AskStarted>("retrieve_ask", { request }),
   runtimeStatus: () => call<RuntimeInfo[]>("runtime_status"),
 
   /** Open an `https:`, `obsidian:` or local `file:` URL with the OS default handler. */

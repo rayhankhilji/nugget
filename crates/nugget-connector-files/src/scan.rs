@@ -291,6 +291,9 @@ fn walk_root(
         }
     }
 
+    // Files are checked to still lie under the root (by canonical parent) before they are sent.
+    let canon_root = std::fs::canonicalize(root).ok();
+
     let filter_cfg = Arc::clone(cfg);
     let filter_root = root.to_path_buf();
     let mut builder = WalkBuilder::new(root);
@@ -362,7 +365,11 @@ fn walk_root(
             out.found.insert(key, version);
             continue;
         }
-        match build_document(cfg, root, path, &rel, &key, &version, &md) {
+        let built = match &canon_root {
+            Some(cr) => build_document(cfg, root, cr, path, &rel, &key, &version, &md),
+            None => Err(Error::NotFound(format!("root `{}`", root.display()))),
+        };
+        match built {
             Ok(doc) => {
                 send(Emit::Change(Change::Upsert(doc)))?;
                 out.upserted += 1;
@@ -431,17 +438,48 @@ fn read_head(f: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(n)
 }
 
+/// The path the pipeline should open for `path`, checked against the scan:
+/// - without `follow_symlinks`, the file's canonical parent must still lie under the root's
+///   canonical path (a parent directory swapped for a symlink to elsewhere is refused);
+/// - with `follow_symlinks`, links are followed by policy, so the fully resolved path is sent
+///   (the pipeline opens it without following a final symlink).
+fn content_path(cfg: &Config, canon_root: &Path, path: &Path) -> Result<PathBuf> {
+    if cfg.follow_symlinks {
+        return Ok(std::fs::canonicalize(path)?);
+    }
+    let Some(parent) = path.parent() else {
+        return Err(Error::Invalid(format!(
+            "`{}` has no parent",
+            path.display()
+        )));
+    };
+    let canon_parent = std::fs::canonicalize(parent)?;
+    if !canon_parent.starts_with(canon_root) {
+        return Err(Error::Integrity(format!(
+            "{}: `{}` now resolves outside its root",
+            nugget_extract::FILE_CHANGED,
+            path.display()
+        )));
+    }
+    Ok(path.to_path_buf())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn build_document(
     cfg: &Config,
     root: &Path,
+    canon_root: &Path,
     path: &Path,
     rel: &str,
     key: &str,
     version: &str,
     md: &Metadata,
-) -> std::io::Result<Document> {
-    // Opening proves the file is readable now, and the head lets us sniff the type.
-    let mut f = File::open(path)?;
+) -> Result<Document> {
+    let open_path = content_path(cfg, canon_root, path)?;
+    // Opening proves the file is readable now (and is still the regular file the walk saw:
+    // no final symlink, no FIFO, same size and mtime), and the head lets us sniff the type.
+    let expect = nugget_extract::FileExpect::of(md);
+    let mut f: File = nugget_extract::open_regular(&open_path, Some(expect))?;
     let mut head = [0u8; 4096];
     let n = read_head(&mut f, &mut head)?;
     drop(f);
@@ -455,7 +493,7 @@ fn build_document(
         _ => nugget_extract::detect_mime(Some(path), &head[..n]),
     };
 
-    let mut doc = Document::new(key, mime, Content::File(path.to_path_buf()));
+    let mut doc = Document::new(key, mime, Content::File(open_path));
     doc.title = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -466,6 +504,8 @@ fn build_document(
     let mut meta = Map::new();
     meta.insert("path".into(), json!(rel));
     meta.insert("size".into(), json!(md.len()));
+    // What the pipeline must find when it opens the file (see `nugget_extract::FileExpect`).
+    meta.insert(nugget_extract::FILE_CHECK_KEY.into(), expect.to_metadata());
     match &cfg.flavor {
         Flavor::Files => {
             meta.insert("root".into(), json!(root.to_string_lossy()));
@@ -493,6 +533,134 @@ mod tests {
             root,
             rel: rel.into(),
         }
+    }
+
+    /// A root with `a.md` (as scanned: lstat metadata and version) and an outside folder.
+    struct Swap {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+        canon_root: PathBuf,
+        outside: PathBuf,
+        cfg: Config,
+    }
+
+    fn swap_fixture() -> Swap {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("r");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.md"), "outside secret").unwrap();
+        let cfg = Config::files(&json!({ "roots": [root] })).unwrap();
+        Swap {
+            canon_root: std::fs::canonicalize(&root).unwrap(),
+            _dir: dir,
+            root,
+            outside,
+            cfg,
+        }
+    }
+
+    fn build(f: &Swap, rel: &str, md: &Metadata) -> Result<Document> {
+        let path = rel.split('/').fold(f.root.clone(), |p, c| p.join(c));
+        build_document(
+            &f.cfg,
+            &f.root,
+            &f.canon_root,
+            &path,
+            rel,
+            &format!("0:{rel}"),
+            &version_of(md),
+            md,
+        )
+    }
+
+    /// Run `build` on a thread so a blocking open fails the test instead of hanging it.
+    fn build_bounded(f: Swap, rel: &'static str, md: Metadata) -> Result<Document> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(build(&f, rel, &md));
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("building the document blocked")
+    }
+
+    #[test]
+    fn documents_carry_the_scanned_file_check() {
+        let f = swap_fixture();
+        std::fs::write(f.root.join("a.md"), "hello").unwrap();
+        let md = std::fs::symlink_metadata(f.root.join("a.md")).unwrap();
+        let doc = build(&f, "a.md", &md).unwrap();
+        assert_eq!(doc.content, Content::File(f.root.join("a.md")));
+        assert_eq!(
+            nugget_extract::FileExpect::from_metadata(&doc.metadata),
+            Some(nugget_extract::FileExpect::of(&md))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_a_symlink_after_the_scan_is_not_sent() {
+        let f = swap_fixture();
+        let p = f.root.join("a.md");
+        std::fs::write(&p, "hello").unwrap();
+        let md = std::fs::symlink_metadata(&p).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        std::os::unix::fs::symlink(f.outside.join("secret.md"), &p).unwrap();
+        let err = build(&f, "a.md", &md).unwrap_err();
+        assert!(nugget_extract::is_file_changed(&err), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_swapped_for_a_fifo_after_the_scan_is_refused_without_blocking() {
+        let f = swap_fixture();
+        let p = f.root.join("a.md");
+        std::fs::write(&p, "hello").unwrap();
+        let md = std::fs::symlink_metadata(&p).unwrap();
+        std::fs::remove_file(&p).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(&p)
+            .status()
+            .is_ok_and(|s| s.success());
+        if !made {
+            eprintln!("mkfifo unavailable; skipping");
+            return;
+        }
+        let err = build_bounded(f, "a.md", md).unwrap_err();
+        assert!(nugget_extract::is_file_changed(&err), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_parent_swapped_for_a_symlink_out_of_the_root_is_refused() {
+        let f = swap_fixture();
+        std::fs::write(f.root.join("sub").join("secret.md"), "inside").unwrap();
+        let md = std::fs::symlink_metadata(f.root.join("sub").join("secret.md")).unwrap();
+        // Same name, same size and mtime outside: only the parent check notices.
+        std::fs::write(f.outside.join("secret.md"), "insidX").unwrap();
+        let t = md.modified().unwrap();
+        let out = std::fs::OpenOptions::new()
+            .write(true)
+            .open(f.outside.join("secret.md"))
+            .unwrap();
+        out.set_modified(t).unwrap();
+        drop(out);
+        std::fs::remove_dir_all(f.root.join("sub")).unwrap();
+        std::os::unix::fs::symlink(&f.outside, f.root.join("sub")).unwrap();
+        let err = build(&f, "sub/secret.md", &md).unwrap_err();
+        assert!(err.to_string().contains("outside its root"), "{err}");
+    }
+
+    #[test]
+    fn a_file_changed_after_the_scan_is_not_sent() {
+        let f = swap_fixture();
+        let p = f.root.join("a.md");
+        std::fs::write(&p, "hello").unwrap();
+        let md = std::fs::symlink_metadata(&p).unwrap();
+        std::fs::write(&p, "hello, longer now").unwrap();
+        let err = build(&f, "a.md", &md).unwrap_err();
+        assert!(nugget_extract::is_file_changed(&err), "{err}");
     }
 
     #[test]

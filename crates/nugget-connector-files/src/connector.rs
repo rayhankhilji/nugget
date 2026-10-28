@@ -82,6 +82,13 @@ impl FsConnector {
             .collect())
     }
 
+    /// Replace the in-memory versions with what the store holds.
+    async fn reload_known(&self) -> Result<()> {
+        let known = self.known_from_store().await?;
+        *self.state() = Some(known);
+        Ok(())
+    }
+
     /// Run a reconcile pass on a blocking thread and forward its changes to `sink`.
     async fn run(
         &self,
@@ -317,14 +324,20 @@ impl Connector for FsConnector {
     ) -> Result<Value> {
         let prev: Option<Cursor> = cursor.and_then(|c| serde_json::from_value(c).ok());
         let hash = self.cfg.roots_hash();
-        // Root indices changed meaning: versions recorded under the old roots cannot be trusted.
-        let force = prev
-            .as_ref()
-            .is_some_and(|c| c.roots.as_deref() != Some(hash.as_str()));
-        if force {
-            tracing::info!(kind = self.cfg.kind, "root folders changed; full rescan");
-        }
         let known = self.known_from_store().await?;
+        // Root indices changed meaning: versions recorded under the old roots cannot be trusted.
+        // No cursor while items are known is a reconciling full pass (e.g. the settings were
+        // updated and the cursor reset): the roots may have changed too, so the same applies.
+        let force = match &prev {
+            Some(c) => c.roots.as_deref() != Some(hash.as_str()),
+            None => !known.is_empty(),
+        };
+        if force {
+            tracing::info!(
+                kind = self.cfg.kind,
+                "root folders changed or cursor reset; full rescan"
+            );
+        }
 
         // Mid-pass cursors keep the previous root hash during a forced rescan, so a crash
         // before the end forces the rescan again.
@@ -387,10 +400,7 @@ impl Connector for FsConnector {
     }
 
     async fn watch(&self, sink: Arc<dyn ChangeSink>, cancel: CancellationToken) -> Result<()> {
-        if self.state().is_none() {
-            let known = self.known_from_store().await?;
-            *self.state() = Some(known);
-        }
+        self.reload_known().await?;
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DebounceEventResult>();
         let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
@@ -453,6 +463,10 @@ impl Connector for FsConnector {
                 }
                 _ = sleep_until_opt(next_full) => {
                     self.watch_roots(&mut debouncer, &mut roots, &mut watched);
+                    // Live changes are recorded as sent, not as applied: start the full pass
+                    // from what the store really holds, so a change the pipeline failed to
+                    // apply is sent again.
+                    self.reload_known().await?;
                     match self.apply(Scope::All, sink.as_ref(), &cancel).await {
                         Err(Error::Cancelled) => break,
                         r => r?,
@@ -518,6 +532,129 @@ mod tests {
 
     fn plan_one(f: &Fx, r: DebounceEventResult, known: &KnownMap) -> Option<Scope> {
         plan(&f.cfg, &f.roots, vec![r], known)
+    }
+
+    /// A pipeline stand-in that applies changes to a version map (also the `KnownItems`), except
+    /// that it fails to apply the next `fail_next` upserts (they are recorded, not stored).
+    #[derive(Default)]
+    struct FlakySink {
+        sent: std::sync::Mutex<Vec<(String, Option<String>)>>,
+        store:
+            std::sync::Mutex<std::collections::HashMap<nugget_core::ids::ItemKey, Option<String>>>,
+        fail_next: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ChangeSink for FlakySink {
+        async fn send(&self, change: Change) -> Result<()> {
+            use std::sync::atomic::Ordering::SeqCst;
+            if let Change::Upsert(d) = &change {
+                self.sent
+                    .lock()
+                    .unwrap()
+                    .push((d.key.0.clone(), d.version.clone()));
+                let failed = self
+                    .fail_next
+                    .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+                    .is_ok();
+                if !failed {
+                    self.store
+                        .lock()
+                        .unwrap()
+                        .insert(d.key.clone(), d.version.clone());
+                }
+            } else if let Change::Delete(k) = &change {
+                self.store.lock().unwrap().remove(k);
+            }
+            Ok(())
+        }
+        async fn checkpoint(&self, _: Value) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct Known(Arc<FlakySink>);
+    #[async_trait]
+    impl nugget_connector::KnownItems for Known {
+        async fn versions(
+            &self,
+        ) -> Result<std::collections::HashMap<nugget_core::ids::ItemKey, Option<String>>> {
+            Ok(self.0.store.lock().unwrap().clone())
+        }
+    }
+
+    struct NoSecrets;
+    impl nugget_connector::SecretStore for NoSecrets {
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(None)
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn periodic_rescans_retry_live_changes_the_pipeline_did_not_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("r");
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("a.md");
+        std::fs::write(&file, "v1").unwrap();
+        let mut cfg = Config::files(&json!({ "roots": [root], "debounce_ms": 50 })).unwrap();
+        cfg.rescan_interval = Some(Duration::from_millis(300));
+        let sink = Arc::new(FlakySink::default());
+        let ctx = ConnectorContext {
+            source: nugget_core::ids::SourceId::new("files:t"),
+            paths: nugget_core::paths::Paths::rooted(dir.path().join("home")),
+            egress: Arc::new(nugget_core::egress::NullEgress),
+            secrets: Arc::new(NoSecrets),
+            known: Arc::new(Known(sink.clone())),
+        };
+        let c = Arc::new(FsConnector::new(cfg, ctx));
+        c.sync(None, sink.as_ref(), &CancellationToken::new())
+            .await
+            .unwrap();
+
+        // Changed while not watching; the catch-up pass sends it, and the pipeline fails to
+        // apply it (e.g. a store error).
+        std::fs::write(&file, "version 2").unwrap();
+        let v2 = crate::scan::version_of(&std::fs::metadata(&file).unwrap());
+        sink.fail_next.store(1, std::sync::atomic::Ordering::SeqCst);
+        let cancel = CancellationToken::new();
+        let task = {
+            let (c, s, cancel) = (
+                c.clone(),
+                sink.clone() as Arc<dyn ChangeSink>,
+                cancel.clone(),
+            );
+            tokio::spawn(async move { c.watch(s, cancel).await })
+        };
+        // The next periodic full pass compares against the store and sends it again.
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
+        loop {
+            let sends = sink
+                .sent
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(k, v)| k == "0:a.md" && v.as_deref() == Some(v2.as_str()))
+                .count();
+            if sends >= 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the failed change was never retried ({sends} sends)"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let stored = sink.store.lock().unwrap()[&nugget_core::ids::ItemKey::new("0:a.md")].clone();
+        assert_eq!(stored.as_deref(), Some(v2.as_str()));
+        cancel.cancel();
+        let _ = task.await;
     }
 
     #[test]

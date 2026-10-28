@@ -25,6 +25,7 @@ use tokio_rustls::TlsConnector;
 use tokio_rustls::rustls::ClientConfig;
 use tokio_rustls::rustls::pki_types::ServerName;
 
+use crate::guard::{Guarded, Limits, clip};
 use crate::settings::TlsMode;
 
 /// Longest line accepted during the plaintext STARTTLS preamble.
@@ -33,6 +34,14 @@ const MAX_PREAMBLE_LINE: usize = 8 * 1024;
 const MAX_RESPONSES_PER_COMMAND: usize = 2_000_000;
 /// Body fetches may take this many times the normal per-response timeout.
 const BODY_TIMEOUT_FACTOR: u32 = 10;
+/// Bytes one non-body command (LIST, SEARCH, metadata FETCH, ...) may receive.
+pub(crate) const META_BUDGET: u64 = 64 * 1024 * 1024;
+/// Protocol overhead allowed on top of the body bytes of one body FETCH.
+const BODY_BUDGET_SLACK: u64 = 4 * 1024 * 1024;
+/// Allowance on top of `max_message_mb` for one literal (headers-only fetches, size drift).
+pub(crate) const LITERAL_SLACK: u64 = 1024 * 1024;
+/// Longest server-supplied text kept in an error message.
+const MAX_ERROR_TEXT: usize = 200;
 
 // ---------------------------------------------------------------------------------------------
 // Byte metering
@@ -172,7 +181,7 @@ impl Drop for EgressMeter {
 // Connecting
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) type Stream = tokio_rustls::client::TlsStream<Metered<TcpStream>>;
+pub(crate) type Stream = Guarded<tokio_rustls::client::TlsStream<Metered<TcpStream>>>;
 
 /// Where and how to connect.
 #[derive(Clone)]
@@ -183,18 +192,47 @@ pub(crate) struct Endpoint {
     pub username: String,
     pub tls_config: Arc<ClientConfig>,
     pub io_timeout: Duration,
+    /// Largest literal (`{N}`) accepted from the server.
+    pub max_literal: u64,
 }
 
 fn net(msg: impl std::fmt::Display) -> Error {
     Error::Network(msg.to_string())
 }
 
-fn imap_err(e: async_imap::error::Error) -> Error {
+/// Map an `async-imap` error to a fixed message. Its parse errors embed the whole receive
+/// buffer (server-controlled, possibly megabytes), so only a short escaped excerpt is kept.
+fn imap_err(limits: &Limits, e: async_imap::error::Error) -> Error {
+    use async_imap::error::Error as E;
     match e {
-        async_imap::error::Error::Io(e) => Error::Network(format!("imap i/o: {e}")),
-        async_imap::error::Error::ConnectionLost => Error::Network("imap connection lost".into()),
-        other => Error::Network(format!("imap: {other}")),
+        E::Io(e) => read_err(limits, e),
+        E::ConnectionLost => Error::Network("imap connection lost".into()),
+        E::Parse(_) => {
+            Error::Network("IMAP server sent a response that could not be parsed".into())
+        }
+        E::Bad(m) | E::No(m) => Error::Network(format!(
+            "IMAP command rejected: {}",
+            clip(&m, MAX_ERROR_TEXT)
+        )),
+        E::Validate(_) => Error::Invalid("IMAP command argument contains a line break".into()),
+        _ => Error::Network("IMAP protocol error".into()),
     }
+}
+
+/// Map an I/O error from the IMAP stream. A guard violation is reported as such; a parse error
+/// (`"<nom error> during parsing of <buffer>"`) keeps only the start of the offending data.
+pub(crate) fn read_err(limits: &Limits, e: io::Error) -> Error {
+    if let Some(v) = limits.violation() {
+        return Error::Network(v);
+    }
+    let text = e.to_string();
+    if let Some((_, data)) = text.split_once(" during parsing of ") {
+        return Error::Network(format!(
+            "IMAP server sent a malformed response: {}",
+            clip(data, MAX_ERROR_TEXT)
+        ));
+    }
+    Error::Network(format!("imap i/o: {}", clip(&text, MAX_ERROR_TEXT)))
 }
 
 async fn with_timeout<T>(
@@ -236,7 +274,10 @@ pub(crate) enum Done {
 /// A logged-in IMAP session.
 pub(crate) struct Imap {
     session: async_imap::Session<Stream>,
+    limits: Arc<Limits>,
     timeout: Duration,
+    /// Bytes the next command may receive (see [`Limits`]).
+    budget: u64,
     caps: HashSet<String>,
     pub condstore: bool,
     pub qresync: bool,
@@ -258,6 +299,9 @@ pub(crate) struct ListedMailbox {
     pub delimiter: Option<String>,
     pub noselect: bool,
     pub special: Option<Special>,
+    /// A virtual view of mail stored elsewhere (RFC 6154 `\All`, `\Flagged`; RFC 8457
+    /// `\Important`), e.g. Gmail's "All Mail", "Starred" and "Important".
+    pub virtual_view: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -317,7 +361,10 @@ impl Imap {
                 ));
             }
             if !upper.starts_with("* OK") {
-                return Err(net(format!("unexpected IMAP greeting: {greeting}")));
+                return Err(net(format!(
+                    "unexpected IMAP greeting: {}",
+                    clip(&greeting, MAX_ERROR_TEXT)
+                )));
             }
             plain.write_all(b"S0 STARTTLS\r\n").await.map_err(net)?;
             plain.flush().await.map_err(net)?;
@@ -329,11 +376,15 @@ impl Imap {
                 }
                 if upper.starts_with("S0 ") {
                     return Err(Error::Unsupported(format!(
-                        "server refused STARTTLS: {line}"
+                        "server refused STARTTLS: {}",
+                        clip(&line, MAX_ERROR_TEXT)
                     )));
                 }
                 if upper.starts_with("* BYE") {
-                    return Err(net(format!("server closed the connection: {line}")));
+                    return Err(net(format!(
+                        "server closed the connection: {}",
+                        clip(&line, MAX_ERROR_TEXT)
+                    )));
                 }
                 // Other untagged lines (e.g. CAPABILITY) are ignored before TLS.
             }
@@ -346,12 +397,13 @@ impl Imap {
             .await
             .map_err(|e| net(format!("TLS handshake with {}: {e}", ep.host)))?;
 
-        let mut client = async_imap::Client::new(tls);
+        let limits = Arc::new(Limits::new(ep.max_literal, META_BUDGET));
+        let mut client = async_imap::Client::new(Guarded::new(tls, limits.clone()));
         if ep.tls == TlsMode::Implicit {
             let greeting = client
                 .read_response()
                 .await
-                .map_err(net)?
+                .map_err(|e| read_err(&limits, e))?
                 .ok_or_else(|| net("connection closed before the IMAP greeting"))?;
             match greeting.parsed() {
                 Response::Data {
@@ -365,7 +417,12 @@ impl Imap {
                         "pre-authenticated IMAP sessions are not supported".into(),
                     ));
                 }
-                other => return Err(net(format!("unexpected IMAP greeting: {other:?}"))),
+                other => {
+                    return Err(net(format!(
+                        "unexpected IMAP greeting: {}",
+                        clip(&format!("{other:?}"), MAX_ERROR_TEXT)
+                    )));
+                }
             }
         }
 
@@ -373,19 +430,24 @@ impl Imap {
             Ok(s) => s,
             Err((async_imap::error::Error::No(m), _))
             | Err((async_imap::error::Error::Bad(m), _)) => {
-                return Err(Error::Unauthorized(format!("IMAP login rejected: {m}")));
+                return Err(Error::Unauthorized(format!(
+                    "IMAP login rejected: {}",
+                    clip(&m, MAX_ERROR_TEXT)
+                )));
             }
             Err((async_imap::error::Error::Validate(_), _)) => {
                 return Err(Error::Invalid(
                     "IMAP username or password contains a line break".into(),
                 ));
             }
-            Err((e, _)) => return Err(imap_err(e)),
+            Err((e, _)) => return Err(imap_err(&limits, e)),
         };
 
         let mut imap = Imap {
             session,
+            limits,
             timeout: ep.io_timeout,
+            budget: META_BUDGET,
             caps: HashSet::new(),
             condstore: false,
             qresync: false,
@@ -432,14 +494,22 @@ impl Imap {
         F: FnMut(&Response<'_>) -> Result<()>,
     {
         let timeout = self.timeout;
+        let limits = self.limits.clone();
+        limits.reset(self.budget);
         let id = with_timeout(timeout, "write", async {
-            self.session.run_command(cmd).await.map_err(imap_err)
+            self.session
+                .run_command(cmd)
+                .await
+                .map_err(|e| imap_err(&limits, e))
         })
         .await?;
         let mut count = 0usize;
         loop {
             let resp = with_timeout(timeout, "read", async {
-                self.session.read_response().await.map_err(net)
+                self.session
+                    .read_response()
+                    .await
+                    .map_err(|e| read_err(&limits, e))
             })
             .await?
             .ok_or_else(|| net("IMAP server closed the connection"))?;
@@ -449,7 +519,7 @@ impl Imap {
                     status,
                     outcome,
                 } if *tag == id => {
-                    let info = outcome.information.as_deref().unwrap_or("").to_string();
+                    let info = clip(outcome.information.as_deref().unwrap_or(""), MAX_ERROR_TEXT);
                     return Ok(match status {
                         Status::Ok => Done::Ok,
                         Status::No => Done::No(info),
@@ -463,7 +533,7 @@ impl Imap {
                 } => {
                     return Err(net(format!(
                         "IMAP server closed the session: {}",
-                        outcome.information.as_deref().unwrap_or("")
+                        clip(outcome.information.as_deref().unwrap_or(""), MAX_ERROR_TEXT)
                     )));
                 }
                 other => on(other)?,
@@ -495,6 +565,7 @@ impl Imap {
             if let Response::MailboxData(MailboxDatum::List(l)) = r {
                 let mut noselect = false;
                 let mut special = None;
+                let mut virtual_view = false;
                 for a in &l.name_attributes {
                     match a {
                         NameAttribute::NoSelect => noselect = true,
@@ -504,11 +575,20 @@ impl Imap {
                         NameAttribute::Sent => special = Some(Special::Sent),
                         NameAttribute::Trash => special = Some(Special::Trash),
                         NameAttribute::Junk => special = Some(Special::Junk),
-                        NameAttribute::All => special = Some(Special::All),
-                        NameAttribute::Drafts => special = Some(Special::Drafts),
-                        NameAttribute::Archive | NameAttribute::Flagged => {
-                            special = special.or(Some(Special::Other))
+                        NameAttribute::All => {
+                            special = Some(Special::All);
+                            virtual_view = true;
                         }
+                        NameAttribute::Drafts => special = Some(Special::Drafts),
+                        NameAttribute::Flagged => {
+                            special = special.or(Some(Special::Other));
+                            virtual_view = true;
+                        }
+                        NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\Important") => {
+                            special = special.or(Some(Special::Other));
+                            virtual_view = true;
+                        }
+                        NameAttribute::Archive => special = special.or(Some(Special::Other)),
                         _ => {}
                     }
                 }
@@ -517,6 +597,7 @@ impl Imap {
                     delimiter: l.delimiter.as_ref().map(|d| d.to_string()),
                     noselect,
                     special,
+                    virtual_view,
                 });
             }
             Ok(())
@@ -657,6 +738,7 @@ impl Imap {
         // A single literal can be tens of MB: allow far longer than the per-response default.
         let normal = self.timeout;
         self.timeout = normal.saturating_mul(BODY_TIMEOUT_FACTOR);
+        self.budget = (max_total as u64).saturating_add(BODY_BUDGET_SLACK);
         let result = self
             .exec_ok(&format!("UID FETCH {set} (UID {section})"), |r| {
                 if let Response::Fetch(_, attrs) = r {
@@ -694,6 +776,7 @@ impl Imap {
             })
             .await;
         self.timeout = normal;
+        self.budget = META_BUDGET;
         result?;
         Ok(out)
     }
@@ -701,13 +784,21 @@ impl Imap {
     /// Start IDLE; returns once the server sent its continuation.
     pub(crate) async fn idle_start(&mut self) -> Result<async_imap::imap_proto::RequestId> {
         let timeout = self.timeout;
+        let limits = self.limits.clone();
+        limits.reset(META_BUDGET);
         let id = with_timeout(timeout, "write", async {
-            self.session.run_command("IDLE").await.map_err(imap_err)
+            self.session
+                .run_command("IDLE")
+                .await
+                .map_err(|e| imap_err(&limits, e))
         })
         .await?;
         loop {
             let resp = with_timeout(timeout, "read", async {
-                self.session.read_response().await.map_err(net)
+                self.session
+                    .read_response()
+                    .await
+                    .map_err(|e| read_err(&limits, e))
             })
             .await?
             .ok_or_else(|| net("IMAP server closed the connection"))?;
@@ -716,7 +807,7 @@ impl Imap {
                 Response::Done { tag, outcome, .. } if *tag == id => {
                     return Err(net(format!(
                         "IMAP IDLE refused: {}",
-                        outcome.information.as_deref().unwrap_or("")
+                        clip(outcome.information.as_deref().unwrap_or(""), MAX_ERROR_TEXT)
                     )));
                 }
                 _ => {}
@@ -730,7 +821,7 @@ impl Imap {
         let resp = match tokio::time::timeout(dur, self.session.read_response()).await {
             Err(_) => return Ok(None),
             Ok(r) => r
-                .map_err(net)?
+                .map_err(|e| read_err(&self.limits, e))?
                 .ok_or_else(|| net("IMAP server closed the connection"))?,
         };
         Ok(Some(match resp.parsed() {
@@ -752,16 +843,20 @@ impl Imap {
     /// End IDLE and wait for its tagged completion.
     pub(crate) async fn idle_done(&mut self, id: &async_imap::imap_proto::RequestId) -> Result<()> {
         let timeout = self.timeout;
+        let limits = self.limits.clone();
         with_timeout(timeout, "write", async {
             self.session
                 .run_command_untagged("DONE")
                 .await
-                .map_err(imap_err)
+                .map_err(|e| imap_err(&limits, e))
         })
         .await?;
         loop {
             let resp = with_timeout(timeout, "read", async {
-                self.session.read_response().await.map_err(net)
+                self.session
+                    .read_response()
+                    .await
+                    .map_err(|e| read_err(&limits, e))
             })
             .await?
             .ok_or_else(|| net("IMAP server closed the connection"))?;

@@ -7,10 +7,11 @@
 //!    the error in metadata);
 //! 3. deterministic PII scan (counts only; any finding marks the item sensitive);
 //! 4. optional triage on a local provider (junk → metadata-only item);
-//! 5. chunk; 6. embed in batches (local providers; cloud only if allowed and not sensitive);
-//! 7. persist: `upsert_item` without a version, `replace_chunks`, then `upsert_item` with the
-//!    version. The version is written last, so a crash in between leaves an item that the next
-//!    pass re-processes instead of skipping.
+//! 5. chunk; 6. embed in batches (local providers; cloud only if allowed and not sensitive;
+//!    vectors with NaN or infinite values count as a failed embedding: text-only);
+//! 7. persist item, chunks and version in one transaction (`upsert_item_with_chunks`, under
+//!    the ingest write lock). On failure nothing changes: the previous item and chunks stay
+//!    searchable, and the pass does not commit its cursor (or the item is rejected).
 //!
 //! `Delete` removes the item. `checkpoint(cursor)` is queued behind every change sent before it,
 //! so the cursor is stored only after they were applied; if any change since the start of the
@@ -32,10 +33,13 @@ use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::ai::{self, Triage};
+use crate::ingest::lock;
 use crate::ingest::{IngestEvent, Inner};
 use crate::known::join_err;
+use crate::metrics::Metrics;
 use crate::pii::{self, PiiFindings};
 use crate::supervisor::Control;
+use crate::util::cap_error;
 
 /// How a change reached the pipeline. Backfill work pauses under power constraints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,13 +95,43 @@ impl PipelineSink {
     }
 }
 
+/// Counts one change in the queue-depth gauge from before it is queued. Unless disarmed (the
+/// change reached the queue, whose worker then accounts for it), dropping it takes the count
+/// back, also when the `send` future is dropped while waiting for queue space.
+pub(crate) struct Queued<'a> {
+    metrics: &'a Metrics,
+    armed: bool,
+}
+
+impl<'a> Queued<'a> {
+    pub(crate) fn new(metrics: &'a Metrics) -> Self {
+        metrics.enqueued();
+        Self {
+            metrics,
+            armed: true,
+        }
+    }
+
+    pub(crate) fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for Queued<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.metrics.dequeued();
+        }
+    }
+}
+
 #[async_trait]
 impl ChangeSink for PipelineSink {
     async fn send(&self, change: Change) -> Result<()> {
-        self.inner.metrics.enqueued();
+        let queued = Queued::new(&self.inner.metrics);
         let r = self.push(OpKind::Change(change)).await;
-        if r.is_err() {
-            self.inner.metrics.dequeued();
+        if r.is_ok() {
+            queued.disarm();
         }
         r
     }
@@ -217,6 +251,7 @@ impl Worker {
                         self.progress(false);
                     }
                     Outcome::Rejected(msg) => {
+                        let msg = cap_error(msg);
                         tracing::warn!(source = %self.source, key = %key, error = %msg, "item rejected");
                         self.inner
                             .record_item_error(&self.source, Some(key), msg.clone());
@@ -224,6 +259,7 @@ impl Worker {
                         self.progress_error(msg);
                     }
                     Outcome::Failed(msg) => {
+                        let msg = cap_error(msg);
                         tracing::warn!(source = %self.source, key = %key, error = %msg, "item failed to persist");
                         self.failed += 1;
                         self.inner
@@ -315,12 +351,17 @@ impl Worker {
     }
 
     async fn delete(&mut self, key: ItemKey) -> Outcome {
-        let store = self.inner.store.clone();
+        let inner = self.inner.clone();
         let item = ItemRef {
             source: self.source.clone(),
             key: key.clone(),
         };
-        match tokio::task::spawn_blocking(move || store.delete_item(&item)).await {
+        let res = tokio::task::spawn_blocking(move || {
+            let _w = lock(&inner.write_lock);
+            inner.store.delete_item(&item)
+        })
+        .await;
+        match res {
             Ok(Ok(_)) => {
                 if let Some(v) = &mut self.versions {
                     v.remove(&key);
@@ -353,10 +394,20 @@ impl Worker {
             _ = cancel.cancelled() => return Outcome::Abandoned,
             n = prepare(&self.inner, &item, doc) => n,
         };
+        // A file that changed (or was swapped) since the connector scanned it is skipped, not
+        // stored: nothing is written, so the next pass sees it as new or changed and resends it.
+        let new = match new {
+            Ok(new) => new,
+            Err(skip) => return Outcome::Rejected(skip),
+        };
 
         // 7. Persist (never abandoned half-way).
-        let store = self.inner.store.clone();
-        let res = tokio::task::spawn_blocking(move || persist(&store, new)).await;
+        let inner = self.inner.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            let _w = lock(&inner.write_lock);
+            persist(&inner.store, new)
+        })
+        .await;
         match res {
             Ok(Ok(())) => {
                 self.versions
@@ -391,9 +442,16 @@ struct Extraction {
     error: Option<String>,
     pii: PiiFindings,
     hash: String,
+    /// The file no longer matches what the connector scanned (see `nugget_extract::FileExpect`).
+    file_changed: bool,
 }
 
-async fn prepare(inner: &Arc<Inner>, item: &ItemRef, doc: Document) -> Prepared {
+/// Build the item to write, or `Err(reason)` when it must be skipped this pass.
+async fn prepare(
+    inner: &Arc<Inner>,
+    item: &ItemRef,
+    doc: Document,
+) -> std::result::Result<Prepared, String> {
     let Document {
         key,
         title: doc_title,
@@ -405,7 +463,24 @@ async fn prepare(inner: &Arc<Inner>, item: &ItemRef, doc: Document) -> Prepared 
         metadata: source_meta,
     } = doc;
 
-    let mut ex = extract_step(inner, &mime, content, doc_title.clone(), version.as_deref()).await;
+    let expect = nugget_extract::FileExpect::from_metadata(&source_meta);
+    let mut ex = extract_step(
+        inner,
+        &mime,
+        content,
+        expect,
+        doc_title.clone(),
+        version.as_deref(),
+    )
+    .await;
+    if ex.file_changed {
+        return Err(format!(
+            "skipped until the next pass: {}",
+            ex.error
+                .as_deref()
+                .unwrap_or("file changed since it was scanned")
+        ));
+    }
     let title = doc_title
         .clone()
         .or_else(|| ex.title.clone())
@@ -563,7 +638,7 @@ async fn prepare(inner: &Arc<Inner>, item: &ItemRef, doc: Document) -> Prepared 
             .collect(),
         None => chunk_texts.into_iter().map(NewChunk::text).collect(),
     };
-    Prepared { item: new, chunks }
+    Ok(Prepared { item: new, chunks })
 }
 
 /// Extraction, PII scan and chunking on a blocking thread, bounded by the extraction timeout.
@@ -571,6 +646,7 @@ async fn extract_step(
     inner: &Arc<Inner>,
     mime: &str,
     content: Content,
+    expect: Option<nugget_extract::FileExpect>,
     title: Option<String>,
     version: Option<&str>,
 ) -> Extraction {
@@ -593,6 +669,7 @@ async fn extract_step(
             error: Some(error),
             pii,
             hash,
+            file_changed: false,
         }
     };
 
@@ -609,7 +686,10 @@ async fn extract_step(
         let src = match &content {
             Content::Text(t) => nugget_extract::Source::Text(t),
             Content::Bytes(b) => nugget_extract::Source::Bytes(b),
-            Content::File(p) => nugget_extract::Source::File(p),
+            Content::File(p) => match expect {
+                Some(expect) => nugget_extract::Source::CheckedFile { path: p, expect },
+                None => nugget_extract::Source::File(p),
+            },
         };
         let mime = if mime_owned.trim().is_empty() {
             match &content {
@@ -651,8 +731,13 @@ async fn extract_step(
                 error: None,
                 pii: pii_found,
                 hash,
+                file_changed: false,
             }
         }
+        Ok(Ok(Err(e))) if nugget_extract::is_file_changed(&e) => Extraction {
+            file_changed: true,
+            ..failed(format!("extract: {e}"), title)
+        },
         Ok(Ok(Err(e))) => failed(format!("extract: {e}"), title),
         Ok(Err(e)) => failed(format!("extract: {}", join_err(e)), title),
         Err(_) => failed(
@@ -674,7 +759,8 @@ fn fallback_title(key: &ItemKey) -> String {
         .to_owned()
 }
 
-/// Write an item crash-safely: content first, version last.
+/// Write an item with its chunks and version in one transaction: on any error the stored item
+/// and its chunks stay as they were.
 fn persist(store: &Store, mut p: Prepared) -> Result<()> {
     // Never mix embedding dimensions within a database.
     if let Some(dim) = store.embedding_dim()?
@@ -695,19 +781,61 @@ fn persist(store: &Store, mut p: Prepared) -> Result<()> {
             m.remove("embedding_provider");
         }
     }
-    let version = p.item.version.take();
-    store.upsert_item(&p.item)?;
-    store.replace_chunks(&p.item.item, &p.chunks)?;
-    if version.is_some() {
-        p.item.version = version;
-        store.upsert_item(&p.item)?;
-    }
+    store.upsert_item_with_chunks(&p.item, &p.chunks)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prepared(text: &str, version: &str, embedding: Option<Vec<f32>>) -> Prepared {
+        let mut item = NewItem::new("src", "doc", content_hash(text))
+            .with_text(text)
+            .with_version(version);
+        item.title = Some("Doc".into());
+        let chunk = match embedding {
+            Some(e) => NewChunk::embedded(text, e),
+            None => NewChunk::text(text),
+        };
+        Prepared {
+            item,
+            chunks: vec![chunk],
+        }
+    }
+
+    #[test]
+    fn a_failed_persist_keeps_the_previous_item_and_chunks() {
+        let store = Store::open_in_memory().unwrap();
+        persist(&store, prepared("old heron text", "1", None)).unwrap();
+        // The store rejects the new chunks (non-finite vector): nothing may change.
+        let err = persist(
+            &store,
+            prepared("new kestrel text", "2", Some(vec![f32::NAN; 3])),
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+        let item = store
+            .get_item(&ItemRef {
+                source: SourceId::new("src"),
+                key: ItemKey::new("doc"),
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(item.version.as_deref(), Some("1"));
+        assert_eq!(item.text.as_deref(), Some("old heron text"));
+        assert_eq!(store.search_text("heron", 10).unwrap().len(), 1);
+        assert!(store.search_text("kestrel", 10).unwrap().is_empty());
+        // A good write replaces item and chunks together.
+        persist(
+            &store,
+            prepared("new kestrel text", "2", Some(vec![0.5; 3])),
+        )
+        .unwrap();
+        assert!(store.search_text("heron", 10).unwrap().is_empty());
+        assert_eq!(store.search_text("kestrel", 10).unwrap().len(), 1);
+        assert_eq!(store.embedding_dim().unwrap(), Some(3));
+    }
 
     #[test]
     fn fallback_titles() {

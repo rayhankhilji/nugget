@@ -16,8 +16,8 @@ use crate::rank::{
     Candidate, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query, token_set,
 };
 use crate::types::{
-    PackedContext, RetrievalMode, RetrievedItem, SearchOptions, SearchResults, Similarity,
-    Strategy, TextOnlyReason,
+    ContextOptions, PackedContext, RetrievalMode, RetrievedItem, SearchOptions, SearchResults,
+    Similarity, Strategy, TextOnlyReason,
 };
 
 /// Longest accepted `url` metadata value.
@@ -51,6 +51,8 @@ impl std::fmt::Debug for Retriever {
 struct Ranked {
     cand: Candidate,
     url: Option<String>,
+    /// See [`is_sensitive`].
+    sensitive: bool,
 }
 
 struct Ranking {
@@ -121,8 +123,20 @@ impl Retriever {
     /// Pack the most relevant, diverse passages for `query` into at most `budget_tokens`
     /// (estimated with `nugget_extract::estimate_tokens`), each prefixed `[n] Title (source)`.
     pub async fn build_context(&self, query: &str, budget_tokens: u32) -> Result<ContextResponse> {
+        self.build_context_with(query, budget_tokens, ContextOptions::default())
+            .await
+    }
+
+    /// [`build_context`](Self::build_context) with options, e.g. leaving sensitive items out
+    /// of a context meant for a cloud model.
+    pub async fn build_context_with(
+        &self,
+        query: &str,
+        budget_tokens: u32,
+        opts: ContextOptions,
+    ) -> Result<ContextResponse> {
         Ok(self
-            .pack_context(query, budget_tokens as usize)
+            .pack_context_with(query, budget_tokens as usize, opts)
             .await?
             .response)
     }
@@ -130,19 +144,46 @@ impl Retriever {
     /// [`build_context`](Self::build_context) with diagnostics (mode, tokens used, chunks per
     /// passage).
     pub async fn pack_context(&self, query: &str, budget_tokens: usize) -> Result<PackedContext> {
-        let ranking = self
-            .rank(
-                query,
-                self.config.context_max_items,
-                SearchOptions::default(),
-            )
-            .await?;
+        self.pack_context_with(query, budget_tokens, ContextOptions::default())
+            .await
+    }
+
+    /// [`pack_context`](Self::pack_context) with options.
+    pub async fn pack_context_with(
+        &self,
+        query: &str,
+        budget_tokens: usize,
+        opts: ContextOptions,
+    ) -> Result<PackedContext> {
+        let max_items = self.config.context_max_items;
+        // When sensitive items are dropped, rank a deeper list so the context can be refilled.
+        let depth = if opts.exclude_sensitive {
+            max_items.saturating_mul(2)
+        } else {
+            max_items
+        };
+        let mut ranking = self.rank(query, depth, SearchOptions::default()).await?;
+        let mut excluded_sensitive: u32 = 0;
+        if opts.exclude_sensitive {
+            let mut kept = Vec::with_capacity(max_items);
+            for r in ranking.items {
+                if kept.len() >= max_items {
+                    break;
+                }
+                if r.sensitive {
+                    excluded_sensitive = excluded_sensitive.saturating_add(1);
+                } else {
+                    kept.push(r);
+                }
+            }
+            ranking.items = kept;
+        }
         let items = if budget_tokens == 0 {
             Vec::new()
         } else {
             self.pack_items(&ranking.items)?
         };
-        let (response, passages) = pack(
+        let (mut response, passages) = pack(
             &items,
             PackOptions {
                 budget: budget_tokens,
@@ -151,6 +192,7 @@ impl Retriever {
                 min_truncated_tokens: self.config.min_truncated_tokens,
             },
         );
+        response.excluded_sensitive = excluded_sensitive;
         let tokens = nugget_extract::estimate_tokens(&response.text);
         Ok(PackedContext {
             response,
@@ -278,6 +320,8 @@ impl Retriever {
             .zip(items_meta)
             .map(|(cand, meta)| Ranked {
                 url: meta.as_ref().and_then(item_url),
+                // An item deleted since the search cannot be checked: treat it as sensitive.
+                sensitive: meta.as_ref().is_none_or(|i| is_sensitive(&i.metadata)),
                 cand,
             })
             .collect();
@@ -490,6 +534,7 @@ impl Retriever {
                 item: r.cand.item.clone(),
                 title: r.cand.title.clone(),
                 url: r.url.clone(),
+                sensitive: r.sensitive,
                 primary,
                 neighbours,
                 secondary,
@@ -497,6 +542,13 @@ impl Retriever {
         }
         Ok(out)
     }
+}
+
+/// Whether an item must stay away from cloud models: its `sensitive` metadata (set by ingest
+/// from PII findings and triage) is anything but an explicit `false`. Items without the flag
+/// (not written by ingest) are treated as sensitive, so the check fails closed.
+pub fn is_sensitive(metadata: &serde_json::Value) -> bool {
+    metadata.get("sensitive") != Some(&serde_json::Value::Bool(false))
 }
 
 /// The item's `url` metadata (set by ingest), if it is a sane single-line string.

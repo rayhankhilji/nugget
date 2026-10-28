@@ -2,7 +2,13 @@
 //!
 //! **Contract (stable for M1):** [`extract`], [`detect_mime`], [`chunk`], [`estimate_tokens`] and
 //! the types below. Additions since the M1 contract: [`extract_with_ocr`], [`is_supported`],
-//! [`OcrModels`], [`set_ocr_models`], [`ocr_models`], [`ocr_available`] and the `OCR_*` constants.
+//! [`OcrModels`], [`set_ocr_models`], [`ocr_models`], [`ocr_available`] and the `OCR_*` constants;
+//! [`Source::CheckedFile`], [`open_regular`], [`FileExpect`], [`is_file_changed`],
+//! [`FILE_CHANGED`] and [`FILE_CHECK_KEY`].
+//!
+//! Files ([`Source::File`], [`Source::CheckedFile`]) are opened with [`open_regular`]: a final
+//! symlink is not followed, FIFOs and devices never block, and anything but a regular file is
+//! refused with an error [`is_file_changed`] recognises.
 //!
 //! Inputs are hostile: every function enforces the size caps in [`ExtractOptions`] and returns
 //! `Error::Unsupported` / `Error::Invalid` rather than panicking. Extraction is CPU-bound and
@@ -46,18 +52,30 @@ mod markdown;
 mod mime;
 mod ocr;
 mod ooxml;
+mod open;
 mod pdf;
 mod tabular;
 mod text;
 mod util;
 mod yaml;
 
+pub use open::{FILE_CHANGED, FILE_CHECK_KEY, FileExpect, is_file_changed, open_regular};
+
 /// Where the bytes come from.
 #[derive(Debug, Clone, Copy)]
 pub enum Source<'a> {
     Text(&'a str),
     Bytes(&'a [u8]),
+    /// A local file, opened with [`open_regular`] (no final symlink, never blocks, regular files
+    /// only).
     File(&'a Path),
+    /// Like [`File`](Self::File), and the opened file must still have the size and modification
+    /// time a connector scanned ([`FileExpect::from_metadata`] reads them from a document's
+    /// metadata). A mismatch fails with an error [`is_file_changed`] recognises.
+    CheckedFile {
+        path: &'a Path,
+        expect: FileExpect,
+    },
 }
 
 /// Limits for one extraction.
@@ -322,19 +340,24 @@ fn load<'a>(
             check_size(b.len() as u64, opts)?;
             (Cow::Borrowed(b), None)
         }
-        Source::File(p) => {
-            let file = std::fs::File::open(p)?;
-            let len = file.metadata()?.len();
-            check_size(len, opts)?;
-            let cap = usize::try_from(len.min(opts.max_input_bytes)).unwrap_or(usize::MAX);
-            let mut buf = Vec::with_capacity(cap.min(64 * 1024 * 1024));
-            // The file may grow between `metadata` and `read`: read at most one byte too many.
-            file.take(opts.max_input_bytes.saturating_add(1))
-                .read_to_end(&mut buf)?;
-            check_size(buf.len() as u64, opts)?;
-            (Cow::Owned(buf), Some(p))
+        Source::File(p) => (Cow::Owned(load_file(p, None, opts)?), Some(p)),
+        Source::CheckedFile { path, expect } => {
+            (Cow::Owned(load_file(path, Some(expect), opts)?), Some(path))
         }
     })
+}
+
+fn load_file(p: &Path, expect: Option<FileExpect>, opts: &ExtractOptions) -> Result<Vec<u8>> {
+    let file = open_regular(p, expect)?;
+    let len = file.metadata()?.len();
+    check_size(len, opts)?;
+    let cap = usize::try_from(len.min(opts.max_input_bytes)).unwrap_or(usize::MAX);
+    let mut buf = Vec::with_capacity(cap.min(64 * 1024 * 1024));
+    // The file may grow between `metadata` and `read`: read at most one byte too many.
+    file.take(opts.max_input_bytes.saturating_add(1))
+        .read_to_end(&mut buf)?;
+    check_size(buf.len() as u64, opts)?;
+    Ok(buf)
 }
 
 fn check_size(len: u64, opts: &ExtractOptions) -> Result<()> {

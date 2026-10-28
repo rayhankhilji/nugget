@@ -140,12 +140,29 @@ impl State {
 
 /// Start `slot`'s server in the background (tracked; stops on shutdown).
 pub(crate) fn spawn_ensure(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
+    spawn_start(state, slot, false);
+}
+
+/// Like [`spawn_ensure`], but always asks the runtime to check the running server against the
+/// installed model (restarting it on a new one). Used after `models.install`.
+pub(crate) fn spawn_refresh(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
+    spawn_start(state, slot, true);
+}
+
+fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
     let stop = state.shutdown.clone();
     state.tasks.spawn(async move {
         let model = slot.model().id.clone();
+        let start = async {
+            if refresh {
+                slot.refresh().await
+            } else {
+                slot.ready().await
+            }
+        };
         tokio::select! {
             () = stop.cancelled() => {}
-            r = slot.ready() => match r {
+            r = start => match r {
                 Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
                 Err(e) => tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start"),
             },
@@ -376,6 +393,15 @@ impl Daemon {
             Error::Invalid(m) => Error::Invalid(format!("sources: {m}")),
             other => other,
         })?;
+        // Items indexed text-only while no embedder was routable get vectors once one is.
+        if let Some(l) = &local {
+            let ingest = ingest.clone();
+            l.on_ready(Arc::new(move |role| {
+                if role == nugget_core::ipc::RuntimeRole::Embedding {
+                    ingest.reembed_now();
+                }
+            }));
+        }
         let retriever =
             Retriever::new(store.clone(), Some(router.clone()), config.retrieve.clone());
         let hub = Arc::new(Hub::default());

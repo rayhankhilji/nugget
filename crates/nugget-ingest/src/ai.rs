@@ -200,6 +200,16 @@ pub(crate) async fn embed(
             };
             out.extend(vecs);
         }
+        // NaN or infinite components would poison the index (the store rejects them): treat
+        // the provider as failed so the item falls back to text-only and is retried later.
+        if out.iter().any(|v| v.iter().any(|x| !x.is_finite())) {
+            router.report_failure(p.id());
+            last_err = Some(Error::Provider(format!(
+                "{}: embedding contains NaN or infinite values",
+                p.id()
+            )));
+            continue;
+        }
         let dim = out.first().map(Vec::len).unwrap_or(0);
         if out.iter().any(|v| v.len() != dim || v.is_empty()) {
             router.report_failure(p.id());

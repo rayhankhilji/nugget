@@ -213,6 +213,45 @@ impl Store {
         })
     }
 
+    /// Items with at least one chunk stored without an embedding (indexed text-only, e.g.
+    /// while no embedder was available), ordered by `(source, key)`, at most `limit`, starting
+    /// after `after` (keyset pagination: pass the last item of the previous page). Junk and
+    /// title-less items without chunks are never listed.
+    pub fn items_missing_embeddings(
+        &self,
+        after: Option<&ItemRef>,
+        limit: usize,
+    ) -> Result<Vec<ItemRef>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
+        self.with_conn(|conn| {
+            // Without a vector table no chunk has a vector yet.
+            let missing = if embedding_dim(conn)?.is_some() {
+                "NOT EXISTS (SELECT 1 FROM chunk_vec v WHERE v.rowid = c.id)"
+            } else {
+                "1"
+            };
+            let sql = format!(
+                "SELECT i.source, i.key FROM items i
+                 WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                   AND EXISTS (SELECT 1 FROM chunks c WHERE c.item_id = i.id AND {missing})
+                 ORDER BY i.source, i.key
+                 LIMIT ?3"
+            );
+            let mut stmt = conn.prepare(&sql).db("prepare items_missing_embeddings")?;
+            let rows = stmt
+                .query_map(params![src, key, limit], |r| {
+                    Ok(item_ref(r.get(0)?, r.get(1)?))
+                })
+                .db("query items_missing_embeddings")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read items_missing_embeddings")
+        })
+    }
+
     /// Item and chunk counts per source, sorted by source id.
     pub fn source_counts(&self) -> Result<Vec<SourceCounts>> {
         self.with_conn(|conn| {

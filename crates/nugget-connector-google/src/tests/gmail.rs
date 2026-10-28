@@ -142,7 +142,8 @@ async fn backfill_pages_newest_first_with_checkpoints() {
     let d = &docs[0];
     assert_eq!(d.mime, "message/rfc822");
     assert!(matches!(&d.content, Content::Bytes(b) if b.starts_with(b"From: Alice")));
-    assert_eq!(d.version.as_deref(), Some("990"));
+    // `<historyId>@<internalDate ms>`: the date lets a resync tell old mail from deleted mail.
+    assert_eq!(d.version.as_deref(), Some("990@1730000000000"));
     assert_eq!(d.title.as_deref(), Some("Subject m3"));
     assert_eq!(
         d.url.as_deref(),
@@ -385,6 +386,162 @@ async fn expired_history_id_triggers_bounded_resync() {
     assert_eq!(cps[0]["resync"], true);
     assert_eq!(cps[0]["history_id"], "2000");
     h.assert_egress("sync:gmail").await;
+}
+
+fn now_ms() -> i64 {
+    time::OffsetDateTime::now_utc().unix_timestamp() * 1000
+}
+
+async fn mount_minimal(server: &MockServer, id: &str, status: u16, labels: &[&str]) {
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/messages/{id}")))
+        .and(query_param("format", "minimal"))
+        .respond_with(
+            ResponseTemplate::new(status).set_body_json(json!({"id": id, "labelIds": labels})),
+        )
+        .mount(server)
+        .await;
+}
+
+async fn mount_history_empty(server: &MockServer, history_id: &str) {
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/history")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"historyId": history_id})))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_reset_cursor_with_indexed_mail_reconciles_everything() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let old = now_ms() - 400 * 86_400_000;
+    h.know("m1", &format!("5@{}", now_ms())); // listed again
+    h.know("spam1", &format!("6@{}", now_ms())); // now excluded: in spam
+    h.know("oldacct", &format!("7@{old}")); // another account's mail, older than the window
+    mount_profile(&h.server, "3000").await;
+    mount_list_page(&h.server, None, &["m1"], None).await;
+    mount_minimal(&h.server, "spam1", 200, &["SPAM"]).await;
+    // Older than the window: out of scope, deleted without a request.
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/messages/oldacct")))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&h.server)
+        .await;
+    let conn = gmail(&h, fast_retry(0));
+    let sink = RecSink::default();
+    let out = run(&conn, None, &sink).await.unwrap();
+    let mut summary = sink.summary();
+    summary.sort();
+    assert_eq!(summary, vec!["-oldacct", "-spam1"]);
+    assert_eq!(out, json!({"phase": "incremental", "history_id": "3000"}));
+    let cps = sink.checkpoints.lock().unwrap().clone();
+    assert_eq!(cps[0]["resync"], true);
+    assert_eq!(cps[0]["reconcile"], true);
+
+    // A first run (nothing indexed) is a plain backfill.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    mount_profile(&h.server, "1").await;
+    mount_list_page(&h.server, None, &[], None).await;
+    let sink = RecSink::default();
+    run(&gmail(&h, fast_retry(0)), None, &sink).await.unwrap();
+    let cps = sink.checkpoints.lock().unwrap().clone();
+    assert_eq!(cps[0]["resync"], false);
+}
+
+#[tokio::test]
+async fn resync_checks_in_window_mail_newest_first_and_carries_the_rest() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let now = now_ms();
+    let old = now - 400 * 86_400_000;
+    // 600 indexed messages inside the window, all deleted while history was unavailable, and
+    // 50 old ones that still exist (outside the window, so never listed).
+    let gone: Vec<String> = (0..600).map(|i| format!("19{i:014x}")).collect();
+    for id in &gone {
+        h.know(id, &format!("1@{now}"));
+    }
+    for i in 0..50 {
+        h.know(&format!("10{i:014x}"), &format!("1@{old}"));
+    }
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/history")))
+        .respond_with(ResponseTemplate::new(404))
+        .up_to_n_times(1)
+        .mount(&h.server)
+        .await;
+    mount_profile(&h.server, "5000").await;
+    mount_list_page(&h.server, None, &[], None).await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(format!(
+            "^{API}/messages/19[0-9a-f]+$"
+        )))
+        .and(query_param("format", "minimal"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(wiremock::matchers::path_regex(format!(
+            "^{API}/messages/10[0-9a-f]+$"
+        )))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"labelIds": ["INBOX"]})))
+        .expect(0)
+        .mount(&h.server)
+        .await;
+
+    let conn = gmail(&h, fast_retry(0));
+    let sink = RecSink::default();
+    let out = run(
+        &conn,
+        Some(json!({"phase": "incremental", "history_id": "7"})),
+        &sink,
+    )
+    .await
+    .unwrap();
+    let deleted: Vec<String> = sink.summary().iter().map(|s| s[1..].to_string()).collect();
+    assert_eq!(deleted.len(), 500);
+    // Newest first: the 500 highest ids.
+    let mut want: Vec<String> = gone.clone();
+    want.sort();
+    want.reverse();
+    let mut got = deleted.clone();
+    got.sort();
+    got.reverse();
+    assert_eq!(got, want[..500].to_vec());
+    let carried: Vec<String> = serde_json::from_value(out["verify"].clone()).unwrap();
+    assert_eq!(carried.len(), 100);
+    assert_eq!(out["history_id"], "5000");
+
+    // The next (incremental) pass checks the rest; nothing is left after it.
+    mount_history_empty(&h.server, "5001").await;
+    let sink = RecSink::default();
+    let out = run(&conn, Some(out), &sink).await.unwrap();
+    assert_eq!(sink.summary().len(), 100);
+    assert_eq!(out, json!({"phase": "incremental", "history_id": "5001"}));
+}
+
+#[tokio::test]
+async fn an_interrupted_resync_lists_again_instead_of_taking_listed_mail_for_missing() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    h.know("m3", &format!("1@{}", now_ms())); // listed on page 1, before the interruption
+    mount_list_page(&h.server, None, &["m3"], Some("p2")).await;
+    mount_list_page(&h.server, Some("p2"), &["m1"], None).await;
+    mount_raw(&h.server, "m1", "9", &["INBOX"]).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/messages/m3")))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&h.server)
+        .await;
+    let conn = gmail(&h, fast_retry(0));
+    let sink = RecSink::default();
+    let cursor = json!({"phase": "backfill", "history_id": "100", "after": 1, "page_token": "p2", "resync": true});
+    let out = run(&conn, Some(cursor), &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["+m1"]);
+    assert_eq!(out, json!({"phase": "incremental", "history_id": "100"}));
 }
 
 #[tokio::test]

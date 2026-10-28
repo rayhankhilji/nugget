@@ -35,6 +35,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `sources.secret.set` | [`SourceSecret`] | `null` |
 /// | `ingest.status` | `{}` | [`IngestStatus`] |
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
+/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
 pub mod method {
     pub const STATUS: &str = "status";
@@ -55,6 +56,7 @@ pub mod method {
     pub const SOURCES_SECRET_SET: &str = "sources.secret.set";
     pub const INGEST_STATUS: &str = "ingest.status";
     pub const RETRIEVE_CONTEXT: &str = "retrieve.context";
+    pub const RETRIEVE_ASK: &str = "retrieve.ask";
     pub const RUNTIME_STATUS: &str = "runtime.status";
 }
 
@@ -126,6 +128,10 @@ pub struct ChatRequest {
     pub provider: Option<ProviderId>,
     pub tier: Tier,
     pub messages: Vec<ChatMessage>,
+    /// Items whose content the messages include (for example passages pasted from
+    /// `retrieve.context`). Recorded in the egress ledger when the request leaves the device.
+    #[serde(default)]
+    pub items: Vec<ItemRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -397,6 +403,9 @@ pub struct Citation {
     pub title: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    /// The item is marked sensitive (PII findings or triage): it never goes to cloud models.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -404,6 +413,41 @@ pub struct ContextResponse {
     /// Packed passages, each prefixed with its `[n]` marker.
     pub text: String,
     pub citations: Vec<Citation>,
+    /// Relevant sensitive items left out of `text` (when sensitive items were excluded).
+    #[serde(default)]
+    pub excluded_sensitive: u32,
+}
+
+/// Answer a question from retrieved context (`retrieve.ask`). The daemon picks the provider
+/// first, then packs the context for it: sensitive items are left out when the provider is a
+/// `Cloud` one, and the cited items are recorded in the egress ledger.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AskRequest {
+    pub query: String,
+    /// Approximate token budget for the packed context.
+    pub budget_tokens: u32,
+    /// Explicit provider (used alone, never substituted), or route by `tier`.
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
+    #[serde(default = "default_ask_tier")]
+    pub tier: Tier,
+}
+
+fn default_ask_tier() -> Tier {
+    Tier::Synthesis
+}
+
+/// Result of `retrieve.ask`: the stream (as for `chat`) plus the context it was given.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AskStarted {
+    pub stream_id: String,
+    pub provider: ProviderId,
+    pub locality: Locality,
+    /// The passages sent to the model, numbered as the answer cites them.
+    pub citations: Vec<Citation>,
+    /// Relevant sensitive items withheld because the provider is a cloud model.
+    #[serde(default)]
+    pub excluded_sensitive: u32,
 }
 
 // ---- local runtime ----

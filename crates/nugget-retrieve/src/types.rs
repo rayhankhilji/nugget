@@ -76,6 +76,15 @@ pub enum Strategy {
     VectorOnly,
 }
 
+/// Options for [`Retriever::build_context_with`](crate::Retriever::build_context_with).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextOptions {
+    /// Leave out items whose metadata marks them `sensitive` (or that carry no such flag), for
+    /// contexts that go to `Cloud` providers. The packed context is refilled from the next
+    /// relevant items; [`ContextResponse::excluded_sensitive`] counts what was left out.
+    pub exclude_sensitive: bool,
+}
+
 /// Per-call overrides.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SearchOptions {

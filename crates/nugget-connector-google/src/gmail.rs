@@ -1,10 +1,22 @@
 //! `gmail`: Gmail over the REST API with `gmail.readonly`.
 //!
 //! Cursor (JSON, tagged by `phase`):
-//! - `{"phase":"backfill","history_id":"<id>","after":<unix secs>,"page_token":"<tok>"|null,"resync":bool}`
+//! - `{"phase":"backfill","history_id":"<id>","after":<unix secs>,"page_token":"<tok>"|null,"resync":bool,"reconcile":bool}`
 //!   while the newest-first backfill runs (`history_id` is the mailbox history id taken *before*
 //!   listing, so nothing that arrives during the backfill is missed);
-//! - `{"phase":"incremental","history_id":"<id>"}` afterwards.
+//! - `{"phase":"incremental","history_id":"<id>","verify":["<id>",...]}` afterwards (`verify`,
+//!   omitted when empty, holds indexed messages a resync did not list and that are still to be
+//!   checked, [`MAX_VERIFY`] per pass).
+//!
+//! A pass without a cursor while items are already indexed (a settings update resets the
+//! cursor) is a *reconciling* backfill: indexed messages the listing does not return are
+//! deleted when they are older than the (possibly new) window, and checked otherwise, so mail
+//! that is now excluded (spam, trash), out of the window or another account's goes away. A
+//! plain resync (expired history id) checks only messages inside the window: older ones are
+//! expected to be missing from the listing and stay. A resync interrupted part-way restarts its listing
+//! (cheap: only unknown messages are fetched), so no message is wrongly taken as missing.
+//!
+//! Versions are `<historyId>@<internalDate ms>`, so the window test needs no extra request.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -37,8 +49,14 @@ const LIST_PAGE: &str = "100";
 const HISTORY_PAGE: &str = "500";
 /// Concurrent `messages.get` calls (Gmail allows ~50/s per user; stay well below).
 const FETCH_CONCURRENCY: usize = 4;
-/// On resync, at most this many indexed-but-unlisted messages are checked for deletion.
+/// At most this many indexed-but-unlisted messages are checked per pass; the rest wait in the
+/// cursor for the next pass.
 const MAX_VERIFY: usize = 500;
+/// Longest list of messages carried in the cursor for later checks.
+const MAX_CARRY: usize = 20_000;
+/// Slack on the window boundary when deciding whether an unlisted message should have been
+/// listed (Gmail's `after:` and `internalDate` may disagree by a time zone).
+const WINDOW_SLACK_SECS: i64 = 86_400;
 /// Labels that never get indexed (unless `include_spam_trash`, for the last two).
 const DRAFT: &str = "DRAFT";
 const HIDDEN: &[&str] = &["SPAM", "TRASH"];
@@ -61,9 +79,15 @@ enum Cursor {
         page_token: Option<String>,
         #[serde(default)]
         resync: bool,
+        /// Check every indexed message the listing misses, not only those inside the window.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reconcile: bool,
     },
     Incremental {
         history_id: String,
+        /// Unlisted messages still to be checked after a resync, most likely deleted first.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        verify: Vec<String>,
     },
 }
 
@@ -246,7 +270,8 @@ impl Plan {
 }
 
 enum HistoryOutcome {
-    Done(Cursor),
+    /// Caught up; the history id to resume from.
+    Done(String),
     Expired,
 }
 
@@ -281,7 +306,12 @@ impl Connector for GmailConnector {
         let mut cur = match parsed {
             Some(c) => c,
             None => {
-                let c = self.start_backfill(false, cancel).await?;
+                // No cursor but indexed mail: a reconciling pass (see the module docs).
+                let reconcile = !self.ctx.known.versions().await?.is_empty();
+                if reconcile {
+                    tracing::info!(source = %self.ctx.source, "gmail cursor reset; reconciling resync");
+                }
+                let c = self.start_backfill(reconcile, reconcile, cancel).await?;
                 sink.checkpoint(c.to_value()).await?;
                 c
             }
@@ -291,16 +321,20 @@ impl Connector for GmailConnector {
                 Cursor::Backfill { .. } => {
                     return Ok(self.backfill(cur, sink, cancel).await?.to_value());
                 }
-                Cursor::Incremental { ref history_id } => {
-                    match self.history(history_id, sink, cancel).await? {
-                        HistoryOutcome::Done(c) => return Ok(c.to_value()),
-                        HistoryOutcome::Expired => {
-                            tracing::info!(source = %self.ctx.source, "gmail history id expired; resyncing");
-                            cur = self.start_backfill(true, cancel).await?;
-                            sink.checkpoint(cur.to_value()).await?;
-                        }
+                Cursor::Incremental {
+                    ref history_id,
+                    ref verify,
+                } => match self.history(history_id, verify, sink, cancel).await? {
+                    HistoryOutcome::Done(history_id) => {
+                        let verify = self.verify_carried(verify.clone(), sink, cancel).await?;
+                        return Ok(Cursor::Incremental { history_id, verify }.to_value());
                     }
-                }
+                    HistoryOutcome::Expired => {
+                        tracing::info!(source = %self.ctx.source, "gmail history id expired; resyncing");
+                        cur = self.start_backfill(true, false, cancel).await?;
+                        sink.checkpoint(cur.to_value()).await?;
+                    }
+                },
             }
         }
     }
@@ -313,7 +347,12 @@ impl GmailConnector {
         api_url(&self.base, &all, query)
     }
 
-    async fn start_backfill(&self, resync: bool, cancel: &CancellationToken) -> Result<Cursor> {
+    async fn start_backfill(
+        &self,
+        resync: bool,
+        reconcile: bool,
+        cancel: &CancellationToken,
+    ) -> Result<Cursor> {
         let resp = self.api.get(&self.url(&["profile"], &[])?, cancel).await?;
         if resp.status.as_u16() != 200 {
             return Err(Error::Other(format!("gmail profile: HTTP {}", resp.status)));
@@ -326,6 +365,7 @@ impl GmailConnector {
             after,
             page_token: None,
             resync,
+            reconcile,
         })
     }
 
@@ -341,11 +381,17 @@ impl GmailConnector {
             after,
             mut page_token,
             resync,
+            reconcile,
         } = cur
         else {
             return Ok(cur);
         };
-        let known: HashSet<ItemKey> = self.ctx.known.versions().await?.into_keys().collect();
+        if resync && page_token.is_some() {
+            // Pages listed before the interruption are not remembered: list again from the
+            // start rather than take their messages for missing.
+            page_token = None;
+        }
+        let known: HashMap<ItemKey, Option<String>> = self.ctx.known.versions().await?;
         let mut seen: HashSet<String> = HashSet::new();
         let q = format!("after:{after}");
         loop {
@@ -379,7 +425,7 @@ impl GmailConnector {
             seen.extend(ids.iter().cloned());
             let todo: Vec<String> = ids
                 .iter()
-                .filter(|id| !known.contains(&ItemKey::new(id.as_str())))
+                .filter(|id| !known.contains_key(&ItemKey::new(id.as_str())))
                 .cloned()
                 .collect();
             let mut fetched = futures::stream::iter(todo)
@@ -399,40 +445,65 @@ impl GmailConnector {
                         after,
                         page_token: page_token.clone(),
                         resync,
+                        reconcile,
                     };
                     sink.checkpoint(c.to_value()).await?;
                 }
                 None => break,
             }
         }
+        let mut verify = Vec::new();
         if resync {
-            let missing: Vec<String> = known
-                .iter()
-                .map(|k| k.as_str().to_string())
-                .filter(|k| !seen.contains(k))
-                .collect();
-            self.verify_missing(missing, sink, cancel).await?;
+            let missing = missing_candidates(&known, &seen, after);
+            if reconcile {
+                // Out of scope after a settings change (e.g. a shorter window): drop them.
+                for id in missing.out_of_window {
+                    sink.send(Change::Delete(ItemKey::new(id))).await?;
+                }
+            }
+            verify = self.verify_batch(missing.check, sink, cancel).await?;
         }
-        Ok(Cursor::Incremental { history_id })
+        Ok(Cursor::Incremental { history_id, verify })
     }
 
-    /// After a resync: indexed messages the listing did not return are either older than the
-    /// window or gone. Check a bounded number of them and delete the gone ones.
-    async fn verify_missing(
+    /// Continue the checks a resync left in the cursor, skipping messages no longer indexed.
+    async fn verify_carried(
+        &self,
+        carried: Vec<String>,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>> {
+        if carried.is_empty() {
+            return Ok(carried);
+        }
+        let known = self.ctx.known.versions().await?;
+        let still: Vec<String> = carried
+            .into_iter()
+            .filter(|id| known.contains_key(&ItemKey::new(id.as_str())))
+            .collect();
+        self.verify_batch(still, sink, cancel).await
+    }
+
+    /// Check the first [`MAX_VERIFY`] of `missing` (in order) and delete the gone ones; return
+    /// the rest (capped at [`MAX_CARRY`]) for the next pass.
+    async fn verify_batch(
         &self,
         mut missing: Vec<String>,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<()> {
-        if missing.len() > MAX_VERIFY {
+    ) -> Result<Vec<String>> {
+        let rest = if missing.len() > MAX_VERIFY {
+            let mut rest = missing.split_off(MAX_VERIFY);
             tracing::info!(
                 source = %self.ctx.source,
-                "gmail resync: checking {MAX_VERIFY} of {} unlisted messages",
-                missing.len()
+                "gmail: checking {MAX_VERIFY} unlisted messages now, {} on later passes",
+                rest.len()
             );
-            missing.sort();
-            missing.truncate(MAX_VERIFY);
-        }
+            rest.truncate(MAX_CARRY);
+            rest
+        } else {
+            Vec::new()
+        };
         let mut checks = futures::stream::iter(missing)
             .map(|id: String| async move {
                 let keep = self.still_indexable(&id, cancel).await;
@@ -444,7 +515,7 @@ impl GmailConnector {
                 sink.send(Change::Delete(ItemKey::new(id))).await?;
             }
         }
-        Ok(())
+        Ok(rest)
     }
 
     async fn still_indexable(&self, id: &str, cancel: &CancellationToken) -> Result<bool> {
@@ -519,7 +590,11 @@ impl GmailConnector {
         let modified_at = internal_ms.and_then(|ms| {
             OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).ok()
         });
-        let version = msg.history_id.clone().or_else(|| msg.internal_date.clone());
+        let version = match (&msg.history_id, internal_ms) {
+            (Some(h), Some(ms)) => Some(format!("{h}@{ms}")),
+            (Some(h), None) => Some(h.clone()),
+            (None, _) => msg.internal_date.clone(),
+        };
         let mut doc = Document::new(msg.id.clone(), "message/rfc822", Content::Bytes(bytes));
         doc.title = subject.clone();
         doc.version = version;
@@ -546,6 +621,7 @@ impl GmailConnector {
     async fn history(
         &self,
         start: &str,
+        verify: &[String],
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<HistoryOutcome> {
@@ -586,6 +662,7 @@ impl GmailConnector {
                     page_token = Some(t);
                     let c = Cursor::Incremental {
                         history_id: last_record.clone(),
+                        verify: verify.to_vec(),
                     };
                     sink.checkpoint(c.to_value()).await?;
                 }
@@ -594,7 +671,7 @@ impl GmailConnector {
                         .history_id
                         .filter(|h| !h.is_empty())
                         .unwrap_or(last_record);
-                    return Ok(HistoryOutcome::Done(Cursor::Incremental { history_id }));
+                    return Ok(HistoryOutcome::Done(history_id));
                 }
             }
         }
@@ -672,6 +749,47 @@ impl GmailConnector {
     }
 }
 
+/// The internal date (ms) in a version written by [`GmailConnector::document`].
+fn version_date_ms(version: Option<&str>) -> Option<i64> {
+    version?.split_once('@')?.1.parse().ok()
+}
+
+/// Indexed messages a resync listing did not return.
+struct Missing {
+    /// Inside the window (or of unknown date): deleted, excluded or another account's, unless
+    /// a check says otherwise. Newest first by id (Gmail ids grow over time).
+    check: Vec<String>,
+    /// Known to be older than the window: expected to be missing from the listing.
+    out_of_window: Vec<String>,
+}
+
+fn missing_candidates(
+    known: &HashMap<ItemKey, Option<String>>,
+    seen: &HashSet<String>,
+    after: i64,
+) -> Missing {
+    let mut check = Vec::new();
+    let mut out_of_window = Vec::new();
+    for (k, v) in known {
+        if seen.contains(k.as_str()) {
+            continue;
+        }
+        let in_window = version_date_ms(v.as_deref())
+            .is_none_or(|ms| ms.div_euclid(1000) >= after - WINDOW_SLACK_SECS);
+        if in_window {
+            check.push(k.as_str().to_string());
+        } else {
+            out_of_window.push(k.as_str().to_string());
+        }
+    }
+    check.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| b.cmp(a)));
+    out_of_window.sort();
+    Missing {
+        check,
+        out_of_window,
+    }
+}
+
 /// Gmail ids are short alphanumerics; anything else is not used in a URL path.
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -688,15 +806,51 @@ mod unit {
             after: 1,
             page_token: Some("p".into()),
             resync: false,
+            reconcile: true,
         };
         let v = c.to_value();
         assert_eq!(v["phase"], "backfill");
         assert_eq!(serde_json::from_value::<Cursor>(v).unwrap(), c);
         let v = Cursor::Incremental {
             history_id: "10".into(),
+            verify: Vec::new(),
         }
         .to_value();
         assert_eq!(v, json!({"phase": "incremental", "history_id": "10"}));
+        // Older cursors (no `verify`, no `reconcile`) still load.
+        let old = json!({"phase": "backfill", "history_id": "1", "after": 5, "resync": true});
+        assert!(matches!(
+            serde_json::from_value::<Cursor>(old).unwrap(),
+            Cursor::Backfill {
+                reconcile: false,
+                resync: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn missing_candidates_skip_old_mail_and_go_newest_first() {
+        let after = 1_700_000_000;
+        let in_ms = (after + 100) * 1000;
+        let old_ms = (after - 10 * 86_400) * 1000;
+        let known: HashMap<ItemKey, Option<String>> = [
+            ("18a0000000000001", Some(format!("5@{in_ms}"))),
+            ("18b0000000000002", Some(format!("6@{in_ms}"))),
+            ("17f0000000000003", Some(format!("7@{old_ms}"))),
+            ("190000000000004", Some("8".to_string())), // legacy version: date unknown
+            ("18c0000000000005", Some(format!("9@{in_ms}"))),
+        ]
+        .into_iter()
+        .map(|(k, v)| (ItemKey::new(k), v))
+        .collect();
+        let seen: HashSet<String> = ["18c0000000000005".to_string()].into();
+        let m = missing_candidates(&known, &seen, after);
+        assert_eq!(
+            m.check,
+            vec!["18b0000000000002", "18a0000000000001", "190000000000004"]
+        );
+        assert_eq!(m.out_of_window, vec!["17f0000000000003"]);
     }
 
     #[test]

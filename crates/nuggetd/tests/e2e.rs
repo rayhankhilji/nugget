@@ -337,6 +337,7 @@ fn chat_request(provider: Option<&str>, tier: Tier, text: &str) -> Value {
                 text: text.into(),
             },
         ],
+        items: Vec::new(),
     })
     .unwrap()
 }

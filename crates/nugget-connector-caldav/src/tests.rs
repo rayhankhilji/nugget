@@ -803,6 +803,28 @@ async fn credential_host_policy_allows_only_same_host_or_https_siblings() {
     );
 }
 
+#[tokio::test]
+async fn sibling_hosts_are_limited_to_known_partitioned_providers() {
+    let h = H::new().await;
+    // A dynamic-DNS name: every other `*.duckdns.org` belongs to someone else.
+    let c = h.connector_with(json!({"url": "https://mycal.duckdns.org/dav/", "username": "u"}));
+    let ok = |u: &str| c.check_url(&Url::parse(u).unwrap()).is_ok();
+    assert!(ok("https://mycal.duckdns.org/dav/cal/"));
+    assert!(!ok("https://attacker.duckdns.org/dav/"));
+    // Likewise for any three-label base outside the allowlist.
+    let c = h.connector_with(json!({"url": "https://dav.example.co.uk/", "username": "u"}));
+    assert!(
+        c.check_url(&Url::parse("https://evil.example.co.uk/").unwrap())
+            .is_err()
+    );
+    // Hosts of one partitioned provider may not reach outside it.
+    let c = h.connector_with(json!({"url": "https://caldav.icloud.com/", "username": "u"}));
+    let ok = |u: &str| c.check_url(&Url::parse(u).unwrap()).is_ok();
+    assert!(ok("https://p07-caldav.icloud.com/1/calendars/"));
+    assert!(!ok("https://icloud.com.evil.org/"));
+    assert!(!ok("https://xicloud.com/"));
+}
+
 #[test]
 fn xml_resolves_namespaces_entities_and_cdata() {
     let doc = br#"<?xml version="1.0"?><!-- c --><m:multistatus xmlns:m="DAV:" xmlns="urn:ietf:params:xml:ns:caldav">

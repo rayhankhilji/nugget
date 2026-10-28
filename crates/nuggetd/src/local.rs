@@ -170,6 +170,10 @@ struct Active {
     provider: Arc<dyn Provider>,
 }
 
+/// Called with a slot's role each time its server becomes ready on a new config (first start,
+/// restart on another port, new model). The daemon uses it to re-embed text-only items.
+pub(crate) type ReadyHook = Arc<dyn Fn(RuntimeRole) + Send + Sync>;
+
 /// One runtime role in the router (see the module docs).
 pub(crate) struct RuntimeSlot {
     id: ProviderId,
@@ -181,6 +185,7 @@ pub(crate) struct RuntimeSlot {
     installed: AtomicBool,
     active: Mutex<Option<Active>>,
     router: OnceLock<Weak<Router>>,
+    on_ready: OnceLock<ReadyHook>,
 }
 
 impl RuntimeSlot {
@@ -215,6 +220,19 @@ impl RuntimeSlot {
             self.runtime.touch(self.role);
             return self.activate(cfg);
         }
+        self.refresh().await
+    }
+
+    /// Run [`Runtime::ensure`] even while a server is up: it compares the installed model's
+    /// SHA-256 with the running server's and restarts the server on a new model (after
+    /// `models.install` updated it). Then route the result.
+    pub async fn refresh(&self) -> Result<Arc<dyn Provider>> {
+        if !self.is_installed() {
+            return Err(Error::Unsupported(format!(
+                "local model `{}` is not installed",
+                self.model.id
+            )));
+        }
         let cfg = self
             .runtime
             .ensure(self.role, &self.model)
@@ -247,6 +265,10 @@ impl RuntimeSlot {
             cfg,
             provider: provider.clone(),
         });
+        drop(active);
+        if let Some(hook) = self.on_ready.get() {
+            hook(self.role);
+        }
         Ok(provider)
     }
 
@@ -323,6 +345,7 @@ impl LocalRuntime {
                     egress: egress.clone(),
                     active: Mutex::new(None),
                     router: OnceLock::new(),
+                    on_ready: OnceLock::new(),
                 })
             })
             .collect();
@@ -341,6 +364,13 @@ impl LocalRuntime {
             {
                 router.set_capabilities(&s.id, Capabilities::default());
             }
+        }
+    }
+
+    /// Call `hook` whenever a slot's server becomes ready on a new config (set once).
+    pub fn on_ready(&self, hook: ReadyHook) {
+        for s in &self.slots {
+            let _ = s.on_ready.set(hook.clone());
         }
     }
 

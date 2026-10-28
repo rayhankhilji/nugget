@@ -28,7 +28,8 @@ pub struct ImapSettings {
     pub tls: TlsMode,
     pub username: String,
     /// Mailboxes to index. Default: INBOX plus the Sent mailbox. `"*"` expands to every
-    /// selectable mailbox except Trash, Spam and Junk.
+    /// selectable mailbox except Trash, Spam and Junk and the virtual views (`\All`,
+    /// `\Flagged`, `\Important`, e.g. Gmail's All Mail, Starred and Important).
     #[serde(default)]
     pub folders: Option<Vec<String>>,
     /// Only messages received in the last N days (by INTERNALDATE). `0` means no limit.
@@ -114,7 +115,7 @@ pub fn schema() -> Value {
             "tls": { "type": "string", "enum": ["implicit", "starttls"], "default": "implicit" },
             "username": { "type": "string" },
             "folders": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1,
-                         "description": "Default: INBOX and Sent. \"*\" = all mailboxes except Trash/Spam/Junk" },
+                         "description": "Default: INBOX and Sent. \"*\" = all mailboxes except Trash/Spam/Junk and virtual views (All Mail, Starred, Important)" },
             "window_days": { "type": "integer", "minimum": 0, "maximum": 36500, "default": 365,
                              "description": "Index mail from the last N days (0 = all)" },
             "max_message_mb": { "type": "integer", "minimum": 1, "maximum": 512, "default": 25,

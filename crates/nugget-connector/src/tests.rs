@@ -74,3 +74,43 @@ async fn oversized_bodies_are_rejected() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn cancelled_exchange_still_records_egress() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(30)))
+        .mount(&server)
+        .await;
+    let sink = Arc::new(VecSink::default());
+    let http = MeteredHttp::new(sink.clone(), "sync:test").unwrap();
+    let req = http
+        .request(Method::POST, &server.uri())
+        .body(vec![b'a'; 1000]);
+    // Drop the request future while the server is still "thinking".
+    let res =
+        tokio::time::timeout(std::time::Duration::from_millis(300), http.send(req, &[])).await;
+    assert!(res.is_err(), "the request should have been cancelled");
+    let events = sink.0.lock().unwrap();
+    assert_eq!(events.len(), 1, "a cancelled exchange still writes one row");
+    assert_eq!(events[0].feature, "sync:test");
+    assert!(events[0].bytes_sent >= 1000);
+    assert_eq!(events[0].bytes_received, 0);
+}
+
+#[tokio::test]
+async fn completed_exchange_records_exactly_one_row_with_received_bytes() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![b'x'; 4096]))
+        .mount(&server)
+        .await;
+    let sink = Arc::new(VecSink::default());
+    let http = MeteredHttp::new(sink.clone(), "sync:test").unwrap();
+    http.send(http.request(Method::GET, &server.uri()), &[])
+        .await
+        .unwrap();
+    let events = sink.0.lock().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].bytes_received, 4096);
+}

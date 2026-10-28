@@ -45,6 +45,11 @@ pub struct IngestConfig {
     pub embed_batch: usize,
     /// Timeout for one embedding request.
     pub embed_timeout_ms: u64,
+    /// How often the re-embed job looks for items indexed text-only (for example before an
+    /// embedder was routable) and embeds them. It also runs at start and whenever
+    /// [`Ingest::reembed_now`](crate::Ingest::reembed_now) is called (e.g. when a local
+    /// embedding server becomes ready). 0 = only then. Default 10 min.
+    pub reembed_interval_ms: u64,
     /// First retry delay after a failed sync pass; doubles per failure.
     pub backoff_base_ms: u64,
     /// Retry delay cap.
@@ -86,6 +91,7 @@ impl Default for IngestConfig {
             allow_cloud_embeddings: false,
             embed_batch: 32,
             embed_timeout_ms: 120_000,
+            reembed_interval_ms: 10 * 60 * 1000,
             backoff_base_ms: 2_000,
             backoff_max_ms: 15 * 60 * 1000,
             watch_resync_ms: 60 * 60 * 1000,

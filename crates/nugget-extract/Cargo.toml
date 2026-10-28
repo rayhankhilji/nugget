@@ -38,6 +38,10 @@ ocrs = { version = "0.10", optional = true }
 rten = { version = "0.21", optional = true }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
 
+# `O_NOFOLLOW`, `O_NONBLOCK` and `O_NOCTTY` for `OpenOptionsExt::custom_flags` (constants only).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # Builds DOCX/XLSX fixtures in tests.
 zip = { version = "9", default-features = false, features = ["deflate-flate2"] }

@@ -448,7 +448,9 @@ async fn idle_servers_stop_and_come_back_on_ensure() {
         rt.status()[0].state == RuntimeState::Stopped
     })
     .await;
-    assert!(!alive(pid));
+    // `Stopped` is reported (and the config withdrawn) before the process is signalled, so the
+    // process may still be exiting here.
+    wait_until("process exit", Duration::from_secs(10), || !alive(pid)).await;
     let again = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
     assert_eq!(
         again.base_url, cfg.base_url,

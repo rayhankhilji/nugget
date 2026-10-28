@@ -23,6 +23,10 @@
 //! neighbouring chunks while the budget allows, adjacent chunks merged) under `[n] Title (source)`
 //! headers, never exceeding the budget as measured by `nugget_extract::estimate_tokens`.
 //!
+//! [`Retriever::build_context_with`] with [`ContextOptions::exclude_sensitive`] leaves items
+//! marked sensitive (see [`is_sensitive`]) out of the context, for contexts sent to `Cloud`
+//! models; citations carry each item's `sensitive` flag.
+//!
 //! [`eval`] is a retrieval-quality harness on a labelled fixture corpus.
 
 mod config;
@@ -34,8 +38,8 @@ mod retriever;
 mod types;
 
 pub use config::{RecencyBoost, RetrieveConfig};
-pub use retriever::Retriever;
+pub use retriever::{Retriever, is_sensitive};
 pub use types::{
-    ChunkMatch, PackedContext, PackedPassage, RetrievalMode, RetrievedItem, SearchOptions,
-    SearchResults, Similarity, Strategy, TextOnlyReason,
+    ChunkMatch, ContextOptions, PackedContext, PackedPassage, RetrievalMode, RetrievedItem,
+    SearchOptions, SearchResults, Similarity, Strategy, TextOnlyReason,
 };

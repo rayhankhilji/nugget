@@ -319,6 +319,19 @@ fn multiget_body(paths: &[String]) -> String {
     )
 }
 
+/// Providers known to spread one account over per-partition hosts under their own registrable
+/// domain. Credentials may move between hosts of the same entry (https only).
+const PARTITIONED_PROVIDERS: &[&str] = &["icloud.com"];
+
+/// The [`PARTITIONED_PROVIDERS`] entry `host` is a subdomain of, if any.
+fn partitioned_provider(host: &str) -> Option<&'static str> {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    PARTITIONED_PROVIDERS.iter().copied().find(|d| {
+        host.strip_suffix(d)
+            .is_some_and(|rest| rest.ends_with('.') && rest.len() > 1)
+    })
+}
+
 /// Outcome of a `sync-collection` attempt.
 enum SyncResult {
     Done(CalCursor),
@@ -352,9 +365,11 @@ impl CalDavConnector {
         }
     }
 
-    /// Hosts we send credentials to: the configured one, or (for https, e.g. iCloud's
-    /// partition hosts) a sibling under the configured host's parent domain when that host has
-    /// at least three labels.
+    /// Hosts we send credentials to: the configured one, or (https on 443 only) another host of
+    /// the same known partitioned provider ([`PARTITIONED_PROVIDERS`], e.g. iCloud sends
+    /// clients from `caldav.icloud.com` to `pNN-caldav.icloud.com`). A generic "sibling under
+    /// the parent domain" rule is not safe: under a public suffix such as `duckdns.org`, every
+    /// sibling belongs to someone else.
     fn check_url(&self, u: &Url) -> Result<()> {
         check_transport(u)?;
         if !u.username().is_empty() || u.password().is_some() {
@@ -369,12 +384,9 @@ impl CalDavConnector {
         let sibling = u.scheme() == "https"
             && self.base.scheme() == "https"
             && u.port_or_known_default() == Some(443)
+            && self.base.port_or_known_default() == Some(443)
             && bh.parse::<IpAddr>().is_err()
-            && bh.split('.').count() >= 3
-            && bh.split_once('.').is_some_and(|(_, parent)| {
-                h.to_ascii_lowercase()
-                    .ends_with(&format!(".{}", parent.to_ascii_lowercase()))
-            });
+            && partitioned_provider(bh).is_some_and(|p| partitioned_provider(h) == Some(p));
         if same || sibling {
             Ok(())
         } else {

@@ -34,6 +34,8 @@ use tokio::sync::{mpsc, oneshot};
 pub enum ErrKind {
     Network,
     Unauthorized,
+    /// A parse error quoting a whole raw message (control characters included).
+    Huge,
 }
 
 impl ErrKind {
@@ -41,6 +43,10 @@ impl ErrKind {
         match self {
             ErrKind::Network => Error::Network("connection reset".into()),
             ErrKind::Unauthorized => Error::Unauthorized("token revoked".into()),
+            ErrKind::Huge => Error::Other(format!(
+                "cannot parse message: {}",
+                "Subject: hi\r\nX-Raw: \u{1}\u{2}".repeat(2_000)
+            )),
         }
     }
 }
@@ -277,6 +283,8 @@ pub struct FakeProvider {
     pub block_marker: Mutex<Option<String>>,
     open: tokio::sync::watch::Sender<bool>,
     pub dim: usize,
+    /// Return NaN vectors.
+    pub nan: AtomicBool,
 }
 
 impl FakeProvider {
@@ -289,6 +297,7 @@ impl FakeProvider {
             block_marker: Mutex::new(None),
             open: tokio::sync::watch::channel(true).0,
             dim: 4,
+            nan: AtomicBool::new(false),
         })
     }
 
@@ -374,6 +383,7 @@ impl Provider for FakeProvider {
                 }
             }
         }
+        let nan = self.nan.load(Ordering::SeqCst);
         Ok(texts
             .iter()
             .map(|t| {
@@ -381,6 +391,9 @@ impl Provider for FakeProvider {
                 let mut v = vec![1.0; self.dim];
                 v[0] += n % 7.0;
                 v[1] += (n % 3.0) * 0.5;
+                if nan {
+                    v[2] = f32::NAN;
+                }
                 v
             })
             .collect())

@@ -15,6 +15,7 @@ use tokio::sync::{Notify, mpsc};
 use crate::ingest::{IngestEvent, Inner};
 use crate::known::join_err;
 use crate::pipeline::{Mode, PipelineSink, Worker};
+use crate::util::cap_error;
 
 /// Signals from the API to a running source.
 #[derive(Debug, Default)]
@@ -201,7 +202,7 @@ async fn pass(
                 } else {
                     *watch_failures += 1;
                 }
-                tracing::warn!(source = %id, error = %e, "watch failed");
+                tracing::warn!(source = %id, error = %cap_error(e.to_string()), "watch failed");
                 let delay = inner.cfg.backoff(watch_failures.saturating_sub(1));
                 record_error(inner, id, &e).await;
                 wait(ctl, cancel, delay).await
@@ -240,7 +241,7 @@ async fn wait(ctl: &Arc<Control>, cancel: &CancellationToken, delay: Duration) -
 }
 
 async fn record_error(inner: &Arc<Inner>, id: &SourceId, e: &Error) {
-    let msg = e.to_string();
+    let msg = cap_error(e.to_string());
     inner.record_item_error(id, None, msg.clone());
     inner.sync_failed(id, SourceState::Error, msg.clone()).await;
     inner.emit(IngestEvent::Progress(IngestProgress {
@@ -275,7 +276,7 @@ async fn fail(
         delay = delay.max(Duration::from_millis(*ms));
     }
     *attempt = attempt.saturating_add(1);
-    tracing::warn!(source = %id, error = %e, retry_in_ms = delay.as_millis() as u64, "sync failed");
+    tracing::warn!(source = %id, error = %cap_error(e.to_string()), retry_in_ms = delay.as_millis() as u64, "sync failed");
     record_error(inner, id, &e).await;
     wait(ctl, cancel, delay).await
 }
@@ -288,7 +289,7 @@ async fn needs_auth(
     cancel: &CancellationToken,
     e: Error,
 ) -> Next {
-    let msg = e.to_string();
+    let msg = cap_error(e.to_string());
     tracing::info!(source = %id, error = %msg, "source needs authorization");
     inner
         .sync_failed(id, SourceState::NeedsAuth, msg.clone())

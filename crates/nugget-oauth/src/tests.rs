@@ -215,11 +215,13 @@ async fn full_pkce_loopback_flow_stores_tokens() {
 }
 
 #[tokio::test]
-async fn state_mismatch_aborts_without_exchanging() {
+async fn forged_state_is_ignored_and_the_flow_keeps_waiting() {
     let e = env().await;
     Mock::given(method("POST"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(token_json("x", None)))
-        .expect(0)
+        .and(path("/token"))
+        .and(body_string_contains("code=real-code"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_json("at", Some("rt"))))
+        .expect(1)
         .mount(&e.server)
         .await;
     let auth = e
@@ -227,6 +229,40 @@ async fn state_mismatch_aborts_without_exchanging() {
         .authorize(&AuthorizeOptions::default())
         .await
         .unwrap();
+    let state = query(&auth.url)["state"].clone();
+    let redirect = auth.redirect_uri.clone();
+    let done = tokio::spawn(auth.finish());
+    // Any local process can hit the port: forged, missing and error-carrying callbacks with a
+    // wrong state get a 400 and do not end the flow.
+    for q in [
+        "state=forged&code=c",
+        "code=c",
+        "state=forged&error=access_denied",
+    ] {
+        let resp = reqwest::get(format!("{redirect}?{q}")).await.unwrap();
+        assert_eq!(resp.status(), 400, "{q}");
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(
+        !done.is_finished(),
+        "a forged redirect must not abort the flow"
+    );
+    let resp = reqwest::get(format!("{redirect}?state={state}&code=real-code"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let tokens = done.await.unwrap().unwrap();
+    assert_eq!(tokens.access_token, "at");
+}
+
+#[tokio::test]
+async fn forged_state_is_reported_when_the_flow_times_out() {
+    let e = env().await;
+    let opts = AuthorizeOptions {
+        timeout: Duration::from_millis(500),
+        ..Default::default()
+    };
+    let auth = e.client.authorize(&opts).await.unwrap();
     let redirect = auth.redirect_uri.clone();
     let done = tokio::spawn(auth.finish());
     let resp = reqwest::get(format!("{redirect}?state=forged&code=c"))
@@ -235,9 +271,49 @@ async fn state_mismatch_aborts_without_exchanging() {
     assert_eq!(resp.status(), 400);
     let err = done.await.unwrap().unwrap_err();
     assert!(
-        matches!(err, Error::Unauthorized(ref m) if m.contains("state")),
+        matches!(err, Error::Unauthorized(ref m) if m.contains("timed out") && m.contains("wrong OAuth state")),
         "{err}"
     );
+}
+
+#[tokio::test]
+async fn idle_connections_beyond_the_cap_do_not_grow_unbounded() {
+    let e = env().await;
+    let auth = e
+        .client
+        .authorize(&AuthorizeOptions::default())
+        .await
+        .unwrap();
+    let state = query(&auth.url)["state"].clone();
+    let redirect = auth.redirect_uri.clone();
+    let u = Url::parse(&redirect).unwrap();
+    let addr = (u.host_str().unwrap().to_string(), u.port().unwrap());
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_json("at", None)))
+        .mount(&e.server)
+        .await;
+    let done = tokio::spawn(auth.finish());
+    // 16 idle connections fill the cap; a 17th is left in the backlog (not served).
+    let mut idle = Vec::new();
+    for _ in 0..16 {
+        idle.push(tokio::net::TcpStream::connect(addr.clone()).await.unwrap());
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let blocked = tokio::spawn({
+        let url = format!("{redirect}?state={state}&code=c");
+        async move { reqwest::get(url).await.map(|r| r.status()) }
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!blocked.is_finished(), "served beyond the connection cap");
+    // Freeing the slots lets the real redirect through.
+    drop(idle);
+    let status = tokio::time::timeout(Duration::from_secs(5), blocked)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, 200);
+    done.await.unwrap().unwrap();
 }
 
 #[tokio::test]

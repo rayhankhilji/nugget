@@ -400,51 +400,40 @@ async fn bad_items_are_recorded_and_never_stop_the_source() {
     h.ingest.shutdown().await;
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn extraction_timeout_indexes_the_title_only() {
-    let dir = tempfile::tempdir().unwrap();
-    let fifo = dir.path().join("pipe.txt");
-    let ok = std::process::Command::new("mkfifo")
-        .arg(&fifo)
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !ok {
-        eprintln!("mkfifo unavailable; skipping");
-        return;
-    }
     let h = start(Opts {
         cfg: IngestConfig {
-            extract_timeout_ms: 200,
+            // Far less than extracting and chunking a few megabytes takes.
+            extract_timeout_ms: 1,
             ..cfg()
         },
         ..Default::default()
     })
     .await;
-    // Reading a FIFO with no writer blocks forever: a stand-in for a pathological file.
-    let mut d = Document::new("pipe.txt", "text/plain", Content::File(fifo.clone()));
+    let big = "lorem ipsum dolor sit amet, consectetur adipiscing elit.\n\n".repeat(60_000);
+    let mut d = Document::new("big.md", "text/markdown", Content::Text(big));
     d.title = Some("Pipe dream".into());
     d.version = Some("1".into());
     h.factory.state("fake-1").script(vec![
         Step::Send(Change::Upsert(d)),
-        Step::Send(text_doc("next", "next item", Some("1"))),
         Step::Return(json!("done")),
     ]);
     h.add("fake-1").await;
     eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
-    let item = h.item("fake-1", "pipe.txt").unwrap();
+    let item = h.item("fake-1", "big.md").unwrap();
     assert!(
         item.metadata["extract_error"]
             .as_str()
             .unwrap()
-            .contains("timed out")
+            .contains("timed out"),
+        "{}",
+        item.metadata
     );
     assert_eq!(item.title.as_deref(), Some("Pipe dream"));
     assert_eq!(h.store.search_text("dream", 10).unwrap().len(), 1);
+    assert!(h.store.search_text("lorem", 10).unwrap().is_empty());
     h.ingest.shutdown().await;
-    // Release the stuck extraction thread.
-    drop(std::fs::OpenOptions::new().write(true).open(&fifo));
 }
 
 #[tokio::test]
@@ -525,5 +514,50 @@ async fn freshness_is_measured_for_sync_and_live_changes() {
     assert_eq!(h.ingest.committed(), 3);
     assert_eq!(status.sources.len(), 1);
     assert_eq!(status.sources[0].items, 1);
+    h.ingest.shutdown().await;
+}
+
+#[tokio::test]
+async fn files_changed_since_the_scan_are_skipped_not_stored() {
+    let h = start(Opts::default()).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("note.md");
+    std::fs::write(&path, "first draft about penguins").unwrap();
+    let scanned = nugget_extract::FileExpect::of(&std::fs::metadata(&path).unwrap());
+    // The file changes after the connector scanned it.
+    std::fs::write(&path, "a much longer second draft about walruses").unwrap();
+
+    let mut stale = Document::new("note.md", "text/markdown", Content::File(path.clone()));
+    stale.version = Some("v1".into());
+    let check = |e: nugget_extract::FileExpect| {
+        let mut m = serde_json::Map::new();
+        m.insert(nugget_extract::FILE_CHECK_KEY.to_owned(), e.to_metadata());
+        serde_json::Value::Object(m)
+    };
+    stale.metadata = check(scanned);
+    let mut fresh = Document::new("fresh.md", "text/markdown", Content::File(path.clone()));
+    fresh.version = Some("v2".into());
+    fresh.metadata = check(nugget_extract::FileExpect::of(
+        &std::fs::metadata(&path).unwrap(),
+    ));
+    h.factory.state("fake-1").script(vec![
+        Step::Send(Change::Upsert(stale)),
+        Step::Send(Change::Upsert(fresh)),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+
+    // Nothing stored for the stale scan (no title-only item, no version), so the next pass
+    // resends it; the item whose scan still matches is indexed normally.
+    assert!(h.item("fake-1", "note.md").is_none());
+    assert!(h.item("fake-1", "fresh.md").is_some());
+    assert_eq!(h.store.search_text("walruses", 10).unwrap().len(), 1);
+    let errors = h.ingest.errors(&SourceId::new("fake-1")).unwrap();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].message.contains("skipped until the next pass"),
+        "{errors:?}"
+    );
     h.ingest.shutdown().await;
 }
