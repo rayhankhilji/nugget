@@ -1,5 +1,6 @@
 [package]
 name = "nugget-connector-files"
+description = "Local files and Obsidian vault connectors for Nugget"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,27 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-connector.workspace = true
+nugget-extract.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+# `.gitignore` / `.nuggetignore` aware walking (Unlicense OR MIT) and glob matching.
+ignore = "0.4.23"
+globset = "0.4.15"
+# Native file watching: inotify, FSEvents, ReadDirectoryChangesW. notify is CC0-1.0, the
+# debouncer MIT OR Apache-2.0; both are on the deny.toml allow list. Use the re-exported
+# `notify_debouncer_full::notify` so the two never drift apart.
+notify-debouncer-full = "0.7"
+url = "2.5"
+percent-encoding = "2.3"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
