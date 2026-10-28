@@ -426,6 +426,11 @@ impl Proactive {
         Ok(out)
     }
 
+    /// When the last [`refresh`](Self::refresh) finished, if one ever ran.
+    pub fn last_refresh(&self) -> Result<Option<OffsetDateTime>> {
+        Ok(self.cards.load()?.last_refresh)
+    }
+
     pub fn metrics(&self) -> Result<Metrics> {
         Ok(Metrics::compute(&self.cards.load()?))
     }

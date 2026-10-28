@@ -46,6 +46,8 @@ use crate::xml::{CALDAV, CS, DAV, DavResponse, MultiStatus};
 pub const KIND: &str = "caldav";
 /// Egress-ledger feature for every CalDAV request.
 pub const FEATURE: &str = "sync:caldav";
+/// Egress-ledger feature for events created on the user's behalf ([`CalDavConnector::put_event`]).
+pub const ACTION_FEATURE: &str = "action:caldav";
 
 /// Cap on one response body.
 const MAX_BODY: usize = 32 * 1024 * 1024;
@@ -248,6 +250,8 @@ struct Calendar {
     name: Option<String>,
     ctag: Option<String>,
     sync_token: Option<String>,
+    /// Accepts `VEVENT` components (or does not say).
+    events: bool,
 }
 
 /// One configured CalDAV account.
@@ -486,7 +490,71 @@ impl CalDavConnector {
             name: r.prop_text(DAV, "displayname"),
             ctag: r.prop_text(CS, "getctag"),
             sync_token: r.prop_text(DAV, "sync-token"),
+            events: Self::holds_events(r),
         }
+    }
+
+    fn holds_events(r: &DavResponse) -> bool {
+        let Some(set) = r.prop(CALDAV, "supported-calendar-component-set") else {
+            return true;
+        };
+        let mut comps = set.children(CALDAV, "comp").peekable();
+        comps.peek().is_none()
+            || comps.any(|c| {
+                c.attr("name")
+                    .is_some_and(|n| n.eq_ignore_ascii_case("VEVENT"))
+            })
+    }
+
+    /// Create an event: `PUT` the iCalendar object `ics` as `<resource>` (e.g. `<uuid>.ics`;
+    /// letters, digits, `-`, `_` and `.` only) into the user's default calendar, the first
+    /// discovered calendar (within `calendars`, if set) that accepts events. Never overwrites
+    /// (`If-None-Match: *`). Recorded in the egress ledger as [`ACTION_FEATURE`]. Returns the new
+    /// event's URL.
+    pub async fn put_event(
+        &self,
+        resource: &str,
+        ics: &str,
+        cancel: &CancellationToken,
+    ) -> Result<String> {
+        let ok = !resource.is_empty()
+            && resource.len() <= 200
+            && !resource.starts_with('.')
+            && resource
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'));
+        if !ok {
+            return Err(Error::Invalid(format!(
+                "caldav: bad event resource name `{resource}`"
+            )));
+        }
+        let password = self.password()?;
+        let calendars = self.discover(&password, cancel).await?;
+        let cal = calendars
+            .iter()
+            .find(|c| c.events)
+            .ok_or_else(|| Error::NotFound("CalDAV: no calendar accepts events".into()))?;
+        let url = self.resolve(&cal.url, resource)?;
+        let http =
+            MeteredHttp::new(self.ctx.egress.clone(), ACTION_FEATURE)?.with_max_body(1024 * 1024);
+        let req = http
+            .request(Method::PUT, url.as_str())
+            .basic_auth(&self.settings.username, Some(&password))
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "text/calendar; charset=utf-8",
+            )
+            .header(reqwest::header::IF_NONE_MATCH, "*")
+            .body(ics.to_owned());
+        let resp = tokio::select! {
+            r = http.send(req, &[]) => r?,
+            _ = cancel.cancelled() => return Err(Error::Cancelled),
+        };
+        if resp.status.as_u16() == 412 {
+            return Err(Error::Invalid(format!("CalDAV: {url} already exists")));
+        }
+        resp.error_for_status()?;
+        Ok(url.to_string())
     }
 
     fn holds_items(r: &DavResponse) -> bool {

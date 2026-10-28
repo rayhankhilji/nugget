@@ -51,6 +51,8 @@ pub use crate::settings::{ImapSettings, TlsMode};
 pub const KIND: &str = "imap";
 /// Egress-ledger feature for every IMAP byte.
 pub const FEATURE: &str = "sync:imap";
+/// Egress-ledger feature for changes made on the user's behalf ([`ImapConnector::archive`]).
+pub const ACTION_FEATURE: &str = "action:imap";
 
 /// UIDs per metadata FETCH (and per checkpoint while fetching new mail).
 const META_BATCH: usize = 200;
@@ -321,6 +323,70 @@ impl ImapConnector {
             }
         }
         Ok(out)
+    }
+
+    /// Archive messages by item key (`<mailbox>/<uidvalidity>/<uid>`): `UID MOVE` them to the
+    /// archive mailbox (`\Archive` special-use, else `\All`, else `Archive`). Needs the
+    /// server's `MOVE` capability (RFC 6851); without it nothing changes and the result is
+    /// `Unsupported` (no COPY + EXPUNGE fallback). Keys whose mailbox changed its UIDVALIDITY
+    /// since indexing, or that are already in the archive, are skipped. Traffic is recorded with
+    /// feature [`ACTION_FEATURE`]. Returns how many messages were moved.
+    pub async fn archive(&self, keys: &[ItemKey], cancel: &CancellationToken) -> Result<usize> {
+        let mut by_folder: BTreeMap<&str, (u32, Vec<u32>)> = BTreeMap::new();
+        for k in keys {
+            let (folder, uv, uid) = parse_key(k.as_str())
+                .ok_or_else(|| Error::Invalid(format!("not an IMAP item key: {k}")))?;
+            let e = by_folder.entry(folder).or_insert((uv, Vec::new()));
+            if e.0 == uv {
+                e.1.push(uid);
+            }
+        }
+        if by_folder.is_empty() {
+            return Ok(0);
+        }
+        let mut meter = EgressMeter::new(
+            self.ctx.egress.clone(),
+            format!("{}:{}", self.settings.host.trim(), self.settings.port()),
+            ACTION_FEATURE,
+        );
+        let mut imap = self.connect(&meter, cancel).await?;
+        let result = async {
+            if !imap.has("MOVE") {
+                return Err(Error::Unsupported(
+                    "this IMAP server cannot move messages (no MOVE capability)".into(),
+                ));
+            }
+            let dest = imap.archive_mailbox().await?.ok_or_else(|| {
+                Error::Unsupported("this IMAP account has no archive mailbox".into())
+            })?;
+            let mut moved = 0;
+            for (folder, (uv, mut uids)) in by_folder {
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
+                if folder == dest {
+                    continue;
+                }
+                let Some(sel) = imap.select(folder).await? else {
+                    continue;
+                };
+                if sel.uidvalidity != Some(uv) {
+                    tracing::warn!(folder, "UIDVALIDITY changed; not archiving stale messages");
+                    continue;
+                }
+                uids.sort_unstable();
+                uids.dedup();
+                for set in conn::uid_sets(&uids, MAX_SET_LEN) {
+                    imap.uid_move(&set, &dest).await?;
+                }
+                moved += uids.len();
+            }
+            Ok(moved)
+        }
+        .await;
+        imap.logout().await;
+        meter.flush();
+        result
     }
 
     async fn run_sync(

@@ -21,7 +21,8 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::text::truncate;
 
-/// Save a reply as a draft in the user's mailbox. Never sends.
+/// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
+/// written to the mailbox.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DraftReply {
     /// The message replied to.
@@ -181,11 +182,26 @@ impl Action {
     /// The executor's declared risk (the policy engine may raise it).
     pub fn risk(&self) -> RiskClass {
         match self {
-            // A draft stays in the mailbox; nothing leaves the device until the user sends it.
+            // A draft stays on the device; nothing leaves it until the user sends it themselves.
             Self::DraftReply(_) => RiskClass::Edit,
             Self::CreateEvent(e) if !e.attendees.is_empty() => RiskClass::Send,
             Self::CreateEvent(_) | Self::Reminder(_) | Self::ResearchNote(_) => RiskClass::Edit,
+            // Changes the mailbox on the server; also always needs explicit confirmation
+            // ([`Action::requires_confirmation`]).
             Self::ArchiveThread(_) => RiskClass::Destroy,
+        }
+    }
+
+    /// A reason the user must explicitly confirm before this action runs, whatever the policy
+    /// says ([`ActionRunner::execute`] answers [`ExecOutcome::NeedsConfirmation`] until the
+    /// approval is `confirmed`).
+    pub fn requires_confirmation(&self) -> Option<&'static str> {
+        match self {
+            Self::ArchiveThread(_) => Some(
+                "Archiving changes your mailbox: the thread leaves the inbox on the mail server \
+                 (nothing is deleted).",
+            ),
+            _ => None,
         }
     }
 
@@ -214,10 +230,12 @@ impl Action {
                     Some(b) => diff.extend(b.lines().map(add)),
                     None => diff.push(ctx(format!("(body to be drafted: {})", d.intent))),
                 }
-                diff.push(ctx("Saved to Drafts. Nothing is sent."));
+                diff.push(ctx(
+                    "Nothing is sent: copy the draft or open it in your mail app to send it yourself.",
+                ));
                 (
-                    format!("Save a draft reply to {}", d.to.join(", ")),
-                    "mail:drafts".to_owned(),
+                    format!("Draft a reply to {}", d.to.join(", ")),
+                    "mail:compose".to_owned(),
                     diff,
                 )
             }
@@ -257,7 +275,7 @@ impl Action {
                         if a.messages.len() == 1 { "" } else { "s" }
                     )),
                     add(format!("Archive: {}", a.subject)),
-                    ctx("Messages are kept; only the inbox label is removed."),
+                    ctx("Messages are kept; they only leave the inbox."),
                 ],
             ),
             Self::ResearchNote(n) => {
@@ -321,7 +339,8 @@ pub trait Drafter: Send + Sync {
 /// Mailbox changes (Gmail / IMAP connectors).
 #[async_trait]
 pub trait MailExecutor: Send + Sync {
-    /// Save a draft; returns the draft's id.
+    /// Keep a draft for the user to copy or open in their mail app; returns the draft's id.
+    /// Must never send it, nor write it to the mailbox.
     async fn save_draft(&self, draft: &DraftReply) -> Result<String>;
     async fn archive_thread(&self, archive: &ArchiveThread) -> Result<String>;
 }
@@ -467,7 +486,9 @@ impl ActionRunner {
     }
 
     /// Execute after the user's approval: the approval must match the preview's digest, the
-    /// kill switch must be off, and the policy must allow it (or the user confirmed).
+    /// kill switch must be off, an executor must be configured, and the policy must allow it.
+    /// A policy `Confirm`, or the action's own [`Action::requires_confirmation`], needs an
+    /// approval with `confirmed`.
     pub async fn execute(
         &self,
         prepared: &PreparedAction,
@@ -484,61 +505,71 @@ impl ActionRunner {
             self.audit("halted", &task, prepared, json!({}));
             return Ok(ExecOutcome::Halted);
         }
+        let missing = |what: &str| Error::Unsupported(format!("no {what} executor configured"));
+        // Resolve the executor first: nothing to confirm for an action that cannot run here.
+        let ex = &self.executors;
+        let what = match &prepared.action {
+            Action::DraftReply(_) | Action::ArchiveThread(_) => ex.mail.is_none().then_some("mail"),
+            Action::CreateEvent(_) => ex.calendar.is_none().then_some("calendar"),
+            Action::Reminder(_) => ex.reminders.is_none().then_some("reminder"),
+            Action::ResearchNote(_) => ex.notes.is_none().then_some("note"),
+        };
+        if let Some(what) = what {
+            return Err(missing(what));
+        }
         let descriptor = prepared.action.descriptor(&task);
-        match self.policy.evaluate(&descriptor) {
-            Decision::Allow => {}
-            Decision::Confirm(reason) if !approval.confirmed => {
-                self.audit(
-                    "needs_confirmation",
-                    &task,
-                    prepared,
-                    json!({"reason": reason}),
-                );
-                return Ok(ExecOutcome::NeedsConfirmation(reason));
-            }
-            Decision::Confirm(_) => {}
+        let policy_reason = match self.policy.evaluate(&descriptor) {
+            Decision::Allow => None,
+            Decision::Confirm(reason) => Some(reason),
             Decision::Deny(reason) => {
                 self.audit("denied", &task, prepared, json!({"reason": reason}));
                 return Ok(ExecOutcome::Denied(reason));
             }
+        };
+        let reason =
+            policy_reason.or_else(|| prepared.action.requires_confirmation().map(str::to_owned));
+        if let Some(reason) = reason
+            && !approval.confirmed
+        {
+            self.audit(
+                "needs_confirmation",
+                &task,
+                prepared,
+                json!({"reason": reason}),
+            );
+            return Ok(ExecOutcome::NeedsConfirmation(reason));
         }
-        let missing = |what: &str| Error::Unsupported(format!("no {what} executor configured"));
         let id = match &prepared.action {
             Action::DraftReply(d) => {
-                self.executors
-                    .mail
+                ex.mail
                     .as_ref()
                     .ok_or_else(|| missing("mail"))?
                     .save_draft(d)
                     .await?
             }
             Action::ArchiveThread(a) => {
-                self.executors
-                    .mail
+                ex.mail
                     .as_ref()
                     .ok_or_else(|| missing("mail"))?
                     .archive_thread(a)
                     .await?
             }
             Action::CreateEvent(e) => {
-                self.executors
-                    .calendar
+                ex.calendar
                     .as_ref()
                     .ok_or_else(|| missing("calendar"))?
                     .create_event(e)
                     .await?
             }
             Action::Reminder(r) => {
-                self.executors
-                    .reminders
+                ex.reminders
                     .as_ref()
                     .ok_or_else(|| missing("reminder"))?
                     .create_reminder(r)
                     .await?
             }
             Action::ResearchNote(n) => {
-                self.executors
-                    .notes
+                ex.notes
                     .as_ref()
                     .ok_or_else(|| missing("note"))?
                     .write_note(n)

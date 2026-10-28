@@ -470,6 +470,67 @@ async fn execution_only_after_approval_and_policy() {
 }
 
 #[tokio::test]
+async fn archiving_always_needs_confirmation() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let policy = Arc::new(RecordingPolicy::default());
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(policy.clone(), exec.clone()).with_audit(f.store.clone());
+    let ana = card_of(&p, CandidateKind::UnansweredThread);
+    let archive = p.prepare_action(&r, &ana.id, 1).await.unwrap();
+    assert!(archive.action.requires_confirmation().is_some());
+    exec.calls.lock().unwrap().clear();
+
+    // The policy allows it, but the action itself asks for confirmation.
+    let out = p
+        .run_action(&r, &archive, &archive.approve(false), now())
+        .await
+        .unwrap();
+    let ExecOutcome::NeedsConfirmation(reason) = out else {
+        panic!("expected a confirmation, got {out:?}");
+    };
+    assert!(reason.contains("inbox"), "{reason}");
+    assert!(exec.calls.lock().unwrap().is_empty());
+    let audit = f.store.recent_audit(10).unwrap();
+    assert!(
+        audit
+            .iter()
+            .any(|a| a.action == "action.archive_thread.needs_confirmation")
+    );
+
+    // A policy denial still wins over the user's confirmation.
+    *policy.decision.lock().unwrap() = Some(Decision::Deny("no mailbox edits".into()));
+    assert_eq!(
+        p.run_action(&r, &archive, &archive.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Denied("no mailbox edits".into())
+    );
+    *policy.decision.lock().unwrap() = None;
+
+    assert_eq!(
+        p.run_action(&r, &archive, &archive.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Executed("archived".into())
+    );
+    assert_eq!(
+        *exec.calls.lock().unwrap(),
+        vec!["archive:Pricing for the pilot".to_string()]
+    );
+    // Other actions need no extra confirmation.
+    let draft = p.prepare_action(&r, &ana.id, 0).await;
+    assert!(draft.is_err(), "the card is done");
+    let reminder = Action::Reminder(nugget_proactive::Reminder {
+        text: "x".into(),
+        at: now(),
+        about: None,
+    });
+    assert!(reminder.requires_confirmation().is_none());
+}
+
+#[tokio::test]
 async fn missing_executor_is_unsupported() {
     let f = fixture();
     let p = Proactive::new(f.store.clone(), cfg());
