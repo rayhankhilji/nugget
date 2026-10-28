@@ -19,6 +19,10 @@ path = "src/main.rs"
 nugget-core.workspace = true
 # `cua`: the action descriptor and risk classes agents confirm with.
 nugget-policy.workspace = true
+# `cua --cua-agent nugget`: the real agent loop, its computer-use tools, and the contract the
+# bench session implements for them.
+nugget-agent.workspace = true
+nugget-a11y.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

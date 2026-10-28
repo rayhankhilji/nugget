@@ -143,11 +143,17 @@ pub trait Platform: Send + Sync {
 pub struct Backend<P: Platform> {
     platform: P,
     config: A11yConfig,
+    /// Element ids handed out by recent computer-use snapshots.
+    pub(crate) computer: crate::computer::backend::Cache,
 }
 
 impl<P: Platform> Backend<P> {
     pub fn new(platform: P, config: A11yConfig) -> Self {
-        Backend { platform, config }
+        Backend {
+            platform,
+            config,
+            computer: Default::default(),
+        }
     }
 
     pub fn config(&self) -> &A11yConfig {
@@ -542,6 +548,7 @@ mod tests {
                 poll: Duration::from_millis(1),
                 verify_timeout: Duration::from_millis(20),
                 before_restore: Duration::ZERO,
+                unverified_grace: Duration::from_millis(5),
             },
             verify_timeout: Duration::from_millis(10),
             ..Default::default()

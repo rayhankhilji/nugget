@@ -14,6 +14,23 @@ fn werr(e: impl std::fmt::Display) -> Error {
     Error::Other(format!("Wayland clipboard: {e}"))
 }
 
+/// The text, plus the hint that keeps clipboard managers from recording a draft we paste
+/// (`x-kde-passwordManagerHint: secret`, honoured by Klipper and others). Not used on restore.
+fn text_sources(text: &str) -> Vec<MimeSource> {
+    vec![
+        MimeSource {
+            source: Source::Bytes(text.as_bytes().into()),
+            mime_type: copy::MimeType::Text,
+        },
+        MimeSource {
+            source: Source::Bytes(super::x11::PASSWORD_HINT_DATA.into()),
+            mime_type: copy::MimeType::Specific(
+                super::x11::PASSWORD_HINT_TARGET.into(),
+            ),
+        },
+    ]
+}
+
 pub struct WaylandClipboard;
 
 impl WaylandClipboard {
@@ -77,7 +94,7 @@ impl Clipboard for WaylandClipboard {
     fn set_text(&mut self, text: &str) -> Result<()> {
         // Served from a background thread until something else is copied.
         copy::Options::new()
-            .copy(Source::Bytes(text.as_bytes().into()), copy::MimeType::Text)
+            .copy_multi(text_sources(text))
             .map_err(werr)
     }
 
@@ -95,5 +112,21 @@ impl Clipboard for WaylandClipboard {
             return copy::clear(copy::ClipboardType::Regular, copy::Seat::All).map_err(werr);
         }
         copy::Options::new().copy_multi(sources).map_err(werr)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn set_text_offers_the_password_manager_hint() {
+        let s = text_sources("draft");
+        assert!(matches!(s[0].mime_type, copy::MimeType::Text));
+        assert!(matches!(
+            &s[1].mime_type,
+            copy::MimeType::Specific(m) if m == "x-kde-passwordManagerHint"
+        ));
+        assert!(matches!(&s[1].source, Source::Bytes(b) if &b[..] == b"secret"));
     }
 }

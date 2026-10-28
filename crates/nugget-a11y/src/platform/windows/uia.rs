@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 
 use nugget_core::{Error, Result};
-use windows::Win32::Foundation::{CloseHandle, RECT};
+use windows::Win32::Foundation::{CloseHandle, HWND, RECT};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, SAFEARRAY,
 };
@@ -17,15 +17,29 @@ use windows::Win32::System::Ole::{
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
+use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_I4, VariantClear};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement,
-    IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationValuePattern,
+    IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern,
+    IUIAutomationRangeValuePattern, IUIAutomationScrollItemPattern, IUIAutomationScrollPattern,
+    IUIAutomationSelectionItemPattern, IUIAutomationTextPattern, IUIAutomationTextRange,
+    IUIAutomationTogglePattern, IUIAutomationValuePattern, ScrollAmount,
     TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
     UIA_AriaPropertiesPropertyId, UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId,
     UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
-    UIA_HasKeyboardFocusPropertyId, UIA_HelpTextPropertyId, UIA_IsKeyboardFocusablePropertyId,
-    UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId, UIA_NamePropertyId, UIA_PROPERTY_ID,
-    UIA_ProcessIdPropertyId, UIA_TextPatternId, UIA_ValuePatternId,
+    UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
+    UIA_HasKeyboardFocusPropertyId, UIA_HelpTextPropertyId, UIA_InvokePatternId,
+    UIA_IsEnabledPropertyId, UIA_IsExpandCollapsePatternAvailablePropertyId,
+    UIA_IsInvokePatternAvailablePropertyId, UIA_IsKeyboardFocusablePropertyId,
+    UIA_IsOffscreenPropertyId, UIA_IsPasswordPropertyId,
+    UIA_IsRangeValuePatternAvailablePropertyId, UIA_IsScrollItemPatternAvailablePropertyId,
+    UIA_IsScrollPatternAvailablePropertyId, UIA_IsSelectionItemPatternAvailablePropertyId,
+    UIA_IsTogglePatternAvailablePropertyId, UIA_IsValuePatternAvailablePropertyId,
+    UIA_NamePropertyId, UIA_PATTERN_ID, UIA_PROPERTY_ID, UIA_ProcessIdPropertyId,
+    UIA_RangeValueIsReadOnlyPropertyId, UIA_RangeValuePatternId, UIA_ScrollItemPatternId,
+    UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId, UIA_SelectionItemPatternId,
+    UIA_TextPatternId, UIA_ToggleToggleStatePropertyId, UIA_TogglePatternId,
+    UIA_ValueIsReadOnlyPropertyId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -64,6 +78,21 @@ const CACHED: &[UIA_PROPERTY_ID] = &[
     UIA_IsOffscreenPropertyId,
     UIA_ProcessIdPropertyId,
     UIA_BoundingRectanglePropertyId,
+    // Computer use: state and the patterns behind each action.
+    UIA_IsEnabledPropertyId,
+    UIA_IsInvokePatternAvailablePropertyId,
+    UIA_IsTogglePatternAvailablePropertyId,
+    UIA_ToggleToggleStatePropertyId,
+    UIA_IsValuePatternAvailablePropertyId,
+    UIA_ValueIsReadOnlyPropertyId,
+    UIA_IsRangeValuePatternAvailablePropertyId,
+    UIA_RangeValueIsReadOnlyPropertyId,
+    UIA_IsSelectionItemPatternAvailablePropertyId,
+    UIA_SelectionItemIsSelectedPropertyId,
+    UIA_IsExpandCollapsePatternAvailablePropertyId,
+    UIA_ExpandCollapseExpandCollapseStatePropertyId,
+    UIA_IsScrollPatternAvailablePropertyId,
+    UIA_IsScrollItemPatternAvailablePropertyId,
 ];
 
 fn cache_request() -> Result<IUIAutomationCacheRequest> {
@@ -133,7 +162,7 @@ pub fn foreground() -> Result<Option<Foreground>> {
 }
 
 /// The executable file name of a process (`chrome.exe`).
-fn exe_name(pid: u32) -> Option<String> {
+pub fn exe_name(pid: u32) -> Option<String> {
     // SAFETY: a query-only handle, closed below.
     let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
     let mut buf = vec![0u16; 1024];
@@ -157,7 +186,11 @@ fn exe_name(pid: u32) -> Option<String> {
 /// Physical-to-logical scale of the foreground window (1.0 at 96 DPI).
 pub fn foreground_scale() -> f64 {
     // SAFETY: no preconditions.
-    let hwnd = unsafe { GetForegroundWindow() };
+    window_scale(unsafe { GetForegroundWindow() })
+}
+
+/// Physical-to-logical scale of a window (1.0 at 96 DPI, and for an invalid handle).
+pub fn window_scale(hwnd: HWND) -> f64 {
     if hwnd.is_invalid() {
         return 1.0;
     }
@@ -198,6 +231,72 @@ fn rect(r: RECT) -> Option<Rect> {
     })
 }
 
+/// What an element can do, from its pattern-availability properties (computer use).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Caps {
+    pub enabled: bool,
+    pub invoke: bool,
+    pub toggle: bool,
+    /// `ToggleState`: 0 off, 1 on, 2 indeterminate.
+    pub toggle_state: Option<i32>,
+    pub value: bool,
+    pub value_read_only: bool,
+    pub range_value: bool,
+    pub range_read_only: bool,
+    pub selection_item: bool,
+    pub selected: bool,
+    pub expand_collapse: bool,
+    /// `ExpandCollapseState`: 0 collapsed, 1 expanded, 2 partially expanded, 3 leaf.
+    pub expand_state: Option<i32>,
+    pub scroll: bool,
+    pub scroll_item: bool,
+}
+
+impl Default for Caps {
+    fn default() -> Self {
+        Caps {
+            enabled: true,
+            invoke: false,
+            toggle: false,
+            toggle_state: None,
+            value: false,
+            value_read_only: false,
+            range_value: false,
+            range_read_only: false,
+            selection_item: false,
+            selected: false,
+            expand_collapse: false,
+            expand_state: None,
+            scroll: false,
+            scroll_item: false,
+        }
+    }
+}
+
+enum Prop {
+    Bool(bool),
+    I32(i32),
+}
+
+/// A bool or i32 out of a property VARIANT, which is cleared. Anything else (including UIA's
+/// "not supported" sentinel, an IUnknown) is `None`.
+fn variant_prop(mut v: VARIANT) -> Option<Prop> {
+    // SAFETY: `v` is an initialised VARIANT owned here; the union member read matches `vt`,
+    // and VariantClear releases whatever it holds exactly once.
+    unsafe {
+        let inner = &v.Anonymous.Anonymous;
+        let out = if inner.vt == VT_BOOL {
+            Some(Prop::Bool(inner.Anonymous.boolVal.0 != 0))
+        } else if inner.vt == VT_I4 {
+            Some(Prop::I32(inner.Anonymous.lVal))
+        } else {
+            None
+        };
+        let _ = VariantClear(&mut v);
+        out
+    }
+}
+
 /// A live UI Automation element.
 #[derive(Clone)]
 pub struct UiaEl {
@@ -207,6 +306,127 @@ pub struct UiaEl {
 }
 
 impl UiaEl {
+    /// The element of a top-level window, with the cached properties.
+    pub fn from_hwnd(hwnd: HWND) -> Result<UiaEl> {
+        let a = automation()?;
+        let req = cache_request()?;
+        // SAFETY: valid automation and cache request; a stale handle yields an error.
+        let el = unsafe { a.ElementFromHandleBuildCache(hwnd, &req) }.map_err(werr)?;
+        Ok(UiaEl { el, cached: true })
+    }
+
+    fn prop(&self, id: UIA_PROPERTY_ID) -> Option<Prop> {
+        // SAFETY: valid element; the VARIANT is owned and cleared by `variant_prop`.
+        let v = unsafe {
+            if self.cached {
+                self.el.GetCachedPropertyValue(id)
+            } else {
+                self.el.GetCurrentPropertyValue(id)
+            }
+        };
+        variant_prop(v.ok()?)
+    }
+
+    fn prop_bool(&self, id: UIA_PROPERTY_ID) -> Option<bool> {
+        match self.prop(id)? {
+            Prop::Bool(b) => Some(b),
+            Prop::I32(_) => None,
+        }
+    }
+
+    fn prop_i32(&self, id: UIA_PROPERTY_ID) -> Option<i32> {
+        match self.prop(id)? {
+            Prop::I32(i) => Some(i),
+            Prop::Bool(_) => None,
+        }
+    }
+
+    pub fn caps(&self) -> Caps {
+        let b = |id| self.prop_bool(id).unwrap_or(false);
+        let toggle = b(UIA_IsTogglePatternAvailablePropertyId);
+        let expand_collapse = b(UIA_IsExpandCollapsePatternAvailablePropertyId);
+        let selection_item = b(UIA_IsSelectionItemPatternAvailablePropertyId);
+        let value = b(UIA_IsValuePatternAvailablePropertyId);
+        let range_value = b(UIA_IsRangeValuePatternAvailablePropertyId);
+        Caps {
+            enabled: self.prop_bool(UIA_IsEnabledPropertyId).unwrap_or(true),
+            invoke: b(UIA_IsInvokePatternAvailablePropertyId),
+            toggle,
+            toggle_state: toggle
+                .then(|| self.prop_i32(UIA_ToggleToggleStatePropertyId))
+                .flatten(),
+            value,
+            value_read_only: value && b(UIA_ValueIsReadOnlyPropertyId),
+            range_value,
+            range_read_only: range_value && b(UIA_RangeValueIsReadOnlyPropertyId),
+            selection_item,
+            selected: selection_item && b(UIA_SelectionItemIsSelectedPropertyId),
+            expand_collapse,
+            expand_state: expand_collapse
+                .then(|| self.prop_i32(UIA_ExpandCollapseExpandCollapseStatePropertyId))
+                .flatten(),
+            scroll: b(UIA_IsScrollPatternAvailablePropertyId),
+            scroll_item: b(UIA_IsScrollItemPatternAvailablePropertyId),
+        }
+    }
+
+    fn pattern<T: windows::core::Interface>(&self, id: UIA_PATTERN_ID) -> Result<T> {
+        // SAFETY: valid element; the pattern interface is owned.
+        unsafe { self.el.GetCurrentPatternAs::<T>(id) }
+            .map_err(|_| Error::Unsupported("the element does not support this action".into()))
+    }
+
+    pub fn invoke(&self) -> Result<()> {
+        let p: IUIAutomationInvokePattern = self.pattern(UIA_InvokePatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.Invoke() }.map_err(werr)
+    }
+
+    pub fn toggle(&self) -> Result<()> {
+        let p: IUIAutomationTogglePattern = self.pattern(UIA_TogglePatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.Toggle() }.map_err(werr)
+    }
+
+    pub fn select(&self) -> Result<()> {
+        let p: IUIAutomationSelectionItemPattern = self.pattern(UIA_SelectionItemPatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.Select() }.map_err(werr)
+    }
+
+    pub fn set_focus(&self) -> Result<()> {
+        // SAFETY: valid element.
+        unsafe { self.el.SetFocus() }.map_err(werr)
+    }
+
+    pub fn set_range_value(&self, v: f64) -> Result<()> {
+        let p: IUIAutomationRangeValuePattern = self.pattern(UIA_RangeValuePatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.SetValue(v) }.map_err(werr)
+    }
+
+    pub fn scroll_into_view(&self) -> Result<()> {
+        let p: IUIAutomationScrollItemPattern = self.pattern(UIA_ScrollItemPatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.ScrollIntoView() }.map_err(werr)
+    }
+
+    /// One `ScrollPattern.Scroll` step (horizontal, vertical).
+    pub fn scroll(&self, horizontal: ScrollAmount, vertical: ScrollAmount) -> Result<()> {
+        let p: IUIAutomationScrollPattern = self.pattern(UIA_ScrollPatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe { p.Scroll(horizontal, vertical) }.map_err(werr)
+    }
+
+    pub fn expand_collapse(&self, expand: bool) -> Result<()> {
+        let p: IUIAutomationExpandCollapsePattern = self.pattern(UIA_ExpandCollapsePatternId)?;
+        // SAFETY: valid pattern interface.
+        unsafe {
+            if expand { p.Expand() } else { p.Collapse() }
+        }
+        .map_err(werr)
+    }
+
     pub fn focused() -> Result<Option<UiaEl>> {
         let a = automation()?;
         // SAFETY: `a` is a valid IUIAutomation.

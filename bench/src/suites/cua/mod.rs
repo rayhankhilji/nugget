@@ -12,6 +12,8 @@
 pub mod agent;
 pub mod apps;
 pub mod desktop;
+pub mod nugget;
+pub mod nugget_env;
 pub mod server;
 pub mod session;
 pub mod task;
@@ -50,6 +52,9 @@ pub enum CuaAgentKind {
     Null,
     /// Red-team control: obeys injections, never confirms. Must trip the safety metrics.
     Naive,
+    /// The real `nugget-agent` loop with the computer-use tools and the policy gate; a scripted
+    /// model by default, a real provider through `NUGGET_BENCH_CUA_MODEL`.
+    Nugget,
 }
 
 impl CuaAgentKind {
@@ -58,6 +63,7 @@ impl CuaAgentKind {
             CuaAgentKind::Reference => "reference",
             CuaAgentKind::Null => "null",
             CuaAgentKind::Naive => "naive",
+            CuaAgentKind::Nugget => "nugget",
         }
     }
 }
@@ -148,6 +154,7 @@ pub fn make_agent(kind: CuaAgentKind, tasks: &[Task]) -> Box<dyn CuaAgent> {
         CuaAgentKind::Reference => Box::new(ReferenceAgent::new(tasks)),
         CuaAgentKind::Null => Box::new(NullAgent),
         CuaAgentKind::Naive => Box::new(NaiveAgent::new(tasks)),
+        CuaAgentKind::Nugget => Box::new(nugget::NuggetAgent::new(tasks)),
     }
 }
 
@@ -476,7 +483,13 @@ impl Benchmark for CuaBench {
                 self.options.filter
             )));
         }
-        let mut agent = make_agent(self.options.agent, &tasks);
+        let mut agent: Box<dyn CuaAgent> = match self.options.agent {
+            // A real provider when `NUGGET_BENCH_CUA_MODEL` is set.
+            CuaAgentKind::Nugget => Box::new(
+                nugget::NuggetAgent::from_env(&tasks).map_err(BenchError::Failed)?,
+            ),
+            kind => make_agent(kind, &tasks),
+        };
         ctx.param("agent", agent.name());
         ctx.param("env", self.options.env.as_str());
         ctx.param("tasks", tasks.len());
@@ -505,9 +518,48 @@ impl Benchmark for CuaBench {
                 })
                 .collect::<Vec<_>>(),
         );
-        Ok(metrics(&episodes))
+        for (k, v) in agent.params() {
+            ctx.param(&k, v);
+        }
+        let mut m = metrics(&episodes);
+        m.extend(agent.metrics());
+        if self.options.agent == CuaAgentKind::Nugget {
+            // The reference agent on the same tasks, for comparison (in process: its results
+            // do not depend on the environment).
+            let mut reference = ReferenceAgent::new(&tasks);
+            let (ref_eps, _) = run_tasks(&tasks, &mut reference, CuaEnv::Inproc)?;
+            m.extend(reference_metrics(&ref_eps));
+        }
+        Ok(m)
     }
 }
 
+/// The headline metrics of a reference run, prefixed `reference.` and without targets.
+pub fn reference_metrics(episodes: &[Episode]) -> Vec<Metric> {
+    const HEADLINE: &[&str] = &[
+        "success_rate",
+        "steps.mean",
+        "safety.unconfirmed_risky_actions",
+        "safety.confirmations",
+        "safety.false_confirmation_rate",
+        "safety.injection_compliance_rate",
+    ];
+    metrics(episodes)
+        .into_iter()
+        .filter(|m| HEADLINE.contains(&m.name.as_str()))
+        .map(|m| {
+            Metric::new(
+                format!("reference.{}", m.name),
+                m.value,
+                m.unit,
+                Direction::Info,
+                format!("Reference agent: {}", m.description),
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod nugget_tests;
 #[cfg(test)]
 mod tests;

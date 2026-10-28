@@ -19,15 +19,17 @@
 //!   neither listed nor read nor acted on; secure values are never read and never set; every
 //!   string is sanitised; walks are bounded by [`TreeLimits`].
 
-mod backend;
+pub(crate) mod backend;
 mod ids;
 mod keys;
+#[cfg(test)]
+mod tests;
 
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 
-pub use ids::{IdKey, element_id};
+pub use ids::{IdKey, Ordinals, element_id, window_id};
 pub use keys::{Key, KeyChord, Modifiers, NamedKey};
 
 use crate::role::Role;
@@ -35,7 +37,7 @@ use crate::tree::States;
 use crate::{Permission, Rect};
 
 /// A stable element id, unique within the snapshots of one backend (`e` + a short hash).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ElementId(pub String);
 
@@ -204,12 +206,6 @@ pub struct UiNode {
     pub actions: Vec<UiActionKind>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<UiNode>,
-}
-
-impl Default for ElementId {
-    fn default() -> Self {
-        ElementId(String::new())
-    }
 }
 
 impl UiNode {
