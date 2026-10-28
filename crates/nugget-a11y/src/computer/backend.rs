@@ -129,7 +129,10 @@ fn matches_app(app: &AppEntry, query: &str) -> bool {
     }
     let name = app.name.to_lowercase();
     let id = app.id.as_deref().unwrap_or("").to_lowercase();
+    // Script and bundle names: `gtk_app.py`, `Mail.app`, `code.exe`.
+    let stem = name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s);
     name == q
+        || stem == q
         || (!id.is_empty()
             && (id == q
                 || id.trim_end_matches(".desktop") == q
@@ -532,6 +535,22 @@ impl<P: Platform> Backend<P> {
         };
         let local_before = with_bounds.then(|| fingerprint(el, 200, true));
 
+        // A combo box's menu items often never report `selected`; the combo's own value does.
+        let combo = matches!(action, UiAction::Select)
+            .then(|| {
+                let mut cur = el.parent();
+                for _ in 0..4 {
+                    let c = cur?;
+                    if read(&c).role == Role::ComboBox {
+                        return Some(c);
+                    }
+                    cur = c.parent();
+                }
+                None
+            })
+            .flatten();
+        let item_name = before.name.as_deref().map(norm).filter(|n| !n.is_empty());
+
         el.perform(&action)?;
 
         let mut after = before.clone();
@@ -550,7 +569,17 @@ impl<P: Platform> Backend<P> {
                     ok
                 }
                 UiAction::Select => {
-                    let ok = s.selected || s.checked == Some(true);
+                    let combo_shows = || {
+                        let (Some(c), Some(want)) = (&combo, &item_name) else {
+                            return false;
+                        };
+                        let n = read(c);
+                        [n.value.as_deref(), n.name.as_deref()]
+                            .into_iter()
+                            .flatten()
+                            .any(|v| norm(v) == *want)
+                    };
+                    let ok = s.selected || s.checked == Some(true) || combo_shows();
                     detail = if ok {
                         "selected".into()
                     } else {
