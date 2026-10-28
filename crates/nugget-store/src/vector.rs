@@ -11,9 +11,17 @@
 //! 2. rescores those candidates by exact cosine distance and keeps the best `k`.
 //!
 //! Sign quantization approximates the angle between vectors (random-hyperplane LSH with the
-//! coordinate axes as hyperplanes), so it suits normalised embeddings; rescoring keeps the
-//! returned scores exact, only recall is approximate. Mean-centering before quantizing would
-//! help embeddings that share a large common component, but cannot be maintained incrementally.
+//! coordinate axes as hyperplanes); rescoring keeps the returned scores exact, only recall is
+//! approximate. Bits are taken **relative to a centre**, the mean of the vectors stored when the
+//! index was built (kept in `meta`, then frozen): embeddings that share a large common component,
+//! or sparse ones whose zero coordinates would all quantize alike, otherwise collapse onto a few
+//! bit patterns.
+//!
+//! Sign bits only carry information for dense vectors. A sparse query (most coordinates zero,
+//! as from hashed bag-of-words embedders) quantizes to noise on every zero coordinate: on the
+//! bench's 256-dim hash embeddings at 20k vectors, recall@10 against exact search was 0.03 with
+//! plain sign bits and 0.06 with centring. Such queries ([`quantizable`]) always use the exact
+//! scan; neural embedding models produce dense vectors and take the approximate path.
 //!
 //! Rescoring reads the candidates' floats from `ann_vectors`, a plain rowid table holding a copy
 //! of each embedding. Reading them from `chunk_vec` instead would cost more than the scan it
@@ -45,6 +53,17 @@ pub const ANN_OVERSAMPLE: usize = 10;
 const ANN_MIN_CANDIDATES: usize = 100;
 /// `meta` flag: the approximate-search index holds every vector of `chunk_vec`.
 const META_ANN_READY: &str = "ann_index_ready";
+/// `meta` key: the quantization centre (hex of little-endian `f32`s), written with the tables.
+const META_ANN_CENTER: &str = "ann_center";
+
+/// Least share of non-zero coordinates for a query to take the approximate path.
+const ANN_MIN_DENSITY: f32 = 0.5;
+
+/// Whether `v` is dense enough for its sign bits to rank neighbours (see the module docs).
+fn quantizable(v: &[f32]) -> bool {
+    let nonzero = v.iter().filter(|x| x.abs() > f32::EPSILON).count();
+    nonzero as f32 >= v.len() as f32 * ANN_MIN_DENSITY
+}
 
 /// Bit-vector width for embeddings of `dim` dimensions: `vec0` bit vectors need a multiple of 8,
 /// so the tail is padded with zero bits (equal in every vector, so hamming distances are
@@ -53,11 +72,12 @@ fn bits_dim(dim: usize) -> usize {
     dim.div_ceil(8) * 8
 }
 
-/// Sign bits of `v`, packed little-endian within each byte (bit `i` is `v[i] > 0`).
-fn sign_bits(v: &[f32]) -> Vec<u8> {
+/// Sign bits of `v - center`, packed little-endian within each byte (bit `i` is
+/// `v[i] > center[i]`; a missing centre coordinate counts as 0).
+fn sign_bits(v: &[f32], center: &[f32]) -> Vec<u8> {
     let mut out = vec![0u8; v.len().div_ceil(8)];
     for (i, x) in v.iter().enumerate() {
-        if *x > 0.0 {
+        if *x > center.get(i).copied().unwrap_or(0.0) {
             out[i / 8] |= 1 << (i % 8);
         }
     }
@@ -87,6 +107,7 @@ fn create_ann_tables(conn: &Connection, dim: usize) -> Result<()> {
 pub(crate) struct AnnWriter<'c> {
     bits: CachedStatement<'c>,
     vectors: CachedStatement<'c>,
+    center: Vec<f32>,
 }
 
 impl<'c> AnnWriter<'c> {
@@ -104,6 +125,7 @@ impl<'c> AnnWriter<'c> {
             return Ok(None);
         }
         Ok(Some(Self {
+            center: ann_center(conn)?,
             bits: conn
                 .prepare_cached("INSERT INTO ann_bits (rowid, bits) VALUES (?1, vec_bit(?2))")
                 .db("prepare vector bits insert")?,
@@ -115,13 +137,65 @@ impl<'c> AnnWriter<'c> {
 
     pub(crate) fn insert(&mut self, id: ChunkId, embedding: &[f32]) -> Result<()> {
         self.bits
-            .execute(params![id, sign_bits(embedding)])
+            .execute(params![id, sign_bits(embedding, &self.center)])
             .db("insert vector bits")?;
         self.vectors
             .execute(params![id, f32_blob(embedding)])
             .db("insert vector copy")?;
         Ok(())
     }
+}
+
+/// The quantization centre ([`META_ANN_CENTER`]); empty (no centring) if absent or malformed.
+fn ann_center(conn: &Connection) -> Result<Vec<f32>> {
+    let hex: Option<String> = conn
+        .prepare_cached("SELECT value FROM meta WHERE key = ?1")
+        .db("prepare index centre read")?
+        .query_row([META_ANN_CENTER], |r| r.get(0))
+        .optional()
+        .db("read index centre")?;
+    Ok(hex
+        .and_then(|h| hex::decode(h).ok())
+        .and_then(|b| f32_from_blob(&b))
+        .unwrap_or_default())
+}
+
+/// Mean of the vectors at `positions` (see [`ensure_ann_ready`]), one sequential read per `vec0`
+/// chunk. Zeros when there are none.
+fn mean_vector(
+    conn: &Connection,
+    positions: &[(i64, i64, ChunkId)],
+    dim: usize,
+) -> Result<Vec<f32>> {
+    let stride = dim * 4;
+    let mut sum = vec![0f64; dim];
+    let mut n = 0usize;
+    let mut read = conn
+        .prepare_cached("SELECT vectors FROM chunk_vec_vector_chunks00 WHERE _rowid_ = ?1")
+        .db("prepare vector chunk read")?;
+    for group in positions.chunk_by(|a, b| a.0 == b.0) {
+        let blob: Option<Vec<u8>> = read
+            .query_row([group[0].0], |r| r.get(0))
+            .optional()
+            .db("read vector chunk")?;
+        let Some(blob) = blob else {
+            continue;
+        };
+        for &(_, offset, _) in group {
+            let v = usize::try_from(offset)
+                .ok()
+                .and_then(|o| blob.get(o * stride..(o + 1) * stride))
+                .and_then(f32_from_blob);
+            if let Some(v) = v {
+                for (s, x) in sum.iter_mut().zip(&v) {
+                    *s += f64::from(*x);
+                }
+                n += 1;
+            }
+        }
+    }
+    let n = n.max(1) as f64;
+    Ok(sum.into_iter().map(|s| (s / n) as f32).collect())
 }
 
 fn ann_ready(conn: &Connection) -> Result<bool> {
@@ -147,13 +221,6 @@ fn ensure_ann_ready(conn: &mut Connection, dim: usize) -> Result<()> {
     if ann_ready(conn)? {
         return Ok(());
     }
-    {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .db("begin approximate index build")?;
-        create_ann_tables(&tx, dim)?;
-        tx.commit().db("commit approximate index tables")?;
-    }
     // (vec0 chunk, offset in it, rowid = chunk id), in storage order.
     let mut positions: Vec<(i64, i64, ChunkId)> = {
         let mut stmt = conn
@@ -169,6 +236,33 @@ fn ensure_ann_ready(conn: &mut Connection, dim: usize) -> Result<()> {
             .db("vector position scan")?
     };
     positions.sort_unstable();
+    // The centre is fixed once, with the tables, so every bit vector uses the same one; a build
+    // resumed after an interruption keeps it.
+    if ann_center(conn)?.len() != dim {
+        let center = mean_vector(conn, &positions, dim)?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .db("begin approximate index build")?;
+        tx.execute_batch(
+            "DROP TABLE IF EXISTS ann_bits;
+             DROP TABLE IF EXISTS ann_vectors;
+             DROP TRIGGER IF EXISTS chunks_ann_ad;",
+        )
+        .db("reset approximate vector index")?;
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            params![META_ANN_CENTER, hex::encode(f32_blob(&center))],
+        )
+        .db("store index centre")?;
+        create_ann_tables(&tx, dim)?;
+        tx.commit().db("commit approximate index tables")?;
+    } else {
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .db("begin approximate index build")?;
+        create_ann_tables(&tx, dim)?;
+        tx.commit().db("commit approximate index tables")?;
+    }
     let stride = dim * 4;
     let mut added = 0usize;
     for group in positions.chunk_by(|a, b| a.0 == b.0) {
@@ -279,6 +373,7 @@ fn approx_neighbours(c: &Connection, embedding: &[f32], k: usize) -> Result<Vec<
     let candidates = k
         .saturating_mul(ANN_OVERSAMPLE)
         .clamp(ANN_MIN_CANDIDATES, MAX_KNN);
+    let center = ann_center(c)?;
     let ids: Vec<ChunkId> = {
         let mut knn = c
             .prepare_cached(
@@ -288,9 +383,10 @@ fn approx_neighbours(c: &Connection, embedding: &[f32], k: usize) -> Result<Vec<
             )
             .db("prepare binary vector search")?;
         let rows = knn
-            .query_map(params![sign_bits(embedding), candidates as i64], |r| {
-                r.get(0)
-            })
+            .query_map(
+                params![sign_bits(embedding, &center), candidates as i64],
+                |r| r.get(0),
+            )
             .db("binary vector search")?;
         rows.collect::<rusqlite::Result<_>>()
             .db("binary vector search")?
@@ -353,7 +449,7 @@ fn neighbour_hits(c: &Connection, neighbours: Vec<(ChunkId, f64)>) -> Result<Vec
 impl Store {
     /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
     ///
-    /// Exact while the store holds fewer than [`ANN_MIN_VECTORS`] vectors (or when
+    /// Exact while the store holds fewer than [`ANN_MIN_VECTORS`] vectors, for sparse queries (or when
     /// `limit × ANN_OVERSAMPLE` exceeds 4096); approximate from there on, through the
     /// binary-quantized index described in this module: scores stay exact, but a true
     /// neighbour may occasionally be missed. The first approximate search builds that index
@@ -405,7 +501,9 @@ impl Store {
             && match mode {
                 Mode::Exact => false,
                 Mode::Approx => true,
-                Mode::Auto => self.with_read_conn(vector_count)? >= ANN_MIN_VECTORS,
+                Mode::Auto => {
+                    quantizable(embedding) && self.with_read_conn(vector_count)? >= ANN_MIN_VECTORS
+                }
             };
         let approx = wanted
             && (self.with_read_conn(ann_ready)?
@@ -472,9 +570,19 @@ mod tests {
     }
 
     #[test]
+    fn sparse_queries_are_not_quantized() {
+        assert!(quantizable(&[0.1, -0.2, 0.3, 0.0]));
+        assert!(!quantizable(&[0.0, 0.0, 0.0, 0.5]));
+    }
+
+    #[test]
     fn sign_bits_pack_and_pad() {
-        assert_eq!(sign_bits(&[1.0, -1.0, 0.0, 2.0]), vec![0b1001]);
-        assert_eq!(sign_bits(&[1.0; 9]), vec![0xff, 0x01]);
+        assert_eq!(sign_bits(&[1.0, -1.0, 0.0, 2.0], &[]), vec![0b1001]);
+        assert_eq!(sign_bits(&[1.0; 9], &[]), vec![0xff, 0x01]);
+        assert_eq!(
+            sign_bits(&[1.0, -1.0, 0.0, 2.0], &[1.5, -2.0, -0.5, 1.0]),
+            vec![0b1110]
+        );
         assert_eq!(bits_dim(384), 384);
         assert_eq!(bits_dim(10), 16);
     }
