@@ -15,7 +15,9 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use nugget_browser::bridge::AttachInfo;
-use nugget_browser::host::{IpcDaemonLink, RelayEnd, run_relay, spawn_extension_reader};
+use nugget_browser::host::{
+    IpcDaemonLink, RelayEnd, run_relay, spawn_extension_reader, wait_extension_closed,
+};
 use nugget_browser::install::{self, Browser, InstallConfig};
 use nugget_core::paths::Paths;
 
@@ -152,7 +154,7 @@ fn host(args: &[String]) -> ExitCode {
             let link = tokio::select! {
                 link = IpcDaemonLink::connect(&paths, info.clone()) => link,
                 // stdin closed while connecting: the extension is gone.
-                () = wait_closed(&mut from_ext) => return ExitCode::SUCCESS,
+                () = wait_extension_closed(&mut from_ext) => return ExitCode::SUCCESS,
             };
             match link {
                 Ok(link) => {
@@ -168,25 +170,11 @@ fn host(args: &[String]) -> ExitCode {
                     eprintln!("nugget-browser-host: daemon not reachable ({e}); retrying");
                     tokio::select! {
                         () = tokio::time::sleep(backoff) => {}
-                        () = wait_closed(&mut from_ext) => return ExitCode::SUCCESS,
+                        () = wait_extension_closed(&mut from_ext) => return ExitCode::SUCCESS,
                     }
                     backoff = (backoff * 2).min(Duration::from_secs(10));
                 }
             }
         }
     })
-}
-
-/// Resolves when the extension side closes; drops (unanswerable) messages meanwhile.
-async fn wait_closed(
-    rx: &mut tokio::sync::mpsc::Receiver<
-        Result<nugget_browser::ExtensionMessage, nugget_browser::framing::FrameError>,
-    >,
-) {
-    loop {
-        match rx.recv().await {
-            None | Some(Err(_)) => return,
-            Some(Ok(_)) => {}
-        }
-    }
 }
