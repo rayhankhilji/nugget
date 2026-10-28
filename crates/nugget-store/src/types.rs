@@ -31,6 +31,10 @@ pub struct NewItem {
     /// Modification time reported by the source, if any.
     #[serde(with = "time::serde::rfc3339::option")]
     pub source_modified_at: Option<OffsetDateTime>,
+    /// Connector-defined version token (e.g. `mtime:size`, an etag, a Gmail history id) used to
+    /// skip unchanged items without re-reading their content.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 impl NewItem {
@@ -51,7 +55,18 @@ impl NewItem {
             text: None,
             metadata: Value::Object(Default::default()),
             source_modified_at: None,
+            version: None,
         }
+    }
+
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        self.version = Some(version.into());
+        self
+    }
+
+    pub fn with_modified_at(mut self, at: OffsetDateTime) -> Self {
+        self.source_modified_at = Some(at);
+        self
     }
 
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
@@ -86,6 +101,8 @@ pub struct Item {
     pub metadata: Value,
     #[serde(with = "time::serde::rfc3339::option")]
     pub source_modified_at: Option<OffsetDateTime>,
+    #[serde(default)]
+    pub version: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub created_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339")]
@@ -152,8 +169,29 @@ impl From<Hit> for nugget_core::ipc::SearchHit {
             title: h.title,
             snippet: h.snippet,
             score: h.score,
+            url: None,
         }
     }
+}
+
+/// A stored chunk with its owning item.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Chunk {
+    pub id: ChunkId,
+    pub item: ItemRef,
+    /// Position within the item, from 0.
+    pub ord: u32,
+    pub text: String,
+    /// Title of the owning item.
+    pub title: Option<String>,
+}
+
+/// Per-source row counts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceCounts {
+    pub source: SourceId,
+    pub items: u64,
+    pub chunks: u64,
 }
 
 /// Row counts, e.g. for the status page.

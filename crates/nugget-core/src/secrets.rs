@@ -7,3 +7,13 @@ pub const KEYCHAIN_SERVICE: &str = "dev.nugget.Nugget";
 pub fn provider_account(name: &str) -> String {
     format!("provider:{name}")
 }
+
+/// Account name for a source's OAuth token set (JSON), e.g. a Gmail connection.
+pub fn oauth_account(source: &str) -> String {
+    format!("oauth:{source}")
+}
+
+/// Account name for a source's password or app password (IMAP, CalDAV).
+pub fn password_account(source: &str) -> String {
+    format!("password:{source}")
+}

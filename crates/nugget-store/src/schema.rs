@@ -95,6 +95,11 @@ const MIGRATIONS: &[&str] = &[
         SELECT RAISE(ABORT, 'audit log is append-only');
     END;
     "#,
+    // v2: connector-reported item versions (for cheap change detection) and per-source scans.
+    r#"
+    ALTER TABLE items ADD COLUMN version TEXT;
+    CREATE INDEX IF NOT EXISTS items_source ON items (source);
+    "#,
 ];
 
 /// Schema version this build creates and understands.
@@ -164,12 +169,12 @@ mod tests {
     }
 
     #[test]
-    fn statements_are_idempotent_even_without_version_tracking() {
+    fn create_statements_are_idempotent_even_without_version_tracking() {
+        // v1 is pure `CREATE ... IF NOT EXISTS`; later migrations may use `ALTER TABLE`, which
+        // SQLite cannot make conditional, so they rely on `user_version` tracking alone.
         let conn = Connection::open_in_memory().unwrap();
-        for sql in MIGRATIONS {
-            conn.execute_batch(sql).unwrap();
-            conn.execute_batch(sql).unwrap();
-        }
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
     }
 
     #[test]

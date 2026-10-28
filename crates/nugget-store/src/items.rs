@@ -25,10 +25,11 @@ struct ItemRow {
     source_modified_at: Option<String>,
     created_at: String,
     updated_at: String,
+    version: Option<String>,
 }
 
 const ITEM_COLUMNS: &str = "id, title, content_hash, mime, text, metadata, source_modified_at, \
-                            created_at, updated_at";
+                            created_at, updated_at, version";
 
 fn read_item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemRow> {
     Ok(ItemRow {
@@ -41,6 +42,7 @@ fn read_item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemRow> {
         source_modified_at: r.get(6)?,
         created_at: r.get(7)?,
         updated_at: r.get(8)?,
+        version: r.get(9)?,
     })
 }
 
@@ -86,8 +88,8 @@ impl Store {
                 None => {
                     tx.execute(
                         "INSERT INTO items (source, key, title, content_hash, mime, text, metadata,
-                                            source_modified_at, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                                            source_modified_at, created_at, updated_at, version)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
                         params![
                             new.item.source.as_str(),
                             new.item.key.as_str(),
@@ -98,6 +100,7 @@ impl Store {
                             metadata,
                             modified,
                             now,
+                            new.version,
                         ],
                     )
                     .db("insert item")?;
@@ -116,6 +119,7 @@ impl Store {
                         && old.mime == new.mime
                         && old.text == new.text
                         && old.metadata == metadata
+                        && old.version == new.version
                         && modified_unchanged;
                     if unchanged {
                         UpsertOutcome::Unchanged
@@ -123,7 +127,7 @@ impl Store {
                         tx.execute(
                             "UPDATE items SET title = ?2, content_hash = ?3, mime = ?4, text = ?5,
                                               metadata = ?6, source_modified_at = ?7,
-                                              updated_at = ?8
+                                              updated_at = ?8, version = ?9
                              WHERE id = ?1",
                             params![
                                 old.id,
@@ -134,6 +138,7 @@ impl Store {
                                 metadata,
                                 modified,
                                 now,
+                                new.version,
                             ],
                         )
                         .db("update item")?;
@@ -167,6 +172,7 @@ impl Store {
                 .as_deref()
                 .map(parse_time)
                 .transpose()?,
+            version: row.version,
             created_at: parse_time(&row.created_at)?,
             updated_at: parse_time(&row.updated_at)?,
         }))

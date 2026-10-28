@@ -2809,6 +2809,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-connector"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "nugget-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
+name = "nugget-connector-caldav"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-connector-files"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-connector-google"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-connector-imap"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
 name = "nugget-core"
 version = "0.0.1"
 dependencies = [
@@ -2837,6 +2882,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-extract"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "nugget-infer"
 version = "0.0.1"
 dependencies = [
@@ -2857,6 +2911,13 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
+]
+
+[[package]]
+name = "nugget-ingest"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
 ]
 
 [[package]]
@@ -2899,6 +2960,27 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "nugget-oauth"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-retrieve"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-runtime"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
 ]
 
 [[package]]

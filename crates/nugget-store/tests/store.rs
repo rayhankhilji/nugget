@@ -677,3 +677,78 @@ fn egress_events_survive_dropping_the_store() {
     assert_eq!(got.len(), 200);
     assert_eq!(got[0].bytes_sent, 199);
 }
+
+mod sources {
+    use nugget_core::ids::{ItemKey, SourceId};
+    use nugget_store::{NewChunk, NewItem, Store};
+
+    fn put(store: &Store, source: &str, key: &str, version: Option<&str>, chunks: &[&str]) {
+        let mut item = NewItem::new(source, key, format!("{source}/{key}/{version:?}"))
+            .with_title(key.to_uppercase());
+        if let Some(v) = version {
+            item = item.with_version(v);
+        }
+        store.upsert_item(&item).unwrap();
+        let chunks: Vec<_> = chunks.iter().map(|t| NewChunk::text(*t)).collect();
+        store.replace_chunks(&item.item, &chunks).unwrap();
+    }
+
+    #[test]
+    fn versions_are_stored_and_listed_per_source() {
+        let store = Store::open_in_memory().unwrap();
+        put(&store, "files", "a.md", Some("1:10"), &["alpha"]);
+        put(&store, "files", "b.md", None, &["beta"]);
+        put(&store, "mail", "m1", Some("h7"), &["gamma"]);
+
+        let v = store.item_versions(&SourceId::new("files")).unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[&ItemKey::new("a.md")].as_deref(), Some("1:10"));
+        assert_eq!(v[&ItemKey::new("b.md")], None);
+
+        // A version change alone is a real update.
+        let item = NewItem::new("files", "a.md", "files/a.md/Some(\"1:10\")")
+            .with_title("A.MD")
+            .with_version("2:10");
+        assert_eq!(
+            store.upsert_item(&item).unwrap(),
+            nugget_store::UpsertOutcome::Updated
+        );
+        let got = store.get_item(&item.item).unwrap().unwrap();
+        assert_eq!(got.version.as_deref(), Some("2:10"));
+    }
+
+    #[test]
+    fn delete_source_removes_items_chunks_and_cursor_only_for_that_source() {
+        let store = Store::open_in_memory().unwrap();
+        put(&store, "files", "a.md", None, &["needle one", "two"]);
+        put(&store, "mail", "m1", None, &["needle three"]);
+        store
+            .set_cursor(&SourceId::new("files"), serde_json::json!({"x": 1}))
+            .unwrap();
+
+        assert_eq!(store.delete_source(&SourceId::new("files")).unwrap(), 1);
+        assert!(store.get_cursor(&SourceId::new("files")).unwrap().is_none());
+        let hits = store.search_text("needle", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].item.source.as_str(), "mail");
+
+        let counts = store.source_counts().unwrap();
+        assert_eq!(counts.len(), 1);
+        assert_eq!((counts[0].items, counts[0].chunks), (1, 1));
+    }
+
+    #[test]
+    fn get_chunks_preserves_requested_order_and_skips_unknown_ids() {
+        let store = Store::open_in_memory().unwrap();
+        put(&store, "files", "a.md", None, &["first", "second"]);
+        let hits = store.search_text("second", 1).unwrap();
+        let second = hits[0].chunk_id;
+        let first = store.search_text("first", 1).unwrap()[0].chunk_id;
+
+        let got = store.get_chunks(&[second, 999_999, first]).unwrap();
+        let texts: Vec<_> = got.iter().map(|c| (c.text.as_str(), c.ord)).collect();
+        assert_eq!(texts, vec![("second", 1), ("first", 0)]);
+        assert_eq!(got[0].title.as_deref(), Some("A.MD"));
+        assert!(store.get_chunks(&vec![1; 513]).is_err());
+    }
+}

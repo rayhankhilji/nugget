@@ -21,6 +21,7 @@ mod items;
 mod key;
 mod schema;
 mod search;
+mod sources;
 mod store;
 mod types;
 mod vec_ext;
@@ -29,8 +30,8 @@ pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
 pub use store::Store;
 pub use types::{
-    AuditEntry, AuditRecord, ChunkId, Counts, Hit, Item, NewChunk, NewItem, UpsertOutcome,
-    content_hash,
+    AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, NewChunk, NewItem, SourceCounts,
+    UpsertOutcome, content_hash,
 };
 
 pub use nugget_core::{Error, Result};

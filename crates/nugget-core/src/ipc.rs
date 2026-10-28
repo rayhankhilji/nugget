@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capability::{Capabilities, Locality, Tier};
 use crate::egress::EgressEvent;
-use crate::ids::{ItemRef, ProviderId};
+use crate::ids::{ItemRef, ProviderId, SourceId};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -26,6 +26,16 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
 /// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
 /// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
+/// | `sources.list` | `{}` | `Vec<`[`SourceInfo`]`>` |
+/// | `sources.add` | [`SourceSpec`] | [`SourceInfo`] |
+/// | `sources.update` | [`SourceUpdate`] | [`SourceInfo`] |
+/// | `sources.remove` | [`SourceRemove`] | `null` |
+/// | `sources.sync` | [`SourceSync`] | `null` (progress via `ingest.progress`) |
+/// | `sources.auth.begin` | [`SourceRef`] | [`AuthBegin`] (completion via `sources.changed`) |
+/// | `sources.secret.set` | [`SourceSecret`] | `null` |
+/// | `ingest.status` | `{}` | [`IngestStatus`] |
+/// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
+/// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
 pub mod method {
     pub const STATUS: &str = "status";
     pub const CHAT: &str = "chat";
@@ -36,12 +46,24 @@ pub mod method {
     pub const MODELS_LIST: &str = "models.list";
     pub const MODELS_INSTALL: &str = "models.install";
     pub const EGRESS_RECENT: &str = "egress.recent";
+    pub const SOURCES_LIST: &str = "sources.list";
+    pub const SOURCES_ADD: &str = "sources.add";
+    pub const SOURCES_UPDATE: &str = "sources.update";
+    pub const SOURCES_REMOVE: &str = "sources.remove";
+    pub const SOURCES_SYNC: &str = "sources.sync";
+    pub const SOURCES_AUTH_BEGIN: &str = "sources.auth.begin";
+    pub const SOURCES_SECRET_SET: &str = "sources.secret.set";
+    pub const INGEST_STATUS: &str = "ingest.status";
+    pub const RETRIEVE_CONTEXT: &str = "retrieve.context";
+    pub const RUNTIME_STATUS: &str = "runtime.status";
 }
 
 pub mod notification {
     pub const CHAT_DELTA: &str = "chat.delta";
     pub const CHAT_DONE: &str = "chat.done";
     pub const MODELS_PROGRESS: &str = "models.progress";
+    pub const INGEST_PROGRESS: &str = "ingest.progress";
+    pub const SOURCES_CHANGED: &str = "sources.changed";
 }
 
 // ---- status ----
@@ -149,6 +171,9 @@ pub struct SearchHit {
     pub title: Option<String>,
     pub snippet: String,
     pub score: f32,
+    /// Where to open the original (file path URL, web link), if known.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 // ---- models ----
@@ -204,3 +229,211 @@ pub struct EgressRecentRequest {
 }
 
 pub type EgressRecentResponse = Vec<EgressEvent>;
+
+// ---- sources ----
+
+/// Connector kinds shipped in M1: `files`, `obsidian`, `gmail`, `gcal`, `imap`, `caldav`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceSpec {
+    /// Chosen by the daemon when `None` (e.g. `files-1`).
+    #[serde(default)]
+    pub id: Option<SourceId>,
+    pub kind: String,
+    /// Human-readable label.
+    pub name: String,
+    /// Kind-specific settings (roots, account, folders, ...). Never contains secrets.
+    #[serde(default)]
+    pub settings: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SourceState {
+    /// Up to date, waiting for the next poll.
+    Idle,
+    /// Running a sync pass.
+    Syncing,
+    /// Up to date and receiving live change notifications.
+    Watching,
+    /// Needs the user to (re)authorize or set a password.
+    NeedsAuth,
+    /// Disabled by the user.
+    Disabled,
+    /// Last pass failed; see `last_error`. Retried with backoff.
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceInfo {
+    pub id: SourceId,
+    pub kind: String,
+    pub name: String,
+    pub enabled: bool,
+    pub state: SourceState,
+    pub items: u64,
+    pub chunks: u64,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_sync: Option<time::OffsetDateTime>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// Same shape as [`SourceSpec::settings`]; never contains secrets.
+    #[serde(default)]
+    pub settings: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceRef {
+    pub id: SourceId,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SourceUpdate {
+    pub id: SourceId,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub settings: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceRemove {
+    pub id: SourceId,
+    /// Also delete everything indexed from this source (default true).
+    #[serde(default = "default_true")]
+    pub purge: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceSync {
+    /// `None` syncs every enabled source.
+    #[serde(default)]
+    pub id: Option<SourceId>,
+}
+
+/// Start of an OAuth authorization: the client opens `url` in the user's browser; the daemon
+/// listens on a loopback redirect and emits `sources.changed` when done.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthBegin {
+    pub url: String,
+}
+
+/// Store a password or app password for a source in the OS keychain. Write-only.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceSecret {
+    pub id: SourceId,
+    pub secret: String,
+}
+
+impl std::fmt::Debug for SourceSecret {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceSecret")
+            .field("id", &self.id)
+            .field("secret", &"<redacted>")
+            .finish()
+    }
+}
+
+// ---- ingest ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IngestPhase {
+    Scanning,
+    Indexing,
+    Idle,
+    Error,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IngestProgress {
+    pub source: SourceId,
+    pub phase: IngestPhase,
+    pub done: u64,
+    #[serde(default)]
+    pub total: Option<u64>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IngestStatus {
+    /// Changes observed but not yet searchable.
+    pub queue_depth: u64,
+    /// Change-to-searchable latency over the recent window, in milliseconds.
+    #[serde(default)]
+    pub freshness_p50_ms: Option<u64>,
+    #[serde(default)]
+    pub freshness_p95_ms: Option<u64>,
+    /// Provider used for embeddings, if any (otherwise text-only search).
+    #[serde(default)]
+    pub embedding_provider: Option<ProviderId>,
+    /// Provider used for triage, if any.
+    #[serde(default)]
+    pub triage_provider: Option<ProviderId>,
+    pub sources: Vec<SourceInfo>,
+}
+
+// ---- retrieval ----
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextRequest {
+    pub query: String,
+    /// Approximate token budget for `text`.
+    pub budget_tokens: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Citation {
+    /// The `[n]` marker used in [`ContextResponse::text`], from 1.
+    pub n: u32,
+    pub item: ItemRef,
+    pub chunk_id: i64,
+    pub title: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContextResponse {
+    /// Packed passages, each prefixed with its `[n]` marker.
+    pub text: String,
+    pub citations: Vec<Citation>,
+}
+
+// ---- local runtime ----
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeRole {
+    Chat,
+    Embedding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeState {
+    /// Runtime binary or model not installed.
+    NotInstalled,
+    Stopped,
+    Starting,
+    Ready,
+    /// Crashed or failed health checks; restarting with backoff.
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RuntimeInfo {
+    pub model_id: String,
+    pub role: RuntimeRole,
+    pub state: RuntimeState,
+    /// Provider id the router knows this runtime by (e.g. `local-chat`).
+    pub provider: ProviderId,
+    #[serde(default)]
+    pub error: Option<String>,
+}

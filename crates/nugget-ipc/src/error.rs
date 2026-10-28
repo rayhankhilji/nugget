@@ -39,6 +39,8 @@ pub mod code {
     pub const IO: i64 = -32007;
     /// A message exceeded [`MAX_MESSAGE_BYTES`](crate::MAX_MESSAGE_BYTES).
     pub const MESSAGE_TOO_LARGE: i64 = -32008;
+    /// The source or provider needs (re)authorization or a credential.
+    pub const UNAUTHORIZED: i64 = -32009;
 }
 
 /// A JSON-RPC 2.0 error object, exactly as serialized on the wire.
@@ -111,6 +113,7 @@ impl From<nugget_core::Error> for RpcError {
             E::Provider(_) => code::PROVIDER,
             E::Storage(_) | E::InsufficientSpace { .. } => code::STORAGE,
             E::Network(_) | E::RateLimited { .. } => code::PROVIDER,
+            E::Unauthorized(_) => code::UNAUTHORIZED,
             E::Io(_) => code::IO,
             E::Cancelled => code::CANCELLED,
             E::Other(_) => code::SERVER_ERROR,
@@ -124,6 +127,7 @@ impl From<nugget_core::Error> for RpcError {
             | E::Provider(m)
             | E::Storage(m)
             | E::Network(m)
+            | E::Unauthorized(m)
             | E::Other(m) => m,
             e @ (E::RateLimited { .. } | E::InsufficientSpace { .. }) => e.to_string(),
             E::Io(e) => e.to_string(),
@@ -147,6 +151,7 @@ impl From<RpcError> for nugget_core::Error {
             code::STORAGE => E::Storage(m),
             code::IO => E::Io(std::io::Error::other(m)),
             code::CANCELLED => E::Cancelled,
+            code::UNAUTHORIZED => E::Unauthorized(m),
             _ => E::Other(m),
         }
     }
