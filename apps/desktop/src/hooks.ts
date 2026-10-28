@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import { api, errorMessage } from "./api";
 
 /**
  * Subscribe to a Tauri event for the component's lifetime. `handler` may change between
@@ -66,4 +67,35 @@ export function useNow(intervalMs = 30_000): number {
     return () => window.clearInterval(t);
   }, [intervalMs]);
   return now;
+}
+
+/** `value`, updated only after it has stopped changing for `ms`. */
+export function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => setV(value), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/** `open_url`, reporting the outcome for the page's live region. */
+export function useOpener() {
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
+  const open = async (url: string, label: string) => {
+    setStatus(null);
+    try {
+      const r = await api.openUrl(url);
+      setStatus({
+        text:
+          r === "revealed"
+            ? `Showed “${label}” in its folder instead of opening it, because this kind of file can run programs.`
+            : `Opened “${label}”.`,
+        error: false,
+      });
+    } catch (e) {
+      setStatus({ text: `Couldn't open “${label}”: ${errorMessage(e)}`, error: true });
+    }
+  };
+  return { status, open };
 }

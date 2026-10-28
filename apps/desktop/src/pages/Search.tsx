@@ -12,7 +12,7 @@ import {
   type SearchHit,
   type SourceInfo,
 } from "../api";
-import { useAsync, useEvent } from "../hooks";
+import { useAsync, useEvent, useOpener } from "../hooks";
 import { splitCitations, withheldNotice } from "../citations";
 import { SOURCE_KIND_LABEL } from "../format";
 import { SourceIcon } from "../components/SourceIcon";
@@ -20,27 +20,6 @@ import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../componen
 
 const LIMITS = [10, 25, 50];
 const BUDGETS = [1000, 2000, 4000, 8000];
-
-/** `open_url`, reporting the outcome in the page's live region. */
-function useOpener() {
-  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
-  const open = async (url: string, label: string) => {
-    setStatus(null);
-    try {
-      const r = await api.openUrl(url);
-      setStatus({
-        text:
-          r === "revealed"
-            ? `Showed “${label}” in its folder instead of opening it, because this kind of file can run programs.`
-            : `Opened “${label}”.`,
-        error: false,
-      });
-    } catch (e) {
-      setStatus({ text: `Couldn't open “${label}”: ${errorMessage(e)}`, error: true });
-    }
-  };
-  return { status, open };
-}
 
 export function SearchPage() {
   const [query, setQuery] = useState("");

@@ -29,6 +29,8 @@ pub mod event {
     pub const INGEST_PROGRESS: &str = "nugget:ingest-progress";
     /// The params of `sources.changed`, as sent (the UI refetches `sources.list` on it).
     pub const SOURCES_CHANGED: &str = "nugget:sources-changed";
+    /// `nugget_core::ipc::KnowledgeChanged`: entities whose facts, mentions or pages changed.
+    pub const KNOWLEDGE_CHANGED: &str = "nugget:knowledge-changed";
     /// Every daemon notification as `{ method, params }`, including unknown ones.
     pub const NOTIFICATION: &str = "nugget:notification";
     /// A page id (`"status"`, ...): the tray asks the window to navigate.
@@ -246,19 +248,24 @@ impl Daemon {
     }
 }
 
+/// The dedicated Tauri event a daemon notification is re-emitted as, if it has one.
+fn event_for(method: &str) -> Option<&'static str> {
+    match method {
+        notification::CHAT_DELTA => Some(event::CHAT_DELTA),
+        notification::CHAT_DONE => Some(event::CHAT_DONE),
+        notification::MODELS_PROGRESS => Some(event::MODELS_PROGRESS),
+        notification::INGEST_PROGRESS => Some(event::INGEST_PROGRESS),
+        notification::SOURCES_CHANGED => Some(event::SOURCES_CHANGED),
+        notification::KNOWLEDGE_CHANGED => Some(event::KNOWLEDGE_CHANGED),
+        _ => None,
+    }
+}
+
 fn forward_notifications(app: AppHandle, client: &Client, generation: u64, socket: String) {
     let mut notes = client.notifications();
     tauri::async_runtime::spawn(async move {
         while let Some(n) = notes.next().await {
-            let specific = match n.method.as_str() {
-                notification::CHAT_DELTA => Some(event::CHAT_DELTA),
-                notification::CHAT_DONE => Some(event::CHAT_DONE),
-                notification::MODELS_PROGRESS => Some(event::MODELS_PROGRESS),
-                notification::INGEST_PROGRESS => Some(event::INGEST_PROGRESS),
-                notification::SOURCES_CHANGED => Some(event::SOURCES_CHANGED),
-                _ => None,
-            };
-            if let Some(name) = specific
+            if let Some(name) = event_for(&n.method)
                 && let Err(e) = app.emit(name, &n.params)
             {
                 tracing::warn!(error = %e, event = name, "emit failed");
@@ -363,6 +370,34 @@ mod tests {
         let v = serde_json::to_value(CmdError::from_ipc(IpcError::Connect(refused), "connect"))
             .unwrap();
         assert_eq!(v["kind"], "not_running");
+    }
+
+    #[test]
+    fn notifications_map_to_events() {
+        assert_eq!(
+            event_for(notification::KNOWLEDGE_CHANGED),
+            Some("nugget:knowledge-changed")
+        );
+        assert_eq!(
+            event_for(notification::SOURCES_CHANGED),
+            Some(event::SOURCES_CHANGED)
+        );
+        assert_eq!(event_for("something.new"), None);
+        // Tauri event names allow only `[A-Za-z0-9-/:_]`.
+        for name in [
+            event::CHAT_DELTA,
+            event::CHAT_DONE,
+            event::MODELS_PROGRESS,
+            event::INGEST_PROGRESS,
+            event::SOURCES_CHANGED,
+            event::KNOWLEDGE_CHANGED,
+        ] {
+            assert!(
+                name.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-/:_".contains(c)),
+                "{name}"
+            );
+        }
     }
 
     fn write_exe(path: &Path) {

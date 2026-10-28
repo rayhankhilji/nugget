@@ -7,11 +7,13 @@ import {
   PROTOCOL_VERSION,
   type Capabilities,
   type IngestStatus,
+  type KnowledgeStatus,
   type ProviderInfo,
   type RuntimeInfo,
   type RuntimeState,
 } from "../api";
-import { useAsync, useEvent, useNow } from "../hooks";
+import { useAsync, useEvent, useNow, useOpener } from "../hooks";
+import { fileUrl, vaultLinks } from "../knowledge";
 import { formatDuration, formatLatency, formatRelative, LOCALITY_LABEL, SOURCE_KIND_LABEL, TIER_LABEL } from "../format";
 import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
@@ -20,25 +22,30 @@ export function StatusPage() {
   const conn = useAsync(api.connection);
   const ingest = useAsync(api.ingestStatus);
   const runtime = useAsync(api.runtimeStatus);
+  const knowledge = useAsync(api.knowledgeStatus);
 
   // Light auto-refresh while the page is open. Methods the daemon lacks are not re-polled.
   const { reload } = status;
   const reloadIngest = ingest.reload;
   const reloadRuntime = runtime.reload;
+  const reloadKnowledge = knowledge.reload;
   const ingestMissing = isMethodNotFound(ingest.error);
   const runtimeMissing = isMethodNotFound(runtime.error);
+  const knowledgeMissing = isMethodNotFound(knowledge.error);
   useEffect(() => {
     const t = window.setInterval(() => {
       reload();
       if (!ingestMissing) reloadIngest();
       if (!runtimeMissing) reloadRuntime();
+      if (!knowledgeMissing) reloadKnowledge();
     }, 10_000);
     return () => window.clearInterval(t);
-  }, [reload, reloadIngest, reloadRuntime, ingestMissing, runtimeMissing]);
+  }, [reload, reloadIngest, reloadRuntime, reloadKnowledge, ingestMissing, runtimeMissing, knowledgeMissing]);
   const refreshAll = () => {
     status.reload();
     ingest.reload();
     runtime.reload();
+    knowledge.reload();
   };
 
   const s = status.data;
@@ -121,6 +128,7 @@ export function StatusPage() {
 
       <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
       <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
+      <KnowledgeCard data={knowledge.data} error={knowledge.error} loading={knowledge.loading} onRetry={knowledge.reload} />
 
       <h2>Connection</h2>
       <p className="muted small">
@@ -384,5 +392,165 @@ function RuntimeCard({
         </>
       )}
     </section>
+  );
+}
+
+// ---- knowledge graph (M2) ----
+
+function KnowledgeCard({
+  data,
+  error,
+  loading,
+  onRetry,
+}: {
+  data: KnowledgeStatus | undefined;
+  error: unknown;
+  loading: boolean;
+  onRetry: () => void;
+}) {
+  const now = useNow();
+  const opener = useOpener();
+  const vault = data?.vault;
+  const vaultUrl = vault?.path ? fileUrl(vault.path) : null;
+  const conflicts = vault?.conflicts ?? [];
+  const invalid = vault?.invalid ?? [];
+  return (
+    <section className="status-card" aria-labelledby="knowledge-title">
+      <h2 id="knowledge-title">Knowledge</h2>
+      {isMethodNotFound(error) ? (
+        <NotAvailable />
+      ) : (
+        <>
+          <ErrorNote error={error} onRetry={onRetry} />
+          {loading && !data && <Spinner />}
+          {data && (
+            <>
+              <dl className="stats">
+                <div>
+                  <dt>Entities</dt>
+                  <dd>{data.entities.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Facts</dt>
+                  <dd>{data.claims.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Mentions</dt>
+                  <dd>{data.mentions.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt>Waiting</dt>
+                  <dd>
+                    {data.pending_items.toLocaleString()}
+                    <span className="muted small stat-unit"> items</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Extraction</dt>
+                  <dd className="stat-text">
+                    {data.extractor_provider ?? <span className="muted">Rules only</span>}
+                    <div className="muted small">Last run {formatRelative(data.last_run, now)}</div>
+                  </dd>
+                </div>
+              </dl>
+              <p className="muted small">
+                Rules (mail headers, calendar attendees, note links and tags) always run on this device.
+                {data.extractor_provider ? " The model above also reads items to find facts." : " No model is set up to find more facts."}
+              </p>
+
+              <h3 className="ask-sub">Vault</h3>
+              {vault?.path ? (
+                <p className="vault-line">
+                  <code>{vault.path}</code>{" "}
+                  {vaultUrl && (
+                    <button type="button" className="btn btn-small" onClick={() => void opener.open(vaultUrl, "the vault folder")}>
+                      Open folder
+                    </button>
+                  )}
+                  <span className="muted small">
+                    {" "}
+                    {vault.pages.toLocaleString()} pages · rendered {formatRelative(vault.last_render, now)}
+                  </span>
+                </p>
+              ) : (
+                <p className="muted small">No vault folder is configured, so pages aren't written to disk.</p>
+              )}
+              <div aria-live="polite">
+                {opener.status && <p className={opener.status.error ? "note note-error small" : "note small"}>{opener.status.text}</p>}
+              </div>
+              {conflicts.length > 0 && (
+                <PageList
+                  title="Edit conflicts"
+                  hint="Your edits to these pages clashed with new facts and couldn't be merged automatically. Open them to check and fix."
+                  pages={conflicts}
+                  root={vault?.path ?? null}
+                  tone="warn"
+                  open={opener.open}
+                />
+              )}
+              {invalid.length > 0 && (
+                <PageList
+                  title="Pages with problems"
+                  hint="These fail the vault checks: broken links, facts without citations, or bad frontmatter."
+                  pages={invalid}
+                  root={vault?.path ?? null}
+                  tone="bad"
+                  open={opener.open}
+                />
+              )}
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+const PAGES_SHOWN = 20;
+
+function PageList({
+  title,
+  hint,
+  pages,
+  root,
+  tone,
+  open,
+}: {
+  title: string;
+  hint: string;
+  pages: string[];
+  root: string | null;
+  tone: "warn" | "bad";
+  open: (url: string, label: string) => Promise<void>;
+}) {
+  const [all, setAll] = useState(false);
+  const shown = all ? pages : pages.slice(0, PAGES_SHOWN);
+  return (
+    <>
+      <h4 className="ask-sub">
+        {title} <Badge tone={tone}>{pages.length.toLocaleString()}</Badge>
+      </h4>
+      <p className="muted small">{hint}</p>
+      <ul className="vault-pages">
+        {shown.map((p) => {
+          const links = vaultLinks(root, p);
+          return (
+            <li key={p}>
+              <code>{p}</code>
+              {links && (
+                <button type="button" className="btn btn-ghost btn-small" onClick={() => void open(links.file, p)} aria-label={`Open ${p}`}>
+                  Open
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {pages.length > PAGES_SHOWN && (
+        <button type="button" className="btn btn-ghost btn-small" onClick={() => setAll((a) => !a)} aria-expanded={all}>
+          {all ? "Show fewer" : `Show all ${pages.length.toLocaleString()}`}
+        </button>
+      )}
+    </>
   );
 }

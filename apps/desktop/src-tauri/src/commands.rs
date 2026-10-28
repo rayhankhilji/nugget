@@ -3,8 +3,10 @@
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
-    AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ContextRequest,
-    ContextResponse, EgressRecentRequest, IngestStatus, ModelInfo, ModelInstallRequest,
+    AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ClaimStatusRequest,
+    ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
+    EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
+    McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelInfo, ModelInstallRequest,
     ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest, SourceInfo, SourceRef,
     SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse, method,
 };
@@ -24,6 +26,17 @@ const MIN_CONTEXT_BUDGET: u32 = 256;
 const MAX_CONTEXT_BUDGET: u32 = 32_000;
 /// Secrets longer than this are certainly a paste mistake.
 const MAX_SECRET_LEN: usize = 4096;
+/// Entity browser pages (the UI asks for one more than it shows, to know if there is a next page).
+const MAX_ENTITIES_LIMIT: u32 = 501;
+/// Graph view: the canvas renders at most 2,000 nodes; a little headroom lets the daemon report
+/// truncation honestly.
+const MAX_GRAPH_LIMIT: u32 = 2_500;
+const MAX_GRAPH_DEPTH: u32 = 4;
+/// Free-text fields (search text, entity ids, client names) beyond this are a UI bug.
+const MAX_TEXT_LEN: usize = 1024;
+const MAX_CLIENT_NAME_LEN: usize = 100;
+/// Entity kinds and MCP tool names are short identifiers.
+const MAX_LIST_LEN: usize = 64;
 
 #[tauri::command]
 pub async fn connection_info(app: AppHandle, daemon: State<'_, Daemon>) -> Result<ConnectionInfo> {
@@ -260,6 +273,227 @@ pub async fn runtime_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result
     daemon.call(&app, method::RUNTIME_STATUS, &()).await
 }
 
+// ---- knowledge graph (M2) ----
+
+fn check_text(what: &str, value: &str) -> Result<()> {
+    if value.len() > MAX_TEXT_LEN {
+        return Err(CmdError::Other(format!("the {what} is too long")));
+    }
+    Ok(())
+}
+
+fn check_entity_id(what: &str, id: &str) -> Result<()> {
+    if id.trim().is_empty() {
+        return Err(CmdError::Other(format!("the {what} entity is missing")));
+    }
+    check_text(what, id)
+}
+
+/// Normalise an entity browser request: bounded page size, blank filters dropped.
+fn entities_request(request: EntitiesRequest) -> Result<EntitiesRequest> {
+    let text = request
+        .text
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty());
+    if let Some(t) = &text {
+        check_text("search text", t)?;
+    }
+    let kind = request.kind.filter(|k| !k.trim().is_empty());
+    if let Some(k) = &kind {
+        check_text("kind", k)?;
+    }
+    Ok(EntitiesRequest {
+        text,
+        kind,
+        limit: request.limit.clamp(1, MAX_ENTITIES_LIMIT),
+        offset: request.offset,
+    })
+}
+
+fn graph_request(request: GraphRequest) -> Result<GraphRequest> {
+    if let Some(c) = &request.center {
+        check_entity_id("center", c.as_str())?;
+    }
+    if request.kinds.len() > MAX_LIST_LEN {
+        return Err(CmdError::Other("too many kinds in the graph filter".into()));
+    }
+    for k in &request.kinds {
+        check_text("kind", k)?;
+    }
+    Ok(GraphRequest {
+        depth: request.depth.clamp(1, MAX_GRAPH_DEPTH),
+        limit: request.limit.clamp(1, MAX_GRAPH_LIMIT),
+        ..request
+    })
+}
+
+fn check_merge(request: &MergeRequest) -> Result<()> {
+    check_entity_id("target", request.into.as_str())?;
+    check_entity_id("merged", request.from.as_str())?;
+    if request.into == request.from {
+        return Err(CmdError::Other(
+            "an entity can't be merged into itself".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// The UI only rejects a fact (`retracted`) or restores it (`active`).
+fn check_claim_status(request: &ClaimStatusRequest) -> Result<()> {
+    match request.status.as_str() {
+        "retracted" | "active" => Ok(()),
+        other => Err(CmdError::Other(format!(
+            "a fact can only be rejected or restored, not set to “{other}”"
+        ))),
+    }
+}
+
+#[tauri::command]
+pub async fn knowledge_entities(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: EntitiesRequest,
+) -> Result<Vec<EntitySummaryView>> {
+    let req = entities_request(request)?;
+    daemon.call(&app, method::KNOWLEDGE_ENTITIES, &req).await
+}
+
+#[tauri::command]
+pub async fn knowledge_entity(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: EntityRef,
+) -> Result<EntityDetail> {
+    check_entity_id("requested", request.id.as_str())?;
+    daemon.call(&app, method::KNOWLEDGE_ENTITY, &request).await
+}
+
+#[tauri::command]
+pub async fn knowledge_graph(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: GraphRequest,
+) -> Result<GraphViewIpc> {
+    let req = graph_request(request)?;
+    daemon.call(&app, method::KNOWLEDGE_GRAPH, &req).await
+}
+
+#[tauri::command]
+pub async fn knowledge_merge(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: MergeRequest,
+) -> Result<()> {
+    check_merge(&request)?;
+    let _: Value = daemon.call(&app, method::KNOWLEDGE_MERGE, &request).await?;
+    Ok(())
+}
+
+/// Reject (`retracted`) or restore (`active`) a fact.
+#[tauri::command]
+pub async fn knowledge_claim_status(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: ClaimStatusRequest,
+) -> Result<()> {
+    check_claim_status(&request)?;
+    let _: Value = daemon
+        .call(&app, method::KNOWLEDGE_CLAIM_STATUS, &request)
+        .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn knowledge_status(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<KnowledgeStatus> {
+    daemon.call(&app, method::KNOWLEDGE_STATUS, &()).await
+}
+
+// ---- MCP clients (M2) ----
+
+fn check_client_create(request: &McpClientCreate) -> Result<McpClientCreate> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err(CmdError::Other("the app needs a name".into()));
+    }
+    if name.chars().count() > MAX_CLIENT_NAME_LEN {
+        return Err(CmdError::Other(format!(
+            "the name is too long (at most {MAX_CLIENT_NAME_LEN} characters)"
+        )));
+    }
+    let scopes = &request.scopes;
+    if scopes.sources.as_ref().is_some_and(Vec::is_empty) {
+        return Err(CmdError::Other(
+            "choose at least one source, or allow all sources".into(),
+        ));
+    }
+    if scopes
+        .sources
+        .as_ref()
+        .is_some_and(|s| s.len() > MAX_LIST_LEN)
+        || scopes.tools.len() > MAX_LIST_LEN
+    {
+        return Err(CmdError::Other("too many scopes".into()));
+    }
+    Ok(McpClientCreate {
+        name: name.to_owned(),
+        scopes: scopes.clone(),
+    })
+}
+
+/// A decode error can quote the offending value, which for this response may be the token, so
+/// the detail is dropped.
+fn without_response_detail(err: CmdError) -> CmdError {
+    match err {
+        CmdError::Protocol(_) => CmdError::Protocol(format!(
+            "{}: the response could not be read",
+            method::MCP_CLIENTS_CREATE
+        )),
+        other => other,
+    }
+}
+
+#[tauri::command]
+pub async fn mcp_clients_list(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<Vec<McpClientInfo>> {
+    daemon.call(&app, method::MCP_CLIENTS_LIST, &()).await
+}
+
+/// Creates a client. The result carries its bearer token, which is shown once in the UI and
+/// never logged (`McpClientCreated`'s `Debug` redacts it).
+#[tauri::command]
+pub async fn mcp_clients_create(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: McpClientCreate,
+) -> Result<McpClientCreated> {
+    let req = check_client_create(&request)?;
+    daemon
+        .call(&app, method::MCP_CLIENTS_CREATE, &req)
+        .await
+        .map_err(without_response_detail)
+}
+
+#[tauri::command]
+pub async fn mcp_clients_revoke(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: McpClientRef,
+) -> Result<()> {
+    if request.id.trim().is_empty() {
+        return Err(CmdError::Other("no app to revoke".into()));
+    }
+    check_text("app id", &request.id)?;
+    let _: Value = daemon
+        .call(&app, method::MCP_CLIENTS_REVOKE, &request)
+        .await?;
+    Ok(())
+}
+
 // ---- shell helpers ----
 
 /// Opens an `https:`, `obsidian:` or local `file:` URL with the OS default handler. Anything else
@@ -348,5 +582,212 @@ mod tests {
         let ctx: ContextRequest =
             serde_json::from_value(json!({ "query": "q", "budget_tokens": 2000 })).unwrap();
         assert_eq!(ctx.budget_tokens, 2000);
+    }
+
+    /// The knowledge and MCP `request` objects `api.ts` builds decode into the IPC types.
+    #[test]
+    fn knowledge_and_mcp_requests_match_the_ipc_types() {
+        let ents: EntitiesRequest = serde_json::from_value(
+            json!({ "text": "sam", "kind": "person", "limit": 51, "offset": 50 }),
+        )
+        .unwrap();
+        assert_eq!(ents.kind.as_deref(), Some("person"));
+        assert_eq!((ents.limit, ents.offset), (51, 50));
+        // Optional fields may be omitted or null.
+        let ents: EntitiesRequest =
+            serde_json::from_value(json!({ "text": null, "limit": 10 })).unwrap();
+        assert!(ents.text.is_none() && ents.kind.is_none() && ents.offset == 0);
+
+        let r: EntityRef = serde_json::from_value(json!({ "id": "ent_1" })).unwrap();
+        assert_eq!(r.id.as_str(), "ent_1");
+
+        let g: GraphRequest = serde_json::from_value(
+            json!({ "center": "ent_1", "depth": 2, "limit": 2000, "kinds": ["person", "project"] }),
+        )
+        .unwrap();
+        assert_eq!(g.center.as_ref().map(|c| c.as_str()), Some("ent_1"));
+        assert_eq!(g.kinds.len(), 2);
+        let g: GraphRequest =
+            serde_json::from_value(json!({ "center": null, "depth": 1, "limit": 200 })).unwrap();
+        assert!(g.center.is_none() && g.kinds.is_empty());
+
+        let m: MergeRequest =
+            serde_json::from_value(json!({ "into": "ent_1", "from": "ent_2" })).unwrap();
+        assert_eq!(m.from.as_str(), "ent_2");
+
+        let c: ClaimStatusRequest =
+            serde_json::from_value(json!({ "claim": 42, "status": "retracted" })).unwrap();
+        assert_eq!(c.claim, 42);
+
+        let create: McpClientCreate = serde_json::from_value(json!({
+            "name": "Claude Desktop",
+            "scopes": { "sources": ["files-1"], "tools": ["search"], "include_sensitive": false }
+        }))
+        .unwrap();
+        assert_eq!(create.scopes.sources.as_ref().map(Vec::len), Some(1));
+        // "All sources, all read-only tools" is `sources: null, tools: []`.
+        let create: McpClientCreate = serde_json::from_value(json!({
+            "name": "Cursor",
+            "scopes": { "sources": null, "tools": [], "include_sensitive": false }
+        }))
+        .unwrap();
+        assert!(create.scopes.sources.is_none() && !create.scopes.include_sensitive);
+
+        let r: McpClientRef = serde_json::from_value(json!({ "id": "mcp-1" })).unwrap();
+        assert_eq!(r.id, "mcp-1");
+    }
+
+    #[test]
+    fn knowledge_requests_are_bounded_and_validated() {
+        let req = entities_request(EntitiesRequest {
+            text: Some("   ".into()),
+            kind: Some(String::new()),
+            limit: 1_000_000,
+            offset: 3,
+        })
+        .unwrap();
+        assert!(req.text.is_none() && req.kind.is_none());
+        assert_eq!(req.limit, MAX_ENTITIES_LIMIT);
+        let req = entities_request(EntitiesRequest {
+            limit: 0,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(req.limit, 1);
+        assert!(
+            entities_request(EntitiesRequest {
+                text: Some("x".repeat(MAX_TEXT_LEN + 1)),
+                limit: 10,
+                ..Default::default()
+            })
+            .is_err()
+        );
+
+        let g = graph_request(GraphRequest {
+            center: None,
+            depth: 99,
+            limit: 1_000_000,
+            kinds: vec![],
+        })
+        .unwrap();
+        assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
+        let g = graph_request(GraphRequest::default()).unwrap();
+        assert_eq!((g.depth, g.limit), (1, 1));
+        assert!(
+            graph_request(GraphRequest {
+                center: Some(nugget_core::ids::EntityId::new(" ")),
+                depth: 1,
+                limit: 10,
+                kinds: vec![],
+            })
+            .is_err()
+        );
+
+        let same = MergeRequest {
+            into: nugget_core::ids::EntityId::new("ent_1"),
+            from: nugget_core::ids::EntityId::new("ent_1"),
+        };
+        assert!(check_merge(&same).is_err());
+
+        for (status, ok) in [
+            ("retracted", true),
+            ("active", true),
+            ("user_asserted", false),
+            ("superseded", false),
+            ("", false),
+        ] {
+            let req = ClaimStatusRequest {
+                claim: 1,
+                status: status.into(),
+            };
+            assert_eq!(check_claim_status(&req).is_ok(), ok, "{status}");
+        }
+    }
+
+    #[test]
+    fn mcp_client_create_is_validated() {
+        use nugget_core::ipc::McpScopes;
+        let scopes = McpScopes {
+            sources: None,
+            tools: vec![],
+            include_sensitive: false,
+        };
+        let ok = check_client_create(&McpClientCreate {
+            name: "  Cursor  ".into(),
+            scopes: scopes.clone(),
+        })
+        .unwrap();
+        assert_eq!(ok.name, "Cursor");
+        for name in ["", "   ", &"x".repeat(MAX_CLIENT_NAME_LEN + 1)] {
+            let req = McpClientCreate {
+                name: name.into(),
+                scopes: scopes.clone(),
+            };
+            assert!(check_client_create(&req).is_err());
+        }
+        let none_selected = McpClientCreate {
+            name: "Cursor".into(),
+            scopes: McpScopes {
+                sources: Some(vec![]),
+                ..scopes
+            },
+        };
+        assert!(check_client_create(&none_selected).is_err());
+    }
+
+    const TOKEN: &str = "nmcp_s3cr3t-token-value";
+
+    fn created_json() -> Value {
+        json!({
+            "client": {
+                "id": "mcp-1",
+                "name": "Claude Desktop",
+                "scopes": { "sources": null, "tools": [], "include_sensitive": false },
+                "created_at": "2026-10-28T09:00:00Z",
+                "last_used": null
+            },
+            "token": TOKEN,
+            "setup": [
+                { "app": "claude-desktop", "config_path": "~/Library/Application Support/Claude/claude_desktop_config.json", "text": format!("{{\"token\": \"{TOKEN}\"}}") }
+            ]
+        })
+    }
+
+    /// The token reaches the webview (it must be shown once) but never a log line.
+    #[test]
+    fn mcp_token_is_redacted_in_debug() {
+        let created: McpClientCreated = serde_json::from_value(created_json()).unwrap();
+        assert_eq!(created.token, TOKEN);
+        let dbg = format!("{created:?}");
+        assert!(!dbg.contains(TOKEN), "Debug leaked the token: {dbg}");
+        assert!(dbg.contains("<redacted>"));
+        let pretty = format!("{created:#?}");
+        assert!(!pretty.contains(TOKEN));
+        // Serialization for the webview keeps it.
+        let back = serde_json::to_value(&created).unwrap();
+        assert_eq!(back["token"], TOKEN);
+        assert_eq!(back["client"]["created_at"], "2026-10-28T09:00:00Z");
+    }
+
+    /// A malformed create response must not put the token into an error message the UI shows.
+    #[test]
+    fn create_decode_errors_never_quote_the_token() {
+        let mut bad = created_json();
+        // serde quotes a string found where a list was expected.
+        bad["setup"] = json!(TOKEN);
+        let err = serde_json::from_value::<McpClientCreated>(bad).unwrap_err();
+        let leaked = CmdError::Protocol(format!("{}: {err}", method::MCP_CLIENTS_CREATE));
+        assert!(leaked.to_string().contains(TOKEN), "fixture should leak");
+        let shown = without_response_detail(leaked);
+        assert!(!shown.to_string().contains(TOKEN));
+        assert!(!format!("{shown:?}").contains(TOKEN));
+        let v = serde_json::to_value(&shown).unwrap();
+        assert_eq!(v["kind"], "protocol");
+        // Other errors pass through unchanged.
+        let rpc = without_response_detail(CmdError::Rpc {
+            code: -32601,
+            message: "method not found".into(),
+        });
+        assert!(matches!(rpc, CmdError::Rpc { code: -32601, .. }));
     }
 }

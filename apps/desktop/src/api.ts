@@ -283,6 +283,242 @@ export interface RuntimeInfo {
   error?: string | null;
 }
 
+// ---- knowledge graph (M2) ----
+
+/** Entity kinds, as `nugget_core::ipc` sends them. */
+export type EntityKind =
+  | "person"
+  | "organization"
+  | "project"
+  | "commitment"
+  | "preference"
+  | "event"
+  | "place"
+  | "topic";
+export const ENTITY_KINDS: readonly EntityKind[] = [
+  "person",
+  "organization",
+  "project",
+  "commitment",
+  "preference",
+  "event",
+  "place",
+  "topic",
+];
+
+export type ClaimStatus = "active" | "superseded" | "retracted" | "user_asserted";
+export const CLAIM_STATUSES: readonly ClaimStatus[] = ["active", "superseded", "retracted", "user_asserted"];
+
+/** `knowledge.entities`: page through entities, optionally filtered by text and kind. */
+export interface EntitiesRequest {
+  text?: string | null;
+  kind?: EntityKind | null;
+  limit: number;
+  offset?: number;
+}
+
+export interface EntitySummaryView {
+  id: string;
+  kind: EntityKind;
+  name: string;
+  claims: number;
+  mentions: number;
+  /** RFC 3339 timestamp. */
+  updated_at: string;
+}
+
+export interface EntityRef {
+  id: string;
+}
+
+/** One source passage supporting a fact. */
+export interface EvidenceView {
+  item: ItemRef;
+  chunk_id?: number | null;
+  quote?: string | null;
+  title?: string | null;
+  url?: string | null;
+}
+
+export interface EntityLink {
+  id: string;
+  name: string;
+}
+
+/** Exactly one of `entity` / `literal` is set. */
+export interface ClaimObjectView {
+  entity?: EntityLink | null;
+  literal?: string | null;
+}
+
+export interface ClaimView {
+  id: number;
+  subject: EntityLink;
+  predicate: string;
+  object: ClaimObjectView;
+  text: string;
+  confidence: number;
+  status: ClaimStatus;
+  evidence: EvidenceView[];
+}
+
+export interface MentionView {
+  item: ItemRef;
+  chunk_id?: number | null;
+  surface: string;
+  title?: string | null;
+  url?: string | null;
+}
+
+export interface EntityDetail {
+  id: string;
+  kind: EntityKind;
+  name: string;
+  aliases: string[];
+  /** `[scheme, value]` pairs, e.g. `["email", "sam@example.com"]`. */
+  identifiers: [string, string][];
+  attributes: unknown;
+  claims: ClaimView[];
+  mentions: MentionView[];
+  /** The entity's vault page, relative to the vault root. */
+  vault_path?: string | null;
+}
+
+export interface GraphRequest {
+  /** Neighbourhood of this entity, or an overview of the most connected entities when `null`. */
+  center?: string | null;
+  depth: number;
+  limit: number;
+  kinds?: EntityKind[];
+}
+
+export interface GraphNodeView {
+  id: string;
+  kind: EntityKind;
+  name: string;
+  depth: number;
+}
+
+export interface GraphEdgeView {
+  claim: number;
+  from: string;
+  to: string;
+  predicate: string;
+}
+
+export interface GraphView {
+  nodes: GraphNodeView[];
+  edges: GraphEdgeView[];
+  truncated: boolean;
+}
+
+export interface MergeRequest {
+  /** The entity that stays. */
+  into: string;
+  /** The entity merged away; its id keeps resolving to `into`. */
+  from: string;
+}
+
+export interface ClaimStatusRequest {
+  claim: number;
+  /** `retracted` rejects the fact; `active` restores it. */
+  status: "retracted" | "active";
+}
+
+export interface VaultStatus {
+  path: string | null;
+  pages: number;
+  last_render?: string | null;
+  /** Pages (relative to the vault) whose user edits could not be merged automatically. */
+  conflicts?: string[];
+  /** Pages failing validation (broken links, missing citations, bad frontmatter). */
+  invalid?: string[];
+}
+
+export interface KnowledgeStatus {
+  entities: number;
+  claims: number;
+  mentions: number;
+  /** Items changed but not yet processed by extraction. */
+  pending_items: number;
+  last_run?: string | null;
+  /** Provider used for LLM extraction; `null` means deterministic extractors only. */
+  extractor_provider?: string | null;
+  vault: VaultStatus;
+}
+
+/** `knowledge.changed`. An empty list means "anything may have changed". */
+export interface KnowledgeChanged {
+  entities: string[];
+}
+
+// ---- MCP clients (M2) ----
+
+/** What an MCP client may see and call. */
+export interface McpScopes {
+  /** Source ids the client may read; `null` means all. */
+  sources?: string[] | null;
+  /** Tool names the client may call; empty means all read-only tools. */
+  tools?: string[];
+  /** Whether items flagged sensitive may be returned. */
+  include_sensitive?: boolean;
+}
+
+export interface McpClientInfo {
+  id: string;
+  name: string;
+  scopes: McpScopes;
+  created_at: string;
+  last_used?: string | null;
+}
+
+export interface McpClientCreate {
+  name: string;
+  scopes: McpScopes;
+}
+
+export interface McpClientRef {
+  id: string;
+}
+
+export type McpSetupApp = "claude-desktop" | "claude-code" | "cursor" | "generic-http" | "generic-stdio";
+export const MCP_SETUP_APPS: readonly McpSetupApp[] = [
+  "claude-desktop",
+  "claude-code",
+  "cursor",
+  "generic-http",
+  "generic-stdio",
+];
+
+export interface McpSetupSnippet {
+  /** Usually an `McpSetupApp`; unknown apps are shown generically. */
+  app: string;
+  /** Config file path hint, if the app uses one. */
+  config_path?: string | null;
+  text: string;
+}
+
+/**
+ * Result of `mcp.clients.create`. `token` is shown once: keep it in the dialog that shows it
+ * and nowhere else, and never log it.
+ */
+export interface McpClientCreated {
+  client: McpClientInfo;
+  token: string;
+  setup: McpSetupSnippet[];
+}
+
+/** Read-only tools the Nugget MCP server offers (docs/m2-spec.md, M2-D). */
+export const MCP_TOOLS: readonly { name: string; label: string; description: string }[] = [
+  { name: "search", label: "Search", description: "Search everything the app may read." },
+  { name: "get_context", label: "Get context", description: "Cited passages for a question." },
+  { name: "get_entity", label: "Get entity", description: "A person, project or other entity, with cited facts." },
+  { name: "find_entities", label: "Find entities", description: "Look entities up by name." },
+  { name: "get_neighbourhood", label: "Get neighbourhood", description: "Entities connected to an entity." },
+  { name: "get_item", label: "Get item", description: "One indexed document, message or event." },
+  { name: "recent_changes", label: "Recent changes", description: "What changed in the knowledge graph lately." },
+];
+
 // ---- type guards (for event payloads, which are not type-checked on the way in) ----
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -353,6 +589,161 @@ export function mergeSources(list: readonly SourceInfo[], updates: readonly Sour
   const merged = list.map((s) => byId.get(s.id) ?? s);
   for (const u of updates) if (!list.some((s) => s.id === u.id)) merged.push(u);
   return merged;
+}
+
+// ---- knowledge & MCP guards ----
+
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+function isItemRef(v: unknown): v is ItemRef {
+  return isRecord(v) && typeof v.source === "string" && typeof v.key === "string";
+}
+
+export function isEntityKind(v: unknown): v is EntityKind {
+  return typeof v === "string" && (ENTITY_KINDS as readonly string[]).includes(v);
+}
+
+export function isClaimStatus(v: unknown): v is ClaimStatus {
+  return typeof v === "string" && (CLAIM_STATUSES as readonly string[]).includes(v);
+}
+
+function isEntityLink(v: unknown): v is EntityLink {
+  return isRecord(v) && typeof v.id === "string" && typeof v.name === "string";
+}
+
+export function isEntitySummaryView(v: unknown): v is EntitySummaryView {
+  return (
+    isRecord(v) &&
+    typeof v.id === "string" &&
+    isEntityKind(v.kind) &&
+    typeof v.name === "string" &&
+    isCount(v.claims) &&
+    isCount(v.mentions) &&
+    typeof v.updated_at === "string"
+  );
+}
+
+export function isEvidenceView(v: unknown): v is EvidenceView {
+  return (
+    isRecord(v) &&
+    isItemRef(v.item) &&
+    (v.chunk_id === undefined || v.chunk_id === null || typeof v.chunk_id === "number") &&
+    isOptString(v.quote) &&
+    isOptString(v.title) &&
+    isOptString(v.url)
+  );
+}
+
+export function isClaimView(v: unknown): v is ClaimView {
+  if (!isRecord(v) || !isRecord(v.object)) return false;
+  const o = v.object;
+  const hasEntity = o.entity !== undefined && o.entity !== null;
+  const hasLiteral = o.literal !== undefined && o.literal !== null;
+  return (
+    typeof v.id === "number" &&
+    isEntityLink(v.subject) &&
+    typeof v.predicate === "string" &&
+    hasEntity !== hasLiteral &&
+    (!hasEntity || isEntityLink(o.entity)) &&
+    (!hasLiteral || typeof o.literal === "string") &&
+    typeof v.text === "string" &&
+    typeof v.confidence === "number" &&
+    Number.isFinite(v.confidence) &&
+    isClaimStatus(v.status) &&
+    Array.isArray(v.evidence) &&
+    v.evidence.every(isEvidenceView)
+  );
+}
+
+export function isGraphNodeView(v: unknown): v is GraphNodeView {
+  return isRecord(v) && typeof v.id === "string" && isEntityKind(v.kind) && typeof v.name === "string" && isCount(v.depth);
+}
+
+export function isGraphEdgeView(v: unknown): v is GraphEdgeView {
+  return (
+    isRecord(v) &&
+    typeof v.claim === "number" &&
+    typeof v.from === "string" &&
+    typeof v.to === "string" &&
+    typeof v.predicate === "string"
+  );
+}
+
+/** Strict: every node must have a known kind and every edge the full shape. */
+export function isGraphView(v: unknown): v is GraphView {
+  return (
+    isRecord(v) &&
+    Array.isArray(v.nodes) &&
+    v.nodes.every(isGraphNodeView) &&
+    Array.isArray(v.edges) &&
+    v.edges.every(isGraphEdgeView) &&
+    typeof v.truncated === "boolean"
+  );
+}
+
+export function isKnowledgeChanged(v: unknown): v is KnowledgeChanged {
+  return isRecord(v) && isStringArray(v.entities);
+}
+
+export function isKnowledgeStatus(v: unknown): v is KnowledgeStatus {
+  if (!isRecord(v) || !isRecord(v.vault)) return false;
+  const vault = v.vault;
+  return (
+    isCount(v.entities) &&
+    isCount(v.claims) &&
+    isCount(v.mentions) &&
+    isCount(v.pending_items) &&
+    isOptString(v.last_run) &&
+    isOptString(v.extractor_provider) &&
+    isOptString(vault.path) &&
+    isCount(vault.pages) &&
+    isOptString(vault.last_render) &&
+    (vault.conflicts === undefined || isStringArray(vault.conflicts)) &&
+    (vault.invalid === undefined || isStringArray(vault.invalid))
+  );
+}
+
+export function isMcpScopes(v: unknown): v is McpScopes {
+  return (
+    isRecord(v) &&
+    (v.sources === undefined || v.sources === null || isStringArray(v.sources)) &&
+    (v.tools === undefined || isStringArray(v.tools)) &&
+    (v.include_sensitive === undefined || typeof v.include_sensitive === "boolean")
+  );
+}
+
+export function isMcpClientInfo(v: unknown): v is McpClientInfo {
+  return (
+    isRecord(v) &&
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    isMcpScopes(v.scopes) &&
+    typeof v.created_at === "string" &&
+    isOptString(v.last_used)
+  );
+}
+
+export function isMcpSetupSnippet(v: unknown): v is McpSetupSnippet {
+  return isRecord(v) && typeof v.app === "string" && typeof v.text === "string" && isOptString(v.config_path);
+}
+
+export function isMcpClientCreated(v: unknown): v is McpClientCreated {
+  return (
+    isRecord(v) &&
+    isMcpClientInfo(v.client) &&
+    typeof v.token === "string" &&
+    v.token.length > 0 &&
+    Array.isArray(v.setup) &&
+    v.setup.every(isMcpSetupSnippet)
+  );
+}
+
+/** Whether a `knowledge.changed` payload may affect `id` (an empty list means "anything"). */
+export function changeAffects(change: KnowledgeChanged, id: string | null | undefined): boolean {
+  if (change.entities.length === 0) return true;
+  return id != null && change.entities.includes(id);
 }
 
 /** URL schemes `open_url` accepts (mirrors `src-tauri/src/open.rs`). */
@@ -519,6 +910,29 @@ export const api = {
   retrieveAsk: (request: AskRequest) => call<AskStarted>("retrieve_ask", { request }),
   runtimeStatus: () => call<RuntimeInfo[]>("runtime_status"),
 
+  knowledgeEntities: (request: EntitiesRequest) => call<EntitySummaryView[]>("knowledge_entities", { request }),
+  knowledgeEntity: (id: string) => call<EntityDetail>("knowledge_entity", { request: { id } satisfies EntityRef }),
+  knowledgeGraph: (request: GraphRequest) => call<GraphView>("knowledge_graph", { request }),
+  /** Merge `from` into `into`; `from`'s id keeps resolving to `into`. */
+  knowledgeMerge: (request: MergeRequest) => call<void>("knowledge_merge", { request }),
+  /** Reject (`retracted`) or restore (`active`) a fact. */
+  knowledgeClaimStatus: (request: ClaimStatusRequest) => call<void>("knowledge_claim_status", { request }),
+  knowledgeStatus: () => call<KnowledgeStatus>("knowledge_status"),
+
+  mcpClientsList: () => call<McpClientInfo[]>("mcp_clients_list"),
+  /**
+   * The result carries the client's token, shown once. Keep it only in the dialog showing it.
+   * A response of the wrong shape is refused rather than half-shown.
+   */
+  mcpClientsCreate: async (request: McpClientCreate) => {
+    const created = await call<unknown>("mcp_clients_create", { request });
+    if (!isMcpClientCreated(created)) {
+      throw new ApiError({ kind: "protocol", message: "Unexpected response from Nugget when creating the app." });
+    }
+    return created;
+  },
+  mcpClientsRevoke: (id: string) => call<void>("mcp_clients_revoke", { request: { id } satisfies McpClientRef }),
+
   /** Open an `https:`, `obsidian:` or local `file:` URL with the OS default handler. */
   openUrl: (url: string) => call<OpenResult>("open_url", { url }),
   /** Native folder picker; `[]` when cancelled. */
@@ -537,6 +951,7 @@ export const EVENT = {
   modelsProgress: "nugget:models-progress",
   ingestProgress: "nugget:ingest-progress",
   sourcesChanged: "nugget:sources-changed",
+  knowledgeChanged: "nugget:knowledge-changed",
   notification: "nugget:notification",
   navigate: "nugget:navigate",
 } as const;
@@ -546,7 +961,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "chat" | "search" | "sources" | "models" | "privacy" | "status";
+export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -565,6 +980,12 @@ export const events = {
     }),
   /** Payload is whatever the daemon sent; see `sourcesFromChange`. */
   onSourcesChanged: (h: (payload: unknown) => void) => on(EVENT.sourcesChanged, h),
+  /**
+   * Entities whose facts, mentions or pages changed. A malformed payload is passed on as
+   * `{ entities: [] }` ("anything may have changed"), so views refetch instead of going stale.
+   */
+  onKnowledgeChanged: (h: (c: KnowledgeChanged) => void) =>
+    on<unknown>(EVENT.knowledgeChanged, (p) => h(isKnowledgeChanged(p) ? p : { entities: [] })),
   /** Every daemon notification, including ones without a dedicated event. */
   onNotification: (h: (n: RawNotification) => void) => on(EVENT.notification, h),
   /** Tray menu asked the window to show a page. */

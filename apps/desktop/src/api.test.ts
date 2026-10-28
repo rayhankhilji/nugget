@@ -1,6 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  changeAffects,
+  isClaimStatus,
+  isClaimView,
+  isEntityKind,
+  isEntitySummaryView,
+  isEvidenceView,
+  isGraphView,
+  isKnowledgeChanged,
+  isKnowledgeStatus,
+  isMcpClientCreated,
+  isMcpClientInfo,
+  isMcpScopes,
   isIngestProgress,
   isMethodNotFound,
   isOpenableUrl,
@@ -158,5 +170,116 @@ describe("isOpenableUrl", () => {
     ]) {
       expect(isOpenableUrl(u), String(u).slice(0, 40)).toBe(false);
     }
+  });
+});
+
+// ---- knowledge & MCP (M2) ----
+
+const claim = (over: Record<string, unknown> = {}) => ({
+  id: 7,
+  subject: { id: "ent_sam", name: "Sam" },
+  predicate: "works_at",
+  object: { entity: { id: "ent_acme", name: "Acme" }, literal: null },
+  text: "Sam works at Acme.",
+  confidence: 0.92,
+  status: "active",
+  evidence: [{ item: { source: "gmail-1", key: "m1" }, chunk_id: 3, quote: "joined Acme", title: "Offer", url: null }],
+  ...over,
+});
+
+const mcpClient = (over: Record<string, unknown> = {}) => ({
+  id: "mcp-1",
+  name: "Claude Desktop",
+  scopes: { sources: null, tools: [], include_sensitive: false },
+  created_at: "2026-10-28T09:00:00Z",
+  last_used: null,
+  ...over,
+});
+
+describe("knowledge guards", () => {
+  it("accept exactly the protocol's kinds and statuses", () => {
+    for (const k of ["person", "organization", "project", "commitment", "preference", "event", "place", "topic"]) {
+      expect(isEntityKind(k)).toBe(true);
+    }
+    for (const k of ["Person", "org", "", null, 3]) expect(isEntityKind(k)).toBe(false);
+    for (const s of ["active", "superseded", "retracted", "user_asserted"]) expect(isClaimStatus(s)).toBe(true);
+    for (const s of ["userAsserted", "rejected", undefined]) expect(isClaimStatus(s)).toBe(false);
+  });
+
+  it("validate entity summaries", () => {
+    const e = { id: "ent_1", kind: "person", name: "Sam", claims: 3, mentions: 10, updated_at: "2026-10-28T09:00:00Z" };
+    expect(isEntitySummaryView(e)).toBe(true);
+    expect(isEntitySummaryView({ ...e, kind: "robot" })).toBe(false);
+    expect(isEntitySummaryView({ ...e, claims: -1 })).toBe(false);
+    expect(isEntitySummaryView({ ...e, updated_at: 0 })).toBe(false);
+  });
+
+  it("validate claims, with exactly one object form", () => {
+    expect(isClaimView(claim())).toBe(true);
+    expect(isClaimView(claim({ object: { literal: "London" } }))).toBe(true);
+    expect(isClaimView(claim({ object: {} }))).toBe(false);
+    expect(isClaimView(claim({ object: { literal: "x", entity: { id: "a", name: "A" } } }))).toBe(false);
+    expect(isClaimView(claim({ status: "rejected" }))).toBe(false);
+    expect(isClaimView(claim({ confidence: Number.NaN }))).toBe(false);
+    expect(isClaimView(claim({ evidence: [{ item: { source: "x" } }] }))).toBe(false);
+    expect(isEvidenceView({ item: { source: "a", key: "b" } })).toBe(true);
+    expect(isEvidenceView({ item: { source: "a", key: "b" }, url: 5 })).toBe(false);
+  });
+
+  it("validate graphs and change notifications", () => {
+    const g = {
+      nodes: [{ id: "a", kind: "person", name: "A", depth: 0 }],
+      edges: [{ claim: 1, from: "a", to: "b", predicate: "knows" }],
+      truncated: false,
+    };
+    expect(isGraphView(g)).toBe(true);
+    expect(isGraphView({ ...g, truncated: "no" })).toBe(false);
+    expect(isGraphView({ ...g, edges: [{ from: "a", to: "b" }] })).toBe(false);
+    expect(isKnowledgeChanged({ entities: ["a", "b"] })).toBe(true);
+    expect(isKnowledgeChanged({ entities: [1] })).toBe(false);
+    expect(isKnowledgeChanged(null)).toBe(false);
+    expect(changeAffects({ entities: [] }, "a")).toBe(true);
+    expect(changeAffects({ entities: ["a"] }, "a")).toBe(true);
+    expect(changeAffects({ entities: ["b"] }, "a")).toBe(false);
+    expect(changeAffects({ entities: ["b"] }, null)).toBe(false);
+  });
+
+  it("validate knowledge status", () => {
+    const s = {
+      entities: 10,
+      claims: 40,
+      mentions: 100,
+      pending_items: 2,
+      last_run: null,
+      extractor_provider: "local-chat",
+      vault: { path: "/home/me/vault", pages: 10, last_render: null, conflicts: ["people/sam.md"], invalid: [] },
+    };
+    expect(isKnowledgeStatus(s)).toBe(true);
+    expect(isKnowledgeStatus({ ...s, vault: { ...s.vault, conflicts: [1] } })).toBe(false);
+    expect(isKnowledgeStatus({ ...s, vault: null })).toBe(false);
+  });
+});
+
+describe("MCP guards", () => {
+  it("validate scopes and clients", () => {
+    expect(isMcpScopes({})).toBe(true);
+    expect(isMcpScopes({ sources: ["files-1"], tools: ["search"], include_sensitive: true })).toBe(true);
+    expect(isMcpScopes({ sources: "all" })).toBe(false);
+    expect(isMcpScopes({ include_sensitive: "no" })).toBe(false);
+    expect(isMcpClientInfo(mcpClient())).toBe(true);
+    expect(isMcpClientInfo(mcpClient({ last_used: "2026-10-28T10:00:00Z" }))).toBe(true);
+    expect(isMcpClientInfo(mcpClient({ created_at: undefined }))).toBe(false);
+  });
+
+  it("validate the one-time create result", () => {
+    const created = {
+      client: mcpClient(),
+      token: "nmcp_secret",
+      setup: [{ app: "claude-desktop", config_path: null, text: "{}" }],
+    };
+    expect(isMcpClientCreated(created)).toBe(true);
+    expect(isMcpClientCreated({ ...created, token: "" })).toBe(false);
+    expect(isMcpClientCreated({ ...created, setup: [{ app: "cursor" }] })).toBe(false);
+    expect(isMcpClientCreated({ ...created, client: {} })).toBe(false);
   });
 });
