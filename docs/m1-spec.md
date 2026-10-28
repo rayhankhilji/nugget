@@ -48,3 +48,16 @@ query ──▶ nugget-retrieve (hybrid + MMR + packing with citations) ──�
 ## Wave 2
 - **M1-I `nuggetd` integration.** Wire ingest, runtime and retrieve into the daemon, implement the new IPC methods, and auto-start local runtimes for the selected models. Run `bench memory --backend real` and record the results in `bench/README.md`.
 - **Review.** Security and correctness reviewers, then fixes.
+
+## Integration notes for wave 2 (collected from wave-1 reports)
+- **Settings shapes.** The desktop wizard sends:
+  - `files {roots, include, exclude}`
+  - `obsidian {vault}`
+  - `gmail`/`gcal {client_id}`
+  - `imap {host, port, tls, username, folders}`
+  - `caldav {url, username}`
+  
+  These must match each connector's `settings_schema`; reconcile them in the daemon or the UI.
+- **Google client secret.** The UI sends it through `sources.secret.set`, never in settings. For OAuth kinds the daemon stores it under a dedicated account (`oauth_client_secret:<source>`), and the connector reads it from there.
+- **`sources.changed` payload.** It is a single `SourceInfo`, and the UI also tolerates a list.
+- After a secret is set, the UI calls `sources.sync`.
