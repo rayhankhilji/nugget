@@ -5,9 +5,44 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Nugget's MCP server: scoped, audited, read-only access to the knowledge graph over stdio and loopback HTTP"
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+time.workspace = true
+# Official MCP Rust SDK (Apache-2.0, MSRV 1.88). Server side only; no macros, no auth/OAuth.
+rmcp = { version = "3.8.0", default-features = false, features = [
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower-service = "0.3"
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.3"
+zeroize = "1"
+
+[dev-dependencies]
+# The SDK's own client, used as an interop check over stdio and streamable HTTP.
+rmcp = { version = "3.8.0", default-features = false, features = [
+    "client",
+    "transport-streamable-http-client-reqwest",
+] }
+reqwest = { workspace = true, features = ["json"] }
 
 [lints]
 workspace = true
