@@ -1,5 +1,6 @@
 [package]
 name = "nugget-voice"
+description = "The user's writing voice for Nugget: identity, stylometric stats, exemplar selection"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +9,13 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-store.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+# Language identification (MIT, pure Rust, no model files).
+whatlang = "0.18"
 
 [lints]
 workspace = true
