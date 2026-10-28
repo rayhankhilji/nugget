@@ -58,5 +58,8 @@ and the list of items included.
 - [`retrieve.context`](../reference/ipc.md#retrieval) returns the packed, numbered passages and their
   citations, without calling a model.
 - [`retrieve.ask`](../reference/ipc.md#retrieval) does the whole Ask flow and streams the answer.
-- Over MCP, the planned `search` and `get_context` tools do the same for Claude, Cursor and other apps
-  (see [MCP](mcp.md)).
+- Over MCP, the `search` and `get_context` tools do the same for Claude Desktop, Claude Code, Cursor
+  and other apps, limited to the sources each app is allowed to see (see [MCP](mcp.md)).
+
+The same budgeted, cited retrieval feeds [Double Tap](double-tap.md) drafts, which are being wired in
+during wave W.

@@ -147,7 +147,15 @@ impl GraphApi {
     }
 
     /// `<base>/<segments...>?<query>`, with each segment percent-encoded.
+    /// `.`, `..` and empty segments are refused: `url` would drop or keep them silently, so an
+    /// id from a response could address another endpoint than the one meant.
     pub(crate) fn url(&self, segments: &[&str], query: &[(&str, &str)]) -> Result<Url> {
+        if segments
+            .iter()
+            .any(|s| s.is_empty() || *s == "." || *s == "..")
+        {
+            return Err(Error::Invalid("bad Graph path segment".into()));
+        }
         let mut url = self.base.clone();
         url.path_segments_mut()
             .map_err(|_| Error::Invalid("bad Graph base".into()))?

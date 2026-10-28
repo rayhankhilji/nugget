@@ -17,6 +17,13 @@ pub const CS: &str = "http://calendarserver.org/ns/";
 
 const MAX_DEPTH: usize = 64;
 const MAX_ELEMENTS: usize = 500_000;
+/// Attributes kept across a whole document (WebDAV responses hardly use any).
+const MAX_ATTRIBUTES: usize = 100_000;
+/// Longest namespace URI kept verbatim. Every element owns a copy of its namespace, so a long
+/// URI declared once and used by many elements would otherwise multiply into gigabytes.
+const MAX_NS_LEN: usize = 256;
+/// What a namespace URI longer than [`MAX_NS_LEN`] is recorded as (it never matches ours).
+const LONG_NS: &str = "urn:nugget:overlong-namespace";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Element {
@@ -59,7 +66,14 @@ fn bad(msg: impl std::fmt::Display) -> Error {
 
 fn qualified(ns: ResolveResult<'_>, local: &str) -> Result<(String, String)> {
     let ns = match ns {
-        ResolveResult::Bound(n) => n.as_ref().to_string(),
+        ResolveResult::Bound(n) => {
+            let n = n.as_ref();
+            if n.len() > MAX_NS_LEN {
+                LONG_NS.to_string()
+            } else {
+                n.to_string()
+            }
+        }
         ResolveResult::Unbound => String::new(),
         ResolveResult::Unknown(p) => return Err(bad(format!("unknown prefix `{p}`"))),
     };
@@ -77,6 +91,7 @@ pub fn parse(body: &[u8]) -> Result<Element> {
     let mut stack: Vec<Element> = Vec::new();
     let mut root: Option<Element> = None;
     let mut count = 0usize;
+    let mut attr_count = 0usize;
 
     loop {
         let (ns, event) = reader.read_resolved_event().map_err(bad)?;
@@ -96,6 +111,10 @@ pub fn parse(body: &[u8]) -> Result<Element> {
                 let mut attrs = Vec::new();
                 for a in e.attributes() {
                     let a = a.map_err(bad)?;
+                    attr_count += 1;
+                    if attr_count > MAX_ATTRIBUTES {
+                        return Err(bad("too many attributes"));
+                    }
                     let v = a.normalized_value(XmlVersion::Implicit1_0).map_err(bad)?;
                     attrs.push((a.key.local_name().as_ref().to_string(), v.into_owned()));
                 }
