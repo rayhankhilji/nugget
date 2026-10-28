@@ -2,9 +2,9 @@
 """GTK3 app for the nugget-a11y computer-use integration test (NUGGET_A11Y_IT=1).
 
 Window "Nugget IT - controls": a status label and an "Apply" button that changes it, a
-"Notifications" check button, a "Name" entry, a "Password" entry, a "Colour" combo box, a list of
-fruit, and an "Advanced" expander. Prints "READY" once mapped and focused, then
-"<WIDGET> <json>" whenever a widget changes, as an oracle independent of AT-SPI.
+"Notifications" check button, a "Name" entry, a "Password" entry, a "Colour" combo box, a list
+of fruit, a scrolled "Log" list and an "Advanced" expander. Prints "READY" once mapped and
+focused, then "<WIDGET> <json>" whenever a widget changes, as an oracle independent of AT-SPI.
 """
 import json
 
@@ -69,6 +69,19 @@ fruit.connect(
     lambda _l, row: report("FRUIT", row.get_child().get_text() if row else None),
 )
 box.pack_start(fruit, False, False, 0)
+
+log = Gtk.ListBox()
+log.get_accessible().set_name("Log")
+for i in range(40):
+    log.add(Gtk.Label(label=f"Log line {i}", xalign=0))
+scroller = Gtk.ScrolledWindow()
+scroller.set_min_content_height(80)
+scroller.set_max_content_height(80)
+scroller.add(log)
+scroller.get_vadjustment().connect(
+    "value-changed", lambda a: report("SCROLL", a.get_value() > 0)
+)
+box.pack_start(scroller, False, False, 0)
 
 expander = Gtk.Expander(label="Advanced")
 expander.add(Gtk.Label(label="Hidden details"))

@@ -91,6 +91,27 @@ synthesises Return, and it strips `\r` and control characters from the inserted 
 | Permission | `org.a11y.Status.IsEnabled` (request enables it) | `AXIsProcessTrustedWithOptions` | not required |
 | **Status** | **run and verified** (integration tests) | compile-checked (`aarch64-apple-darwin`) | compile-checked (`x86_64-pc-windows-msvc`) |
 
+### Computer use on Linux (M4)
+
+| | Linux (AT-SPI) |
+|---|---|
+| Apps | registry desktop children with a visible or minimised window; pid from `GetConnectionUnixProcessID`; id from the desktop file, Flatpak or Snap id, else the executable; frontmost = owns the `active` window |
+| Windows | `frame`, `window`, `dialog`, `alert`, `file chooser` children of each app; focused = `active`, minimised = `iconified`; bounds from `Component.GetExtents` |
+| Window native id | bus name + object path |
+| States | `disabled` (interactive and neither `enabled` nor `sensitive`), `checked` (`checked`, or `pressed` for toggle buttons, on checkable roles), `expanded` (`expandable`/`expanded`) |
+| Press | the `click`/`press`/`activate`/`toggle`/`jump`/`open` action, else action 0; selectable items without actions are selected |
+| Set value | `EditableText.SetTextContents` (caret moved to the end), else `Value.CurrentValue` for sliders, spin buttons, scroll bars |
+| Select | the combo box's `Selection` for its menu items; menu items are activated; else the parent's `Selection.SelectChild`, else a `select` action |
+| Focus | `Component.GrabFocus` |
+| Scroll | amount 0: `Component.ScrollTo(anywhere)`; else the nearest scroll bar's `Value` (of the element or an ancestor) moved by its step |
+| Expand | no-op when already in the wanted state; else the `expand or contract` (or `expand`/`collapse`, press) action |
+| Key input | text into an editable focused field: `EditableText.InsertText` at the caret over the selection; otherwise, and for keys and chords: XTest on X11 (keysyms; a spare keycode is remapped for characters the keymap lacks), else the registry's `DeviceEventController.GenerateKeyboardEvent` |
+| Open app | a running app: EWMH `_NET_ACTIVE_WINDOW` for its pid, and `GrabFocus` on its window or a focusable element in it; else `gtk-launch <desktop id>` (by file name or `Name=`) or a program of that name on `PATH` |
+| Screenshot | X11 only: `GetImage` of the window's extents as an uncompressed PNG (24/32-bit true colour) |
+
+Secure fields (`password text`) never advertise `set_value` and `perform` refuses it. Launch names
+must be plain names or ids (no paths, no leading `-`); processes are started without a shell.
+
 ### Computer use on macOS and Windows (M4)
 
 | | macOS (AX) | Windows (UIA) |
@@ -152,16 +173,24 @@ The scenarios are:
 - the deny list;
 - a real snapshot.
 
+`tests/linux_atspi_computer.rs` drives `tests/fixtures/gtk_computer_app.py` (button, check box,
+entries, combo box, lists, a scrolled list, an expander) through `system_computer_with`:
+window enumeration, snapshots with stable ids and no password value, a press that changes a label,
+check box toggle, set value, typed text, `ctrl+a backspace` and XTest keys, list and combo
+selection, scrolling, expanding, focus, activating the running app, and a screenshot.
+
 Setup on Debian/Ubuntu:
 
 ```sh
 sudo apt-get install -y xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-gtk-3.0
-NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi -- --nocapture
+NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi_computer -- --nocapture
 ```
 
 - If `python3` is not the interpreter that has PyGObject (for example, a newer Python sits ahead of
   the system one in `PATH`), set `NUGGET_A11Y_IT_PYTHON=/usr/bin/python3.12` or whichever version
   has `gi`.
+- Without `at-spi2-core` the accessibility bus is never activated; without `gir1.2-gtk-3.0`
+  `gi.require_version('Gtk', '3.0')` fails.
 - Set `NUGGET_A11Y_RECORD=<dir>` to write the recorded tree to `<dir>/gtk_recorded.json`.
 
 ## Known gaps

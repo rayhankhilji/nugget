@@ -10,6 +10,8 @@
 //! - Insertion: `EditableText.DeleteText` + `InsertText`, then the caret is moved after the
 //!   text. Fallback: clipboard + `EditableText.PasteText` (works on Wayland too), else an XTest
 //!   Ctrl+V on X11.
+//! - Computer use (`computer`): apps and windows from the registry, element actions through the
+//!   AT-SPI interfaces, key input (`input`: XTest, else the device event controller).
 
 mod computer;
 mod input;

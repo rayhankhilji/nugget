@@ -233,12 +233,9 @@ mod inner {
         }
     }
 
-    fn snap(cu: &dyn ComputerUse) -> UiTree {
-        cu.snapshot(
-            &WindowSel::App("gtk_computer_app".into()),
-            &TreeLimits::default(),
-        )
-        .expect("snapshot of the test window")
+    fn snap(cu: &dyn ComputerUse, sel: &WindowSel) -> UiTree {
+        cu.snapshot(sel, &TreeLimits::default())
+            .expect("snapshot of the test window")
     }
 
     fn find<'a>(t: &'a UiTree, raw_role: &str, name: &str) -> &'a UiNode {
@@ -295,11 +292,12 @@ mod inner {
         assert!(win.app.name.contains("gtk_computer_app"), "{:?}", win.app);
         assert!(win.app.pid.is_some() && win.app.frontmost);
         assert!(win.bounds.is_some());
+        let sel = WindowSel::Id(win.id.clone());
         let apps = cu.apps().unwrap();
         assert!(apps[0].name.contains("gtk_computer_app"), "{apps:?}");
 
         // Snapshot: roles, names, ids, actions, states; stable ids; no secret.
-        let t = snap(cu.as_ref());
+        let t = snap(cu.as_ref(), &sel);
         eprintln!("snapshot: {} nodes, truncated={}", t.count(), t.truncated);
         let button = find(&t, "push button", "Apply");
         assert!(button.actions.contains(&UiActionKind::Press));
@@ -315,7 +313,7 @@ mod inner {
         let json = serde_json::to_string(&t).unwrap();
         assert!(!json.contains("hunter2"), "secret leaked into the snapshot");
         assert!(has_text(&t, "Status: idle"));
-        let t2 = snap(cu.as_ref());
+        let t2 = snap(cu.as_ref(), &sel);
         assert_eq!(
             id_of(&t2, "push button", "Apply"),
             button.id,
@@ -327,7 +325,7 @@ mod inner {
         eprintln!("press: {out:?}");
         assert!(out.verified, "press not verified: {}", out.detail);
         assert_eq!(app.reported("STATUS"), Some("Status: applied".into()));
-        assert!(has_text(&snap(cu.as_ref()), "Status: applied"));
+        assert!(has_text(&snap(cu.as_ref(), &sel), "Status: applied"));
 
         // Toggle the check box.
         let out = cu.act(&check.id, &UiAction::Press).expect("toggle");
@@ -374,7 +372,7 @@ mod inner {
         );
 
         // Select a list row.
-        let t = snap(cu.as_ref());
+        let t = snap(cu.as_ref(), &sel);
         let cherry = t
             .root
             .iter()
@@ -388,19 +386,40 @@ mod inner {
         assert!(out.verified, "select not verified: {}", out.detail);
         assert_eq!(app.reported("FRUIT"), Some("Cherry".into()));
 
-        // Combo box: select an item of its menu.
-        let blue = t
+        // Combo box: select an item of its (hidden) menu.
+        let all = cu
+            .snapshot(
+                &sel,
+                &TreeLimits {
+                    skip_offscreen: false,
+                    ..TreeLimits::default()
+                },
+            )
+            .unwrap();
+        let blue = all
             .root
             .iter()
-            .find(|n| n.raw_role == "menu item" && n.name.as_deref() == Some("Blue"));
-        match blue {
-            Some(b) => {
-                let out = cu.act(&b.id, &UiAction::Select).expect("combo select");
-                eprintln!("combo select: {out:?}");
-                assert_eq!(app.reported("COMBO"), Some("Blue".into()));
-            }
-            None => eprintln!("combo items not exposed while the popup is closed; skipped"),
-        }
+            .find(|n| n.raw_role == "menu item" && n.name.as_deref() == Some("Blue"))
+            .expect("combo items in the full tree")
+            .id
+            .clone();
+        let out = cu.act(&blue, &UiAction::Select).expect("combo select");
+        eprintln!("combo select: verified={} {}", out.verified, out.detail);
+        assert_eq!(app.reported("COMBO"), Some("Blue".into()));
+
+        // Scroll the log by three steps.
+        let log = id_of(&t, "list box", "Log");
+        let out = cu
+            .act(
+                &log,
+                &UiAction::Scroll {
+                    direction: ScrollDirection::Down,
+                    amount: 3,
+                },
+            )
+            .expect("scroll");
+        assert!(out.verified, "scroll not verified: {}", out.detail);
+        assert_eq!(app.reported("SCROLL"), Some(true.into()));
 
         // Expand the expander.
         let exp = t
@@ -415,7 +434,7 @@ mod inner {
         assert!(out.verified, "expand not verified: {}", out.detail);
         assert_eq!(app.reported("EXPANDED"), Some(true.into()));
 
-        // Focus and scroll (best effort: the window is not scrollable).
+        // Focus; scrolling with no scroll bar around is refused.
         let out = cu.act(&button.id, &UiAction::Focus).expect("focus");
         assert!(out.verified, "focus not verified: {}", out.detail);
         let scroll = cu.act(
@@ -428,7 +447,7 @@ mod inner {
         eprintln!("scroll without a scroll bar: {scroll:?}");
 
         // Open (activate) the running app; a missing one is not found.
-        let out = cu.open_app("gtk_computer_app").expect("open running app");
+        let out = cu.open_app(&win.app.name).expect("open running app");
         assert!(out.verified, "open not verified: {}", out.detail);
         assert!(
             cu.open_app("no-such-app-nugget").is_err()

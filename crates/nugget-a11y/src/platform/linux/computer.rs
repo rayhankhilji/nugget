@@ -261,6 +261,10 @@ impl AtspiEl {
                 .editable()
                 .ok_or_else(|| Error::Unsupported("EditableText proxy".into()))?;
             return if ed.set_text_contents(value).map_err(zerr)? {
+                // Leave the caret after the value, as typing it would (GTK puts it at 0).
+                if let Some(t) = self.text() {
+                    let _ = t.set_caret_offset(value.chars().count() as i32);
+                }
                 Ok(())
             } else {
                 Err(refused("SetTextContents"))

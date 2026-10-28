@@ -1,5 +1,5 @@
-//! X11 clipboard (the `CLIPBOARD` selection) and an XTest Ctrl+V, over x11rb's pure-Rust
-//! protocol implementation.
+//! X11 clipboard (the `CLIPBOARD` selection), an XTest Ctrl+V, EWMH window activation and a
+//! screen capture for the screenshot fallback, over x11rb's pure-Rust protocol implementation.
 //!
 //! Saving reads `TARGETS` and then every target (with INCR for large transfers). Restoring, or
 //! setting text, makes a background thread the selection owner; it serves requests (INCR for

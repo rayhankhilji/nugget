@@ -4,13 +4,13 @@
 //!
 //! - [`tools`] / [`tools_with`]: `observe`, `click`, `type_text`, `press_key`, `set_value`,
 //!   `scroll`, `open_app`, `wait_for`. They share the last snapshot of each window so
-//!   [`Tool::risk`](nugget_agent::Tool::risk) and [`Tool::describe`](nugget_agent::Tool::describe)
+//!   `Tool::risk` and `Tool::describe`
 //!   can look an element up by id without touching the OS.
-//! - [`render`]: the compact tree rendering the model reads. Screen text is untrusted: it is
+//! - [`render()`]: the compact tree rendering the model reads. Screen text is untrusted: it is
 //!   escaped so it cannot forge an element line, an id or a fence, and every result that carries
 //!   it is marked [`untrusted`](nugget_agent::ToolResult::untrusted) so the loop fences it.
 //! - Every mutating tool observes the element and a fingerprint of its window before and after
-//!   the call. [`Tool::verify`](nugget_agent::Tool::verify) passes only when the backend saw the
+//!   the call. `Tool::verify` passes only when the backend saw the
 //!   effect *and* the after-observation shows it (the value reads back, the item is selected,
 //!   the element or window changed); it fails when the observation contradicts the intent, and is
 //!   unverifiable otherwise.
@@ -47,7 +47,7 @@
 //!
 //! Secure (password) fields are never typed into or set: the tools refuse, and so does the
 //! backend. Their contents are masked in confirmation previews and in the action log
-//! ([`Tool::redact`](nugget_agent::Tool::redact)).
+//! (`Tool::redact`).
 
 mod config;
 mod observe;
