@@ -3,11 +3,14 @@
  *
  * Nothing installs without the user: the default is notify-only, the release notes are shown
  * before the Install button, and Install names the exact version shown. Auto-install is opt-in.
+ * The desktop app's own preferences (`AppSettings`) render at the end of the same card.
  */
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { errorMessage, inTauri } from "../api";
+import { useT, type MessageKey } from "../i18n";
+import { AppSettings } from "./AppSettings";
 import { Badge, Spinner } from "./ui";
 
 type Channel = "stable" | "beta" | "off";
@@ -28,17 +31,16 @@ interface Progress {
   total: number | null;
 }
 
-const CHANNELS: { id: Channel; label: string }[] = [
-  { id: "stable", label: "Stable" },
-  { id: "beta", label: "Beta (prereleases)" },
-  { id: "off", label: "Off (never check)" },
+const CHANNELS: { id: Channel; label: MessageKey }[] = [
+  { id: "stable", label: "updates.channel.stable" },
+  { id: "beta", label: "updates.channel.beta" },
+  { id: "off", label: "updates.channel.off" },
 ];
 
-function when(secs: number | null): string {
-  return secs ? new Date(secs * 1000).toLocaleString() : "never";
-}
+const date = (secs: number) => new Date(secs * 1000);
 
 export function UpdateSettings() {
+  const t = useT();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [progress, setProgress] = useState<Progress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export function UpdateSettings() {
   if (!status) {
     return (
       <section className="status-card" aria-labelledby="updates-title">
-        <h2 id="updates-title">Updates</h2>
+        <h2 id="updates-title">{t("updates.title")}</h2>
         {error ? <div className="note note-error">{error}</div> : <Spinner />}
       </section>
     );
@@ -84,22 +86,20 @@ export function UpdateSettings() {
 
   return (
     <section className="status-card" aria-labelledby="updates-title">
-      <h2 id="updates-title">Updates</h2>
-      <p className="muted small">
-        Nugget {status.current_version}. Checks send no identifiers and never install anything without you.
-      </p>
+      <h2 id="updates-title">{t("updates.title")}</h2>
+      <p className="muted small">{t("updates.intro", { version: status.current_version })}</p>
 
       {!status.configured ? (
-        <div className="note">This build has no update signing key (a development or self-built copy), so it can't update itself.</div>
+        <div className="note">{t("updates.unconfigured")}</div>
       ) : (
         <>
           <div className="row" style={{ justifyContent: "flex-start", alignItems: "center" }}>
             <label className="field-inline">
-              Channel
+              {t("updates.channel")}
               <select value={settings.channel} disabled={busy} onChange={(e) => setSettings(e.target.value as Channel, settings.auto_install)}>
                 {CHANNELS.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.label}
+                    {t(c.label)}
                   </option>
                 ))}
               </select>
@@ -111,28 +111,29 @@ export function UpdateSettings() {
                 disabled={busy || settings.channel === "off"}
                 onChange={(e) => setSettings(settings.channel, e.target.checked)}
               />
-              Download updates automatically and install them when I quit Nugget
+              {t("updates.autoInstall")}
             </label>
             <button type="button" className="btn btn-ghost btn-small" disabled={busy || settings.channel === "off"} onClick={() => void run("updates_check")}>
-              Check now
+              {t("updates.checkNow")}
             </button>
-            {busy && <Spinner label="Working" />}
+            {busy && <Spinner label={t("updates.working")} />}
           </div>
           <p className="muted small">
-            Last checked: {when(status.last_checked)}
-            {progress && busy && progress.total ? ` · downloading ${Math.round((100 * progress.downloaded) / progress.total)}%` : ""}
+            {status.last_checked ? t("updates.lastChecked", { when: date(status.last_checked) }) : t("updates.neverChecked")}
+            {progress && busy && progress.total ? ` · ${t("updates.downloading", { progress: progress.downloaded / progress.total })}` : ""}
           </p>
-          {status.last_error && <div className="note note-warn">Update problem: {status.last_error}</div>}
+          {status.last_error && <div className="note note-warn">{t("updates.problem", { error: status.last_error })}</div>}
 
           {available ? (
             <div className="note" role="status" style={{ display: "block" }}>
               <p>
-                <strong>Nugget {available.version}</strong> is available <Badge tone="accent">{settings.channel}</Badge>
-                {available.date ? <span className="muted small"> · released {when(available.date)}</span> : null}
+                <strong>{t("updates.available", { version: available.version })}</strong>{" "}
+                {settings.channel !== "off" && <Badge tone="accent">{t(`updates.badge.${settings.channel}`)}</Badge>}
+                {available.date ? <span className="muted small"> · {t("updates.released", { when: date(available.date) })}</span> : null}
               </p>
-              <h3 className="small">What's new</h3>
+              <h3 className="small">{t("updates.whatsNew")}</h3>
               <div className="small" style={{ whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>
-                {available.notes?.trim() || "No release notes were published for this version."}
+                {available.notes?.trim() || t("updates.noNotes")}
               </div>
               <div className="row" style={{ justifyContent: "flex-start", marginTop: 8 }}>
                 <button
@@ -141,27 +142,27 @@ export function UpdateSettings() {
                   disabled={busy}
                   onClick={() => void run("updates_install", { version: available.version })}
                 >
-                  Install {available.version} and restart
+                  {t("updates.install", { version: available.version })}
                 </button>
-                {status.staged && <span className="muted small">Downloaded and verified; installs when you quit Nugget.</span>}
+                {status.staged && <span className="muted small">{t("updates.staged")}</span>}
               </div>
             </div>
           ) : (
-            settings.channel !== "off" && status.last_checked && <p className="muted small">You're up to date.</p>
+            settings.channel !== "off" && status.last_checked && <p className="muted small">{t("updates.upToDate")}</p>
           )}
         </>
       )}
 
-      <h2>Start at login</h2>
+      <h2>{t("updates.login.title")}</h2>
       {settings.start_at_login === null ? (
         <div className="note" style={{ display: "block" }}>
-          <p>Start the Nugget background service when you log in, so your sources stay indexed without the app open?</p>
+          <p>{t("updates.login.ask")}</p>
           <div className="row" style={{ justifyContent: "flex-start" }}>
             <button type="button" className="btn btn-primary btn-small" disabled={busy} onClick={() => void run("login_set", { enabled: true })}>
-              Yes, start at login
+              {t("updates.login.yes")}
             </button>
             <button type="button" className="btn btn-ghost btn-small" disabled={busy} onClick={() => void run("login_set", { enabled: false })}>
-              Not now
+              {t("updates.login.notNow")}
             </button>
           </div>
         </div>
@@ -173,9 +174,10 @@ export function UpdateSettings() {
             disabled={busy}
             onChange={(e) => void run("login_set", { enabled: e.target.checked })}
           />
-          Start the Nugget background service at login
+          {t("updates.login.toggle")}
         </label>
       )}
+      <AppSettings />
       {error && (
         <div className="note note-error" role="alert">
           {error}

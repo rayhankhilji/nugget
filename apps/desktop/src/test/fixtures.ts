@@ -99,6 +99,36 @@ export const plugins: PluginInfo[] = [
   },
 ];
 
+/** Hits with openable URLs, from two sources (flow tests). Not in RESPONSES. */
+export const openableHits: SearchHit[] = [
+  { item: { source: "files-1", key: "notes/engine.md" }, title: "Engine notes", snippet: "The Analytical Engine weaves algebraic patterns", score: 0.875, url: "file:///home/me/Documents/notes/engine.md" },
+  { item: { source: "gmail-1", key: "msg-42" }, title: "Re: Bernoulli numbers", snippet: "Note G computes the Bernoulli numbers", score: 0.5, url: "https://mail.google.com/mail/u/0/#inbox/msg-42" },
+];
+
+/** `knowledge_entity` for Ada Lovelace (e1). Not in RESPONSES. */
+export const entityDetail: import("../api").EntityDetail = {
+  id: "e1",
+  kind: "person",
+  name: "Ada Lovelace",
+  aliases: ["Ada Lovelace", "Countess of Lovelace"],
+  identifiers: [["email", "ada@example.com"]],
+  attributes: null,
+  claims: [
+    {
+      id: 1,
+      subject: { id: "e1", name: "Ada Lovelace" },
+      predicate: "works_on",
+      object: { entity: { id: "e2", name: "Analytical Engine" } },
+      text: "Ada Lovelace works on Analytical Engine",
+      confidence: 0.9,
+      status: "active",
+      evidence: [{ item: { source: "files-1", key: "notes/engine.md" }, quote: "Ada's notes on the engine", title: "Engine notes", url: null }],
+    },
+  ],
+  mentions: [{ item: { source: "files-1", key: "notes/engine.md" }, surface: "Ada", title: "Engine notes", url: null }],
+  vault_path: null,
+};
+
 export const RESPONSES: Record<string, unknown> = {
   connection_info: { connected: true, socket: "/tmp/nuggetd.sock", error: null },
   status,
@@ -114,4 +144,9 @@ export const RESPONSES: Record<string, unknown> = {
   mcp_clients_list: mcpClients,
   plugins_list: { plugins },
   search: hits,
+  autostart_get: { supported: true, enabled: false },
+  chat_history_load: [],
+  chat_history_save: null,
+  chat_history_delete: null,
+  chat_history_clear: null,
 };

@@ -19,7 +19,7 @@ import { useAsync, useNow } from "../hooks";
 import { formatBytes, formatRelative, formatTime } from "../format";
 import { useT, type MessageKey, type TFunction } from "../i18n";
 import { Dialog } from "../components/Dialog";
-import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 const SIGNATURE_TONE: Record<PluginSignature, "good" | "warn" | "bad"> = { trusted: "good", dev: "warn", untrusted: "bad" };
 
@@ -124,8 +124,8 @@ export function PluginsPage() {
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-          {loaded.loading && !plugins && <Spinner />}
-          {plugins && list.length === 0 && <Empty title={t("plugins.emptyTitle")}>{t("plugins.emptyBody")}</Empty>}
+          {loaded.loading && !plugins && <Loading />}
+          {plugins && list.length === 0 && <EmptyState title={t("plugins.emptyTitle")}>{t("plugins.emptyBody")}</EmptyState>}
           {list.length > 0 && (
             <ul className="source-list" aria-label={t("plugins.listLabel")}>
               {list.map((p) => (

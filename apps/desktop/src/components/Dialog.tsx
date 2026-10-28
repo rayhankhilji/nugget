@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useT } from "../i18n";
 
 const FOCUSABLE =
@@ -30,11 +30,13 @@ export function Dialog({
   const descId = useId();
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  // Taken on first render: by the time effects run, children may already have moved focus
+  // (autoFocus, their own effects), and the element to return to would be lost.
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!el.open) el.showModal();
     const target = el.querySelector<HTMLElement>("[data-autofocus]") ?? el.querySelector<HTMLElement>(FOCUSABLE);
     target?.focus();
