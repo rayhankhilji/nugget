@@ -1,0 +1,37 @@
+# The Nugget book, built with mdBook (https://rust-lang.github.io/mdBook/).
+#
+# mdBook is MPL-2.0. It is a documentation build tool only: it is not a dependency of any Nugget
+# crate and nothing it produces is linked into the product.
+#
+#   mdbook build docs/book          # writes docs/book/build/
+#   mdbook serve docs/book          # live preview on http://localhost:3000
+#   python3 docs/book/check-refs.py # fails if the docs drift from the code
+#
+# CI (.github/workflows/docs.yml) pins the mdBook and mdbook-linkcheck versions.
+
+[book]
+title = "Nugget"
+description = "Local-first personal AI: user guide, reference, architecture and contributor docs."
+authors = ["The Nugget contributors"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "build"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/rayhankhilji/nugget"
+edit-url-template = "https://github.com/rayhankhilji/nugget/edit/main/docs/book/{path}"
+no-section-label = false
+
+[output.html.search]
+enable = true
+
+# Checks every internal link and anchor when mdbook-linkcheck is installed (CI installs it).
+# `optional` lets a plain `mdbook build` work without it; check-refs.py also checks internal
+# links, so a local run still catches broken ones.
+[output.linkcheck]
+optional = true
+follow-web-links = false
+warning-policy = "error"
