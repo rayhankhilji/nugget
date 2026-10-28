@@ -1,5 +1,6 @@
 [package]
 name = "nugget-connector-microsoft"
+description = "Microsoft 365 connectors for Nugget: Outlook mail, Outlook calendar and OneDrive over Microsoft Graph"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,23 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-connector.workspace = true
+nugget-oauth.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+url = "2.5"
+# Time zone conversion for calendar events. The tz database is bundled so rendering does not
+# depend on the host having /usr/share/zoneinfo.
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+
+[dev-dependencies]
+wiremock = "0.6"
 
 [lints]
 workspace = true
