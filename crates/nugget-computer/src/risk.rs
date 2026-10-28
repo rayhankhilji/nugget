@@ -13,16 +13,7 @@ use crate::render::is_text_input;
 
 /// Words on a control that mean the click sends something to someone.
 pub const SEND_WORDS: &[&str] = &[
-    "send",
-    "submit",
-    "post",
-    "reply",
-    "reply all",
-    "forward",
-    "publish",
-    "share",
-    "invite",
-    "tweet",
+    "send", "submit", "post", "publish", "share", "invite", "tweet",
 ];
 /// Words that mean the click removes or overwrites data.
 pub const DESTROY_WORDS: &[&str] = &[
@@ -52,8 +43,6 @@ pub const SPEND_WORDS: &[&str] = &[
     "pay",
     "buy",
     "purchase",
-    "checkout",
-    "check out",
     "place order",
     "book",
     "subscribe",
@@ -253,7 +242,14 @@ pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) 
     let Some(node) = node else {
         return RiskClass::Send;
     };
-    let own = classify_text(&label_text(node), kw);
+    let mut own = classify_text(&label_text(node), kw);
+    // Toggling a check box or switch sets a preference ("Send me the newsletter"); it sends or
+    // spends nothing by itself. Destroy and Security words still count.
+    if (node.role == Role::CheckBox || node.states.checked.is_some())
+        && matches!(own, Some(RiskClass::Send | RiskClass::Spend))
+    {
+        own = Some(RiskClass::Edit);
+    }
     let ctx = if is_affirmative(node) {
         classify_text(&context.join(" "), kw)
     } else {
@@ -344,7 +340,7 @@ mod tests {
     fn text_classes() {
         let k = kw();
         assert_eq!(classify_text("Send", &k), Some(RiskClass::Send));
-        assert_eq!(classify_text("Reply All", &k), Some(RiskClass::Send));
+        assert_eq!(classify_text("Reply All", &k), None);
         assert_eq!(classify_text("Delete draft", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Empty Trash…", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Place order", &k), Some(RiskClass::Spend));
@@ -484,6 +480,33 @@ mod tests {
         assert!(is_terminal_app("MyShell", &["myshell".into()]));
         assert!(is_terminal_role("terminal"));
         assert!(is_terminal_role("AXTerminal"));
+    }
+
+    #[test]
+    fn toggles_and_draft_openers_are_edits() {
+        let kw = RiskKeywords::default();
+        let mut cb = UiNode {
+            role: Role::CheckBox,
+            name: Some("Send me the city newsletter".into()),
+            ..UiNode::default()
+        };
+        assert_eq!(click_risk(Some(&cb), &[], &kw), RiskClass::Edit);
+        cb.name = Some("Delete my data after 30 days".into());
+        assert_eq!(click_risk(Some(&cb), &[], &kw), RiskClass::Destroy);
+        for name in ["Reply", "Forward", "Checkout"] {
+            let b = UiNode {
+                role: Role::Button,
+                name: Some(name.into()),
+                ..UiNode::default()
+            };
+            assert_eq!(click_risk(Some(&b), &[], &kw), RiskClass::Edit, "{name}");
+        }
+        let send = UiNode {
+            role: Role::Button,
+            name: Some("Send".into()),
+            ..UiNode::default()
+        };
+        assert_eq!(click_risk(Some(&send), &[], &kw), RiskClass::Send);
     }
 
     #[test]

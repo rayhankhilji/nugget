@@ -74,6 +74,9 @@ synthesises Return, and it strips `\r` and control characters from the inserted 
   cloud clipboard and clipboard monitors.
 - On macOS, the temporary text is marked `org.nspasteboard.TransientType` and
   `org.nspasteboard.ConcealedType`, so clipboard managers skip it.
+- On Linux (X11 and Wayland), the temporary text is offered with `x-kde-passwordManagerHint:
+  secret`, so clipboard managers that honour it (Klipper and others) do not record it. Restored
+  clipboards are served as they were.
 
 ## Platform support
 

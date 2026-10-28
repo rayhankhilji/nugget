@@ -28,9 +28,9 @@
 //! |------|------|
 //! | `observe`, `scroll`, `wait_for` | Observe |
 //! | `click` on an element not in the last snapshot | **Send** (fail-safe: forces a confirmation) |
-//! | `click`, label has send/submit/post/reply/forward/publish/share/invite | Send |
+//! | `click`, label has send/submit/post/publish/share/invite ("Reply" and "Forward" only open a draft; its Send button is what sends) | Send |
 //! | `click`, label has delete/remove/discard/erase/archive/empty trash/unsubscribe/cancel subscription | Destroy |
-//! | `click`, label has pay/buy/purchase/checkout/place order/book/subscribe/donate/transfer/sign (not sign in/up/out) | Spend |
+//! | `click`, label has pay/buy/purchase/place order/book/subscribe/donate/transfer/sign (not sign in/up/out); a check box or switch is never Send or Spend by itself | Spend |
 //! | `click`, label has password/permission/security/install/allow/grant/2fa/authorize/trust | Security |
 //! | `click` on OK/Yes/Continue/Confirm/… | the class of its dialog's text and the window title |
 //! | any other `click` (fields, tabs, list items, links, ordinary buttons) | Edit |
