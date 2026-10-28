@@ -1,5 +1,6 @@
 [package]
 name = "nugget-retrieve"
+description = "Retrieval for Nugget: hybrid search, per-item grouping, MMR diversity and token-budgeted context packing with citations"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,17 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-store.workspace = true
+nugget-infer.workspace = true
+nugget-extract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }
 
 [lints]
 workspace = true

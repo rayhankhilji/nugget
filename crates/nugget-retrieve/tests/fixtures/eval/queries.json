@@ -1,0 +1,305 @@
+[
+ {
+  "id": "q01",
+  "query": "kestrel rollback plan",
+  "relevant": [
+   "kestrel-rollback"
+  ]
+ },
+ {
+  "id": "q02",
+  "query": "Kestrel Postgres migration status",
+  "relevant": [
+   "kestrel-migration",
+   "kestrel-standup"
+  ]
+ },
+ {
+  "id": "q03",
+  "query": "sourdough starter stretch and fold",
+  "relevant": [
+   "sourdough"
+  ]
+ },
+ {
+  "id": "q04",
+  "query": "Pena Palace tickets Sintra",
+  "relevant": [
+   "lisbon-itinerary"
+  ]
+ },
+ {
+  "id": "q05",
+  "query": "booking reference QX7H2P",
+  "relevant": [
+   "flight-confirmation"
+  ]
+ },
+ {
+  "id": "q06",
+  "query": "fault code F28 ignition",
+  "relevant": [
+   "boiler-repair"
+  ]
+ },
+ {
+  "id": "q07",
+  "query": "half term October dates",
+  "relevant": [
+   "school-term-dates"
+  ]
+ },
+ {
+  "id": "q08",
+  "query": "connection pool size zero outage",
+  "relevant": [
+   "api-outage-postmortem",
+   "oncall-runbook"
+  ]
+ },
+ {
+  "id": "q09",
+  "query": "rail pass Kyoto Hiroshima",
+  "relevant": [
+   "japan-trip"
+  ]
+ },
+ {
+  "id": "q10",
+  "query": "salmon kibble elimination diet",
+  "relevant": [
+   "dog-food-allergy"
+  ]
+ },
+ {
+  "id": "q11",
+  "query": "automobile coverage renewal price",
+  "relevant": [
+   "car-insurance-renewal"
+  ]
+ },
+ {
+  "id": "q12",
+  "query": "veterinarian appointment for the dog",
+  "relevant": [
+   "dog-vet-visit"
+  ]
+ },
+ {
+  "id": "q13",
+  "query": "furnace broke, no hot water",
+  "relevant": [
+   "boiler-repair"
+  ]
+ },
+ {
+  "id": "q14",
+  "query": "teeth cleaning appointment",
+  "relevant": [
+   "dentist-checkup"
+  ]
+ },
+ {
+  "id": "q15",
+  "query": "vacation in Portugal",
+  "relevant": [
+   "lisbon-itinerary",
+   "flight-confirmation"
+  ]
+ },
+ {
+  "id": "q16",
+  "query": "jab for my father",
+  "relevant": [
+   "flu-vaccine"
+  ]
+ },
+ {
+  "id": "q17",
+  "query": "monthly spending plan",
+  "relevant": [
+   "monthly-budget"
+  ]
+ },
+ {
+  "id": "q18",
+  "query": "recruiting a payments developer",
+  "relevant": [
+   "hiring-backend"
+  ]
+ },
+ {
+  "id": "q19",
+  "query": "computer purchase shortlist",
+  "relevant": [
+   "laptop-research"
+  ]
+ },
+ {
+  "id": "q20",
+  "query": "internet deal ending",
+  "relevant": [
+   "broadband-contract"
+  ]
+ },
+ {
+  "id": "q21",
+  "query": "power bill going up",
+  "relevant": [
+   "energy-switch"
+  ]
+ },
+ {
+  "id": "q22",
+  "query": "present for mother",
+  "relevant": [
+   "mum-birthday"
+  ]
+ },
+ {
+  "id": "q23",
+  "query": "jogging knee injury",
+  "relevant": [
+   "physio-knee"
+  ]
+ },
+ {
+  "id": "q24",
+  "query": "children's swim classes",
+  "relevant": [
+   "swimming-lessons"
+  ]
+ },
+ {
+  "id": "q25",
+  "query": "movie evening",
+  "relevant": [
+   "film-night"
+  ]
+ },
+ {
+  "id": "q26",
+  "query": "downtime incident retrospective",
+  "relevant": [
+   "api-outage-postmortem"
+  ]
+ },
+ {
+  "id": "q27",
+  "query": "home loan interest rate switch",
+  "relevant": [
+   "mortgage-remortgage"
+  ]
+ },
+ {
+  "id": "q28",
+  "query": "repair estimate for leaking ceiling",
+  "relevant": [
+   "roof-leak"
+  ]
+ },
+ {
+  "id": "q29",
+  "query": "backing up family pictures",
+  "relevant": [
+   "nas-backup"
+  ]
+ },
+ {
+  "id": "q30",
+  "query": "what to cook this week",
+  "relevant": [
+   "meal-plan"
+  ]
+ },
+ {
+  "id": "q31",
+  "query": "Biscuit health problems",
+  "relevant": [
+   "dog-vet-visit",
+   "dog-food-allergy"
+  ]
+ },
+ {
+  "id": "q32",
+  "query": "insurance renewals",
+  "relevant": [
+   "car-insurance-renewal",
+   "home-insurance"
+  ]
+ },
+ {
+  "id": "q33",
+  "query": "Japan trip passport validity",
+  "relevant": [
+   "passport-renewal",
+   "japan-trip"
+  ]
+ },
+ {
+  "id": "q34",
+  "query": "search latency and ranking evaluation",
+  "relevant": [
+   "search-design-review",
+   "quarterly-okrs"
+  ]
+ },
+ {
+  "id": "q35",
+  "query": "cheap overnight electricity for charging the car",
+  "relevant": [
+   "energy-switch",
+   "ev-charger-install"
+  ]
+ },
+ {
+  "id": "q36",
+  "query": "vegan curry with chickpeas",
+  "relevant": [
+   "chickpea-curry",
+   "meal-plan"
+  ]
+ },
+ {
+  "id": "q37",
+  "query": "notice period cancellation in writing",
+  "relevant": [
+   "gym-cancel"
+  ]
+ },
+ {
+  "id": "q38",
+  "query": "Maya progress at school",
+  "relevant": [
+   "parent-teacher-meeting"
+  ]
+ },
+ {
+  "id": "q39",
+  "query": "worn chain and cassette",
+  "relevant": [
+   "bike-repair"
+  ]
+ },
+ {
+  "id": "q40",
+  "query": "vitamin D and cholesterol",
+  "relevant": [
+   "blood-test"
+  ]
+ },
+ {
+  "id": "q41",
+  "query": "wedding hotel in Ludlow",
+  "relevant": [
+   "wedding-rsvp"
+  ]
+ },
+ {
+  "id": "q42",
+  "query": "holding a mutex across await",
+  "relevant": [
+   "rust-async-notes"
+  ]
+ }
+]

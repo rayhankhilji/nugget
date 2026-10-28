@@ -1,5 +1,6 @@
 [package]
 name = "nugget-ingest"
+description = "Ingest runtime for Nugget: source registry, per-source supervisors and the indexing pipeline"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,38 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-connector.workspace = true
+nugget-extract.workspace = true
+nugget-store.workspace = true
+nugget-infer.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+toml = "1"
+
+# OS keychains for source credentials. The backend set must match nugget-store's and
+# nugget-infer's exactly; see the `keyring` entry in the root Cargo.toml.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
+
+# Battery state for power-aware scheduling (ISC). 0.10 is the last line with MSRV <= 1.88.
+# Only on the platforms it supports; everything else uses the no-op policy.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows", target_os = "freebsd", target_os = "dragonfly", target_os = "netbsd"))'.dependencies]
+starship-battery = { version = "0.10.2", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
