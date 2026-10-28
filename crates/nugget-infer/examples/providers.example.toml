@@ -1,0 +1,115 @@
+# Example provider configuration for nugget-infer.
+#
+# Model ids live ONLY in configuration like this file, never in code. Each provider serves the
+# tiers it lists; when several providers serve a tier they are tried in file order, filtered by
+# the capabilities their probe proved (vision, tools, json_schema, embeddings).
+#
+# Fields (all providers):
+#   id        unique name                     kind      anthropic | openai_responses | openai_compatible
+#   model     model id as the API expects it  base_url  API root (see per-kind notes below)
+#   api_key   "env:VAR" or "keychain:NAME"    tiers     triage | light | synthesis | agentic | embedding
+# Optional: locality ("cloud" for a localhost gateway that forwards to a cloud API), context_tokens,
+#   max_output_tokens, connect_timeout_secs, idle_timeout_secs, max_retries, retry_base_ms,
+#   headers = { ... }, extra_body = { ... } (merged into every chat request body).
+#
+# Keychain entries are read from service "nugget", account NAME. For example:
+#   macOS:   security add-generic-password -s nugget -a anthropic -w
+#   Windows: cmdkey /generic:anthropic.nugget /user:anthropic /pass   (or Credential Manager)
+#
+# Locality is derived from the base_url host: localhost/127.0.0.1/::1 => on_device (no egress
+# record); private ranges, *.local, single-label hosts => local_network; everything else => cloud.
+# Every request to a non-on_device provider is written to the egress ledger.
+
+# --- Local (on-device) via Ollama: triage + embeddings ------------------------------------------
+[[providers]]
+id = "ollama-triage"
+kind = "openai_compatible"
+base_url = "http://localhost:11434/v1"   # include the /v1 prefix for OpenAI-compatible servers
+model = "qwen3:4b"
+tiers = ["triage"]
+context_tokens = 32768
+
+[[providers]]
+id = "ollama-embed"
+kind = "openai_compatible"
+base_url = "http://localhost:11434/v1"
+model = "nomic-embed-text"
+tiers = ["embedding"]
+embed_batch_size = 64
+
+# --- Anthropic (cloud) --------------------------------------------------------------------------
+# base_url defaults to https://api.anthropic.com (no /v1). anthropic_version defaults to
+# 2026-10-21; on that version `temperature` is not sent.
+[[providers]]
+id = "anthropic"
+kind = "anthropic"
+model = "claude-opus-5-5"
+api_key = "keychain:anthropic"
+tiers = ["synthesis", "agentic"]
+context_tokens = 1000000
+max_output_tokens = 32000
+# Server-side refusal fallbacks: if a safety classifier declines, the API retries on a fallback
+# model inside the same streamed call. Remove both lines to opt out.
+headers = { "anthropic-beta" = "server-side-fallback-2026-07-01" }
+extra_body = { fallbacks = "default" }
+
+[[providers]]
+id = "anthropic-light"
+kind = "anthropic"
+model = "claude-haiku-5-5"
+api_key = "env:ANTHROPIC_API_KEY"
+tiers = ["light"]
+
+# --- OpenAI Responses API (cloud) ---------------------------------------------------------------
+# base_url defaults to https://api.openai.com/v1. store = false (default) keeps conversations off
+# OpenAI's servers and replays encrypted reasoning instead.
+[[providers]]
+id = "openai"
+kind = "openai_responses"
+model = "gpt-5"
+api_key = "env:OPENAI_API_KEY"
+tiers = ["synthesis", "agentic"]
+
+# --- More OpenAI-compatible servers (uncomment to use) ------------------------------------------
+# LM Studio:
+# [[providers]]
+# id = "lmstudio"
+# kind = "openai_compatible"
+# base_url = "http://localhost:1234/v1"
+# model = "qwen3-8b"
+# tiers = ["light"]
+#
+# llama.cpp llama-server (start with --embeddings for the embedding tier):
+# [[providers]]
+# id = "llama-server"
+# kind = "openai_compatible"
+# base_url = "http://127.0.0.1:8080/v1"
+# model = "local"
+# tiers = ["triage"]
+#
+# vLLM on another machine on the LAN (local_network: recorded in the egress ledger):
+# [[providers]]
+# id = "vllm-lan"
+# kind = "openai_compatible"
+# base_url = "http://192.168.1.50:8000/v1"
+# model = "Qwen/Qwen3-8B"
+# tiers = ["synthesis"]
+#
+# OpenRouter:
+# [[providers]]
+# id = "openrouter"
+# kind = "openai_compatible"
+# base_url = "https://openrouter.ai/api/v1"
+# model = "meta-llama/llama-3.3-70b-instruct"
+# api_key = "env:OPENROUTER_API_KEY"
+# tiers = ["light"]
+# headers = { "X-Title" = "Nugget" }
+#
+# OpenAI embeddings (the Responses API has none; use the compatible kind):
+# [[providers]]
+# id = "openai-embed"
+# kind = "openai_compatible"
+# base_url = "https://api.openai.com/v1"
+# model = "text-embedding-3-small"
+# api_key = "env:OPENAI_API_KEY"
+# tiers = ["embedding"]
