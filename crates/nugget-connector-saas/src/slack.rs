@@ -673,7 +673,13 @@ impl SlackConnector {
             .await?;
         let env: Envelope = api::json(&resp, method)?;
         if !env.ok {
-            return Ok(Err(env.error.unwrap_or_else(|| "unknown_error".into())));
+            // The code ends up in error messages (logs, the UI): keep it short and printable.
+            let code = env.error.map(|e| one_line(&e, 80)).unwrap_or_default();
+            return Ok(Err(if code.is_empty() {
+                "unknown_error".into()
+            } else {
+                code
+            }));
         }
         api::json(&resp, method).map(Ok)
     }
@@ -1508,6 +1514,9 @@ fn author_and_mention_ids(msgs: &[Msg]) -> Vec<String> {
 
 /// Slack mrkdwn → plain text: mentions and channel links resolved, links as `label (url)`,
 /// entities decoded, `*bold*` / `_italic_` / `~strike~` / backtick markers dropped.
+/// Longest `<…>` token (link, mention) rendered; longer ones stay literal text.
+const MAX_TOKEN: usize = 2_000;
+
 pub(crate) fn render_mrkdwn(text: &str, users: &HashMap<String, String>) -> String {
     let text = clean(text);
     let mut out = String::with_capacity(text.len());
@@ -1515,12 +1524,24 @@ pub(crate) fn render_mrkdwn(text: &str, users: &HashMap<String, String>) -> Stri
     while let Some(open) = rest.find('<') {
         out.push_str(&strip_markers(&decode_entities(&rest[..open])));
         let after = &rest[open + 1..];
-        match after.find('>') {
-            Some(close) if close <= 2_000 && !after[..close].contains('<') => {
+        // Look for the closing `>` only within the token limit, and stop at the next `<`: an
+        // unbounded `find('>')` per `<` made hostile text (`<<<<…`) quadratic.
+        let mut window = after.len().min(MAX_TOKEN + 1);
+        while !after.is_char_boundary(window) {
+            window -= 1;
+        }
+        match after[..window].find(['<', '>']) {
+            Some(close) if after.as_bytes()[close] == b'>' => {
                 out.push_str(&render_token(&after[..close], users));
                 rest = &after[close + 1..];
             }
-            _ => {
+            Some(next) => {
+                // A `<` before any `>`: this one is literal text.
+                out.push('<');
+                out.push_str(&strip_markers(&decode_entities(&after[..next])));
+                rest = &after[next..];
+            }
+            None => {
                 out.push('<');
                 rest = after;
             }
@@ -1621,6 +1642,32 @@ mod unit {
             "unclosed < bracket"
         );
         assert_eq!(render_mrkdwn("```let x = 1;```", &users), "let x = 1;");
+        assert_eq!(render_mrkdwn("a<b<@U1>", &users), "a<b@Ada");
+        let long = format!("<{}> <@U1>", "x".repeat(MAX_TOKEN + 1));
+        assert!(render_mrkdwn(&long, &users).ends_with("> @Ada"));
+        let edge = format!("<{}>", "é".repeat(MAX_TOKEN / 2));
+        assert_eq!(render_mrkdwn(&edge, &users), "é".repeat(MAX_TOKEN / 2));
+    }
+
+    /// Hostile message text (`<<<<…`, or `<` followed by a far-away `>`) used to cost one full
+    /// scan per `<`: quadratic in the message size. It must stay linear.
+    #[test]
+    fn mrkdwn_is_linear_on_hostile_brackets() {
+        let users = HashMap::new();
+        let start = std::time::Instant::now();
+        for text in [
+            "<".repeat(600_000),
+            format!("{}>", "<a".repeat(300_000)),
+            format!("{}{}", "<a ".repeat(200_000), ">"),
+        ] {
+            let out = render_mrkdwn(&text, &users);
+            assert!(out.len() >= text.len() / 2);
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "took {:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

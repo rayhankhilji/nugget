@@ -370,6 +370,20 @@ pub(crate) async fn github_device_flow(
             "GitHub returned a non-https verification URL".into(),
         ));
     }
+    // The page is opened for the user to type the code into: it must be GitHub's (or the
+    // configured login root's host), never a page the response names, and carry no userinfo.
+    let root_host = url::Url::parse(&root)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_ascii_lowercase));
+    let host = url.host_str().map(str::to_ascii_lowercase);
+    let host_ok = host
+        .as_deref()
+        .is_some_and(|h| h == "github.com" || Some(h) == root_host.as_deref());
+    if !host_ok || !url.username().is_empty() || url.password().is_some() {
+        return Err(Error::Invalid(
+            "GitHub returned a verification URL outside GitHub".into(),
+        ));
+    }
     if code.user_code.len() > 64 || code.user_code.chars().any(char::is_control) {
         return Err(Error::Invalid("GitHub returned a bad user code".into()));
     }
