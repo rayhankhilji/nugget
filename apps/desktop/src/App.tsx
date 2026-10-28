@@ -16,6 +16,7 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
+import { DoubleTapPage } from "./pages/DoubleTap";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
@@ -44,6 +45,7 @@ export const PAGES: readonly PageDef[] = [
   { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources" },
   { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps" },
   { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models" },
+  { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
   { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
 ];

@@ -3993,7 +3993,9 @@ name = "nugget-desktop"
 version = "0.0.1"
 dependencies = [
  "futures",
+ "nugget-a11y",
  "nugget-core",
+ "nugget-hotkey",
  "nugget-ipc",
  "serde",
  "serde_json",
@@ -4417,6 +4419,7 @@ dependencies = [
  "nugget-connector-microsoft",
  "nugget-connector-saas",
  "nugget-core",
+ "nugget-draft",
  "nugget-graph",
  "nugget-infer",
  "nugget-ingest",
@@ -4428,6 +4431,7 @@ dependencies = [
  "nugget-runtime",
  "nugget-store",
  "nugget-vault",
+ "nugget-voice",
  "nuggetd",
  "reqwest",
  "rmcp",

@@ -6,6 +6,7 @@
 mod autostart;
 mod commands;
 mod daemon;
+mod doubletap;
 mod history;
 mod login;
 mod open;
@@ -83,6 +84,16 @@ fn main() {
             updater::login_set,
             autostart::autostart_get,
             autostart::autostart_set,
+            doubletap::commands::doubletap_settings_get,
+            doubletap::commands::doubletap_settings_set,
+            doubletap::commands::doubletap_status,
+            doubletap::commands::doubletap_request_permissions,
+            doubletap::commands::doubletap_default_excluded,
+            doubletap::commands::doubletap_fire,
+            doubletap::commands::voice_status,
+            doubletap::commands::overlay_state,
+            doubletap::commands::overlay_accept,
+            doubletap::commands::overlay_cancel,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
@@ -106,9 +117,11 @@ fn main() {
                 let _ = daemon.connection_info(&handle).await;
             });
             updater::spawn_background_checks(app.handle());
+            doubletap::setup(app);
             Ok(())
         })
         .on_window_event(|window, event| {
+            doubletap::on_window_event(window, event);
             // Events can arrive before `setup` has managed the state.
             let Some(state) = window.try_state::<window_state::WindowState>() else {
                 return;
