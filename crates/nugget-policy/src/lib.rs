@@ -4,8 +4,57 @@
 //! package M4-B implements the policy engine (allow/deny lists per app and site, a risk classifier,
 //! confirmation requirements, the kill switch and the tamper-evident action log). Every executor
 //! (computer use, browser, proactive actions) asks a [`PolicyGate`] before acting.
+//!
+//! # Pieces
+//! - [`PolicyEngine`]: the [`PolicyGate`] implementation. Rules per app and site ([`Rule`]), the
+//!   built-in defaults ([`default_rules`]), per-task approvals, rate limits per risk class and the
+//!   kill switch. Configuration persists through a [`PolicyStore`] ([`JsonFilePolicyStore`],
+//!   [`MemoryPolicyStore`]).
+//! - [`RiskClassifier`]: deterministic heuristics that can only *raise* the declared risk.
+//! - [`KillSwitch`]: process-wide halt, one atomic load to check. [`KillSwitch::trigger_hook`]
+//!   plugs straight into `nugget_hotkey::start`.
+//! - [`ConfirmationBroker`]: executors await a user decision on a [`Decision::Confirm`]; a timeout
+//!   or the kill switch counts as deny.
+//! - [`ActionLog`]: append-only, SHA-256 hash-chained, exportable as JSONL. See [`log`] for the
+//!   adapter `nugget-agent` can use.
+//!
+//! # Precedence (what [`PolicyEngine::assess`] does)
+//! 1. Kill switch engaged → `Deny`.
+//! 2. Effective risk = max(declared, classified).
+//! 3. Any matching `Deny` rule (user or default) → `Deny`. Deny always wins.
+//! 4. A per-task approval for this risk class and target → `Allow`.
+//! 5. The most specific matching user `Allow`/`Confirm` rule; ties go to `Confirm`.
+//! 6. The most specific matching default `Allow`/`Confirm` rule.
+//! 7. Nothing matched: `Confirm` for Send and above, `Allow` otherwise.
+//! 8. The rate limit for the risk class is exhausted for this task → `Deny`.
+//!
+//! An `Allow` rule that names no risk classes only covers Observe and Edit: allowing Send,
+//! Destroy, Spend or Security needs the class named explicitly.
 
 use serde::{Deserialize, Serialize};
+
+pub mod broker;
+pub mod classify;
+pub mod engine;
+mod glob;
+pub mod kill;
+pub mod log;
+pub mod redact;
+pub mod rules;
+pub mod store;
+mod text;
+
+pub use broker::{
+    ConfirmOutcome, ConfirmationBroker, ConfirmationRequest, DenyReason, UserDecision,
+};
+pub use classify::{Classification, RiskClassifier};
+pub use engine::{Assessment, PolicyEngine, PolicyEngineBuilder, TaskApproval};
+pub use glob::glob_match;
+pub use kill::KillSwitch;
+pub use log::{ActionLog, ChainError, LogEntry, LogEvent};
+pub use redact::RedactedAction;
+pub use rules::{Effect, PolicyConfig, Rule, default_rules};
+pub use store::{JsonFilePolicyStore, MemoryPolicyStore, PolicyStore};
 
 /// What kind of consequence an action can have. Higher classes need stronger consent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -23,6 +72,34 @@ pub enum RiskClass {
     Spend,
     /// Changes security or system state (passwords, permissions, installs, settings).
     Security,
+}
+
+impl RiskClass {
+    pub const ALL: [RiskClass; 6] = [
+        RiskClass::Observe,
+        RiskClass::Edit,
+        RiskClass::Send,
+        RiskClass::Destroy,
+        RiskClass::Spend,
+        RiskClass::Security,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RiskClass::Observe => "observe",
+            RiskClass::Edit => "edit",
+            RiskClass::Send => "send",
+            RiskClass::Destroy => "destroy",
+            RiskClass::Spend => "spend",
+            RiskClass::Security => "security",
+        }
+    }
+}
+
+impl std::fmt::Display for RiskClass {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// A proposed action, described for the policy engine and for the user.
@@ -51,10 +128,79 @@ pub enum Decision {
     Deny(String),
 }
 
+impl Decision {
+    pub fn is_allow(&self) -> bool {
+        matches!(self, Decision::Allow)
+    }
+}
+
+/// What the executor can see around the action, beyond the [`ActionDescriptor`]. Everything is
+/// optional; the more an executor fills in, the better the classifier and the rules can judge
+/// (a payment field in the same form, a compose window, the page URL behind a browser tab).
+///
+/// Build it with [`ActionContext::default`] and the `with_*` methods.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ActionContext {
+    /// URL of the page or document the action happens in.
+    pub url: Option<String>,
+    /// Title of the window or tab.
+    pub window_title: Option<String>,
+    /// Text of the surrounding dialog, sheet or alert, if any.
+    pub dialog_text: Option<String>,
+    /// Labels, names or `autocomplete` values of the other fields in the same form.
+    pub form_fields: Vec<String>,
+    /// The target is a password or other secure text field.
+    pub secure_field: bool,
+    /// Accessibility role of the target (`button`, `link`, `text_field`, ...).
+    pub role: Option<String>,
+}
+
+impl ActionContext {
+    pub fn with_url(mut self, url: impl Into<String>) -> Self {
+        self.url = Some(url.into());
+        self
+    }
+    pub fn with_window_title(mut self, title: impl Into<String>) -> Self {
+        self.window_title = Some(title.into());
+        self
+    }
+    pub fn with_dialog_text(mut self, text: impl Into<String>) -> Self {
+        self.dialog_text = Some(text.into());
+        self
+    }
+    pub fn with_form_fields<I, S>(mut self, fields: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.form_fields = fields.into_iter().map(Into::into).collect();
+        self
+    }
+    pub fn with_secure_field(mut self, secure: bool) -> Self {
+        self.secure_field = secure;
+        self
+    }
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
+        self
+    }
+}
+
 /// Asked before every action. Implementations must be fast and must not block on the user;
 /// confirmation is the executor's job when `Confirm` is returned.
 pub trait PolicyGate: Send + Sync {
     fn evaluate(&self, action: &ActionDescriptor) -> Decision;
     /// Whether the global kill switch is engaged (all executors must stop at once).
     fn halted(&self) -> bool;
+    /// Like [`PolicyGate::evaluate`], with what the executor can see around the action. Executors
+    /// that know the form, dialog or page should call this one. The default ignores the context.
+    fn evaluate_with_context(
+        &self,
+        action: &ActionDescriptor,
+        context: &ActionContext,
+    ) -> Decision {
+        let _ = context;
+        self.evaluate(action)
+    }
 }
