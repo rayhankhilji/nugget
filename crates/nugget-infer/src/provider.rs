@@ -15,7 +15,7 @@ use crate::adapters::{anthropic::AnthropicProvider, openai_compatible::OpenAiCom
 use crate::config::{ProviderConfig, Secret, SecretResolver, SystemSecrets, resolve_headers};
 use crate::http::{Http, HttpSettings};
 use crate::locality::{HostResolver, Resolved, SystemResolver};
-use crate::types::{ChatRequest, ChatStream, ProviderKind, ProviderMeta};
+use crate::types::{ChatRequest, ChatStream, FEATURE_PREWARM, ProviderKind, ProviderMeta};
 
 /// One model behind one API. Implementations are cheap to share (`Arc<dyn Provider>`).
 #[async_trait]
@@ -27,6 +27,33 @@ pub trait Provider: Send + Sync {
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream>;
     /// Embed texts, one vector per input in order. `Error::Unsupported` if the API has none.
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
+
+    /// Get ready for an imminent request without sending any user content: resolve, connect and
+    /// complete the TLS handshake so the connection sits warm in the pool (HTTP/2 keep-alive),
+    /// and the next [`Provider::chat`] skips that latency. The built-in remote adapters make one
+    /// cheap authenticated `GET …/models` request, recorded in the egress ledger under
+    /// [`FEATURE_PREWARM`] with no items. Best effort: callers may ignore the error. The default
+    /// does nothing.
+    async fn prewarm(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Like [`Provider::prewarm`], and also warm the provider's prompt cache with the stable
+    /// prefix of `req` ([`ChatRequest::cache_prefix`]) when the provider supports doing that
+    /// without generating output. Unlike `prewarm`, this DOES send the prefix content (system
+    /// prompt, tools, messages up to the last [`crate::Part::CacheBreakpoint`]), recorded in the
+    /// egress ledger under `req.feature` and `req.items`, so apply the same routing and
+    /// sensitivity rules as for the real request. The default calls `prewarm`.
+    ///
+    /// - Anthropic: a `max_tokens: 0` request with the same `cache_control` breakpoints (only if
+    ///   the request marks something cacheable).
+    /// - llama-server (`llama_cpp`): `n_predict: 0` with `cache_prompt`, evaluating the prefix
+    ///   into a slot's KV cache.
+    /// - OpenAI Responses and other OpenAI-compatible servers: connection prewarm only.
+    async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+        let _ = req;
+        self.prewarm().await
+    }
 }
 
 /// Build a provider, resolving its API key from the environment or OS keychain.
@@ -138,6 +165,23 @@ impl Common {
             http,
             cfg: cfg.clone(),
         })
+    }
+}
+
+impl Common {
+    /// Connection prewarm: one bodiless authenticated `GET {base}/{path}`, response drained and
+    /// metered under [`FEATURE_PREWARM`]. The connection then stays in the pool.
+    pub(crate) async fn prewarm_get(&self, path: &str) -> Result<()> {
+        let (resp, mut meter, clock) = self.http.get(path, FEATURE_PREWARM).await?;
+        let mut body = resp.bytes_stream();
+        while let Some(chunk) = futures::StreamExt::next(&mut body).await {
+            match chunk {
+                Ok(c) => meter.add_received(c.len()),
+                Err(_) => break,
+            }
+        }
+        tracing::debug!(provider = %self.id, connect = ?clock.connect, headers = ?clock.headers, "prewarmed");
+        Ok(())
     }
 }
 

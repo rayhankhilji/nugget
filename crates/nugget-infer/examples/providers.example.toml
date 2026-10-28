@@ -95,6 +95,9 @@ tiers = ["synthesis", "agentic"]
 # base_url = "http://127.0.0.1:8080/v1"
 # model = "local"
 # tiers = ["triage"]
+# # Prompt-prefix KV caching (`cache_prompt`, n_predict:0 prewarm) is on by default for on-device
+# # endpoints; set llama_cpp = true for a llama-server on the LAN, false to disable.
+# # slot_affinity = true   # pin keyed requests (CacheHint.key) to one slot via `id_slot`
 #
 # vLLM on another machine on the LAN (local_network: recorded in the egress ledger):
 # [[providers]]

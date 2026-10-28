@@ -70,7 +70,16 @@ async fn streams_tool_calls_with_bearer_auth() {
         input_schema: json!({"type": "object", "properties": {"q": {"type": "string"}}}),
     }]);
     let events = collect_all(p.chat(req).await.unwrap()).await;
-    let events: Vec<ChatEvent> = events.into_iter().map(Result::unwrap).collect();
+    let mut events: Vec<ChatEvent> = events.into_iter().map(Result::unwrap).collect();
+    // Built-in adapters send usage detail and timings just before `Done`.
+    let ChatEvent::Stats(stats) = events.remove(events.len() - 2) else {
+        panic!("expected Stats before Done: {events:?}");
+    };
+    assert_eq!(
+        (stats.input_tokens, stats.output_tokens),
+        (Some(5), Some(7))
+    );
+    assert!(stats.timings.is_some());
     assert_eq!(
         events,
         vec![
