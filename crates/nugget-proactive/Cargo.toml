@@ -1,5 +1,6 @@
 [package]
 name = "nugget-proactive"
+description = "Proactive cards and the morning brief: deterministic candidates, feedback-learned scoring, an optional LLM judge, typed actions with dry-run diffs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,22 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-store.workspace = true
+nugget-graph.workspace = true
+nugget-policy.workspace = true
+nugget-infer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures.workspace = true
+time = { workspace = true, features = ["macros"] }
 
 [lints]
 workspace = true
