@@ -1,0 +1,73 @@
+name: Bug report
+description: Something in Nugget does not work as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Security problems go to a private advisory instead (see SECURITY.md).
+        Please remove personal data from logs: Nugget indexes your mail, notes and files.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start nuggetd with ...
+        2. In the desktop app, open ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Nugget version or commit
+      placeholder: 0.0.1 or a commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      multiple: true
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 10
+        - Windows 11
+        - Linux (X11)
+        - Linux (Wayland)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version and hardware
+      placeholder: e.g. macOS 15.4, M2, 16 GB RAM
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Daemon (nuggetd)
+        - Desktop app
+        - Store and search
+        - Models and inference
+        - Connectors
+        - Benchmarks
+        - Build or CI
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log lines with personal data removed. This is rendered as code.
+      render: text

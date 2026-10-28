@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/rayhankhilji/nugget/blob/main/bench/schema/report.schema.json",
+  "title": "Nugget benchmark report",
+  "description": "One run of one nugget-bench suite. Version 1. Incompatible changes bump schema_version.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "suite",
+    "status",
+    "started_at",
+    "finished_at",
+    "duration_ms",
+    "harness_version",
+    "git_commit",
+    "environment",
+    "config",
+    "metrics",
+    "message"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "suite": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Registry name of the suite, e.g. memory, perf, draft, cua."
+    },
+    "status": {
+      "enum": ["ok", "not_implemented", "failed"],
+      "description": "ok: metrics recorded. not_implemented: message holds the plan. failed: message holds the error."
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "harness_version": { "type": "string", "minLength": 1 },
+    "git_commit": {
+      "type": ["string", "null"],
+      "description": "Commit of the code under test, when known."
+    },
+    "environment": { "$ref": "#/$defs/environment" },
+    "config": { "$ref": "#/$defs/config" },
+    "metrics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/metric" }
+    },
+    "message": { "type": ["string", "null"] }
+  },
+  "$defs": {
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "arch", "cpus", "build_profile"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "arch": { "type": "string", "minLength": 1 },
+        "cpus": { "type": "integer", "minimum": 1 },
+        "build_profile": { "enum": ["debug", "release"] }
+      }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scale", "seed", "params"],
+      "properties": {
+        "scale": { "enum": ["smoke", "quick", "standard", "full"] },
+        "seed": { "type": "integer", "minimum": 0 },
+        "params": {
+          "type": "object",
+          "description": "Suite-specific parameters (corpus size, query count, ...)."
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "value", "unit", "direction", "target", "target_met", "description"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_@]*(\\.[a-z0-9_@]+)*$",
+          "description": "Dotted lowercase name, unique within a report, stable across versions."
+        },
+        "value": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["higher_is_better", "lower_is_better", "info"] },
+        "target": { "type": ["number", "null"] },
+        "target_met": { "type": ["boolean", "null"] },
+        "description": { "type": "string" }
+      }
+    }
+  }
+}

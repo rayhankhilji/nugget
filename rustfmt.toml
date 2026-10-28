@@ -1,0 +1,6 @@
+# Stable rustfmt options only, so `cargo fmt --check` behaves the same on every toolchain and OS.
+# Defaults otherwise (max_width = 100). Line endings follow each file ("Auto"), so Windows
+# checkouts with CRLF pass the CI format check.
+edition = "2024"
+style_edition = "2024"
+newline_style = "Auto"

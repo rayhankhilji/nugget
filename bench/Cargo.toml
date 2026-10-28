@@ -1,5 +1,6 @@
 [package]
 name = "nugget-bench"
+description = "Benchmark harness for Nugget: memory, perf, draft and computer-use suites"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,8 +8,23 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "nugget-bench"
+path = "src/main.rs"
+
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+clap = { version = "4.5", features = ["derive", "env"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

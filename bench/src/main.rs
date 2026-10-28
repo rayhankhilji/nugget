@@ -1,1 +1,255 @@
-fn main() {}
+//! `nugget-bench` CLI.
+//!
+//! ```text
+//! cargo run --release -p nugget-bench -- perf memory
+//! cargo run -p nugget-bench -- all --scale smoke --no-write
+//! cargo run -p nugget-bench -- --list
+//! ```
+
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::Parser;
+use nugget_bench::report::SCHEMA_JSON;
+use nugget_bench::{Benchmark, Report, RunConfig, Scale, Status, find, registry, run_benchmark};
+
+/// Default report directory: `bench/results` in the source tree.
+const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results");
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "nugget-bench",
+    version,
+    about = "Run Nugget benchmark suites and write JSON reports"
+)]
+struct Cli {
+    /// Suites to run (`memory`, `perf`, `draft`, `cua`), or `all`.
+    #[arg(value_name = "SUITE")]
+    suites: Vec<String>,
+
+    /// List the registered suites and exit.
+    #[arg(long)]
+    list: bool,
+
+    /// Print the report JSON schema and exit.
+    #[arg(long)]
+    schema: bool,
+
+    /// Workload size. Use `standard` or `full` on a release build for publishable numbers.
+    #[arg(long, value_enum, default_value_t = Scale::Standard)]
+    scale: Scale,
+
+    /// Seed for corpus and workload generation.
+    #[arg(long, default_value_t = 42)]
+    seed: u64,
+
+    /// Directory for `<suite>-<timestamp>.json` reports.
+    #[arg(long, env = "NUGGET_BENCH_RESULTS_DIR", default_value = DEFAULT_RESULTS_DIR)]
+    out_dir: PathBuf,
+
+    /// Do not write report files.
+    #[arg(long)]
+    no_write: bool,
+
+    /// Print each report's JSON to stdout (the human summary goes to stderr).
+    #[arg(long)]
+    json: bool,
+
+    /// Exit non-zero if a selected suite is not implemented yet.
+    #[arg(long)]
+    strict: bool,
+}
+
+/// Resolve suite names, expanding `all` and rejecting unknown names.
+fn select(names: &[String]) -> Result<Vec<Box<dyn Benchmark>>, String> {
+    if names.is_empty() {
+        return Err("no suite given; pass one or more of the names from --list, or `all`".into());
+    }
+    let mut out: Vec<Box<dyn Benchmark>> = Vec::new();
+    for name in names {
+        if name == "all" {
+            for b in registry() {
+                if !out.iter().any(|o| o.name() == b.name()) {
+                    out.push(b);
+                }
+            }
+            continue;
+        }
+        let b = find(name).ok_or_else(|| {
+            let known: Vec<&str> = registry().iter().map(|b| b.name()).collect();
+            format!("unknown suite `{name}` (known: {}, all)", known.join(", "))
+        })?;
+        if !out.iter().any(|o| o.name() == b.name()) {
+            out.push(b);
+        }
+    }
+    Ok(out)
+}
+
+fn summary(report: &Report) -> String {
+    let mut s = format!(
+        "== {} [{}] {} ms, scale={}, seed={}, {} build\n",
+        report.suite,
+        match report.status {
+            Status::Ok => "ok",
+            Status::NotImplemented => "not implemented",
+            Status::Failed => "FAILED",
+        },
+        report.duration_ms,
+        report.config.scale,
+        report.config.seed,
+        report.environment.build_profile,
+    );
+    let width = report
+        .metrics
+        .iter()
+        .map(|m| m.name.len())
+        .max()
+        .unwrap_or(0);
+    for m in &report.metrics {
+        let target = match (m.target, m.target_met) {
+            (Some(t), Some(true)) => format!("  (target {t}: met)"),
+            (Some(t), Some(false)) => format!("  (target {t}: MISSED)"),
+            _ => String::new(),
+        };
+        s.push_str(&format!(
+            "  {:width$}  {:>14.4} {}{}\n",
+            m.name, m.value, m.unit, target
+        ));
+    }
+    if let Some(msg) = &report.message {
+        s.push_str(&format!("  {msg}\n"));
+    }
+    s
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    if cli.schema {
+        println!("{SCHEMA_JSON}");
+        return ExitCode::SUCCESS;
+    }
+    if cli.list {
+        for b in registry() {
+            let state = if b.implemented() {
+                ""
+            } else {
+                " [not yet implemented]"
+            };
+            println!("{:8} {}{}", b.name(), b.description(), state);
+        }
+        return ExitCode::SUCCESS;
+    }
+    let suites = match select(&cli.suites) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if cfg!(debug_assertions) && suites.iter().any(|b| b.name() == "perf") {
+        eprintln!("note: debug build; timings are not representative (use `cargo run --release`)");
+    }
+
+    let config = RunConfig {
+        scale: cli.scale,
+        seed: cli.seed,
+    };
+    let mut failed = false;
+    let mut unimplemented = false;
+    for bench in suites {
+        let report = run_benchmark(bench.as_ref(), &config);
+        let text = summary(&report);
+        if cli.json {
+            eprint!("{text}");
+            match report.to_json_pretty() {
+                Ok(json) => println!("{json}"),
+                Err(e) => {
+                    eprintln!("error: cannot serialise report: {e}");
+                    failed = true;
+                }
+            }
+        } else {
+            print!("{text}");
+        }
+        if !cli.no_write {
+            match report.write_to_dir(&cli.out_dir) {
+                Ok(path) => eprintln!("  wrote {}", path.display()),
+                Err(e) => {
+                    eprintln!(
+                        "error: cannot write report to {}: {e}",
+                        cli.out_dir.display()
+                    );
+                    failed = true;
+                }
+            }
+        }
+        let _ = std::io::stdout().flush();
+        match report.status {
+            Status::Ok => {}
+            Status::NotImplemented => unimplemented = true,
+            Status::Failed => failed = true,
+        }
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else if unimplemented && cli.strict {
+        ExitCode::from(3)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_definition_is_valid() {
+        Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn parses_suites_and_options() {
+        let cli = Cli::try_parse_from([
+            "nugget-bench",
+            "perf",
+            "memory",
+            "--scale",
+            "quick",
+            "--seed",
+            "9",
+        ])
+        .unwrap();
+        assert_eq!(cli.suites, ["perf", "memory"]);
+        assert_eq!(cli.scale, Scale::Quick);
+        assert_eq!(cli.seed, 9);
+        assert!(!cli.no_write);
+        assert!(Cli::try_parse_from(["nugget-bench", "perf", "--scale", "huge"]).is_err());
+    }
+
+    #[test]
+    fn selection() {
+        let names = |v: &[&str]| -> Result<Vec<&'static str>, String> {
+            let owned: Vec<String> = v.iter().map(|s| (*s).to_owned()).collect();
+            select(&owned).map(|s| s.iter().map(|b| b.name()).collect())
+        };
+        assert_eq!(names(&["perf"]).unwrap(), ["perf"]);
+        assert_eq!(names(&["all"]).unwrap(), ["memory", "perf", "draft", "cua"]);
+        assert_eq!(
+            names(&["perf", "all", "perf"]).unwrap(),
+            ["perf", "memory", "draft", "cua"]
+        );
+        assert!(names(&[]).is_err());
+        assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));
+    }
+
+    #[test]
+    fn default_results_dir_is_bench_results() {
+        let p = PathBuf::from(DEFAULT_RESULTS_DIR);
+        assert_eq!(p.file_name().unwrap(), "results");
+        assert!(p.parent().unwrap().join("Cargo.toml").exists());
+    }
+}

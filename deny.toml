@@ -1,0 +1,95 @@
+# cargo-deny configuration: https://embarkstudios.github.io/cargo-deny/
+#
+# Nugget is Apache-2.0. Everything we link must be compatible with distributing the combined work
+# under Apache-2.0, so only permissive licenses are allowed. Copyleft licenses (GPL, AGPL, LGPL,
+# SSPL, EUPL, ...) are rejected simply by not being on the allow list. A crate offered under a
+# choice of licenses (`MIT OR GPL-2.0`) passes when one of its options is allowed.
+#
+# Run locally with `cargo deny check` (install: `cargo install cargo-deny --locked`).
+
+[graph]
+# Check every platform we ship on, so Windows- or macOS-only dependencies are not missed when CI
+# runs this on Linux.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+all-features = true
+
+[output]
+feature-depth = 1
+
+[advisories]
+# RustSec advisory database. Vulnerabilities anywhere in the graph fail the check. Unmaintained
+# notices fail only for crates we depend on directly: transitive ones (for example under Tauri or
+# GTK) are outside our control and are tracked upstream instead.
+unmaintained = "workspace"
+yanked = "deny"
+# Each ignore needs an advisory id, a reason and an issue tracking its removal, e.g.
+# { id = "RUSTSEC-0000-0000", reason = "not reachable: we never call X; tracked in #123" },
+ignore = []
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    # Community Data License Agreement, used by webpki-roots / Mozilla root certificate data.
+    "CDLA-Permissive-2.0",
+    # The original OpenSSL/SSLeay license (OpenSSL < 3 and older `ring`). OpenSSL 3, which
+    # SQLCipher's vendored build uses, is Apache-2.0.
+    "OpenSSL",
+    # Weak, file-level copyleft. Allowed for dependencies we use unmodified: MPL-2.0 files stay
+    # MPL-2.0 and the rest of Nugget stays Apache-2.0. Do not vendor or patch MPL-2.0 code into
+    # this repository.
+    "MPL-2.0",
+]
+# Lower than the default (0.8) is never needed; raise if a license text is misdetected.
+confidence-threshold = 0.93
+# Several allowed licenses may be unused at any given time; that is fine.
+unused-allowed-license = "allow"
+exceptions = [
+    # Add per-crate exceptions here with a comment explaining why, e.g.
+    # { allow = ["Unicode-DFS-2016"], crate = "unicode-ident" },
+]
+
+[licenses.private]
+# Our own unpublished crates are Apache-2.0 via `license.workspace`; still check them.
+ignore = false
+
+[bans]
+multiple-versions = "warn"
+# `foo = "*"` registry requirements are banned in spirit. This is "warn" rather than "deny" only
+# because the internal path dependencies in the root `[workspace.dependencies]` carry no version
+# and the crates are not marked `publish = false`, which cargo-deny counts as wildcards. Give
+# those path dependencies a `version` (or mark the crates `publish = false`), then make this "deny".
+wildcards = "warn"
+allow-wildcard-paths = true
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+# Crates we never want, each with a reason, e.g.
+# { crate = "openssl-sys", reason = "..." },
+deny = []
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
