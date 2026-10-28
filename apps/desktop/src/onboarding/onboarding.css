@@ -1,0 +1,291 @@
+/* First-run onboarding. Logical properties only, so the layout mirrors in right-to-left locales. */
+
+.onboarding {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 100%;
+  max-inline-size: 880px;
+  margin-inline: auto;
+  padding-inline: 24px;
+}
+
+.ob-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-block: 18px 10px;
+}
+
+.ob-top .brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 650;
+}
+
+.ob-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.ob-progress ol {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-end: 1px solid var(--border);
+  padding-block-end: 10px;
+}
+
+.ob-step button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding-block: 4px;
+  padding-inline: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-small);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ob-step button:hover {
+  color: var(--text);
+}
+
+.ob-step button[aria-current="step"] {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.ob-step-num {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 20px;
+  block-size: 20px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 11px;
+}
+
+.ob-step-done .ob-step-num {
+  background: var(--good);
+  border-color: var(--good);
+  color: var(--surface);
+}
+
+.ob-step-skipped .ob-step-num {
+  border-style: dashed;
+}
+
+.ob-main {
+  padding-block: 18px;
+}
+
+.ob-main h1:focus {
+  outline: none;
+}
+
+.ob-main h1:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+}
+
+.ob-count {
+  margin-block-end: 4px;
+}
+
+.ob-lead {
+  font-size: 15px;
+  max-inline-size: 64ch;
+  margin-block: 8px 16px;
+}
+
+.ob-panel {
+  animation: ob-enter 180ms ease-out;
+}
+
+@keyframes ob-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.ob-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-block: 12px;
+}
+
+.ob-card {
+  padding-block: 4px 8px;
+  padding-inline: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.ob-card h2 {
+  margin-block: 12px 6px;
+}
+
+.ob-card ul,
+.ob-perm-list {
+  margin: 0;
+  padding-inline-start: 20px;
+  display: grid;
+  gap: 6px;
+}
+
+.ob-language {
+  margin-block-start: 12px;
+}
+
+.ob-fieldset {
+  border: 0;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+.ob-choices .kind-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ob-section {
+  margin-block-start: 8px;
+}
+
+.ob-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-block: 8px 12px;
+}
+
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-inline select {
+  min-height: 30px;
+  padding-block: 4px;
+  padding-inline: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.ob-guide {
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 20px;
+}
+
+.ob-guide h3 {
+  font-size: 14px;
+  margin-block: 8px 4px;
+}
+
+.ob-snippet {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-block-end: 8px;
+}
+
+.ob-snippet pre {
+  flex: 1;
+  margin: 0;
+  padding: 8px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: color-mix(in srgb, var(--text) 4%, var(--surface));
+  font-family: var(--mono);
+  font-size: 12px;
+  text-align: start;
+}
+
+.ob-details {
+  margin-block: 12px;
+}
+
+.ob-details summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.ob-details h3 {
+  font-size: 14px;
+  margin-block: 12px 4px;
+}
+
+.ob-pending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-row-start {
+  justify-content: flex-start;
+  margin-block: 8px;
+}
+
+.ob-actions {
+  position: sticky;
+  inset-block-end: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-block: 12px 18px;
+  border-block-start: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.ob-spacer {
+  flex: 1;
+}
+
+/* Sidebar settings (language, run setup again). */
+.sidebar-settings {
+  display: grid;
+  gap: 6px;
+  margin-block-start: 8px;
+  font-size: 12px;
+}
+
+.sidebar-settings .field-inline {
+  justify-content: space-between;
+}
+
+.sidebar-settings select {
+  max-inline-size: 140px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ob-panel {
+    animation: none;
+  }
+}

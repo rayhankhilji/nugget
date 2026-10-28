@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { api, type EntityDetail, type EntitySummaryView } from "../api";
 import { useAsync, useDebounced } from "../hooks";
+import { formatNumber, Trans, useT } from "../i18n";
 import { kindLabel } from "../knowledge";
 import { Dialog } from "./Dialog";
 import { ErrorNote, Spinner } from "./ui";
@@ -20,6 +21,7 @@ export function MergeDialog({
   onClose: () => void;
   onMerged: (into: string) => void;
 }) {
+  const t = useT();
   const [text, setText] = useState(target.name);
   const query = useDebounced(text.trim(), 250);
   const [picked, setPicked] = useState<EntitySummaryView | null>(null);
@@ -55,14 +57,14 @@ export function MergeDialog({
 
   return (
     <Dialog
-      title={`Merge with ${target.name}`}
-      description="Use this when two entries are the same person, project or thing. Facts, mentions and aliases are combined."
+      title={t("merge.title", { name: target.name })}
+      description={t("merge.description")}
       onClose={onClose}
       wide
     >
       <form onSubmit={submit}>
         <div className="field">
-          <label htmlFor={searchId}>Find the duplicate</label>
+          <label htmlFor={searchId}>{t("merge.find")}</label>
           <input
             id={searchId}
             type="search"
@@ -75,18 +77,18 @@ export function MergeDialog({
           />
         </div>
         <fieldset className="field">
-          <legend>Entity to merge</legend>
+          <legend>{t("merge.entityToMerge")}</legend>
           <div id={listId} className="merge-results" aria-busy={results.loading || undefined}>
             <ErrorNote error={results.error} onRetry={results.reload} />
             {results.loading && !results.data && <Spinner />}
-            {results.data && results.data.length === 0 && <p className="muted small">No other entities match “{query}”.</p>}
+            {results.data && results.data.length === 0 && <p className="muted small">{t("merge.noMatches", { query })}</p>}
             {results.data?.map((r) => (
               <label key={r.id} className="check merge-option">
                 <input type="radio" name="merge-other" checked={picked?.id === r.id} onChange={() => setPicked(r)} />
                 <span>
                   <span className="merge-name">{r.name}</span>{" "}
                   <span className="muted small">
-                    {kindLabel(r.kind)} · {r.claims.toLocaleString()} facts · {r.mentions.toLocaleString()} mentions
+                    {t("merge.optionMeta", { kind: kindLabel(r.kind), claims: r.claims, mentions: r.mentions })}
                   </span>
                 </span>
               </label>
@@ -96,7 +98,7 @@ export function MergeDialog({
 
         {picked && (
           <fieldset className="field">
-            <legend>Keep</legend>
+            <legend>{t("merge.keep")}</legend>
             <label className="check">
               <input type="radio" name="merge-keep" checked={keep === "target"} onChange={() => setKeep("target")} />
               <span>
@@ -113,8 +115,8 @@ export function MergeDialog({
         )}
 
         {picked && (
-          <section className="merge-preview" aria-live="polite" aria-label="Merge preview">
-            {other.loading && !otherDetail && <Spinner label="Loading preview" />}
+          <section className="merge-preview" aria-live="polite" aria-label={t("merge.previewLabel")}>
+            {other.loading && !otherDetail && <Spinner label={t("merge.loadingPreview")} />}
             <ErrorNote error={other.error} onRetry={other.reload} />
             {into && from && <MergePreview into={into} from={from} />}
           </section>
@@ -123,10 +125,10 @@ export function MergeDialog({
         <ErrorNote error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn-primary" disabled={busy || !into || !from}>
-            {busy ? <Spinner label="Merging" /> : "Merge"}
+            {busy ? <Spinner label={t("merge.merging")} /> : t("merge.merge")}
           </button>
         </div>
       </form>
@@ -135,44 +137,46 @@ export function MergeDialog({
 }
 
 function MergePreview({ into, from }: { into: EntityDetail; from: EntityDetail }) {
+  const t = useT();
   const aliases = [...new Set([...into.aliases, from.name, ...from.aliases])].filter((a) => a !== into.name);
   const sameKind = into.kind === from.kind;
   return (
     <>
       <p>
-        <b>{from.name}</b> will be merged into <b>{into.name}</b>.
+        <Trans k="merge.summary" args={{ from: from.name, into: into.name }} tags={{ b: (c) => <b>{c}</b> }} />
       </p>
       <dl className="entity-props">
         <div>
-          <dt>Name</dt>
+          <dt>{t("merge.name")}</dt>
           <dd>
             {into.name} <span className="muted small">({kindLabel(into.kind)})</span>
           </dd>
         </div>
         <div>
-          <dt>Aliases</dt>
-          <dd>{aliases.length > 0 ? aliases.join(", ") : <span className="muted">None</span>}</dd>
+          <dt>{t("merge.aliases")}</dt>
+          <dd>{aliases.length > 0 ? aliases.join(t("common.listSeparator")) : <span className="muted">{t("merge.none")}</span>}</dd>
         </div>
         <div>
-          <dt>Facts</dt>
+          <dt>{t("merge.facts")}</dt>
           <dd>
-            up to {(into.claims.length + from.claims.length).toLocaleString()}{" "}
-            <span className="muted small">
-              ({into.claims.length.toLocaleString()} + {from.claims.length.toLocaleString()}; duplicates are combined)
-            </span>
+            <Trans
+              k="merge.factsValue"
+              args={{ total: into.claims.length + from.claims.length, a: into.claims.length, b: from.claims.length }}
+              tags={{ note: (c) => <span className="muted small">{c}</span> }}
+            />
           </dd>
         </div>
         <div>
-          <dt>Mentions</dt>
-          <dd>{(into.mentions.length + from.mentions.length).toLocaleString()}</dd>
+          <dt>{t("merge.mentions")}</dt>
+          <dd>{formatNumber(into.mentions.length + from.mentions.length)}</dd>
         </div>
       </dl>
       <p className="muted small">
-        Links and apps that refer to <code>{from.id}</code> keep working: it becomes an alias of <code>{into.id}</code>.
+        <Trans k="merge.aliasNote" args={{ from: from.id, into: into.id }} tags={{ code: (c) => <code>{c}</code> }} />
       </p>
       {!sameKind && (
         <p className="note small" role="status">
-          These are different kinds ({kindLabel(from.kind)} and {kindLabel(into.kind)}). The result is a {kindLabel(into.kind)}.
+          {t("merge.kindMismatch", { fromKind: kindLabel(from.kind), intoKind: kindLabel(into.kind) })}
         </p>
       )}
     </>

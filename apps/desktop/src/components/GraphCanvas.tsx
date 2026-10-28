@@ -13,6 +13,7 @@ import {
   type ViewTransform,
 } from "../graph";
 import { ENTITY_KINDS } from "../api";
+import { useT } from "../i18n";
 import { kindLabel } from "../knowledge";
 
 /** Theme colours, read from CSS custom properties so the canvas follows light/dark mode. */
@@ -82,6 +83,7 @@ export function GraphCanvas({
   onOpen: (id: string) => void;
   onCenter: (id: string) => void;
 }) {
+  const t = useT();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
@@ -133,7 +135,7 @@ export function GraphCanvas({
     if (!paletteRef.current) paletteRef.current = readPalette(canvas);
     const pal = paletteRef.current;
     const { w, h, dpr } = sizeRef.current;
-    const t = tRef.current;
+    const tf = tRef.current;
     const { byId, adj, byKind } = indexRef.current;
     const graph = graphRef.current;
     const { selected: sel, focused: foc } = live.current;
@@ -148,20 +150,20 @@ export function GraphCanvas({
       ctx.fillStyle = pal.muted;
       ctx.font = "13px system-ui, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("Laying out…", w / 2, h / 2);
+      ctx.fillText(t("graph.layingOut"), w / 2, h / 2);
       return;
     }
 
-    ctx.setTransform(dpr * t.k, 0, 0, dpr * t.k, dpr * t.x, dpr * t.y);
+    ctx.setTransform(dpr * tf.k, 0, 0, dpr * tf.k, dpr * tf.x, dpr * tf.y);
     // Visible world rectangle, for culling.
-    const x0 = -t.x / t.k;
-    const y0 = -t.y / t.k;
-    const x1 = (w - t.x) / t.k;
-    const y1 = (h - t.y) / t.k;
+    const x0 = -tf.x / tf.k;
+    const y0 = -tf.y / tf.k;
+    const x1 = (w - tf.x) / tf.k;
+    const y1 = (h - tf.y) / tf.k;
     const visible = (n: SimNode) => n.x + n.r >= x0 && n.x - n.r <= x1 && n.y + n.r >= y0 && n.y - n.r <= y1;
 
     // Edges: one path for all, then the highlighted node's edges on top.
-    ctx.lineWidth = 1 / t.k;
+    ctx.lineWidth = 1 / tf.k;
     ctx.strokeStyle = pal.edge;
     ctx.beginPath();
     for (const l of graph.links) {
@@ -173,7 +175,7 @@ export function GraphCanvas({
     }
     ctx.stroke();
     if (hl) {
-      ctx.lineWidth = 2 / t.k;
+      ctx.lineWidth = 2 / tf.k;
       ctx.strokeStyle = pal.edgeHi;
       ctx.beginPath();
       for (const l of graph.links) {
@@ -202,9 +204,9 @@ export function GraphCanvas({
       const n = id ? byId.get(id) : undefined;
       if (!n) return;
       ctx.strokeStyle = color;
-      ctx.lineWidth = width / t.k;
+      ctx.lineWidth = width / tf.k;
       ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r + gap / t.k, 0, Math.PI * 2);
+      ctx.arc(n.x, n.y, n.r + gap / tf.k, 0, Math.PI * 2);
       ctx.stroke();
     };
     ring(graph.center, pal.accent, 2.5, 2);
@@ -214,7 +216,7 @@ export function GraphCanvas({
 
     // Labels: everything when few or zoomed in, else just the nodes that matter right now.
     const large = graph.nodes.length > LARGE_GRAPH;
-    const showAll = graph.nodes.length <= 150 || t.k >= (large ? 2.2 : 1.2);
+    const showAll = graph.nodes.length <= 150 || tf.k >= (large ? 2.2 : 1.2);
     const labelled: SimNode[] = [];
     const seen = new Set<string>();
     const add = (n: SimNode | undefined) => {
@@ -228,16 +230,16 @@ export function GraphCanvas({
     if (showAll) for (const n of graph.nodes) add(n);
     else if (graph.nodes.length <= 600) for (const n of graph.nodes) if (n.depth <= 1) add(n);
 
-    ctx.font = `${12 / t.k}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.font = `${12 / tf.k}px system-ui, -apple-system, "Segoe UI", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 3 / t.k;
+    ctx.lineWidth = 3 / tf.k;
     ctx.strokeStyle = pal.bg;
     ctx.fillStyle = pal.text;
     for (const n of labelled) {
       const label = shortName(n.name);
-      const y = n.y + n.r + 3 / t.k;
+      const y = n.y + n.r + 3 / tf.k;
       ctx.strokeText(label, n.x, y);
       ctx.fillText(label, n.x, y);
     }
@@ -430,11 +432,11 @@ export function GraphCanvas({
   /** Pan so `n` is on screen (centred if it was off). */
   const reveal = (n: SimNode) => {
     const { w, h } = sizeRef.current;
-    const t = tRef.current;
-    const sx = n.x * t.k + t.x;
-    const sy = n.y * t.k + t.y;
+    const tf = tRef.current;
+    const sx = n.x * tf.k + tf.x;
+    const sy = n.y * tf.k + tf.y;
     if (sx < 40 || sx > w - 40 || sy < 40 || sy > h - 40) {
-      tRef.current = { k: t.k, x: w / 2 - n.x * t.k, y: h / 2 - n.y * t.k };
+      tRef.current = { k: tf.k, x: w / 2 - n.x * tf.k, y: h / 2 - n.y * tf.k };
       userMoved.current = true;
     }
   };
@@ -447,35 +449,35 @@ export function GraphCanvas({
     onFocusChange(next.id);
     reveal(next);
     const links = index.adj.get(next.id)?.size ?? 0;
-    setAnnounce(`${next.name}, ${kindLabel(next.kind)}, ${links} ${links === 1 ? "link" : "links"}.`);
+    setAnnounce(t("graph.announceNode", { name: next.name, kind: kindLabel(next.kind), links }));
     schedule();
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLCanvasElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const { w, h } = sizeRef.current;
-    const t = tRef.current;
+    const tf = tRef.current;
     let handled = true;
     switch (e.key) {
       case "ArrowLeft":
-        tRef.current = { ...t, x: t.x + PAN_STEP };
+        tRef.current = { ...tf, x: tf.x + PAN_STEP };
         break;
       case "ArrowRight":
-        tRef.current = { ...t, x: t.x - PAN_STEP };
+        tRef.current = { ...tf, x: tf.x - PAN_STEP };
         break;
       case "ArrowUp":
-        tRef.current = { ...t, y: t.y + PAN_STEP };
+        tRef.current = { ...tf, y: tf.y + PAN_STEP };
         break;
       case "ArrowDown":
-        tRef.current = { ...t, y: t.y - PAN_STEP };
+        tRef.current = { ...tf, y: tf.y - PAN_STEP };
         break;
       case "+":
       case "=":
-        tRef.current = zoomAt(t, 1.25, w / 2, h / 2);
+        tRef.current = zoomAt(tf, 1.25, w / 2, h / 2);
         break;
       case "-":
       case "_":
-        tRef.current = zoomAt(t, 0.8, w / 2, h / 2);
+        tRef.current = zoomAt(tf, 0.8, w / 2, h / 2);
         break;
       case "0":
         userMoved.current = false;
@@ -528,8 +530,8 @@ export function GraphCanvas({
           className="graph-canvas"
           tabIndex={0}
           role="application"
-          aria-roledescription="graph"
-          aria-label={`Knowledge graph: ${graph.nodes.length.toLocaleString()} entities, ${graph.links.length.toLocaleString()} links`}
+          aria-roledescription={t("graph.roleDescription")}
+          aria-label={t("graph.canvasLabel", { nodes: graph.nodes.length, links: graph.links.length })}
           aria-describedby={helpId}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -544,18 +546,17 @@ export function GraphCanvas({
           onDoubleClick={onDoubleClick}
           onKeyDown={onKeyDown}
           onFocus={() => {
-            if (!focused && graph.nodes[0]) setAnnounce("Press N to move to the first entity.");
+            if (!focused && graph.nodes[0]) setAnnounce(t("graph.pressN"));
           }}
         />
         <div className="graph-overlay">
           <button type="button" className="btn btn-small" onClick={fit}>
-            Fit
+            {t("graph.fit")}
           </button>
         </div>
       </div>
       <p id={helpId} className="muted small graph-help">
-        Drag to move, scroll to zoom, click an entity to open it, double-click to centre on it. With the graph focused: arrows pan,
-        + and − zoom, 0 fits, N and P move between entities, Enter opens, C centres.
+        {t("graph.help")}
       </p>
       <div className="visually-hidden" aria-live="polite">
         {announce}

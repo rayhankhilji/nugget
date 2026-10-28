@@ -1,10 +1,11 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api, changeAffects, errorMessage, events, type ClaimStatus, type ClaimView, type EntityDetail, type MentionView } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
+import { Trans, useT } from "../i18n";
 import {
   attributeRows,
   claimText,
-  CLAIM_STATUS_LABEL,
+  claimStatusLabel,
   confidenceTone,
   evidenceSummary,
   formatConfidence,
@@ -40,6 +41,7 @@ export function EntityDetailPanel({
   onMerged: (into: string) => void;
   onClose?: () => void;
 }) {
+  const t = useT();
   const detail = useAsync(() => api.knowledgeEntity(id), [id]);
   const [overrides, setOverrides] = useState<Record<number, ClaimStatus>>({});
   const [busyClaim, setBusyClaim] = useState<number | null>(null);
@@ -77,14 +79,14 @@ export function EntityDetailPanel({
       await api.knowledgeClaimStatus({ claim: claim.id, status: next });
       if (next === "retracted") {
         setUndo({ claim, text });
-        setAnnounce(`Rejected “${text}”.`);
+        setAnnounce(t("entity.rejected", { text }));
       } else {
         setUndo((u) => (u?.claim.id === claim.id ? null : u));
-        setAnnounce(`Restored “${text}”.`);
+        setAnnounce(t("entity.restored", { text }));
       }
     } catch (e) {
       setOverrides((o) => ({ ...o, [claim.id]: prev }));
-      setActionError(`Couldn't ${next === "retracted" ? "reject" : "restore"} the fact: ${errorMessage(e)}`);
+      setActionError(t(next === "retracted" ? "entity.rejectFailed" : "entity.restoreFailed", { error: errorMessage(e) }));
     } finally {
       setBusyClaim(null);
     }
@@ -97,7 +99,7 @@ export function EntityDetailPanel({
       {!d && (
         <div className="entity-detail-head">
           <h2 id={headingId} className="entity-name">
-            {detail.loading ? "Loading…" : "Entity"}
+            {detail.loading ? t("entity.loading") : t("entity.placeholder")}
           </h2>
           {onClose && <CloseButton onClose={onClose} />}
         </div>
@@ -111,11 +113,11 @@ export function EntityDetailPanel({
             <VaultButtons detail={d} vaultRoot={vaultRoot} open={opener.open} />
             {onShowInGraph && (
               <button type="button" className="btn btn-small" onClick={() => onShowInGraph(d.id)}>
-                Show in graph
+                {t("entity.showInGraph")}
               </button>
             )}
             <button type="button" className="btn btn-small" onClick={() => setMerging(true)}>
-              Merge…
+              {t("entity.merge")}
             </button>
           </div>
           <div aria-live="polite" className="entity-live">
@@ -124,16 +126,14 @@ export function EntityDetailPanel({
             )}
             {undo && (
               <p className="note small undo-note">
-                <span>
-                  Rejected “{undo.text}”. It won't be shown to apps or written to your vault.
-                </span>
+                <span>{t("entity.rejectedNote", { text: undo.text })}</span>
                 <button
                   type="button"
                   className="btn btn-small"
                   disabled={busyClaim !== null}
                   onClick={() => void setClaimStatus(undo.claim, "active", "retracted")}
                 >
-                  Undo
+                  {t("entity.undo")}
                 </button>
               </p>
             )}
@@ -174,8 +174,9 @@ export function EntityDetailPanel({
 }
 
 function CloseButton({ onClose }: { onClose: () => void }) {
+  const t = useT();
   return (
-    <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close details">
+    <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} aria-label={t("entity.closeDetails")}>
       <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
         <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
@@ -184,6 +185,7 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 }
 
 function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headingId: string; onClose?: () => void }) {
+  const t = useT();
   const aliases = d.aliases.filter((a) => a !== d.name);
   const attrs = attributeRows(d.attributes);
   return (
@@ -203,8 +205,8 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
         <dl className="entity-props">
           {aliases.length > 0 && (
             <div>
-              <dt>Also known as</dt>
-              <dd>{aliases.join(", ")}</dd>
+              <dt>{t("entity.aliases")}</dt>
+              <dd>{aliases.join(t("common.listSeparator"))}</dd>
             </div>
           )}
           {d.identifiers.map(([scheme, value]) => (
@@ -236,23 +238,24 @@ function VaultButtons({
   vaultRoot: string | null;
   open: (url: string, label: string) => Promise<void>;
 }) {
+  const t = useT();
   const links = vaultLinks(vaultRoot, detail.vault_path);
   if (!links) {
     return (
-      <button type="button" className="btn btn-small" disabled title="This entity has no vault page yet">
-        Open in vault
+      <button type="button" className="btn btn-small" disabled title={t("entity.noVaultPage")}>
+        {t("entity.openInVault")}
       </button>
     );
   }
-  const label = `${detail.name}'s vault page`;
+  const label = t("entity.vaultPageLabel", { name: detail.name });
   return (
     <>
       <button type="button" className="btn btn-small" onClick={() => void open(links.file, label)}>
-        Open in vault
+        {t("entity.openInVault")}
       </button>
       {links.obsidian && (
         <button type="button" className="btn btn-small btn-ghost" onClick={() => void open(links.obsidian!, label)}>
-          Open in Obsidian
+          {t("entity.openInObsidian")}
         </button>
       )}
     </>
@@ -278,15 +281,20 @@ function Facts({
   onReject: (c: ClaimView, prev: ClaimStatus) => void;
   onRestore: (c: ClaimView) => void;
 }) {
+  const t = useT();
   const claims = detail.claims.map((c) => (overrides[c.id] ? { ...c, status: overrides[c.id]! } : c));
   const groups = groupClaims(claims);
   const headingId = useId();
   return (
     <section aria-labelledby={headingId}>
       <h3 id={headingId} className="entity-section">
-        Facts <span className="muted small">({claims.filter((c) => c.status !== "retracted").length})</span>
+        <Trans
+          k="entity.factsHeading"
+          args={{ n: claims.filter((c) => c.status !== "retracted").length }}
+          tags={{ count: (x) => <span className="muted small">{x}</span> }}
+        />
       </h3>
-      {groups.length === 0 && <p className="muted small">No facts about {detail.name} yet.</p>}
+      {groups.length === 0 && <p className="muted small">{t("entity.noFacts", { name: detail.name })}</p>}
       {groups.map((g) => (
         <div key={g.predicate} className="fact-group">
           <h4 className="fact-predicate">{g.label}</h4>
@@ -334,6 +342,7 @@ function Fact({
   onReject: (c: ClaimView, prev: ClaimStatus) => void;
   onRestore: (c: ClaimView) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const evidenceId = useId();
   const text = claimText(c);
@@ -344,40 +353,40 @@ function Fact({
       <p className="fact-text">
         {retracted ? <s>{text}</s> : text}
         {c.status === "user_asserted" && (
-          <span className="fact-you" title="You added or edited this fact in your vault">
+          <span className="fact-you" title={t("entity.youTitle")}>
             {" "}
-            (you)
+            {t("entity.you")}
           </span>
         )}
       </p>
       <div className="fact-meta">
         <Badge tone={confidenceTone(c.confidence)}>
-          <span className="visually-hidden">Confidence </span>
+          <span className="visually-hidden">{t("entity.confidence")} </span>
           {formatConfidence(c.confidence)}
         </Badge>
         {c.status !== "active" && c.status !== "user_asserted" && (
-          <Badge tone={retracted ? "bad" : "neutral"}>{CLAIM_STATUS_LABEL[c.status] ?? c.status}</Badge>
+          <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
         )}
         {other && (
           <button type="button" className="btn btn-ghost btn-small" onClick={() => onSelect(other.id)}>
-            {other.name} →
+            {t("entity.goTo", { name: other.name })}
           </button>
         )}
         {c.evidence.length > 0 ? (
           <button type="button" className="btn btn-ghost btn-small" aria-expanded={open} aria-controls={evidenceId} onClick={() => setOpen((o) => !o)}>
-            Why? <span className="muted">{evidenceSummary(c.evidence)}</span>
+            {t("entity.why")} <span className="muted">{evidenceSummary(c.evidence)}</span>
           </button>
         ) : (
-          <span className="muted small">{c.status === "user_asserted" ? "From your vault edit" : "No sources"}</span>
+          <span className="muted small">{c.status === "user_asserted" ? t("entity.fromVaultEdit") : evidenceSummary([])}</span>
         )}
         <button
           type="button"
           className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost"}
           disabled={busy}
-          aria-label={retracted ? `Restore this fact: ${text}` : `Reject this fact: ${text}`}
+          aria-label={retracted ? t("entity.restoreLabel", { text }) : t("entity.rejectLabel", { text })}
           onClick={() => (retracted ? onRestore(c) : onReject(c, original))}
         >
-          {busy ? <Spinner label="Saving" /> : retracted ? "Restore" : "Reject this fact"}
+          {busy ? <Spinner label={t("entity.saving")} /> : retracted ? t("entity.restore") : t("entity.reject")}
         </button>
       </div>
       <div id={evidenceId} hidden={!open}>
@@ -392,14 +401,14 @@ function Fact({
                       {e.quote}
                     </blockquote>
                   ) : (
-                    <p className="muted small">No quote recorded for this source.</p>
+                    <p className="muted small">{t("entity.noQuote")}</p>
                   )}
                   <div className="evidence-source">
                     <span className="evidence-title">{e.title}</span>
                     <span className="muted small">{e.source}</span>
                     {e.openUrl && (
                       <button type="button" className="btn btn-small" onClick={() => void onOpen(e.openUrl!, e.title)}>
-                        Open
+                        {t("entity.open")}
                       </button>
                     )}
                   </div>
@@ -422,26 +431,31 @@ function Mentions({
   sourceNames: ReadonlyMap<string, string>;
   onOpen: (url: string, label: string) => Promise<void>;
 }) {
+  const t = useT();
   const [all, setAll] = useState(false);
   const headingId = useId();
   const shown = all ? mentions : mentions.slice(0, MENTIONS_SHOWN);
   return (
     <section aria-labelledby={headingId}>
       <h3 id={headingId} className="entity-section">
-        Mentions <span className="muted small">({mentions.length.toLocaleString()})</span>
+        <Trans
+          k="entity.mentionsHeading"
+          args={{ n: mentions.length }}
+          tags={{ count: (x) => <span className="muted small">{x}</span> }}
+        />
       </h3>
-      {mentions.length === 0 && <p className="muted small">Not mentioned in any indexed item yet.</p>}
+      {mentions.length === 0 && <p className="muted small">{t("entity.noMentions")}</p>}
       <ul className="mentions">
         {shown.map((m, i) => {
           const e = formatEvidence({ item: m.item, chunk_id: m.chunk_id, title: m.title, url: m.url, quote: null }, sourceNames);
           return (
             <li key={`${m.item.source}\u0000${m.item.key}\u0000${m.chunk_id ?? ""}\u0000${i}`}>
-              <span className="mention-surface">“{m.surface}”</span>
+              <span className="mention-surface">{t("entity.mentionSurface", { surface: m.surface })}</span>
               <span className="mention-title">{e.title}</span>
               <span className="muted small">{e.source}</span>
               {e.openUrl && (
                 <button type="button" className="btn btn-small btn-ghost" onClick={() => void onOpen(e.openUrl!, e.title)}>
-                  Open
+                  {t("entity.open")}
                 </button>
               )}
             </li>
@@ -450,7 +464,7 @@ function Mentions({
       </ul>
       {mentions.length > MENTIONS_SHOWN && (
         <button type="button" className="btn btn-ghost btn-small" onClick={() => setAll((a) => !a)} aria-expanded={all}>
-          {all ? "Show fewer" : `Show all ${mentions.length.toLocaleString()} mentions`}
+          {all ? t("entity.showFewer") : t("entity.showAllMentions", { n: mentions.length })}
         </button>
       )}
     </section>

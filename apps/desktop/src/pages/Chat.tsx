@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { api, CHAT_TIERS, events, errorMessage, type ChatDone, type ChatMessage, type ProviderInfo, type Tier } from "../api";
 import { useAsync, useEvent } from "../hooks";
-import { LOCALITY_LABEL, TIER_LABEL } from "../format";
+import { localityLabel, tierLabel } from "../format";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
+import { Trans, useT } from "../i18n";
 
 interface Turn {
   id: number;
@@ -25,19 +26,20 @@ interface Early {
 let nextTurnId = 1;
 
 export function ChatPage() {
+  const t = useT();
   const providers = useAsync(api.providersList);
   const [tier, setTier] = useState<Tier>("synthesis");
   const [provider, setProvider] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const early = useRef(new Map<string, Early>());
-  const logRef = useRef<HTMLOListElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const active = turns.find((t) => t.state === "pending" || t.state === "streaming");
+  const active = turns.find((x) => x.state === "pending" || x.state === "streaming");
 
-  const finish = (t: Turn, done: ChatDone): Turn => ({
-    ...t,
+  const finish = (turn: Turn, done: ChatDone): Turn => ({
+    ...turn,
     state: done.error ? (/cancel/i.test(done.error) ? "cancelled" : "error") : "done",
     error: done.error ?? undefined,
     tokens: { input: done.input_tokens, output: done.output_tokens },
@@ -53,10 +55,10 @@ export function ChatPage() {
   useEvent(events.onChatDelta, (d) => {
     if (attached.current.has(d.stream_id)) {
       setTurns((ts) =>
-        ts.map((t) =>
-          t.streamId === d.stream_id && (t.state === "pending" || t.state === "streaming")
-            ? { ...t, text: t.text + d.text, state: "streaming" }
-            : t,
+        ts.map((x) =>
+          x.streamId === d.stream_id && (x.state === "pending" || x.state === "streaming")
+            ? { ...x, text: x.text + d.text, state: "streaming" }
+            : x,
         ),
       );
     } else if (awaiting.current > 0) {
@@ -69,7 +71,7 @@ export function ChatPage() {
   useEvent(events.onChatDone, (d) => {
     if (attached.current.has(d.stream_id)) {
       attached.current.delete(d.stream_id);
-      setTurns((ts) => ts.map((t) => (t.streamId === d.stream_id && t.state !== "cancelled" ? finish(t, d) : t)));
+      setTurns((ts) => ts.map((x) => (x.streamId === d.stream_id && x.state !== "cancelled" ? finish(x, d) : x)));
     } else if (awaiting.current > 0) {
       const e = early.current.get(d.stream_id) ?? { text: "" };
       e.done = d;
@@ -89,8 +91,8 @@ export function ChatPage() {
     if (!text || active) return;
 
     const history: ChatMessage[] = turns
-      .filter((t) => t.role === "user" || t.state === "done" || (t.state === "cancelled" && t.text))
-      .map((t) => ({ role: t.role, text: t.text }));
+      .filter((x) => x.role === "user" || x.state === "done" || (x.state === "cancelled" && x.text))
+      .map((x) => ({ role: x.role, text: x.text }));
     history.push({ role: "user", text });
 
     const userTurn: Turn = { id: nextTurnId++, role: "user", text };
@@ -105,10 +107,10 @@ export function ChatPage() {
       early.current.delete(started.stream_id);
       if (!buffered?.done) attached.current.add(started.stream_id);
       setTurns((ts) =>
-        ts.map((t) => {
-          if (t.id !== reply.id) return t;
+        ts.map((x) => {
+          if (x.id !== reply.id) return x;
           let next: Turn = {
-            ...t,
+            ...x,
             streamId: started.stream_id,
             provider: started.provider,
             text: buffered?.text ?? "",
@@ -119,7 +121,7 @@ export function ChatPage() {
         }),
       );
     } catch (err) {
-      setTurns((ts) => ts.map((t) => (t.id === reply.id ? { ...t, state: "error", error: errorMessage(err) } : t)));
+      setTurns((ts) => ts.map((x) => (x.id === reply.id ? { ...x, state: "error", error: errorMessage(err) } : x)));
     } finally {
       awaiting.current--;
       if (awaiting.current === 0) early.current.clear();
@@ -135,7 +137,7 @@ export function ChatPage() {
       /* the done event (or its absence) settles the turn */
     }
     attached.current.delete(active.streamId);
-    setTurns((ts) => ts.map((t) => (t.id === active.id && t.state !== "done" ? { ...t, state: "cancelled" } : t)));
+    setTurns((ts) => ts.map((x) => (x.id === active.id && x.state !== "done" ? { ...x, state: "cancelled" } : x)));
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -153,89 +155,99 @@ export function ChatPage() {
   return (
     <div className="page page-chat">
       <PageHeader
-        title="Chat"
+        title={t("chat.title")}
         actions={
           <>
             <label className="field-inline">
-              <span>Tier</span>
+              <span>{t("chat.tier")}</span>
               <select value={tier} onChange={(e) => setTier(e.target.value as Tier)}>
-                {CHAT_TIERS.map((t) => (
-                  <option key={t} value={t}>
-                    {TIER_LABEL[t]}
+                {CHAT_TIERS.map((tr) => (
+                  <option key={tr} value={tr}>
+                    {tierLabel(tr)}
                   </option>
                 ))}
               </select>
             </label>
             <label className="field-inline">
-              <span>Provider</span>
+              <span>{t("chat.provider")}</span>
               <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                <option value="">Auto (route by tier)</option>
+                <option value="">{t("chat.providerAuto")}</option>
                 {list.map((p) => (
                   <option key={p.id} value={p.id} disabled={!!p.error}>
-                    {p.id} · {p.model} ({LOCALITY_LABEL[p.locality] ?? p.locality}){p.error ? " – unavailable" : ""}
+                    {t(p.error ? "chat.providerOptionUnavailable" : "chat.providerOption", {
+                      id: p.id,
+                      model: p.model,
+                      locality: localityLabel(p.locality),
+                    })}
                   </option>
                 ))}
               </select>
             </label>
             <button type="button" className="btn btn-ghost" onClick={() => setTurns([])} disabled={!!active || turns.length === 0}>
-              Clear
+              {t("chat.clear")}
             </button>
           </>
         }
       />
       {providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} /> : null}
 
-      <ol className="chat-log" ref={logRef} role="log" aria-label="Conversation" aria-busy={!!active}>
-        {turns.length === 0 && (
-          <li className="chat-empty muted">
-            Ask anything. Replies stream from the provider routed for the <strong>{TIER_LABEL[tier]}</strong> tier
-            {provider ? ` (pinned to ${provider})` : ""}.
-          </li>
-        )}
-        {turns.map((t) => (
-          <li key={t.id} className={`msg msg-${t.role}`}>
-            <div className="msg-meta">
-              {t.role === "user" ? "You" : (t.provider ?? "Nugget")}
-              {t.state === "cancelled" && <Badge tone="warn">Stopped</Badge>}
-              {t.state === "done" && t.tokens?.output != null && (
-                <span className="muted small">{t.tokens.output} tokens</span>
+      {/* The log region wraps the list: role="log" on the <ol> itself would hide its list semantics. */}
+      <div className="chat-log" ref={logRef} role="log" aria-label={t("chat.conversation")} aria-busy={!!active}>
+        <ol className="chat-list">
+          {turns.length === 0 && (
+            <li className="chat-empty muted">
+              <Trans
+                k={provider ? "chat.emptyPinned" : "chat.empty"}
+                args={{ tier: tierLabel(tier), provider }}
+                tags={{ strong: (c) => <strong>{c}</strong> }}
+              />
+            </li>
+          )}
+          {turns.map((turn) => (
+            <li key={turn.id} className={`msg msg-${turn.role}`}>
+              <div className="msg-meta">
+                {turn.role === "user" ? t("chat.you") : (turn.provider ?? t("app.name"))}
+                {turn.state === "cancelled" && <Badge tone="warn">{t("chat.stopped")}</Badge>}
+                {turn.state === "done" && turn.tokens?.output != null && (
+                  <span className="muted small">{t("chat.tokens", { n: turn.tokens.output })}</span>
+                )}
+              </div>
+              <div className="msg-body">
+                {turn.text}
+                {(turn.state === "pending" || turn.state === "streaming") && <span className="caret" aria-hidden="true" />}
+                {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
+              </div>
+              {turn.state === "error" && (
+                <p className="note note-error" role="alert">
+                  {turn.error}
+                </p>
               )}
-            </div>
-            <div className="msg-body">
-              {t.text}
-              {(t.state === "pending" || t.state === "streaming") && <span className="caret" aria-hidden="true" />}
-              {t.state === "pending" && !t.text && <span className="visually-hidden">Waiting for reply</span>}
-            </div>
-            {t.state === "error" && (
-              <p className="note note-error" role="alert">
-                {t.error}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
+            </li>
+          ))}
+        </ol>
+      </div>
 
       <form className="composer" onSubmit={send}>
         <label htmlFor="chat-input" className="visually-hidden">
-          Message
+          {t("chat.message")}
         </label>
         <textarea
           id="chat-input"
           ref={inputRef}
           rows={3}
           value={input}
-          placeholder="Message Nugget  (Enter to send, Shift+Enter for a new line)"
+          placeholder={t("chat.placeholder")}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onKeyDown}
           autoFocus
         />
         {active ? (
           <button type="button" className="btn" onClick={stop} disabled={!active.streamId}>
-            Stop
+            {t("chat.stop")}
           </button>
         ) : (
           <button type="submit" className="btn btn-primary" disabled={!input.trim()}>
-            Send
+            {t("chat.send")}
           </button>
         )}
       </form>

@@ -4,7 +4,6 @@ import {
   ApiError,
   errorMessage,
   events,
-  NOT_AVAILABLE,
   SOURCE_KINDS,
   sourcesFromChange,
   type SourceInfo,
@@ -12,28 +11,32 @@ import {
   type SourceSettings,
 } from "../api";
 import { useEvent } from "../hooks";
-import { baseName, SOURCE_KIND_LABEL, splitList } from "../format";
+import { t as tGlobal, Trans, useT, type MessageKey, type TagRenderer } from "../i18n";
+import { baseName, sourceKindLabel, splitList } from "../format";
 import { Dialog } from "./Dialog";
 import { SourceIcon } from "./SourceIcon";
 import { Spinner } from "./ui";
 
-const KIND_BLURB: Record<SourceKind, string> = {
-  files: "Documents, notes and code in folders on this device.",
-  obsidian: "Notes, links and tags from an Obsidian vault.",
-  gmail: "Your Gmail mail, through your own Google OAuth client.",
-  gcal: "Events from Google Calendar, through your own Google OAuth client.",
-  imap: "Any IMAP mailbox (Fastmail, iCloud, Outlook, self-hosted…).",
-  caldav: "Any CalDAV calendar (iCloud, Fastmail, Nextcloud…).",
+const KIND_BLURB: Record<SourceKind, MessageKey> = {
+  files: "addSource.blurb.files",
+  obsidian: "addSource.blurb.obsidian",
+  gmail: "addSource.blurb.gmail",
+  gcal: "addSource.blurb.gcal",
+  imap: "addSource.blurb.imap",
+  caldav: "addSource.blurb.caldav",
 };
+
+const BOLD: Record<string, TagRenderer> = { b: (c) => <b>{c}</b> };
 
 const GOOGLE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 
 /** Wizard for `sources.add`: pick a kind, fill in its settings, then connect. */
 export function AddSourceWizard({ onClose, onAdded }: { onClose: () => void; onAdded: (s: SourceInfo) => void }) {
+  const t = useT();
   const [kind, setKind] = useState<SourceKind>("files");
   const [step, setStep] = useState<"kind" | "form">("kind");
 
-  const title = step === "kind" ? "Add a source" : ADD_TITLE[kind];
+  const title = step === "kind" ? t("addSource.title") : t(ADD_TITLE[kind]);
 
   return (
     <Dialog title={title} onClose={onClose} wide>
@@ -46,13 +49,13 @@ export function AddSourceWizard({ onClose, onAdded }: { onClose: () => void; onA
   );
 }
 
-const ADD_TITLE: Record<SourceKind, string> = {
-  files: "Add a folder",
-  obsidian: "Add an Obsidian vault",
-  gmail: "Connect Gmail",
-  gcal: "Connect Google Calendar",
-  imap: "Add an IMAP mailbox",
-  caldav: "Add a CalDAV calendar",
+const ADD_TITLE: Record<SourceKind, MessageKey> = {
+  files: "addSource.addTitle.files",
+  obsidian: "addSource.addTitle.obsidian",
+  gmail: "addSource.addTitle.gmail",
+  gcal: "addSource.addTitle.gcal",
+  imap: "addSource.addTitle.imap",
+  caldav: "addSource.addTitle.caldav",
 };
 
 function useAutofocus<T extends HTMLElement>() {
@@ -76,6 +79,7 @@ function KindPicker({
   onNext: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const first = useAutofocus<HTMLInputElement>();
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -84,7 +88,7 @@ function KindPicker({
   return (
     <form onSubmit={submit}>
       <fieldset className="kind-picker">
-        <legend className="visually-hidden">What do you want to add?</legend>
+        <legend className="visually-hidden">{t("addSource.kindLegend")}</legend>
         {SOURCE_KINDS.map((k) => (
           <label key={k} className="kind-option">
             <input
@@ -98,18 +102,18 @@ function KindPicker({
             />
             <SourceIcon kind={k} size={22} />
             <span>
-              <span className="kind-label">{SOURCE_KIND_LABEL[k]}</span>
-              <span className="muted small">{KIND_BLURB[k]}</span>
+              <span className="kind-label">{sourceKindLabel(k)}</span>
+              <span className="muted small">{t(KIND_BLURB[k])}</span>
             </span>
           </label>
         ))}
       </fieldset>
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </button>
         <button type="submit" className="btn btn-primary">
-          Next
+          {t("common.next")}
         </button>
       </div>
     </form>
@@ -170,6 +174,7 @@ function Field({
   optional?: boolean;
   children: (a: { id: string; "aria-describedby"?: string; "aria-invalid"?: true }) => ReactNode;
 }) {
+  const t = useT();
   const id = useId();
   const hintId = `${id}-hint`;
   const errId = `${id}-err`;
@@ -178,7 +183,7 @@ function Field({
     <div className="field">
       <label htmlFor={id}>
         {label}
-        {optional && <span className="muted small"> (optional)</span>}
+        {optional && <span className="muted small"> {t("addSource.optional")}</span>}
       </label>
       {children({ id, "aria-describedby": describedBy, "aria-invalid": error ? true : undefined })}
       {hint && (
@@ -196,25 +201,27 @@ function Field({
 }
 
 function FormError({ error }: { error: unknown }) {
+  const t = useT();
   if (!error) return null;
   const e = ApiError.from(error);
   return (
     <p className="note note-error" role="alert">
-      {e.isMethodNotFound ? `${NOT_AVAILABLE}.` : e.message}
+      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.message}
     </p>
   );
 }
 
 function Actions({ onBack, busy, submitLabel }: { onBack: () => void; busy: boolean; submitLabel: string }) {
+  const t = useT();
   return (
     <div className="dialog-actions">
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
-        Back
+        {t("common.back")}
       </button>
       <button type="submit" className="btn btn-primary" disabled={busy}>
         {busy ? (
           <>
-            <Spinner label="Working" /> {submitLabel}
+            <Spinner label={t("addSource.working")} /> {submitLabel}
           </>
         ) : (
           submitLabel
@@ -225,8 +232,9 @@ function Actions({ onBack, busy, submitLabel }: { onBack: () => void; busy: bool
 }
 
 function NameField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const t = useT();
   return (
-    <Field label="Name" optional hint="How this source appears in Nugget.">
+    <Field label={t("addSource.name")} optional hint={t("addSource.nameHint")}>
       {(a) => (
         <input {...a} type="text" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" />
       )}
@@ -241,13 +249,14 @@ async function pickFolders(multiple: boolean): Promise<{ paths: string[]; error:
   try {
     return { paths: await api.pickFolders(multiple), error: null };
   } catch (e) {
-    return { paths: [], error: `Couldn't open the folder picker (${errorMessage(e)}). Type the path instead.` };
+    return { paths: [], error: tGlobal("addSource.pickerFailed", { error: errorMessage(e) }) };
   }
 }
 
 // -- folder --
 
 function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
+  const t = useT();
   const [roots, setRoots] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [include, setInclude] = useState("");
@@ -274,7 +283,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
     const p = draft.trim();
     if (!p) return;
     if (!isAbsolutePath(p)) {
-      setRootsError("Use a full path, like /Users/me/Documents or C:\\Users\\me\\Documents.");
+      setRootsError(t("addSource.folder.fullPath"));
       return;
     }
     addRoots([p]);
@@ -288,12 +297,12 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
     }
   };
 
-  const defaultName = roots.length === 1 ? baseName(roots[0]!) : roots.length > 1 ? "Folders" : "Documents";
+  const defaultName = roots.length === 1 ? baseName(roots[0]!) : roots.length > 1 ? t("addSource.folder.defaultMany") : t("addSource.folder.defaultNone");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (roots.length === 0) {
-      setRootsError("Add at least one folder.");
+      setRootsError(t("addSource.folder.needOne"));
       return;
     }
     setBusy(true);
@@ -312,27 +321,27 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
   return (
     <form onSubmit={submit} noValidate>
       <fieldset className="field" aria-describedby={rootsError ? "roots-err" : undefined}>
-        <legend>Folders</legend>
+        <legend>{t("addSource.folder.legend")}</legend>
         {roots.length > 0 ? (
           <ul className="path-list">
             {roots.map((r) => (
               <li key={r}>
                 <code>{r}</code>
-                <button type="button" className="btn btn-ghost btn-small" onClick={() => setRoots((rs) => rs.filter((x) => x !== r))} aria-label={`Remove ${r}`}>
-                  Remove
+                <button type="button" className="btn btn-ghost btn-small" onClick={() => setRoots((rs) => rs.filter((x) => x !== r))} aria-label={t("addSource.folder.removePath", { path: r })}>
+                  {t("addSource.folder.remove")}
                 </button>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="muted small">No folders yet.</p>
+          <p className="muted small">{t("addSource.folder.none")}</p>
         )}
         <div className="inline-row">
           <button ref={browseRef} data-autofocus="" type="button" className="btn" onClick={() => void browse()}>
-            Choose folders…
+            {t("addSource.folder.choose")}
           </button>
           <label htmlFor="folder-path" className="visually-hidden">
-            Folder path
+            {t("addSource.folder.pathLabel")}
           </label>
           <input
             id="folder-path"
@@ -340,12 +349,12 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onDraftKey}
-            placeholder="or type a path"
+            placeholder={t("addSource.folder.pathPlaceholder")}
             autoComplete="off"
             spellCheck={false}
           />
           <button type="button" className="btn" onClick={addDraft} disabled={!draft.trim()}>
-            Add
+            {t("addSource.folder.add")}
           </button>
         </div>
         {rootsError && (
@@ -354,15 +363,15 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
           </p>
         )}
       </fieldset>
-      <Field label="Include" optional hint="Glob patterns, comma or newline separated, e.g. **/*.md, **/*.pdf. Empty means every supported file.">
+      <Field label={t("addSource.folder.include")} optional hint={t("addSource.folder.includeHint")}>
         {(a) => <textarea {...a} rows={2} value={include} onChange={(e) => setInclude(e.target.value)} spellCheck={false} />}
       </Field>
-      <Field label="Exclude" optional hint="Glob patterns to skip, e.g. **/node_modules/**, **/*.log. .gitignore and .nuggetignore files are honored too.">
+      <Field label={t("addSource.folder.exclude")} optional hint={t("addSource.folder.excludeHint")}>
         {(a) => <textarea {...a} rows={2} value={exclude} onChange={(e) => setExclude(e.target.value)} spellCheck={false} />}
       </Field>
       <NameField value={name} onChange={setName} placeholder={defaultName} />
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel="Add folder" />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.folder.submit")} />
     </form>
   );
 }
@@ -370,6 +379,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
 // -- obsidian --
 
 function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
+  const t = useT();
   const [vault, setVault] = useState("");
   const [name, setName] = useState("");
   const [vaultError, setVaultError] = useState<string | null>(null);
@@ -388,12 +398,12 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
   };
 
   const v = vault.trim();
-  const defaultName = v ? baseName(v) : "Obsidian";
+  const defaultName = v ? baseName(v) : t("addSource.vault.defaultName");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!v) return setVaultError("Choose the vault folder (the one that contains .obsidian).");
-    if (!isAbsolutePath(v)) return setVaultError("Use a full path to the vault folder.");
+    if (!v) return setVaultError(t("addSource.vault.choose"));
+    if (!isAbsolutePath(v)) return setVaultError(t("addSource.vault.fullPath"));
     setBusy(true);
     setError(null);
     try {
@@ -409,19 +419,19 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
 
   return (
     <form onSubmit={submit} noValidate>
-      <Field label="Vault folder" hint="The folder that contains your notes and the .obsidian settings folder." error={vaultError}>
+      <Field label={t("addSource.vault.label")} hint={t("addSource.vault.hint")} error={vaultError}>
         {(a) => (
           <div className="inline-row">
             <input {...a} type="text" value={vault} onChange={(e) => setVault(e.target.value)} autoComplete="off" spellCheck={false} />
             <button ref={browseRef} data-autofocus="" type="button" className="btn" onClick={() => void browse()}>
-              Choose…
+              {t("addSource.vault.browse")}
             </button>
           </div>
         )}
       </Field>
       <NameField value={name} onChange={setName} placeholder={defaultName} />
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel="Add vault" />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.vault.submit")} />
     </form>
   );
 }
@@ -431,7 +441,9 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
 type AuthPhase = "form" | "waiting" | "done";
 
 function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
-  const label = SOURCE_KIND_LABEL[kind] ?? kind;
+  const t = useT();
+  const label = sourceKindLabel(kind);
+  // i18n-ignore: Google's product names for the APIs, as shown in the Cloud console.
   const apiName = kind === "gmail" ? "Gmail API" : "Google Calendar API";
   const [clientId, setClientId] = useState("");
   const [name, setName] = useState("");
@@ -453,7 +465,7 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
       await api.openUrl(url);
       setAuthNote(null);
     } catch (e) {
-      setAuthNote(`Couldn't open your browser (${errorMessage(e)}). Copy the link below into it instead.`);
+      setAuthNote(t("addSource.google.browserFailed", { error: errorMessage(e) }));
     }
   };
 
@@ -462,9 +474,9 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
     const id = clientId.trim();
     const secret = secretRef.current?.value ?? "";
     const errs: typeof fieldErrors = {};
-    if (!id) errs.clientId = "Paste the client ID from the Google Cloud console.";
-    else if (!/\.apps\.googleusercontent\.com$/.test(id)) errs.clientId = "Google client IDs end in .apps.googleusercontent.com.";
-    if (!secret && !secretSaved) errs.secret = "Paste the client secret too.";
+    if (!id) errs.clientId = t("addSource.google.clientIdMissing");
+    else if (!/\.apps\.googleusercontent\.com$/.test(id)) errs.clientId = t("addSource.google.clientIdInvalid");
+    if (!secret && !secretSaved) errs.secret = t("addSource.google.secretMissing");
     setFieldErrors(errs);
     if (errs.clientId || errs.secret) return;
 
@@ -516,8 +528,8 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
   });
   useEffect(() => {
     if (phase !== "waiting") return;
-    const t = window.setInterval(() => void checkRef.current(), 5000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => void checkRef.current(), 5000);
+    return () => window.clearInterval(timer);
   }, [phase]);
 
   if (phase === "waiting" && source) {
@@ -536,36 +548,32 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
     );
   }
   if (phase === "done" && source) {
-    return <Done text={`${label} is connected. Nugget is syncing it now.`} onClose={onClose} />;
+    return <Done text={t("addSource.google.connected", { label })} onClose={onClose} />;
   }
 
   return (
     <form onSubmit={connect} noValidate>
       <details className="help">
-        <summary>How to create a Google OAuth client</summary>
+        <summary>{t("addSource.google.howTo")}</summary>
         <ol className="small">
-          <li>Open the Google Cloud console and create a project, or pick an existing one.</li>
+          <li>{t("addSource.google.step1")}</li>
           <li>
-            Under <b>APIs &amp; Services → Library</b>, enable the <b>{apiName}</b>.
+            <Trans k="addSource.google.step2" args={{ api: apiName }} tags={BOLD} />
           </li>
           <li>
-            Under <b>OAuth consent screen</b>, choose <b>External</b>, fill in an app name and your email, and add your
-            own Google account as a <b>test user</b>.
+            <Trans k="addSource.google.step3" tags={BOLD} />
           </li>
           <li>
-            Under <b>Credentials → Create credentials → OAuth client ID</b>, choose <b>Desktop app</b>.
+            <Trans k="addSource.google.step4" tags={BOLD} />
           </li>
-          <li>Copy the client ID and client secret into the fields below.</li>
+          <li>{t("addSource.google.step5")}</li>
         </ol>
-        <p className="small muted">
-          Nugget signs in through your browser and a redirect to this device only. Tokens and the client secret are kept
-          in your OS keychain, never in config files.
-        </p>
+        <p className="small muted">{t("addSource.google.privacy")}</p>
         <button type="button" className="btn btn-small" onClick={() => void api.openUrl(GOOGLE_CREDENTIALS_URL).catch(() => {})}>
-          Open Google Cloud credentials
+          {t("addSource.google.openConsole")}
         </button>
       </details>
-      <Field label="Client ID" error={fieldErrors.clientId}>
+      <Field label={t("addSource.google.clientId")} error={fieldErrors.clientId}>
         {(a) => (
           <input
             {...a}
@@ -574,6 +582,7 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
             type="text"
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
+            // i18n-ignore: example value, the same in every language
             placeholder="1234-abc.apps.googleusercontent.com"
             autoComplete="off"
             spellCheck={false}
@@ -581,16 +590,16 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
         )}
       </Field>
       <Field
-        label="Client secret"
+        label={t("addSource.google.clientSecret")}
         error={fieldErrors.secret}
         optional={secretSaved}
-        hint={secretSaved ? "Saved to your keychain. Leave empty to keep it." : "Stored in your OS keychain."}
+        hint={secretSaved ? t("addSource.savedKeepIt") : t("addSource.google.secretHint")}
       >
         {(a) => <input {...a} ref={secretRef} type="password" autoComplete="off" spellCheck={false} />}
       </Field>
       <NameField value={name} onChange={setName} placeholder={label} />
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel="Connect" />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.google.submit")} />
     </form>
   );
 }
@@ -610,12 +619,12 @@ function WaitingForAuth({
   onReopen: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const reopenRef = useAutofocus<HTMLButtonElement>();
   return (
     <div className="auth-wait">
       <p role="status">
-        <Spinner label="Waiting" /> Finish signing in to {label} in your browser. This window updates as soon as Google
-        sends you back.
+        <Spinner label={t("addSource.wait.waiting")} /> {t("addSource.wait.text", { label })}
       </p>
       {source.state === "error" && source.last_error && (
         <p className="note note-error" role="alert">
@@ -634,10 +643,10 @@ function WaitingForAuth({
       )}
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onClose}>
-          Finish later
+          {t("addSource.wait.later")}
         </button>
         <button ref={reopenRef} type="button" className="btn btn-primary" onClick={onReopen} disabled={!url}>
-          Open sign-in page again
+          {t("addSource.wait.reopen")}
         </button>
       </div>
     </div>
@@ -645,13 +654,14 @@ function WaitingForAuth({
 }
 
 function Done({ text, onClose }: { text: string; onClose: () => void }) {
+  const t = useT();
   const ref = useAutofocus<HTMLButtonElement>();
   return (
     <div>
       <p role="status">{text}</p>
       <div className="dialog-actions">
         <button ref={ref} type="button" className="btn btn-primary" onClick={onClose}>
-          Done
+          {t("common.done")}
         </button>
       </div>
     </div>
@@ -682,6 +692,7 @@ type TlsMode = "implicit" | "starttls";
 const TLS_PORT: Record<TlsMode, number> = { implicit: 993, starttls: 143 };
 
 function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
+  const t = useT();
   const [host, setHost] = useState("");
   const [port, setPort] = useState("993");
   const [tls, setTls] = useState<TlsMode>("implicit");
@@ -702,18 +713,18 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
     setTls(mode);
   };
 
-  const defaultName = username.trim() || host.trim() || "Mail";
+  const defaultName = username.trim() || host.trim() || t("addSource.imap.defaultName");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const p = Number(port);
     const next: Record<string, string> = {};
-    if (!host.trim()) next.host = "Enter the IMAP server, e.g. imap.fastmail.com.";
-    else if (/[\s/:]/.test(host.trim())) next.host = "Enter just the host name, without imap:// or a port.";
-    if (!Number.isInteger(p) || p < 1 || p > 65535) next.port = "Enter a port between 1 and 65535.";
-    if (!username.trim()) next.username = "Enter your username (usually your email address).";
-    if (!passwordRef.current?.value && !passwordSaved) next.password = "Enter the password or app password.";
-    if (splitList(folders).length === 0) next.folders = "Name at least one folder, e.g. INBOX.";
+    if (!host.trim()) next.host = t("addSource.imap.hostMissing");
+    else if (/[\s/:]/.test(host.trim())) next.host = t("addSource.imap.hostInvalid");
+    if (!Number.isInteger(p) || p < 1 || p > 65535) next.port = t("addSource.imap.portInvalid");
+    if (!username.trim()) next.username = t("addSource.imap.usernameMissing");
+    if (!passwordRef.current?.value && !passwordSaved) next.password = t("addSource.passwordMissing");
+    if (splitList(folders).length === 0) next.folders = t("addSource.imap.foldersMissing");
     setErrs(next);
     if (Object.keys(next).length > 0) return;
 
@@ -739,7 +750,7 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
   return (
     <form onSubmit={submit} noValidate>
       <div className="field-grid">
-        <Field label="IMAP server" error={errs.host}>
+        <Field label={t("addSource.imap.server")} error={errs.host}>
           {(a) => (
             <input
               {...a}
@@ -748,43 +759,44 @@ function ImapForm({ kind, onBack, onClose, onAdded }: FormProps) {
               type="text"
               value={host}
               onChange={(e) => setHost(e.target.value)}
+              // i18n-ignore: example value, the same in every language
               placeholder="imap.example.com"
               autoComplete="off"
               spellCheck={false}
             />
           )}
         </Field>
-        <Field label="Port" error={errs.port}>
+        <Field label={t("addSource.imap.port")} error={errs.port}>
           {(a) => <input {...a} type="number" inputMode="numeric" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />}
         </Field>
-        <Field label="Security">
+        <Field label={t("addSource.imap.security")}>
           {(a) => (
             <select {...a} value={tls} onChange={(e) => changeTls(e.target.value as TlsMode)}>
-              <option value="implicit">TLS (port 993)</option>
-              <option value="starttls">STARTTLS (port 143)</option>
+              <option value="implicit">{t("addSource.imap.tlsImplicit", { port: String(TLS_PORT.implicit) })}</option>
+              <option value="starttls">{t("addSource.imap.tlsStarttls", { port: String(TLS_PORT.starttls) })}</option>
             </select>
           )}
         </Field>
       </div>
-      <Field label="Username" error={errs.username}>
+      <Field label={t("addSource.username")} error={errs.username}>
         {(a) => (
           <input {...a} type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" spellCheck={false} />
         )}
       </Field>
       <Field
-        label="Password"
+        label={t("addSource.password")}
         error={errs.password}
         optional={passwordSaved}
-        hint={passwordSaved ? "Saved to your keychain. Leave empty to keep it." : "Use an app password if your provider offers one. Stored in your OS keychain."}
+        hint={passwordSaved ? t("addSource.savedKeepIt") : t("addSource.passwordHint")}
       >
         {(a) => <input {...a} ref={passwordRef} type="password" autoComplete="current-password" />}
       </Field>
-      <Field label="Folders" error={errs.folders} hint="Comma separated, e.g. INBOX, Archive.">
+      <Field label={t("addSource.imap.folders")} error={errs.folders} hint={t("addSource.imap.foldersHint")}>
         {(a) => <input {...a} type="text" value={folders} onChange={(e) => setFolders(e.target.value)} autoComplete="off" spellCheck={false} />}
       </Field>
       <NameField value={name} onChange={setName} placeholder={defaultName} />
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel="Add mailbox" />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.imap.submit")} />
     </form>
   );
 }
@@ -801,6 +813,7 @@ export function isCaldavUrl(raw: string): boolean {
 }
 
 function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
+  const t = useT();
   const [url, setUrl] = useState("");
   const [username, setUsername] = useState("");
   const [name, setName] = useState("");
@@ -812,7 +825,7 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
   const urlRef = useAutofocus<HTMLInputElement>();
   const save = useSaveSource(kind);
 
-  let defaultName = "Calendar";
+  let defaultName = t("addSource.caldav.defaultName");
   try {
     defaultName = new URL(url.trim()).hostname || defaultName;
   } catch {
@@ -822,9 +835,9 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const next: Record<string, string> = {};
-    if (!isCaldavUrl(url.trim())) next.url = "Enter the calendar server's https:// URL.";
-    if (!username.trim()) next.username = "Enter your username.";
-    if (!passwordRef.current?.value && !passwordSaved) next.password = "Enter the password or app password.";
+    if (!isCaldavUrl(url.trim())) next.url = t("addSource.caldav.urlInvalid");
+    if (!username.trim()) next.username = t("addSource.caldav.usernameMissing");
+    if (!passwordRef.current?.value && !passwordSaved) next.password = t("addSource.passwordMissing");
     setErrs(next);
     if (Object.keys(next).length > 0) return;
 
@@ -844,7 +857,7 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
 
   return (
     <form onSubmit={submit} noValidate>
-      <Field label="Server URL" error={errs.url} hint="For example https://caldav.fastmail.com/ or https://cloud.example.com/remote.php/dav/.">
+      <Field label={t("addSource.caldav.url")} error={errs.url} hint={t("addSource.caldav.urlHint")}>
         {(a) => (
           <input
             {...a}
@@ -853,28 +866,29 @@ function CaldavForm({ kind, onBack, onClose, onAdded }: FormProps) {
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
+            // i18n-ignore: example value, the same in every language
             placeholder="https://"
             autoComplete="url"
             spellCheck={false}
           />
         )}
       </Field>
-      <Field label="Username" error={errs.username}>
+      <Field label={t("addSource.username")} error={errs.username}>
         {(a) => (
           <input {...a} type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" spellCheck={false} />
         )}
       </Field>
       <Field
-        label="Password"
+        label={t("addSource.password")}
         error={errs.password}
         optional={passwordSaved}
-        hint={passwordSaved ? "Saved to your keychain. Leave empty to keep it." : "Use an app password if your provider offers one. Stored in your OS keychain."}
+        hint={passwordSaved ? t("addSource.savedKeepIt") : t("addSource.passwordHint")}
       >
         {(a) => <input {...a} ref={passwordRef} type="password" autoComplete="current-password" />}
       </Field>
       <NameField value={name} onChange={setName} placeholder={defaultName} />
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel="Add calendar" />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.caldav.submit")} />
     </form>
   );
 }

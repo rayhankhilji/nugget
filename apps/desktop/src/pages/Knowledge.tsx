@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api, events, isMethodNotFound, type EntityKind, type SourceInfo } from "../api";
 import { useAsync, useDebounced, useEvent } from "../hooks";
+import { useT, type MessageKey } from "../i18n";
 import { kindLabel } from "../knowledge";
 import { EntityDetailPanel } from "../components/EntityDetail";
 import { GraphPanel, KindChips } from "../components/GraphView";
@@ -8,12 +9,13 @@ import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../componen
 
 const PAGE_SIZE = 50;
 type Tab = "browse" | "graph";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "browse", label: "Browse" },
-  { id: "graph", label: "Graph" },
+const TABS: { id: Tab; label: MessageKey }[] = [
+  { id: "browse", label: "knowledge.tab.browse" },
+  { id: "graph", label: "knowledge.tab.graph" },
 ];
 
 export function KnowledgePage() {
+  const t = useT();
   const [tab, setTab] = useState<Tab>("browse");
   const [selected, setSelected] = useState<string | null>(null);
   const [center, setCenter] = useState<string | null>(null);
@@ -39,7 +41,7 @@ export function KnowledgePage() {
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
-    const i = TABS.findIndex((t) => t.id === tab);
+    const i = TABS.findIndex((x) => x.id === tab);
     const next =
       e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : (i + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length;
     const id = TABS[next]!.id;
@@ -59,7 +61,7 @@ export function KnowledgePage() {
       }}
       onMerged={(into) => {
         setSelected(into);
-        setListTick((t) => t + 1);
+        setListTick((n) => n + 1);
         statusReload();
       }}
       onClose={tab === "graph" ? () => setSelected(null) : undefined}
@@ -69,36 +71,37 @@ export function KnowledgePage() {
   return (
     <div className="page page-wide">
       <PageHeader
-        title="Knowledge"
-        description="People, organizations, projects and more that Nugget has learned from your sources. Every fact links back to where it came from."
+        title={t("knowledge.title")}
+        description={t("knowledge.description")}
         actions={
           s && (
             <p className="muted small knowledge-counts">
-              {s.entities.toLocaleString()} entities · {s.claims.toLocaleString()} facts
-              {s.pending_items > 0 && <> · {s.pending_items.toLocaleString()} items waiting</>}
+              {s.pending_items > 0
+                ? t("knowledge.countsWaiting", { entities: s.entities, claims: s.claims, pending: s.pending_items })
+                : t("knowledge.counts", { entities: s.entities, claims: s.claims })}
             </p>
           )
         }
       />
       {status.error != null && !isMethodNotFound(status.error) && <ErrorNote error={status.error} onRetry={status.reload} />}
 
-      <div className="tabs" role="tablist" aria-label="Knowledge views" onKeyDown={onTabKey}>
-        {TABS.map((t) => (
+      <div className="tabs" role="tablist" aria-label={t("knowledge.tabsLabel")} onKeyDown={onTabKey}>
+        {TABS.map((x) => (
           <button
-            key={t.id}
+            key={x.id}
             ref={(el) => {
-              tabRefs.current[t.id] = el;
+              tabRefs.current[x.id] = el;
             }}
             type="button"
             role="tab"
-            id={`kb-tab-${t.id}`}
-            aria-selected={tab === t.id}
-            aria-controls={`kb-panel-${t.id}`}
-            tabIndex={tab === t.id ? 0 : -1}
+            id={`kb-tab-${x.id}`}
+            aria-selected={tab === x.id}
+            aria-controls={`kb-panel-${x.id}`}
+            tabIndex={tab === x.id ? 0 : -1}
             className="tab"
-            onClick={() => setTab(t.id)}
+            onClick={() => setTab(x.id)}
           >
-            {t.label}
+            {t(x.label)}
           </button>
         ))}
       </div>
@@ -107,7 +110,7 @@ export function KnowledgePage() {
         <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-layout">
           <EntityBrowser selected={selected} onSelect={setSelected} total={s?.entities ?? null} refreshKey={listTick} />
           <div className="kb-detail">
-            {detail || <Empty title="Choose an entity">Pick someone or something on the left to see what Nugget knows and why.</Empty>}
+            {detail || <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>}
           </div>
         </div>
       )}
@@ -133,6 +136,7 @@ function EntityBrowser({
   total: number | null;
   refreshKey: number;
 }) {
+  const t = useT();
   const [text, setText] = useState("");
   const query = useDebounced(text.trim(), 250);
   const [kind, setKind] = useState<EntityKind | null>(null);
@@ -175,21 +179,21 @@ function EntityBrowser({
   if (isMethodNotFound(list.error)) {
     return (
       <div className="kb-list">
-        <NotAvailable what="Knowledge" />
+        <NotAvailable what={t("knowledge.title")} />
       </div>
     );
   }
 
   return (
-    <section className="kb-list" aria-label="Entities">
+    <section className="kb-list" aria-label={t("knowledge.entitiesLabel")}>
       <div className="field">
         <label htmlFor="kb-search" className="visually-hidden">
-          Search entities
+          {t("knowledge.searchLabel")}
         </label>
         <input
           id="kb-search"
           type="search"
-          placeholder="Search people, projects, places…"
+          placeholder={t("knowledge.searchPlaceholder")}
           value={text}
           onChange={(e) => setText(e.target.value)}
           autoComplete="off"
@@ -200,24 +204,25 @@ function EntityBrowser({
         selected={kind ? [kind] : []}
         onToggle={(k) => setKind((cur) => (cur === k ? null : k))}
         onClear={() => setKind(null)}
-        label="Filter by kind"
+        label={t("knowledge.filterByKind")}
         single
       />
       <p className="muted small kb-count" aria-live="polite">
         {list.loading && !list.data ? (
-          "Loading…"
+          t("knowledge.loading")
         ) : rows.length === 0 ? (
-          filtered ? "No matching entities." : ""
+          filtered ? t("knowledge.noMatches") : ""
+        ) : !filtered && total != null ? (
+          t("knowledge.rangeOf", { from, to, total })
+        ) : hasMore ? (
+          t("knowledge.rangeMore", { from, to })
         ) : (
-          <>
-            {from.toLocaleString()}–{to.toLocaleString()}
-            {!filtered && total != null ? ` of ${total.toLocaleString()}` : hasMore ? " and more" : ""}
-          </>
+          t("knowledge.range", { from, to })
         )}
       </p>
       <ErrorNote error={list.error} onRetry={list.reload} />
       {list.data && rows.length === 0 && !filtered && (
-        <Empty title="No entities yet">They appear as Nugget indexes your sources: people from mail and calendars, projects and topics from notes.</Empty>
+        <Empty title={t("knowledge.emptyTitle")}>{t("knowledge.emptyBody")}</Empty>
       )}
       <ul className="entity-list" onKeyDown={onListKey} aria-busy={list.loading || undefined}>
         {rows.map((e) => (
@@ -228,21 +233,20 @@ function EntityBrowser({
                 {e.name}
               </span>
               <span className="muted small">
-                {kindLabel(e.kind)} · {e.claims.toLocaleString()} {e.claims === 1 ? "fact" : "facts"} · {e.mentions.toLocaleString()}{" "}
-                {e.mentions === 1 ? "mention" : "mentions"}
+                {t("knowledge.rowMeta", { kind: kindLabel(e.kind), claims: e.claims, mentions: e.mentions })}
               </span>
             </button>
           </li>
         ))}
       </ul>
       {(page > 0 || hasMore) && (
-        <nav className="pager" aria-label="Entity pages">
+        <nav className="pager" aria-label={t("knowledge.pagesLabel")}>
           <button type="button" className="btn btn-small" onClick={() => setPage(page - 1)} disabled={page === 0 || list.loading}>
-            Previous
+            {t("knowledge.previous")}
           </button>
-          <span className="muted small">Page {page + 1}</span>
+          <span className="muted small">{t("knowledge.page", { n: page + 1 })}</span>
           <button type="button" className="btn btn-small" onClick={() => setPage(page + 1)} disabled={!hasMore || list.loading}>
-            Next
+            {t("common.next")}
           </button>
           {list.loading && <Spinner />}
         </nav>

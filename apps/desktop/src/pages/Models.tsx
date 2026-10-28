@@ -3,15 +3,17 @@ import { api, errorMessage, events, type ModelInfo, type ModelProgress } from ".
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Badge, Empty, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import { t as translate, useT, type MessageKey } from "../i18n";
 
-const PHASE_LABEL: Record<string, string> = {
-  downloading: "Downloading",
-  verifying: "Verifying",
-  installed: "Installed",
-  failed: "Failed",
-};
+const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
+
+/** Label for an install phase; unknown phases (a newer daemon) show as sent. */
+export function phaseLabel(phase: string): string {
+  return PHASES.has(phase) ? translate(`models.phase.${phase}` as MessageKey) : phase;
+}
 
 export function ModelsPage() {
+  const t = useT();
   const models = useAsync(api.modelsList);
   const [progress, setProgress] = useState<Record<string, ModelProgress>>({});
   const [requestError, setRequestError] = useState<Record<string, string>>({});
@@ -40,17 +42,17 @@ export function ModelsPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Models"
-        description="Local models are downloaded from a signed manifest and verified before use."
+        title={t("models.title")}
+        description={t("models.description")}
         actions={
           <button type="button" className="btn btn-ghost" onClick={models.reload} disabled={models.loading}>
-            Refresh
+            {t("common.refresh")}
           </button>
         }
       />
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && <Spinner />}
-      {models.data && list.length === 0 && <Empty title="No models available">The model manifest is empty.</Empty>}
+      {models.data && list.length === 0 && <Empty title={t("models.emptyTitle")}>{t("models.emptyBody")}</Empty>}
       <ul className="cards">
         {list.map((m) => (
           <ModelCard
@@ -77,6 +79,7 @@ function ModelCard({
   error?: string;
   onInstall: () => void;
 }) {
+  const t = useT();
   const busy = progress && (progress.phase === "downloading" || progress.phase === "verifying");
   const failed = progress?.phase === "failed";
   const installed = model.installed || progress?.phase === "installed";
@@ -90,31 +93,35 @@ function ModelCard({
           {model.id}
         </span>
         <span className="badges">
-          {model.recommended && <Badge tone="accent">Recommended</Badge>}
-          {installed && <Badge tone="good">Installed</Badge>}
+          {model.recommended && <Badge tone="accent">{t("models.recommended")}</Badge>}
+          {installed && <Badge tone="good">{t("models.installed")}</Badge>}
         </span>
       </div>
       <p className="muted small">{formatBytes(model.size_bytes)}</p>
 
       {busy && progress && (
         <div className="progress">
-          <progress max={100} value={pct} aria-labelledby={labelId} aria-valuetext={`${PHASE_LABEL[progress.phase] ?? progress.phase} ${pct}%`} />
+          <progress max={100} value={pct} aria-labelledby={labelId} aria-valuetext={t("models.progressValueText", { phase: phaseLabel(progress.phase), pct })} />
           <span className="small muted">
-            {PHASE_LABEL[progress.phase] ?? progress.phase} · {pct}% · {formatBytes(progress.downloaded)} of{" "}
-            {formatBytes(progress.total || model.size_bytes)}
+            {t("models.progress", {
+              phase: phaseLabel(progress.phase),
+              pct,
+              done: formatBytes(progress.downloaded),
+              total: formatBytes(progress.total || model.size_bytes),
+            })}
           </span>
         </div>
       )}
       {(failed || error) && (
         <p className="note note-error" role="alert">
-          {progress?.error || error || "Install failed."}
+          {progress?.error || error || t("models.installFailed")}
         </p>
       )}
 
       {!installed && !busy && (
         <div className="card-actions">
           <button type="button" className="btn" onClick={onInstall}>
-            {failed || error ? "Retry install" : "Install"}
+            {failed || error ? t("models.retryInstall") : t("models.install")}
           </button>
         </div>
       )}

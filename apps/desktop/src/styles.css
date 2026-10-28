@@ -1,4 +1,5 @@
-/* Nugget desktop. System fonts only (works offline); light/dark follow the OS. */
+/* Nugget desktop. System fonts only (works offline); light/dark follow the OS. Logical properties
+   (inline-start/end) throughout, so right-to-left locales mirror the layout. */
 
 :root {
   color-scheme: light dark;
@@ -156,7 +157,7 @@ main:focus {
 
 .skip-link {
   position: absolute;
-  left: 8px;
+  inset-inline-start: 8px;
   top: -40px;
   z-index: 10;
   padding: 6px 10px;
@@ -176,7 +177,7 @@ main:focus {
   gap: 16px;
   padding: 16px 10px;
   background: var(--sidebar);
-  border-right: 1px solid var(--border);
+  border-inline-end: 1px solid var(--border);
 }
 
 .brand {
@@ -198,7 +199,7 @@ main:focus {
 
 .nav-item {
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 7px 10px;
   border: 0;
   border-radius: var(--radius-small);
@@ -350,7 +351,7 @@ textarea {
 }
 
 select {
-  padding-right: 6px;
+  padding-inline-end: 6px;
 }
 
 textarea {
@@ -474,7 +475,7 @@ textarea:focus-visible {
 }
 
 .offline details {
-  text-align: left;
+  text-align: start;
   max-width: 100%;
 }
 
@@ -490,9 +491,16 @@ textarea:focus-visible {
 .chat-log {
   flex: 1;
   overflow-y: auto;
+  padding: 4px 2px 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-list {
+  flex: 1;
   list-style: none;
   margin: 0;
-  padding: 4px 2px 12px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -545,7 +553,7 @@ textarea:focus-visible {
   display: inline-block;
   width: 7px;
   height: 1.05em;
-  margin-left: 2px;
+  margin-inline-start: 2px;
   vertical-align: text-bottom;
   background: var(--accent);
   animation: blink 1s steps(2, start) infinite;
@@ -728,7 +736,7 @@ table {
 
 th,
 td {
-  text-align: left;
+  text-align: start;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
   vertical-align: top;
@@ -750,7 +758,7 @@ tbody tr:last-child > * {
 }
 
 .num {
-  text-align: right;
+  text-align: end;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -895,7 +903,8 @@ fieldset {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 4px 4px 4px 10px;
+  padding-block: 4px;
+  padding-inline: 10px 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
 }
@@ -914,7 +923,7 @@ fieldset {
 
 .help ol {
   margin: 8px 0;
-  padding-left: 20px;
+  padding-inline-start: 20px;
   display: grid;
   gap: 4px;
 }
@@ -1027,7 +1036,7 @@ fieldset {
   content: "";
   position: absolute;
   top: 2px;
-  left: 2px;
+  inset-inline-start: 2px;
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -1042,6 +1051,10 @@ fieldset {
 
 .switch input:checked + .switch-track::after {
   transform: translateX(14px);
+}
+
+[dir="rtl"] .switch input:checked + .switch-track::after {
+  transform: translateX(-14px);
 }
 
 .switch input:focus-visible + .switch-track {
@@ -1389,7 +1402,7 @@ h4.ask-sub {
 }
 
 .segmented button + button {
-  border-left: 1px solid var(--border);
+  border-inline-start: 1px solid var(--border);
 }
 
 .segmented button[aria-pressed="true"] {
@@ -1455,7 +1468,7 @@ h4.ask-sub {
   display: grid;
   gap: 1px;
   width: 100%;
-  text-align: left;
+  text-align: start;
   padding: 7px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-small);
@@ -1628,8 +1641,8 @@ h4.fact-predicate {
 
 .evidence-quote {
   margin: 0 0 6px;
-  padding-left: 10px;
-  border-left: 3px solid var(--accent);
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--accent);
   font-size: 13px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1743,7 +1756,7 @@ h4.fact-predicate {
   position: absolute;
   z-index: 5;
   top: calc(100% + 4px);
-  left: 0;
+  inset-inline-start: 0;
   min-width: 260px;
   max-height: 280px;
   overflow: auto;
@@ -1761,7 +1774,7 @@ h4.fact-predicate {
 .center-results li .btn {
   flex: 1;
   justify-content: flex-start;
-  text-align: left;
+  text-align: start;
 }
 
 .center-results li.muted {
@@ -1800,7 +1813,7 @@ h4.fact-predicate {
 .graph-overlay {
   position: absolute;
   top: 8px;
-  right: 8px;
+  inset-inline-end: 8px;
   display: flex;
   gap: 6px;
 }
@@ -1821,7 +1834,7 @@ h4.fact-predicate {
   gap: 6px;
   margin: 4px 0 4px 24px;
   padding: 8px 10px;
-  border-left: 2px solid var(--border);
+  border-inline-start: 2px solid var(--border);
 }
 
 h3.token-heading {
@@ -1905,7 +1918,7 @@ h3.token-heading:focus {
     flex-direction: row;
     align-items: center;
     padding: 8px;
-    border-right: 0;
+    border-inline-end: 0;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
   }

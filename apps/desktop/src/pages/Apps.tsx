@@ -6,9 +6,11 @@ import { summarizeScopes } from "../mcp";
 import { ConnectAppWizard } from "../components/ConnectAppWizard";
 import { Dialog } from "../components/Dialog";
 import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { useT } from "../i18n";
 
 /** Connected AI apps: MCP clients with their scopes, plus connect and revoke. */
 export function AppsPage() {
+  const t = useT();
   const loaded = useAsync(api.mcpClientsList);
   const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
   const [clients, setClients] = useState<McpClientInfo[] | null>(null);
@@ -27,12 +29,12 @@ export function AppsPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Connected AI apps"
-        description="Let apps such as Claude Desktop, Claude Code and Cursor answer from what Nugget knows, over MCP. Apps connect on this device only, each with its own token and permissions, and every request goes in the audit log."
+        title={t("apps.title")}
+        description={t("apps.description")}
         actions={
           !unavailable && (
             <button type="button" className="btn btn-primary" onClick={() => setConnecting(true)}>
-              Connect an app
+              {t("apps.connect")}
             </button>
           )
         }
@@ -42,26 +44,26 @@ export function AppsPage() {
       </div>
 
       {unavailable ? (
-        <NotAvailable what="Connected AI apps" />
+        <NotAvailable what={t("apps.title")} />
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
           {loaded.loading && !clients && <Spinner />}
           {clients && list.length === 0 && (
-            <Empty title="No apps connected">Connect an app to let it search your sources and knowledge graph, with the access you choose.</Empty>
+            <Empty title={t("apps.emptyTitle")}>{t("apps.emptyBody")}</Empty>
           )}
           {list.length > 0 && (
-            <div className="table-wrap" tabIndex={0} role="region" aria-label="Connected apps">
+            <div className="table-wrap" tabIndex={0} role="region" aria-label={t("apps.tableLabel")}>
               <table>
                 <thead>
                   <tr>
-                    <th scope="col">App</th>
-                    <th scope="col">Can read</th>
-                    <th scope="col">Tools</th>
-                    <th scope="col">Created</th>
-                    <th scope="col">Last used</th>
+                    <th scope="col">{t("apps.col.app")}</th>
+                    <th scope="col">{t("apps.col.canRead")}</th>
+                    <th scope="col">{t("apps.col.tools")}</th>
+                    <th scope="col">{t("apps.col.created")}</th>
+                    <th scope="col">{t("apps.col.lastUsed")}</th>
                     <th scope="col">
-                      <span className="visually-hidden">Actions</span>
+                      <span className="visually-hidden">{t("apps.col.actions")}</span>
                     </th>
                   </tr>
                 </thead>
@@ -80,18 +82,18 @@ export function AppsPage() {
                           {sum.sources}
                           {sum.sensitive && (
                             <div>
-                              <Badge tone="warn">Includes sensitive items</Badge>
+                              <Badge tone="warn">{t("apps.sensitiveBadge")}</Badge>
                             </div>
                           )}
                         </td>
                         <td>{sum.tools}</td>
                         <td title={formatTime(c.created_at)}>{formatRelative(c.created_at, now)}</td>
                         <td title={c.last_used ? formatTime(c.last_used) : undefined}>
-                          {c.last_used ? formatRelative(c.last_used, now) : <span className="muted">Never</span>}
+                          {c.last_used ? formatRelative(c.last_used, now) : <span className="muted">{t("apps.neverUsed")}</span>}
                         </td>
                         <td>
-                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={`Revoke ${c.name}`}>
-                            Revoke
+                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={t("apps.revokeLabel", { name: c.name })}>
+                            {t("apps.revoke")}
                           </button>
                         </td>
                       </tr>
@@ -102,13 +104,13 @@ export function AppsPage() {
             </div>
           )}
           <details className="help apps-help">
-            <summary>How connecting works</summary>
+            <summary>{t("apps.help.summary")}</summary>
             <ol>
-              <li>Choose a name and what the app may read. Sensitive items stay hidden unless you allow them.</li>
-              <li>Nugget creates a token for that app. Copy it, or copy the ready-made setup for your app.</li>
-              <li>Paste it into the app's MCP settings and restart the app. It shows up here as used once it connects.</li>
+              <li>{t("apps.help.step1")}</li>
+              <li>{t("apps.help.step2")}</li>
+              <li>{t("apps.help.step3")}</li>
             </ol>
-            <p className="small muted">Revoking an app stops its token working immediately.</p>
+            <p className="small muted">{t("apps.help.revokeNote")}</p>
           </details>
         </>
       )}
@@ -121,7 +123,7 @@ export function AppsPage() {
           }}
           onCreated={(client) => {
             setClients((l) => [...(l ?? []).filter((c) => c.id !== client.id), client]);
-            setAnnounce(`Created a token for ${client.name}.`);
+            setAnnounce(t("apps.announce.created", { name: client.name }));
           }}
         />
       )}
@@ -131,7 +133,7 @@ export function AppsPage() {
           onClose={() => setRevoking(null)}
           onRevoked={() => {
             setClients((l) => (l ?? []).filter((c) => c.id !== revoking.id));
-            setAnnounce(`Revoked ${revoking.name}.`);
+            setAnnounce(t("apps.announce.revoked", { name: revoking.name }));
             setRevoking(null);
           }}
         />
@@ -141,6 +143,7 @@ export function AppsPage() {
 }
 
 function RevokeDialog({ client, onClose, onRevoked }: { client: McpClientInfo; onClose: () => void; onRevoked: () => void }) {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -158,17 +161,17 @@ function RevokeDialog({ client, onClose, onRevoked }: { client: McpClientInfo; o
 
   return (
     <Dialog
-      title={`Revoke ${client.name}?`}
-      description="The app loses access to Nugget straight away. To connect it again later, create a new token."
+      title={t("apps.revokeDialog.title", { name: client.name })}
+      description={t("apps.revokeDialog.description")}
       onClose={onClose}
     >
       <ErrorNote error={error} />
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onClose} disabled={busy} data-autofocus="">
-          Cancel
+          {t("common.cancel")}
         </button>
         <button type="button" className="btn btn-danger" onClick={() => void revoke()} disabled={busy}>
-          {busy ? <Spinner label="Revoking" /> : "Revoke"}
+          {busy ? <Spinner label={t("apps.revoking")} /> : t("apps.revoke")}
         </button>
       </div>
     </Dialog>

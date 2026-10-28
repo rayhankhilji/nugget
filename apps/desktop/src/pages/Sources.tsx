@@ -10,7 +10,8 @@ import {
   type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useNow } from "../hooks";
-import { formatRelative, formatTime, SOURCE_KIND_LABEL, SOURCE_STATE_LABEL, SOURCE_STATE_TONE } from "../format";
+import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_STATE_TONE } from "../format";
+import { useT, type TFunction } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Dialog } from "../components/Dialog";
 import { SourceIcon } from "../components/SourceIcon";
@@ -20,6 +21,7 @@ const OAUTH_KINDS = new Set(["gmail", "gcal"]);
 const PASSWORD_KINDS = new Set(["imap", "caldav"]);
 
 export function SourcesPage() {
+  const t = useT();
   const loaded = useAsync(api.sourcesList);
   const [sources, setSources] = useState<SourceInfo[] | null>(null);
   const [progress, setProgress] = useState<Record<string, IngestProgress>>({});
@@ -64,7 +66,7 @@ export function SourcesPage() {
     setSyncAllError(null);
     try {
       await api.sourcesSync({ id: null });
-      setAnnounce("Syncing every enabled source.");
+      setAnnounce(t("sources.announce.syncingAll"));
     } catch (e) {
       setSyncAllError(errorMessage(e));
     }
@@ -76,16 +78,16 @@ export function SourcesPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Sources"
-        description="Folders, notes, mail and calendars Nugget keeps indexed on this device. Changes show up in search within a minute."
+        title={t("sources.title")}
+        description={t("sources.description")}
         actions={
           !unavailable && (
             <>
               <button type="button" className="btn btn-ghost" onClick={() => void syncAll()} disabled={list.length === 0}>
-                Sync all
+                {t("sources.syncAll")}
               </button>
               <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
-                Add source
+                {t("sources.add")}
               </button>
             </>
           )
@@ -101,13 +103,13 @@ export function SourcesPage() {
       )}
 
       {unavailable ? (
-        <NotAvailable what="Sources" />
+        <NotAvailable what={t("sources.title")} />
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
           {loaded.loading && !sources && <Spinner />}
           {sources && list.length === 0 && (
-            <Empty title="No sources yet">Add a folder, an Obsidian vault, or connect mail and calendars to make them searchable.</Empty>
+            <Empty title={t("sources.empty.title")}>{t("sources.empty.body")}</Empty>
           )}
           {list.length > 0 && (
             <ul className="source-list">
@@ -137,7 +139,7 @@ export function SourcesPage() {
           }}
           onAdded={(s) => {
             replace(s);
-            setAnnounce(`Added ${s.name}.`);
+            setAnnounce(t("sources.announce.added", { name: s.name }));
             reloadSoon();
           }}
         />
@@ -148,7 +150,7 @@ export function SourcesPage() {
           onClose={() => setRemoving(null)}
           onRemoved={() => {
             setSources((l) => (l ?? []).filter((x) => x.id !== removing.id));
-            setAnnounce(`Removed ${removing.name}.`);
+            setAnnounce(t("sources.announce.removed", { name: removing.name }));
             setRemoving(null);
           }}
         />
@@ -158,7 +160,7 @@ export function SourcesPage() {
           source={passwordFor}
           onClose={() => setPasswordFor(null)}
           onSaved={() => {
-            setAnnounce(`Password saved for ${passwordFor.name}.`);
+            setAnnounce(t("sources.announce.passwordSaved", { name: passwordFor.name }));
             setPasswordFor(null);
             reloadSoon();
           }}
@@ -168,10 +170,10 @@ export function SourcesPage() {
   );
 }
 
-function progressText(p: IngestProgress): string {
-  const verb = p.phase === "scanning" ? "Scanning" : "Indexing";
-  if (p.total) return `${verb} ${p.done.toLocaleString()} of ${p.total.toLocaleString()}`;
-  return p.done > 0 ? `${verb}… ${p.done.toLocaleString()} so far` : `${verb}…`;
+function progressText(p: IngestProgress, t: TFunction): string {
+  const args = { phase: p.phase, done: p.done, total: p.total };
+  if (p.total) return t("sources.progress.total", args);
+  return p.done > 0 ? t("sources.progress.soFar", args) : t("sources.progress.started", args);
 }
 
 function SourceRow({
@@ -191,10 +193,11 @@ function SourceRow({
   onSetPassword: () => void;
   onAnnounce: (text: string) => void;
 }) {
+  const t = useT();
   const [busy, setBusy] = useState<null | "toggle" | "sync" | "auth">(null);
   const [error, setError] = useState<unknown>(null);
   const [note, setNote] = useState<string | null>(null);
-  const kindLabel = SOURCE_KIND_LABEL[s.kind] ?? s.kind;
+  const kindLabel = sourceKindLabel(s.kind);
   const tone = SOURCE_STATE_TONE[s.state] ?? "neutral";
   const headingId = `source-${s.id}`;
 
@@ -215,20 +218,20 @@ function SourceRow({
     run("toggle", async () => {
       const next = await api.sourcesUpdate({ id: s.id, enabled: !s.enabled });
       onChanged(next);
-      onAnnounce(`${s.name} ${next.enabled ? "enabled" : "disabled"}.`);
+      onAnnounce(t(next.enabled ? "sources.announce.enabled" : "sources.announce.disabled", { name: s.name }));
     });
 
   const sync = () =>
     run("sync", async () => {
       await api.sourcesSync({ id: s.id });
-      onAnnounce(`Syncing ${s.name}.`);
+      onAnnounce(t("sources.announce.syncing", { name: s.name }));
     });
 
   const reauth = () =>
     run("auth", async () => {
       const { url } = await api.sourcesAuthBegin({ id: s.id });
       await api.openUrl(url);
-      setNote("Finish signing in in your browser. This updates when you're done.");
+      setNote(t("sources.finishSignIn"));
     });
 
   return (
@@ -241,22 +244,22 @@ function SourceRow({
           <h2 id={headingId} className="source-name">
             {s.name}
           </h2>
-          <Badge tone={tone}>{SOURCE_STATE_LABEL[s.state] ?? s.state}</Badge>
+          <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>
         </div>
         <p className="muted small source-meta">
           {kindLabel} · <code>{s.id}</code>
         </p>
         <p className="small source-meta">
-          <span>{s.items.toLocaleString()} items</span>
-          <span>{s.chunks.toLocaleString()} chunks</span>
+          <span>{t("sources.items", { n: s.items })}</span>
+          <span>{t("sources.chunks", { n: s.chunks })}</span>
           <span title={s.last_sync ? formatTime(s.last_sync) : undefined}>
-            {s.last_sync ? `Synced ${formatRelative(s.last_sync, now)}` : "Never synced"}
+            {s.last_sync ? t("sources.synced", { when: formatRelative(s.last_sync, now) }) : t("sources.neverSynced")}
           </span>
         </p>
         {progress && (
           <div className="progress source-progress">
-            <ProgressBar done={progress.done} total={progress.total} label={`${s.name} sync progress`} />
-            <span className="muted small">{progressText(progress)}</span>
+            <ProgressBar done={progress.done} total={progress.total} label={t("sources.syncProgressLabel", { name: s.name })} />
+            <span className="muted small">{progressText(progress, t)}</span>
           </div>
         )}
         {s.last_error && (
@@ -267,8 +270,8 @@ function SourceRow({
         {s.state === "needs_auth" && !s.last_error && (
           <p className="note small">
             {OAUTH_KINDS.has(s.kind)
-              ? "Nugget needs you to sign in again to keep this source up to date."
-              : "Nugget needs the password for this source."}
+              ? t("sources.needsSignIn")
+              : t("sources.needsPassword")}
           </p>
         )}
         {note && (
@@ -288,23 +291,29 @@ function SourceRow({
               aria-describedby={headingId}
             />
             <span className="switch-track" aria-hidden="true" />
-            <span>Enabled</span>
+            <span>{t("sources.enabled")}</span>
           </label>
           <button type="button" className="btn btn-small" onClick={() => void sync()} disabled={!s.enabled || busy !== null}>
-            {busy === "sync" ? <Spinner label="Starting sync" /> : "Sync now"}
+            {busy === "sync" ? <Spinner label={t("sources.startingSync")} /> : t("sources.syncNow")}
           </button>
           {OAUTH_KINDS.has(s.kind) && (
             <button type="button" className="btn btn-small" onClick={() => void reauth()} disabled={busy !== null}>
-              {busy === "auth" ? <Spinner label="Opening sign-in" /> : s.state === "needs_auth" ? "Sign in" : "Sign in again"}
+              {busy === "auth" ? (
+                <Spinner label={t("sources.openingSignIn")} />
+              ) : s.state === "needs_auth" ? (
+                t("sources.signIn")
+              ) : (
+                t("sources.signInAgain")
+              )}
             </button>
           )}
           {PASSWORD_KINDS.has(s.kind) && (
             <button type="button" className="btn btn-small" onClick={onSetPassword} disabled={busy !== null}>
-              {s.state === "needs_auth" ? "Set password" : "Change password"}
+              {s.state === "needs_auth" ? t("sources.setPassword") : t("sources.changePassword")}
             </button>
           )}
           <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
-            Remove
+            {t("sources.remove")}
           </button>
         </div>
       </div>
@@ -313,6 +322,7 @@ function SourceRow({
 }
 
 function RemoveDialog({ source, onClose, onRemoved }: { source: SourceInfo; onClose: () => void; onRemoved: () => void }) {
+  const t = useT();
   const [purge, setPurge] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -331,24 +341,26 @@ function RemoveDialog({ source, onClose, onRemoved }: { source: SourceInfo; onCl
   };
 
   return (
-    <Dialog title={`Remove ${source.name}?`} description="Nugget stops syncing this source. Your original files, mail and events are not touched." onClose={onClose}>
+    <Dialog
+      title={t("sources.removeDialog.title", { name: source.name })}
+      description={t("sources.removeDialog.description")}
+      onClose={onClose}
+    >
       <form onSubmit={submit}>
         <label className="check">
           <input type="checkbox" checked={purge} onChange={(e) => setPurge(e.target.checked)} />
           <span>
-            Also delete indexed data
-            <span className="muted small block">
-              Removes {source.items.toLocaleString()} items and their search index from this device.
-            </span>
+            {t("sources.removeDialog.purge")}
+            <span className="muted small block">{t("sources.removeDialog.purgeHint", { n: source.items })}</span>
           </span>
         </label>
         <ErrorNote error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy} data-autofocus="">
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn-danger" disabled={busy}>
-            {busy ? <Spinner label="Removing" /> : "Remove"}
+            {busy ? <Spinner label={t("sources.removeDialog.removing")} /> : t("sources.remove")}
           </button>
         </div>
       </form>
@@ -358,6 +370,7 @@ function RemoveDialog({ source, onClose, onRemoved }: { source: SourceInfo; onCl
 
 /** Set or replace an IMAP/CalDAV password. The value lives only in the input until sent. */
 function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onClose: () => void; onSaved: () => void }) {
+  const t = useT();
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -386,12 +399,16 @@ function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onCl
   const username = typeof source.settings?.username === "string" ? source.settings.username : "";
 
   return (
-    <Dialog title={`Password for ${source.name}`} description="Saved to your OS keychain. Nugget never shows it again." onClose={onClose}>
+    <Dialog
+      title={t("sources.passwordDialog.title", { name: source.name })}
+      description={t("sources.passwordDialog.description")}
+      onClose={onClose}
+    >
       <form onSubmit={submit} noValidate>
         {/* Lets password managers match the account. */}
         {username && <input type="text" name="username" autoComplete="username" value={username} readOnly hidden />}
         <div className="field">
-          <label htmlFor="source-password">Password or app password</label>
+          <label htmlFor="source-password">{t("sources.passwordDialog.label")}</label>
           <input
             id="source-password"
             ref={ref}
@@ -404,17 +421,17 @@ function PasswordDialog({ source, onClose, onSaved }: { source: SourceInfo; onCl
           />
           {empty && (
             <p id="source-password-err" className="field-error small">
-              Enter the password.
+              {t("sources.passwordDialog.empty")}
             </p>
           )}
         </div>
         <ErrorNote error={error} />
         <div className="dialog-actions">
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </button>
           <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? <Spinner label="Saving" /> : "Save"}
+            {busy ? <Spinner label={t("sources.passwordDialog.saving")} /> : t("sources.passwordDialog.save")}
           </button>
         </div>
       </form>
