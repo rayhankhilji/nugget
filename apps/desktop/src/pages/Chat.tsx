@@ -33,7 +33,7 @@ export function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const early = useRef(new Map<string, Early>());
-  const logRef = useRef<HTMLOListElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const active = turns.find((x) => x.state === "pending" || x.state === "streaming");
@@ -191,38 +191,41 @@ export function ChatPage() {
       />
       {providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} /> : null}
 
-      <ol className="chat-log" ref={logRef} role="log" aria-label={t("chat.conversation")} aria-busy={!!active}>
-        {turns.length === 0 && (
-          <li className="chat-empty muted">
-            <Trans
-              k={provider ? "chat.emptyPinned" : "chat.empty"}
-              args={{ tier: tierLabel(tier), provider }}
-              tags={{ strong: (c) => <strong>{c}</strong> }}
-            />
-          </li>
-        )}
-        {turns.map((turn) => (
-          <li key={turn.id} className={`msg msg-${turn.role}`}>
-            <div className="msg-meta">
-              {turn.role === "user" ? t("chat.you") : (turn.provider ?? t("app.name"))}
-              {turn.state === "cancelled" && <Badge tone="warn">{t("chat.stopped")}</Badge>}
-              {turn.state === "done" && turn.tokens?.output != null && (
-                <span className="muted small">{t("chat.tokens", { n: turn.tokens.output })}</span>
+      {/* The log region wraps the list: role="log" on the <ol> itself would hide its list semantics. */}
+      <div className="chat-log" ref={logRef} role="log" aria-label={t("chat.conversation")} aria-busy={!!active}>
+        <ol className="chat-list">
+          {turns.length === 0 && (
+            <li className="chat-empty muted">
+              <Trans
+                k={provider ? "chat.emptyPinned" : "chat.empty"}
+                args={{ tier: tierLabel(tier), provider }}
+                tags={{ strong: (c) => <strong>{c}</strong> }}
+              />
+            </li>
+          )}
+          {turns.map((turn) => (
+            <li key={turn.id} className={`msg msg-${turn.role}`}>
+              <div className="msg-meta">
+                {turn.role === "user" ? t("chat.you") : (turn.provider ?? t("app.name"))}
+                {turn.state === "cancelled" && <Badge tone="warn">{t("chat.stopped")}</Badge>}
+                {turn.state === "done" && turn.tokens?.output != null && (
+                  <span className="muted small">{t("chat.tokens", { n: turn.tokens.output })}</span>
+                )}
+              </div>
+              <div className="msg-body">
+                {turn.text}
+                {(turn.state === "pending" || turn.state === "streaming") && <span className="caret" aria-hidden="true" />}
+                {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
+              </div>
+              {turn.state === "error" && (
+                <p className="note note-error" role="alert">
+                  {turn.error}
+                </p>
               )}
-            </div>
-            <div className="msg-body">
-              {turn.text}
-              {(turn.state === "pending" || turn.state === "streaming") && <span className="caret" aria-hidden="true" />}
-              {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
-            </div>
-            {turn.state === "error" && (
-              <p className="note note-error" role="alert">
-                {turn.error}
-              </p>
-            )}
-          </li>
-        ))}
-      </ol>
+            </li>
+          ))}
+        </ol>
+      </div>
 
       <form className="composer" onSubmit={send}>
         <label htmlFor="chat-input" className="visually-hidden">

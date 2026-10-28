@@ -201,7 +201,7 @@
   "onboarding.trigger.mod.right_shift": "दायाँ Shift",
   "onboarding.done.heading": "सब तैयार है",
   "onboarding.done.lead": "Nugget बैकग्राउंड में इंडेक्स करता रहेगा। आप अभी से खोजना और चैट करना शुरू कर सकते हैं।",
-  "onboarding.done.pending": "आपने {count, plural, one {# चरण} other {# चरण}} छोड़ा। इन पर वापस जाएँ:",
+  "onboarding.done.pending": "आपने {count, plural, one {# चरण छोड़ा} other {# चरण छोड़े}}। इन पर वापस जाएँ:",
   "onboarding.done.allDone": "सभी चरण पूरे हो गए।",
   "onboarding.done.ai.local": "AI: इस डिवाइस पर चलने वाला मॉडल",
   "onboarding.done.ai.byok": "AI: आपका अपना प्रोवाइडर",
