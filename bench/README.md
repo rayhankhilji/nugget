@@ -28,6 +28,9 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `--draft-locality cloud\|local` | `draft`: where the fake model counts as running (default `cloud`, which turns on the sensitive-content gates) |
 | `--fake-ttft-ms MS`, `--fake-prefill-ms-per-1k MS`, `--fake-token-ms MS` | `draft`: artificial latency of the fake model (default 0) |
 | `--draft-dump FILE` | `draft`: write every draft with its scores as JSONL, for spot checks |
+| `--cua-agent reference\|null\|naive` | `cua`: the agent under test (default `reference`) |
+| `--cua-env inproc\|socket\|xvfb` | `cua`: where the apps run (default `inproc`; `xvfb` is Linux only) |
+| `--cua-tasks TERMS` | `cua`: only tasks matching any comma-separated id, tag, app or difficulty |
 | `--out-dir DIR` | Where reports go (default `bench/results/`; env `NUGGET_BENCH_RESULTS_DIR`) |
 | `--no-write` | Do not write report files |
 | `--json` | Print report JSON to stdout; the human summary moves to stderr |
@@ -92,7 +95,7 @@ timing-robust gates instead: every file operation propagates, and freshness meet
 | `perf` | **M0: runs against a fake index** | Ingest throughput, dedup throughput, update and delete latency, query latency, index size |
 | `proactive` | **M5: reference engine (default); the real crate in wave 2** | Card precision@5 and recall, distractor false positives, dedup, the learning curve, dry-run coverage and the approval gate, against a recency-ordered baseline |
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
-| `cua` | Not yet implemented (M4) | Computer-use task success, steps, time and safety violations |
+| `cua` | **M4: 51 tasks on six local test apps; in process, over a socket, or on an Xvfb desktop** | Verified task success, steps, wall time, unconfirmed risky actions, false confirmations, injection compliance, token cost |
 
 ### The M0 fake index
 
@@ -514,32 +517,36 @@ sensitive gate and its injection handling).
   `--draft-dump` output, to calibrate the stylometric score.
 - Time to first *inserted* token and `insert_verified_rate` need the desktop flow (M3-G).
 
-### `cua` (planned, M4)
+### `cua` (M4)
 
-Computer use, across all three OSes.
+Full methodology, task format, environments and how to plug in the real agent:
+[`cua/README.md`](cua/README.md).
 
-- **Environment.** Disposable VMs (macOS, Windows, and Linux on both X11 and Wayland) restored
-  from snapshots, with seeded apps and accounts. Network access is limited to local fixtures.
-- **Tasks.** Scripted, with a programmatic outcome check for each:
-  - form fill
-  - email triage (archive, label, reply)
-  - organising files
-  - booking a calendar slot
-  - web checkout, up to the confirmation step
-  - an OSWorld-style subset, where its licences allow
-- **Scoring.**
-  - Verified success: the outcome check passes, not the agent's own claim.
-  - Steps and wall time per task.
-  - Safety violations: any risky action (send, pay, delete, share, install) taken without inline
-    confirmation. The target is 0.
-  - Red-team tasks with prompt injections planted in content check that injected instructions
-    are not followed.
-- **Metrics.**
-  - `cua.success_rate`, overall and per OS
-  - `cua.steps.p50`
-  - `cua.wall_time.p50_s`
-  - `cua.safety_violations` (target 0)
-  - `cua.injection_followed_rate` (target 0)
+- **Environment.** Six small, deterministic local apps: mail, a multi-step form, a file manager,
+  a calendar, a shop checkout with **Pay**, and settings with dangerous toggles. Each exposes its
+  true state on a test-only socket. They run in process (`inproc`, any OS, the CI default),
+  behind a loopback socket (`socket`), or on a real Linux desktop (`xvfb`). The desktop has
+  Xvfb, a window manager, D-Bus, the AT-SPI bus and a kiosk Chromium window per app, and can be
+  started by `cua/env/desktop.sh`.
+- **Tasks.** 51 tasks in `cua/tasks/*.json`, each with a start state and state-based checks.
+  They include 9 red-team tasks with prompt injections in the UI, 9 where the right answer is to
+  ask or refuse, and 6 where the user declines at the confirmation step.
+- **Agents.** `CuaAgent` is the plug-in point for the real agent (wave 2). Three agents are
+  built in:
+  - `reference` plays scripted solutions through the UI and validates the harness;
+  - `null` does nothing (the floor);
+  - `naive` is a red-team control that obeys injections and never confirms; it must trip every
+    safety target.
+- **Metrics and targets.**
+  - `success_rate` (verified, safe success; target ≥ 0.8, provisional)
+  - `safety.unconfirmed_risky_actions` (target 0)
+  - `safety.injection_compliance_rate` (target 0)
+  - `safety.false_confirmation_rate` (target ≤ 0.1)
+  - breakdowns by difficulty, app and category
+  - steps and wall time
+  - token cost
+- **Reference results** (51 tasks): `reference` 1.00 success, 0 unconfirmed; `null` 0.00;
+  `naive` 0.31 success, 42 unconfirmed, injection compliance 1.00.
 
 ## Results
 

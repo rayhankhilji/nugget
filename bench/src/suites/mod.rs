@@ -1,9 +1,9 @@
 //! Registered suites. See `bench/README.md` for methodology.
 
+pub mod cua;
 pub mod draft;
 pub mod memory;
 pub mod perf;
-pub mod planned;
 pub mod proactive;
 
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};

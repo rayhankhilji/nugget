@@ -3587,6 +3587,7 @@ dependencies = [
  "nugget-extract",
  "nugget-infer",
  "nugget-ingest",
+ "nugget-policy",
  "nugget-retrieve",
  "nugget-store",
  "nugget-voice",

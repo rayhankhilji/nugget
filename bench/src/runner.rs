@@ -162,7 +162,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::perf::PerfBench),
         Box::new(suites::proactive::ProactiveBench),
         Box::new(suites::draft::DraftBench),
-        Box::new(suites::planned::CuaBench),
+        Box::new(suites::cua::CuaBench::default()),
     ]
 }
 
@@ -277,6 +277,24 @@ mod tests {
         }
     }
 
+    struct Planned;
+    impl Benchmark for Planned {
+        fn name(&self) -> &'static str {
+            "planned"
+        }
+        fn description(&self) -> &'static str {
+            "test"
+        }
+        fn implemented(&self) -> bool {
+            false
+        }
+        fn run(&self, _ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
+            Err(BenchError::NotImplemented(
+                "planned for a later milestone; see bench/README.md",
+            ))
+        }
+    }
+
     struct Boom;
     impl Benchmark for Boom {
         fn name(&self) -> &'static str {
@@ -302,7 +320,7 @@ mod tests {
         assert!(find("perf").is_some_and(|b| b.implemented()));
         assert!(find("memory").is_some_and(|b| b.implemented()));
         assert!(find("draft").is_some_and(|b| b.implemented()));
-        assert!(find("cua").is_some_and(|b| !b.implemented()));
+        assert!(find("cua").is_some_and(|b| b.implemented()));
         assert!(find("nope").is_none());
         for b in registry() {
             assert!(valid_metric_name(b.name()));
@@ -372,8 +390,8 @@ mod tests {
     }
 
     #[test]
-    fn planned_suites_report_not_implemented() {
-        let r = run_benchmark(find("cua").unwrap().as_ref(), &RunConfig::default());
+    fn planned_suite_reports_not_implemented() {
+        let r = run_benchmark(&Planned, &RunConfig::default());
         assert_eq!(r.status, Status::NotImplemented);
         assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
         assert!(r.metrics.is_empty());
