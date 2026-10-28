@@ -297,7 +297,10 @@ mod inner {
     fn read_composer_and_thread() {
         let _app = App::start("composer");
         let a = nugget_a11y::system_with(config());
-        let f = wait_focus(a.as_ref(), "text_area");
+        wait_focus(a.as_ref(), "text_area");
+        let t = Instant::now();
+        let f = a.focused().unwrap().expect("focused");
+        eprintln!("focused() with thread took {:?}", t.elapsed());
         assert!(
             f.app.name.contains("gtk_test_app"),
             "app name {:?}",
