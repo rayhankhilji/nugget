@@ -3411,6 +3411,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-a11y"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "nugget-bench"
 version = "0.0.1"
 dependencies = [
@@ -3555,6 +3565,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-draft"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
 name = "nugget-extract"
 version = "0.0.1"
 dependencies = [
@@ -3585,6 +3602,13 @@ dependencies = [
  "serde",
  "serde_json",
  "time",
+]
+
+[[package]]
+name = "nugget-hotkey"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
 ]
 
 [[package]]
@@ -3780,6 +3804,14 @@ name = "nugget-vault"
 version = "0.0.1"
 dependencies = [
  "nugget-core",
+]
+
+[[package]]
+name = "nugget-voice"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+ "serde",
 ]
 
 [[package]]

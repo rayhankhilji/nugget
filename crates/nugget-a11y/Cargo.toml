@@ -1,5 +1,6 @@
 [package]
 name = "nugget-a11y"
+description = "Cross-platform accessibility: read the focused field and thread, insert with read-back verification"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,9 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 
 [lints]
 workspace = true

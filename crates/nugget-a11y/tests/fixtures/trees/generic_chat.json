@@ -1,0 +1,247 @@
+{
+ "note": "Shape of the GTK3 test app (tests/fixtures/gtk_test_app.py) as read over AT-SPI.",
+ "app": {
+  "id": "gtk_test_app",
+  "name": "gtk_test_app.py",
+  "window_title": "Nugget IT - chat"
+ },
+ "field_value": "Hello ",
+ "root": {
+  "role": "window",
+  "raw_role": "frame",
+  "name": "Nugget IT - chat",
+  "bounds": [
+   0,
+   0,
+   600,
+   500
+  ],
+  "children": [
+   {
+    "role": "group",
+    "raw_role": "filler",
+    "bounds": [
+     0,
+     0,
+     600,
+     500
+    ],
+    "children": [
+     {
+      "role": "list",
+      "raw_role": "list box",
+      "name": "Messages",
+      "bounds": [
+       0,
+       0,
+       600,
+       300
+      ],
+      "children": [
+       {
+        "role": "list_item",
+        "raw_role": "list item",
+        "states": {
+         "selected": false
+        },
+        "bounds": [
+         0,
+         0,
+         600,
+         40
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "filler",
+          "bounds": [
+           0,
+           0,
+           120,
+           40
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "Alice",
+            "bounds": [
+             0,
+             0,
+             40,
+             17
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "Are we still on for lunch tomorrow?",
+            "bounds": [
+             0,
+             17,
+             160,
+             17
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "list_item",
+        "raw_role": "list item",
+        "states": {
+         "selected": false
+        },
+        "bounds": [
+         0,
+         0,
+         600,
+         40
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "filler",
+          "bounds": [
+           0,
+           0,
+           120,
+           40
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "Bob",
+            "bounds": [
+             0,
+             0,
+             40,
+             17
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "I can bring the slides.",
+            "bounds": [
+             0,
+             17,
+             160,
+             17
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "list_item",
+        "raw_role": "list item",
+        "states": {
+         "selected": false
+        },
+        "bounds": [
+         0,
+         0,
+         600,
+         40
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "filler",
+          "bounds": [
+           440,
+           0,
+           120,
+           40
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "You",
+            "bounds": [
+             440,
+             0,
+             40,
+             17
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "label",
+            "name": "Yes, noon works for me.",
+            "bounds": [
+             440,
+             17,
+             160,
+             17
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "role": "text_area",
+      "raw_role": "text",
+      "name": "Message composer",
+      "value": "Hello ",
+      "states": {
+       "focused": true,
+       "editable": true,
+       "multiline": true
+      },
+      "bounds": [
+       0,
+       300,
+       600,
+       120
+      ]
+     },
+     {
+      "role": "text_field",
+      "raw_role": "text",
+      "name": "Search",
+      "placeholder": "Search messages",
+      "states": {
+       "editable": true,
+       "multiline": false
+      },
+      "bounds": [
+       0,
+       430,
+       600,
+       30
+      ]
+     },
+     {
+      "role": "text_field",
+      "raw_role": "password text",
+      "name": "Password",
+      "states": {
+       "editable": true,
+       "secure": true,
+       "multiline": false
+      },
+      "bounds": [
+       0,
+       465,
+       600,
+       30
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  0,
+  1
+ ]
+}

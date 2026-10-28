@@ -1,0 +1,107 @@
+{
+ "note": "Modelled on an Apple Mail reply window; the body web area holds the quoted original.",
+ "app": {
+  "id": "com.apple.mail",
+  "name": "Mail",
+  "window_title": "Re: Q1 numbers"
+ },
+ "field_value": "Thanks Bob, will review today.\n\nOn Mon, 2 Mar 2026 at 09:00, Bob Jones <bob@example.com> wrote:\n> Q1 numbers attached.\n> Let me know if anything looks off.",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "Re: Q1 numbers",
+  "bounds": [
+   100,
+   100,
+   800,
+   700
+  ],
+  "children": [
+   {
+    "role": "toolbar",
+    "raw_role": "AXToolbar",
+    "children": [
+     {
+      "role": "button",
+      "raw_role": "AXButton",
+      "name": "Send"
+     }
+    ]
+   },
+   {
+    "role": "scroll_area",
+    "raw_role": "AXScrollArea",
+    "bounds": [
+     100,
+     160,
+     800,
+     640
+    ],
+    "children": [
+     {
+      "role": "static_text",
+      "raw_role": "AXStaticText",
+      "value": "To:"
+     },
+     {
+      "role": "text_field",
+      "raw_role": "AXTextField",
+      "value": "Bob Jones, carol@example.com",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     },
+     {
+      "role": "static_text",
+      "raw_role": "AXStaticText",
+      "value": "Cc:"
+     },
+     {
+      "role": "text_field",
+      "raw_role": "AXTextField",
+      "value": "",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     },
+     {
+      "role": "static_text",
+      "raw_role": "AXStaticText",
+      "value": "Subject:"
+     },
+     {
+      "role": "text_field",
+      "raw_role": "AXTextField",
+      "name": "Subject:",
+      "value": "Re: Q1 numbers",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     },
+     {
+      "role": "web_area",
+      "raw_role": "AXWebArea",
+      "value": "Thanks Bob, will review today.\n\nOn Mon, 2 Mar 2026 at 09:00, Bob Jones <bob@example.com> wrote:\n> Q1 numbers attached.\n> Let me know if anything looks off.",
+      "states": {
+       "focused": true,
+       "editable": true
+      },
+      "bounds": [
+       100,
+       300,
+       800,
+       500
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  1,
+  6
+ ]
+}
