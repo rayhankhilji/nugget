@@ -352,6 +352,18 @@ struct Http {
 }
 
 async fn http(rate: RateLimit, origins: Vec<String>) -> Http {
+    http_with(
+        rate,
+        HttpConfig {
+            port: 0,
+            allowed_origins: origins,
+            ..HttpConfig::default()
+        },
+    )
+    .await
+}
+
+async fn http_with(rate: RateLimit, config: HttpConfig) -> Http {
     let (reg, _) = registry();
     let log = AuditLog::default();
     let server = McpServer::builder(backend(false))
@@ -359,13 +371,7 @@ async fn http(rate: RateLimit, origins: Vec<String>) -> Http {
         .audit(log.sink())
         .config(McpConfig { rate_limit: rate })
         .build();
-    let handle = server
-        .serve_http(HttpConfig {
-            port: 0,
-            allowed_origins: origins,
-        })
-        .await
-        .unwrap();
+    let handle = server.serve_http(config).await.unwrap();
     Http {
         server,
         reg,
@@ -604,9 +610,132 @@ async fn http_needs_a_registry() {
         server
             .serve_http(HttpConfig {
                 port: 0,
-                allowed_origins: vec![]
+                ..HttpConfig::default()
             })
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn http_fails_closed_when_the_port_is_taken() {
+    // Someone else holds the port: no fallback port, an error.
+    let squatter = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = squatter.local_addr().unwrap().port();
+    let (reg, _) = registry();
+    let server = McpServer::builder(backend(false)).registry(reg).build();
+    let r = server
+        .serve_http(HttpConfig {
+            port,
+            ..HttpConfig::default()
+        })
+        .await;
+    assert!(r.is_err(), "bound a port someone else holds");
+}
+
+/// Read from `s` until EOF (or `limit`), returning what arrived.
+async fn read_to_close(s: &mut tokio::net::TcpStream, limit: std::time::Duration) -> String {
+    use tokio::io::AsyncReadExt;
+    let mut out = Vec::new();
+    let _ = tokio::time::timeout(limit, s.read_to_end(&mut out)).await;
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[tokio::test]
+async fn http_closes_connections_that_never_send_headers() {
+    let h = http_with(
+        RateLimit::default(),
+        HttpConfig {
+            port: 0,
+            header_timeout_ms: 200,
+            ..HttpConfig::default()
+        },
+    )
+    .await;
+    use tokio::io::AsyncWriteExt;
+    let mut s = tokio::net::TcpStream::connect(h.handle.local_addr())
+        .await
+        .unwrap();
+    s.write_all(b"POST /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n")
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let _ = read_to_close(&mut s, std::time::Duration::from_secs(10)).await;
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(5),
+        "slow-header connection kept open"
+    );
+    // An idle connection that sends nothing is closed too.
+    let mut idle = tokio::net::TcpStream::connect(h.handle.local_addr())
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let _ = read_to_close(&mut idle, std::time::Duration::from_secs(10)).await;
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    h.handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn http_times_out_slow_bodies() {
+    let h = http_with(
+        RateLimit::default(),
+        HttpConfig {
+            port: 0,
+            body_timeout_ms: 200,
+            ..HttpConfig::default()
+        },
+    )
+    .await;
+    let (_, token) = h.reg.create("Slow", all_scopes()).unwrap();
+    use tokio::io::AsyncWriteExt;
+    let addr = h.handle.local_addr();
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nAuthorization: Bearer {}\r\n\
+         Content-Type: application/json\r\nAccept: application/json, text/event-stream\r\n\
+         Content-Length: 1000\r\n\r\n{{\"jsonrpc\"",
+        addr.port(),
+        token.expose()
+    );
+    s.write_all(head.as_bytes()).await.unwrap();
+    let resp = read_to_close(&mut s, std::time::Duration::from_secs(5)).await;
+    assert!(resp.starts_with("HTTP/1.1 408"), "{resp}");
+    h.handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn http_caps_open_connections() {
+    let h = http_with(
+        RateLimit::default(),
+        HttpConfig {
+            port: 0,
+            max_connections: 1,
+            header_timeout_ms: 60_000,
+            ..HttpConfig::default()
+        },
+    )
+    .await;
+    let (_, token) = h.reg.create("Capped", all_scopes()).unwrap();
+    let url = h.handle.url();
+    // Holding the only slot: the next request is not served.
+    let hog = tokio::net::TcpStream::connect(h.handle.local_addr())
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let blocked = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        post(&url, Some(token.expose()), &[]),
+    )
+    .await;
+    assert!(blocked.is_err(), "served over the connection cap");
+    // Slot freed: served.
+    drop(hog);
+    let ok = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        post(&url, Some(token.expose()), &[]),
+    )
+    .await
+    .expect("served once a slot is free");
+    assert_eq!(ok.status(), 200);
+    h.handle.shutdown().await;
 }

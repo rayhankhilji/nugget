@@ -127,8 +127,9 @@ fn snippets_cover_every_app_and_keep_the_token_out_of_paths_and_urls() {
     let t = token.expose();
     let opts = SnippetOptions {
         nuggetd: "/Applications/Nugget.app/Contents/MacOS/nuggetd".into(),
-        http_port: Some(7466),
+        http_port: Some(7319),
         os: "macos".into(),
+        env: Vec::new(),
     };
     let snippets = setup_snippets(&info, t, &opts);
     let apps: Vec<_> = snippets.iter().map(|s| s.app.as_str()).collect();
@@ -183,7 +184,7 @@ fn snippets_cover_every_app_and_keep_the_token_out_of_paths_and_urls() {
     );
 
     let http = &snippets[4].text;
-    assert!(http.contains("url: http://127.0.0.1:7466/mcp\n"));
+    assert!(http.contains("url: http://127.0.0.1:7319/mcp\n"));
     assert!(http.contains(&format!("header: Authorization: Bearer {t}")));
 
     // No HTTP snippet when the listener is off; Windows and Linux paths.
@@ -225,9 +226,52 @@ fn paths_with_spaces_are_quoted_for_the_shell() {
             nuggetd: "/opt/My Apps/nuggetd".into(),
             http_port: None,
             os: "linux".into(),
+            env: Vec::new(),
         },
     );
     assert!(s[1].text.contains("-- '/opt/My Apps/nuggetd' mcp"));
+}
+
+#[test]
+fn env_extras_reach_every_stdio_snippet() {
+    let (reg, _) = registry();
+    let (info, token) = reg.create("Laptop", all_scopes()).unwrap();
+    let t = token.expose();
+    let s = setup_snippets(
+        &info,
+        t,
+        &SnippetOptions {
+            os: "linux".into(),
+            env: vec![
+                ("NUGGET_HOME".into(), "/my home".into()),
+                // Never overrides the client's token.
+                ("NUGGET_MCP_TOKEN".into(), "spoofed".into()),
+            ],
+            ..SnippetOptions::default()
+        },
+    );
+    for json in [&s[0].text, &s[2].text] {
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        let env = &v["mcpServers"]["nugget"]["env"];
+        assert_eq!(env["NUGGET_HOME"], "/my home");
+        assert_eq!(env["NUGGET_MCP_TOKEN"], t);
+        assert_eq!(env.as_object().unwrap().len(), 2);
+    }
+    assert!(
+        s[1].text.contains(&format!(
+            "--scope user --env NUGGET_HOME='/my home' --env NUGGET_MCP_TOKEN={t} nugget -- "
+        )),
+        "{}",
+        s[1].text
+    );
+    assert!(!s[1].text.contains("spoofed"));
+    assert!(
+        s[3].text.ends_with(&format!(
+            "\nenv: NUGGET_HOME=/my home\nenv: NUGGET_MCP_TOKEN={t}"
+        )),
+        "{}",
+        s[3].text
+    );
 }
 
 #[test]

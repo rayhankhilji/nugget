@@ -76,7 +76,7 @@ Add the same JSON as for Claude Desktop to `~/.cursor/mcp.json` (Windows:
 
 - **stdio**: run `nuggetd mcp --client <client id>` with `NUGGET_MCP_TOKEN=<token>` in its
   environment.
-- **Streamable HTTP**: `http://127.0.0.1:7466/mcp` with the header `Authorization: Bearer <token>`.
+- **Streamable HTTP**: `http://127.0.0.1:7319/mcp` with the header `Authorization: Bearer <token>`.
   Browsers are refused (any request with an `Origin` header is rejected unless that origin is
   explicitly allowed), and the token is never accepted in the URL.
 
