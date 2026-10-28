@@ -136,6 +136,11 @@ impl EgressExchange {
         self.event.bytes_received = self.event.bytes_received.saturating_add(n);
     }
 
+    /// Correct the bytes sent, e.g. to 0 when the connection failed before the request went out.
+    pub fn set_sent(&mut self, n: u64) {
+        self.event.bytes_sent = n;
+    }
+
     /// Push the running totals to the sink if they changed (two-phase sinks only).
     pub fn flush(&mut self) {
         let totals = (self.event.bytes_sent, self.event.bytes_received);

@@ -360,12 +360,38 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 1;
     END;
     "#,
+    // v6: two-phase egress ledger (see `egress`). A row is written `open` before the first byte
+    // is sent and becomes `done` when the exchange ends; rows still `open` when a store is
+    // opened were left by a crash and become `interrupted`. Existing rows were one-shot: `done`.
+    // `egress.state` is added by `ADDED_COLUMNS`, its index by `AFTER_COLUMNS`.
+    "",
+    // v7: keyed audit chain (see `audit`). Entries from `audit_v2_from` on are linked with an
+    // HMAC keyed from the store key; the SHA-256 entries written before this migration keep
+    // their v1 links and are still verified as such.
+    r#"
+    INSERT OR IGNORE INTO meta (key, value)
+        SELECT 'audit_v2_from', coalesce(max(seq), 0) + 1 FROM audit;
+    "#,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
 /// missing, so these migrations stay idempotent (`ALTER TABLE ADD COLUMN` cannot be made
 /// conditional in SQL).
-const ADDED_COLUMNS: &[(u32, &str, &str, &str)] = &[(5, "entities", "deleted_at", "TEXT")];
+const ADDED_COLUMNS: &[(u32, &str, &str, &str)] = &[
+    (5, "entities", "deleted_at", "TEXT"),
+    (
+        6,
+        "egress",
+        "state",
+        "TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('open', 'done', 'interrupted'))",
+    ),
+];
+
+/// Idempotent statements a migration runs after its `ADDED_COLUMNS` (they use those columns).
+const AFTER_COLUMNS: &[(u32, &str)] = &[(
+    6,
+    "CREATE INDEX IF NOT EXISTS egress_unfinished ON egress (state) WHERE state <> 'done';",
+)];
 
 fn ensure_column(conn: &Connection, table: &str, column: &str, ty: &str) -> Result<()> {
     let exists: bool = conn
@@ -437,6 +463,10 @@ fn apply_migrations(conn: &mut Connection, current: u32) -> Result<u32> {
         for (_, table, column, ty) in ADDED_COLUMNS.iter().filter(|c| c.0 == target) {
             ensure_column(&tx, table, column, ty)?;
         }
+        for (_, sql) in AFTER_COLUMNS.iter().filter(|c| c.0 == target) {
+            tx.execute_batch(sql)
+                .db(&format!("apply migration v{target}"))?;
+        }
         let violations: i64 = tx
             .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
                 r.get(0)
@@ -498,6 +528,9 @@ mod tests {
             conn.execute_batch(sql).unwrap();
             for (_, t, c, ty) in ADDED_COLUMNS.iter().filter(|c| c.0 == idx as u32 + 1) {
                 ensure_column(conn, t, c, ty).unwrap();
+            }
+            for (_, sql) in AFTER_COLUMNS.iter().filter(|c| c.0 == idx as u32 + 1) {
+                conn.execute_batch(sql).unwrap();
             }
             conn.pragma_update(None, "user_version", idx as u32 + 1)
                 .unwrap();

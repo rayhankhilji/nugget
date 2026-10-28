@@ -224,9 +224,10 @@ pub struct AuditRecord {
     pub action: String,
     pub target: String,
     pub detail: Value,
-    /// Hex SHA-256 of the previous record (all zeros for the first).
+    /// Hex chain tag of the previous record (all zeros for the first).
     pub prev_hash: String,
-    /// Hex SHA-256 over this record's fields and `prev_hash`.
+    /// Hex chain tag over this record's fields and `prev_hash`: SHA-256 for entries written before
+    /// the keyed chain (`audit_v2_from`), HMAC-SHA256 under a key derived from the store key after.
     pub hash: String,
 }
 

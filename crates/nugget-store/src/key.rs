@@ -126,6 +126,16 @@ pub(crate) trait SecretBackend {
     fn set(&self, secret: &str) -> std::result::Result<(), String>;
 }
 
+/// The OS keychain entry `account` under this app's service, for secrets other than the store
+/// key (e.g. the audit chain anchor). `None` when the keychain is disabled through
+/// [`KEYCHAIN_ENV`] or this target has no supported keychain.
+pub(crate) fn keychain_entry(account: String) -> Option<Box<dyn SecretBackend + Send + Sync>> {
+    if keychain_disabled_by_env() {
+        return None;
+    }
+    os::keychain_account_entry(account).map(|k| Box::new(k) as Box<dyn SecretBackend + Send + Sync>)
+}
+
 pub(crate) fn key_file(paths: &Paths) -> PathBuf {
     paths.data.join(KEY_FILE_NAME)
 }
@@ -205,8 +215,9 @@ fn read_key_file(path: &Path) -> Result<StoreKey> {
     StoreKey::from_hex(&contents, KeySource::File)
 }
 
-/// Create the key file exclusively (`O_EXCL`), owner-only on Unix. A crash mid-write leaves a
-/// malformed file, which is reported rather than silently replaced.
+/// Create the key file exclusively (`O_EXCL`), owner-only (`0600` on Unix, a protected DACL on
+/// Windows). A crash mid-write leaves a malformed file, which is reported rather than silently
+/// replaced.
 fn write_key_file(path: &Path, hex: &str) -> Result<()> {
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
@@ -219,6 +230,8 @@ fn write_key_file(path: &Path, hex: &str) -> Result<()> {
         opts.mode(0o600);
     }
     let mut f = opts.open(path)?;
+    // Before the key is written, so it is never readable through an inherited ACL.
+    crate::acl::restrict_file(path);
     let written = f
         .write_all(hex.as_bytes())
         .and_then(|()| f.write_all(b"\n"))
@@ -231,7 +244,8 @@ fn write_key_file(path: &Path, hex: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create `dir` (and parents). On Unix, a directory we create is owner-only (`0700`).
+/// Create `dir` (and parents). A directory we create is owner-only: `0700` on Unix, a protected
+/// DACL (current user and `SYSTEM`) on Windows.
 pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
     if dir.as_os_str().is_empty() || dir.exists() {
         return Ok(());
@@ -244,6 +258,7 @@ pub(crate) fn create_private_dir(dir: &Path) -> Result<()> {
         builder.mode(0o700);
     }
     builder.create(dir)?;
+    crate::acl::restrict_dir(dir);
     Ok(())
 }
 
@@ -286,9 +301,11 @@ mod os {
     }
 
     pub(super) fn keychain_for(data_dir: &Path) -> Option<OsKeychain> {
-        Some(OsKeychain {
-            account: keychain_account(data_dir),
-        })
+        keychain_account_entry(keychain_account(data_dir))
+    }
+
+    pub(super) fn keychain_account_entry(account: String) -> Option<OsKeychain> {
+        Some(OsKeychain { account })
     }
 
     impl OsKeychain {
@@ -330,6 +347,10 @@ mod os {
     pub(super) enum OsKeychain {}
 
     pub(super) fn keychain_for(_data_dir: &Path) -> Option<OsKeychain> {
+        None
+    }
+
+    pub(super) fn keychain_account_entry(_account: String) -> Option<OsKeychain> {
         None
     }
 
