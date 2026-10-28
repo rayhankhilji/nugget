@@ -29,11 +29,13 @@ license = "Apache-2.0"
 repository = "https://github.com/rayhankhilji/nugget"
 
 [workspace.dependencies]
-nugget-core = { path = "crates/nugget-core" }
-nugget-store = { path = "crates/nugget-store" }
-nugget-infer = { path = "crates/nugget-infer" }
-nugget-models = { path = "crates/nugget-models" }
-nugget-ipc = { path = "crates/nugget-ipc" }
+# Internal crates carry a version so cargo-deny's `wildcards = "deny"` accepts them. Keep these in
+# step with `[workspace.package] version`.
+nugget-core = { path = "crates/nugget-core", version = "0.0.1" }
+nugget-store = { path = "crates/nugget-store", version = "0.0.1" }
+nugget-infer = { path = "crates/nugget-infer", version = "0.0.1" }
+nugget-models = { path = "crates/nugget-models", version = "0.0.1" }
+nugget-ipc = { path = "crates/nugget-ipc", version = "0.0.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -42,6 +44,30 @@ tracing = "0.1"
 async-trait = "0.1"
 futures = "0.3"
 time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+# One HTTP/TLS stack for the whole workspace: reqwest 0.13 on rustls with the aws-lc-rs crypto
+# provider (rustls' and reqwest's default; post-quantum hybrid key exchange) and certificate
+# verification by the OS through rustls-platform-verifier. No OpenSSL, and no second provider
+# (`ring`): with two providers compiled in, rustls cannot pick a process default. Crates add only
+# non-TLS features (e.g. `stream`). Check with `cargo tree -d -i reqwest` / `-i rustls`.
+reqwest = { version = "0.13.5", default-features = false, features = [
+    "rustls",
+    "http2",
+    "system-proxy",
+] }
+# OS keychain. Version only: the backends are target-specific features, which each user crate
+# declares under `[target.'cfg(...)'.dependencies]` with the SAME set, so a crate tested on its
+# own uses the same store as the unified build:
+#   macOS                   apple-native    (Keychain Services)
+#   Windows                 windows-native  (Credential Manager)
+#   Linux, FreeBSD, OpenBSD async-secret-service + async-io + crypto-rust
+#     Secret Service (GNOME Keyring, KWallet, KeePassXC) over zbus, a pure-Rust D-Bus client:
+#     no system libdbus, no OpenSSL, and no tokio runtime required by the caller. Entries persist
+#     across reboots, unlike kernel keyutils (`linux-native`), which loses them at reboot and so
+#     cannot hold the store key. On a headless box with no Secret Service the keyring call fails
+#     fast: nugget-store falls back to its 0600 key file (or set NUGGET_KEYCHAIN=off), and
+#     provider keys use `env:VAR`. Never enable `sync-secret-service` (libdbus, and a compile
+#     error next to the async one) or `linux-native*` (changes the default store).
+keyring = { version = "3.6.3", default-features = false }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

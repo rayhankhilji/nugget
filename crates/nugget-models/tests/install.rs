@@ -226,7 +226,7 @@ async fn preflight_fails_closed_before_any_network() {
     let st = store(tmp.path(), Arc::default()).with_disk_space(Arc::new(FakeDisk(Some(need - 1))));
     let err = st.install(&m.models[0], |_| {}).await.unwrap_err();
     assert!(
-        matches!(&err, Error::Storage(m) if m.contains("insufficient")),
+        matches!(err, Error::InsufficientSpace { needed, available } if needed == need && available == need - 1),
         "{err}"
     );
 
@@ -274,6 +274,40 @@ async fn retries_transient_errors_and_gives_up_on_fatal_ones() {
     let err = st.install(&m.models[0], |_| {}).await.unwrap_err();
     assert!(err.to_string().contains("403"), "{err}");
     assert_eq!(srv.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn network_and_rate_limit_failures_use_their_error_variants() {
+    let srv = TestServer::start().await;
+    let bytes = data(SIZE, 9);
+    let url = srv.add("m", bytes.clone());
+
+    // Persistent 503: retried, then reported as a network failure.
+    let tmp = tempfile::tempdir().unwrap();
+    let st = store(tmp.path(), Arc::default());
+    let m = signed(vec![entry("m", &url, &bytes)]);
+    srv.set_behavior(|_| Action::Status(503));
+    let err = st.install(&m.models[0], |_| {}).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Network(m) if m.contains("503")),
+        "{err}"
+    );
+
+    // Persistent 429: retried, then reported as rate limited.
+    srv.set_behavior(|_| Action::Status(429));
+    let err = st.install(&m.models[0], |_| {}).await.unwrap_err();
+    assert!(matches!(err, Error::RateLimited { .. }), "{err}");
+
+    // Nothing listening: a connection failure is a network error.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let dead = url.replace(&srv.base, &format!("http://127.0.0.1:{port}"));
+    let m = signed(vec![entry("m", &dead, &bytes)]);
+    let err = st.install(&m.models[0], |_| {}).await.unwrap_err();
+    assert!(matches!(err, Error::Network(_)), "{err}");
 }
 
 #[tokio::test]

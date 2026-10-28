@@ -23,15 +23,16 @@ getrandom = "0.3"
 zeroize = "1"
 
 # OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.
+# The backend set must match nugget-infer's exactly; see the `keyring` entry in the root Cargo.toml.
 [target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3.6", features = ["apple-native"] }
+keyring = { workspace = true, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3.6", features = ["windows-native"] }
+keyring = { workspace = true, features = ["windows-native"] }
 
 # Secret Service over a pure-Rust D-Bus client (zbus), so there is no libdbus system dependency.
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
-keyring = { version = "3.6", features = ["async-secret-service", "async-io", "crypto-rust"] }
+keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile = "3"

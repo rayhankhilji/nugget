@@ -263,11 +263,15 @@ async fn overloaded_529_exhausts_retries() {
         .await
         .err()
         .unwrap();
-    let msg = err.to_string();
-    assert!(matches!(err, Error::Provider(_)));
+    // 529 (overloaded) is a rate limit; no retry-after header means no hint.
     assert!(
-        msg.contains("HTTP 529") && msg.contains("overloaded_error: Overloaded"),
-        "{msg}"
+        matches!(
+            err,
+            Error::RateLimited {
+                retry_after_ms: None
+            }
+        ),
+        "{err}"
     );
 }
 

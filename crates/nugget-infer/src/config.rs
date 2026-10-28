@@ -14,8 +14,10 @@ use url::Url;
 use crate::locality::{classify_parsed, rank};
 use crate::types::ProviderKind;
 
-/// Keychain service name under which `keychain:NAME` secrets are stored (account = `NAME`).
-pub const KEYCHAIN_SERVICE: &str = "nugget";
+/// Keychain service name under which `keychain:NAME` secrets are stored (account =
+/// [`provider_account`]`(NAME)`, i.e. `provider:NAME`). Shared by every crate via
+/// [`nugget_core::secrets`].
+pub use nugget_core::secrets::{KEYCHAIN_SERVICE, provider_account};
 
 /// Default `base_url` per kind, used when the config leaves it out.
 pub const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
@@ -29,7 +31,8 @@ pub const ANTHROPIC_DEFAULT_API_VERSION: &str = "2026-10-21";
 pub enum ApiKeyRef {
     /// `env:VAR`: read the environment variable `VAR`.
     Env(String),
-    /// `keychain:NAME`: read the OS keychain entry service=[`KEYCHAIN_SERVICE`], account=`NAME`.
+    /// `keychain:NAME`: read the OS keychain entry service=[`KEYCHAIN_SERVICE`],
+    /// account=[`provider_account`]`(NAME)` (`provider:NAME`).
     Keychain(String),
 }
 
@@ -104,8 +107,8 @@ pub trait SecretResolver: Send + Sync {
     fn resolve(&self, key: &ApiKeyRef) -> Result<Secret>;
 }
 
-/// Environment variables and the OS keychain (macOS Keychain, Windows Credential Manager,
-/// Linux kernel keyutils, or Secret Service when the workspace enables it for `keyring`).
+/// Environment variables and the OS keychain (macOS Keychain, Windows Credential Manager, Secret
+/// Service on Linux and the BSDs). Keychain entries use [`nugget_core::secrets`] naming.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemSecrets;
 
@@ -135,21 +138,43 @@ impl SecretResolver for SystemSecrets {
     }
 }
 
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd"
+))]
 fn read_keychain(name: &str) -> Result<Secret> {
-    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, name)
-        .map_err(|e| Error::Other(format!("keychain {KEYCHAIN_SERVICE}/{name}: {e}")))?;
+    let account = provider_account(name);
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, &account)
+        .map_err(|e| Error::Other(format!("keychain {KEYCHAIN_SERVICE}/{account}: {e}")))?;
     match entry.get_password() {
         Ok(v) if !v.trim().is_empty() => Ok(Secret(v.trim().to_string())),
         Ok(_) => Err(Error::NotFound(format!(
-            "keychain entry {KEYCHAIN_SERVICE}/{name} is empty"
+            "keychain entry {KEYCHAIN_SERVICE}/{account} is empty"
         ))),
         Err(keyring::Error::NoEntry) => Err(Error::NotFound(format!(
-            "keychain entry {KEYCHAIN_SERVICE}/{name} not found"
+            "keychain entry {KEYCHAIN_SERVICE}/{account} not found"
         ))),
         Err(e) => Err(Error::Other(format!(
-            "keychain {KEYCHAIN_SERVICE}/{name}: {e}"
+            "keychain {KEYCHAIN_SERVICE}/{account}: {e}"
         ))),
     }
+}
+
+/// No OS keychain backend is built for this target.
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd",
+    target_os = "openbsd"
+)))]
+fn read_keychain(name: &str) -> Result<Secret> {
+    Err(Error::Unsupported(format!(
+        "keychain:{name}: no OS keychain on this platform; use env:VAR"
+    )))
 }
 
 /// Which request field carries the output-token cap for `openai_compatible` servers.

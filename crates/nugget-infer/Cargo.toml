@@ -22,19 +22,19 @@ bytes = "1"
 png = "0.18"
 toml = "1"
 url = "2"
-# rustls on `ring` (Apache-2.0/ISC) with the OS trust store; no OpenSSL, no aws-lc build step.
-reqwest = { version = "0.12.28", default-features = false, features = [
-    "rustls-tls-native-roots",
-    "http2",
-    "stream",
-] }
-# Only the pure-Rust platform stores. A Secret Service backend (sync *or* async) may be enabled
-# by another crate in the workspace; we never enable one ourselves so features cannot conflict.
-keyring = { version = "3.6", default-features = false, features = [
-    "apple-native",
-    "windows-native",
-    "linux-native",
-] }
+# TLS stack and features come from the workspace (rustls + aws-lc-rs, OS certificate verifier).
+reqwest = { workspace = true, features = ["stream"] }
+
+# OS keychain for `keychain:NAME` API keys. The backend set must match nugget-store's exactly;
+# see the `keyring` entry in the root Cargo.toml for the per-OS choice.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { workspace = true, features = ["apple-native"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, features = ["windows-native"] }
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+keyring = { workspace = true, features = ["async-secret-service", "async-io", "crypto-rust"] }
 
 [dev-dependencies]
 wiremock = "0.6"

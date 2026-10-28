@@ -17,6 +17,8 @@ enum Behaviour {
     Ok,
     FailBeforeStream,
     FailFirstEvent,
+    RateLimited,
+    NetworkDown,
     InvalidRequest,
 }
 
@@ -66,6 +68,10 @@ impl Provider for Fake {
             Behaviour::FailFirstEvent => Ok(Box::pin(stream::iter(vec![Err(Error::Provider(
                 "overloaded".into(),
             ))]))),
+            Behaviour::RateLimited => Err(Error::RateLimited {
+                retry_after_ms: Some(1000),
+            }),
+            Behaviour::NetworkDown => Err(Error::Network("connection failed".into())),
             Behaviour::InvalidRequest => Err(Error::Invalid("bad request".into())),
         }
     }
@@ -74,6 +80,10 @@ impl Provider for Fake {
         self.calls.fetch_add(1, Ordering::SeqCst);
         match self.behaviour {
             Behaviour::Ok => Ok(texts.iter().map(|_| vec![1.0]).collect()),
+            Behaviour::RateLimited => Err(Error::RateLimited {
+                retry_after_ms: None,
+            }),
+            Behaviour::NetworkDown => Err(Error::Network("timed out".into())),
             _ => Err(Error::Provider("down".into())),
         }
     }
@@ -209,6 +219,76 @@ async fn chat_falls_back_on_early_failures() {
     // Failed providers are now tried last.
     let order = ids(&router.candidates(Tier::Synthesis, &Capabilities::default()));
     assert_eq!(order, vec!["c", "a", "b"]);
+}
+
+#[tokio::test]
+async fn chat_falls_back_on_rate_limits_and_network_errors() {
+    let a = Fake::new("a", Behaviour::RateLimited);
+    let b = Fake::new("b", Behaviour::NetworkDown);
+    let c = Fake::new("c", Behaviour::Ok);
+    let router = Router::new(
+        vec![a.clone(), b.clone(), c.clone()],
+        tiers(&[(Tier::Light, &["a", "b", "c"])]),
+    );
+    let (p, stream) = router
+        .chat(
+            Tier::Light,
+            &Capabilities::default(),
+            ChatRequest::new(vec![Message::user_text("hi")]),
+        )
+        .await
+        .unwrap();
+    assert_eq!(p.id().as_str(), "c");
+    assert_eq!(
+        ChatResponse::collect(stream).await.unwrap().text(),
+        "from c"
+    );
+    assert_eq!(
+        (
+            a.calls.load(Ordering::SeqCst),
+            b.calls.load(Ordering::SeqCst)
+        ),
+        (1, 1)
+    );
+    assert_eq!(
+        ids(&router.candidates(Tier::Light, &Capabilities::default())),
+        vec!["c", "a", "b"],
+        "transient failures cool the provider down"
+    );
+
+    // When every candidate is rate limited, the caller sees that (with the server's hint).
+    let all_limited = Router::new(
+        vec![Fake::new("x", Behaviour::RateLimited)],
+        tiers(&[(Tier::Light, &["x"])]),
+    );
+    let err = all_limited
+        .chat(
+            Tier::Light,
+            &Capabilities::default(),
+            ChatRequest::new(vec![Message::user_text("hi")]),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert!(matches!(
+        err,
+        Error::RateLimited {
+            retry_after_ms: Some(1000)
+        }
+    ));
+}
+
+#[tokio::test]
+async fn embed_falls_back_on_rate_limits_and_network_errors() {
+    let a = Fake::new("a", Behaviour::RateLimited);
+    let b = Fake::new("b", Behaviour::NetworkDown);
+    let c = Fake::new("c", Behaviour::Ok);
+    let router = Router::new(vec![a, b, c], tiers(&[(Tier::Embedding, &["a", "b", "c"])]));
+    for id in ["a", "b", "c"] {
+        router.set_capabilities(&ProviderId::new(id), caps(false, false, true));
+    }
+    let (id, _) = router.embed(&["x".into()]).await.unwrap();
+    assert_eq!(id.as_str(), "c");
 }
 
 #[tokio::test]

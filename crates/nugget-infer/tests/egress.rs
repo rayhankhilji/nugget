@@ -132,13 +132,15 @@ async fn refused_connections_record_zero_bytes_per_attempt() {
         &format!("{OAI}\nlocality = \"cloud\"\nmax_retries = 1"),
         &format!("http://127.0.0.1:{port}/v1"),
     );
-    let msg = p
+    let err = p
         .chat(ChatRequest::new(vec![Message::user_text("x")]))
         .await
         .err()
-        .unwrap()
-        .to_string();
-    assert!(msg.contains("connection failed"), "{msg}");
+        .unwrap();
+    assert!(
+        matches!(&err, Error::Network(m) if m.contains("connection failed")),
+        "{err}"
+    );
     let events = sink.events();
     assert_eq!(events.len(), 2);
     assert!(

@@ -337,11 +337,12 @@ struct FetchErr {
 }
 
 impl FetchErr {
+    /// A transport failure (connect, timeout, reset, short body): [`Error::Network`], retried.
     fn transient(msg: impl Into<String>) -> Self {
         Self {
             retryable: true,
             retry_after: None,
-            err: Error::Other(format!("download failed: {}", msg.into())),
+            err: Error::Network(format!("download failed: {}", msg.into())),
         }
     }
     fn fatal(err: Error) -> Self {
@@ -351,15 +352,27 @@ impl FetchErr {
             err,
         }
     }
+    /// An unexpected HTTP status. 429 is [`Error::RateLimited`] (with the server's hint); other
+    /// transient statuses (5xx, 408, 425) are [`Error::Network`], since the source is temporarily
+    /// unreachable; anything else (403, 404, 416, ...) is a permanent [`Error::Other`].
     fn status(url: &str, status: StatusCode, retry_after: Option<Duration>) -> Self {
         let retryable = status.is_server_error() || matches!(status.as_u16(), 408 | 425 | 429);
+        let msg = format!("download failed: HTTP {status} from {}", host_of(url));
+        let err = if status == StatusCode::TOO_MANY_REQUESTS {
+            tracing::warn!(%msg, ?retry_after, "rate limited");
+            Error::RateLimited {
+                retry_after_ms: retry_after
+                    .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+            }
+        } else if retryable {
+            Error::Network(msg)
+        } else {
+            Error::Other(msg)
+        };
         Self {
             retryable,
             retry_after,
-            err: Error::Other(format!(
-                "download failed: HTTP {status} from {}",
-                host_of(url)
-            )),
+            err,
         }
     }
 }
@@ -919,6 +932,41 @@ mod tests {
                 "{code}"
             );
         }
+    }
+
+    #[test]
+    fn status_errors_map_to_core_variants() {
+        let err = |code: u16, hint: Option<Duration>| {
+            FetchErr::status("http://h/x", StatusCode::from_u16(code).unwrap(), hint).err
+        };
+        assert!(matches!(
+            err(429, Some(Duration::from_secs(2))),
+            Error::RateLimited {
+                retry_after_ms: Some(2000)
+            }
+        ));
+        assert!(matches!(
+            err(429, None),
+            Error::RateLimited {
+                retry_after_ms: None
+            }
+        ));
+        for code in [500, 503, 408] {
+            assert!(
+                matches!(err(code, None), Error::Network(m) if m.contains(&code.to_string())),
+                "{code}"
+            );
+        }
+        for code in [403, 404, 416] {
+            assert!(
+                matches!(err(code, None), Error::Other(m) if m.contains(&code.to_string())),
+                "{code}"
+            );
+        }
+        assert!(matches!(
+            FetchErr::transient("connection reset").err,
+            Error::Network(_)
+        ));
     }
 
     #[test]

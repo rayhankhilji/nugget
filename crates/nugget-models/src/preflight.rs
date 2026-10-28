@@ -31,8 +31,11 @@ pub fn required_bytes(size: u64, already_staged: u64) -> u64 {
         .saturating_add(GIB)
 }
 
-/// Check that `dir` has room for a `size`-byte model. **Fails closed**: if free space cannot be
-/// determined, this is an error, never a pass.
+/// Check that `dir` has room for a `size`-byte model.
+///
+/// Too little room is [`Error::InsufficientSpace`]. **Fails closed**: if free space cannot be
+/// determined, that is an [`Error::Storage`] (never a pass, and never an `InsufficientSpace`
+/// with a made-up `available`).
 pub fn check_disk_space(
     disk: &dyn DiskSpace,
     dir: &Path,
@@ -47,10 +50,13 @@ pub fn check_disk_space(
         ))
     })?;
     if available < needed {
-        return Err(Error::Storage(format!(
-            "insufficient disk space at {}: need {needed} bytes (model + 10% + 1 GiB), have {available}",
-            dir.display()
-        )));
+        tracing::warn!(
+            dir = %dir.display(),
+            needed,
+            available,
+            "insufficient disk space (model + 10% + 1 GiB)"
+        );
+        return Err(Error::InsufficientSpace { needed, available });
     }
     Ok(())
 }
@@ -83,7 +89,10 @@ mod tests {
         let need = required_bytes(1000, 0);
         assert!(check_disk_space(&Fixed(Ok(need)), dir, 1000, 0).is_ok());
         let err = check_disk_space(&Fixed(Ok(need - 1)), dir, 1000, 0).unwrap_err();
-        assert!(matches!(err, Error::Storage(_)), "{err}");
+        assert!(
+            matches!(err, Error::InsufficientSpace { needed, available } if needed == need && available == need - 1),
+            "{err}"
+        );
     }
 
     #[test]

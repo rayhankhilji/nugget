@@ -229,17 +229,20 @@ async fn rate_limit_with_long_retry_after_fails_fast() {
         .mount(&server)
         .await;
     let (p, _) = provider(CFG, &format!("{}/v1", server.uri()));
-    let msg = p
+    let err = p
         .chat(ChatRequest::new(vec![Message::user_text("x")]))
         .await
         .err()
-        .unwrap()
-        .to_string();
+        .unwrap();
+    // Not retried (the hint exceeds max_retry_delay); the hint is passed on to the caller.
     assert!(
-        msg.contains("HTTP 429")
-            && msg.contains("Rate limit reached")
-            && msg.contains("retry after 3600s"),
-        "{msg}"
+        matches!(
+            err,
+            Error::RateLimited {
+                retry_after_ms: Some(3_600_000)
+            }
+        ),
+        "{err}"
     );
 }
 

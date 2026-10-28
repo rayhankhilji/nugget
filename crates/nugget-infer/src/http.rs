@@ -154,7 +154,8 @@ impl Http {
 
     /// POST a JSON body, retrying transient failures (connect errors, timeouts before the
     /// response, 408/409/429/5xx/529) with backoff. Returns the successful response and the meter
-    /// that will record its egress once dropped.
+    /// that will record its egress once dropped. Once retries run out, 429/529 surface as
+    /// [`Error::RateLimited`] and transport failures as [`Error::Network`].
     pub(crate) async fn post_json(
         &self,
         path: &str,
@@ -435,6 +436,9 @@ pub(crate) fn error_detail_value(v: &Value) -> Option<String> {
     })
 }
 
+/// Map a non-success response. 429 (too many requests) and 529 (Anthropic "overloaded") become
+/// [`Error::RateLimited`] with the server's retry hint; the body detail is logged, since that
+/// variant carries none. Everything else is [`Error::Provider`].
 fn http_error(
     provider: &ProviderId,
     status: StatusCode,
@@ -442,6 +446,12 @@ fn http_error(
     retry_after: Option<Duration>,
 ) -> Error {
     let detail = error_detail(body).unwrap_or_else(|| truncate(body, 300));
+    if is_rate_limit_status(status) {
+        tracing::warn!(%provider, status = status.as_u16(), %detail, ?retry_after, "rate limited");
+        return Error::RateLimited {
+            retry_after_ms: retry_after.map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
+        };
+    }
     let hint = match status.as_u16() {
         401 | 403 => " (check the provider's api_key)",
         404 => " (check base_url and model)",
@@ -456,6 +466,14 @@ fn http_error(
     ))
 }
 
+/// Statuses that mean "back off": 429 and Anthropic's 529 (overloaded).
+pub(crate) fn is_rate_limit_status(status: StatusCode) -> bool {
+    matches!(status.as_u16(), 429 | 529)
+}
+
+/// Map a reqwest failure (sending, or reading the body). Connect, timeout and other transport
+/// failures are [`Error::Network`]. A request reqwest could not even build (a bad URL or header
+/// from this provider's config) stays [`Error::Provider`], so the Router still falls back.
 pub(crate) fn transport_error(provider: &ProviderId, e: &reqwest::Error) -> Error {
     let kind = if e.is_connect() {
         "connection failed"
@@ -469,7 +487,10 @@ pub(crate) fn transport_error(provider: &ProviderId, e: &reqwest::Error) -> Erro
         Some(src) => format!("{e}: {src}"),
         None => e.to_string(),
     };
-    Error::Provider(format!("{provider}: {kind}: {msg}"))
+    if e.is_builder() {
+        return Error::Provider(format!("{provider}: {kind}: {msg}"));
+    }
+    Error::Network(format!("{provider}: {kind}: {msg}"))
 }
 
 /// Parse a tool-call arguments string. Empty means `{}`; invalid JSON is returned as a JSON
@@ -541,6 +562,35 @@ mod tests {
                 !is_retryable_status(StatusCode::from_u16(s).unwrap()),
                 "{s}"
             );
+        }
+    }
+
+    #[test]
+    fn rate_limit_statuses_map_to_rate_limited() {
+        let p = ProviderId::new("p");
+        for s in [429u16, 529] {
+            let status = StatusCode::from_u16(s).unwrap();
+            assert!(is_rate_limit_status(status), "{s}");
+            assert!(matches!(
+                http_error(&p, status, "{}", Some(Duration::from_millis(1500))),
+                Error::RateLimited {
+                    retry_after_ms: Some(1500)
+                }
+            ));
+            assert!(matches!(
+                http_error(&p, status, "", None),
+                Error::RateLimited {
+                    retry_after_ms: None
+                }
+            ));
+        }
+        for s in [500u16, 503, 401, 404] {
+            let status = StatusCode::from_u16(s).unwrap();
+            assert!(!is_rate_limit_status(status), "{s}");
+            assert!(matches!(
+                http_error(&p, status, "", None),
+                Error::Provider(_)
+            ));
         }
     }
 

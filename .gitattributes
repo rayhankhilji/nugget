@@ -1,0 +1,32 @@
+# Line endings: every text file is stored and checked out with LF on every OS, so rustfmt,
+# `cargo fmt --check`, hashes and byte-exact test fixtures agree between Windows and Unix.
+* text=auto eol=lf
+
+# Binaries: never normalised, never diffed or merged as text.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.icns   binary
+*.pdf    binary
+*.woff   binary
+*.woff2  binary
+*.ttf    binary
+*.otf    binary
+*.zip    binary
+*.gz     binary
+*.tar    binary
+*.gguf   binary
+*.onnx   binary
+*.safetensors binary
+*.sqlite binary
+*.db     binary
+*.wasm   binary
+
+# Signed model manifests: the ed25519 signature covers the exact bytes, which nugget-models embeds
+# with `include_bytes!`. Never convert their line endings. manifests/.gitattributes says the same
+# (`* -text`); this line keeps the guarantee if that file is ever moved or removed.
+/manifests/** -text -eol
+*.sig -text -eol

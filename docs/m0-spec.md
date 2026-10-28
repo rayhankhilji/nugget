@@ -158,3 +158,7 @@ Tauri 2 shell: React, TypeScript, Vite, pnpm. The crate is named `nugget-desktop
 - **Router.** A provider that hasn't been probed only serves plain chat. Probe results are persisted by `nuggetd`, under the store's `meta` table or the config dir, and loaded at start into `Router::set_capabilities`.
 - **Keychain naming.** Use `nugget_core::secrets` for all keychain entries: the service is `dev.nugget.Nugget`, and provider keys use the account `provider:NAME`.
 - **New error variants.** `Error::{Network, RateLimited, InsufficientSpace}` exist; use them instead of `Provider`/`Other`/`Storage` strings.
+- **TLS and HTTP.** There is one reqwest (0.13) on rustls with the **aws-lc-rs** provider only, verified against the OS trust store through `rustls-platform-verifier`. Declare it as `reqwest.workspace = true`, never with a crate-local version.
+- **Keyring backends.** `keyring` is declared once in the workspace with identical per-target features: macOS Keychain, Windows Credential Manager, Linux Secret Service over zbus (pure Rust). On headless Linux, the store key falls back to a 0600 file and provider keys should use `env:VAR`.
+- **Error mapping.** HTTP 429/529 maps to `RateLimited`; transport failures and retryable 5xx/408 map to `Network`; disk preflight maps to `InsufficientSpace`; an unreadable free-space value is a fail-closed `Storage` error. The router falls back on `Network` and `RateLimited`.
+- **MSRV** is 1.88, verified with `cargo +1.88 check` (sysinfo is pinned at 0.38 for this reason).

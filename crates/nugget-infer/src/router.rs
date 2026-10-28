@@ -276,11 +276,17 @@ impl Router {
     }
 }
 
-/// Failures worth trying another provider for. Request errors (`Invalid`) and cancellation are
-/// not: another provider would reject the same request or the caller gave up.
+/// Failures worth trying another provider for: transient ones (`Network`, `RateLimited`) and
+/// provider-side ones. Request errors (`Invalid`) and cancellation are not: another provider
+/// would reject the same request or the caller gave up.
 fn is_fallback_error(e: &Error) -> bool {
     matches!(
         e,
-        Error::Provider(_) | Error::Io(_) | Error::Unsupported(_) | Error::Other(_)
+        Error::Network(_)
+            | Error::RateLimited { .. }
+            | Error::Provider(_)
+            | Error::Io(_)
+            | Error::Unsupported(_)
+            | Error::Other(_)
     )
 }

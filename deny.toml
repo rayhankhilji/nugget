@@ -73,11 +73,10 @@ ignore = false
 
 [bans]
 multiple-versions = "warn"
-# `foo = "*"` registry requirements are banned in spirit. This is "warn" rather than "deny" only
-# because the internal path dependencies in the root `[workspace.dependencies]` carry no version
-# and the crates are not marked `publish = false`, which cargo-deny counts as wildcards. Give
-# those path dependencies a `version` (or mark the crates `publish = false`), then make this "deny".
-wildcards = "warn"
+# No `foo = "*"` requirements. Internal path dependencies count as wildcards unless they carry a
+# `version`, so every entry in the root `[workspace.dependencies]` has one; crates depend on each
+# other with `nugget-x.workspace = true`, never a bare `path = ...`.
+wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 workspace-default-features = "allow"

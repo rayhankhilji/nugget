@@ -1,6 +1,7 @@
 mod common;
 
 use common::*;
+use nugget_core::Error;
 use nugget_core::capability::Locality;
 use nugget_infer::{ChatEvent, ChatRequest, ChatResponse, Message, StopReason, ToolSpec};
 use serde_json::{Value, json};
@@ -129,13 +130,20 @@ async fn rate_limited_then_gives_up() {
         .mount(&server)
         .await;
     let (p, _) = provider(LOCAL, &format!("{}/v1", server.uri()));
-    let msg = p
+    let err = p
         .chat(ChatRequest::new(vec![Message::user_text("x")]))
         .await
         .err()
-        .unwrap()
-        .to_string();
-    assert!(msg.contains("HTTP 429: too many requests"), "{msg}");
+        .unwrap();
+    assert!(
+        matches!(
+            err,
+            Error::RateLimited {
+                retry_after_ms: None
+            }
+        ),
+        "{err}"
+    );
 }
 
 #[tokio::test]

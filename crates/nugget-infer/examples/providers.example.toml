@@ -12,9 +12,12 @@
 #   max_output_tokens, connect_timeout_secs, idle_timeout_secs, max_retries, retry_base_ms,
 #   headers = { ... }, extra_body = { ... } (merged into every chat request body).
 #
-# Keychain entries are read from service "nugget", account NAME. For example:
-#   macOS:   security add-generic-password -s nugget -a anthropic -w
-#   Windows: cmdkey /generic:anthropic.nugget /user:anthropic /pass   (or Credential Manager)
+# Keychain entries are read from service "dev.nugget.Nugget", account "provider:NAME" (the naming in
+# nugget_core::secrets, shared by every Nugget crate). For example, for "keychain:anthropic":
+#   macOS:   security add-generic-password -s dev.nugget.Nugget -a provider:anthropic -w
+#   Windows: cmdkey /generic:provider:anthropic.dev.nugget.Nugget /user:provider:anthropic /pass
+#   Linux:   secret-tool store --label="Nugget anthropic" service dev.nugget.Nugget username provider:anthropic
+#            (Secret Service: GNOME Keyring, KWallet or KeePassXC; on headless machines use env:VAR)
 #
 # Locality is derived from the base_url host: localhost/127.0.0.1/::1 => on_device (no egress
 # record); private ranges, *.local, single-label hosts => local_network; everything else => cloud.

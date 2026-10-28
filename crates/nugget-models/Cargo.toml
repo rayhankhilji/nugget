@@ -17,11 +17,13 @@ tracing.workspace = true
 ed25519-dalek = "3"
 fs4 = "1"
 hex = "0.4"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "system-proxy"] }
+# TLS stack and features come from the workspace (rustls + aws-lc-rs, OS certificate verifier).
+reqwest.workspace = true
 semver = "1"
 sha2 = "0.11"
 url = "2"
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# 0.38 is the newest line that builds on the workspace rust-version (0.39 needs Rust 1.95).
+sysinfo = { version = "0.38.4", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 getrandom = "0.4"
