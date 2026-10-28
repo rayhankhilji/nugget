@@ -1,5 +1,6 @@
 [package]
 name = "nugget-knowledge"
+description = "Knowledge extraction: deterministic and LLM extractors, entity resolution and claim lifecycle"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,19 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-graph.workspace = true
+nugget-infer.workspace = true
+nugget-store.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio = { workspace = true }
+tracing.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+futures.workspace = true
+tokio = { workspace = true }
 
 [lints]
 workspace = true

@@ -52,3 +52,13 @@ store items/chunks ──▶ nugget-knowledge (extract → resolve → claims wi
 ## Wave 2
 - **M2-G `nuggetd` integration:** run knowledge extraction after ingest commits, vault render and watch, and the MCP server (`nuggetd mcp` stdio bridge subcommand plus a loopback HTTP listener); the new IPC methods; MCP client install helpers (`nuggetd mcp install --client claude-desktop|claude-code|cursor`).
 - **Review:** security reviewers (MCP auth and scoping, vault path safety, prompt injection from source content into extraction) and correctness reviewers, then fixes.
+
+## Contract gaps found in wave 1 (to resolve in wave 2)
+- **`GraphStore` changes:**
+  - Add `update_claim` (confidence and validity patches).
+  - Add a distinct user-rejected status, so a fact the user rejected isn't revived when its source is re-extracted.
+  - Add entity cleanup or deletion for entities left without claims or mentions.
+  - Document that `add_claim` keeps the higher confidence.
+- **Store changes:** add `items_changed_since` with deletion tombstones, plus a cheap `item_dates`. Knowledge currently diffs `item_versions` per source on every run.
+- **MCP:** per-identifier provenance, because aliases and identifiers are hidden when any of the entity's sources is out of scope. Also revisit `is_sensitive` treating a missing flag as sensitive.
+- **Desktop:** a source filter on `GraphRequest`, entity split, and undoing a user-asserted fact.
