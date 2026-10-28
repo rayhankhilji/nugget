@@ -4,29 +4,6 @@
 use crate::report::Metric;
 use crate::runner::{BenchError, Benchmark, RunContext};
 
-/// `bench/draft`: reply drafting quality and latency (Double Tap, milestone M3).
-pub struct DraftBench;
-
-pub const DRAFT_PLAN: &str = "Planned for M3 (Double Tap). Reply drafting against synthetic personas and consented \
-held-out threads, scored by pairwise LLM judging against a screenshot-only baseline (voice match, factuality, \
-helpfulness) plus human spot checks, with p50/p95 time to first inserted token for cloud (target < 1.2 s) and \
-local (target < 3 s on a 16 GB machine) tiers. See bench/README.md.";
-
-impl Benchmark for DraftBench {
-    fn name(&self) -> &'static str {
-        "draft"
-    }
-    fn description(&self) -> &'static str {
-        "Reply drafting: judged quality and time to first inserted token (planned, M3)"
-    }
-    fn implemented(&self) -> bool {
-        false
-    }
-    fn run(&self, _ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        Err(BenchError::NotImplemented(DRAFT_PLAN))
-    }
-}
-
 /// `bench/cua`: computer-use task success (agent and `nugget-a11y`, milestone M4).
 pub struct CuaBench;
 

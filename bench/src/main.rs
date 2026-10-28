@@ -61,6 +61,9 @@ struct Cli {
     #[arg(long, value_name = "MODEL", requires = "embed_url")]
     embed_model: Option<String>,
 
+    #[command(flatten)]
+    draft: nugget_bench::suites::draft::DraftOptions,
+
     /// Directory for `<suite>-<timestamp>.json` reports.
     #[arg(long, env = "NUGGET_BENCH_RESULTS_DIR", default_value = DEFAULT_RESULTS_DIR)]
     out_dir: PathBuf,
@@ -198,6 +201,7 @@ fn main() -> ExitCode {
         backend: cli.backend,
         embed_url: cli.embed_url.clone(),
         embed_model: cli.embed_model.clone(),
+        draft: cli.draft.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;
@@ -345,6 +349,44 @@ mod tests {
         );
         assert!(names(&[]).is_err());
         assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));
+    }
+
+    #[test]
+    fn parses_draft_options() {
+        use nugget_bench::suites::draft::DraftLocality;
+        let cli = Cli::try_parse_from(["nugget-bench", "draft"]).unwrap();
+        assert_eq!(
+            cli.draft,
+            Default::default(),
+            "fake model, cloud, no latency"
+        );
+        let cli = Cli::try_parse_from([
+            "nugget-bench",
+            "draft",
+            "--provider-url",
+            "http://127.0.0.1:8080/v1",
+            "--provider-model",
+            "local-4b",
+            "--api-key-env",
+            "BENCH_KEY",
+            "--draft-locality",
+            "local",
+            "--fake-ttft-ms",
+            "300",
+        ])
+        .unwrap();
+        assert_eq!(
+            cli.draft.provider_url.as_deref(),
+            Some("http://127.0.0.1:8080/v1")
+        );
+        assert_eq!(cli.draft.provider_model.as_deref(), Some("local-4b"));
+        assert_eq!(cli.draft.api_key_env.as_deref(), Some("BENCH_KEY"));
+        assert_eq!(cli.draft.draft_locality, DraftLocality::Local);
+        assert_eq!(cli.draft.fake_ttft_ms, 300);
+        assert!(
+            Cli::try_parse_from(["nugget-bench", "draft", "--provider-model", "x"]).is_err(),
+            "--provider-model needs --provider-url"
+        );
     }
 
     #[test]

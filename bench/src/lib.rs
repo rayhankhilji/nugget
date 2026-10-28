@@ -9,8 +9,9 @@
 //! and hybrid fusion). `memory --backend real` ([`real`]) runs the real stack in process: an
 //! encrypted `nugget-store`, `nugget-ingest` with the `files` connector watching a temporary
 //! folder, and `nugget-retrieve`.
-//! `draft` and `cua` are registered but not yet implemented; their methodology is in
-//! `bench/README.md`.
+//! `draft` compares Nugget's drafting prompt with a Sentient-style whole-vault baseline on a
+//! fictional fixture corpus, against a deterministic fake model or a real provider.
+//! `cua` is registered but not yet implemented; its methodology is in `bench/README.md`.
 
 pub mod corpus;
 pub mod index;

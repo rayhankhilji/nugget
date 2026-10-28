@@ -1,0 +1,1111 @@
+{
+ "personas": [
+  {
+   "id": "maya",
+   "name": "Maya Okafor",
+   "email": "maya.okafor@northwind.example.com",
+   "role": "Head of Product, Northwind Labs",
+   "voice": "Warm and organised. Email: 'Hi <name>,' and 'Best,' (externals) or 'Thanks,' (colleagues), medium length, no emoji. Chat: lowercase, short, no greeting or sign-off, an occasional :) emoji.",
+   "sent": [
+    {
+     "id": "maya-s01",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-06-01",
+     "app": "Mail",
+     "text": "Hi Priya,\n\nI can send a short summary after the meeting. Let me know if Thursday works for a quick review. I think we are close, but I want to check one detail with the team first. We plan to launch Atlas on October 1 if the billing work lands.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s02",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-06-04",
+     "app": "Microsoft Teams",
+     "text": "i think the date is still oct 1 :)"
+    },
+    {
+     "id": "maya-s03",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-06-08",
+     "app": "Thunderbird",
+     "text": "Hi Noor,\n\nCould you share the latest version before our next call? We plan to launch Atlas on October 1 if the billing work lands. I went through the notes and they look good to me. Let me check the calendar and come back to you.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s04",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-06-12",
+     "app": "Mail",
+     "text": "Hi Aiko,\n\nPlease loop in anyone else who should be on the thread. I can send a short summary after the meeting.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s05",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-06-15",
+     "app": "Outlook",
+     "text": "Hi Tom,\n\nTom will join to cover the technical questions. The roadmap review moved to next week. We should have an answer for you by Friday. We plan to launch Atlas on October 1 if the billing work lands.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s06",
+     "channel": "email",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-06-19",
+     "app": "Thunderbird",
+     "text": "Hi Sam,\n\nOur goal is to keep the scope small for the first release. I will follow up once I have the final numbers. We are still collecting feedback from the design partners.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s07",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-06-23",
+     "app": "Slack",
+     "text": "running 5 min late :)"
+    },
+    {
+     "id": "maya-s08",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-06-26",
+     "app": "Outlook",
+     "text": "Hi Zoe,\n\nI am out on Monday but back on Tuesday morning. Please loop in anyone else who should be on the thread. The roadmap review moved to next week.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s09",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-06-30",
+     "app": "Thunderbird",
+     "text": "Hi Ben,\n\nWe should have an answer for you by Friday. I will follow up once I have the final numbers. Let me check the calendar and come back to you. Could you share the latest version before our next call?\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s10",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-07-04",
+     "app": "Mail",
+     "text": "Hi Priya,\n\nI am out on Monday but back on Tuesday morning. Tom will join to cover the technical questions.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s11",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-07-07",
+     "app": "Slack",
+     "text": "nice work on the mockups :)"
+    },
+    {
+     "id": "maya-s12",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-07-11",
+     "app": "Thunderbird",
+     "text": "Hi Noor,\n\nTom will join to cover the technical questions. I went through the notes and they look good to me. I can send a short summary after the meeting.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s13",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-07-15",
+     "app": "Slack",
+     "text": "nice work on the mockups :)"
+    },
+    {
+     "id": "maya-s14",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-07-18",
+     "app": "Outlook",
+     "text": "Hi Tom,\n\nLet me check the calendar and come back to you. Please loop in anyone else who should be on the thread. We plan to launch Atlas on October 1 if the billing work lands.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s15",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-07-22",
+     "app": "Slack",
+     "text": "can you send me the link, sure, add me to the invite :)"
+    },
+    {
+     "id": "maya-s16",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-07-26",
+     "app": "Mail",
+     "text": "Hi Ravi,\n\nPlease loop in anyone else who should be on the thread. I can send a short summary after the meeting. Could you share the latest version before our next call?\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s17",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-07-29",
+     "app": "Outlook",
+     "text": "Hi Zoe,\n\nI will follow up once I have the final numbers. That sounds like a good plan to me.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s18",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-08-02",
+     "app": "Microsoft Teams",
+     "text": "can we move it to 3, i think the date is still oct 1 :)"
+    },
+    {
+     "id": "maya-s19",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-08-06",
+     "app": "Slack",
+     "text": "sounds good, running 5 min late :)"
+    },
+    {
+     "id": "maya-s20",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-08-09",
+     "app": "Microsoft Teams",
+     "text": "agreed :)"
+    },
+    {
+     "id": "maya-s21",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-08-13",
+     "app": "Thunderbird",
+     "text": "Hi Noor,\n\nHappy to jump on a call if that is easier. We are still collecting feedback from the design partners. I really appreciate the detailed write-up.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s22",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-08-17",
+     "app": "Microsoft Teams",
+     "text": "agreed, on it :)"
+    },
+    {
+     "id": "maya-s23",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-08-20",
+     "app": "Outlook",
+     "text": "Hi Tom,\n\nThe beta has been going well so far. For the renewal, we are thinking about something around $40,000 per year. Happy to jump on a call if that is easier.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s24",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-08-24",
+     "app": "Microsoft Teams",
+     "text": "yes please, i think the date is still oct 1 :)"
+    },
+    {
+     "id": "maya-s25",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-08-28",
+     "app": "Slack",
+     "text": "ok, i'll update the doc, looks great to me :)"
+    },
+    {
+     "id": "maya-s26",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-08-31",
+     "app": "Outlook",
+     "text": "Hi Zoe,\n\nHappy to jump on a call if that is easier. We are still collecting feedback from the design partners.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s27",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-09-04",
+     "app": "Thunderbird",
+     "text": "Hi Ben,\n\nWe are still collecting feedback from the design partners. Thanks for sending this over so quickly. Please loop in anyone else who should be on the thread. We plan to launch Atlas on October 1 if the billing work lands.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s28",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-09-08",
+     "app": "Mail",
+     "text": "Hi Priya,\n\nFor the renewal, we are thinking about something around $40,000 per year. I will follow up once I have the final numbers.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s29",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-09-11",
+     "app": "Slack",
+     "text": "let's sync after standup :)"
+    },
+    {
+     "id": "maya-s30",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-09-15",
+     "app": "Thunderbird",
+     "text": "Hi Noor,\n\nLet me check the calendar and come back to you. We plan to launch Atlas on October 1 if the billing work lands. The roadmap review moved to next week.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s31",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-09-19",
+     "app": "Slack",
+     "text": "on it :)"
+    },
+    {
+     "id": "maya-s32",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-09-22",
+     "app": "Microsoft Teams",
+     "text": "ok, i'll update the doc, just pushed my comments :)"
+    },
+    {
+     "id": "maya-s33",
+     "channel": "email",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-09-26",
+     "app": "Thunderbird",
+     "text": "Hi Sam,\n\nThat sounds like a good plan to me. I really appreciate the detailed write-up. I went through the notes and they look good to me.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s34",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-09-30",
+     "app": "Mail",
+     "text": "Hi Ravi,\n\nCould you share the latest version before our next call? I have added a few comments in the doc.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s35",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-10-03",
+     "app": "Slack",
+     "text": "i'll check with tom, on it :)"
+    },
+    {
+     "id": "maya-s36",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-10-07",
+     "app": "Thunderbird",
+     "text": "Hi Ben,\n\nI think we are close, but I want to check one detail with the team first. Thanks for sending this over so quickly.\n\nThanks,\nMaya"
+    },
+    {
+     "id": "maya-s37",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-10-11",
+     "app": "Mail",
+     "text": "Hi Priya,\n\nHappy to jump on a call if that is easier. The beta has been going well so far. I think we are close, but I want to check one detail with the team first. Our goal is to keep the scope small for the first release.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s38",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-10-14",
+     "app": "Microsoft Teams",
+     "text": "can you send me the link"
+    },
+    {
+     "id": "maya-s39",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-10-18",
+     "app": "Thunderbird",
+     "text": "Hi Noor,\n\nI really appreciate the detailed write-up. Happy to jump on a call if that is easier. That sounds like a good plan to me. For the renewal, we are thinking about something around $40,000 per year.\n\nBest,\nMaya"
+    },
+    {
+     "id": "maya-s40",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-10-22",
+     "app": "Mail",
+     "text": "Hi Aiko,\n\nLet me check the calendar and come back to you. Our goal is to keep the scope small for the first release. Please loop in anyone else who should be on the thread.\n\nBest,\nMaya"
+    }
+   ]
+  },
+  {
+   "id": "henrik",
+   "name": "Henrik Larsen",
+   "email": "henrik.larsen@northwind.example.com",
+   "role": "Finance Director, Northwind Labs",
+   "voice": "Formal everywhere, no contractions, no emoji or exclamation marks. Email: 'Dear <name>,' and 'Kind regards,\\nHenrik Larsen', long. Chat: 'Hello <name>,' and 'Regards, Henrik', medium.",
+   "sent": [
+    {
+     "id": "henrik-s01",
+     "channel": "email",
+     "to": "lena.fischer@globex.test",
+     "to_name": "Lena Fischer",
+     "date": "2026-06-01",
+     "app": "Mail",
+     "text": "Dear Lena,\n\nThe board expects a full cost comparison before any decision is taken. Our current planning assumes a budget of $310,000 for marketing in Q4. It is important that we keep within the approved limits. Our records show the 2025 rate of $11,200 per month. Please ensure that the purchase order number appears on the invoice. We should schedule a short meeting next week to close this matter.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s02",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-06-04",
+     "app": "Microsoft Teams",
+     "text": "Hello Tom,\nI have approved the request. Thank you, I will review it this afternoon.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s03",
+     "channel": "chat",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-06-08",
+     "app": "Slack",
+     "text": "Hello Maya,\nCould you confirm the amount before I approve it?\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s04",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-06-12",
+     "app": "Mail",
+     "text": "Dear Noor,\n\nI must ask that all expenses are submitted with receipts. The board expects a full cost comparison before any decision is taken. Thank you in advance for your cooperation. We are reviewing all vendor contracts this quarter. I would appreciate an updated quote at your earliest convenience.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s05",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-06-15",
+     "app": "Outlook",
+     "text": "Dear Tom,\n\nWe are reviewing all vendor contracts this quarter. Please ensure that the purchase order number appears on the invoice. Please find my comments below. Our current planning assumes a budget of $310,000 for marketing in Q4. I would be grateful if you could send the supporting invoices. The figures for September are now final.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s06",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-06-19",
+     "app": "Thunderbird",
+     "text": "Dear Maya,\n\nThe board expects a full cost comparison before any decision is taken. I will confirm the approval once the documentation is complete. The notice period in the current agreement must be respected. Thank you in advance for your cooperation. Thank you for your message and for the clear summary.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s07",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-06-23",
+     "app": "Slack",
+     "text": "Hello Tom,\nWe need the signed contract before payment can be made. I have approved the request.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s08",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-06-26",
+     "app": "Outlook",
+     "text": "Dear Zoe,\n\nPlease find my comments below. I would be grateful if you could send the supporting invoices. It is important that we keep within the approved limits. The board expects a full cost comparison before any decision is taken. The notice period in the current agreement must be respected. I would prefer to discuss the terms in person before we commit.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s09",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-06-30",
+     "app": "Slack",
+     "text": "Hello Ben,\nWe need the signed contract before payment can be made. I have approved the request.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s10",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-07-04",
+     "app": "Microsoft Teams",
+     "text": "Hello Zoe,\nPlease add the cost centre to the request.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s11",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-07-07",
+     "app": "Outlook",
+     "text": "Dear Priya,\n\nI would appreciate an updated quote at your earliest convenience. It is important that we keep within the approved limits. Please find my comments below. I would prefer to discuss the terms in person before we commit. We will need to align this with the quarterly forecast.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s12",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-07-11",
+     "app": "Thunderbird",
+     "text": "Dear Noor,\n\nWe will need to align this with the quarterly forecast. The figures for September are now final. I would appreciate an updated quote at your earliest convenience. Our records show the 2025 rate of $11,200 per month.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s13",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-07-15",
+     "app": "Mail",
+     "text": "Dear Tom,\n\nThank you in advance for your cooperation. The notice period in the current agreement must be respected. Please ensure that the purchase order number appears on the invoice. We are reviewing all vendor contracts this quarter.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s14",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-07-18",
+     "app": "Outlook",
+     "text": "Dear Maya,\n\nI trust this clarifies our position. We will need to align this with the quarterly forecast. Thank you for your message and for the clear summary. Our records show the 2025 rate of $11,200 per month.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s15",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-07-22",
+     "app": "Slack",
+     "text": "Hello Zoe,\nThat is correct.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s16",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-07-26",
+     "app": "Microsoft Teams",
+     "text": "Hello Ravi,\nPlease submit the receipts through the finance portal.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s17",
+     "channel": "email",
+     "to": "lena.fischer@globex.test",
+     "to_name": "Lena Fischer",
+     "date": "2026-07-29",
+     "app": "Outlook",
+     "text": "Dear Lena,\n\nThe board expects a full cost comparison before any decision is taken. Thank you for your message and for the clear summary. I must ask that all expenses are submitted with receipts. Please do not hesitate to contact me should anything be unclear.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s18",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-08-02",
+     "app": "Thunderbird",
+     "text": "Dear Ravi,\n\nOur current planning assumes a budget of $310,000 for marketing in Q4. The figures for September are now final. I will confirm the approval once the documentation is complete. I must ask that all expenses are submitted with receipts. I trust this clarifies our position. I have copied Ravi so that he is aware of the situation.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s19",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-08-06",
+     "app": "Mail",
+     "text": "Dear Priya,\n\nI have reviewed the figures and have a number of questions. We are reviewing all vendor contracts this quarter. I would appreciate an updated quote at your earliest convenience. Please ensure that the purchase order number appears on the invoice.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s20",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-08-09",
+     "app": "Outlook",
+     "text": "Dear Noor,\n\nWe should schedule a short meeting next week to close this matter. I have copied Ravi so that he is aware of the situation. Please ensure that the purchase order number appears on the invoice. We will need to align this with the quarterly forecast. I trust this clarifies our position. The figures for September are now final.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s21",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-08-13",
+     "app": "Thunderbird",
+     "text": "Dear Tom,\n\nWe should schedule a short meeting next week to close this matter. Thank you for your message and for the clear summary. I would appreciate an updated quote at your earliest convenience. I would prefer to discuss the terms in person before we commit. Our records show the 2025 rate of $11,200 per month. We will need to align this with the quarterly forecast.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s22",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-08-17",
+     "app": "Mail",
+     "text": "Dear Maya,\n\nWe will need to align this with the quarterly forecast. The notice period in the current agreement must be respected. Thank you in advance for your cooperation. I would be grateful if you could send the supporting invoices.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s23",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-08-20",
+     "app": "Outlook",
+     "text": "Dear Ben,\n\nI have reviewed the figures and have a number of questions. I will confirm the approval once the documentation is complete. We should schedule a short meeting next week to close this matter. Thank you in advance for your cooperation. I trust this clarifies our position. The notice period in the current agreement must be respected.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s24",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-08-24",
+     "app": "Microsoft Teams",
+     "text": "Hello Ben,\nThat is correct.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s25",
+     "channel": "email",
+     "to": "lena.fischer@globex.test",
+     "to_name": "Lena Fischer",
+     "date": "2026-08-28",
+     "app": "Mail",
+     "text": "Dear Lena,\n\nOur current planning assumes a budget of $310,000 for marketing in Q4. The board expects a full cost comparison before any decision is taken. I must ask that all expenses are submitted with receipts. I have reviewed the figures and have a number of questions.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s26",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-08-31",
+     "app": "Outlook",
+     "text": "Dear Ravi,\n\nWe should schedule a short meeting next week to close this matter. I would appreciate an updated quote at your earliest convenience. I trust this clarifies our position. Thank you for your message and for the clear summary.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s27",
+     "channel": "email",
+     "to": "priya.shah@acme.example.com",
+     "to_name": "Priya Shah",
+     "date": "2026-09-04",
+     "app": "Thunderbird",
+     "text": "Dear Priya,\n\nI would appreciate an updated quote at your earliest convenience. I will confirm the approval once the documentation is complete. Thank you in advance for your cooperation. We should schedule a short meeting next week to close this matter.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s28",
+     "channel": "chat",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-09-08",
+     "app": "Microsoft Teams",
+     "text": "Hello Maya,\nPlease add the cost centre to the request.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s29",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-09-11",
+     "app": "Outlook",
+     "text": "Dear Tom,\n\nI would appreciate an updated quote at your earliest convenience. We should schedule a short meeting next week to close this matter. I trust this clarifies our position. The notice period in the current agreement must be respected. Our current planning assumes a budget of $310,000 for marketing in Q4.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s30",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-09-15",
+     "app": "Thunderbird",
+     "text": "Dear Maya,\n\nWe should schedule a short meeting next week to close this matter. I must ask that all expenses are submitted with receipts. I trust this clarifies our position. The board expects a full cost comparison before any decision is taken. I would appreciate an updated quote at your earliest convenience. We will need to align this with the quarterly forecast.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s31",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-09-19",
+     "app": "Mail",
+     "text": "Dear Ben,\n\nI would be grateful if you could send the supporting invoices. It is important that we keep within the approved limits. I would appreciate an updated quote at your earliest convenience. I will confirm the approval once the documentation is complete. Please find my comments below.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s32",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-09-22",
+     "app": "Outlook",
+     "text": "Dear Zoe,\n\nOur current planning assumes a budget of $310,000 for marketing in Q4. I have copied Ravi so that he is aware of the situation. Please find my comments below. The board expects a full cost comparison before any decision is taken. Please do not hesitate to contact me should anything be unclear. I would be grateful if you could send the supporting invoices.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s33",
+     "channel": "email",
+     "to": "lena.fischer@globex.test",
+     "to_name": "Lena Fischer",
+     "date": "2026-09-26",
+     "app": "Thunderbird",
+     "text": "Dear Lena,\n\nOur records show the 2025 rate of $11,200 per month. Please ensure that the purchase order number appears on the invoice. We are reviewing all vendor contracts this quarter. We will need to align this with the quarterly forecast.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s34",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-09-30",
+     "app": "Mail",
+     "text": "Dear Ravi,\n\nWe will need to align this with the quarterly forecast. I would appreciate an updated quote at your earliest convenience. Our current planning assumes a budget of $310,000 for marketing in Q4. I would be grateful if you could send the supporting invoices. It is important that we keep within the approved limits.\n\nKind regards,\nHenrik Larsen"
+    },
+    {
+     "id": "henrik-s35",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-10-03",
+     "app": "Slack",
+     "text": "Hello Zoe,\nI am available at 14:00 if that suits you. We need the signed contract before payment can be made.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s36",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-10-07",
+     "app": "Microsoft Teams",
+     "text": "Hello Ravi,\nI am available at 14:00 if that suits you.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s37",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-10-11",
+     "app": "Slack",
+     "text": "Hello Tom,\nThat is correct. Please submit the receipts through the finance portal.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s38",
+     "channel": "chat",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-10-14",
+     "app": "Microsoft Teams",
+     "text": "Hello Maya,\nPlease submit the receipts through the finance portal. Noted. I will update the forecast accordingly.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s39",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-10-18",
+     "app": "Slack",
+     "text": "Hello Ben,\nI have approved the request. Please send me the final figures when they are ready.\nRegards, Henrik"
+    },
+    {
+     "id": "henrik-s40",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-10-22",
+     "app": "Mail",
+     "text": "Dear Zoe,\n\nWe are reviewing all vendor contracts this quarter. Thank you for your message and for the clear summary. I will confirm the approval once the documentation is complete. I trust this clarifies our position. I would appreciate an updated quote at your earliest convenience. The figures for September are now final.\n\nKind regards,\nHenrik Larsen"
+    }
+   ]
+  },
+  {
+   "id": "jules",
+   "name": "Jules Rivera",
+   "email": "jules.rivera@northwind.example.com",
+   "role": "Developer Relations Lead, Northwind Labs",
+   "voice": "Upbeat and casual, emoji and exclamation marks. Email: 'Hey <name>!' (colleagues) or 'Hi <name>!' (externals) and 'Cheers,\\nJules', short. Chat: lowercase, very short, no greeting or sign-off, emoji.",
+   "sent": [
+    {
+     "id": "jules-s01",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-06-01",
+     "app": "Slack",
+     "text": "nice!! 😄"
+    },
+    {
+     "id": "jules-s02",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-06-04",
+     "app": "Microsoft Teams",
+     "text": "i'll take a look 😄"
+    },
+    {
+     "id": "jules-s03",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-06-08",
+     "app": "Slack",
+     "text": "haha fair, omg yes 🙌"
+    },
+    {
+     "id": "jules-s04",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-06-12",
+     "app": "Mail",
+     "text": "Hi Aiko!\n\nCan you send me the details when you get a sec? I'll share the slides as soon as they're ready. 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s05",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-06-15",
+     "app": "Slack",
+     "text": "let's gooo, nice!! 🚀"
+    },
+    {
+     "id": "jules-s06",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-06-19",
+     "app": "Thunderbird",
+     "text": "Hey Ravi!\n\nCan you send me the details when you get a sec? I'll share the slides as soon as they're ready. Happy to review the draft.\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s07",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-06-23",
+     "app": "Mail",
+     "text": "Hey Ben!\n\nSuper excited about how the meetup is shaping up! Thanks so much for this! This is going to be awesome! 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s08",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-06-26",
+     "app": "Microsoft Teams",
+     "text": "who's bringing snacks?, done! 😄"
+    },
+    {
+     "id": "jules-s09",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-06-30",
+     "app": "Thunderbird",
+     "text": "Hey Zoe!\n\nI'll loop in Zoe for the marketing side. Let's grab 20 minutes next week to sync. I'll share the slides as soon as they're ready. 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s10",
+     "channel": "chat",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-07-04",
+     "app": "Microsoft Teams",
+     "text": "can't wait for this, brb, call 🙌"
+    },
+    {
+     "id": "jules-s11",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-07-07",
+     "app": "Outlook",
+     "text": "Hey Tom!\n\nTotally agree with you on that. Thanks so much for this! We're aiming to get the docs live soon. 🎉\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s12",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-07-11",
+     "app": "Thunderbird",
+     "text": "Hi Aiko!\n\nWe're aiming to get the docs live soon. Quick one from me. Thanks so much for this! 😄\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s13",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-07-15",
+     "app": "Slack",
+     "text": "who's bringing snacks?, pizza is on me next time!! 😄"
+    },
+    {
+     "id": "jules-s14",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-07-18",
+     "app": "Microsoft Teams",
+     "text": "shipping it now!! 🎉"
+    },
+    {
+     "id": "jules-s15",
+     "channel": "email",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-07-22",
+     "app": "Thunderbird",
+     "text": "Hey Ben!\n\nTotally agree with you on that. Can you send me the details when you get a sec? Let's grab 20 minutes next week to sync. 🎉\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s16",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-07-26",
+     "app": "Mail",
+     "text": "Hi Noor!\n\nThe community has been asking about this a lot. Can you send me the details when you get a sec? Quick one from me. 😄\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s17",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-07-29",
+     "app": "Outlook",
+     "text": "Hey Zoe!\n\nHappy to review the draft. I'll share the slides as soon as they're ready. 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s18",
+     "channel": "chat",
+     "to": "ben.clarke@northwind.example.com",
+     "to_name": "Ben Clarke",
+     "date": "2026-08-02",
+     "app": "Microsoft Teams",
+     "text": "omg yes!! 🎉"
+    },
+    {
+     "id": "jules-s19",
+     "channel": "email",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-08-06",
+     "app": "Mail",
+     "text": "Hey Tom!\n\nI'll loop in Zoe for the marketing side. Feel free to ping me with any questions. 🎉\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s20",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-08-09",
+     "app": "Microsoft Teams",
+     "text": "let's gooo, i'll take a look!! 🙌"
+    },
+    {
+     "id": "jules-s21",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-08-13",
+     "app": "Thunderbird",
+     "text": "Hey Maya!\n\nThe September meetup had a $400 pizza budget and it was gone in minutes! Totally agree with you on that. I can help promote it on our channels! 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s22",
+     "channel": "chat",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-08-17",
+     "app": "Microsoft Teams",
+     "text": "brb, call 🙌"
+    },
+    {
+     "id": "jules-s23",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-08-20",
+     "app": "Slack",
+     "text": "who's bringing snacks?!! 🎉"
+    },
+    {
+     "id": "jules-s24",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-08-24",
+     "app": "Thunderbird",
+     "text": "Hi Noor!\n\nTotally agree with you on that. Super excited about how the meetup is shaping up! 😄\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s25",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-08-28",
+     "app": "Slack",
+     "text": "omg yes 🙌"
+    },
+    {
+     "id": "jules-s26",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-08-31",
+     "app": "Microsoft Teams",
+     "text": "nice!!, omg yes 🎉"
+    },
+    {
+     "id": "jules-s27",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-09-04",
+     "app": "Slack",
+     "text": "on it! 😄"
+    },
+    {
+     "id": "jules-s28",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-09-08",
+     "app": "Mail",
+     "text": "Hi Aiko!\n\nQuick one from me. We're aiming to get the docs live soon. I'll share the slides as soon as they're ready. 🙌\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s29",
+     "channel": "email",
+     "to": "maya.okafor@northwind.example.com",
+     "to_name": "Maya Okafor",
+     "date": "2026-09-11",
+     "app": "Outlook",
+     "text": "Hey Maya!\n\nThis is going to be awesome! I can help promote it on our channels!\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s30",
+     "channel": "email",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-09-15",
+     "app": "Thunderbird",
+     "text": "Hey Ravi!\n\nHappy to review the draft. This is going to be awesome! 🎉\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s31",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-09-19",
+     "app": "Slack",
+     "text": "on it! 🚀"
+    },
+    {
+     "id": "jules-s32",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-09-22",
+     "app": "Outlook",
+     "text": "Hi Noor!\n\nFeel free to ping me with any questions. Happy to review the draft. This is going to be awesome! 😄\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s33",
+     "channel": "email",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-09-26",
+     "app": "Thunderbird",
+     "text": "Hey Zoe!\n\nHappy to review the draft. I'll share the slides as soon as they're ready.\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s34",
+     "channel": "email",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-09-30",
+     "app": "Mail",
+     "text": "Hey Sam!\n\nThe community has been asking about this a lot. The September meetup had a $400 pizza budget and it was gone in minutes! 🚀\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s35",
+     "channel": "chat",
+     "to": "ravi.menon@northwind.example.com",
+     "to_name": "Ravi Menon",
+     "date": "2026-10-03",
+     "app": "Slack",
+     "text": "done!, who's bringing snacks? 🙌"
+    },
+    {
+     "id": "jules-s36",
+     "channel": "email",
+     "to": "aiko.tanaka@initech.example.com",
+     "to_name": "Aiko Tanaka",
+     "date": "2026-10-07",
+     "app": "Thunderbird",
+     "text": "Hi Aiko!\n\nQuick one from me. This is going to be awesome! I can help promote it on our channels! 😄\n\nCheers,\nJules"
+    },
+    {
+     "id": "jules-s37",
+     "channel": "chat",
+     "to": "zoe.martin@northwind.example.com",
+     "to_name": "Zoe Martin",
+     "date": "2026-10-11",
+     "app": "Slack",
+     "text": "done! 😄"
+    },
+    {
+     "id": "jules-s38",
+     "channel": "chat",
+     "to": "sam.ortiz@northwind.example.com",
+     "to_name": "Sam Ortiz",
+     "date": "2026-10-14",
+     "app": "Microsoft Teams",
+     "text": "can't wait for this!! 🎉"
+    },
+    {
+     "id": "jules-s39",
+     "channel": "chat",
+     "to": "tom.becker@northwind.example.com",
+     "to_name": "Tom Becker",
+     "date": "2026-10-18",
+     "app": "Slack",
+     "text": "nice!! 🙌"
+    },
+    {
+     "id": "jules-s40",
+     "channel": "email",
+     "to": "noor.haddad@umbrella.test",
+     "to_name": "Noor Haddad",
+     "date": "2026-10-22",
+     "app": "Mail",
+     "text": "Hi Noor!\n\nLove the idea, let's do it! Totally agree with you on that. Can you send me the details when you get a sec? 😄\n\nCheers,\nJules"
+    }
+   ]
+  }
+ ]
+}

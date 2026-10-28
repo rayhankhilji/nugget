@@ -263,7 +263,7 @@ fn every_suite_report_conforms() {
     };
     assert_eq!(status("memory"), "ok");
     assert_eq!(status("perf"), "ok");
-    assert_eq!(status("draft"), "not_implemented");
+    assert_eq!(status("draft"), "ok");
     assert_eq!(status("cua"), "not_implemented");
     // The fake memory suite has targets; the planned suites have none and omit the field.
     let memory = reports.iter().find(|r| r["suite"] == "memory").unwrap();

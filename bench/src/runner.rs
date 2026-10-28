@@ -73,6 +73,8 @@ pub struct RunConfig {
     pub embed_url: Option<String>,
     /// Model name sent to `embed_url`.
     pub embed_model: Option<String>,
+    /// `draft` suite options (provider, fake-model latency, locality).
+    pub draft: suites::draft::DraftOptions,
 }
 
 impl Default for RunConfig {
@@ -83,6 +85,7 @@ impl Default for RunConfig {
             backend: Backend::default(),
             embed_url: None,
             embed_model: None,
+            draft: suites::draft::DraftOptions::default(),
         }
     }
 }
@@ -157,7 +160,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
     vec![
         Box::new(suites::memory::MemoryBench),
         Box::new(suites::perf::PerfBench),
-        Box::new(suites::planned::DraftBench),
+        Box::new(suites::draft::DraftBench),
         Box::new(suites::planned::CuaBench),
     ]
 }
@@ -296,7 +299,7 @@ mod tests {
         assert_eq!(names, ["memory", "perf", "draft", "cua"]);
         assert!(find("perf").is_some_and(|b| b.implemented()));
         assert!(find("memory").is_some_and(|b| b.implemented()));
-        assert!(find("draft").is_some_and(|b| !b.implemented()));
+        assert!(find("draft").is_some_and(|b| b.implemented()));
         assert!(find("cua").is_some_and(|b| !b.implemented()));
         assert!(find("nope").is_none());
         for b in registry() {
@@ -368,12 +371,10 @@ mod tests {
 
     #[test]
     fn planned_suites_report_not_implemented() {
-        for name in ["draft", "cua"] {
-            let r = run_benchmark(find(name).unwrap().as_ref(), &RunConfig::default());
-            assert_eq!(r.status, Status::NotImplemented);
-            assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
-            assert!(r.metrics.is_empty());
-        }
+        let r = run_benchmark(find("cua").unwrap().as_ref(), &RunConfig::default());
+        assert_eq!(r.status, Status::NotImplemented);
+        assert!(r.message.as_deref().is_some_and(|m| m.len() > 20));
+        assert!(r.metrics.is_empty());
     }
 
     #[test]
