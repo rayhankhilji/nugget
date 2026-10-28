@@ -11,7 +11,7 @@ Reference for the server in `nugget-mcp`. For setup steps, see
 | Transport | How a client connects | Credential |
 |---|---|---|
 | stdio | The app launches `nuggetd mcp --client <id>` (planned), which pipes MCP to the running daemon over the local IPC socket | `NUGGET_MCP_TOKEN` in the launched process's environment |
-| Streamable HTTP | `http://127.0.0.1:7466/mcp` (port configurable; `0` picks a free one) | `Authorization: Bearer ngt_…` on every request |
+| Streamable HTTP | `http://127.0.0.1:7319/mcp` (port configurable; `0` picks a free one) | `Authorization: Bearer ngt_…` on every request |
 
 There is no remote transport. Every HTTP request passes these checks, in order:
 
