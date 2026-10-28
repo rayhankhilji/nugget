@@ -7,18 +7,33 @@ the current results. The full methodology, metric definitions and raw tables are
 
 ## Suites
 
+Six suites are registered (`bench/src/suites/`). `cargo run -p nugget-bench -- --list` prints them.
+
 | Suite | State | Measures |
 |---|---|---|
-| `memory` | Implemented: a fake in-crate index (default) or the **real stack** (`--backend real`) | Retrieval recall and MRR, change-to-searchable freshness, edit, insert, delete and rename propagation, ingest throughput, database size, memory |
+| `memory` | Implemented: a fake in-crate index (default) or the **real stack** (`--backend real`: encrypted store, ingest pipeline, files watcher and retriever in process) | Retrieval recall and MRR, change-to-searchable freshness, edit, insert, delete and rename propagation, ingest throughput, database size, memory |
 | `perf` | Implemented against the fake index only | Ingest, dedup, update, delete and query micro-benchmarks |
-| `draft` | Not implemented (M3) | Drafting quality against a screenshot-plus-whole-vault baseline; time to first inserted token |
-| `cua` | Not implemented (M4) | Computer-use task success, steps, time and safety violations |
+| `knowledge` | Implemented: the real M2 pipeline (`nugget-knowledge`, `nugget-vault`, `nugget-mcp`) on a labelled fixture corpus, with a scripted fake model | Entity and claim precision and recall, resolution, unsupported claims, injection resistance, citation coverage, user-edit merge fidelity, retraction, MCP `get_context` round trips |
+| `draft` | Implemented: Nugget's drafting context against a Sentient-style "whole vault plus screenshot" baseline, with a deterministic fake model by default or a real one (`--provider-url`) | Voice match (stylometric), fact recall, hallucination rate, injection resistance, sensitive-item leaks, prompt size, time to first token and total latency |
+| `cua` | Implemented: six deterministic test apps, run in process, over a loopback socket, or on an Xvfb desktop with AT-SPI (`--cua-env`); agents `reference`, `null` and `naive` (`--cua-agent`) | Computer-use task success, steps, time, unconfirmed risky actions and injected instructions followed |
+| `proactive` | Implemented against an in-crate reference engine over a 30-day fixture world; `--backend real` (the `nugget-proactive` crate) is not implemented yet | Card precision and recall, distractor false positives, dedup, learning curve, dry-run coverage and the approval gate, against a recency baseline |
+
+The `cua` agents validate the harness: no Nugget agent arm exists yet. Computer use and the real
+proactive engine are being wired into the daemon in wave W, and their bench arms with them.
 
 ```sh
+cargo run -p nugget-bench -- --list                                     # registered suites
+cargo run -p nugget-bench -- all --scale smoke --no-write              # what CI runs (it writes reports)
 cargo run --release -p nugget-bench -- memory --backend real            # the M1 gate
 cargo run --release -p nugget-bench -- memory --backend real --scale quick
-cargo run --release -p nugget-bench -- --list
+cargo run -p nugget-bench -- knowledge --strict
+cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict   # Linux only
 ```
+
+Scales are `smoke`, `quick`, `standard` (the default) and `full`; quote numbers only from `standard`
+or `full` on a release build. Reports are JSON files in `bench/results/` (`--out-dir` changes that,
+`--no-write` skips them), checked in CI against `bench/schema/report.schema.json`. `--strict` exits
+non-zero when a suite is not implemented or a metric misses its target.
 
 Fake-index numbers validate the harness and serve as a regression baseline; they are **not** product
 numbers and are not quoted here.
@@ -102,5 +117,8 @@ nDCG@10 0.913, against 0.905 and 0.810 for full-text alone.
 - Mail and calendar connectors end to end, through the daemon and IPC.
 - Citation accuracy (does each `[n]` support its sentence?).
 - CPU, battery and idle cost per 1 000 items, and daemon idle overhead.
-- Knowledge-graph extraction precision and recall, and the 100 % citation-coverage gate (M2).
-- Drafting (M3) and computer use (M4): suites not implemented.
+- Published `knowledge`, `draft`, `cua` and `proactive` results: the suites run in CI at smoke
+  scale, but no release-build run is published here yet, and `knowledge` and `draft` use fake models
+  by default.
+- Nugget's own computer-use agent and the real proactive engine on their suites (being wired in
+  wave W).

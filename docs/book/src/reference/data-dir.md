@@ -40,10 +40,35 @@ On macOS, data and config share one directory.
   runtime/
     chat.pid, embedding.pid
                            running local model servers (orphans are cleaned up at start)
+  vault/                   the vault, only with --home or NUGGET_HOME (see below)
 ```
 
-The **vault** (rendered Markdown pages of the knowledge graph) is not written by the daemon yet; its
-location will be configurable when it is.
+Status: being wired in (wave W). Installed WebAssembly plugins will live in `<data>/plugins/`
+(the store in `nugget-plugin` already uses that directory), and the agent's hash-chained action log
+will also be kept under the data directory.
+
+## The vault
+
+The knowledge graph is rendered as Markdown into the **vault**, outside the data directory so you
+can open it in any editor:
+
+| Install | Vault |
+|---|---|
+| Normal | `~/Nugget Vault` |
+| With `NUGGET_HOME=DIR` or `--home DIR` | `DIR/data/vault` |
+| `[vault] path` set | That directory (see [config.toml](config.md#vault)) |
+
+```text
+<vault>/
+  Person/Ada Example (ent_000042).md    one page per entity, under its kind
+  Organization/…, Project/…, Topic/…
+  .nugget/                              merge bases, conflict sidecars and the page manifest
+```
+
+The daemon writes pages atomically, never through a symlink, and watches the vault for your edits.
+`[vault] enabled = false` turns rendering and watching off. The vault is plain, unencrypted text: it
+is a readable copy of facts that are also in the store, so keep it out of folders you sync if that
+matters to you.
 
 ## What is in the store
 
@@ -54,8 +79,11 @@ location will be configurable when it is.
 - per-source sync cursors;
 - the egress ledger;
 - the hash-chained audit log;
-- the knowledge graph tables (entities, claims, evidence, mentions, a change feed);
-- metadata such as the embedding dimension.
+- the knowledge graph tables (entities, claims, evidence, mentions, a change feed) and the
+  extraction progress;
+- MCP clients (names, scopes and keyed hashes of their tokens, never the tokens) and the key those
+  hashes use;
+- metadata such as the embedding dimension and the vault's render position.
 
 The key is 256 random bits, kept in the OS keychain (service `dev.nugget.Nugget`), or in `store.key`
 when no keychain is usable or `NUGGET_KEYCHAIN=off`.
@@ -70,4 +98,6 @@ when no keychain is usable or `NUGGET_KEYCHAIN=off`.
 
 Copy the data and config directories while the daemon is stopped. The store is useless without its key:
 back up the keychain entry too, or the `store.key` file if you use one, and keep it as safe as the data
-itself. Model files can be re-downloaded and do not need a backup.
+itself. Model files can be re-downloaded and do not need a backup. The vault is rendered from the
+store, and edits you made in it are already merged into the store as facts you asserted, so it can be
+rebuilt; back it up anyway if you keep your own notes in it.

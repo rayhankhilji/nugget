@@ -99,12 +99,18 @@ export class Router {
         await this.halt();
         return {};
       case "snapshot": {
+        // Stop means stop: no reading pages either until the user resumes from the popup.
+        if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
         const tab = await this.grantedTab(req.tab_id);
         const snap = (await this.toTab(tab.id, { nugget: "snapshot", options: req.options })) as PageSnapshot;
+        await this.checkSnapshotOrigin(snap);
         this.latest.set(tab.id, snap);
         return snap;
       }
       case "overlay": {
+        // Showing "Nugget is acting" over "Nugget stopped" would tell the user the opposite of
+        // the truth; hiding it is always fine.
+        if (this.halted && req.active) throw new ProtocolError("halted", "Nugget was stopped by the user");
         const tab = await this.grantedTab(req.tab_id);
         return this.toTab(tab.id, { nugget: "overlay", active: req.active, label: req.label });
       }
@@ -113,6 +119,7 @@ export class Router {
         if (req.action.kind === "navigate") return this.navigate(req.tab_id, req.action.url);
         const tab = await this.grantedTab(req.tab_id);
         const result = (await this.toTab(tab.id, { nugget: "act", snapshot_id: req.snapshot_id, action: req.action })) as ActResult;
+        await this.checkSnapshotOrigin(result.snapshot);
         this.latest.set(tab.id, result.snapshot);
         return result;
       }
@@ -129,6 +136,8 @@ export class Router {
     const before = this.latest.get(tab.id);
     await this.deps.navigate(tab.id, url.href);
     const snapshot = (await this.toTab(tab.id, { nugget: "snapshot" })) as PageSnapshot;
+    // Redirects may land anywhere; only hand over the page if the user granted where it ended up.
+    await this.checkSnapshotOrigin(snapshot);
     this.latest.set(tab.id, snapshot);
     const base: PageSnapshot = before ?? { ...snapshot, url: tab.url ?? "", title: "", elements: [], text: "" };
     return { before_snapshot_id: before?.snapshot_id ?? "", snapshot, diff: diffSnapshots(base, snapshot) };
@@ -152,6 +161,24 @@ export class Router {
       throw new ProtocolError("permission_required", "Nugget has no access to this site; grant it from the toolbar button");
     }
     return tab;
+  }
+
+  /**
+   * The consent check runs on the tab's URL before the read, but the tab can navigate (or the
+   * page can redirect itself) in between: check the document the snapshot actually came from,
+   * and drop it unless that site is granted too.
+   */
+  private async checkSnapshotOrigin(snap: PageSnapshot | undefined): Promise<void> {
+    let origin: string | undefined;
+    try {
+      const u = new URL(snap?.url ?? "");
+      origin = /^https?:$/.test(u.protocol) ? u.origin : undefined;
+    } catch {
+      origin = undefined;
+    }
+    if (!origin || !(await this.deps.hasPermission(origin))) {
+      throw new ProtocolError("permission_required", "the page moved to a site Nugget has no access to");
+    }
   }
 
   private async toTab(tabId: number, msg: ContentRequest): Promise<unknown> {

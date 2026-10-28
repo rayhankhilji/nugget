@@ -531,3 +531,27 @@ async fn denied_device_flow_is_unauthorized() {
             .is_none()
     );
 }
+
+/// The verification URL is opened for the user to type the code into: a hostile device/code
+/// answer must not turn it into a look-alike page on another host.
+#[tokio::test]
+async fn device_flow_refuses_foreign_verification_urls() {
+    for uri in [
+        "https://github.com.evil.example/login/device",
+        "https://evil.example/login/device",
+        "https://user:pw@github.com/login/device",
+        "javascript:alert(1)",
+    ] {
+        let h = Harness::new().await;
+        Mock::given(method("POST"))
+            .and(path("/github/login/device/code"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "device_code": "dc", "user_code": "X", "verification_uri": uri, "interval": 0
+            })))
+            .mount(&h.server)
+            .await;
+        let conn = github(&h, json!({"client_id": "Iv1.abc"}));
+        let r = conn.begin_auth().await;
+        assert!(matches!(r, Err(Error::Invalid(_))), "{uri} accepted");
+    }
+}

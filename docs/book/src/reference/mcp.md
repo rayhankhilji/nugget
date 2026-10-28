@@ -3,22 +3,24 @@
 Reference for the server in `nugget-mcp`. For setup steps, see
 [Connecting AI apps over MCP](../guide/mcp.md).
 
-> **Not yet served by the daemon.** The server is implemented and tested as a library; `nuggetd` does
-> not start it yet.
+`nuggetd` runs the server unless `[mcp] enabled = false` (see
+[config.toml](config.md#mcp)). Clients are managed with the `mcp.clients.*` IPC methods, the
+desktop's **Connected AI apps** page, or `nuggetd mcp install` ([Command line](cli.md#nuggetd-mcp)).
 
 ## Transports
 
 | Transport | How a client connects | Credential |
 |---|---|---|
-| stdio | The app launches `nuggetd mcp --client <id>` (planned), which pipes MCP to the running daemon over the local IPC socket | `NUGGET_MCP_TOKEN` in the launched process's environment |
-| Streamable HTTP | `http://127.0.0.1:7466/mcp` (port configurable; `0` picks a free one) | `Authorization: Bearer ngt_…` on every request |
+| stdio | The app launches `nuggetd mcp --client <id>`, which pipes MCP to the running daemon over the local IPC socket | `NUGGET_MCP_TOKEN` in the launched process's environment |
+| Streamable HTTP | `http://127.0.0.1:7319/mcp` when `[mcp] http` is on (the default). The port is `[mcp] port`; `0` picks a free one | `Authorization: Bearer ngt_…` on every request |
 
 There is no remote transport. Every HTTP request passes these checks, in order:
 
 1. The peer is on loopback (the listener binds `127.0.0.1` only).
 2. The path is `/mcp`, with **no query string at all**: credentials never travel in URLs.
 3. `Host` is `127.0.0.1:<port>` or `localhost:<port>` (DNS-rebinding protection).
-4. `Origin`, if present, is on the allow-list, which is empty by default, so browser pages are refused.
+4. `Origin`, if present, is on the allow-list (`[mcp] allowed_origins`), which is empty by default,
+   so browser pages are refused.
    CORS is closed: preflights get 403, and no response carries `Access-Control-*` headers.
 5. The bearer token names a live client (otherwise 401).
 6. The client is within its rate limit (otherwise 429 with `Retry-After`).
