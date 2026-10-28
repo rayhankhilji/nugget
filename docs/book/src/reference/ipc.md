@@ -27,9 +27,14 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
   An `ItemRef` is `{"source": "<source id>", "key": "<item key>"}`.
 - Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`. Localities: `on_device`,
   `local_network`, `cloud`.
-- The **Daemon** column says whether today's `nuggetd` implements the method. Methods marked
-  "not yet" are part of the protocol, and the desktop app is built against them, but the daemon
-  answers them with `-32601` (method not found).
+- The **Daemon** column says whether today's `nuggetd` implements the method:
+  - **yes**: the daemon serves it.
+  - **not yet**: part of the protocol, and the desktop app may be built against it, but the daemon
+    answers `-32601` (method not found).
+  - **in progress**: being wired into the daemon in the current wave of work (wave W) on another
+    branch. The name and the one-line description come from the plan; parameters and results are
+    not final, and some of these names are not in `nugget_core::ipc` yet. Until the work lands, the
+    daemon answers `-32601`.
 
 ## Methods
 
@@ -107,35 +112,88 @@ Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `knowledge.entities` | `EntitiesRequest`: `text`, `kind`, `limit`, `offset` | list of `EntitySummaryView`: `id`, `kind`, `name`, `claims`, `mentions`, `updated_at` | not yet |
-| `knowledge.entity` | `EntityRef`: `{id}` | `EntityDetail`: `id`, `kind`, `name`, `aliases`, `identifiers`, `attributes`, `claims`, `mentions`, `vault_path` | not yet |
-| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds` | `GraphViewIpc`: `nodes`, `edges`, `truncated` | not yet |
-| `knowledge.merge` | `MergeRequest`: `{into, from}` | `null` | not yet |
-| `knowledge.claim.status` | `ClaimStatusRequest`: `{claim, status}`, status `retracted` (reject) or `active` (restore) | `null` | not yet |
-| `knowledge.status` | `{}` | `KnowledgeStatus`: `entities`, `claims`, `mentions`, `pending_items`, `last_run`, `extractor_provider`, `vault` | not yet |
+| `knowledge.entities` | `EntitiesRequest`: `text`, `kind`, `limit`, `offset` | list of `EntitySummaryView`: `id`, `kind`, `name`, `claims`, `mentions`, `updated_at` | yes |
+| `knowledge.entity` | `EntityRef`: `{id}` | `EntityDetail`: `id`, `kind`, `name`, `aliases`, `identifiers`, `attributes`, `claims`, `mentions`, `vault_path` | yes |
+| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds` | `GraphViewIpc`: `nodes`, `edges`, `truncated` | yes |
+| `knowledge.merge` | `MergeRequest`: `{into, from}` | `null` | yes |
+| `knowledge.claim.status` | `ClaimStatusRequest`: `{claim, status}`, status `retracted` (reject) or `active` (restore) | `null` | yes |
+| `knowledge.status` | `{}` | `KnowledgeStatus`: `entities`, `claims`, `mentions`, `pending_items`, `last_run`, `extractor_provider`, `vault` | yes |
 
 ### MCP clients
 
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `mcp.clients.list` | `{}` | list of `McpClientInfo`: `id`, `name`, `scopes`, `created_at`, `last_used` | not yet |
-| `mcp.clients.create` | `McpClientCreate`: `{name, scopes}` | `McpClientCreated`: `client`, `token` (returned once), `setup` (list of `McpSetupSnippet`: `app`, `config_path`, `text`) | not yet |
-| `mcp.clients.revoke` | `McpClientRef`: `{id}` | `null` | not yet |
+| `mcp.clients.list` | `{}` | list of `McpClientInfo`: `id`, `name`, `scopes`, `created_at`, `last_used` | yes |
+| `mcp.clients.create` | `McpClientCreate`: `{name, scopes}` | `McpClientCreated`: `client`, `token` (returned once), `setup` (list of `McpSetupSnippet`: `app`, `config_path`, `text`) | yes |
+| `mcp.clients.revoke` | `McpClientRef`: `{id}` | `null` | yes |
 
-`McpScopes` is described in [MCP tools and scopes](mcp.md#scopes).
+`McpScopes` is described in [MCP tools and scopes](mcp.md#scopes). The stdio bridge
+(`nuggetd mcp --client <id>`) also talks to the daemon over this socket, with internal
+`mcp.bridge.*` methods that are not part of the public protocol.
 
 ### Drafting (Double Tap, milestone M3)
+
+Status: being wired in (wave W, Double Tap). The contracts below are already in `nugget_core::ipc`.
 
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens` | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | not yet |
-| `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | not yet |
-| `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | not yet |
-| `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | not yet |
+| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens` | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | in progress |
+| `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | in progress |
+| `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | in progress |
+| `draft.prewarm` | Not final | Not final. Sent by the desktop when the trigger fires, so the model can load the prompt prefix before `draft.begin`; it may end up as a notification (no `id`) rather than a method | in progress |
+| `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | in progress |
 
 A field with `secure: true` (a password field) is refused, and its value is never read.
+
+### Agent and safety (milestone M4)
+
+Status: being wired in (wave W). The names are planned; parameters and results are not final.
+
+<!-- check-refs: ipc.methods -->
+| Method | Params | Result | Daemon |
+|---|---|---|---|
+| `agent.run` | A goal, the tools it may use, budgets | A task id; progress arrives as `agent.event` notifications | in progress |
+| `agent.cancel` | A task id | Stops a running task | in progress |
+| `agent.confirm` | A task id and an answer | Answers a pending confirmation (approve once, for this task, or deny) | in progress |
+| `agent.list` | Filters | Past and running tasks, from the action log | in progress |
+| `agent.get` | A task id | One task with its steps and an explanation of what it did | in progress |
+| `policy.get` | `{}` | The safety rules per app and site | in progress |
+| `policy.set` | The rules | Replaces the safety rules | in progress |
+| `policy.approvals` | `{}` | Standing approvals | in progress |
+| `policy.kill` | `{}` | Stops every agent now (the kill switch) | in progress |
+| `policy.resume` | `{}` | Allows agents to run again after a kill | in progress |
+| `browser.host.attach` | Host registration | Long-lived call from the browser extension's native host; returns when the daemon detaches it | in progress |
+| `browser.host.deliver` | An extension message | A reply or event from the extension, delivered by the native host | in progress |
+
+### Proactive cards and brief (milestone M5)
+
+Status: being wired in (wave W). The names are planned; parameters and results are not final.
+
+<!-- check-refs: ipc.methods -->
+| Method | Params | Result | Daemon |
+|---|---|---|---|
+| `cards.list` | Filters | Current suggestion cards | in progress |
+| `cards.feedback` | A card id and `accept`, `dismiss` or `snooze` | Records what you did with a card | in progress |
+| `cards.preview` | A card id | A dry run of the card's action, with a digest the approval is bound to | in progress |
+| `cards.execute` | A card id and the preview's digest | Runs the action, through the safety policy | in progress |
+| `brief.get` | `{}` | Today's brief | in progress |
+| `proactive.metrics` | `{}` | Acceptance and dismissal counts | in progress |
+
+### Plugins (milestone M6)
+
+Status: being wired in (wave W). The names are planned; parameters and results are not final.
+
+<!-- check-refs: ipc.methods -->
+| Method | Params | Result | Daemon |
+|---|---|---|---|
+| `plugins.list` | `{}` | Installed plugins | in progress |
+| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | in progress |
+| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | in progress |
+| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | in progress |
+| `plugins.remove` | A plugin | Uninstalls it | in progress |
+| `plugins.enable` | A plugin and on or off | Turns it on or off | in progress |
 
 ## Notifications
 
@@ -147,7 +205,16 @@ A field with `secure: true` (a password field) is refused, and its value is neve
 | `models.progress` | `ModelProgress`: `{id, downloaded, total, phase, error}`, `phase` one of `downloading`, `verifying`, `installed`, `failed` | A model install progressed |
 | `ingest.progress` | `IngestProgress`: `{source, phase, done, total, error}`, `phase` one of `scanning`, `indexing`, `idle`, `error` | A source's sync progressed |
 | `sources.changed` | A `SourceInfo`; or `{"id": …, "removed": true}`; or `{"lagged": n}` | A source was added, changed (including after sign-in) or removed. Treat anything but a `SourceInfo` as "refetch `sources.list`" |
-| `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (not sent yet: the daemon does not run extraction) |
+| `knowledge.changed` | `KnowledgeChanged`: `{entities}` | Entities changed (after an extraction run, a merge, a claim status change or a vault edit) |
+
+Being wired in (wave W); the names are planned and the parameters not final:
+
+<!-- check-refs: ipc.notifications -->
+| Notification | Params | Sent when | Daemon |
+|---|---|---|---|
+| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | in progress |
+| `cards.changed` | Not final | The set of suggestion cards changed | in progress |
+| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | in progress |
 
 ## Errors
 
@@ -217,8 +284,8 @@ wire format).
 ### An error
 
 ```json
-→ {"jsonrpc":"2.0","id":7,"method":"knowledge.status","params":{}}
-← {"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"method not found: knowledge.status"}}
+→ {"jsonrpc":"2.0","id":7,"method":"cards.list","params":{}}
+← {"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"method not found: cards.list"}}
 ```
 
 The exact values in these examples (ids, stream ids, message wording, the generated source id) are
