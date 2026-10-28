@@ -191,6 +191,8 @@ export interface SourceSync {
 
 export interface AuthBegin {
   url: string;
+  /** Device flows (GitHub): the code the user enters on the page at `url`. */
+  user_code?: string | null;
 }
 
 /** Write-only: the password goes to the OS keychain through the daemon. */
@@ -997,3 +999,21 @@ export const events = {
   /** Tray menu asked the window to show a page. */
   onNavigate: (h: (page: PageId) => void) => on(EVENT.navigate, h),
 };
+
+// W5: connectors
+
+/** Microsoft 365 connector kinds (OAuth with the user's own Entra app registration). */
+export type MicrosoftKind = "outlook" | "outlook-calendar" | "onedrive";
+export const MICROSOFT_KINDS: readonly MicrosoftKind[] = ["outlook", "outlook-calendar", "onedrive"];
+
+/** SaaS connector kinds (a pasted token, or OAuth when settings carry `client_id`). */
+export type SaasKind = "slack" | "notion" | "github" | "linear";
+export const SAAS_KINDS: readonly SaasKind[] = ["slack", "notion", "github", "linear"];
+
+/** Every kind the Add source wizard offers. */
+export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind;
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS];
+
+export function isConnectorKind(v: unknown): v is ConnectorKind {
+  return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
+}
