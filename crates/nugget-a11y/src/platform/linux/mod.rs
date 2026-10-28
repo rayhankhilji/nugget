@@ -313,6 +313,7 @@ impl AtspiEl {
             multiline,
             selected: st.contains(State::Selected),
             offscreen: !st.contains(State::Showing),
+            ..States::default()
         };
         let name = acc.name().ok().filter(|s| !s.trim().is_empty());
         let description = if name.is_none() {

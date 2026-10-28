@@ -22,6 +22,7 @@ use nugget_core::Result;
 use nugget_core::ipc::{AppInfo, FieldInfo, ThreadMessage};
 
 pub mod clipboard;
+pub mod computer;
 pub mod deny;
 pub mod engine;
 mod platform;
@@ -31,8 +32,12 @@ pub mod thread;
 pub mod tree;
 pub mod verify;
 
+pub use computer::{
+    ActionOutcome, AppEntry, ComputerUse, ElementId, KeyInput, ScrollDirection, TreeLimits,
+    UiAction, UiActionKind, UiNode, UiTree, WindowId, WindowInfo, WindowSel,
+};
 pub use deny::{DenyList, DenyRule};
-pub use engine::{A11yConfig, Backend, InsertStrategy, Platform};
+pub use engine::{A11yConfig, Backend, InsertStrategy, Platform, PlatformWindow};
 #[cfg(target_os = "linux")]
 pub use platform::linux::AtspiPlatform;
 #[cfg(target_os = "macos")]
@@ -41,7 +46,7 @@ pub use platform::macos::AxPlatform;
 pub use platform::windows::UiaPlatform;
 
 /// Screen rectangle in logical points, origin top-left of the primary display.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Rect {
     pub x: f64,
     pub y: f64,
@@ -134,4 +139,14 @@ pub fn system_clipboard() -> Result<Box<dyn clipboard::Clipboard>> {
 /// strategy, the user's own names for `from_me`).
 pub fn system_with(config: A11yConfig) -> Box<dyn Accessibility> {
     platform::system_with(config)
+}
+
+/// The computer-use backend for the current OS (M4).
+pub fn system_computer() -> std::sync::Arc<dyn ComputerUse> {
+    system_computer_with(A11yConfig::default())
+}
+
+/// The computer-use backend for the current OS with explicit configuration.
+pub fn system_computer_with(config: A11yConfig) -> std::sync::Arc<dyn ComputerUse> {
+    platform::system_computer_with(config)
 }

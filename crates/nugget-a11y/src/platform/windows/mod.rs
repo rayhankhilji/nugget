@@ -86,6 +86,7 @@ impl UiaEl {
                 multiline,
                 selected: false,
                 offscreen: info.offscreen,
+                ..States::default()
             },
             bounds,
             ..Default::default()

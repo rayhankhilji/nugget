@@ -150,6 +150,7 @@ impl AxEl {
                 multiline,
                 selected: get("AXSelected").and_then(cf_bool).unwrap_or(false),
                 offscreen: false,
+                ..States::default()
             },
             ..Default::default()
         };

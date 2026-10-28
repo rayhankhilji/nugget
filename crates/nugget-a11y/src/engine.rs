@@ -74,6 +74,26 @@ pub struct Target<E> {
     pub element: E,
 }
 
+/// A top-level window as a platform enumerates it (M4 computer use).
+pub struct PlatformWindow<E> {
+    pub app: crate::computer::AppEntry,
+    /// A handle that is stable while the window exists (CGWindowID / AX pid+index, HWND, AT-SPI
+    /// bus name + object path). Hashed into the [`WindowId`](crate::computer::WindowId).
+    pub native_id: String,
+    pub title: Option<String>,
+    pub bounds: Option<Rect>,
+    pub focused: bool,
+    pub minimized: bool,
+    /// The window element; its subtree is what [`Backend`] snapshots.
+    pub element: E,
+}
+
+fn no_computer_use<T>() -> Result<T> {
+    Err(Error::Unsupported(
+        "computer use is not implemented for this platform".into(),
+    ))
+}
+
 /// The per-OS half of a backend.
 pub trait Platform: Send + Sync {
     type Element: Element;
@@ -93,6 +113,30 @@ pub trait Platform: Send + Sync {
     fn clipboard(&self) -> Result<Box<dyn Clipboard>>;
     /// Paste into `el` (Cmd/Ctrl+V or a toolkit paste action). Never sends Return.
     fn paste(&self, el: &Self::Element) -> Result<()>;
+
+    // --- M4 computer use. Defaults refuse, so a platform can grow into them. ---
+
+    /// Running apps that have windows, frontmost first.
+    fn apps(&self) -> Result<Vec<crate::computer::AppEntry>> {
+        no_computer_use()
+    }
+    /// Top-level windows of every app, the focused window first.
+    fn windows(&self) -> Result<Vec<PlatformWindow<Self::Element>>> {
+        no_computer_use()
+    }
+    /// Synthesise key input to whatever has keyboard focus. Text is typed as Unicode (never as
+    /// shortcuts); chords press modifiers, the key, and release in reverse.
+    fn key_input(&self, _input: &crate::computer::KeyInput) -> Result<()> {
+        no_computer_use()
+    }
+    /// Launch the app by name or id, or activate it when it is running.
+    fn open_app(&self, _name: &str) -> Result<()> {
+        no_computer_use()
+    }
+    /// A PNG of the window, for the screenshot fallback.
+    fn screenshot(&self, _window: &Self::Element) -> Result<Option<Vec<u8>>> {
+        Ok(None)
+    }
 }
 
 /// [`Accessibility`] over a [`Platform`].
