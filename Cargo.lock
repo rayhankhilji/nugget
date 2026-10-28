@@ -3449,18 +3449,7 @@ dependencies = [
 name = "nugget-browser"
 version = "0.0.1"
 dependencies = [
- "async-trait",
- "futures",
  "nugget-core",
- "nugget-ipc",
- "nugget-policy",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
 ]
 
 [[package]]
@@ -3823,7 +3812,20 @@ dependencies = [
 name = "nugget-proactive"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
+ "futures",
+ "hex",
  "nugget-core",
+ "nugget-graph",
+ "nugget-infer",
+ "nugget-policy",
+ "nugget-store",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "time",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
