@@ -1,11 +1,40 @@
 //! Double Tap drafting engine (daemon side).
 //!
-//! **Contract (M3):** [`FieldKind`] and [`classify`]. Work package M3-C builds the engine: prompt
-//! assembly from the voice profile, the thread and budgeted, cited retrieval context; streaming
-//! generation with post-processing; the cloud/sensitive gate. Field kinds are decided here by
-//! rules, never by the model.
+//! **Contract (M3):** [`FieldKind`] and [`classify()`]. Field kinds are decided here by rules,
+//! never by the model (the [`classify`](mod@classify) module documents the rule order), and secure
+//! fields and excluded apps are refused first ([`gate`]).
+//!
+//! [`Drafter`] is the engine:
+//! - **Provider first.** The request's provider, else the user's choice for the app
+//!   ([`DraftConfig::app_providers`]), else the Synthesis tier with fallback, mirroring
+//!   `retrieve.ask`: what may be sent depends on where it goes.
+//! - **Budgeted, cited context.** Retrieval from the thread, subject and recipients, packed into
+//!   [`DraftConfig::budget_tokens`] (1,500 by default), with sensitive items withheld from `Cloud`
+//!   providers and the cited items passed to the egress ledger (`ChatRequest.items`, feature
+//!   `draft`). No whole-vault dumps, no silent truncation.
+//! - **Voice.** Style stats and exemplars from a [`VoiceSource`], in a stable system prefix
+//!   (cache-friendly), with the thread and field text fenced as untrusted data ([`prompt`]).
+//! - **Streaming post-processing** ([`post`]): preambles, wrapping quotes, duplicate greetings
+//!   and sign-offs, citation markers and (for chat and email) markdown are stripped; the draft
+//!   is cut to the voice's length band; nothing emitted is ever retracted and no trailing newline
+//!   is ever emitted.
+//! - **Latency.** [`Drafter::prewarm`] starts provider warm-up, retrieval and the voice lookup on
+//!   trigger; [`DraftTimings`] records retrieval, provider open, first token and total.
+//! - **Cancellation** ([`Drafter::cancel`], [`DraftStream::cancel`]) and **feedback**
+//!   ([`Drafter::feedback`]: an audit event plus the texts to a [`FeedbackSink`]).
 
-use nugget_core::ipc::DraftContext;
+pub mod classify;
+mod engine;
+pub mod post;
+pub mod prompt;
+
+pub use classify::{DEFAULT_EXCLUDED_APPS, Refusal, classify, gate, is_secure};
+pub use engine::{
+    DraftConfig, DraftStream, DraftTimings, Drafter, FeedbackOutcome, FeedbackRecord, FeedbackSink,
+    MAX_BUDGET_TOKENS, NoVoice, Prewarm, VoiceQuery, VoiceSource, Warmer, post_options,
+    retrieval_query,
+};
+pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldKind {
@@ -35,19 +64,4 @@ impl FieldKind {
     pub fn draftable(self) -> bool {
         !matches!(self, Self::Search)
     }
-}
-
-/// Decide what kind of field this is from app, role, labels and thread (minimal stub; M3-C
-/// replaces it with the full rule set).
-pub fn classify(ctx: &DraftContext) -> FieldKind {
-    if ctx.field.role == "search_field" {
-        return FieldKind::Search;
-    }
-    if ctx.subject.is_some() || !ctx.recipients.is_empty() {
-        return FieldKind::EmailBody;
-    }
-    if !ctx.thread.is_empty() {
-        return FieldKind::ChatMessage;
-    }
-    FieldKind::Unknown
 }
