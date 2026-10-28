@@ -188,15 +188,30 @@ impl Store {
 }
 
 /// Chunk leg of text search: `?1` an FTS5 query, `?2` the limit.
+///
+/// Ranking happens on the FTS table alone and only the top `?2` rows are joined, so the cost of
+/// the join (and of the snippet, taken separately by [`SNIPPET_SQL`]) does not grow with the
+/// number of matching chunks. Computing `snippet()` in the ranked query made SQLite build a
+/// snippet for every match before sorting: 415 ms p50 per query at 100k chunks.
 pub(crate) const TEXT_SEARCH_SQL: &str = "
-    SELECT ch.id, ch.item_id, i.source, i.key, i.title,
-           snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
-    FROM chunks_fts
-    JOIN chunks ch ON ch.id = chunks_fts.rowid
+    WITH top AS (
+        SELECT rowid AS id, bm25(chunks_fts) AS rank
+        FROM chunks_fts
+        WHERE chunks_fts MATCH ?1
+        ORDER BY bm25(chunks_fts), rowid
+        LIMIT ?2
+    )
+    SELECT ch.id, ch.item_id, i.source, i.key, i.title, top.rank
+    FROM top
+    JOIN chunks ch ON ch.id = top.id
     JOIN items i ON i.id = ch.item_id
-    WHERE chunks_fts MATCH ?1
-    ORDER BY bm25(chunks_fts), ch.id
-    LIMIT ?2";
+    ORDER BY top.rank, ch.id";
+
+/// Snippet of one matching chunk: `?1` the FTS5 query, `?2` the chunk id.
+pub(crate) const SNIPPET_SQL: &str = "
+    SELECT snippet(chunks_fts, 0, '', '', '…', 24)
+    FROM chunks_fts
+    WHERE chunks_fts MATCH ?1 AND rowid = ?2";
 
 /// Title leg of text search: `?1` an FTS5 query, `?2` the limit.
 pub(crate) const TITLE_SEARCH_SQL: &str = "
@@ -223,14 +238,14 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
             .db("prepare text search")?;
         let rows = stmt
             .query_map(params![q, lim], |r| {
-                let rank: f64 = r.get(6)?;
+                let rank: f64 = r.get(5)?;
                 Ok((
                     r.get::<_, i64>(1)?,
                     Hit {
                         chunk_id: r.get(0)?,
                         item: item_ref(r.get(2)?, r.get(3)?),
                         title: r.get(4)?,
-                        snippet: r.get(5)?,
+                        snippet: String::new(),
                         score: -rank as f32,
                     },
                 ))
@@ -238,6 +253,16 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
             .db("text search")?;
         rows.collect::<rusqlite::Result<_>>().db("text search")?
     };
+    if !hits.is_empty() {
+        let mut snip = c.prepare_cached(SNIPPET_SQL).db("prepare snippet")?;
+        for (_, hit) in &mut hits {
+            hit.snippet = snip
+                .query_row(params![q, hit.chunk_id], |r| r.get(0))
+                .optional()
+                .db("snippet")?
+                .unwrap_or_default();
+        }
+    }
 
     // Title leg: item id → weighted title score.
     let titles: Vec<(i64, f64)> = {

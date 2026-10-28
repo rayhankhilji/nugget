@@ -5,7 +5,7 @@
 
 use rusqlite::Connection;
 
-use crate::search::{FIRST_CHUNK_SQL, TEXT_SEARCH_SQL, TITLE_SEARCH_SQL};
+use crate::search::{FIRST_CHUNK_SQL, SNIPPET_SQL, TEXT_SEARCH_SQL, TITLE_SEARCH_SQL};
 use crate::types::{NewChunk, NewItem, content_hash};
 use crate::{Result, Store};
 
@@ -16,6 +16,7 @@ const CHUNK_COLUMNS: &str = "c.id, i.source, i.key, c.ord, c.text, i.title";
 fn statements() -> Vec<(&'static str, String)> {
     vec![
         ("text search", TEXT_SEARCH_SQL.to_owned()),
+        ("snippet", SNIPPET_SQL.to_owned()),
         ("title search", TITLE_SEARCH_SQL.to_owned()),
         ("first chunk lookup", FIRST_CHUNK_SQL.to_owned()),
         // search::search_vector
@@ -92,11 +93,12 @@ fn plan(c: &Connection, sql: &str) -> Vec<String> {
 }
 
 /// A plan step that reads every row of a real table (FTS5 virtual-table scans are index
-/// lookups; a constant row is not a table).
+/// lookups; a constant row is not a table; `top` is text search's bounded CTE).
 fn is_full_scan(detail: &str) -> bool {
     detail.starts_with("SCAN ")
         && !detail.contains("VIRTUAL TABLE")
         && !detail.contains("CONSTANT ROW")
+        && detail != "SCAN top"
 }
 
 fn check_plans(store: &Store, label: &str) {
