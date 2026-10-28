@@ -1002,6 +1002,8 @@ impl PumpState {
                         output_tokens,
                     }));
                 }
+                // Usage and timing stats (cache hits, first-token time) pass through unchanged.
+                Some(Ok(stats @ ChatEvent::Stats(_))) => self.pending.push_back(Ok(stats)),
                 Some(Ok(ChatEvent::ToolCall { .. } | ChatEvent::Opaque { .. })) => {}
                 Some(Err(e)) => {
                     self.finish();

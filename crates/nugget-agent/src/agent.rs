@@ -9,7 +9,8 @@ use nugget_core::capability::{Capabilities, Tier};
 use nugget_core::ids::ItemRef;
 use nugget_infer::schema;
 use nugget_infer::{
-    ChatRequest, ChatResponse, ChatStream, Message, Part, Provider, Router, StopReason, ToolCall,
+    CacheHint, CacheTtl, ChatRequest, ChatResponse, ChatStream, Message, Part, Provider, Router,
+    StopReason, ToolCall,
 };
 use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
 use serde::{Deserialize, Serialize};
@@ -471,6 +472,13 @@ impl Agent {
                 temperature: cfg.temperature,
                 feature: FEATURE_AGENT.into(),
                 items: st.task.items.clone(),
+                // The system prompt and tool specs are identical on every step of a run, so cache
+                // them; the routing key keeps a run's turns on one cache slot.
+                cache: Some(CacheHint {
+                    system: true,
+                    key: Some(format!("agent:{}", st.task.id)),
+                    ttl: CacheTtl::default(),
+                }),
             };
             let input_estimate = estimate_tokens(&req.messages) + estimate(&system);
             let t0 = Instant::now();
@@ -1376,7 +1384,7 @@ fn estimate_tokens(messages: &[Message]) -> u64 {
             Part::ToolResult { content, .. } => estimate(content),
             Part::ToolCall { arguments, .. } => estimate(&arguments.to_string()),
             Part::Image { .. } => 1000,
-            Part::Opaque { .. } => 0,
+            Part::Opaque { .. } | Part::CacheBreakpoint => 0,
         })
         .sum()
 }
