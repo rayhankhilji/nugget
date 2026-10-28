@@ -1,0 +1,2 @@
+# Signed files: the signature covers the exact bytes, so never normalise line endings.
+* -text

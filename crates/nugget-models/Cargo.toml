@@ -1,5 +1,6 @@
 [package]
 name = "nugget-models"
+description = "Verified local model distribution: signed manifest, content-addressed store, resumable download, hardware-aware choice"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,23 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ed25519-dalek = "3"
+fs4 = "1"
+hex = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "system-proxy"] }
+semver = "1"
+sha2 = "0.11"
+url = "2"
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+getrandom = "0.4"
+tempfile = "3"
 
 [lints]
 workspace = true
