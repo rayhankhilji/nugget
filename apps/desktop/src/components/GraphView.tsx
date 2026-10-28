@@ -2,7 +2,8 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from "rea
 import { api, ENTITY_KINDS, events, type EntityKind, type EntitySummaryView, type GraphView as GraphData } from "../api";
 import { hashSeed, MAX_RENDER_NODES, prepareGraph, type PreparedGraph } from "../graph";
 import { useAsync, useEvent } from "../hooks";
-import { kindLabel, KIND_PLURAL } from "../knowledge";
+import { Trans, useT } from "../i18n";
+import { kindLabel, kindPlural } from "../knowledge";
 import { GraphCanvas } from "./GraphCanvas";
 import { Badge, Empty, ErrorNote, Spinner } from "./ui";
 
@@ -26,6 +27,7 @@ export function GraphPanel({
   selected: string | null;
   onOpen: (id: string) => void;
 }) {
+  const t = useT();
   const [depth, setDepth] = useState(2);
   const [kinds, setKinds] = useState<EntityKind[]>([]);
   const [mode, setMode] = useState<"canvas" | "list">("canvas");
@@ -65,60 +67,57 @@ export function GraphPanel({
         <CenterPicker onPick={(id) => onCenter(id)} />
         {center && (
           <span className="graph-centered">
-            Centred on <b>{centerName}</b>{" "}
+            <Trans k="graph.centredOn" args={{ name: centerName }} tags={{ b: (c) => <b>{c}</b> }} />{" "}
             <button type="button" className="btn btn-ghost btn-small" onClick={() => onCenter(null)}>
-              Show overview
+              {t("graph.showOverview")}
             </button>
           </span>
         )}
         <label className="field-inline" htmlFor={depthId}>
-          Depth
+          {t("graph.depth")}
           <select id={depthId} value={depth} onChange={(e) => setDepth(Number(e.target.value))} disabled={!center}>
             {DEPTHS.map((d) => (
               <option key={d} value={d}>
-                {d === 1 ? "1 hop" : `${d} hops`}
+                {t("graph.hops", { n: d })}
               </option>
             ))}
           </select>
         </label>
-        <div className="segmented" role="group" aria-label="Graph display">
+        <div className="segmented" role="group" aria-label={t("graph.displayLabel")}>
           <button type="button" aria-pressed={mode === "canvas"} onClick={() => setMode("canvas")}>
-            Graph
+            {t("graph.modeGraph")}
           </button>
           <button type="button" aria-pressed={mode === "list"} onClick={() => setMode("list")}>
-            List
+            {t("graph.modeList")}
           </button>
         </div>
       </div>
-      <KindChips selected={kinds} onToggle={toggleKind} onClear={() => setKinds([])} label="Show kinds" />
+      <KindChips selected={kinds} onToggle={toggleKind} onClear={() => setKinds([])} label={t("graph.showKinds")} />
 
       <div className="graph-status" aria-live="polite">
         {graph && (
           <span className="muted small">
-            {graph.nodes.length.toLocaleString()} entities · {graph.links.length.toLocaleString()} links
+            {t("graph.counts", { nodes: graph.nodes.length, links: graph.links.length })}
           </span>
         )}
         {graph?.truncated && (
           <Badge tone="warn">
-            Truncated
-            <span className="visually-hidden">
-              : showing the {graph.nodes.length.toLocaleString()} nearest and most connected entities. Centre on an entity or filter by kind to see
-              more.
-            </span>
+            {t("graph.truncated")}
+            <span className="visually-hidden">{t("graph.truncatedDetail", { n: graph.nodes.length })}</span>
           </Badge>
         )}
         {graph?.truncated && (
           <span className="muted small" aria-hidden="true">
-            Showing the nearest and most connected. Centre on an entity or filter by kind to see more.
+            {t("graph.truncatedHint")}
           </span>
         )}
-        {loaded.loading && <Spinner label="Loading graph" />}
+        {loaded.loading && <Spinner label={t("graph.loading")} />}
       </div>
 
       <ErrorNote error={loaded.error} onRetry={loaded.reload} />
       {graph && graph.nodes.length === 0 && (
-        <Empty title="Nothing to show">
-          {kinds.length > 0 ? "No entities of these kinds here. Clear the kind filter." : "Nugget hasn't found any entities yet. They appear as your sources are indexed."}
+        <Empty title={t("graph.emptyTitle")}>
+          {kinds.length > 0 ? t("graph.emptyFiltered") : t("graph.emptyNone")}
         </Empty>
       )}
       {graph && graph.nodes.length > 0 && mode === "canvas" && (
@@ -154,10 +153,11 @@ export function KindChips({
   /** Radio-like: one kind at a time. */
   single?: boolean;
 }) {
+  const t = useT();
   return (
     <div className="chips" role="group" aria-label={label}>
       <button type="button" className="chip" aria-pressed={selected.length === 0} onClick={onClear}>
-        All
+        {t("graph.all")}
       </button>
       {ENTITY_KINDS.map((k) => (
         <button
@@ -166,10 +166,10 @@ export function KindChips({
           className="chip"
           aria-pressed={selected.includes(k)}
           onClick={() => onToggle(k)}
-          title={single ? `Only ${KIND_PLURAL[k].toLowerCase()}` : undefined}
+          title={single ? t("graph.only", { kind: k }) : undefined}
         >
           <span className={`kind-dot kind-${k}`} aria-hidden="true" />
-          {KIND_PLURAL[k]}
+          {kindPlural(k)}
         </button>
       ))}
     </div>
@@ -178,6 +178,7 @@ export function KindChips({
 
 /** Search box that picks an entity to centre the graph on. */
 function CenterPicker({ onPick }: { onPick: (id: string) => void }) {
+  const t = useT();
   const [text, setText] = useState("");
   const [results, setResults] = useState<EntitySummaryView[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -204,12 +205,12 @@ function CenterPicker({ onPick }: { onPick: (id: string) => void }) {
     <div className="center-picker">
       <form onSubmit={search} role="search" className="inline-row">
         <label htmlFor={inputId} className="visually-hidden">
-          Centre the graph on an entity
+          {t("graph.centreLabel")}
         </label>
         <input
           id={inputId}
           type="search"
-          placeholder="Centre on…"
+          placeholder={t("graph.centrePlaceholder")}
           value={text}
           onChange={(e) => {
             setText(e.target.value);
@@ -225,13 +226,13 @@ function CenterPicker({ onPick }: { onPick: (id: string) => void }) {
           autoComplete="off"
         />
         <button type="submit" className="btn btn-small" disabled={busy || !text.trim()}>
-          {busy ? <Spinner label="Searching" /> : "Find"}
+          {busy ? <Spinner label={t("graph.searching")} /> : t("graph.find")}
         </button>
       </form>
       <ErrorNote error={error} />
       {results && (
-        <ul id={listId} className="center-results" aria-label="Entities to centre on">
-          {results.length === 0 && <li className="muted small">No match.</li>}
+        <ul id={listId} className="center-results" aria-label={t("graph.centreResults")}>
+          {results.length === 0 && <li className="muted small">{t("graph.noMatch")}</li>}
           {results.map((r) => (
             <li key={r.id}>
               <button
@@ -265,6 +266,7 @@ function GraphList({
   onOpen: (id: string) => void;
   onCenter: (id: string) => void;
 }) {
+  const t = useT();
   const [limit, setLimit] = useState(LIST_PAGE);
   const links = useMemo(() => {
     const m = new Map<string, string[]>();
@@ -279,18 +281,18 @@ function GraphList({
   }, [graph]);
   const rows = graph.nodes.slice(0, limit);
   return (
-    <div className="table-wrap" tabIndex={0} role="region" aria-label="Entities in the graph">
+    <div className="table-wrap" tabIndex={0} role="region" aria-label={t("graph.listLabel")}>
       <table>
         <thead>
           <tr>
-            <th scope="col">Entity</th>
-            <th scope="col">Kind</th>
+            <th scope="col">{t("graph.col.entity")}</th>
+            <th scope="col">{t("graph.col.kind")}</th>
             <th scope="col" className="num">
-              Hops
+              {t("graph.col.hops")}
             </th>
-            <th scope="col">Connections</th>
+            <th scope="col">{t("graph.col.connections")}</th>
             <th scope="col">
-              <span className="visually-hidden">Actions</span>
+              <span className="visually-hidden">{t("graph.col.actions")}</span>
             </th>
           </tr>
         </thead>
@@ -304,15 +306,15 @@ function GraphList({
                 <td className="num">{n.id === graph.center ? "–" : n.depth}</td>
                 <td className="small">
                   {conns.slice(0, 3).join("; ")}
-                  {conns.length > 3 && <span className="muted"> and {conns.length - 3} more</span>}
+                  {conns.length > 3 && <span className="muted"> {t("graph.andMore", { n: conns.length - 3 })}</span>}
                 </td>
                 <td className="nowrap">
-                  <button type="button" className="btn btn-small" onClick={() => onOpen(n.id)} aria-label={`Open ${n.name}`}>
-                    Open
+                  <button type="button" className="btn btn-small" onClick={() => onOpen(n.id)} aria-label={t("graph.openLabel", { name: n.name })}>
+                    {t("graph.open")}
                   </button>{" "}
                   {n.id !== graph.center && (
-                    <button type="button" className="btn btn-ghost btn-small" onClick={() => onCenter(n.id)} aria-label={`Centre on ${n.name}`}>
-                      Centre
+                    <button type="button" className="btn btn-ghost btn-small" onClick={() => onCenter(n.id)} aria-label={t("graph.centreOnLabel", { name: n.name })}>
+                      {t("graph.centre")}
                     </button>
                   )}
                 </td>
@@ -324,7 +326,7 @@ function GraphList({
       {graph.nodes.length > limit && (
         <p className="list-more">
           <button type="button" className="btn btn-ghost btn-small" onClick={() => setLimit((l) => l + LIST_PAGE)}>
-            Show {Math.min(LIST_PAGE, graph.nodes.length - limit).toLocaleString()} more of {graph.nodes.length.toLocaleString()}
+            {t("graph.showMore", { n: Math.min(LIST_PAGE, graph.nodes.length - limit), total: graph.nodes.length })}
           </button>
         </p>
       )}

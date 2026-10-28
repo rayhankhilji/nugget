@@ -6,6 +6,7 @@ import { sourceKindLabel } from "../format";
 import { CopyButton } from "./CopyButton";
 import { Dialog } from "./Dialog";
 import { ErrorNote, Spinner } from "./ui";
+import { Trans, useT } from "../i18n";
 
 /**
  * "Connect an app": name and scopes, then the client's token (shown once) and setup snippets.
@@ -14,6 +15,7 @@ import { ErrorNote, Spinner } from "./ui";
  * it, and closing the dialog unmounts this component, which drops the token.
  */
 export function ConnectAppWizard({ onClose, onCreated }: { onClose: () => void; onCreated: (client: McpClientInfo) => void }) {
+  const t = useT();
   const [created, setCreated] = useState<McpClientCreated | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -25,12 +27,8 @@ export function ConnectAppWizard({ onClose, onCreated }: { onClose: () => void; 
 
   return (
     <Dialog
-      title={created ? `Connect ${created.client.name}` : "Connect an app"}
-      description={
-        created
-          ? undefined
-          : "Give an AI app on this device read access to Nugget over MCP. You choose what it can see, and you can revoke it at any time."
-      }
+      title={created ? t("connectApp.titleFor", { name: created.client.name }) : t("connectApp.title")}
+      description={created ? undefined : t("connectApp.description")}
       onClose={close}
       wide
     >
@@ -56,6 +54,7 @@ export function ConnectAppWizard({ onClose, onCreated }: { onClose: () => void; 
 }
 
 function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (c: McpClientCreated) => void }) {
+  const t = useT();
   const [form, setForm] = useState<ScopeForm>(DEFAULT_SCOPE_FORM);
   const [errors, setErrors] = useState<ScopeFormErrors>({});
   const [busy, setBusy] = useState(false);
@@ -102,7 +101,7 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
   return (
     <form ref={formRef} onSubmit={submit} noValidate>
       <div className="field">
-        <label htmlFor={ids.name}>App name</label>
+        <label htmlFor={ids.name}>{t("connectApp.name")}</label>
         <input
           id={ids.name}
           data-field="name"
@@ -110,7 +109,7 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
           type="text"
           value={form.name}
           maxLength={MAX_CLIENT_NAME}
-          placeholder="Claude Desktop"
+          placeholder={t("connectApp.namePlaceholder")}
           autoComplete="off"
           onChange={(e) => set("name", e.target.value)}
           aria-invalid={errors.name ? true : undefined}
@@ -124,11 +123,11 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
       </div>
 
       <fieldset className="field" aria-describedby={errors.sources ? ids.srcErr : undefined}>
-        <legend>What it can read</legend>
+        <legend>{t("connectApp.canRead")}</legend>
         <label className="check">
           <input type="radio" name="mcp-sources" checked={form.allSources} onChange={() => set("allSources", true)} data-field={form.allSources ? "sources" : undefined} />
           <span>
-            All sources <span className="muted small block">Including sources you add later.</span>
+            {t("connectApp.allSources")} <span className="muted small block">{t("connectApp.allSourcesHint")}</span>
           </span>
         </label>
         <label className="check">
@@ -139,10 +138,10 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
             onChange={() => set("allSources", false)}
             disabled={sourcesUnavailable || sourceList.length === 0}
           />
-          <span>Only these sources</span>
+          <span>{t("connectApp.onlySources")}</span>
         </label>
-        {sources.loading && !sources.data && <Spinner label="Loading sources" />}
-        {sourcesUnavailable && <p className="muted small">Couldn't list your sources, so only “All sources” is available.</p>}
+        {sources.loading && !sources.data && <Spinner label={t("connectApp.loadingSources")} />}
+        {sourcesUnavailable && <p className="muted small">{t("connectApp.sourcesUnavailable")}</p>}
         {!form.allSources && (
           <div className="scope-options">
             {sourceList.map((s, i) => (
@@ -168,30 +167,30 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
       </fieldset>
 
       <fieldset className="field" aria-describedby={errors.tools ? ids.toolErr : undefined}>
-        <legend>What it can do</legend>
+        <legend>{t("connectApp.canDo")}</legend>
         <label className="check">
           <input type="radio" name="mcp-tools" checked={form.allTools} onChange={() => set("allTools", true)} data-field={form.allTools ? "tools" : undefined} />
           <span>
-            All read-only tools <span className="muted small block">Nugget's MCP tools only read; none change your data.</span>
+            {t("connectApp.allTools")} <span className="muted small block">{t("connectApp.allToolsHint")}</span>
           </span>
         </label>
         <label className="check">
           <input type="radio" name="mcp-tools" checked={!form.allTools} onChange={() => set("allTools", false)} />
-          <span>Only these tools</span>
+          <span>{t("connectApp.onlyTools")}</span>
         </label>
         {!form.allTools && (
           <div className="scope-options">
-            {MCP_TOOLS.map((t, i) => (
-              <label key={t.name} className="check">
+            {MCP_TOOLS.map((tool, i) => (
+              <label key={tool.name} className="check">
                 <input
                   type="checkbox"
-                  checked={form.tools.includes(t.name)}
-                  onChange={(e) => toggle("tools", t.name, e.target.checked)}
+                  checked={form.tools.includes(tool.name)}
+                  onChange={(e) => toggle("tools", tool.name, e.target.checked)}
                   data-field={i === 0 ? "tools" : undefined}
                 />
                 <span>
-                  {t.label} <code className="muted small">{t.name}</code>
-                  <span className="muted small block">{t.description}</span>
+                  {t(tool.label)} <code className="muted small">{tool.name}</code>
+                  <span className="muted small block">{t(tool.description)}</span>
                 </span>
               </label>
             ))}
@@ -214,22 +213,20 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
             aria-describedby={ids.sensitiveWarn}
           />
           <span className="switch-track" aria-hidden="true" />
-          <span>Allow sensitive items</span>
+          <span>{t("connectApp.allowSensitive")}</span>
         </label>
         <p id={ids.sensitiveWarn} className={form.includeSensitive ? "note note-warn small" : "muted small field-hint"}>
-          {form.includeSensitive
-            ? "This app will be able to read items Nugget marked sensitive, such as messages with financial, health or identity details. Many apps send what they read to a cloud AI model. Only allow this for apps you trust with that."
-            : "Off: items Nugget marked sensitive (financial, health, identity details) are never returned to this app."}
+          {form.includeSensitive ? t("connectApp.sensitiveOn") : t("connectApp.sensitiveOff")}
         </p>
       </div>
 
       <ErrorNote error={error} />
       <div className="dialog-actions">
         <button type="button" className="btn" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("common.cancel")}
         </button>
         <button type="submit" className="btn btn-primary" disabled={busy}>
-          {busy ? <Spinner label="Creating" /> : "Create token"}
+          {busy ? <Spinner label={t("connectApp.creating")} /> : t("connectApp.createToken")}
         </button>
       </div>
     </form>
@@ -250,6 +247,7 @@ function TokenStep({
   onCancelClose: () => void;
   onDone: () => void;
 }) {
+  const t = useT();
   const snippets = sortSnippets(created.setup);
   const [tab, setTab] = useState(0);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -276,14 +274,13 @@ function TokenStep({
   return (
     <div>
       <h3 ref={headingRef} tabIndex={-1} className="token-heading">
-        Copy the token now
+        {t("connectApp.copyNow")}
       </h3>
       <p id={ids.warn} className="note note-warn">
-        <b>This token is shown only once.</b> Nugget doesn't keep it in readable form, so it can't show it again. If you lose it, revoke this app and connect it
-        again.
+        <Trans k="connectApp.shownOnce" tags={{ b: (c) => <b>{c}</b> }} />
       </p>
       <div className="field">
-        <label htmlFor={ids.token}>Access token for {created.client.name}</label>
+        <label htmlFor={ids.token}>{t("connectApp.tokenFor", { name: created.client.name })}</label>
         <div className="inline-row">
           <input
             id={ids.token}
@@ -296,18 +293,18 @@ function TokenStep({
             aria-describedby={ids.warn}
             onFocus={(e) => e.currentTarget.select()}
           />
-          <CopyButton text={created.token} what="token" className="btn btn-primary" onCopied={onCopied} />
+          <CopyButton text={created.token} what={t("connectApp.tokenWhat")} className="btn btn-primary" onCopied={onCopied} />
         </div>
       </div>
 
-      <h3 className="ask-sub">Set up your app</h3>
+      <h3 className="ask-sub">{t("connectApp.setUp")}</h3>
       {snippets.length === 0 ? (
         <p className="muted small">
-          Point your app's MCP settings at Nugget and use the token above as its bearer token. Run <code>nuggetd mcp --help</code> for the options.
+          <Trans k="connectApp.noSnippets" tags={{ code: (c) => <code>{c}</code> }} />
         </p>
       ) : (
         <>
-          <div className="tabs tabs-small" role="tablist" aria-label="Apps" onKeyDown={onTabKey}>
+          <div className="tabs tabs-small" role="tablist" aria-label={t("connectApp.tabsLabel")} onKeyDown={onTabKey}>
             {snippets.map((s, i) => (
               <button
                 key={`${s.app}-${i}`}
@@ -331,15 +328,19 @@ function TokenStep({
             <div id={`${ids.tabs}-panel`} role="tabpanel" aria-labelledby={`${ids.tabs}-tab-${tab}`} className="snippet">
               {snippet.config_path ? (
                 <p className="small">
-                  Add this to <code>{snippet.config_path}</code>, then restart {setupAppLabel(snippet.app)}.
+                  <Trans
+                    k="connectApp.addToConfig"
+                    args={{ path: snippet.config_path, app: setupAppLabel(snippet.app) }}
+                    tags={{ code: (c) => <code>{c}</code> }}
+                  />
                 </p>
               ) : (
-                <p className="small">Run or paste this in {setupAppLabel(snippet.app)}:</p>
+                <p className="small">{t("connectApp.runIn", { app: setupAppLabel(snippet.app) })}</p>
               )}
-              <pre className="snippet-text" tabIndex={0} aria-label={`${setupAppLabel(snippet.app)} setup`}>
+              <pre className="snippet-text" tabIndex={0} aria-label={t("connectApp.setupWhat", { app: setupAppLabel(snippet.app) })}>
                 <code>{snippet.text}</code>
               </pre>
-              <CopyButton text={snippet.text} what={`${setupAppLabel(snippet.app)} setup`} onCopied={onCopied} />
+              <CopyButton text={snippet.text} what={t("connectApp.setupWhat", { app: setupAppLabel(snippet.app) })} onCopied={onCopied} />
             </div>
           )}
         </>
@@ -347,17 +348,17 @@ function TokenStep({
 
       {confirmClose && (
         <p className="note note-warn small" role="alert">
-          You haven't copied the token or a setup snippet. Once you close this, the token can't be shown again.
+          {t("connectApp.notCopied")}
         </p>
       )}
       <div className="dialog-actions">
         {confirmClose && (
           <button type="button" className="btn" onClick={onCancelClose}>
-            Go back
+            {t("connectApp.goBack")}
           </button>
         )}
         <button ref={confirmRef} type="button" className={confirmClose ? "btn btn-danger" : "btn btn-primary"} onClick={onDone}>
-          {confirmClose ? "Close anyway" : "Done"}
+          {confirmClose ? t("connectApp.closeAnyway") : t("common.done")}
         </button>
       </div>
     </div>

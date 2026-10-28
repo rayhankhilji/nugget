@@ -1,50 +1,37 @@
 /** Display helpers for the knowledge graph: labels, facts, evidence and vault links. */
-import { isOpenableUrl, type ClaimStatus, type ClaimView, type EntityKind, type EvidenceView } from "./api";
-
-export const KIND_LABEL: Record<EntityKind, string> = {
-  person: "Person",
-  organization: "Organization",
-  project: "Project",
-  commitment: "Commitment",
-  preference: "Preference",
-  event: "Event",
-  place: "Place",
-  topic: "Topic",
-};
-
-export const KIND_PLURAL: Record<EntityKind, string> = {
-  person: "People",
-  organization: "Organizations",
-  project: "Projects",
-  commitment: "Commitments",
-  preference: "Preferences",
-  event: "Events",
-  place: "Places",
-  topic: "Topics",
-};
+import { formatNumber, t, type MessageKey } from "./i18n";
+import { isOpenableUrl, type ClaimStatus, type ClaimView, type EvidenceView } from "./api";
 
 /** Label for a kind, tolerating kinds a newer daemon may add. */
 export function kindLabel(kind: string): string {
-  return (KIND_LABEL as Record<string, string>)[kind] ?? kind;
+  return known(`knowledge.kind.${kind}`, kind);
 }
 
-export const CLAIM_STATUS_LABEL: Record<ClaimStatus, string> = {
-  active: "Active",
-  superseded: "Superseded",
-  retracted: "Rejected",
-  user_asserted: "Added by you",
-};
+/** Plural label for a kind ("People", "Projects"). */
+export function kindPlural(kind: string): string {
+  return known(`knowledge.kindPlural.${kind}`, kind);
+}
+
+export function claimStatusLabel(status: string): string {
+  return known(`knowledge.claimStatus.${status}`, status);
+}
+
+/** The catalog entry for `key`, else `fallback` (for values a newer daemon may send). */
+function known(key: string, fallback: string): string {
+  const out = t(key as MessageKey);
+  return out === key ? fallback : out;
+}
 
 /** `works_at` → `works at`. */
 export function predicateLabel(predicate: string): string {
-  const t = predicate.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
-  return t || predicate;
+  const text = predicate.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  return text || predicate;
 }
 
 /** `0.923` → `92%`. Out-of-range values are clamped; non-numbers give `–`. */
 export function formatConfidence(c: number): string {
   if (typeof c !== "number" || !Number.isFinite(c)) return "–";
-  return `${Math.round(Math.min(1, Math.max(0, c)) * 100)}%`;
+  return formatNumber(Math.round(Math.min(1, Math.max(0, c)) * 100) / 100, { style: "percent" });
 }
 
 export function confidenceTone(c: number): "good" | "neutral" | "warn" {
@@ -61,8 +48,8 @@ export function claimObjectText(claim: ClaimView): string {
 
 /** What to show for a fact: its sentence, else `predicate object`. */
 export function claimText(claim: ClaimView): string {
-  const t = claim.text.trim();
-  if (t) return t;
+  const text = claim.text.trim();
+  if (text) return text;
   return `${predicateLabel(claim.predicate)} ${claimObjectText(claim)}`.trim();
 }
 
@@ -136,8 +123,7 @@ export function formatEvidence(ev: EvidenceView, sourceNames?: ReadonlyMap<strin
 /** "1 source", "3 sources" — distinct items, not passages. */
 export function evidenceSummary(evidence: readonly EvidenceView[]): string {
   const items = new Set(evidence.map((e) => `${e.item.source}\u0000${e.item.key}`)).size;
-  if (items === 0) return "No sources";
-  return items === 1 ? "1 source" : `${items} sources`;
+  return t("knowledge.evidenceSummary", { n: items });
 }
 
 // ---- vault paths ----

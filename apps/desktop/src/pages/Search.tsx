@@ -17,11 +17,13 @@ import { splitCitations, withheldNotice } from "../citations";
 import { sourceKindLabel } from "../format";
 import { SourceIcon } from "../components/SourceIcon";
 import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [10, 25, 50];
 const BUDGETS = [1000, 2000, 4000, 8000];
 
 export function SearchPage() {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(25);
   const [hits, setHits] = useState<SearchHit[] | null>(null);
@@ -53,38 +55,38 @@ export function SearchPage() {
   return (
     <div className="page">
       <PageHeader
-        title="Search"
-        description="Full-text and semantic search over everything Nugget has indexed."
+        title={t("search.title")}
+        description={t("search.description")}
         actions={
           <button type="button" className="btn btn-ghost" aria-expanded={askOpen} aria-controls="ask-panel" onClick={() => setAskOpen((o) => !o)}>
-            {askOpen ? "Hide Ask with context" : "Ask with context"}
+            {askOpen ? t("search.hideAsk") : t("search.ask")}
           </button>
         }
       />
       <form className="search-bar" role="search" onSubmit={run}>
         <label htmlFor="search-q" className="visually-hidden">
-          Search query
+          {t("search.query")}
         </label>
         <input
           id="search-q"
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search your notes, mail, files…"
+          placeholder={t("search.placeholder")}
           autoFocus
         />
         <label className="field-inline">
-          <span>Show</span>
+          <span>{t("search.show")}</span>
           <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
             {LIMITS.map((l) => (
               <option key={l} value={l}>
-                {l}
+                {formatNumber(l)}
               </option>
             ))}
           </select>
         </label>
         <button type="submit" className="btn btn-primary" disabled={busy || !query.trim()}>
-          {busy ? <Spinner label="Searching" /> : "Search"}
+          {busy ? <Spinner label={t("search.searching")} /> : t("search.submit")}
         </button>
       </form>
 
@@ -96,13 +98,11 @@ export function SearchPage() {
         {opener.status?.text}
       </div>
       <div aria-live="polite" className="visually-hidden">
-        {hits && `${hits.length} result${hits.length === 1 ? "" : "s"} for ${searched}`}
+        {hits && t("search.resultsFor", { n: hits.length, query: searched })}
       </div>
 
       {hits && hits.length === 0 && (
-        <Empty title={`No results for “${searched}”`}>
-          Try different words. Sources are indexed in the background, so new items can take a minute to appear.
-        </Empty>
+        <Empty title={t("search.noResults", { query: searched })}>{t("search.noResultsHint")}</Empty>
       )}
       {hits && hits.length > 0 && (
         <ol className="results">
@@ -113,12 +113,12 @@ export function SearchPage() {
                 <div className="result-head">
                   <span className="result-title">{title}</span>
                   <span className="result-tools">
-                    <span className="muted small" title="Relevance score">
-                      {h.score.toFixed(3)}
+                    <span className="muted small" title={t("search.score")}>
+                      {formatNumber(h.score, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
                     </span>
                     {isOpenableUrl(h.url) && (
-                      <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={`Open ${title}`}>
-                        Open
+                      <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={t("search.openTitle", { title })}>
+                        {t("search.open")}
                       </button>
                     )}
                   </span>
@@ -132,15 +132,16 @@ export function SearchPage() {
           })}
         </ol>
       )}
-      {!hits && !error && <Empty title="Type a query to search">Results come only from this device.</Empty>}
+      {!hits && !error && <Empty title={t("search.typeQuery")}>{t("search.typeQueryHint")}</Empty>}
     </div>
   );
 }
 
 function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefined }) {
+  const t = useT();
   const kind = source?.kind ?? "";
   return (
-    <span className="source-badge" title={source ? `${sourceKindLabel(kind)} · ${id}` : id}>
+    <span className="source-badge" title={source ? t("search.sourceBadge", { kind: sourceKindLabel(kind), id }) : id}>
       <SourceIcon kind={kind} size={13} />
       {source?.name ?? id}
     </span>
@@ -180,6 +181,7 @@ function AskPanel({
   byId: Map<string, SourceInfo>;
   onOpen: (url: string, label: string) => Promise<void>;
 }) {
+  const t = useT();
   const [question, setQuestion] = useState(initialQuestion);
   const [budget, setBudget] = useState(2000);
   const [ctx, setCtx] = useState<ContextResponse | null>(null);
@@ -274,41 +276,38 @@ function AskPanel({
 
   return (
     <section id="ask-panel" className="ask-panel" aria-labelledby="ask-title">
-      <h2 id="ask-title">Ask with context</h2>
-      <p className="muted small">
-        Nugget packs the most relevant passages from your sources, with numbered citations. Review them, then ask a model to
-        answer from them.
-      </p>
+      <h2 id="ask-title">{t("search.ask")}</h2>
+      <p className="muted small">{t("search.askIntro")}</p>
       <form className="ask-form" onSubmit={getContext}>
         <label htmlFor="ask-q" className="visually-hidden">
-          Question
+          {t("search.question")}
         </label>
-        <input id="ask-q" type="text" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question about your data…" autoFocus />
+        <input id="ask-q" type="text" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={t("search.questionPlaceholder")} autoFocus />
         <label className="field-inline">
-          <span>Budget</span>
+          <span>{t("search.budget")}</span>
           <select value={budget} onChange={(e) => setBudget(Number(e.target.value))}>
             {BUDGETS.map((b) => (
               <option key={b} value={b}>
-                {b.toLocaleString()} tokens
+                {t("search.budgetTokens", { n: b })}
               </option>
             ))}
           </select>
         </label>
         <button type="submit" className="btn" disabled={busy || !question.trim()}>
-          {busy ? <Spinner label="Finding context" /> : "Find context"}
+          {busy ? <Spinner label={t("search.findingContext")} /> : t("search.findContext")}
         </button>
       </form>
 
-      {isMethodNotFound(error) ? <NotAvailable what="Context retrieval" /> : <ErrorNote error={error} />}
+      {isMethodNotFound(error) ? <NotAvailable what={t("search.contextRetrieval")} /> : <ErrorNote error={error} />}
 
-      {ctx && ctx.citations.length === 0 && <p className="muted">Nothing relevant was found for “{asked}”.</p>}
+      {ctx && ctx.citations.length === 0 && <p className="muted">{t("search.nothingRelevant", { query: asked })}</p>}
       {ctx && ctx.citations.length > 0 && (
         <>
-          <h3 className="ask-sub">Context</h3>
-          <div className="context-text" tabIndex={0} role="region" aria-label="Retrieved context">
+          <h3 className="ask-sub">{t("search.context")}</h3>
+          <div className="context-text" tabIndex={0} role="region" aria-label={t("search.retrievedContext")}>
             <CitedText text={ctx.text} valid={valid} byN={byN} onCite={cite} />
           </div>
-          <h3 className="ask-sub">Citations</h3>
+          <h3 className="ask-sub">{t("search.citations")}</h3>
           <ol className="citations" ref={listRef}>
             {ctx.citations.map((c) => (
               <CitationItem key={c.n} c={c} source={byId.get(c.item.source)} onOpen={onOpen} />
@@ -316,12 +315,9 @@ function AskPanel({
           </ol>
           <div className="ask-actions">
             <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
-              {streaming ? <Spinner label="Answering" /> : answer ? "Ask again" : "Ask with this context"}
+              {streaming ? <Spinner label={t("search.answering")} /> : answer ? t("search.askAgain") : t("search.askWithContext")}
             </button>
-            <span className="muted small">
-              The question and the most relevant passages go to the model for the Synthesis tier. Sensitive passages are only sent
-              to models on this device or your network.
-            </span>
+            <span className="muted small">{t("search.askNote")}</span>
           </div>
         </>
       )}
@@ -329,12 +325,11 @@ function AskPanel({
       {answer && (
         <div className="answer" aria-live="polite" aria-busy={streaming}>
           <h3 className="ask-sub">
-            Answer
+            {t("search.answer")}
             {answer.provider && (
               <span className="muted small">
                 {" "}
-                · {answer.provider}
-                {answer.locality === "cloud" ? " (cloud)" : answer.locality === "on_device" ? " (on this device)" : ""}
+                {t("search.answerProvider", { provider: answer.provider, locality: answer.locality ?? "" })}
               </span>
             )}
           </h3>
@@ -352,13 +347,13 @@ function AskPanel({
               {answer.text ? (
                 <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
               ) : (
-                <Spinner label="Waiting for the model" />
+                <Spinner label={t("search.waitingModel")} />
               )}
             </div>
           )}
           {answer.citations.length > 0 && (
             <>
-              <h4 className="ask-sub">Passages sent to the model</h4>
+              <h4 className="ask-sub">{t("search.passagesSent")}</h4>
               <ol className="citations" ref={answerListRef}>
                 {answer.citations.map((c) => (
                   <CitationItem key={c.n} c={c} idPrefix="answer-cite" source={byId.get(c.item.source)} onOpen={onOpen} />
@@ -383,6 +378,7 @@ function CitedText({
   byN: Map<number, Citation>;
   onCite: (n: number) => void;
 }) {
+  const t = useT();
   const parts = useMemo(() => splitCitations(text, valid), [text, valid]);
   return (
     <>
@@ -395,7 +391,7 @@ function CitedText({
             type="button"
             className="cite"
             onClick={() => onCite(p.n)}
-            aria-label={`Citation ${p.n}: ${byN.get(p.n)?.title || byN.get(p.n)?.item.key || ""}`}
+            aria-label={t("search.citationLabel", { n: p.n, title: byN.get(p.n)?.title || byN.get(p.n)?.item.key || "" })}
             title={byN.get(p.n)?.title ?? undefined}
           >
             {p.raw}
@@ -417,6 +413,7 @@ function CitationItem({
   onOpen: (url: string, label: string) => Promise<void>;
   idPrefix?: string;
 }) {
+  const t = useT();
   const title = c.title || c.item.key;
   return (
     <li id={`${idPrefix}-${c.n}`} tabIndex={-1} className="citation">
@@ -427,8 +424,8 @@ function CitationItem({
           {c.sensitive && (
             <>
               {" "}
-              <span className="badge badge-warn" title="Contains personal or confidential details: never sent to cloud models">
-                Sensitive
+              <span className="badge badge-warn" title={t("search.sensitiveTitle")}>
+                {t("search.sensitive")}
               </span>
             </>
           )}
@@ -438,8 +435,8 @@ function CitationItem({
         </span>
       </span>
       {isOpenableUrl(c.url) && (
-        <button type="button" className="btn btn-small" onClick={() => void onOpen(c.url!, title)} aria-label={`Open ${title}`}>
-          Open
+        <button type="button" className="btn btn-small" onClick={() => void onOpen(c.url!, title)} aria-label={t("search.openTitle", { title })}>
+          {t("search.open")}
         </button>
       )}
     </li>

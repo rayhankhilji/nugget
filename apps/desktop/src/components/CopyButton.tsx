@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useT } from "../i18n";
 
 /**
  * Copy `text` to the clipboard. Falls back to a temporary off-screen textarea when the async
@@ -33,7 +34,7 @@ export async function copyText(text: string): Promise<boolean> {
 /** A Copy button that says "Copied" for a moment; the result is announced to screen readers. */
 export function CopyButton({
   text,
-  label = "Copy",
+  label,
   what,
   onCopied,
   className = "btn btn-small",
@@ -45,6 +46,8 @@ export function CopyButton({
   onCopied?: () => void;
   className?: string;
 }) {
+  const t = useT();
+  const shown = label ?? t("copy.copy");
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -59,11 +62,11 @@ export function CopyButton({
 
   return (
     <>
-      <button type="button" className={className} onClick={() => void copy()} aria-label={`${label} ${what}`}>
-        {state === "copied" ? "Copied" : state === "failed" ? "Copy failed" : label}
+      <button type="button" className={className} onClick={() => void copy()} aria-label={t("copy.ariaLabel", { label: shown, what })}>
+        {state === "copied" ? t("copy.copied") : state === "failed" ? t("copy.failed") : shown}
       </button>
       <span className="visually-hidden" aria-live="polite">
-        {state === "copied" ? `${what} copied to the clipboard.` : state === "failed" ? `Couldn't copy the ${what}. Select it and copy it yourself.` : ""}
+        {state === "copied" ? t("copy.copiedAnnounce", { what }) : state === "failed" ? t("copy.failedAnnounce", { what }) : ""}
       </span>
     </>
   );

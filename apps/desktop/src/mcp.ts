@@ -1,16 +1,18 @@
 /** Helpers for the Connected AI apps page (MCP clients). */
 import { MCP_TOOLS, type McpScopes, type SourceInfo } from "./api";
+import { t } from "./i18n";
 
-export const SETUP_APP_LABEL: Record<string, string> = {
-  "claude-desktop": "Claude Desktop",
-  "claude-code": "Claude Code",
-  cursor: "Cursor",
-  "generic-http": "Other app (HTTP)",
-  "generic-stdio": "Other app (stdio)",
+/** Setup apps in display order. Named apps are product names and stay untranslated. */
+const SETUP_APP_LABEL: Record<string, () => string> = {
+  "claude-desktop": () => "Claude Desktop", // i18n-ignore: product name
+  "claude-code": () => "Claude Code", // i18n-ignore: product name
+  cursor: () => "Cursor",
+  "generic-http": () => t("mcp.app.generic-http"),
+  "generic-stdio": () => t("mcp.app.generic-stdio"),
 };
 
 export function setupAppLabel(app: string): string {
-  return SETUP_APP_LABEL[app] ?? app;
+  return SETUP_APP_LABEL[app]?.() ?? app;
 }
 
 /** Order snippets are shown in: the named apps first, then generic ones, then anything else. */
@@ -50,10 +52,10 @@ export type ScopeFormErrors = Partial<Record<"name" | "sources" | "tools", strin
 export function validateScopeForm(f: ScopeForm): ScopeFormErrors {
   const errors: ScopeFormErrors = {};
   const name = f.name.trim();
-  if (!name) errors.name = "Give the app a name, such as “Claude Desktop”.";
-  else if (Array.from(name).length > MAX_CLIENT_NAME) errors.name = `Use at most ${MAX_CLIENT_NAME} characters.`;
-  if (!f.allSources && f.sources.length === 0) errors.sources = "Choose at least one source, or allow all sources.";
-  if (!f.allTools && f.tools.length === 0) errors.tools = "Choose at least one tool, or allow all tools.";
+  if (!name) errors.name = t("mcp.error.name");
+  else if (Array.from(name).length > MAX_CLIENT_NAME) errors.name = t("mcp.error.nameTooLong", { max: MAX_CLIENT_NAME });
+  if (!f.allSources && f.sources.length === 0) errors.sources = t("mcp.error.sources");
+  if (!f.allTools && f.tools.length === 0) errors.tools = t("mcp.error.tools");
   return errors;
 }
 
@@ -74,17 +76,20 @@ export interface ScopeSummary {
 
 export function summarizeScopes(scopes: McpScopes, sources?: readonly SourceInfo[]): ScopeSummary {
   const names = new Map((sources ?? []).map((s) => [s.id, s.name]));
-  const toolLabels = new Map(MCP_TOOLS.map((t) => [t.name, t.label]));
+  const toolLabels = new Map<string, string>(MCP_TOOLS.map((tool) => [tool.name, t(tool.label)]));
   const list = scopes.sources;
   const tools = scopes.tools ?? [];
   return {
     sources:
       list == null
-        ? "All sources"
+        ? t("mcp.summary.allSources")
         : list.length === 0
-          ? "No sources"
-          : list.map((id) => names.get(id) ?? id).join(", "),
-    tools: tools.length === 0 ? "All read-only tools" : tools.map((t) => toolLabels.get(t) ?? t).join(", "),
+          ? t("mcp.summary.noSources")
+          : list.map((id) => names.get(id) ?? id).join(t("common.listSeparator")),
+    tools:
+      tools.length === 0
+        ? t("mcp.summary.allTools")
+        : tools.map((name) => toolLabels.get(name) ?? name).join(t("common.listSeparator")),
     sensitive: scopes.include_sensitive === true,
   };
 }

@@ -1,4 +1,5 @@
 /** Splitting packed context / answers into text and `[n]` citation markers. */
+import { t } from "./i18n";
 
 export type CitationPart = { kind: "text"; text: string } | { kind: "cite"; n: number; raw: string };
 
@@ -35,6 +36,5 @@ export function splitCitations(text: string, valid: ReadonlySet<number>): Citati
  */
 export function withheldNotice(excluded: number | null | undefined, provider: string): string | null {
   if (!excluded || excluded <= 0) return null;
-  const items = excluded === 1 ? "1 sensitive item was" : `${excluded} sensitive items were`;
-  return `${items} left out because ${provider} is a cloud model. Sensitive items are only sent to models on this device or your network.`;
+  return t("search.withheld", { n: excluded, provider });
 }
