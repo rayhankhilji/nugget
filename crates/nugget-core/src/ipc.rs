@@ -932,7 +932,7 @@ pub struct CardsList {
 /// One feature's share of a card's score.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CardFactor {
-    /// `urgency`, `importance`, `freshness`, `kind:<kind>`, ...
+    /// `urgency`, `importance`, `freshness`, `kind_<kind>`, `bias`, ...
     pub name: String,
     pub value: f64,
     pub weight: f64,
