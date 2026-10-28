@@ -22,6 +22,10 @@ pub struct SnippetOptions {
     pub http_port: Option<u16>,
     /// `std::env::consts::OS` of the machine the apps run on (picks config paths).
     pub os: String,
+    /// Extra environment variables the launched `nuggetd mcp` process gets, in order, ahead of
+    /// [`TOKEN_ENV`] (e.g. `NUGGET_HOME` when the daemon runs on a non-default data root). A
+    /// pair named [`TOKEN_ENV`] is ignored: the token always comes from the client.
+    pub env: Vec<(String, String)>,
 }
 
 impl Default for SnippetOptions {
@@ -30,6 +34,7 @@ impl Default for SnippetOptions {
             nuggetd: "nuggetd".into(),
             http_port: None,
             os: std::env::consts::OS.into(),
+            env: Vec::new(),
         }
     }
 }
@@ -54,14 +59,28 @@ fn sh_quote(s: &str) -> String {
     }
 }
 
+/// `opts.env` (minus any [`TOKEN_ENV`]) followed by the token.
+fn stdio_env<'a>(token: &'a str, opts: &'a SnippetOptions) -> Vec<(&'a str, &'a str)> {
+    opts.env
+        .iter()
+        .filter(|(k, _)| k != TOKEN_ENV)
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .chain([(TOKEN_ENV, token)])
+        .collect()
+}
+
 /// The `mcpServers` entry shared by Claude Desktop and Cursor.
 fn stdio_server_json(client: &McpClientInfo, token: &str, opts: &SnippetOptions) -> String {
+    let env: serde_json::Map<String, serde_json::Value> = stdio_env(token, opts)
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.into()))
+        .collect();
     let v = json!({
         "mcpServers": {
             SERVER_KEY: {
                 "command": opts.nuggetd,
                 "args": ["mcp", "--client", client.id],
-                "env": { TOKEN_ENV: token }
+                "env": env
             }
         }
     });
@@ -85,8 +104,11 @@ pub fn setup_snippets(
             app: "claude-code".into(),
             config_path: None,
             text: format!(
-                "claude mcp add --transport stdio --scope user --env {TOKEN_ENV}={} {SERVER_KEY} -- {} mcp --client {}",
-                sh_quote(token),
+                "claude mcp add --transport stdio --scope user{} {SERVER_KEY} -- {} mcp --client {}",
+                stdio_env(token, opts)
+                    .into_iter()
+                    .map(|(k, v)| format!(" --env {k}={}", sh_quote(v)))
+                    .collect::<String>(),
                 sh_quote(&opts.nuggetd),
                 sh_quote(&client.id)
             ),
@@ -105,8 +127,13 @@ pub fn setup_snippets(
             app: "generic-stdio".into(),
             config_path: None,
             text: format!(
-                "command: {} mcp --client {}\nenv: {TOKEN_ENV}={token}",
-                opts.nuggetd, client.id
+                "command: {} mcp --client {}{}",
+                opts.nuggetd,
+                client.id,
+                stdio_env(token, opts)
+                    .into_iter()
+                    .map(|(k, v)| format!("\nenv: {k}={v}"))
+                    .collect::<String>()
             ),
         },
     ];
