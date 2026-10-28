@@ -345,6 +345,12 @@ fn chunk_segment(text: &str, seg: &Seg<'_>, o: &Opts, out: &mut Vec<ChunkOut>) {
         return;
     }
     let prefix = make_prefix(seg.path, o.max);
+    // When a chunk's own text starts with the section's heading (e.g. `# Title`), repeating that
+    // heading in the prefix double-weights it for search; such chunks get only the parent path.
+    let parent_prefix = match seg.path.split_last() {
+        Some((_, parents)) => make_prefix(parents, o.max),
+        None => String::new(),
+    };
     let pt = Counts::of(&prefix).tokens();
     let budget = o.max.saturating_sub(pt).max(1);
     let target = o.target.saturating_sub(pt).max(1).min(budget);
@@ -376,8 +382,13 @@ fn chunk_segment(text: &str, seg: &Seg<'_>, o: &Opts, out: &mut Vec<ChunkOut>) {
             ce = ne;
             i += 1;
         }
+        let body = &text[cs..ce];
+        let prefix = match seg.path.last() {
+            Some(own) if starts_with_heading(body, own) => &parent_prefix,
+            _ => &prefix,
+        };
         let mut chunk_text = String::with_capacity(prefix.len() + ce - cs);
-        chunk_text.push_str(&prefix);
+        chunk_text.push_str(prefix);
         chunk_text.push_str(&text[cs..ce]);
         let tokens = Counts::of(&chunk_text).tokens();
         out.push(ChunkOut {
@@ -389,6 +400,23 @@ fn chunk_segment(text: &str, seg: &Seg<'_>, o: &Opts, out: &mut Vec<ChunkOut>) {
         });
         prev = Some((cs, ce));
     }
+}
+
+/// Whether the first non-blank line of `body` is the heading `heading` (ATX `#` markers and
+/// surrounding whitespace ignored, case-insensitive).
+fn starts_with_heading(body: &str, heading: &str) -> bool {
+    let Some(line) = body.lines().find(|l| !l.trim().is_empty()) else {
+        return false;
+    };
+    let line = line
+        .trim()
+        .trim_start_matches('#')
+        .trim_end_matches('#')
+        .trim();
+    let want = heading.trim();
+    !want.is_empty()
+        && crate::util::normalize_ws(line).to_lowercase()
+            == crate::util::normalize_ws(want).to_lowercase()
 }
 
 #[cfg(test)]
@@ -426,6 +454,31 @@ mod tests {
                 (9, 10, String::new()),
             ]
         );
+    }
+
+    #[test]
+    fn own_heading_is_not_repeated_in_the_prefix() {
+        let doc = crate::Extracted {
+            text: "# Guide\n\nIntro.\n\n## Install\n\nRun it.\n".into(),
+            sections: vec![
+                crate::Section {
+                    heading_path: vec!["Guide".into()],
+                    start: 0,
+                    end: 17,
+                },
+                crate::Section {
+                    heading_path: vec!["Guide".into(), "Install".into()],
+                    start: 17,
+                    end: 37,
+                },
+            ],
+            ..Default::default()
+        };
+        let chunks = crate::chunk(&doc, &crate::ChunkOptions::default());
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+        assert_eq!(texts, ["# Guide\n\nIntro.", "Guide\n## Install\n\nRun it."]);
+        assert!(starts_with_heading("\n## Install  \nx", "install"));
+        assert!(!starts_with_heading("Install guide", "Install"));
     }
 
     #[test]

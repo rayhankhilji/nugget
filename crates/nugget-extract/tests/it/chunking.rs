@@ -179,7 +179,12 @@ fn heading_prefix() {
         .find(|c| c.heading_path == ["Guide", "Install"])
         .expect("install chunk");
     assert!(
-        install.text.starts_with("Guide > Install\n## Install"),
+        install.text.starts_with("Guide\n## Install"),
+        "own heading is not repeated in the prefix: {:?}",
+        install.text
+    );
+    assert!(
+        !install.text.contains("Install\n## Install"),
         "{:?}",
         install.text
     );
