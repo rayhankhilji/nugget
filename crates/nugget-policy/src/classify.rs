@@ -253,6 +253,12 @@ impl RiskClassifier {
                 .collect::<Vec<_>>()
                 .join(" ");
             let k = parse_keys(&keys);
+            let terminal = apps.contains(&AppKind::Terminal);
+            if k.ctrl_o && terminal {
+                acc.raise(RiskClass::Security, || {
+                    "Ctrl+O in a terminal runs the current command".into()
+                });
+            }
             if k.enter {
                 if k.cmd_or_ctrl {
                     acc.raise(RiskClass::Send, || "Ctrl/Cmd+Enter sends".into());
@@ -289,7 +295,9 @@ impl RiskClassifier {
                 acc.raise(RiskClass::Spend, || "enters payment card details".into());
             }
             if let Some(p) = preview {
-                let submits = p.ends_with('\n') || p.ends_with('\r');
+                // A line break anywhere submits what comes before it (a terminal runs each line,
+                // a chat sends it), not only a trailing one.
+                let submits = p.contains(['\n', '\r', '\u{2028}', '\u{2029}', '\u{85}']);
                 if submits && apps.contains(&AppKind::Messaging) {
                     acc.raise(RiskClass::Send, || "newline in a chat app sends".into());
                 }
@@ -515,7 +523,10 @@ const CURRENCY_CODES: &[&str] = &[
 ];
 
 struct Keys {
+    /// Enter, or a control chord terminals and many inputs treat as Enter (Ctrl/Cmd+J, +M).
     enter: bool,
+    /// Ctrl/Cmd+O (readline's operate-and-get-next: runs the line in a terminal).
+    ctrl_o: bool,
     delete: bool,
     cmd_or_ctrl: bool,
     any_modifier: bool,
@@ -528,16 +539,21 @@ fn parse_keys(keys: &str) -> Keys {
         .collect();
     let has = |set: &[&str]| tokens.iter().any(|t| set.contains(t));
     let sym = |set: &[char]| keys.chars().any(|c| set.contains(&c));
-    let enter = has(&["enter", "return", "kp_enter", "numpadenter", "ret", "\\n"])
-        || sym(&['↩', '⏎', '↵', '⌤', '\n', '\r']);
     let delete = has(&["delete", "del", "backspace", "forwarddelete"]) || sym(&['⌫', '⌦']);
     let cmd_or_ctrl = has(&[
         "cmd", "command", "ctrl", "control", "meta", "super", "win", "primary", "mod", "strg",
     ]) || sym(&['⌘', '⌃', '^']);
+    let enter = has(&["enter", "return", "kp_enter", "numpadenter", "ret", "\\n"])
+        || sym(&[
+            '↩', '⏎', '↵', '⌤', '\n', '\r', '\u{2028}', '\u{2029}', '\u{85}',
+        ])
+        || (cmd_or_ctrl && has(&["j", "m"]));
+    let ctrl_o = cmd_or_ctrl && has(&["o"]);
     let any_modifier =
         cmd_or_ctrl || has(&["shift", "alt", "option", "opt", "altgr"]) || sym(&['⇧', '⌥']);
     Keys {
         enter,
+        ctrl_o,
         delete,
         cmd_or_ctrl,
         any_modifier,
@@ -1669,6 +1685,48 @@ mod tests {
             declared_risk: RiskClass::Observe,
             task_id: "t".into(),
         }
+    }
+
+    // Security review PA-2 (regression).
+    #[test]
+    fn pa2_line_break_anywhere_submits_and_enter_chords() {
+        assert!(
+            risk(
+                "com.apple.Terminal",
+                "type",
+                Some("shell"),
+                Some("echo ok\nopen -a Calculator ")
+            ) >= RiskClass::Security
+        );
+        assert!(
+            risk(
+                "com.tinyspeck.slackmacgap",
+                "type",
+                Some("Message #general"),
+                Some("secret stuff\n ")
+            ) >= RiskClass::Send
+        );
+        for sep in ['\r', '\u{2028}', '\u{2029}', '\u{85}'] {
+            let text = format!("echo ok{sep}ls ");
+            assert!(
+                risk("com.apple.Terminal", "type", Some("shell"), Some(&text))
+                    >= RiskClass::Security,
+                "{sep:?}"
+            );
+        }
+        for k in ["ctrl+j", "ctrl+m", "ctrl+o"] {
+            assert!(
+                risk("com.apple.Terminal", "key", Some(k), None) >= RiskClass::Security,
+                "{k}"
+            );
+        }
+        assert!(risk("com.tinyspeck.slackmacgap", "key", Some("ctrl+j"), None) >= RiskClass::Send);
+        // Plain letters and Ctrl+O outside a terminal are not Enter.
+        assert!(risk("com.apple.Terminal", "key", Some("j"), None) < RiskClass::Send);
+        assert!(risk("com.apple.TextEdit", "key", Some("ctrl+o"), None) < RiskClass::Send);
+        assert!(
+            risk("com.apple.Terminal", "type", Some("shell"), Some("echo ok")) < RiskClass::Send
+        );
     }
 
     fn risk(app: &str, verb: &str, label: Option<&str>, preview: Option<&str>) -> RiskClass {

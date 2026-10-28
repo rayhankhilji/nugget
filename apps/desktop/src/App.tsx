@@ -8,6 +8,8 @@ import { ChatPage } from "./pages/Chat";
 import { SearchPage } from "./pages/Search";
 import { KnowledgePage } from "./pages/Knowledge";
 import { AppsPage } from "./pages/Apps";
+import { AgentPage } from "./pages/Agent";
+import { SafetyPage } from "./pages/Safety";
 import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
@@ -22,6 +24,8 @@ const PAGES: { id: PageId; label: MessageKey }[] = [
   { id: "knowledge", label: "app.nav.knowledge" },
   { id: "sources", label: "app.nav.sources" },
   { id: "apps", label: "app.nav.apps" },
+  { id: "agent", label: "app.nav.agent" },
+  { id: "safety", label: "app.nav.safety" },
   { id: "models", label: "app.nav.models" },
   { id: "privacy", label: "app.nav.privacy" },
   { id: "status", label: "app.nav.status" },
@@ -151,6 +155,10 @@ function Page({ id }: { id: PageId }) {
       return <KnowledgePage />;
     case "apps":
       return <AppsPage />;
+    case "agent":
+      return <AgentPage />;
+    case "safety":
+      return <SafetyPage />;
     case "sources":
       return <SourcesPage />;
     case "models":

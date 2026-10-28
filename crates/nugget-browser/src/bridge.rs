@@ -25,15 +25,17 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::protocol::{BrowserEvent, ErrorCode, ExtensionMessage, HostMessage, HostRequest};
 
-/// IPC method and notification names between the host process and the daemon. Proposed for
-/// `nugget_core::ipc` once the daemon wires the hub in.
+/// IPC method and notification names between the host process and the daemon. They live in
+/// `nugget_core::ipc` (`agent_method`, `agent_notification`); these are aliases.
 pub mod ipc_method {
+    use nugget_core::ipc::{agent_method, agent_notification};
+
     /// Host -> daemon, long-lived: registers the host; returns when the daemon detaches it.
-    pub const ATTACH: &str = "browser.host.attach";
+    pub const ATTACH: &str = agent_method::BROWSER_HOST_ATTACH;
     /// Host -> daemon: a reply or event from the extension ([`super::ExtensionMessage`]).
-    pub const DELIVER: &str = "browser.host.deliver";
+    pub const DELIVER: &str = agent_method::BROWSER_HOST_DELIVER;
     /// Daemon -> host notification: a [`super::HostMessage`] to forward to the extension.
-    pub const REQUEST: &str = "browser.host.request";
+    pub const REQUEST: &str = agent_notification::BROWSER_HOST_REQUEST;
 }
 
 /// Default time to wait for the extension to answer one request.

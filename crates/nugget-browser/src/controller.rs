@@ -131,7 +131,18 @@ impl BrowserController {
             Decision::Confirm(reason) => {
                 if self.confirmer.confirm(descriptor, &reason).await {
                     // Approval can take a while; the user may have hit Stop meanwhile.
-                    self.check_halt().await
+                    self.check_halt().await?;
+                    // An approved action still counts against the task's rate limit.
+                    if !self
+                        .gate
+                        .record_approved(descriptor, descriptor.declared_risk)
+                    {
+                        return Err(BrowserError::Denied(format!(
+                            "rate limit reached for {} actions in this task",
+                            descriptor.declared_risk
+                        )));
+                    }
+                    Ok(())
                 } else {
                     Err(BrowserError::Declined(reason))
                 }

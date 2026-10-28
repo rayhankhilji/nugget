@@ -3,6 +3,7 @@
 // No console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod agent;
 mod commands;
 mod daemon;
 mod login;
@@ -67,6 +68,19 @@ fn main() {
             updater::updates_check,
             updater::updates_install,
             updater::login_set,
+            agent::commands::agent_run,
+            agent::commands::agent_cancel,
+            agent::commands::agent_confirm,
+            agent::commands::agent_answer,
+            agent::commands::agent_list,
+            agent::commands::agent_get,
+            agent::commands::policy_get,
+            agent::commands::policy_set,
+            agent::commands::policy_approvals,
+            agent::commands::policy_kill,
+            agent::commands::policy_resume,
+            agent::commands::policy_log_export,
+            agent::commands::browser_status,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
@@ -75,6 +89,7 @@ fn main() {
                 // and closing it quits the app.
                 tracing::warn!(error = %e, "tray icon unavailable");
             }
+            agent::setup(app);
             // Connect early so the tray reflects the daemon state before the window asks.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

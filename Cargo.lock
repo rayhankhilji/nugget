@@ -3830,6 +3830,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "futures",
+ "nugget-agent",
  "nugget-core",
  "nugget-ipc",
  "nugget-policy",
@@ -3838,6 +3839,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-util",
  "tracing",
  "url",
 ]
@@ -3991,7 +3993,9 @@ version = "0.0.1"
 dependencies = [
  "futures",
  "nugget-core",
+ "nugget-hotkey",
  "nugget-ipc",
+ "nugget-policy",
  "serde",
  "serde_json",
  "tauri",
