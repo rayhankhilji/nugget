@@ -1,0 +1,6 @@
+name,email,role
+Alice Smith,alice@example.com,"Lead, Platform"
+Bob Jones,bob@example.com,Engineer
+,,
+Carol "CJ" Lee,carol@example.com,"Designer
+(contract)"

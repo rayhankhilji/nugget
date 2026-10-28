@@ -1,0 +1,13 @@
+From: newsletter@example.org
+To: bob@example.com
+Subject: Weekly digest
+Date: Tue, 16 Jan 2024 08:00:00 +0000
+Message-ID: <digest-7@example.org>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><body><div>Thanks for the update!</div>
+<div class="gmail_signature">Newsletter Team</div>
+<div class="gmail_quote">On Mon, someone wrote:<blockquote class="gmail_quote">Old message text</blockquote></div>
+<p>Read more at <a href="https://example.org/digest/7">the site</a>.</p>
+<script>alert(1)</script></body></html>

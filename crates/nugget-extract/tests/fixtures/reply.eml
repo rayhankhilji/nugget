@@ -1,0 +1,43 @@
+Return-Path: <alice@example.com>
+From: Alice Smith <alice@example.com>
+To: Bob Jones <bob@example.com>, carol@example.com
+Cc: "Dave" <dave@example.com>
+Subject: Re: Lunch on Friday?
+Date: Mon, 15 Jan 2024 10:30:00 +0100
+Message-ID: <reply-2@example.com>
+In-Reply-To: <orig-1@example.com>
+References: <thread-0@example.com> <orig-1@example.com>
+X-Gmail-Labels: Important,Friends
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Friday works. Let's try the caf=C3=A9 at noon.
+
+Details: https://example.com/menu
+
+--=20
+Alice Smith
+Platform Lead
+
+On Sun, 14 Jan 2024, Bob Jones <bob@example.com> wrote:
+> Lunch on Friday?
+> Bob
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>Friday works. Let's try the caf&eacute; at noon.</p>
+--alt--
+--outer
+Content-Type: application/pdf; name="menu.pdf"
+Content-Disposition: attachment; filename="menu.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKJcfsj6IKMSAwIG9iago8PD4+CmVuZG9iagp0cmFpbGVyCjw8Pj4KJSVFT0YK
+--outer--

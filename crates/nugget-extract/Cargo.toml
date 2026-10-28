@@ -7,10 +7,40 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["ocr"]
+# Image OCR through the pure-Rust `ocrs` engine. Models are never bundled or downloaded: they are
+# looked up at run time (see `set_ocr_model_dir` / `NUGGET_OCR_MODELS`).
+ocr = ["dep:ocrs", "dep:rten", "dep:image"]
+
 [dependencies]
 nugget-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+# Text encodings (UTF-16 BOMs, legacy 8-bit fallbacks).
+encoding_rs = "0.8"
+# Markdown structure with source offsets.
+pulldown-cmark = { version = "0.13", default-features = false }
+# YAML frontmatter (event API only, so alias expansion stays bounded).
+yaml-rust2 = { version = "0.10", default-features = false }
+# HTML tokenizer (streaming; no DOM, no recursion).
+html5ever = "0.38"
+# PDF text (re-exports `lopdf`).
+pdf-extract = "0.12"
+# DOCX / XLSX containers.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+quick-xml = "0.42"
+csv = "1"
+mail-parser = { version = "0.11", default-features = false, features = ["full_encoding"] }
+# OCR (optional).
+ocrs = { version = "0.10", optional = true }
+rten = { version = "0.21", optional = true }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"], optional = true }
+
+[dev-dependencies]
+# Builds DOCX/XLSX fixtures in tests.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 
 [lints]
 workspace = true

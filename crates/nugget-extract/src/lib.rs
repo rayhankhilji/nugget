@@ -1,16 +1,56 @@
 //! Text extraction and structure-aware chunking.
 //!
 //! **Contract (stable for M1):** [`extract`], [`detect_mime`], [`chunk`], [`estimate_tokens`] and
-//! the types below. Work package M1-A replaces the minimal implementation behind them.
+//! the types below. Additions since the M1 contract: [`extract_with_ocr`], [`is_supported`],
+//! [`OcrModels`], [`set_ocr_models`], [`ocr_models`], [`ocr_available`] and the `OCR_*` constants.
 //!
 //! Inputs are hostile: every function enforces the size caps in [`ExtractOptions`] and returns
 //! `Error::Unsupported` / `Error::Invalid` rather than panicking. Extraction is CPU-bound and
 //! synchronous; callers run it on a blocking thread with a timeout.
+//!
+//! # Formats
+//!
+//! | MIME | Notes |
+//! |---|---|
+//! | `text/plain`, `text/*`, source code (`text/x-rust`, `application/json`, ...) | `metadata.language` from the extension or MIME |
+//! | `text/markdown` | frontmatter → `metadata.frontmatter`; headings → sections; wikilinks, links, `#tags` |
+//! | `text/html` | readable text, `<title>`, links, headings → sections; script/style dropped |
+//! | `application/pdf` | text per page; one section per page (`["Page 3"]`) |
+//! | DOCX | paragraphs and tables; heading styles → sections; hyperlinks |
+//! | XLSX, CSV/TSV | one row per line (`a \| b \| c`); one section per sheet; row/column caps |
+//! | `message/rfc822` | headers → metadata; text/plain preferred; quotes and signature → metadata |
+//! | `text/calendar` | events rendered as text; uid/times → metadata |
+//! | `image/png`, `image/jpeg`, `image/webp` | OCR via `ocrs`, only with `ocr` set and models present |
+//!
+//! Markdown frontmatter is removed from [`Extracted::text`] (it is in `metadata.frontmatter`);
+//! otherwise Markdown text is kept as-is.
+//!
+//! # Panics
+//!
+//! No extractor panics on any input. As a last line of defence (third-party parsers, notably the
+//! PDF one, contain panicking paths), each extraction runs under `catch_unwind` and a caught panic
+//! becomes `Error::Invalid`; this requires the default `panic = "unwind"` strategy.
 
-use std::path::Path;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::RwLock;
 
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
+
+mod chunker;
+mod html;
+mod ics;
+mod mail;
+mod markdown;
+mod mime;
+mod ocr;
+mod ooxml;
+mod pdf;
+mod tabular;
+mod text;
+mod util;
+mod yaml;
 
 /// Where the bytes come from.
 #[derive(Debug, Clone, Copy)]
@@ -68,33 +108,233 @@ pub struct Extracted {
     pub truncated: bool,
 }
 
+/// Environment variable naming a directory that holds the OCR models
+/// ([`OCR_DETECTION_MODEL_FILE`] and [`OCR_RECOGNITION_MODEL_FILE`]).
+pub const OCR_MODELS_ENV: &str = "NUGGET_OCR_MODELS";
+/// File name of the `ocrs` text-detection model inside an OCR model directory.
+pub const OCR_DETECTION_MODEL_FILE: &str = "text-detection.rten";
+/// File name of the `ocrs` text-recognition model inside an OCR model directory.
+pub const OCR_RECOGNITION_MODEL_FILE: &str = "text-recognition.rten";
+
+/// Paths of the two `ocrs` models (`.rten` format). Nugget never downloads them; the user or the
+/// model manager places them on disk.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OcrModels {
+    pub detection: PathBuf,
+    pub recognition: PathBuf,
+}
+
+impl OcrModels {
+    /// The standard file names inside `dir`.
+    pub fn from_dir(dir: impl AsRef<Path>) -> Self {
+        let dir = dir.as_ref();
+        Self {
+            detection: dir.join(OCR_DETECTION_MODEL_FILE),
+            recognition: dir.join(OCR_RECOGNITION_MODEL_FILE),
+        }
+    }
+
+    /// Models from the directory in [`OCR_MODELS_ENV`], if that variable is set and non-empty.
+    pub fn from_env() -> Option<Self> {
+        let dir = std::env::var_os(OCR_MODELS_ENV)?;
+        if dir.is_empty() {
+            return None;
+        }
+        Some(Self::from_dir(PathBuf::from(dir)))
+    }
+
+    /// Both model files exist.
+    pub fn exist(&self) -> bool {
+        self.detection.is_file() && self.recognition.is_file()
+    }
+}
+
+static OCR_MODELS: RwLock<Option<OcrModels>> = RwLock::new(None);
+
+/// Set (or clear) the process-wide OCR models used by [`extract`]. When unset, [`extract`] falls
+/// back to [`OCR_MODELS_ENV`].
+pub fn set_ocr_models(models: Option<OcrModels>) {
+    match OCR_MODELS.write() {
+        Ok(mut g) => *g = models,
+        Err(poisoned) => *poisoned.into_inner() = models,
+    }
+}
+
+/// The OCR models [`extract`] would use: those set with [`set_ocr_models`], else
+/// [`OcrModels::from_env`]. Existence is not checked.
+pub fn ocr_models() -> Option<OcrModels> {
+    let set = match OCR_MODELS.read() {
+        Ok(g) => g.clone(),
+        Err(poisoned) => poisoned.into_inner().clone(),
+    };
+    set.or_else(OcrModels::from_env)
+}
+
+/// Whether [`extract`] can OCR images: the `ocr` feature is compiled in and the model files of
+/// [`ocr_models`] exist.
+pub fn ocr_available() -> bool {
+    cfg!(feature = "ocr") && ocr_models().is_some_and(|m| m.exist())
+}
+
+/// Whether [`extract`] has an extractor for `mime` (parameters are ignored). Images count as
+/// supported even though they also need `ExtractOptions::ocr` and OCR models.
+pub fn is_supported(mime: &str) -> bool {
+    Kind::route(&mime::base(mime)).is_some()
+}
+
 /// Extract text and structure from `source`, interpreted as `mime`.
 pub fn extract(mime: &str, source: Source<'_>, opts: &ExtractOptions) -> Result<Extracted> {
-    let base = mime.split(';').next().unwrap_or("").trim();
-    if !(base.starts_with("text/") || base == "application/json") {
-        return Err(Error::Unsupported(format!("no extractor for {base}")));
+    let models = if opts.ocr { ocr_models() } else { None };
+    run(mime, source, opts, models.as_ref())
+}
+
+/// [`extract`] with explicit OCR models instead of the process-wide / environment ones.
+pub fn extract_with_ocr(
+    mime: &str,
+    source: Source<'_>,
+    opts: &ExtractOptions,
+    models: &OcrModels,
+) -> Result<Extracted> {
+    run(mime, source, opts, Some(models))
+}
+
+/// Extractor families, chosen by MIME.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Text,
+    Markdown,
+    Html,
+    Pdf,
+    Docx,
+    Xlsx,
+    Csv,
+    Mail,
+    Calendar,
+    Image,
+}
+
+impl Kind {
+    fn route(base: &str) -> Option<Kind> {
+        Some(match base {
+            "text/markdown" | "text/x-markdown" => Kind::Markdown,
+            "text/html" | "application/xhtml+xml" => Kind::Html,
+            "text/calendar" | "application/ics" | "text/x-vcalendar" => Kind::Calendar,
+            "text/csv" | "application/csv" | "text/tab-separated-values" | "text/tsv" => Kind::Csv,
+            "message/rfc822" | "message/global" => Kind::Mail,
+            "application/pdf" | "application/x-pdf" => Kind::Pdf,
+            mime::DOCX => Kind::Docx,
+            mime::XLSX | mime::XLSM => Kind::Xlsx,
+            "image/png" | "image/jpeg" | "image/jpg" | "image/pjpeg" | "image/webp" => Kind::Image,
+            _ if base.starts_with("text/") => Kind::Text,
+            _ if mime::language_for_mime(base).is_some() => Kind::Text,
+            _ => return None,
+        })
     }
-    let raw = match source {
-        Source::Text(t) => t.to_owned(),
+
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Text => "text",
+            Kind::Markdown => "markdown",
+            Kind::Html => "html",
+            Kind::Pdf => "pdf",
+            Kind::Docx => "docx",
+            Kind::Xlsx => "xlsx",
+            Kind::Csv => "csv",
+            Kind::Mail => "mail",
+            Kind::Calendar => "calendar",
+            Kind::Image => "image",
+        }
+    }
+}
+
+/// Everything an extractor needs besides the bytes.
+pub(crate) struct Ctx<'a> {
+    pub opts: &'a ExtractOptions,
+    /// Lower-cased MIME without parameters.
+    pub mime: &'a str,
+    /// `charset` parameter of the MIME type, if any.
+    pub charset: Option<&'a str>,
+    pub path: Option<&'a Path>,
+    pub ocr: Option<&'a OcrModels>,
+}
+
+fn run(
+    mime: &str,
+    source: Source<'_>,
+    opts: &ExtractOptions,
+    ocr: Option<&OcrModels>,
+) -> Result<Extracted> {
+    let base = mime::base(mime);
+    let Some(kind) = Kind::route(&base) else {
+        return Err(Error::Unsupported(format!("no extractor for {base}")));
+    };
+    let charset = mime::param(mime, "charset");
+    let (data, path) = load(source, opts)?;
+    let ctx = Ctx {
+        opts,
+        mime: &base,
+        charset: charset.as_deref(),
+        path,
+        ocr: if opts.ocr { ocr } else { None },
+    };
+    let result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| dispatch(kind, &data, &ctx)));
+    match result {
+        Ok(Ok(out)) => Ok(finalize(out, opts)),
+        Ok(Err(e)) => Err(e),
+        Err(payload) => {
+            let msg = util::panic_message(payload.as_ref());
+            tracing::warn!(kind = kind.name(), "extractor panicked: {msg}");
+            Err(Error::Invalid(format!(
+                "{} extractor panicked on malformed input: {msg}",
+                kind.name()
+            )))
+        }
+    }
+}
+
+fn dispatch(kind: Kind, data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
+    match kind {
+        Kind::Text => text::extract(data, ctx),
+        Kind::Markdown => markdown::extract(data, ctx),
+        Kind::Html => html::extract(data, ctx),
+        Kind::Pdf => pdf::extract(data, ctx),
+        Kind::Docx => ooxml::extract_docx(data, ctx),
+        Kind::Xlsx => ooxml::extract_xlsx(data, ctx),
+        Kind::Csv => tabular::extract_csv(data, ctx),
+        Kind::Mail => mail::extract(data, ctx),
+        Kind::Calendar => ics::extract(data, ctx),
+        Kind::Image => ocr::extract(data, ctx),
+    }
+}
+
+fn load<'a>(
+    source: Source<'a>,
+    opts: &ExtractOptions,
+) -> Result<(std::borrow::Cow<'a, [u8]>, Option<&'a Path>)> {
+    use std::borrow::Cow;
+    Ok(match source {
+        Source::Text(t) => {
+            check_size(t.len() as u64, opts)?;
+            (Cow::Borrowed(t.as_bytes()), None)
+        }
         Source::Bytes(b) => {
             check_size(b.len() as u64, opts)?;
-            String::from_utf8_lossy(b).into_owned()
+            (Cow::Borrowed(b), None)
         }
         Source::File(p) => {
-            check_size(std::fs::metadata(p)?.len(), opts)?;
-            String::from_utf8_lossy(&std::fs::read(p)?).into_owned()
+            let file = std::fs::File::open(p)?;
+            let len = file.metadata()?.len();
+            check_size(len, opts)?;
+            let cap = usize::try_from(len.min(opts.max_input_bytes)).unwrap_or(usize::MAX);
+            let mut buf = Vec::with_capacity(cap.min(64 * 1024 * 1024));
+            // The file may grow between `metadata` and `read`: read at most one byte too many.
+            file.take(opts.max_input_bytes.saturating_add(1))
+                .read_to_end(&mut buf)?;
+            check_size(buf.len() as u64, opts)?;
+            (Cow::Owned(buf), Some(p))
         }
-    };
-    let mut out = Extracted {
-        text: raw,
-        metadata: serde_json::Value::Object(Default::default()),
-        ..Default::default()
-    };
-    if out.text.chars().count() > opts.max_text_chars {
-        out.text = out.text.chars().take(opts.max_text_chars).collect();
-        out.truncated = true;
-    }
-    Ok(out)
+    })
 }
 
 fn check_size(len: u64, opts: &ExtractOptions) -> Result<()> {
@@ -107,21 +347,40 @@ fn check_size(len: u64, opts: &ExtractOptions) -> Result<()> {
     Ok(())
 }
 
-/// Best-effort MIME type from a file name and its first bytes.
-pub fn detect_mime(path: Option<&Path>, head: &[u8]) -> String {
-    let ext = path
-        .and_then(|p| p.extension())
-        .and_then(|e| e.to_str())
-        .map(str::to_ascii_lowercase);
-    match ext.as_deref() {
-        Some("md" | "markdown") => "text/markdown",
-        Some("txt") => "text/plain",
-        Some("pdf") => "application/pdf",
-        _ if head.starts_with(b"%PDF") => "application/pdf",
-        _ if std::str::from_utf8(head).is_ok() => "text/plain",
-        _ => "application/octet-stream",
+/// Caps applied to every result, whatever the extractor did.
+const MAX_LINKS: usize = 2_000;
+const MAX_TAGS: usize = 500;
+
+fn finalize(mut out: Extracted, opts: &ExtractOptions) -> Extracted {
+    if let Some((cut, _)) = out.text.char_indices().nth(opts.max_text_chars) {
+        out.text.truncate(cut);
+        out.truncated = true;
     }
-    .to_owned()
+    let len = out.text.len();
+    for s in &mut out.sections {
+        s.end = util::floor_char_boundary(&out.text, s.end.min(len));
+        s.start = util::floor_char_boundary(&out.text, s.start.min(s.end));
+    }
+    out.sections.retain(|s| s.start < s.end);
+    out.links.truncate(MAX_LINKS);
+    out.tags.truncate(MAX_TAGS);
+    if let Some(t) = &out.title {
+        let t = util::normalize_ws(t);
+        out.title = (!t.is_empty()).then(|| util::truncate_chars(&t, 500));
+    }
+    if !out.metadata.is_object() {
+        out.metadata = serde_json::Value::Object(Default::default());
+    }
+    out
+}
+
+/// Best-effort MIME type from a file name and its first bytes.
+///
+/// Binary signatures (PDF, PNG, JPEG, WebP, GIF, ZIP/OOXML, OLE) win over the extension; then the
+/// extension decides (source files map to `text/x-<language>`, e.g. `text/x-rust`); then the
+/// content is sniffed for HTML, iCalendar, RFC 822 mail and plain text.
+pub fn detect_mime(path: Option<&Path>, head: &[u8]) -> String {
+    mime::detect(path, head)
 }
 
 /// Chunking parameters, in estimated tokens.
@@ -156,37 +415,22 @@ pub struct ChunkOut {
 
 /// Split an extracted document into retrieval-sized chunks. Deterministic: the same input always
 /// yields the same chunks.
+///
+/// Splits by section, then paragraph (blank line), then sentence or line, then word, then
+/// character, and packs the pieces greedily up to `target_tokens`. Guarantees:
+/// - every non-whitespace byte of `doc.text` lies in some chunk's `start..end`;
+/// - `text` is the heading-path prefix (`"Guide > Install\n"`, empty outside sections) followed
+///   by exactly `doc.text[start..end]`;
+/// - `tokens == estimate_tokens(&text) <= max_tokens` (`max_tokens` is treated as at least 1);
+/// - consecutive chunks of one section overlap by at most `overlap_tokens` (capped at half of
+///   `max_tokens`), starting at a word boundary; chunks never overlap across sections.
 pub fn chunk(doc: &Extracted, opts: &ChunkOptions) -> Vec<ChunkOut> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut cur = String::new();
-    let mut pos = 0;
-    for para in doc.text.split_inclusive("\n\n") {
-        if !cur.is_empty() && estimate_tokens(&cur) + estimate_tokens(para) > opts.target_tokens {
-            out.push(make(&cur, start, pos));
-            cur.clear();
-            start = pos;
-        }
-        cur.push_str(para);
-        pos += para.len();
-    }
-    if !cur.trim().is_empty() {
-        out.push(make(&cur, start, pos));
-    }
-    out
+    chunker::chunk(doc, opts)
 }
 
-fn make(text: &str, start: usize, end: usize) -> ChunkOut {
-    ChunkOut {
-        text: text.trim().to_owned(),
-        heading_path: Vec::new(),
-        start,
-        end,
-        tokens: estimate_tokens(text),
-    }
-}
-
-/// Rough token count (about 4 chars per token for Latin text).
+/// Rough token count: about 4 chars per token for Latin-script text, and 1 token per CJK
+/// ideograph, kana or Hangul syllable. Cheap, deterministic and additive over concatenation up
+/// to rounding (`estimate_tokens(a + b) <= estimate_tokens(a) + estimate_tokens(b)`).
 pub fn estimate_tokens(text: &str) -> usize {
-    text.chars().count().div_ceil(4)
+    chunker::Counts::of(text).tokens()
 }
