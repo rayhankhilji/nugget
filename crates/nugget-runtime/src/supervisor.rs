@@ -20,11 +20,12 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::args::{LaunchPlan, Tuning};
-use crate::health::{ProcSlot, activity, loopback_client, wait_ready};
+use crate::health::{ProcSlot, Target, activity, loopback_client, wait_ready};
 use crate::logs::{RollingLog, SharedLog, lock as lock_log};
 use crate::orphan::{self, PidRecord};
 use crate::process::ServerProcess;
 use crate::secrets::{RuntimeSecrets, api_key_ref_gen, random_key};
+use crate::socket;
 
 /// Provider id of the local chat server (`local-chat`).
 pub const CHAT_PROVIDER_ID: &str = "local-chat";
@@ -83,6 +84,11 @@ pub struct RuntimeOptions {
     pub log_max_bytes: u64,
     /// Rotated log files kept.
     pub log_keep: usize,
+    /// Serve on a Unix socket in a private (0700) directory instead of a loopback TCP port
+    /// (default `true`). The directory is `data/run`, or a short per-installation one in
+    /// `$XDG_RUNTIME_DIR` / the temp dir when that path is too long for a socket address. Unix
+    /// only: elsewhere servers always listen on `127.0.0.1`. Set to `false` to fall back to TCP.
+    pub unix_socket: bool,
     pub chat: Tuning,
     pub embedding: Tuning,
 }
@@ -102,6 +108,7 @@ impl Default for RuntimeOptions {
             shutdown_grace: Duration::from_secs(5),
             log_max_bytes: 8 * 1024 * 1024,
             log_keep: 3,
+            unix_socket: true,
             chat: Tuning::default(),
             embedding: Tuning::default(),
         }
@@ -116,6 +123,11 @@ impl RuntimeOptions {
         }
     }
 
+    /// Whether servers listen on Unix sockets on this platform.
+    fn use_socket(&self) -> bool {
+        cfg!(unix) && self.unix_socket
+    }
+
     fn backoff(&self, failures: u32) -> Duration {
         self.restart_backoff_base
             .saturating_mul(1u32 << failures.saturating_sub(1).min(16))
@@ -127,9 +139,13 @@ impl RuntimeOptions {
 #[derive(Debug, Clone, PartialEq)]
 pub struct RuntimeDetails {
     pub info: RuntimeInfo,
-    /// The provider config callers should use (port included), while the server is ready.
+    /// The provider config callers should use (port or socket included), while the server is
+    /// ready.
     pub config: Option<ProviderConfig>,
+    /// Loopback port, when the server listens on TCP.
     pub port: Option<u16>,
+    /// Unix socket, when the server listens on one (see [`RuntimeOptions::unix_socket`]).
+    pub socket: Option<PathBuf>,
     /// The server process, from spawn (so also while it is loading) until it is stopped or
     /// found dead.
     pub pid: Option<u32>,
@@ -151,7 +167,8 @@ struct Config {
     server_override: Option<(PathBuf, RuntimeAccel)>,
 }
 
-/// Supervises local `llama-server` processes (one per [`RuntimeRole`]) on `127.0.0.1`.
+/// Supervises local `llama-server` processes (one per [`RuntimeRole`]) on private Unix sockets
+/// (Unix) or `127.0.0.1`.
 ///
 /// Cheap to clone; clones share the servers. When the last clone is dropped every server's
 /// process group (Unix) or job object (Windows) is killed, including one still starting.
@@ -254,6 +271,7 @@ struct Status {
     error: Option<String>,
     config: Option<ProviderConfig>,
     port: Option<u16>,
+    socket: Option<PathBuf>,
     restarts: u32,
     accel: Option<RuntimeAccel>,
     binary: Option<PathBuf>,
@@ -353,10 +371,24 @@ impl RoleState {
         task_alive && lock(&self.status).model_sha.as_deref() == Some(model_sha)
     }
 
-    /// Withdraw the config (and say `Stopped`) before a server is signalled to stop.
+    /// Withdraw the config (and say `Stopping`) before a server is signalled to stop.
     fn mark_stopping(&self) {
         self.set(|st| {
             if st.state.is_some() {
+                st.state = Some(RuntimeState::Stopping);
+            }
+            st.config = None;
+        });
+    }
+
+    /// The server is gone: `Stopping` becomes `Stopped`, and its socket file is removed.
+    fn mark_stopped(&self) {
+        let sock = lock(&self.status).socket.clone();
+        if let Some(sock) = sock {
+            socket::remove_stale(&sock);
+        }
+        self.set(|st| {
+            if st.state == Some(RuntimeState::Stopping) {
                 st.state = Some(RuntimeState::Stopped);
             }
             st.config = None;
@@ -721,11 +753,15 @@ impl Runtime {
         on_progress: Arc<dyn Fn(Progress) + Send + Sync>,
     ) -> watch::Receiver<Option<StartResult>> {
         // `Starting` right away, so the status never lags behind the start.
-        let previous = lock(&rs.status).port;
+        let (previous, previous_socket) = {
+            let st = lock(&rs.status);
+            (st.port, st.socket.clone())
+        };
         let model_id = launches.first().map(|(_, l)| l.entry.id.clone());
         rs.set(|st| {
             *st = Status {
                 port: previous,
+                socket: previous_socket,
                 model_id,
                 model_sha: Some(model_sha.clone()),
                 state: Some(RuntimeState::Starting),
@@ -792,6 +828,7 @@ impl Runtime {
             }
         }
         orphan::remove(&rs.pid_file);
+        rs.mark_stopped();
     }
 
     /// Gracefully stop every server.
@@ -830,6 +867,7 @@ impl Runtime {
                 None
             },
             port: st.port,
+            socket: st.socket,
             pid: rs.pid(),
             restarts: st.restarts,
             accel: st.accel,
@@ -888,10 +926,14 @@ async fn start_new(
     let opts = &ctx.cfg.opts;
     // Reuse the previous port when it is free, so configs handed out before a stop (idle,
     // explicit) point at the right place again (they still need the new key's generation).
-    let previous = lock(&rs.status).port;
+    let (previous, previous_socket) = {
+        let st = lock(&rs.status);
+        (st.port, st.socket.clone())
+    };
     rs.set(|st| {
         *st = Status {
             port: previous,
+            socket: previous_socket,
             model_id: Some(launch.entry.id.clone()),
             model_sha: Some(model_sha.to_string()),
             state: Some(RuntimeState::Starting),
@@ -903,7 +945,14 @@ async fn start_new(
         if let Some(entry) = &runtime {
             launch.binary = ctx.install_entry(entry, on_progress).await?;
         }
-        launch.plan.port = choose_port(previous)?;
+        if opts.use_socket() {
+            let dir = socket::private_dir(&ctx.cfg.paths)?;
+            launch.plan.socket = Some(socket::socket_path(&dir, role_name(rs.role)));
+            launch.plan.port = 0;
+        } else {
+            launch.plan.socket = None;
+            launch.plan.port = choose_port(previous)?;
+        }
         // A fresh key for every server process.
         let (generation, key) = ctx.secrets.rotate(rs.role)?;
         let log = rs.log(opts, &key)?;
@@ -933,9 +982,10 @@ async fn start_new(
         );
     }
     tracing::info!(role = role_name(rs.role), model = %launch.entry.id,
-        port = launch.plan.port, accel = launch.accel.as_str(), "local runtime ready");
+        listen = %listen_display(&launch.plan), accel = launch.accel.as_str(),
+        "local runtime ready");
     let binary = launch.binary.clone();
-    let port = launch.plan.port;
+    let (port, sock) = listen_status(&launch.plan);
     let cancel = CancellationToken::new();
     let handle = tokio::spawn(supervise(
         Arc::clone(rs),
@@ -948,7 +998,8 @@ async fn start_new(
     rs.set(|st| {
         st.state = Some(RuntimeState::Ready);
         st.error = None;
-        st.port = Some(port);
+        st.port = port;
+        st.socket = sock;
         st.config = Some(cfg.clone());
         st.binary = Some(binary);
     });
@@ -987,11 +1038,17 @@ pub(crate) fn provider_config(
             .filter(|t| *t != Tier::Embedding)
             .collect(),
     };
+    // On a Unix socket the URL only names the path (and `Host`); the socket is the address.
+    let base_url = match &plan.socket {
+        Some(_) => "http://localhost/v1".to_string(),
+        None => format!("http://127.0.0.1:{}/v1", plan.port),
+    };
     // Built from JSON so fields added to ProviderConfig later take their serde defaults.
     let v = serde_json::json!({
         "id": provider_id(role),
         "kind": "openai_compatible",
-        "base_url": format!("http://127.0.0.1:{}/v1", plan.port),
+        "base_url": base_url,
+        "socket_path": plan.socket,
         "model": model.id,
         "api_key": api_key_ref_gen(role, generation).to_string(),
         "tiers": tiers,
@@ -1001,6 +1058,30 @@ pub(crate) fn provider_config(
     let cfg: ProviderConfig = serde_json::from_value(v)?;
     cfg.validate()?;
     Ok(cfg)
+}
+
+/// Where a plan listens, for logs.
+fn listen_display(plan: &LaunchPlan) -> String {
+    match &plan.socket {
+        Some(p) => p.display().to_string(),
+        None => format!("127.0.0.1:{}", plan.port),
+    }
+}
+
+/// `(port, socket)` for the status of a server started from `plan`.
+fn listen_status(plan: &LaunchPlan) -> (Option<u16>, Option<PathBuf>) {
+    match &plan.socket {
+        Some(p) => (None, Some(p.clone())),
+        None => (Some(plan.port), None),
+    }
+}
+
+/// How the supervisor reaches a server started from `plan`.
+fn target(client: &reqwest::Client, plan: &LaunchPlan) -> Result<Target> {
+    match &plan.socket {
+        Some(p) => Target::unix(p),
+        None => Ok(Target::tcp(client, plan.port)),
+    }
 }
 
 /// A free loopback port: `preferred` if it can still be bound, otherwise one from the OS.
@@ -1030,10 +1111,15 @@ async fn start_once(
     log: &SharedLog,
 ) -> Result<()> {
     check_binary(&launch.binary)?;
+    let target = target(client, &launch.plan)?;
+    if let Some(sock) = &launch.plan.socket {
+        // Left behind by an earlier server of ours that died; the new one binds afresh.
+        socket::remove_stale(sock);
+    }
     lock_log(log).note(&format!(
-        "starting {} on 127.0.0.1:{} (ctx {}x{}, ngl {}, accel {})",
+        "starting {} on {} (ctx {}x{}, ngl {}, accel {})",
         launch.entry.id,
-        launch.plan.port,
+        listen_display(&launch.plan),
         launch.plan.parallel,
         launch.plan.ctx_per_slot,
         launch.plan.gpu_layers.as_arg(),
@@ -1044,8 +1130,7 @@ async fn start_once(
     let previous = lock(&rs.proc).replace(proc);
     drop(previous);
     match wait_ready(
-        client,
-        launch.plan.port,
+        &target,
         &rs.proc,
         opts.health_timeout,
         opts.health_poll,
@@ -1097,6 +1182,9 @@ async fn supervise(
     let Ok(log) = rs.log(opts, &key) else {
         return;
     };
+    let Ok(mut server) = target(&ctx.client, &launch.plan) else {
+        return;
+    };
     loop {
         let ev = tokio::select! {
             _ = cancel.cancelled() => Event::Cancelled,
@@ -1133,6 +1221,10 @@ async fn supervise(
                 Some(k) => key = k,
                 None => return,
             }
+            match target(&ctx.client, &launch.plan) {
+                Ok(t) => server = t,
+                Err(_) => return,
+            }
             last_counters = None;
             continue;
         }
@@ -1142,7 +1234,7 @@ async fn supervise(
             && last_idle_check.elapsed() >= opts.idle_check_interval
         {
             last_idle_check = Instant::now();
-            match activity(&ctx.client, launch.plan.port, &key).await {
+            match activity(&server, &key).await {
                 Some((counters, busy)) => {
                     if busy || last_counters.is_some_and(|c| c != counters) {
                         rs.touch();
@@ -1157,7 +1249,7 @@ async fn supervise(
                 lock_log(&log).note("stopping: idle");
                 // Withdraw the config before the server is signalled.
                 rs.set(|st| {
-                    st.state = Some(RuntimeState::Stopped);
+                    st.state = Some(RuntimeState::Stopping);
                     st.error = None;
                     st.config = None;
                 });
@@ -1166,6 +1258,7 @@ async fn supervise(
                     p.shutdown(opts.shutdown_grace).await;
                 }
                 orphan::remove(&rs.pid_file);
+                rs.mark_stopped();
                 return;
             }
         }
@@ -1203,12 +1296,12 @@ async fn restart(
             _ = tokio::time::sleep(opts.backoff(*failures)) => {}
         }
         // Keep the port unless something else took it. Whoever holds it now, the new server
-        // must turn out to be the listener before it is trusted (see `wait_ready`).
-        let port = match choose_port(Some(launch.plan.port)) {
-            Ok(p) => p,
-            Err(_) => launch.plan.port,
-        };
-        launch.plan.port = port;
+        // must turn out to be the listener before it is trusted (see `wait_ready`). A socket
+        // keeps its path.
+        if launch.plan.socket.is_none() {
+            launch.plan.port = choose_port(Some(launch.plan.port)).unwrap_or(launch.plan.port);
+        }
+        let (port, sock) = listen_status(&launch.plan);
         rs.set(|st| {
             st.state = Some(RuntimeState::Starting);
             st.config = None;
@@ -1232,18 +1325,20 @@ async fn restart(
                         &PidRecord {
                             pid,
                             exe: launch.binary.clone(),
-                            port,
+                            port: launch.plan.port,
                         },
                     );
                 }
                 rs.set(|st| {
                     st.state = Some(RuntimeState::Ready);
                     st.error = None;
-                    st.port = Some(port);
+                    st.port = port;
+                    st.socket = sock;
                     st.config = cfg;
                     st.restarts += 1;
                 });
-                tracing::info!(role = role_name(rs.role), port, "local runtime restarted");
+                tracing::info!(role = role_name(rs.role), listen = %listen_display(&launch.plan),
+                    "local runtime restarted");
                 return Some(key);
             }
             Err(e) => {

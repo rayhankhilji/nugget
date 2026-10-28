@@ -322,6 +322,7 @@
   "status.runtime.stopped": "Gestoppt",
   "status.runtime.starting": "Wird gestartet",
   "status.runtime.ready": "Bereit",
+  "status.runtime.stopping": "Wird beendet",
   "status.runtime.failed": "Fehlgeschlagen",
   "status.localRuntime": "Lokale Laufzeitumgebung",
   "status.noRuntimes": "Keine lokalen Modellserver. Installieren Sie auf der Seite „Modelle“ ein lokales Modell, um Chat und Embeddings auf diesem Gerät auszuführen.",

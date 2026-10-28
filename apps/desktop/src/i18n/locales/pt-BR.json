@@ -322,6 +322,7 @@
   "status.runtime.stopped": "Parado",
   "status.runtime.starting": "Iniciando",
   "status.runtime.ready": "Pronto",
+  "status.runtime.stopping": "Parando",
   "status.runtime.failed": "Falhou",
   "status.localRuntime": "Runtime local",
   "status.noRuntimes": "Nenhum servidor de modelos local. Instale um modelo local na página Modelos para executar o chat e os embeddings neste dispositivo.",

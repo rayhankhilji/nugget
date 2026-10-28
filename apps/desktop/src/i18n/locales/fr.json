@@ -322,6 +322,7 @@
   "status.runtime.stopped": "Arrêté",
   "status.runtime.starting": "Démarrage",
   "status.runtime.ready": "Prêt",
+  "status.runtime.stopping": "Arrêt en cours",
   "status.runtime.failed": "Échec",
   "status.localRuntime": "Moteur local",
   "status.noRuntimes": "Aucun serveur de modèle local. Installez un modèle local sur la page Modèles pour exécuter la discussion et la vectorisation sur cet appareil.",

@@ -322,6 +322,7 @@
   "status.runtime.stopped": "Stopped",
   "status.runtime.starting": "Starting",
   "status.runtime.ready": "Ready",
+  "status.runtime.stopping": "Stopping",
   "status.runtime.failed": "Failed",
   "status.localRuntime": "Local runtime",
   "status.noRuntimes": "No local model servers. Install a local model on the Models page to run chat and embeddings on this device.",

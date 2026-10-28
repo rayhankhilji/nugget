@@ -348,6 +348,7 @@ const RUNTIME_STATE: Record<RuntimeState, { label: MessageKey; tone: "neutral" |
   stopped: { label: "status.runtime.stopped", tone: "neutral" },
   starting: { label: "status.runtime.starting", tone: "accent" },
   ready: { label: "status.runtime.ready", tone: "good" },
+  stopping: { label: "status.runtime.stopping", tone: "accent" },
   failed: { label: "status.runtime.failed", tone: "bad" },
 };
 

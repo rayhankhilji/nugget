@@ -4132,6 +4132,7 @@ dependencies = [
  "futures",
  "interprocess",
  "nugget-core",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
@@ -4346,6 +4347,7 @@ version = "0.0.1"
 dependencies = [
  "getrandom 0.3.4",
  "hex",
+ "hmac",
  "keyring",
  "nugget-core",
  "nugget-graph",
@@ -4357,6 +4359,7 @@ dependencies = [
  "tempfile",
  "time",
  "tracing",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

@@ -322,6 +322,7 @@
   "status.runtime.stopped": "停止中",
   "status.runtime.starting": "起動中",
   "status.runtime.ready": "準備完了",
+  "status.runtime.stopping": "停止中",
   "status.runtime.failed": "失敗",
   "status.localRuntime": "ローカルランタイム",
   "status.noRuntimes": "ローカルモデルサーバーはありません。チャットと埋め込みをこのデバイス上で実行するには、モデルページでローカルモデルをインストールしてください。",

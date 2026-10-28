@@ -123,8 +123,10 @@ pub struct LaunchPlan {
     pub model_path: PathBuf,
     /// Name the OpenAI-compatible API knows the model by (`--alias`), the model id.
     pub alias: String,
-    /// Loopback port. The host is always `127.0.0.1`.
+    /// Loopback port (host `127.0.0.1`), when `socket` is `None`.
     pub port: u16,
+    /// Listen on this Unix socket (`--host <path>.sock`) instead of TCP. Unix only.
+    pub socket: Option<PathBuf>,
     pub ctx_per_slot: u32,
     pub parallel: u32,
     pub gpu_layers: GpuLayers,
@@ -176,6 +178,7 @@ impl LaunchPlan {
             model_path,
             alias: alias.into(),
             port,
+            socket: None,
             ctx_per_slot,
             parallel,
             gpu_layers: tuning
@@ -201,14 +204,25 @@ impl LaunchPlan {
     /// listings.
     pub fn args(&self) -> Vec<OsString> {
         let mut a: Vec<OsString> = Vec::with_capacity(32);
+        match &self.socket {
+            // llama-server listens on a Unix socket when the host ends in `.sock`.
+            Some(path) => {
+                a.push("--host".into());
+                a.push(path.clone().into_os_string());
+            }
+            None => {
+                a.push("--host".into());
+                a.push("127.0.0.1".into());
+                a.push("--port".into());
+                a.push(self.port.to_string().into());
+            }
+        }
         let mut push = |k: &str, v: Option<String>| {
             a.push(k.into());
             if let Some(v) = v {
                 a.push(v.into());
             }
         };
-        push("--host", Some("127.0.0.1".into()));
-        push("--port", Some(self.port.to_string()));
         push("--alias", Some(self.alias.clone()));
         push("--ctx-size", Some(self.ctx_size().to_string()));
         push("--parallel", Some(self.parallel.to_string()));
