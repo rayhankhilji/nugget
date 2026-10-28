@@ -30,13 +30,11 @@
 //! | crate kind | benchmark kind | subject |
 //! |---|---|---|
 //! | `unanswered_thread` | `unanswered_thread` | `thread:<world thread of the message>` |
+//! | `follow_up`, `awaiting:` key (the user's unanswered question) | `follow_up` | `thread:<world thread of the message>` |
 //! | `follow_up` (a promise in sent mail) | `commitment_due` | `commit:<mail id>` |
-//! | `commitment` (graph) | `commitment_due` | `commit:<evidence item id>` |
+//! | `commitment` (graph, or a dated todo in a note) | `commitment_due` | `commit:<evidence item id>` |
 //! | `meeting_prep` | `meeting_prep` | `event:<event id>` |
 //! | `renewal` | `renewal` | `sub:<sender domain>` |
-//!
-//! The crate has no "the user asked and got no answer" generator, so the benchmark's `follow_up`
-//! kind has no counterpart.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
@@ -488,6 +486,11 @@ impl RealEngine {
         match c.kind {
             CandidateKind::UnansweredThread => (
                 CardKind::UnansweredThread,
+                thread_subject(self.mail_thread.get(&key).unwrap_or(&key)),
+            ),
+            // The user's unanswered question (`awaiting:` cards) is the benchmark's follow-up.
+            CandidateKind::FollowUp if c.dedup_key.starts_with("awaiting:") => (
+                CardKind::FollowUp,
                 thread_subject(self.mail_thread.get(&key).unwrap_or(&key)),
             ),
             CandidateKind::FollowUp | CandidateKind::Commitment => {

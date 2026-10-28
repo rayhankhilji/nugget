@@ -276,7 +276,7 @@ impl Proactive {
         let mut v: Vec<Card> = state
             .cards
             .into_values()
-            .filter(|c| c.state.is_open())
+            .filter(|c| c.state.is_open() && score::shown(c, &self.cfg))
             .collect();
         v.sort_by(|a, b| {
             b.rank

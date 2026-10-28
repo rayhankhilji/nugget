@@ -995,7 +995,12 @@ mod tests {
             people: vec!["ana@example.com".into()],
             due: None,
             expires_at: None,
-            features: Features::default(),
+            // Ranks above the default `min_score` after a rescore, so the card stays in the
+            // inbox once feedback rescored it.
+            features: Features {
+                urgency: 1.0,
+                ..Features::default()
+            },
             score: 0.5,
             rank: 0.5,
             factors: vec![nugget_proactive::Factor {

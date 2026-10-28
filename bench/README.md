@@ -432,8 +432,9 @@ a deterministic stub and no LLM judge is configured, so nothing touches the netw
 learning-off arm persists cards normally but resets the scoring model to its prior on every
 save. Card mapping, by the card's first evidence item: `unanswered_thread` → `thread:<thread>`;
 `follow_up` (a promise in sent mail) and `commitment` (graph) → `commitment_due`,
-`commit:<item>`; `meeting_prep` → `event:<id>`; `renewal` → `sub:<sender domain>`. The crate has
-no generator for the benchmark's `follow_up` kind (the user asked and got no answer).
+`commit:<item>` (also dated todos in notes); `follow_up` with an `awaiting:` key (the user asked
+and got no answer) → `follow_up`, `thread:<thread>`; `meeting_prep` → `event:<id>`; `renewal` →
+`sub:<sender domain>`.
 
 **Fixture world** (`bench/fixtures/proactive/`). One fictional user, Sam Rivera
 (`sam@example.com`), over 30 days from 2026-09-01. Every address is on `example.com` or a `.test`
@@ -851,54 +852,60 @@ Every target passes.
 ### `proactive`, M5 real crate (`--backend real`, 2026-10-28)
 
 **Setup.** Release build. Seed 42, 30 user seeds (standard), user noise 0.1, k = 5, default
-`ProactiveConfig` with the user's address set, no judge. A run takes 176 s (about 2.9 s per
-30-day engine run; each `refresh` rescans the corpus). Smoke scale (3 seeds) gives the same
-numbers to three decimals: the crate shows the same cards whatever the feedback (see below).
+`ProactiveConfig` with the user's address set (`min_score` 0.45), no judge. A run takes 51 s
+(about 0.85 s per 30-day engine run).
 
-| Metric | nugget-proactive | learning off | reference engine | recency judge |
-|---|---|---|---|---|
-| precision@5 (target ≥ 0.7) | **0.201 (missed)** | | 0.763 | 0.020 |
-| recall (target ≥ 0.8) | **0.619 (missed)** | | 0.945 | 0.071 |
-| recall: unanswered / follow-up / commitment / meeting / renewal | 1.00 / 0.00 / 0.00 / 1.00 / 1.00 | | 0.92 / 1.00 / 1.00 / 0.98 / 0.78 | |
-| distractor false-positive rate (target ≤ 0.05) | **0.173 (missed)** | 0.173 | 0.028 | 0.262 |
-| FPR: newsletter / notification / bulk / answered / completed / cancelled / spam renewal | 0 / 0 / 0.71 / 0.24 / 0.75 / 0 / 0.50 | | | |
-| header-flagged false positives (target 0) | 0 | | 0 | |
-| duplicate shows per run (target 0) | **1 (missed)** | | 0 | 11 |
-| precision, days 1 to 10 → days 21 to 30 (gain target ≥ 0) | 0.239 → 0.150 **(missed)** | → 0.150 | 0.553 → 0.996 | → 0.000 |
-| dry-run coverage / diff fidelity (target 1.0) | 1.0 / 1.0 | | 1.0 / 1.0 | |
-| executed without approval (target 0) | 0, over 198 probes and 33.5 approved executions per run | | 0 | |
-| shown per day / acceptance rate / accepted precision | 3.87 / 0.289 / 0.711 | | | |
+| Metric | nugget-proactive | before the fixes | learning off | reference engine | recency judge |
+|---|---|---|---|---|---|
+| precision@5 (target ≥ 0.7) | **0.849** | 0.201 | | 0.763 | 0.020 |
+| recall (target ≥ 0.8) | **0.997** | 0.619 | | 0.945 | 0.071 |
+| recall: unanswered / follow-up / commitment / meeting / renewal | 0.99 / 1.00 / 1.00 / 1.00 / 1.00 | 1.00 / 0.00 / 0.00 / 1.00 / 1.00 | | 0.92 / 1.00 / 1.00 / 0.98 / 0.78 | |
+| distractor false-positive rate (target ≤ 0.05) | **0.031** | 0.173 | 0.063 | 0.028 | 0.262 |
+| FPR: newsletter / notification / bulk / answered / completed / cancelled / spam renewal | 0 / 0 / 0.21 / 0.03 / 0 / 0 / 0 | 0 / 0 / 0.71 / 0.24 / 0.75 / 0 / 0.50 | | | |
+| header-flagged false positives (target 0) | 0 | 0 | | 0 | |
+| duplicate shows per run (target 0) | **0** | 1 | | 0 | 11 |
+| precision, days 1 to 10 → days 21 to 30 (gain target ≥ 0) | 0.764 → 0.947 (+0.18) | 0.239 → 0.150 | → 0.750 | 0.553 → 0.996 | → 0.000 |
+| gain over frozen weights, days 21 to 30 (target ≥ 0) | +0.197 | 0.0 | | | |
+| dry-run coverage / diff fidelity (target 1.0) | 1.0 / 1.0 | 1.0 / 1.0 | | 1.0 / 1.0 | |
+| executed without approval (target 0) | 0, over 63.6 probes and 38.1 approved executions per run | 0 | | 0 | |
+| shown per day / acceptance rate / accepted precision | 1.70 / 0.750 / 0.976 | 3.87 / 0.289 / 0.711 | | | |
 
-Passes: header-flagged false positives, dry-run coverage, diff fidelity, the approval gate,
-precision above the baseline, and (trivially, at 0.0) gain over frozen weights. Missed: precision,
-recall, distractor FPR, duplicates and precision gain over the month.
+Every target passes, and the crate now beats the reference engine on precision (+0.086) and
+recall (+0.052) at a similar distractor FPR. `min_score` 0.3 gives precision 0.816, FPR 0.045;
+0.55 gives precision 0.857 but recall 0.925 and a slightly negative gain over the month. 0.45 sits
+on the plateau between.
 
-**Reading these honestly.** The safety properties hold in the real crate: every shown action
-has a rendered preview, what the executors applied equals what was approved, and the approval
-gate refused every probe (no approval, another card's approval, a replayed approval) through the
-product path (`run_action`). The ranking and timing are where it falls short, and the per-show
-trace (`cargo test -p nugget-bench --lib real_engine_diagnostic -- --ignored --nocapture`) shows
-why:
+**What changed in the crate** (general heuristics; none matches the fixture's strings):
 
-- **Every inbound human message is an unanswered thread.** The generator does not require a
-  question or request (`question` is only a feature), so FYI mail ("Nice work", "Weekend photos"),
-  answers that close a thread ("Done, you're on from the 1st"), calendar "Cancelled: …" notices
-  and unflagged bulk mail all become cards: 74 of the 90 non-gold shows (seed 0). This is most of the
-  precision loss and all of the bulk (0.71) and answered-thread (0.24) false positives.
-- **Nothing is ever held back.** There is no score threshold, and the inbox rarely holds more than
-  five cards, so the learned model only reorders what is shown anyway. Learning on and off give
-  identical shows on every seed (`learning.gain_vs_frozen` = 0.0 exactly), and dismissing a
-  sender's cards never stops the next one.
-- **Dated promises are shown the day after they are made**, a week before the gold window (the 2
-  days before the deadline), and the simulated user dismisses them, so commitment recall is 0 and
-  promises later delivered count as completed-commitment false positives (0.75).
-- **Renewals trust any billing mail.** Spam renewal notices (0.50) and monthly plans the user
-  never wanted reminders for become cards; the dedup key includes the renewal date, so a monthly
-  plan comes back each cycle (the one duplicate show per run).
-- **Coverage gaps.** No generator covers "the user asked and got no answer" (follow-up recall 0),
-  and note todos (`- [ ] … (due <date>)`) become commitments only through the knowledge graph,
-  which this benchmark does not populate. Annual renewals are found only from renewal notices:
-  receipts older than `renewal_lookback_days` (45) are not read.
+- **Unanswered threads** need the last inbound message to ask something or request an action
+  (`text::asks_something`: a sentence ending in `?`, request phrases such as "could you" or
+  "let me know", or a "please …" that is not "yes please" or "please find attached"). Calendar
+  replies and auto-replies (`Accepted:`, `Cancelled:`, `Updated invitation`, `Automatic reply`, …)
+  and role mailboxes (`events@`, `accounts@`, `service@`, …) count as automated mail.
+- **Per-sender learning and a threshold.** Unanswered and awaiting-reply cards carry their sender;
+  the scoring model keeps a per-sender weight with its own, faster learning rate, and cards ranked
+  below `min_score` stay in the card set but are not offered (inbox and brief). One dismissal of
+  cold outreach mutes that sender without muting the card kind, which is where the learning gain
+  comes from.
+- **Dated promises and note todos** become cards `followup_lead_days` (2) before the deadline, not
+  the day after the promise; open `- [ ] … (due <date>)` tasks in Markdown notes become
+  commitments directly, without the graph.
+- **Renewals** need proof of payment: a receipt from the same vendor domain within
+  `renewal_receipt_lookback_days` (400, so annual plans work; receipts are also read for their next
+  billing date). Trials need earlier mail from the vendor. The card is keyed by vendor and kind, not
+  date, so a dismissed vendor stays dismissed and a monthly plan does not return each cycle.
+  `renewal_horizon_days` is now 7.
+- **Awaiting reply** (the benchmark's `follow_up`): the user's last message in a thread asks
+  something and has had no answer for `awaiting_reply_days` (3). It is a `follow_up` card with an
+  `awaiting:` dedup key.
+- **Meeting prep** skips social plans (meals, drinks, family calls) and meetings whose only
+  outside attendees use personal mailbox domains.
+
+**What is left** (seed 0 trace, `real_engine_diagnostic`): the first message from each
+unflagged bulk sender is still shown once (bulk FPR 0.21; nothing in the message tells it from a
+first contact who asks a question, so it takes one dismissal), and each monthly plan is shown once
+before its first dismissal. The fixture is one persona; these heuristics need checking on real
+mail before the numbers are quoted as product numbers.
 
 ### `knowledge`, M2 first wired run (2026-10-28)
 

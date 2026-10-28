@@ -421,8 +421,9 @@ fn mail(id: &str, day: i32, thread: &str, from: &str, to: &str, subject: &str, b
     })
 }
 
-/// Six days: an unanswered question, an external meeting, a renewal notice, a newsletter that
-/// asks a question, an automated notification and a meeting that is cancelled.
+/// Six days: an unanswered question, an external meeting, a renewal notice (after last year's
+/// receipt), a newsletter that asks a question, an automated notification and a meeting that is
+/// cancelled.
 fn tiny_world() -> (World, Gold) {
     let mut newsletter = mail(
         "m-news",
@@ -464,6 +465,17 @@ fn tiny_world() -> (World, Gold) {
         })
     };
     let items = vec![
+        // Last year's receipt: Sam pays CloudVault, so its renewal notice is credible.
+        Item::Receipt(world::Receipt {
+            id: "r-cv".into(),
+            day: -359,
+            merchant: "CloudVault".into(),
+            merchant_domain: "cloudvault.test".into(),
+            amount_cents: 9_900,
+            description: "CloudVault annual plan".into(),
+            cadence: None,
+            renews_on: None,
+        }),
         mail(
             "m-q",
             1,

@@ -8,7 +8,7 @@ use crate::candidate::{CandidateKind, EvidenceRef};
 use crate::cards::{Card, CardState, ProactiveState};
 use crate::config::ProactiveConfig;
 use crate::corpus::Corpus;
-use crate::score::Factor;
+use crate::score::{Factor, shown};
 
 /// How many cards the brief leads with.
 pub const BRIEF_TOP: usize = 5;
@@ -71,7 +71,8 @@ pub struct MorningBrief {
     pub date: Date,
     #[serde(with = "time::serde::rfc3339")]
     pub generated_at: OffsetDateTime,
-    /// Highest-ranked open cards (meetings and overdue items have their own sections).
+    /// Highest-ranked open cards at or above `min_score` (meetings and overdue items have their
+    /// own sections).
     pub top: Vec<BriefCard>,
     pub meetings: Vec<BriefMeeting>,
     /// Commitments and promises past due.
@@ -149,7 +150,12 @@ pub fn compose(
         .collect();
     let top: Vec<BriefCard> = cards
         .iter()
-        .filter(|c| c.state.is_open() && c.kind != CandidateKind::MeetingPrep && !is_overdue(c))
+        .filter(|c| {
+            c.state.is_open()
+                && c.kind != CandidateKind::MeetingPrep
+                && !is_overdue(c)
+                && shown(c, cfg)
+        })
         .take(BRIEF_TOP)
         .map(|c| BriefCard::of(c))
         .collect();

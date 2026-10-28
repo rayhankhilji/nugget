@@ -222,7 +222,19 @@ async fn feedback_moves_weights_and_order() {
     assert!(after.weights["kind_renewal"] < before.weights["kind_renewal"]);
     assert!(after.weights["kind_unanswered_thread"] > before.weights["kind_unanswered_thread"]);
 
-    // A new renewal now scores lower than the first one did.
+    // A new renewal (from a vendor the user pays) now scores lower than the first one did.
+    put_mail(
+        &f.store,
+        Mail {
+            key: "m-boxy-receipt",
+            from: "Box <billing@boxy.io>",
+            subject: "Your receipt",
+            body: "Thanks for your purchase: $10.00.",
+            days_ago: 30.0,
+            message_id: "<receipt@boxy.io>",
+            ..Default::default()
+        },
+    );
     put_mail(
         &f.store,
         Mail {
@@ -252,6 +264,24 @@ async fn feedback_moves_weights_and_order() {
         Proactive::new(f.store.clone(), cfg()).model().unwrap(),
         p.model().unwrap()
     );
+}
+
+#[tokio::test]
+async fn cards_below_min_score_are_kept_but_not_offered() {
+    let f = fixture();
+    let strict = nugget_proactive::ProactiveConfig {
+        min_score: 0.99,
+        ..cfg()
+    };
+    let p = Proactive::new(f.store.clone(), strict.clone());
+    p.refresh(now()).await.unwrap();
+    assert!(!p.all_cards().unwrap().is_empty());
+    assert!(p.inbox().unwrap().is_empty());
+    assert!(p.brief(now()).unwrap().top.is_empty());
+    // The same cards, with the default threshold, are offered.
+    let p = Proactive::new(f.store.clone(), cfg());
+    assert!(!p.inbox().unwrap().is_empty());
+    assert!(p.inbox().unwrap().iter().all(|c| c.rank >= cfg().min_score));
 }
 
 // ---- metrics ----

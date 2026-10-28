@@ -146,6 +146,112 @@ pub fn sentences(text: &str) -> Vec<String> {
     out
 }
 
+/// Phrases that ask the reader for something (an answer, a decision, an action).
+const ASKS: &[&str] = &[
+    "could you",
+    "can you",
+    "would you",
+    "will you",
+    "would it be possible",
+    "are you able",
+    "do you have time",
+    "let me know",
+    "let us know",
+    "i need you to",
+    "need your",
+    "i'd like your",
+    "i would like your",
+    "your thoughts",
+    "get back to me",
+    "can we",
+    "could we",
+    "shall we",
+];
+
+/// "please …" that does not request anything.
+const PLEASE_NOT_ASKING: &[&str] = &[
+    "please find",
+    "please see attached",
+    "please see below",
+    "please note",
+    "please ignore",
+    "please disregard",
+    "please do not reply",
+    "please don't reply",
+];
+
+/// Whether one sentence asks the reader something: a question, or a request.
+pub fn sentence_asks(sentence: &str) -> bool {
+    let l = sentence.to_lowercase().replace('’', "'");
+    let l = l.trim();
+    let end = l.trim_end_matches(['"', '\'', ')', ']', '*', '_']);
+    if end.ends_with('?') || end.ends_with('？') || l.starts_with('¿') {
+        return true;
+    }
+    if ASKS.iter().any(|p| contains_phrase(l, p)) {
+        return true;
+    }
+    // "Please send…" asks; "yes please", "thanks, please find attached" do not.
+    if let Some(i) = l.find("please") {
+        let before = l[..i].trim_end_matches([' ', ',']);
+        let rest = &l[i..];
+        let after = rest["please".len()..].trim_start_matches([' ', ',', '!', '.']);
+        return !after.is_empty()
+            && !before.ends_with("yes")
+            && !before.ends_with("thanks")
+            && !PLEASE_NOT_ASKING.iter().any(|p| rest.starts_with(p));
+    }
+    false
+}
+
+/// `phrase` in `text` at word boundaries.
+fn contains_phrase(text: &str, phrase: &str) -> bool {
+    text.match_indices(phrase).any(|(i, _)| {
+        let before = text[..i].chars().next_back();
+        let after = text[i + phrase.len()..].chars().next();
+        before.is_none_or(|c| !c.is_alphanumeric()) && after.is_none_or(|c| !c.is_alphanumeric())
+    })
+}
+
+/// Whether the author's own text (quotes removed) asks the reader something or requests an
+/// action. Acknowledgements ("Done, you're on from the 1st."), FYIs and thanks do not.
+pub fn asks_something(body: &str) -> bool {
+    sentences(&own_text(body)).iter().any(|s| sentence_asks(s))
+}
+
+/// Subjects of mail that calendars and mail servers generate on a person's behalf: invitation
+/// replies and updates, auto-replies, bounces. They never need a reply.
+pub fn is_generated_subject(subject: &str) -> bool {
+    const PREFIXES: &[&str] = &[
+        "accepted:",
+        "declined:",
+        "tentative:",
+        "tentatively accepted:",
+        "cancelled:",
+        "canceled:",
+        "cancelled event:",
+        "canceled event:",
+        "event cancelled",
+        "event canceled",
+        "invitation:",
+        "updated invitation",
+        "invitation updated",
+        "updated event:",
+        "new event:",
+        "automatic reply",
+        "auto reply",
+        "auto-reply",
+        "autoreply",
+        "out of office",
+        "undeliverable:",
+        "undelivered mail",
+        "delivery status notification",
+        "read:",
+    ];
+    let l = subject.trim().to_lowercase();
+    PREFIXES.iter().any(|p| l.starts_with(p))
+}
+
 /// Phrases with which the user promises to do something.
 const PROMISES: &[&str] = &[
     "i'll send",
@@ -592,5 +698,36 @@ mod tests {
         );
         assert_eq!(p, vec!["I'll send the deck by Friday.".to_string()]);
         assert_eq!(normalize_subject("Re: Fwd:  Q3  Plan"), "q3 plan");
+    }
+
+    #[test]
+    fn asking() {
+        for yes in [
+            "Hi, could you send the numbers before Friday?",
+            "Any update?",
+            "Please send the signed copy by Monday.",
+            "Let me know which variant you prefer.",
+            "I'd like your view before Friday.",
+            "Hi,\n\nThoughts on the draft? \n\nOn Mon, Bob wrote:\n> ok",
+        ] {
+            assert!(asks_something(yes), "{yes}");
+        }
+        for no in [
+            "Done, you're on from the 1st.",
+            "Yes please, the usual.",
+            "Thanks for the help yesterday, it worked.",
+            "Please find attached the minutes from the call.",
+            "Heads up: the office is closed on Monday.",
+            "Sharing the agenda ahead of our meeting. Talk soon.",
+            "Got them!\n\nOn Sun, Carol wrote:\n> Did you get the photos?",
+            "See https://example.com/a?b=c for details.",
+            "We scanned it as best we can, you're all set.",
+        ] {
+            assert!(!asks_something(no), "{no}");
+        }
+        assert!(is_generated_subject("Accepted: Weekly sync @ Mon"));
+        assert!(is_generated_subject("Updated invitation: All hands"));
+        assert!(is_generated_subject("Automatic reply: Out of office"));
+        assert!(!is_generated_subject("Re: Contract renewal terms"));
     }
 }

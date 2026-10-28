@@ -3,7 +3,7 @@
 //! Each generator is a pure function of its [`GenContext`]: the same data and `now` always give
 //! the same candidates with the same dedup keys.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use nugget_core::Result;
 use nugget_core::ids::EntityId;
@@ -14,11 +14,11 @@ use time::{Duration, OffsetDateTime, PrimitiveDateTime, Time};
 
 use crate::actions::{Action, ArchiveThread, CreateEvent, DraftReply, Reminder, ResearchNote};
 use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features, freshness, urgency};
-use crate::config::ProactiveConfig;
-use crate::corpus::{CalEvent, Corpus, MailMessage};
+use crate::config::{PUBLIC_MAIL_DOMAINS, ProactiveConfig};
+use crate::corpus::{CalEvent, Corpus, MailMessage, NoteDoc};
 use crate::text::{
-    deadline_in, find_amounts, find_dates, find_promises, is_promise, own_text, parse_iso_date,
-    relative_days, sentences, stable_hash, truncate,
+    asks_something, deadline_in, find_amounts, find_dates, find_promises, is_promise, own_text,
+    parse_iso_date, relative_days, sentences, stable_hash, truncate,
 };
 
 const QUOTE_CHARS: usize = 240;
@@ -68,6 +68,8 @@ pub fn generate_all(ctx: &GenContext<'_>) -> Result<Vec<Candidate>> {
     all.extend(meetings(ctx));
     all.extend(renewals(ctx));
     all.extend(follow_ups(ctx));
+    all.extend(awaiting_replies(ctx));
+    all.extend(note_todos(ctx));
     let mut seen = HashSet::new();
     all.retain(|c| seen.insert(c.dedup_key.clone()));
     Ok(all)
@@ -91,19 +93,17 @@ fn lead(body: &str) -> Option<String> {
     Some(truncate(&s, QUOTE_CHARS))
 }
 
-fn asks_something(body: &str) -> bool {
-    let own = own_text(body).to_lowercase();
-    own.contains('?')
-        || [
-            "could you",
-            "can you",
-            "would you",
-            "please",
-            "let me know",
-            "thoughts",
-        ]
-        .iter()
-        .any(|p| own.contains(p))
+/// Whole days from `now` to `due`, by the user's calendar (0 = due today, negative = overdue).
+fn days_left(ctx: &GenContext<'_>, due: OffsetDateTime) -> i64 {
+    let off = ctx.cfg.utc_offset;
+    (due.to_offset(off).date() - ctx.now.to_offset(off).date()).whole_days()
+}
+
+/// 17:00 local on `date`.
+fn end_of_day(ctx: &GenContext<'_>, date: time::Date) -> Option<OffsetDateTime> {
+    Time::from_hms(17, 0, 0)
+        .ok()
+        .map(|t| PrimitiveDateTime::new(date, t).assume_offset(ctx.cfg.utc_offset))
 }
 
 fn reply_subject(s: &str) -> String {
@@ -116,8 +116,9 @@ fn reply_subject(s: &str) -> String {
 
 // ---- unanswered threads ----
 
-/// Inbound mail from real people, addressed to the user, with no later reply from the user,
-/// 1–14 days old. Newsletters and automated senders never qualify.
+/// Inbound mail from real people, addressed to the user, that asks something and has no later
+/// reply from the user, 1–14 days old. Newsletters, automated senders, role mailboxes and
+/// calendar replies never qualify.
 pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
     let c = ctx.corpus;
     let mut out = Vec::new();
@@ -143,7 +144,12 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if !c.user_addresses.is_empty() && !direct && !cc {
             continue;
         }
-        let question = asks_something(&last.body);
+        // Only a message that asks something or requests an action is waiting on the user: FYIs,
+        // thanks and closing replies ("Done, you're on from the 1st.") are not.
+        if !asks_something(&last.body) {
+            continue;
+        }
+        let question = true;
         let quote = lead(&last.body).or_else(|| Some(truncate(&last.subject, QUOTE_CHARS)));
         let mut evidence_list = vec![evidence(last, quote.clone())];
         // The user's own earlier message gives context.
@@ -206,6 +212,7 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 direct: f64::from(u8::from(direct)),
                 question: f64::from(u8::from(question)),
                 kind: Some(CandidateKind::UnansweredThread),
+                sender: Some(from.email.clone()),
             },
             actions,
             sensitive: last.sensitive,
@@ -483,6 +490,7 @@ fn commitment_candidate(
             direct: f64::from(u8::from(*owner == Owner::Me)),
             question: 0.0,
             kind: Some(CandidateKind::Commitment),
+            sender: None,
         },
         actions,
         sensitive,
@@ -507,7 +515,14 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
             .filter(|a| !a.resource && c.is_external(&a.address))
             .map(|a| a.address.email.clone())
             .collect();
-        if external.is_empty() {
+        if external.is_empty() || social_plan(&ev.title) {
+            continue;
+        }
+        // Only personal mailboxes outside: friends and family, not a meeting to prepare.
+        if external.iter().all(|e| {
+            let d = e.rsplit_once('@').map_or("", |(_, d)| d);
+            PUBLIC_MAIL_DOMAINS.contains(&d)
+        }) {
             continue;
         }
         let threads = related_threads(c, &external, ctx.now);
@@ -578,6 +593,7 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 direct: 1.0,
                 question: 0.0,
                 kind: Some(CandidateKind::MeetingPrep),
+                sender: None,
             },
             actions: vec![Action::ResearchNote(ResearchNote {
                 title: format!("Prep: {}", ev.title),
@@ -590,6 +606,41 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
         });
     }
     out
+}
+
+/// A meal, drinks, a party or a family call: social, nothing to prepare.
+fn social_plan(title: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "lunch",
+        "dinner",
+        "breakfast",
+        "brunch",
+        "drinks",
+        "happy hour",
+        "party",
+        "birthday",
+        "wedding",
+        "bbq",
+        "barbecue",
+        "picnic",
+        "mom",
+        "mum",
+        "dad",
+        "grandma",
+        "grandpa",
+    ];
+    let l = title.to_lowercase();
+    let words: Vec<&str> = l
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    WORDS.iter().any(|w| {
+        if w.contains(' ') {
+            l.contains(w)
+        } else {
+            words.contains(w)
+        }
+    })
 }
 
 fn evidence_of_thread(m: &MailMessage) -> EvidenceRef {
@@ -671,15 +722,90 @@ const RENEWAL_WORDS: &[&str] = &[
     "free trial",
 ];
 
-/// Receipts and notices with an upcoming renewal, charge or trial end (amount and date parsed).
+/// Phrases of a receipt or payment confirmation: proof that the user pays a vendor.
+const RECEIPT_WORDS: &[&str] = &[
+    "receipt",
+    "thanks for your purchase",
+    "thank you for your purchase",
+    "thanks for your order",
+    "thank you for your order",
+    "order confirmation",
+    "payment received",
+    "we received your payment",
+    "payment successful",
+    "invoice paid",
+];
+
+/// A receipt or payment confirmation (not a renewal or charge *notice*, which spam imitates).
+fn is_payment_proof(m: &MailMessage) -> bool {
+    if m.from_user || m.from.is_none() {
+        return false;
+    }
+    let lower = format!("{}\n{}", m.subject, own_text(&m.body)).to_lowercase();
+    RECEIPT_WORDS.iter().any(|w| lower.contains(w))
+}
+
+/// The registrable part of a domain (`billing.vendor.co.uk` → `vendor.co.uk`), roughly: the
+/// last two labels, or three under a two-letter country code with a generic second level.
+pub(crate) fn base_domain(domain: &str) -> String {
+    let d = domain.trim().trim_end_matches('.').to_lowercase();
+    let labels: Vec<&str> = d.split('.').collect();
+    let n = labels.len();
+    if n <= 2 {
+        return d;
+    }
+    let generic = matches!(
+        labels[n - 2],
+        "co" | "com" | "org" | "net" | "ac" | "gov" | "edu" | "ne" | "or"
+    );
+    let keep = if generic && labels[n - 1].len() == 2 {
+        3
+    } else {
+        2
+    };
+    labels[n - keep..].join(".")
+}
+
+/// Upcoming renewals, charges and trial ends, from vendors the user actually deals with.
+///
+/// A renewal needs proof of payment: a receipt from the same vendor domain in the last
+/// `renewal_receipt_lookback_days` (long enough for annual plans), so renewal notices from
+/// vendors the user never paid (a common scam) are ignored. A trial end needs any earlier mail
+/// from the vendor (the sign-up). Receipts themselves are read over that long window (they carry
+/// the next billing date), other notices over `renewal_lookback_days`. One card per vendor and
+/// kind (renewal or trial), not per date: a dismissed vendor stays dismissed and a monthly plan
+/// does not come back every cycle.
 pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
     let horizon = ctx.now + Duration::days(ctx.cfg.renewal_horizon_days);
+    let receipt_window = ctx.cfg.renewal_receipt_lookback_days as f64;
+    // Vendor base domain → dates of its receipts, and of its first message.
+    let mut paid: HashMap<String, Vec<OffsetDateTime>> = HashMap::new();
+    let mut first_seen: HashMap<String, OffsetDateTime> = HashMap::new();
+    for m in &ctx.corpus.mail {
+        if m.from_user || m.date > ctx.now {
+            continue;
+        }
+        let Some(f) = &m.from else { continue };
+        let base = base_domain(f.domain());
+        first_seen.entry(base.clone()).or_insert(m.date);
+        if ctx.days_ago(m.date) <= receipt_window && is_payment_proof(m) {
+            paid.entry(base).or_default().push(m.date);
+        }
+    }
     let mut out: BTreeMap<String, Candidate> = BTreeMap::new();
     for m in &ctx.corpus.mail {
-        if m.from_user
-            || ctx.days_ago(m.date) > ctx.cfg.renewal_lookback_days as f64
-            || m.date > ctx.now
-        {
+        if m.from_user || m.date > ctx.now {
+            continue;
+        }
+        let Some(from) = &m.from else { continue };
+        let base = base_domain(from.domain());
+        let receipt = is_payment_proof(m);
+        let window = if receipt {
+            receipt_window
+        } else {
+            ctx.cfg.renewal_lookback_days as f64
+        };
+        if ctx.days_ago(m.date) > window {
             continue;
         }
         let text = format!("{}\n{}", m.subject, own_text(&m.body));
@@ -688,6 +814,13 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let trial = lower.contains("trial");
+        let proof = paid
+            .get(&base)
+            .is_some_and(|ds| ds.iter().any(|d| *d <= m.date));
+        let known = first_seen.get(&base).is_some_and(|d| *d < m.date);
+        if !(proof || (trial && known)) {
+            continue;
+        }
         // The sentence that names the renewal carries its date.
         let sents = sentences(&text);
         let key_sents: Vec<&String> = sents
@@ -717,32 +850,16 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             .iter()
             .find_map(|s| find_amounts(s).into_iter().next())
             .or_else(|| find_amounts(&text).into_iter().next());
-        let vendor = m
-            .from
-            .as_ref()
-            .map(|f| {
-                f.name.clone().unwrap_or_else(|| {
-                    let d = f.domain();
-                    let parts: Vec<&str> = d.split('.').collect();
-                    parts
-                        .len()
-                        .checked_sub(2)
-                        .map_or(d, |i| parts[i])
-                        .to_owned()
-                })
-            })
-            .unwrap_or_else(|| "Subscription".into());
-        let vendor_key = m
-            .from
-            .as_ref()
-            .map_or(vendor.clone(), |f| f.domain().to_owned());
+        let vendor = from.name.clone().unwrap_or_else(|| {
+            base.split('.')
+                .next()
+                .filter(|s| !s.is_empty())
+                .unwrap_or("Subscription")
+                .to_owned()
+        });
         let dedup_key = format!(
             "renewal:{}",
-            stable_hash(&[
-                &vendor_key,
-                &date.to_string(),
-                if trial { "trial" } else { "renewal" }
-            ])
+            stable_hash(&[&base, if trial { "trial" } else { "renewal" }])
         );
         let money = amount
             .as_ref()
@@ -765,7 +882,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 "Keep it, or cancel before the charge.".into()
             },
             evidence: vec![evidence(m, quote)],
-            people: m.from.iter().map(|f| f.email.clone()).collect(),
+            people: vec![from.email.clone()],
             due: Some(at),
             expires_at: Some(at + Duration::days(1)),
             features: Features {
@@ -777,6 +894,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 direct: 1.0,
                 question: 0.0,
                 kind: Some(CandidateKind::Renewal),
+                sender: None,
             },
             actions: vec![Action::Reminder(Reminder {
                 text: format!(
@@ -788,7 +906,7 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
             })],
             sensitive: m.sensitive,
         };
-        // Several notices for the same renewal: keep the most recent.
+        // Several notices for the same vendor: keep the most recent.
         out.insert(dedup_key, cand);
     }
     out.into_values().collect()
@@ -797,7 +915,8 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
 // ---- follow-ups ----
 
 /// Promises the user made in sent mail ("I'll send…") with no later message from the user in
-/// that thread.
+/// that thread: dated ones from `followup_lead_days` before the deadline, undated ones from a
+/// day after.
 pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
     let c = ctx.corpus;
     let mut out = Vec::new();
@@ -806,9 +925,6 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
             continue;
         }
         let age = ctx.days_ago(m.date);
-        if age > ctx.cfg.followup_max_days as f64 {
-            continue;
-        }
         let promises = find_promises(&m.body);
         let Some(promise) = promises.first() else {
             continue;
@@ -820,14 +936,22 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
         if followed {
             continue;
         }
-        let due = deadline_in(promise, m.date.date()).and_then(|d| {
-            Time::from_hms(17, 0, 0)
-                .ok()
-                .map(|t| PrimitiveDateTime::new(d, t).assume_offset(ctx.cfg.utc_offset))
-        });
-        // Without a deadline, a promise becomes worth a nudge after a day.
-        if due.is_none() && age < 1.0 {
-            continue;
+        let due = deadline_in(promise, m.date.date()).and_then(|d| end_of_day(ctx, d));
+        match due {
+            // A dated promise matters shortly before its deadline, not the day after it was
+            // made; it is tracked until a week past the deadline.
+            Some(d) => {
+                let left = days_left(ctx, d);
+                if left > ctx.cfg.followup_lead_days || left < -7 {
+                    continue;
+                }
+            }
+            // Without a deadline, a promise becomes worth a nudge after a day.
+            None => {
+                if !(1.0..=ctx.cfg.followup_max_days as f64).contains(&age) {
+                    continue;
+                }
+            }
         }
         let recipients: Vec<String> =
             m.to.iter()
@@ -881,10 +1005,202 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 direct: 1.0,
                 question: 0.0,
                 kind: Some(CandidateKind::FollowUp),
+                sender: None,
             },
             actions,
             sensitive: m.sensitive,
         });
     }
     out
+}
+
+// ---- awaiting replies ----
+
+/// The user asked someone something and has heard nothing back: the user's message is the last
+/// one from a person in its thread, it asks something, and it is between `awaiting_reply_days`
+/// and `followup_max_days` old.
+pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
+    let c = ctx.corpus;
+    let mut out = Vec::new();
+    for idxs in c.threads.values() {
+        let human: Vec<&MailMessage> = idxs
+            .iter()
+            .map(|&i| &c.mail[i])
+            .filter(|m| m.from_user || m.automated_reason().is_none())
+            .collect();
+        let Some(last) = human.last() else { continue };
+        if !last.from_user || last.date > ctx.now {
+            continue;
+        }
+        let age = ctx.days_ago(last.date);
+        if age < ctx.cfg.awaiting_reply_days as f64 || age > ctx.cfg.followup_max_days as f64 {
+            continue;
+        }
+        if !asks_something(&last.body) {
+            continue;
+        }
+        let recipients: Vec<&crate::text::Address> =
+            last.to.iter().filter(|a| !c.is_user(&a.email)).collect();
+        let Some(first) = recipients.first() else {
+            continue;
+        };
+        let emails: Vec<String> = recipients.iter().map(|a| a.email.clone()).collect();
+        let quote = lead(&last.body).or_else(|| Some(truncate(&last.subject, QUOTE_CHARS)));
+        let msg_key = last
+            .message_id
+            .clone()
+            .unwrap_or_else(|| last.item.key.as_str().to_owned());
+        let days = age.floor() as i64;
+        let who = first.display();
+        out.push(Candidate {
+            dedup_key: format!("awaiting:{}", stable_hash(&[&last.thread, &msg_key])),
+            kind: CandidateKind::FollowUp,
+            title: format!("No answer from {who}: {}", last.subject),
+            detail: format!("You asked {days} days ago and haven't heard back."),
+            evidence: vec![evidence(last, quote)],
+            people: emails.clone(),
+            due: None,
+            expires_at: Some(last.date + Duration::days(ctx.cfg.followup_max_days)),
+            features: Features {
+                urgency: (age / ctx.cfg.followup_max_days as f64).min(1.0) * 0.6,
+                importance: ctx.importance(emails.iter().map(String::as_str)),
+                freshness: freshness(last.date, ctx.now),
+                direct: 1.0,
+                question: 1.0,
+                kind: Some(CandidateKind::FollowUp),
+                sender: Some(first.email.clone()),
+            },
+            actions: vec![
+                Action::DraftReply(DraftReply {
+                    reply_to: last.item.clone(),
+                    in_reply_to_message_id: last.message_id.clone(),
+                    to: emails,
+                    cc: Vec::new(),
+                    subject: reply_subject(&last.subject),
+                    intent: "Gently follow up on your question.".into(),
+                    body: None,
+                }),
+                Action::Reminder(Reminder {
+                    text: format!("Follow up with {who}: {}", last.subject),
+                    at: ctx.now + Duration::hours(2),
+                    about: Some(last.item.clone()),
+                }),
+            ],
+            sensitive: last.sensitive,
+        });
+    }
+    out
+}
+
+// ---- todos in notes ----
+
+/// An open Markdown task (`- [ ] …`, `* [ ] …`), its text.
+fn open_task(line: &str) -> Option<&str> {
+    let t = line.trim_start();
+    let t = t
+        .strip_prefix("- ")
+        .or_else(|| t.strip_prefix("* "))
+        .or_else(|| t.strip_prefix("+ "))
+        .unwrap_or(t);
+    let rest = t.strip_prefix("[ ]")?.trim();
+    (!rest.is_empty()).then_some(rest)
+}
+
+/// Open, dated tasks in the user's notes (`- [ ] Send the lease (due 2026-09-10)`), from
+/// `followup_lead_days` before the date until `commitment_overdue_max_days` after it.
+pub fn note_todos(ctx: &GenContext<'_>) -> Vec<Candidate> {
+    let mut out = Vec::new();
+    for n in &ctx.corpus.notes {
+        if n.date > ctx.now {
+            continue;
+        }
+        for line in n.text.lines() {
+            let Some(task) = open_task(line) else {
+                continue;
+            };
+            let written = n.date.date();
+            let Some(due) = find_dates(task, written)
+                .into_iter()
+                .next()
+                .or_else(|| deadline_in(task, written))
+                .and_then(|d| end_of_day(ctx, d))
+            else {
+                continue;
+            };
+            let left = days_left(ctx, due);
+            if left > ctx.cfg.followup_lead_days || -left > ctx.cfg.commitment_overdue_max_days {
+                continue;
+            }
+            out.push(todo_candidate(ctx, n, task, due, left));
+        }
+    }
+    out
+}
+
+fn todo_candidate(
+    ctx: &GenContext<'_>,
+    n: &NoteDoc,
+    task: &str,
+    due: OffsetDateTime,
+    left: i64,
+) -> Candidate {
+    let what = truncate(task, 120);
+    let when = due.to_offset(ctx.cfg.utc_offset).date();
+    let title = if left < 0 {
+        format!("Overdue since {when}: {what}")
+    } else {
+        format!("Due {when}: {what}")
+    };
+    let remind_at = if due - Duration::days(1) > ctx.now {
+        due - Duration::days(1)
+    } else {
+        ctx.now + Duration::hours(2)
+    };
+    let start = (remind_at + Duration::hours(1))
+        .replace_minute(0)
+        .unwrap_or(remind_at);
+    Candidate {
+        dedup_key: format!(
+            "todo:{}",
+            stable_hash(&[n.item.source.as_str(), n.item.key.as_str(), task.trim()])
+        ),
+        kind: CandidateKind::Commitment,
+        title,
+        detail: match &n.title {
+            Some(t) => format!("From your note \"{t}\"."),
+            None => "From your notes.".into(),
+        },
+        evidence: vec![EvidenceRef {
+            item: n.item.clone(),
+            quote: Some(truncate(task, QUOTE_CHARS)),
+            url: n.url.clone(),
+        }],
+        people: Vec::new(),
+        due: Some(due),
+        expires_at: Some(due + Duration::days(ctx.cfg.commitment_overdue_max_days)),
+        features: Features {
+            urgency: urgency(Some(due), ctx.now),
+            importance: 0.5,
+            freshness: freshness(n.date, ctx.now),
+            direct: 1.0,
+            question: 0.0,
+            kind: Some(CandidateKind::Commitment),
+            sender: None,
+        },
+        actions: vec![
+            Action::Reminder(Reminder {
+                text: what.clone(),
+                at: remind_at,
+                about: Some(n.item.clone()),
+            }),
+            Action::CreateEvent(CreateEvent {
+                title: format!("Focus: {what}"),
+                start,
+                end: start + Duration::hours(1),
+                attendees: Vec::new(),
+                description: Some(format!("Due {when}.")),
+            }),
+        ],
+        sensitive: n.sensitive,
+    }
 }
