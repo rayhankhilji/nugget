@@ -26,11 +26,24 @@ The orchestrator merges each branch into `claude/inspiring-wozniak-z3gg3n`, rege
 | M6-E | `m6/microsoft` | session_01CTjRSqh5PtecX1ahjUxQV7 | Outlook mail and calendar, OneDrive |
 | M6-F | `m6/saas` | session_01CTjRSrQY2KnVUFW2SW5ex3 | Slack, Notion, GitHub, Linear |
 
-## Local agents (this container)
-- **M2-F:** `bench` knowledge suite.
-- **M2-G1:** daemon wiring for knowledge, vault and MCP, the `nuggetd mcp` bridge and the install helper.
-- **M2-G2:** graph contract upgrades (update_claim, Rejected, batch, provenance, split) and their adoption.
+## Wave W (wiring M3–M6 into the product): cloud sessions, each a swarm lead with subagents
+Briefs: `docs/waves/wave-w/`. Daemon features plug in through `crates/nuggetd/src/features/`.
 
-## Waiting
-- **M4 computer-use driver** (`nugget-cua`, on top of `nugget-a11y`): starts once `m3/a11y` merges.
-- **Integration waves for M3–M6:** daemon IPC wiring and desktop surfaces, after their branches merge.
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| W1 | `w/doubletap` | session_01CTjRStnoX652MRxbNwSpAM | Double Tap end to end |
+| W2 | `w/computer-use` | session_01CTjRSsopXCg3H46VhuHkzE | computer use on accessibility (`nugget-computer`) |
+| W3 | `w/agent` | session_01CTjRStKEKwwk7JPoKfPkBa | agent, safety policy, browser bridge wired in |
+| W4 | `w/proactive` | session_01CTjRSsZfijoUUui2srYGCa | proactive cards, morning brief, Today page |
+| W5 | `w/connectors` | session_01CTjRSqdohXyVJ3dgv6FZVf | Microsoft 365 and SaaS connectors in the app; power policy |
+| W6 | `w/plugins` | session_01CTjRStDrNuY9AEiEMfZrMQ | plugins in the daemon and app |
+| W7 | `w/knowledge` | session_01CTjRSuCgDAG5bV1tVw22qL | knowledge quality, M2 exit criteria |
+| W8 | `w/security` | session_01CTjRStu5JF2bP3MNj6hBmi | security review of M3–M6 |
+| W9 | `w/platform` | session_01CTjRSs7rCLYgT4e1XXg9cJ | cross-OS CI, M0 hardening follow-ups |
+| W10 | `w/docs` | session_01CTjRSpisXZEZ8cUcvXkasf | docs, Sentient comparison |
+| W11 | `w/desktop` | session_01CTjRStmMDYih1pk2k7ko9x | desktop shell quality, UI tests |
+| W12 | `w/retrieval` | session_01CTjRSqr4eEo2eWw8xKSmak | retrieval quality, store performance |
+
+## Merged
+All M0–M6 wave-1 branches above, and the local M2-F (knowledge bench), M2-G1 (daemon wiring for
+knowledge, vault and MCP) and M2-G2 (graph contract upgrades) agents.

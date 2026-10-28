@@ -116,6 +116,23 @@ where
     }
 }
 
+/// Drain the extension stream while no daemon is attached, resolving once the extension is gone
+/// (EOF or a framing error that desynchronizes the stream). A frame that was read whole but is not
+/// valid JSON leaves the stream aligned and is skipped, as [`run_relay`] does: one malformed
+/// message must not make the host exit.
+pub async fn wait_extension_closed(rx: &mut mpsc::Receiver<Result<ExtensionMessage, FrameError>>) {
+    loop {
+        match rx.recv().await {
+            None => return,
+            Some(Err(FrameError::Json(e))) => {
+                tracing::warn!(error = %e, "dropping malformed message from the extension");
+            }
+            Some(Err(_)) => return,
+            Some(Ok(_)) => {}
+        }
+    }
+}
+
 /// [`DaemonLink`] over the daemon's local socket (`nugget-ipc`).
 pub struct IpcDaemonLink {
     client: Client,

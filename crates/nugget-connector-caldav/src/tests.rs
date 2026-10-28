@@ -884,6 +884,33 @@ fn hostile_xml_is_rejected_without_panicking() {
 }
 
 #[test]
+fn a_long_namespace_is_not_copied_into_every_element() {
+    // One 1 MiB namespace URI used by 100k empty elements: before, every element owned its own
+    // copy of the URI (~100 GiB from a ~1.6 MB body).
+    let long_ns = format!("urn:x:{}", "a".repeat(1024 * 1024));
+    let mut doc = format!("<D:multistatus xmlns:D=\"DAV:\" xmlns:p=\"{long_ns}\">");
+    doc.push_str(&"<p:a/>".repeat(100_000));
+    doc.push_str("</D:multistatus>");
+    let root = xml::parse(doc.as_bytes()).unwrap();
+    assert_eq!(root.children.len(), 100_000);
+    assert!(
+        root.children
+            .iter()
+            .all(|c| c.ns.len() <= 256 && c.ns != long_ns)
+    );
+    // Ordinary namespaces are kept verbatim.
+    assert!(root.is(DAV, "multistatus"));
+}
+
+#[test]
+fn attributes_are_bounded() {
+    let attrs: String = (0..100_001).map(|i| format!(" a{i}=\"\"")).collect();
+    let doc = format!("<x{attrs}/>");
+    let err = xml::parse(doc.as_bytes()).unwrap_err();
+    assert!(err.to_string().contains("too many attributes"), "{err}");
+}
+
+#[test]
 fn cursor_round_trip_and_garbage() {
     assert_eq!(Cursor::load(Some(json!([1, 2]))), Cursor::fresh());
     assert_eq!(Cursor::load(Some(json!({"v": 9}))), Cursor::fresh());

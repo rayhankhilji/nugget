@@ -7,8 +7,8 @@ provider you configure says which tiers it serves:
 |---|---|---|
 | `triage` | Per-item keep, junk or sensitive, plus a short summary, during indexing | **Local only.** Cloud providers are never used for triage. |
 | `light` | Cheap classification and routing calls | Any provider you assign |
-| `synthesis` | Ask, chat, knowledge extraction (when wired in), drafting (planned) | Any provider you assign |
-| `agentic` | Tool-using agent loops and computer use (planned, M4) | Any provider you assign |
+| `synthesis` | Ask, chat, knowledge extraction, drafting (being wired in, wave W) | Any provider you assign. Knowledge extraction uses local providers only, unless you allow cloud for specific sources |
+| `agentic` | Tool-using agent loops and computer use (being wired in, wave W) | Any provider you assign |
 | `embedding` | Vectors for semantic search, at indexing and query time | **Local or LAN only** unless you opt in |
 
 There are three ways to serve a tier.
@@ -69,7 +69,7 @@ A plain key in `config.toml` is rejected at load time.
 [[providers]]
 id = "anthropic"
 kind = "anthropic"
-model = "claude-opus-5-5"
+model = "<model name from the provider>"
 api_key = "env:ANTHROPIC_API_KEY"
 tiers = ["synthesis", "agentic"]
 ```
@@ -84,6 +84,31 @@ Then restart `nuggetd`. What changes when a cloud provider is configured:
   `ingest.allow_cloud_embeddings` sends non-sensitive items' chunks to a cloud embedder at indexing
   time, and `retrieve.allow_cloud_embedding` sends your search queries (and, for diversity ranking,
   passages stored without a vector). Sensitive items are never embedded in the cloud.
+
+## Servers built on llama.cpp
+
+When a provider is llama.cpp's `llama-server`, Nugget sends `cache_prompt` so the server reuses its
+KV cache for the shared start of a prompt (system prompt, tool definitions, retrieved context), and it
+can evaluate that shared prefix ahead of time. This is on by default for on-device
+`openai_compatible` providers, including the managed `local-chat`; Ollama, LM Studio and vLLM ignore
+the extra fields. Two provider settings control it:
+
+```toml
+[[providers]]
+id = "my-llama"
+kind = "openai_compatible"
+base_url = "http://192.168.1.20:8080/v1"
+model = "my-model"
+tiers = ["synthesis"]
+llama_cpp = true       # default: true on this device, false elsewhere
+slot_affinity = false  # default: false
+```
+
+- `llama_cpp`: set it to `true` for a `llama-server` on another machine, or to `false` if an
+  on-device server rejects the extra fields.
+- `slot_affinity`: pin requests that share a cache key to the same server slot (`id_slot`). Leave it
+  off unless you have measured a gain: `llama-server` already picks the idle slot with the longest
+  matching cached prefix, and a pinned request waits whenever its slot is busy.
 
 ## Routing and probing
 
