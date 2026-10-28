@@ -23,6 +23,7 @@ use nugget_core::ipc::{
 };
 use nugget_core::paths::Paths;
 use nugget_infer::probe::vision::read_code_png;
+use nugget_ingest::MemorySecrets;
 use nugget_ipc::{Client, IpcError, Notification, code};
 use nugget_store::{NewChunk, NewItem, Store, StoreKey, content_hash};
 use nuggetd::{Daemon, DaemonOptions, Startup};
@@ -181,6 +182,7 @@ struct Harness {
     _tmp: tempfile::TempDir,
     paths: Paths,
     key: StoreKey,
+    secrets: MemorySecrets,
     store: Store,
     client: Client,
     mock: MockServer,
@@ -192,6 +194,10 @@ struct Harness {
 fn config(mock: &MockServer, slow: &SlowServer) -> String {
     format!(
         r#"
+# The local runtime has its own test (it would add `local-*` providers to every tier).
+[runtime]
+enabled = false
+
 [[providers]]
 id = "mock"
 kind = "openai_compatible"
@@ -222,18 +228,23 @@ tiers = ["synthesis"]
     )
 }
 
+fn daemon_options(paths: &Paths, key: &StoreKey, secrets: &MemorySecrets) -> DaemonOptions {
+    let mut opts = DaemonOptions::new(paths.clone());
+    opts.store_key = Some(key.clone());
+    opts.source_secrets = Some(Arc::new(secrets.clone()));
+    opts
+}
+
 async fn start_daemon(
     paths: &Paths,
     key: &StoreKey,
+    secrets: &MemorySecrets,
 ) -> (
     Store,
     oneshot::Sender<()>,
     JoinHandle<nugget_core::Result<()>>,
 ) {
-    let opts = DaemonOptions {
-        paths: paths.clone(),
-        store_key: Some(key.clone()),
-    };
+    let opts = daemon_options(paths, key, secrets);
     let daemon = match Daemon::start(opts).await.unwrap() {
         Startup::Ready(d) => d,
         Startup::AlreadyRunning { socket } => panic!("unexpected daemon on {socket}"),
@@ -263,10 +274,12 @@ impl Harness {
         std::fs::create_dir_all(&paths.config).unwrap();
         std::fs::write(paths.config_file(), config(&mock, &slow)).unwrap();
         let key = StoreKey::from_bytes([7; 32]);
-        let (store, stop, server) = start_daemon(&paths, &key).await;
+        let secrets = MemorySecrets::new();
+        let (store, stop, server) = start_daemon(&paths, &key, &secrets).await;
         let client = Client::connect(&paths).await.unwrap();
         Self {
             _tmp: tmp,
+            secrets,
             paths,
             key,
             store,
@@ -302,7 +315,7 @@ impl Harness {
     }
 
     async fn restart(&mut self) {
-        let (store, stop, server) = start_daemon(&self.paths, &self.key).await;
+        let (store, stop, server) = start_daemon(&self.paths, &self.key, &self.secrets).await;
         self.store = store;
         self.stop = Some(stop);
         self.server = Some(server);
@@ -536,7 +549,7 @@ async fn status_chat_search_egress_and_models() {
         code::METHOD_NOT_FOUND
     );
 
-    // search over the seeded items.
+    // search over the seeded items: one hit per item (its best chunk), through the retriever.
     let hits: Vec<SearchHit> = h
         .call(
             method::SEARCH,
@@ -546,11 +559,11 @@ async fn status_chat_search_egress_and_models() {
             }),
         )
         .await;
-    assert_eq!(hits.len(), 2);
-    assert!(hits.iter().all(|hit| hit.item == item.item));
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].item, item.item);
     assert_eq!(hits[0].title.as_deref(), Some("Fox notes"));
     assert!(hits[0].chunk_id.is_some());
-    assert!(hits[0].score >= hits[1].score);
+    assert!(hits[0].score > 0.0);
     let hits: Vec<SearchHit> = h
         .call(method::SEARCH, json!({"query": "cats", "limit": 1}))
         .await;
@@ -770,10 +783,7 @@ async fn probe_is_persisted_and_routes_capability_requests() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_daemon_on_the_same_home_reports_already_running() {
     let mut h = Harness::start().await;
-    let opts = DaemonOptions {
-        paths: h.paths.clone(),
-        store_key: Some(h.key.clone()),
-    };
+    let opts = daemon_options(&h.paths, &h.key, &h.secrets);
     match Daemon::start(opts).await.unwrap() {
         Startup::AlreadyRunning { socket } => {
             assert_eq!(socket, nugget_ipc::socket_display(&h.paths));
@@ -796,10 +806,11 @@ async fn invalid_config_is_a_clear_error() {
         "[[providers]]\nid = \"x\"\nkind = \"carrier_pigeon\"\nmodel = \"m\"\n",
     )
     .unwrap();
-    let err = match Daemon::start(DaemonOptions {
-        paths: paths.clone(),
-        store_key: Some(StoreKey::from_bytes([1; 32])),
-    })
+    let err = match Daemon::start(daemon_options(
+        &paths,
+        &StoreKey::from_bytes([1; 32]),
+        &MemorySecrets::new(),
+    ))
     .await
     {
         Err(e) => e.to_string(),

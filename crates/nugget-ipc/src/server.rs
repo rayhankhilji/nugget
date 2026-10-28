@@ -31,6 +31,12 @@ pub trait Handler: Send + Sync + 'static {
     /// stream notifications to the calling connection, also after returning (clone it into a
     /// spawned task).
     async fn call(&self, method: &str, params: Value, notify: Notifier) -> Result<Value, RpcError>;
+
+    /// Called once per connection, when it opens and before any of its requests is read, with
+    /// that connection's notifier (for example to subscribe it to broadcast notifications).
+    /// The notifier fails with [`IpcError::Disconnected`] once the connection is gone. Default:
+    /// nothing.
+    fn connected(&self, _notify: &Notifier) {}
 }
 
 /// Pushes notifications to one connection. Cheap to clone.
@@ -134,6 +140,7 @@ async fn handle_connection(stream: Stream, handler: Arc<dyn Handler>) {
         tx: tx.clone(),
         closed: closed.clone(),
     };
+    handler.connected(&notifier);
     let mut lines = wire::line_reader(read);
     let mut calls = JoinSet::new();
 

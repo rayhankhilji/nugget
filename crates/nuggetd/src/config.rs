@@ -9,6 +9,8 @@ use nugget_core::capability::Tier;
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
 use nugget_infer::ProviderConfig;
+use nugget_ingest::IngestConfig;
+use nugget_retrieve::RetrieveConfig;
 use serde::{Deserialize, Serialize};
 
 /// Written to `Paths::config_file()` when no config exists.
@@ -34,11 +36,24 @@ pub const DEFAULT_CONFIG: &str = r#"# Nugget daemon (nuggetd) configuration.
 # Parallel connections per local model download.
 download_parts = 4
 
-# The local model chosen for each tier (ids from the app's Models page). Reserved for the
-# on-device runtime; unset tiers use the hardware-based recommendation.
+# The local model chosen for each tier (ids from the app's Models page). The on-device runtime
+# below falls back to `triage` (chat) and `embedding` when [runtime] names no model.
 [models.selected]
 # triage = "qwen3-4b-q4km"
 # embedding = "nomic-embed-text-v1.5-q8"
+
+# --- On-device runtime (llama.cpp llama-server, managed by nuggetd) ------------------------------
+# When a selected model is installed (Models page), nuggetd runs it on 127.0.0.1 and routes to it
+# as `local-chat` (triage, light, synthesis) and `local-embedding` (embedding). Providers you
+# configure below that run on this device or your network are tried first; cloud providers come
+# after the runtime and are never used for triage or (by default) embeddings.
+[runtime]
+enabled = true
+# Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
+# chat_model = "qwen3-4b-q4km"
+# embedding_model = "nomic-embed-text-v1.5-q8"
+# Stop a server after this many idle minutes (0 = keep running); it restarts on the next request.
+idle_stop_minutes = 30
 
 # --- On-device: Ollama ---------------------------------------------------------------------------
 # Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
@@ -73,8 +88,46 @@ tiers = ["triage", "light", "synthesis"]
 pub struct Config {
     #[serde(default)]
     pub models: ModelsConfig,
+    /// `[runtime]`: the on-device llama-server runtime.
+    #[serde(default)]
+    pub runtime: RuntimeConfig,
+    /// `[ingest]`: indexing tunables (`nugget_ingest::IngestConfig`; every field optional).
+    #[serde(default)]
+    pub ingest: IngestConfig,
+    /// `[retrieve]`: search tunables (`nugget_retrieve::RetrieveConfig`; every field optional).
+    #[serde(default)]
+    pub retrieve: RetrieveConfig,
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+}
+
+/// `[runtime]`: local inference through `nugget-runtime`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct RuntimeConfig {
+    /// Run selected, installed models locally (default true).
+    pub enabled: bool,
+    /// Manifest id of the chat model (served as `local-chat` for triage, light and synthesis).
+    /// Unset: `models.selected.triage`, then the recommendation for the Triage tier (then
+    /// Synthesis).
+    pub chat_model: Option<String>,
+    /// Manifest id of the embedding model (served as `local-embedding`). Unset:
+    /// `models.selected.embedding`, then the recommendation for the Embedding tier.
+    pub embedding_model: Option<String>,
+    /// Stop a server after this many minutes without requests; 0 keeps it running. A stopped
+    /// server starts again on the next request.
+    pub idle_stop_minutes: u64,
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            chat_model: None,
+            embedding_model: None,
+            idle_stop_minutes: 30,
+        }
+    }
 }
 
 /// `[models]`: local model settings.
@@ -150,17 +203,29 @@ impl Config {
             )));
         }
         for (tier, id) in self.models.selected.iter() {
-            let ok = !id.is_empty()
-                && id.len() <= 64
-                && id
-                    .bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b));
-            if !ok {
+            if !is_model_id(id) {
                 return Err(Error::Invalid(format!(
                     "models.selected.{}: `{id}` is not a model id",
                     tier_name(tier)
                 )));
             }
+        }
+        for (field, id) in [
+            ("chat_model", &self.runtime.chat_model),
+            ("embedding_model", &self.runtime.embedding_model),
+        ] {
+            if let Some(id) = id
+                && !is_model_id(id)
+            {
+                return Err(Error::Invalid(format!(
+                    "runtime.{field}: `{id}` is not a model id"
+                )));
+            }
+        }
+        if self.runtime.idle_stop_minutes > 7 * 24 * 60 {
+            return Err(Error::Invalid(
+                "runtime.idle_stop_minutes must be at most 10080 (one week)".into(),
+            ));
         }
         Ok(())
     }
@@ -193,6 +258,14 @@ impl Config {
     pub fn load_or_create(paths: &Paths) -> Result<(Self, bool)> {
         Self::load_or_create_at(&paths.config_file())
     }
+}
+
+fn is_model_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"._-".contains(&b))
 }
 
 /// The inner message of an `Invalid` error (avoids "invalid input: invalid config: ...").
@@ -248,6 +321,8 @@ mod tests {
     fn default_config_is_local_first() {
         let cfg = Config::default_local();
         assert_eq!(cfg.models, ModelsConfig::default());
+        assert_eq!(cfg.runtime, RuntimeConfig::default());
+        assert!(cfg.runtime.enabled);
         assert_eq!(cfg.providers.len(), 1);
         let p = &cfg.providers[0];
         assert_eq!(p.kind, ProviderKind::OpenaiCompatible);
@@ -321,6 +396,25 @@ mod tests {
     }
 
     #[test]
+    fn parses_runtime_ingest_and_retrieve_sections() {
+        let cfg = Config::parse(
+            "[runtime]\nenabled = false\nchat_model = \"qwen3-4b-q4km\"\nidle_stop_minutes = 0\n\
+             [ingest]\nqueue_capacity = 8\n[retrieve]\nmmr = false\n",
+        )
+        .unwrap();
+        assert!(!cfg.runtime.enabled);
+        assert_eq!(cfg.runtime.chat_model.as_deref(), Some("qwen3-4b-q4km"));
+        assert_eq!(cfg.runtime.embedding_model, None);
+        assert_eq!(cfg.runtime.idle_stop_minutes, 0);
+        assert_eq!(cfg.ingest.queue_capacity, 8);
+        assert!(!cfg.ingest.allow_cloud_embeddings);
+        assert!(!cfg.retrieve.mmr);
+        assert!(!cfg.retrieve.allow_cloud_embedding);
+        let empty = Config::parse("").unwrap();
+        assert_eq!(empty.runtime, RuntimeConfig::default());
+    }
+
+    #[test]
     fn rejects_invalid_configs_with_clear_errors() {
         let cases = [
             ("bogus = 1", "unknown field"),
@@ -328,6 +422,9 @@ mod tests {
             ("[models]\nparts = 2", "unknown field"),
             ("[models.selected]\nfast = \"x\"", "unknown field"),
             ("[models.selected]\ntriage = \"Bad Id\"", "not a model id"),
+            ("[runtime]\nchat_model = \"../x\"", "runtime.chat_model"),
+            ("[runtime]\nidle_stop_minutes = 99999", "idle_stop_minutes"),
+            ("[runtime]\nbogus = 1", "unknown field"),
             (
                 "[[providers]]\nid = \"a\"\nkind = \"anthropic\"\nmodel = \"m\"\napi_key = \"sk-plain\"",
                 "api_key",

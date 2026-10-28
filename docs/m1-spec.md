@@ -64,3 +64,29 @@ query ──▶ nugget-retrieve (hybrid + MMR + packing with citations) ──�
 - **Google `client_secret`.** The connectors accept `client_secret` in settings, but the daemon never persists it there. It stores the secret through `sources.secret.set` under `oauth_client_secret:<source>`, and injects it into the settings passed to `ConnectorFactory::build`.
 - **Google app verification.** While the user's OAuth app is in Testing mode, refresh tokens expire after 7 days. The UI should explain that reconnecting will be needed.
 - **`AuthFlow::done`.** The daemon spawns it and awaits it for up to 5 minutes. Dropping it aborts the flow.
+
+## M1-I daemon integration (as built)
+- **Config.** `config.toml` gains:
+  - `[runtime]`: `enabled` (default `true`), `chat_model` and `embedding_model` (manifest ids; unset falls back to `[models.selected] triage` / `embedding`, then `recommend()` for Triage (else Synthesis) / Embedding), and `idle_stop_minutes` (default 30; 0 keeps servers running).
+  - `[ingest]` (`nugget_ingest::IngestConfig`) and `[retrieve]` (`nugget_retrieve::RetrieveConfig`), every field optional.
+- **Local runtime in the router.** The router is built once. Each selected runtime role gets a slot provider in it from the start, under `local-chat` (triage, light, synthesis, plus the model's other chat tiers) or `local-embedding` (embedding). A slot forwards to `build_provider_with(cfg, egress, &runtime.secrets())` for the config `Runtime::ensure` returned. It starts the server on demand (after an idle stop, too) and rebuilds the provider only when the config changes. A slot is routable for nothing until its server is first ready; then its known capabilities are set (chat: streaming plus JSON schema; embedding: embeddings). Installed selected models are ensured in the background at startup, and again when `models.install` finishes for them.
+- **Routing order per tier.** Configured non-cloud providers (in config order), then the runtime slot, then configured cloud providers. The ingest gates (triage is local only; embeddings are local unless `allow_cloud_embeddings`) and the retrieve gate (`allow_cloud_embedding`) keep cloud providers from embedding or triaging by default.
+- **Notifications are broadcast** to every connection. A connection subscribes when it opens (`nugget_ipc::Handler::connected`, a new default trait method). Each connection has its own queue, so a slow client never delays the others.
+  - `ingest.progress` carries `IngestProgress`.
+  - `sources.changed` carries one of:
+    - a single `SourceInfo`, when a source was added or changed;
+    - `{"id": "<source id>", "removed": true}`, when a source was removed;
+    - `{"lagged": <n>}`, when the daemon dropped events.
+  
+  Clients treat anything but a `SourceInfo` (or a list of them) as "refetch `sources.list`".
+- **Secrets.**
+  - `sources.secret.set` stores imap/caldav passwords under `password:<id>`. For gmail/gcal it stores the OAuth client secret under `oauth_client_secret:<id>`; a settings resolver (`IngestBuilder::settings_resolver`) injects it as `client_secret` when the connector is built, and the source is rebuilt (`Ingest::reload`).
+  - `client_secret` in `sources.add`/`update` settings is refused.
+  - Account names are recorded in `sources.toml`, so removal deletes them. Values never appear in responses, notifications, logs or audit.
+  - With `NUGGET_KEYCHAIN=off`, source secrets are kept in daemon memory only (warned at start).
+- **`sources.auth.begin`** returns the URL only (the client opens it). Ingest abandons the flow after `nugget_ingest::AUTH_TIMEOUT` (5 min). The daemon audits `source.auth.begin` and `source.auth.result`.
+- **Audit actions:** `source.add`, `source.update`, `source.remove`, `source.auth.begin`, `source.auth.result` and `source.secret.set` (the account name only).
+- **Settings reconciliation:** for `files`, an empty `include` (the desktop's "default types") is dropped before validation.
+- **`search`** uses `Retriever::search`: hybrid when an embedder is usable, one hit per item, with `url`. **`retrieve.context`** uses `build_context` (budget capped at 128k tokens). Both run on the blocking pool.
+- **`runtime.status`** returns `Runtime::status()`, plus each selected role not started yet, as `not_installed` or `stopped`. It returns `[]` when the runtime is disabled.
+- **Shutdown order:** stop accepting and close connections (chat streams first get `chat.done`), then `Ingest::shutdown`, then `Runtime::shutdown`, then flush the store's egress writer.

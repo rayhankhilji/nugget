@@ -15,12 +15,32 @@ path = "src/lib.rs"
 name = "nuggetd"
 path = "src/main.rs"
 
+# Test double for llama.cpp's `llama-server` (nugget-runtime's), built only for this crate's own
+# tests through the self dev-dependency below, so the end-to-end tests can run the local runtime.
+[[bin]]
+name = "nuggetd-fake-llama-server"
+path = "../nugget-runtime/src/bin/fake-llama-server.rs"
+required-features = ["fake-runtime"]
+test = false
+doc = false
+
+[features]
+fake-runtime = []
+
 [dependencies]
 nugget-core.workspace = true
 nugget-store.workspace = true
 nugget-infer.workspace = true
 nugget-models.workspace = true
 nugget-ipc.workspace = true
+nugget-connector.workspace = true
+nugget-connector-files.workspace = true
+nugget-connector-google.workspace = true
+nugget-connector-imap.workspace = true
+nugget-connector-caldav.workspace = true
+nugget-ingest.workspace = true
+nugget-retrieve.workspace = true
+nugget-runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -36,6 +56,7 @@ tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }
 base64 = "0.22"
 tempfile = "3"
 wiremock = "0.6"

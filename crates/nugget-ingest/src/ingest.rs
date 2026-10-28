@@ -34,6 +34,17 @@ use crate::supervisor::{Control, run_source};
 /// Capacity of the event broadcast; slow subscribers miss old events (`RecvError::Lagged`).
 const EVENT_CAPACITY: usize = 1024;
 
+/// How long an interactive authorization ([`Ingest::begin_auth`]) may take before it is
+/// abandoned (its loopback listener closed).
+pub const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+/// Adds values that must never be persisted (for example an OAuth client secret read from the
+/// keychain) to a source's settings right before its connector is built. Called with the source
+/// id, its kind and its persisted settings; returns the settings to build with. The result is
+/// only handed to [`nugget_connector::ConnectorFactory::build`], never stored or reported.
+pub type SettingsResolver =
+    Arc<dyn Fn(&SourceId, &str, serde_json::Value) -> Result<serde_json::Value> + Send + Sync>;
+
 /// Something that changed, for UIs. `nuggetd` forwards these as notifications:
 /// [`Progress`](Self::Progress) → `ingest.progress`, the others → `sources.changed`.
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +116,7 @@ pub(crate) struct Inner {
     registry: Registry,
     paths: Paths,
     secrets: Arc<dyn SecretStore>,
+    settings_resolver: Option<SettingsResolver>,
     events: broadcast::Sender<IngestEvent>,
     slots: Mutex<BTreeMap<SourceId, Slot>>,
     /// Serializes registry mutations (add / update / remove).
@@ -273,6 +285,10 @@ impl Inner {
             (s.entry.kind.clone(), s.entry.settings.clone())
         };
         let factory = self.registry.get(&kind)?;
+        let settings = match &self.settings_resolver {
+            Some(resolve) => resolve(id, &kind, settings)?,
+            None => settings,
+        };
         let connector = factory.build(&settings, self.context(id))?;
         if let Some(s) = lock(&self.slots).get_mut(id) {
             s.connector = Some(connector.clone());
@@ -374,6 +390,7 @@ pub struct IngestBuilder {
     router: Option<Arc<Router>>,
     secrets: Option<Arc<dyn SecretStore>>,
     power: Option<Arc<dyn PowerPolicy>>,
+    settings_resolver: Option<SettingsResolver>,
 }
 
 impl std::fmt::Debug for IngestBuilder {
@@ -404,6 +421,13 @@ impl IngestBuilder {
         self
     }
 
+    /// Settings hook applied each time a connector is built (see [`SettingsResolver`]).
+    /// After the values it adds change, call [`Ingest::reload`] to rebuild the connector.
+    pub fn settings_resolver(mut self, resolver: SettingsResolver) -> Self {
+        self.settings_resolver = Some(resolver);
+        self
+    }
+
     /// Load `<config>/sources.toml` and start a supervisor for every enabled source.
     /// Must be called inside a Tokio runtime.
     pub async fn start(self) -> Result<Ingest> {
@@ -430,6 +454,7 @@ impl IngestBuilder {
             registry: self.registry,
             paths: self.paths,
             secrets,
+            settings_resolver: self.settings_resolver,
             events,
             slots: Mutex::new(BTreeMap::new()),
             ops: tokio::sync::Mutex::new(()),
@@ -520,6 +545,7 @@ impl Ingest {
             router: None,
             secrets: None,
             power: None,
+            settings_resolver: None,
         }
     }
 
@@ -877,8 +903,14 @@ impl Ingest {
         let task_inner = inner.clone();
         inner.tracker.spawn(async move {
             let inner = task_inner;
+            // Dropping `done` (timeout, shutdown) aborts the flow and closes its listener.
             let r = tokio::select! {
-                r = done => r,
+                r = tokio::time::timeout(AUTH_TIMEOUT, done) => r.unwrap_or_else(|_| {
+                    Err(Error::Other(format!(
+                        "authorization timed out after {} s",
+                        AUTH_TIMEOUT.as_secs()
+                    )))
+                }),
                 _ = inner.shutdown.cancelled() => Err(Error::Cancelled),
             };
             match &r {
@@ -934,6 +966,25 @@ impl Ingest {
             Some(ctl) => ctl.sync_now(),
             None => inner.start_source(id),
         }
+        Ok(())
+    }
+
+    /// Rebuild a source's connector (re-running the [`SettingsResolver`]) and restart its
+    /// supervisor if it is enabled. Use after credentials the resolver injects have changed.
+    /// The cursor is kept.
+    pub async fn reload(&self, id: &SourceId) -> Result<()> {
+        let inner = &self.inner;
+        let _g = inner.ops.lock().await;
+        if !lock(&inner.slots).contains_key(id) {
+            return Err(Error::NotFound(format!("source `{id}`")));
+        }
+        inner.set_reconfiguring(id, true);
+        inner.stop_source(id).await;
+        if let Some(s) = lock(&inner.slots).get_mut(id) {
+            s.connector = None;
+            s.reconfiguring = false;
+        }
+        inner.start_source(id);
         Ok(())
     }
 

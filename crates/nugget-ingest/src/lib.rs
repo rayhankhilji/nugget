@@ -60,7 +60,7 @@ mod supervisor;
 
 pub use ai::{FEATURE_TRIAGE, SUMMARY_MAX_WORDS, Triage};
 pub use config::IngestConfig;
-pub use ingest::{Ingest, IngestBuilder, IngestEvent, ItemError};
+pub use ingest::{AUTH_TIMEOUT, Ingest, IngestBuilder, IngestEvent, ItemError, SettingsResolver};
 pub use known::StoreKnownItems;
 pub use pii::{PiiFindings, scan as scan_pii};
 pub use power::{NoPowerPolicy, PowerPolicy, SystemPowerPolicy};

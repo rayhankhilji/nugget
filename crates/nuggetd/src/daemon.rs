@@ -1,25 +1,36 @@
-//! Daemon lifecycle: bind the socket, open the store, build providers and the router, serve IPC
-//! until shutdown, then wind down background tasks.
+//! Daemon lifecycle: bind the socket, open the store, build providers, the local runtime and
+//! the router, start ingest, serve IPC until shutdown, then wind down in order: stop accepting
+//! (and close connections), ingest, the local runtime, then flush the store.
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
+use nugget_connector::SecretStore;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
-use nugget_infer::{Provider, ProviderConfig, Router, build_provider, tier_map_from_configs};
+use nugget_infer::{Provider, ProviderConfig, Router, build_provider};
+use nugget_ingest::{Ingest, KeyringSecrets, MemorySecrets};
 use nugget_ipc::Listener;
-use nugget_models::{DownloadOptions, Hardware, Manifest, ModelStore, default_manifest};
+use nugget_models::{
+    DownloadOptions, Hardware, Manifest, ModelStore, RuntimeAccel, default_manifest,
+};
+use nugget_retrieve::Retriever;
+use nugget_runtime::{Runtime, RuntimeOptions};
 use nugget_store::{Store, StoreKey};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
 use crate::config::{Config, tier_name};
 use crate::handler::RpcHandler;
+use crate::hub::Hub;
+use crate::local::{self, LocalRuntime, RuntimeSlot};
 use crate::probes::ProbeCache;
+use crate::sources;
 
 /// How long shutdown waits for chat streams and installs to stop.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -30,6 +41,23 @@ pub struct DaemonOptions {
     pub paths: Paths,
     /// Use this store key instead of [`StoreKey::load_or_create`] (tests).
     pub store_key: Option<StoreKey>,
+    /// Where source credentials live. Default: the OS keychain, or process memory (lost at
+    /// exit, with a warning) when `NUGGET_KEYCHAIN=off`. Tests inject a `MemorySecrets`.
+    pub source_secrets: Option<Arc<dyn SecretStore>>,
+    /// Local runtime overrides (tests).
+    pub runtime: RuntimeOverrides,
+}
+
+/// Test hooks for the local runtime and model manifest.
+#[derive(Clone, Default)]
+pub struct RuntimeOverrides {
+    /// Run this `llama-server` executable instead of downloading a manifest runtime build.
+    pub server_binary: Option<(PathBuf, RuntimeAccel)>,
+    /// Supervisor timings.
+    pub options: Option<RuntimeOptions>,
+    /// Use this (already verified) manifest instead of the bundled one, for models too.
+    pub manifest: Option<Manifest>,
+    pub hardware: Option<Hardware>,
 }
 
 impl DaemonOptions {
@@ -37,6 +65,8 @@ impl DaemonOptions {
         Self {
             paths,
             store_key: None,
+            source_secrets: None,
+            runtime: RuntimeOverrides::default(),
         }
     }
 }
@@ -64,6 +94,13 @@ pub(crate) struct State {
     pub started: Instant,
     pub store: Store,
     pub router: Arc<Router>,
+    /// The on-device runtime, unless `[runtime] enabled = false` (or no manifest).
+    pub local: Option<Arc<LocalRuntime>>,
+    pub ingest: Ingest,
+    pub retriever: Retriever,
+    pub secrets: Arc<dyn SecretStore>,
+    /// Broadcast notifications to every connection.
+    pub hub: Arc<Hub>,
     /// Every configured provider, in config order (including ones that failed to build).
     pub configs: Vec<ProviderConfig>,
     /// Providers that could not be built, with the reason. They are not in the router.
@@ -94,6 +131,26 @@ impl State {
     pub fn streams(&self) -> MutexGuard<'_, HashMap<String, CancellationToken>> {
         self.streams.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    /// The runtime slot routed under `id`, if any.
+    pub fn slot(&self, id: &ProviderId) -> Option<&Arc<RuntimeSlot>> {
+        self.local.as_ref().and_then(|l| l.slot(id))
+    }
+}
+
+/// Start `slot`'s server in the background (tracked; stops on shutdown).
+pub(crate) fn spawn_ensure(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
+    let stop = state.shutdown.clone();
+    state.tasks.spawn(async move {
+        let model = slot.model().id.clone();
+        tokio::select! {
+            () = stop.cancelled() => {}
+            r = slot.ready() => match r {
+                Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
+                Err(e) => tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start"),
+            },
+        }
+    });
 }
 
 /// A set of ids with RAII membership: at most one holder per id.
@@ -193,18 +250,15 @@ impl Daemon {
             .filter(|c| !unavailable.contains_key(&c.id))
             .cloned()
             .collect();
-        let router = Router::new(providers, tier_map_from_configs(&built));
-        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
-        for cfg in &built {
-            if let Some(caps) = probes.get(cfg) {
-                router.set_capabilities(&cfg.id, caps.clone());
-            }
-        }
 
-        let manifest = default_manifest().map_err(|e| {
-            tracing::error!(error = %e, "bundled model manifest failed verification");
-            e.to_string()
-        });
+        let overrides = opts.runtime;
+        let manifest = match overrides.manifest.clone() {
+            Some(m) => Ok(m),
+            None => default_manifest().map_err(|e| {
+                tracing::error!(error = %e, "bundled model manifest failed verification");
+                e.to_string()
+            }),
+        };
         if let Ok(m) = &manifest {
             for (tier, id) in config.models.selected.iter() {
                 if m.get(id).is_none() {
@@ -216,18 +270,122 @@ impl Daemon {
                 }
             }
         }
-        let models =
+        let models = Arc::new(
             ModelStore::open(&paths, egress.clone())?.with_download_options(DownloadOptions {
                 parts: config.models.download_parts,
                 ..DownloadOptions::default()
-            });
-        let hardware = blocking(|| Ok(nugget_models::detect_hardware())).await?;
+            }),
+        );
+        let hardware = match overrides.hardware {
+            Some(hw) => hw,
+            None => blocking(|| Ok(nugget_models::detect_hardware())).await?,
+        };
+
+        // The local runtime's slots join the router from the start (see `local`).
+        let local = match (&manifest, config.runtime.enabled) {
+            (Ok(m), true) => {
+                let installed = {
+                    let models = models.clone();
+                    blocking(move || models.installed())
+                        .await
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(error = %e, "cannot list installed models");
+                            Default::default()
+                        })
+                };
+                let mut runtime = Runtime::new(&paths, models.clone(), egress.clone())?
+                    .with_manifest(m.clone())
+                    .with_hardware(hardware);
+                let mut ropts = overrides.options.clone().unwrap_or_default();
+                if ropts.idle_shutdown.is_none() {
+                    ropts.idle_shutdown = (config.runtime.idle_stop_minutes > 0)
+                        .then(|| Duration::from_secs(config.runtime.idle_stop_minutes * 60));
+                }
+                runtime = runtime.with_options(ropts);
+                if let Some((bin, accel)) = overrides.server_binary.clone() {
+                    runtime = runtime.with_server_binary(bin, accel);
+                }
+                let selected = local::selected_models(&config, m, &hardware);
+                Some(Arc::new(LocalRuntime::new(
+                    runtime,
+                    selected,
+                    &|id| installed.contains_key(id),
+                    egress.clone(),
+                )))
+            }
+            (Err(_), true) => {
+                tracing::warn!("local runtime disabled: no verified model manifest");
+                None
+            }
+            (_, false) => None,
+        };
+
+        let localities = local::localities(&providers);
+        let configured: Vec<_> = built
+            .iter()
+            .map(|c| {
+                let loc = localities
+                    .get(&c.id)
+                    .copied()
+                    .unwrap_or(nugget_core::capability::Locality::Cloud);
+                (c.id.clone(), c.tiers.clone(), loc)
+            })
+            .collect();
+        let tier_map = local::tier_map(&configured, &local::slot_routes(local.as_deref()));
+        let mut all_providers = providers;
+        if let Some(l) = &local {
+            all_providers.extend(local::as_providers(l));
+        }
+        let router = Arc::new(Router::new(all_providers, tier_map));
+        if let Some(l) = &local {
+            l.attach(&router);
+        }
+        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
+        for cfg in &built {
+            if let Some(caps) = probes.get(cfg) {
+                router.set_capabilities(&cfg.id, caps.clone());
+            }
+        }
+
+        // Ingest: every M1 connector kind, credentials in the keychain.
+        let secrets: Arc<dyn SecretStore> = match opts.source_secrets {
+            Some(s) => s,
+            None if sources::keychain_disabled() => {
+                tracing::warn!(
+                    "NUGGET_KEYCHAIN is off: source passwords and tokens are kept in memory only and must be set again after a restart"
+                );
+                Arc::new(MemorySecrets::new())
+            }
+            None => Arc::new(KeyringSecrets::new()),
+        };
+        let registry = sources::registry();
+        let resolver =
+            sources::client_secret_resolver(secrets.clone(), sources::oauth_kinds(&registry));
+        let ingest = Ingest::builder(
+            config.ingest.clone(),
+            store.clone(),
+            registry,
+            paths.clone(),
+        )
+        .router(Some(router.clone()))
+        .secrets(secrets.clone())
+        .settings_resolver(resolver)
+        .start()
+        .await
+        .map_err(|e| match e {
+            Error::Invalid(m) => Error::Invalid(format!("sources: {m}")),
+            other => other,
+        })?;
+        let retriever =
+            Retriever::new(store.clone(), Some(router.clone()), config.retrieve.clone());
+        let hub = Arc::new(Hub::default());
 
         tracing::info!(
             version = env!("CARGO_PKG_VERSION"),
             socket = %socket,
             providers = built.len(),
             unavailable = unavailable.len(),
+            local_runtime = local.is_some(),
             encrypted = store.is_encrypted(),
             ram_gb = hardware.total_ram / nugget_models::GIB,
             "nuggetd ready"
@@ -236,27 +394,54 @@ impl Daemon {
         let audit_chain_ok = Arc::new(OnceLock::new());
         spawn_audit_check(store.clone(), audit_chain_ok.clone());
 
+        let state = Arc::new(State {
+            paths,
+            started: Instant::now(),
+            store,
+            router,
+            local,
+            ingest,
+            retriever,
+            secrets,
+            hub,
+            configs,
+            unavailable,
+            audit_chain_ok,
+            probes: Arc::new(Mutex::new(probes)),
+            manifest,
+            models,
+            hardware,
+            streams: Mutex::new(HashMap::new()),
+            installs: Arc::new(InFlight::default()),
+            tasks: TaskTracker::new(),
+            shutdown: CancellationToken::new(),
+        });
+
+        // Forward ingest events to every client; start installed local models (not awaited).
+        crate::hub::spawn_forwarder(state.hub.clone(), &state.ingest, state.shutdown.clone());
+        if let Some(l) = &state.local {
+            for slot in &l.slots {
+                if slot.is_installed() {
+                    spawn_ensure(&state, slot.clone());
+                }
+            }
+        }
+
         Ok(Startup::Ready(Box::new(Daemon {
-            state: Arc::new(State {
-                paths,
-                started: Instant::now(),
-                store,
-                router: Arc::new(router),
-                configs,
-                unavailable,
-                audit_chain_ok,
-                probes: Arc::new(Mutex::new(probes)),
-                manifest,
-                models: Arc::new(models),
-                hardware,
-                streams: Mutex::new(HashMap::new()),
-                installs: Arc::new(InFlight::default()),
-                tasks: TaskTracker::new(),
-                shutdown: CancellationToken::new(),
-            }),
+            state,
             listener,
             config_created,
         })))
+    }
+
+    /// The daemon's ingest runtime (tests).
+    pub fn ingest(&self) -> Ingest {
+        self.state.ingest.clone()
+    }
+
+    /// The local runtime, if enabled (tests).
+    pub fn runtime(&self) -> Option<Runtime> {
+        self.state.local.as_ref().map(|l| l.runtime.clone())
     }
 
     /// The daemon's store (tests seed it directly).
@@ -289,11 +474,22 @@ impl Daemon {
             shutdown.await;
             wind_down(&winding).await;
         };
+        // Returns once the listener stopped accepting and every connection is closed.
         let served = nugget_ipc::serve_until(self.listener, handler, shutdown).await;
         // `serve_until` can also return early on a listener failure.
         if !state.shutdown.is_cancelled() {
             wind_down(&state).await;
         }
+        state.ingest.shutdown().await;
+        if let Some(l) = &state.local {
+            l.runtime.shutdown().await;
+        }
+        let store = state.store.clone();
+        let _ = blocking(move || {
+            store.flush_egress();
+            Ok(())
+        })
+        .await;
         served.map_err(Error::Io)?;
         tracing::info!("stopped");
         Ok(())
