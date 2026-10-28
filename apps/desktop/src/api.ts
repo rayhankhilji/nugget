@@ -967,7 +967,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status";
+export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status" | "doubletap";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -996,4 +996,110 @@ export const events = {
   onNotification: (h: (n: RawNotification) => void) => on(EVENT.notification, h),
   /** Tray menu asked the window to show a page. */
   onNavigate: (h: (page: PageId) => void) => on(EVENT.navigate, h),
+};
+
+// ---- W1 Double Tap ----
+// Tauri commands in apps/desktop/src-tauri/src/doubletap/ (the settings page and the overlay window).
+
+/** Modifier keys a double tap can use (mirrors `nugget_hotkey::Modifier`). */
+export type DoubleTapModifier =
+  | "left_command"
+  | "right_command"
+  | "left_control"
+  | "right_control"
+  | "left_option"
+  | "right_option"
+  | "left_shift"
+  | "right_shift";
+
+export type TriggerSpec =
+  | { kind: "double_tap"; modifier: DoubleTapModifier; window_ms: number }
+  /** A chord such as `Ctrl+Alt+Space`. */
+  | { kind: "chord"; chord: string };
+
+export interface DoubleTapSettings {
+  enabled: boolean;
+  trigger: TriggerSpec;
+  /** App id (bundle id, executable) or page host → provider id. */
+  app_providers: Record<string, string>;
+  /** Apps Double Tap never drafts in (password managers and banking by default). */
+  excluded_apps: string[];
+  /** Allow drafting in terminal emulators (off by default: text there can run as a command). */
+  allow_terminals: boolean;
+}
+
+export interface ModifierOption {
+  id: DoubleTapModifier;
+  /** As printed on this platform's keyboards. */
+  label: string;
+}
+
+export type PermissionState = "granted" | "denied" | "not_required" | "unknown";
+
+export interface DoubleTapStatus {
+  platform: "macos" | "windows" | "linux";
+  /** `macos`, `windows`, `x11`, `wayland` or `unknown`. */
+  session: string;
+  /** A listener is running with the current trigger. */
+  listening: boolean;
+  /** Why the trigger could not start (unsupported, taken…). */
+  trigger_error: string | null;
+  accessibility: "granted" | "denied" | "not_required";
+  /** macOS only; `not_required` elsewhere. */
+  input_monitoring: PermissionState;
+  /** i18n key of an onboarding hint, e.g. `doubletap.hint.atspi`. */
+  hint: string | null;
+  modifiers: ModifierOption[];
+  recommended_trigger: TriggerSpec;
+}
+
+/** `nugget_core::ipc::VoiceStatus`. */
+export interface VoiceStatus {
+  /** Messages written by the user that the profile was built from. */
+  samples: number;
+  /** Channels with enough samples for their own style (e.g. `email`, `chat`). */
+  channels: string[];
+  /** RFC 3339, or `null` when never built. */
+  last_built: string | null;
+}
+
+export type OverlayPhase = "reading" | "refused" | "streaming" | "done" | "inserting" | "inserted" | "error";
+export type InsertMethod = "accessibility" | "clipboard" | "typing";
+
+/** What the caret overlay shows; sent with every `doubletap:overlay` event. */
+export interface OverlayView {
+  phase: OverlayPhase;
+  /** Draft so far. */
+  text: string;
+  provider: string | null;
+  locality: Locality | null;
+  citations: number;
+  excluded_sensitive: number;
+  /** i18n key for refused/error (e.g. `doubletap.refused.secure`), or raw error text. */
+  message: string | null;
+  /** After insertion: whether reading the field back matched. */
+  verified: boolean | null;
+  method: InsertMethod | null;
+}
+
+export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
+
+export const doubletapApi = {
+  settingsGet: () => call<DoubleTapSettings>("doubletap_settings_get"),
+  /** Validates, saves and restarts the listener; returns what was saved. */
+  settingsSet: (settings: DoubleTapSettings) => call<DoubleTapSettings>("doubletap_settings_set", { settings }),
+  status: () => call<DoubleTapStatus>("doubletap_status"),
+  /** macOS: opens the Accessibility / Input Monitoring prompts. Elsewhere just reports status. */
+  requestPermissions: () => call<DoubleTapStatus>("doubletap_request_permissions"),
+  defaultExcluded: () => call<string[]>("doubletap_default_excluded"),
+  /** Start a draft as if the trigger fired. */
+  fire: () => call<void>("doubletap_fire"),
+  voiceStatus: () => call<VoiceStatus>("voice_status"),
+
+  // Overlay window only.
+  overlayState: () => call<OverlayView>("overlay_state"),
+  /** `text` is `null` when accepted unchanged, else the edited text. */
+  overlayAccept: (text: string | null) => call<void>("overlay_accept", { text }),
+  overlayCancel: () => call<void>("overlay_cancel"),
+  onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
 };

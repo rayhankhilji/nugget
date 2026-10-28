@@ -115,6 +115,8 @@ pub struct FeedbackRecord {
     /// What the user finally sent, when known.
     pub final_text: Option<String>,
     pub insert_verified: Option<bool>,
+    /// The draft drew on sensitive passages: the stored sample must stay out of cloud prompts.
+    pub sensitive: bool,
 }
 
 /// Receives draft outcomes and final texts (implemented by `nugget-voice`).
@@ -210,6 +212,8 @@ struct Session {
     cancel: CancellationToken,
     timings: Arc<Mutex<DraftTimings>>,
     draft: Arc<Mutex<String>>,
+    /// A cited passage was sensitive.
+    sensitive: bool,
 }
 
 #[derive(Default)]
@@ -546,6 +550,7 @@ impl Drafter {
                 draft,
                 final_text,
                 insert_verified: fb.insert_verified,
+                sensitive: s.sensitive,
             })
             .await?;
         }
@@ -776,6 +781,7 @@ impl Drafter {
                     cancel: cancel.clone(),
                     timings: timings.clone(),
                     draft: draft.clone(),
+                    sensitive: context.citations.iter().any(|c| c.sensitive),
                 },
             );
         tracing::info!(

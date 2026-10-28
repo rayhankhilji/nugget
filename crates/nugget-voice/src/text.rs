@@ -676,7 +676,7 @@ pub(crate) fn truncate(text: &str, max: usize) -> String {
 }
 
 /// All per-message features.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Features {
     pub words: u32,
     pub greeting: Option<String>,

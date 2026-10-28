@@ -12,6 +12,7 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
+import { DoubleTapPage } from "./pages/DoubleTap";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { shouldShowOnboarding } from "./onboarding/machine";
@@ -23,6 +24,7 @@ const PAGES: { id: PageId; label: MessageKey }[] = [
   { id: "sources", label: "app.nav.sources" },
   { id: "apps", label: "app.nav.apps" },
   { id: "models", label: "app.nav.models" },
+  { id: "doubletap", label: "app.nav.doubletap" },
   { id: "privacy", label: "app.nav.privacy" },
   { id: "status", label: "app.nav.status" },
 ];
@@ -159,6 +161,8 @@ function Page({ id }: { id: PageId }) {
       return <PrivacyPage />;
     case "status":
       return <StatusPage />;
+    case "doubletap":
+      return <DoubleTapPage />;
   }
 }
 

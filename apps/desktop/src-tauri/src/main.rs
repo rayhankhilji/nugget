@@ -5,6 +5,7 @@
 
 mod commands;
 mod daemon;
+mod doubletap;
 mod login;
 mod open;
 mod settings;
@@ -67,6 +68,16 @@ fn main() {
             updater::updates_check,
             updater::updates_install,
             updater::login_set,
+            doubletap::commands::doubletap_settings_get,
+            doubletap::commands::doubletap_settings_set,
+            doubletap::commands::doubletap_status,
+            doubletap::commands::doubletap_request_permissions,
+            doubletap::commands::doubletap_default_excluded,
+            doubletap::commands::doubletap_fire,
+            doubletap::commands::voice_status,
+            doubletap::commands::overlay_state,
+            doubletap::commands::overlay_accept,
+            doubletap::commands::overlay_cancel,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));
@@ -82,9 +93,11 @@ fn main() {
                 let _ = daemon.connection_info(&handle).await;
             });
             updater::spawn_background_checks(app.handle());
+            doubletap::setup(app);
             Ok(())
         })
         .on_window_event(|window, event| {
+            doubletap::on_window_event(window, event);
             // With a tray, closing the window hides it; Quit lives in the tray menu.
             if let WindowEvent::CloseRequested { api, .. } = event
                 && window.label() == "main"
