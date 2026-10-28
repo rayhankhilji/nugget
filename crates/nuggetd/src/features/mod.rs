@@ -25,6 +25,7 @@ use crate::config::Config;
 use crate::daemon::State;
 
 mod draft;
+pub(crate) mod plugins;
 
 /// One wired-in subsystem.
 #[async_trait]
@@ -112,7 +113,7 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     start(&mut list, "draft", draft::start(cx).await);
     // W3 agent/safety: start(&mut list, "agent", agent::start(cx).await);
     // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
-    // W6 plugins:      start(&mut list, "plugins", plugins::start(cx).await);
+    start(&mut list, "plugins", plugins::start(cx).await);
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

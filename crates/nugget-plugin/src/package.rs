@@ -1,7 +1,18 @@
 //! Signed plugin packages.
 //!
 //! A package is a directory holding [`MANIFEST_FILE`], [`WASM_FILE`] (a WebAssembly component)
-//! and [`SIGNATURE_FILE`], a detached **ed25519** signature in hex. As with the model manifest in
+//! and [`SIGNATURE_FILE`], a detached **ed25519** signature in hex, or the same three parts in one
+//! `.nuggetplugin` file ([`PACKAGE_EXTENSION`]):
+//!
+//! ```text
+//! b"NUGGETPKG\x01"                         10-byte magic (format version 1)
+//! u32 LE length + manifest bytes           at most MAX_MANIFEST_BYTES
+//! u32 LE length + component bytes          at most MAX_WASM_BYTES
+//! u32 LE length + signature bytes          at most 1024 (empty = unsigned)
+//! ```
+//!
+//! Nothing may follow the signature section. The file format is only a container: the bytes are
+//! exactly those of the directory form and are verified the same way. As with the model manifest in
 //! `nugget-models`, the signature is checked before anything in the package is parsed or used.
 //! It covers both files through [`signing_payload`]: a domain-separation tag plus the SHA-256 of
 //! the exact manifest bytes and of the exact component bytes, so neither can be swapped.
@@ -20,6 +31,18 @@ pub const WASM_FILE: &str = "plugin.wasm";
 pub const SIGNATURE_FILE: &str = "plugin.sig";
 /// Largest accepted component.
 pub const MAX_WASM_BYTES: usize = 32 * 1024 * 1024;
+/// File extension of a single-file package (without the dot).
+pub const PACKAGE_EXTENSION: &str = "nuggetplugin";
+/// Magic prefix of a single-file package: the format name and version 1.
+const PACKAGE_MAGIC: &[u8; 10] = b"NUGGETPKG\x01";
+/// Largest accepted detached signature (raw or hex).
+const MAX_SIGNATURE_BYTES: usize = 1024;
+/// Largest accepted single-file package.
+const MAX_PACKAGE_BYTES: usize = PACKAGE_MAGIC.len()
+    + 3 * 4
+    + crate::manifest::MAX_MANIFEST_BYTES
+    + MAX_WASM_BYTES
+    + MAX_SIGNATURE_BYTES;
 const PAYLOAD_TAG: &str = "nugget-plugin-package/v1";
 
 /// The raw files of a package. Untrusted until [`verify`](Self::verify) succeeds.
@@ -58,8 +81,86 @@ impl PluginPackage {
         Ok(Self {
             manifest: read(MANIFEST_FILE, crate::manifest::MAX_MANIFEST_BYTES)?,
             wasm: read(WASM_FILE, MAX_WASM_BYTES)?,
-            signature: read(SIGNATURE_FILE, 1024)?,
+            signature: read(SIGNATURE_FILE, MAX_SIGNATURE_BYTES)?,
         })
+    }
+
+    /// Read a package from a directory or from a single `.nuggetplugin` file.
+    pub fn from_path(path: &Path) -> Result<Self> {
+        if std::fs::metadata(path)?.is_dir() {
+            Self::from_dir(path)
+        } else {
+            Self::from_file(path)
+        }
+    }
+
+    /// Read a single-file package. The size is checked before the file is read.
+    pub fn from_file(path: &Path) -> Result<Self> {
+        let len = std::fs::metadata(path)?.len();
+        if len > MAX_PACKAGE_BYTES as u64 {
+            return Err(Error::Invalid(format!(
+                "plugin package is larger than {MAX_PACKAGE_BYTES} bytes"
+            )));
+        }
+        Self::from_bytes(&std::fs::read(path)?)
+    }
+
+    /// Write the package as a single `.nuggetplugin` file.
+    pub fn write_file(&self, path: &Path) -> Result<()> {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(path, self.to_bytes())?;
+        Ok(())
+    }
+
+    /// Decode a single-file package. Section sizes are bounded and nothing may follow the
+    /// signature section. The contents are still unverified.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let bad = |what: &str| Error::Invalid(format!("not a valid plugin package: {what}"));
+        let mut rest = bytes
+            .strip_prefix(PACKAGE_MAGIC.as_slice())
+            .ok_or_else(|| bad("bad magic"))?;
+        let mut section = |name: &str, max: usize| -> Result<Vec<u8>> {
+            let (len, tail) = rest
+                .split_first_chunk::<4>()
+                .ok_or_else(|| bad(&format!("truncated {name} length")))?;
+            let len = u32::from_le_bytes(*len) as usize;
+            if len > max {
+                return Err(bad(&format!("{name} is larger than {max} bytes")));
+            }
+            if tail.len() < len {
+                return Err(bad(&format!("truncated {name}")));
+            }
+            let (body, tail) = tail.split_at(len);
+            rest = tail;
+            Ok(body.to_vec())
+        };
+        let manifest = section("manifest", crate::manifest::MAX_MANIFEST_BYTES)?;
+        let wasm = section("component", MAX_WASM_BYTES)?;
+        let signature = section("signature", MAX_SIGNATURE_BYTES)?;
+        if !rest.is_empty() {
+            return Err(bad("trailing bytes after the signature"));
+        }
+        Ok(Self {
+            manifest,
+            wasm,
+            signature,
+        })
+    }
+
+    /// Encode as a single-file package (see the module docs for the layout).
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(
+            PACKAGE_MAGIC.len() + 12 + self.manifest.len() + self.wasm.len() + self.signature.len(),
+        );
+        out.extend_from_slice(PACKAGE_MAGIC);
+        for part in [&self.manifest, &self.wasm, &self.signature] {
+            let len = u32::try_from(part.len()).unwrap_or(u32::MAX);
+            out.extend_from_slice(&len.to_le_bytes());
+            out.extend_from_slice(part);
+        }
+        out
     }
 
     /// Write the package into `dir` (created if missing).

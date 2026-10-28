@@ -970,6 +970,7 @@ export interface RawNotification {
 }
 
 export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status" | "doubletap";
+export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -1179,3 +1180,158 @@ export const doubletapApi = {
   overlayCancel: () => call<void>("overlay_cancel"),
   onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
 };
+
+// ---- W6 plugins ----
+// Wire types mirror the `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+
+/** What a plugin may use. The host denies everything not listed. */
+export interface PluginCapabilities {
+  /** `example.com`, `example.com:8443`, `*.example.com` (any subdomain) or `http://host:port`. */
+  hosts: string[];
+  /** Names of the plugin's own secrets in the OS keychain. */
+  secrets: string[];
+  /** Size limit of the plugin's own key-value store; `0` means none. */
+  kv_max_bytes: number;
+}
+
+/** `trusted`: signer is in `[plugins] trusted_keys`; `dev`: this device's dev key; else `untrusted`. */
+export type PluginSignature = "trusted" | "dev" | "untrusted";
+export const PLUGIN_SIGNATURES: readonly PluginSignature[] = ["trusted", "dev", "untrusted"];
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** `connector` and/or `tool`. */
+  kinds: string[];
+  enabled: boolean;
+  /** Running in the plugin host right now. */
+  loaded: boolean;
+  /** Why it is not loaded (untrusted signer, load failure, …). */
+  error?: string | null;
+  signature: PluginSignature;
+  /** Hex ed25519 public key. */
+  signer: string;
+  approved: PluginCapabilities;
+  /** RFC 3339. */
+  installed_at: string;
+  /** `plugin:<id>` when the plugin provides a connector. */
+  connector_kind?: string | null;
+  /** Agent tool names. */
+  tools?: string[];
+}
+
+export interface PluginListResult {
+  plugins: PluginInfo[];
+}
+
+export interface PluginInspectResult {
+  plugin: PluginInfo;
+  requested: PluginCapabilities;
+  connector_display_name?: string | null;
+}
+
+/** A verified package staged under `token` (for 10 minutes) until approved or rejected. */
+export interface PluginInstallResult {
+  token: string;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  signature: PluginSignature;
+  signer: string;
+  requested: PluginCapabilities;
+  /** What the user approved for the installed version, when this is an update. */
+  previously_approved?: PluginCapabilities | null;
+  installed_version?: string | null;
+  needs_approval: boolean;
+  /** Already committed (an update within the approved capabilities). */
+  installed: boolean;
+}
+
+export interface PluginApproveResult {
+  plugin: PluginInfo | null;
+}
+
+export interface PluginRemoveResult {
+  removed: boolean;
+}
+
+/** One `hosts` entry, split for plain-language display. */
+export interface PluginHost {
+  /** Host name (without `*.`), with `:port` when one is given. */
+  host: string;
+  /** Any subdomain of `host` (not `host` itself). */
+  wildcard: boolean;
+  /** Plain `http` (unencrypted) was spelled out. */
+  insecure: boolean;
+}
+
+export function parsePluginHost(entry: string): PluginHost {
+  let rest = entry.trim();
+  let insecure = false;
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(rest);
+  if (scheme) {
+    insecure = scheme[1]!.toLowerCase() === "http";
+    rest = rest.slice(scheme[0].length);
+  }
+  const wildcard = rest.startsWith("*.");
+  if (wildcard) rest = rest.slice(2);
+  return { host: rest.toLowerCase().replace(/\.$/, ""), wildcard, insecure };
+}
+
+function hostKey(entry: string): string {
+  const h = parsePluginHost(entry);
+  return `${h.insecure ? "http" : "https"}://${h.wildcard ? "*." : ""}${h.host}`;
+}
+
+/** What `requested` adds over `previous` (everything, for a new install). */
+export function newPluginCapabilities(
+  requested: PluginCapabilities,
+  previous: PluginCapabilities | null | undefined,
+): PluginCapabilities {
+  if (!previous) return requested;
+  const oldHosts = new Set(previous.hosts.map(hostKey));
+  return {
+    hosts: requested.hosts.filter((h) => !oldHosts.has(hostKey(h))),
+    secrets: requested.secrets.filter((s) => !previous.secrets.includes(s)),
+    kv_max_bytes: requested.kv_max_bytes > previous.kv_max_bytes ? requested.kv_max_bytes : 0,
+  };
+}
+
+export function pluginCapabilitiesEmpty(c: PluginCapabilities): boolean {
+  return c.hosts.length === 0 && c.secrets.length === 0 && c.kv_max_bytes <= 0;
+}
+
+export function isPluginInfo(v: unknown): v is PluginInfo {
+  if (typeof v !== "object" || v === null) return false;
+  const p = v as Record<string, unknown>;
+  return (
+    typeof p.id === "string" &&
+    typeof p.name === "string" &&
+    typeof p.version === "string" &&
+    Array.isArray(p.kinds) &&
+    typeof p.enabled === "boolean" &&
+    typeof p.loaded === "boolean" &&
+    (PLUGIN_SIGNATURES as readonly unknown[]).includes(p.signature)
+  );
+}
+
+/** Installed plugins (`plugins.list`). */
+export const listPlugins = async (): Promise<PluginInfo[]> => {
+  const r = await call<PluginListResult>("plugins_list");
+  return Array.isArray(r?.plugins) ? r.plugins.filter(isPluginInfo) : [];
+};
+export const inspectPlugin = (id: string) => call<PluginInspectResult>("plugins_inspect", { request: { id } });
+/** Verify and stage a `.nuggetplugin` file; commit it with `approvePlugin` when `needs_approval`. */
+export const installPlugin = (path: string) => call<PluginInstallResult>("plugins_install", { request: { path } });
+/** `approve: false` discards the staged package. */
+export const approvePlugin = (token: string, approve: boolean) =>
+  call<PluginApproveResult>("plugins_approve", { request: { token, approve } });
+export const removePlugin = (id: string) => call<PluginRemoveResult>("plugins_remove", { request: { id } });
+export const setPluginEnabled = (id: string, enabled: boolean) =>
+  call<PluginInfo>("plugins_enable", { request: { id, enabled } });
+/** Native file picker for `.nuggetplugin` packages; `null` when cancelled. */
+export const pickPluginFile = () => call<string | null>("pick_plugin_file");

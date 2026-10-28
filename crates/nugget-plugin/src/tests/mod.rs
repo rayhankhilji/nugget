@@ -1,8 +1,11 @@
 //! Host tests. `manifest`, `package` and `store` need nothing extra; `guest` builds the SDK's
 //! example and test plugins for `wasm32-wasip2` (see [`guest_wasm`]).
 
+mod agent;
 mod guest;
+mod limits;
 mod manifest;
+mod network;
 mod package;
 mod store;
 
