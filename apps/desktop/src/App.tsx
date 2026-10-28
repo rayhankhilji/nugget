@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
 import { useEvent } from "./hooks";
+import { requestNewChat, requestSearch } from "./hooks.nav";
+import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
 import { Offline } from "./components/Offline";
+import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
+import { ShortcutsHelp, type ShortcutRow } from "./components/ShortcutsHelp";
 import { ChatPage } from "./pages/Chat";
 import { SearchPage } from "./pages/Search";
 import { KnowledgePage } from "./pages/Knowledge";
@@ -15,21 +19,39 @@ import { StatusPage } from "./pages/Status";
 import { DoubleTapPage } from "./pages/DoubleTap";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
-import { shouldShowOnboarding } from "./onboarding/machine";
+import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
 
-const PAGES: { id: PageId; label: MessageKey }[] = [
-  { id: "chat", label: "app.nav.chat" },
-  { id: "search", label: "app.nav.search" },
-  { id: "knowledge", label: "app.nav.knowledge" },
-  { id: "sources", label: "app.nav.sources" },
-  { id: "apps", label: "app.nav.apps" },
-  { id: "models", label: "app.nav.models" },
-  { id: "doubletap", label: "app.nav.doubletap" },
-  { id: "privacy", label: "app.nav.privacy" },
-  { id: "status", label: "app.nav.status" },
+export interface PageDef {
+  id: PageId;
+  /** Nav label (also the page's landmark name and its palette entry). */
+  label: MessageKey;
+  Component: ComponentType;
+  /** Extra words the command palette matches, e.g. synonyms ("ask, conversation"). */
+  keywords?: MessageKey;
+  /** A ⌘/Ctrl+<key> shortcut besides the automatic ⌘/Ctrl+1…9 by position. */
+  shortcut?: string;
+}
+
+/**
+ * Every page of the app, in nav order. The nav, ⌘/Ctrl+1…9, the command palette and page
+ * restore all come from this list. To add a page: add its id to `PageId` in api.ts, import the
+ * component above and add ONE line here (a label key under `app.nav.*` in en.json, optionally
+ * `keywords` under `app.keywords.*`).
+ */
+export const PAGES: readonly PageDef[] = [
+  { id: "chat", label: "app.nav.chat", Component: ChatPage, keywords: "app.keywords.chat" },
+  { id: "search", label: "app.nav.search", Component: SearchPage, keywords: "app.keywords.search" },
+  { id: "knowledge", label: "app.nav.knowledge", Component: KnowledgePage, keywords: "app.keywords.knowledge" },
+  { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources" },
+  { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps" },
+  { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models" },
+  { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
+  { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },
+  { id: "status", label: "app.nav.status", Component: StatusPage, keywords: "app.keywords.status", shortcut: "," },
 ];
 
 const PAGE_KEY = "nugget.page";
+const PALETTE: Combo = { mod: true, key: "K" };
 
 function initialPage(): PageId {
   try {
@@ -41,6 +63,12 @@ function initialPage(): PageId {
   return "chat";
 }
 
+/** The shortcut for a page: ⌘/Ctrl+<n> for the first nine, else its own, if any. */
+function pageCombo(p: PageDef, i: number): Combo | null {
+  if (i < 9) return { mod: true, key: String(i + 1) };
+  return p.shortcut ? { mod: true, key: p.shortcut } : null;
+}
+
 /** `null` while the first connection attempt is in flight. */
 type Connection = ConnectionInfo | null;
 
@@ -49,8 +77,12 @@ export function App() {
   const [page, setPage] = useState<PageId>(initialPage);
   const [conn, setConn] = useState<Connection>(null);
   const [onboarding, setOnboarding] = useState(shouldShowOnboarding);
+  const [palette, setPalette] = useState(false);
+  const [help, setHelp] = useState(false);
   const endOnboarding = useCallback(() => setOnboarding(false), []);
   const mainRef = useRef<HTMLElement>(null);
+  // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
+  const focusMain = useRef(false);
 
   const go = useCallback((id: PageId) => {
     setPage(id);
@@ -60,6 +92,22 @@ export function App() {
       /* ignore */
     }
   }, []);
+
+  /** Navigate and put keyboard focus at the top of the new page. */
+  const jump = useCallback(
+    (id: PageId) => {
+      focusMain.current = true;
+      go(id);
+    },
+    [go],
+  );
+
+  useEffect(() => {
+    if (!focusMain.current || palette) return;
+    focusMain.current = false;
+    // A page that focused its own field on mount (Search) keeps it.
+    if (!mainRef.current?.contains(document.activeElement)) mainRef.current?.focus();
+  }, [page, palette]);
 
   const refreshConnection = useCallback(async () => {
     try {
@@ -86,6 +134,116 @@ export function App() {
     mainRef.current?.focus();
   });
 
+  // Global shortcuts. Modifier combos work even while typing; plain keys (`?`) never steal
+  // text input, and nothing fires during IME composition or under another page's dialog.
+  useKeydown((e) => {
+    if (onboarding || e.defaultPrevented || isComposing(e)) return;
+    const mod = hasMod(e) && !e.altKey;
+    const foreignDialog = !palette && !help && document.querySelector("dialog[open]") !== null;
+    if (foreignDialog) return;
+    if (mod && !e.shiftKey && letterOf(e) === "k") {
+      e.preventDefault();
+      setHelp(false);
+      setPalette((o) => !o);
+      return;
+    }
+    if (palette || help) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setPalette(false);
+        setHelp(false);
+      }
+      return;
+    }
+    if (mod) {
+      const n = e.shiftKey ? null : digitOf(e);
+      const target = n !== null ? PAGES[n - 1] : PAGES.find((p) => p.shortcut && p.shortcut === e.key);
+      if (target) {
+        e.preventDefault();
+        jump(target.id);
+      } else if (e.key === "/") {
+        e.preventDefault();
+        setHelp(true);
+      }
+      return;
+    }
+    if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingTarget(e.target)) {
+      e.preventDefault();
+      setHelp(true);
+    }
+  });
+
+  const paletteItems = useMemo<PaletteItem[]>(() => {
+    const pages = PAGES.map((p, i): PaletteItem => {
+      const combo = pageCombo(p, i);
+      return {
+        id: `page:${p.id}`,
+        label: t(p.label),
+        keywords: p.keywords ? t(p.keywords) : undefined,
+        hint: combo ? comboLabel(combo) : undefined,
+        group: t("palette.group.page"),
+        run: () => jump(p.id),
+      };
+    });
+    const actions: PaletteItem[] = [
+      {
+        id: "action:new-chat",
+        label: t("palette.action.newChat"),
+        keywords: t("app.keywords.chat"),
+        group: t("palette.group.action"),
+        run: () => {
+          requestNewChat();
+          go("chat");
+        },
+      },
+      {
+        id: "action:shortcuts",
+        label: t("palette.action.shortcuts"),
+        keywords: t("palette.action.shortcutsKeywords"),
+        hint: comboLabel({ key: "?" }),
+        group: t("palette.group.action"),
+        run: () => setHelp(true),
+      },
+      {
+        id: "action:setup",
+        label: t("settings.setupAgain"),
+        keywords: t("palette.action.setupKeywords"),
+        group: t("palette.group.action"),
+        run: () => {
+          restartOnboarding();
+          setOnboarding(true);
+        },
+      },
+    ];
+    return [...pages, ...actions];
+  }, [t, go, jump]);
+
+  const searchItem = useCallback(
+    (q: string): PaletteItem => ({
+      id: "action:search",
+      label: t("palette.action.search", { query: q }),
+      group: t("palette.group.action"),
+      run: () => {
+        // The Search page takes focus into its box, so don't move focus to <main> here.
+        requestSearch(q);
+        go("search");
+      },
+    }),
+    [t, go],
+  );
+
+  const shortcutRows = useMemo<ShortcutRow[]>(
+    () => [
+      { combo: PALETTE, label: t("shortcuts.palette") },
+      { combo: { mod: true, key: `1–${Math.min(9, PAGES.length)}` }, label: t("shortcuts.pages") },
+      ...PAGES.filter((p) => p.shortcut).map((p) => ({ combo: { mod: true, key: p.shortcut! }, label: t("shortcuts.openPage", { page: t(p.label) }) })),
+      { combo: { key: "?" }, label: t("shortcuts.help") },
+      { combo: { mod: true, key: "/" }, label: t("shortcuts.help") },
+      { combo: { key: "Escape" }, label: t("shortcuts.close") },
+    ],
+    [t],
+  );
+
   // Arrow keys move between nav items (roving focus), as in a tab list.
   const onNavKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -98,6 +256,7 @@ export function App() {
   };
 
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
+  const Current = current.Component;
 
   if (onboarding) return <Onboarding connected={conn?.connected === true} onExit={endOnboarding} />;
 
@@ -111,20 +270,30 @@ export function App() {
           <Logo />
           <span>{t("app.name")}</span>
         </div>
+        <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
+          <span>{t("app.openPalette")}</span>
+          <kbd aria-hidden="true">{comboLabel(PALETTE)}</kbd>
+        </button>
         <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
           <ul>
-            {PAGES.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  className="nav-item"
-                  aria-current={p.id === page ? "page" : undefined}
-                  onClick={() => go(p.id)}
-                >
-                  {t(p.label)}
-                </button>
-              </li>
-            ))}
+            {PAGES.map((p, i) => {
+              const combo = pageCombo(p, i);
+              const label = t(p.label);
+              return (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="nav-item"
+                    aria-current={p.id === page ? "page" : undefined}
+                    aria-keyshortcuts={combo ? comboAria(combo) : undefined}
+                    title={combo ? t("shortcuts.hint", { label, keys: comboLabel(combo) }) : undefined}
+                    onClick={() => go(p.id)}
+                  >
+                    {label}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </nav>
         <ConnectionPill conn={conn} />
@@ -136,34 +305,13 @@ export function App() {
         ) : !conn.connected ? (
           <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
         ) : (
-          <Page id={page} />
+          <Current />
         )}
       </main>
+      {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
+      {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
     </div>
   );
-}
-
-function Page({ id }: { id: PageId }) {
-  switch (id) {
-    case "chat":
-      return <ChatPage />;
-    case "search":
-      return <SearchPage />;
-    case "knowledge":
-      return <KnowledgePage />;
-    case "apps":
-      return <AppsPage />;
-    case "sources":
-      return <SourcesPage />;
-    case "models":
-      return <ModelsPage />;
-    case "privacy":
-      return <PrivacyPage />;
-    case "status":
-      return <StatusPage />;
-    case "doubletap":
-      return <DoubleTapPage />;
-  }
 }
 
 function ConnectionPill({ conn }: { conn: Connection }) {

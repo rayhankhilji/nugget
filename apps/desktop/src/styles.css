@@ -13,8 +13,9 @@
   --border: #e4e0d8;
   --text: #1f1d1a;
   --muted: #6b665d;
-  --accent: #c98a0c;
-  --accent-strong: #a06c00;
+  /* Contrast (WCAG AA) is checked for both themes: text pairs >= 4.5:1, UI parts >= 3:1. */
+  --accent: #9c6600;
+  --accent-strong: #7f5200;
   --accent-soft: #fbf0d8;
   --accent-contrast: #fffaf0;
   --good: #1f7a4d;
@@ -24,6 +25,12 @@
   --bad: #b3261e;
   --bad-soft: #fbe5e3;
   --focus: #1a66d9;
+  --link: #1a5cc4;
+  /* Borders that alone identify a control (inputs) need 3:1; --border is for dividers. */
+  --control-border: #8a8478;
+  --backdrop: rgb(0 0 0 / 0.35);
+  --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+  --skeleton: color-mix(in srgb, var(--text) 9%, transparent);
   --user-bubble: #f1ece1;
 
   --radius: 10px;
@@ -61,6 +68,10 @@
     --bad: #ff8a80;
     --bad-soft: #3b1a17;
     --focus: #7cb0ff;
+    --link: #8cb8ff;
+    --control-border: #787266;
+    --backdrop: rgb(0 0 0 / 0.6);
+    --overlay-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
     --user-bubble: #2a2722;
     --shadow: none;
 
@@ -145,6 +156,24 @@ code {
 
 main:focus {
   outline: none;
+}
+
+a {
+  color: var(--link);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  font: 11px/16px var(--font);
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* ---- shell ---- */
@@ -345,7 +374,7 @@ textarea {
   font: inherit;
   color: var(--text);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--control-border);
   border-radius: var(--radius-small);
   padding: 6px 10px;
 }
@@ -774,7 +803,7 @@ tbody tr:last-child > * {
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.18);
+  box-shadow: var(--overlay-shadow);
 }
 
 .dialog-wide {
@@ -782,7 +811,7 @@ tbody tr:last-child > * {
 }
 
 .dialog::backdrop {
-  background: rgb(0 0 0 / 0.35);
+  background: var(--backdrop);
 }
 
 .dialog-head {
@@ -1940,6 +1969,232 @@ h3.token-heading:focus {
   }
 }
 
+/* ---- command palette, shortcuts ---- */
+
+.palette-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px 5px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.palette-trigger:hover {
+  color: var(--text);
+}
+
+.palette {
+  width: min(560px, calc(100vw - 32px));
+  margin-top: 12vh;
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: min(480px, calc(100vh - 24vh));
+}
+
+.palette:not([open]) {
+  display: none;
+}
+
+.palette-input {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.palette-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  padding: 4px 0;
+  background: transparent;
+  font-size: 15px;
+}
+
+/* The dialog is the visible boundary; the input's own ring would sit flush against it. */
+.palette-input:focus-within {
+  box-shadow: inset 0 -2px 0 var(--focus);
+}
+
+.palette-input input:focus-visible {
+  outline: none;
+}
+
+.palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow: auto;
+}
+
+.palette-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+.palette-option[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  /* A second cue besides colour (forced-colors and low-vision users). */
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+[dir="rtl"] .palette-option[aria-selected="true"] {
+  box-shadow: inset -3px 0 0 var(--accent);
+}
+
+.palette-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.palette-group {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.palette-option[aria-selected="true"] .palette-group {
+  color: inherit;
+}
+
+.palette-empty {
+  margin: 0;
+  padding: 14px 16px 4px;
+}
+
+.palette-footer {
+  margin: 0;
+  padding: 6px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.shortcut-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: 8em 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.shortcut-row dt,
+.shortcut-row dd {
+  margin: 0;
+}
+
+@media (forced-colors: active) {
+  .palette-option[aria-selected="true"] {
+    outline: 2px solid Highlight;
+  }
+}
+
+/* ---- shared states: use on any page ----
+   .state-empty    nothing to show yet (wrap a title + hint + optional action)
+   .state-loading  waiting; contains .state-spinner and/or .state-skeleton lines
+   .state-error    something failed (pair with role="alert" and a retry button) */
+
+.state-empty,
+.state-loading,
+.state-error {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.state-empty > :first-child,
+.state-error > :first-child {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.state-error {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, var(--border));
+  border-radius: var(--radius);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.state-error > :first-child {
+  color: var(--bad);
+}
+
+.state-loading {
+  justify-items: stretch;
+}
+
+.state-spinner {
+  justify-self: center;
+  width: 18px;
+  height: 18px;
+  border: 2px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.state-skeleton {
+  height: 14px;
+  border-radius: var(--radius-small);
+  background: linear-gradient(90deg, var(--skeleton) 25%, color-mix(in srgb, var(--skeleton) 40%, transparent) 50%, var(--skeleton) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+.state-skeleton:nth-child(3n + 2) {
+  width: 80%;
+}
+
+.state-skeleton:nth-child(3n) {
+  width: 60%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* The one reduced-motion switch: every animation and transition in the app (and page sheets)
+   stops; spinners and skeletons stay visible as static shapes. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1947,5 +2202,11 @@ h3.token-heading:focus {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .state-skeleton {
+    animation: none;
+    background: var(--skeleton);
   }
 }

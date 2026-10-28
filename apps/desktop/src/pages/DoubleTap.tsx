@@ -12,7 +12,7 @@ import {
 } from "../api";
 import { useAsync } from "../hooks";
 import { formatRelative } from "../format";
-import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import {
   addApp,
@@ -104,7 +104,7 @@ export function DoubleTapPage() {
       ) : (
         <ErrorNote error={saved.error} onRetry={saved.reload} />
       )}
-      {saved.loading && !saved.data && <Spinner />}
+      {saved.loading && !saved.data && <Loading />}
 
       {form && (
         <form onSubmit={(e) => void save(e)} noValidate>
@@ -339,7 +339,7 @@ function ProviderTable({ map, onChange }: { map: Record<string, string>; onChang
       <p className="muted small">{t("doubletap.providers.description")}</p>
       <ErrorNote error={providers.error} onRetry={providers.reload} />
       {rows.length === 0 ? (
-        <p className="muted">{t("doubletap.providers.empty")}</p>
+        <EmptyState title={t("doubletap.providers.empty")} />
       ) : (
         <ul className="path-list">
           {rows.map((r) => (
@@ -442,7 +442,7 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
       <p className="muted small">{t("doubletap.excluded.description")}</p>
       <ErrorNote error={restoreError} />
       {list.length === 0 ? (
-        <p className="muted">{t("doubletap.excluded.empty")}</p>
+        <EmptyState title={t("doubletap.excluded.empty")} />
       ) : (
         <ul className="path-list">
           {list.map((a) => (
@@ -536,7 +536,7 @@ function PermissionsCard({
     <section className="status-card" aria-labelledby="dt-perm">
       <h2 id="dt-perm">{t("doubletap.perm.title")}</h2>
       {isMethodNotFound(error) ? <NotAvailable /> : <ErrorNote error={error} onRetry={onUpdate} />}
-      {loading && !s && <Spinner />}
+      {loading && !s && <Loading lines={1} />}
       {s && (
         <>
           <dl className="stats">
@@ -602,7 +602,7 @@ function VoiceCard() {
     <section className="status-card" aria-labelledby="dt-voice">
       <h2 id="dt-voice">{t("doubletap.voice.title")}</h2>
       {isMethodNotFound(voice.error) ? <NotAvailable /> : <ErrorNote error={voice.error} onRetry={voice.reload} />}
-      {voice.loading && !v && <Spinner />}
+      {voice.loading && !v && <Loading lines={1} />}
       {v && (
         <>
           <dl className="stats">
