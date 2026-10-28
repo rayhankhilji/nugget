@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/rayhankhilji/nugget/blob/main/bench/schema/report.schema.json",
   "title": "Nugget benchmark report",
-  "description": "One run of one nugget-bench suite. Version 1. Incompatible changes bump schema_version.",
+  "description": "One run of one nugget-bench suite. Version 1. Incompatible changes bump schema_version; optional additions (targets) keep it, so every earlier report still validates.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -43,6 +43,11 @@
     "metrics": {
       "type": "array",
       "items": { "$ref": "#/$defs/metric" }
+    },
+    "targets": {
+      "type": "array",
+      "description": "Optional (added for M1): pass/fail of every metric that has a target, in metric order. Omitted when no metric has a target.",
+      "items": { "$ref": "#/$defs/target" }
     },
     "message": { "type": ["string", "null"] }
   },
@@ -87,6 +92,25 @@
         "target": { "type": ["number", "null"] },
         "target_met": { "type": ["boolean", "null"] },
         "description": { "type": "string" }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metric", "comparison", "target", "value", "pass"],
+      "properties": {
+        "metric": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_@]*(\\.[a-z0-9_@]+)*$",
+          "description": "Name of the metric the target applies to."
+        },
+        "comparison": {
+          "enum": ["at_least", "at_most"],
+          "description": "at_least: pass when value >= target. at_most: pass when value <= target."
+        },
+        "target": { "type": "number" },
+        "value": { "type": "number" },
+        "pass": { "type": "boolean" }
       }
     }
   }

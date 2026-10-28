@@ -28,6 +28,8 @@ mod vec_ext;
 
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
+pub use search::TITLE_WEIGHT;
+pub use sources::{MAX_CHUNK_IDS, MAX_NEIGHBOUR_RADIUS};
 pub use store::Store;
 pub use types::{
     AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, NewChunk, NewItem, SourceCounts,

@@ -473,8 +473,8 @@ async fn results_are_grouped_by_item_with_all_matching_chunks() {
 fn mmr_corpus(emb: Option<&HashEmbedder>) -> Store {
     let store = Store::open_in_memory().unwrap();
     let dup = "Quarterly sales forecast for the northern region: widgets up, gizmos flat, northern stores steady.";
-    add(&store, Doc::new("dup-a", "Forecast A", &[dup]), emb);
-    add(&store, Doc::new("dup-b", "Forecast B", &[dup]), emb);
+    add(&store, Doc::new("dup-a", "Northern report A", &[dup]), emb);
+    add(&store, Doc::new("dup-b", "Northern report B", &[dup]), emb);
     add(
         &store,
         Doc::new(
@@ -534,7 +534,11 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     let res = r.search("quarterly sales forecast", 3).await.unwrap();
     assert_eq!(res.similarity, Similarity::Vector);
     assert_eq!(keys(&res.items)[2], "dup-b", "duplicate pushed last");
-    assert_eq!(emb.calls(), 2, "query, then the MMR pool in one batch");
+    assert_eq!(
+        emb.calls(),
+        1,
+        "only the query is embedded; the pool's vectors come from the store"
+    );
 
     // Vector MMR can be turned off: lexical similarity, one embedding call.
     let emb2 = Arc::new(embedder());
@@ -549,6 +553,199 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     let res = r.search("quarterly sales forecast", 3).await.unwrap();
     assert_eq!(res.similarity, Similarity::Lexical);
     assert_eq!(emb2.calls(), 1);
+}
+
+/// Wraps the hash embedder and records how many texts each `embed` call carried.
+struct Recording {
+    inner: HashEmbedder,
+    batches: std::sync::Mutex<Vec<usize>>,
+}
+
+#[async_trait]
+impl Provider for Recording {
+    fn id(&self) -> &ProviderId {
+        self.inner.id()
+    }
+    fn meta(&self) -> ProviderMeta {
+        self.inner.meta()
+    }
+    async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
+        self.inner.chat(req).await
+    }
+    async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.batches.lock().unwrap().push(texts.len());
+        self.inner.embed(texts).await
+    }
+}
+
+#[tokio::test]
+async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
+    // dup-a and distinct are stored with vectors, dup-b (same text as dup-a) text-only.
+    let local = embedder();
+    let store = Store::open_in_memory().unwrap();
+    let dup = "Quarterly sales forecast for the northern region: widgets up, gizmos flat, northern stores steady.";
+    add(
+        &store,
+        Doc::new("dup-a", "Northern report A", &[dup]),
+        Some(&local),
+    );
+    add(&store, Doc::new("dup-b", "Northern report B", &[dup]), None);
+    add(
+        &store,
+        Doc::new(
+            "distinct",
+            "Supplier delay",
+            &["Quarterly sales forecast revised after the supplier delay hit gadget deliveries."],
+        ),
+        Some(&local),
+    );
+    let rec = Arc::new(Recording {
+        inner: embedder(),
+        batches: Default::default(),
+    });
+    let r = Retriever::new(
+        store,
+        Some(router(vec![rec.clone()], true)),
+        RetrieveConfig::default(),
+    );
+    let res = r.search("quarterly sales forecast", 3).await.unwrap();
+    assert_eq!(res.similarity, Similarity::Vector);
+    assert_eq!(keys(&res.items).len(), 3);
+    assert_eq!(keys(&res.items)[2], "dup-b", "{:?}", keys(&res.items));
+    assert_eq!(
+        *rec.batches.lock().unwrap(),
+        vec![1, 1],
+        "the query, then only the one passage without a stored vector"
+    );
+}
+
+#[tokio::test]
+async fn fusion_depth_keeps_strong_single_list_matches() {
+    // The target is the only full-text match for "zephyr" but far away in vector space. 80
+    // fillers match "common" (more often = better full-text rank) and sit near the query vector
+    // in the *opposite* order, so in deep lists every filler is in both lists and fuses above
+    // the target. 100 unrelated notes, orthogonal to the query, sit between the fillers and the
+    // target in vector space. With the default depth (40 per list for 5 results) no filler is in
+    // both lists.
+    let emb = embedder();
+    let query = "zephyr common";
+    let q = emb.embed_text(query);
+    let mut unused = (0..q.len()).filter(|&i| q[i] == 0.0);
+    let (free, other) = (unused.next().unwrap(), unused.next().unwrap());
+    let far: Vec<f32> = q.iter().map(|x| -x).collect();
+    let mut orthogonal = vec![0.0; q.len()];
+    orthogonal[other] = 1.0;
+    let store = Store::open_in_memory().unwrap();
+    let put = |key: &str, text: &str, v: Vec<f32>| {
+        let it = NewItem::new("notes", key, content_hash(text)).with_title(key);
+        store
+            .upsert_item_with_chunks(&it, &[NewChunk::embedded(text, v)])
+            .unwrap();
+    };
+    put("target", "the zephyr signal at dawn", far.clone());
+    for j in 0..80usize {
+        let text = format!("{}{}", "common ".repeat(j + 1), "pad ".repeat(100 - j));
+        let mut v = q.clone();
+        v[free] = j as f32 / 20.0;
+        put(&format!("filler-{j:02}"), &text, v);
+    }
+    for j in 0..100usize {
+        put(
+            &format!("other-{j:03}"),
+            &format!("unrelated note {j}"),
+            orthogonal.clone(),
+        );
+    }
+    let opts = SearchOptions {
+        strategy: Strategy::Auto,
+        mmr: Some(false),
+    };
+    let r = Retriever::new(
+        store.clone(),
+        Some(router(vec![Arc::new(embedder())], true)),
+        RetrieveConfig::default(),
+    );
+    let res = r.search_with(query, 5, opts).await.unwrap();
+    assert!(matches!(res.mode, RetrievalMode::Hybrid { .. }));
+    assert!(
+        keys(&res.items).contains(&"target"),
+        "{:?}",
+        keys(&res.items)
+    );
+
+    let deep = Retriever::new(
+        store,
+        Some(router(vec![Arc::new(embedder())], true)),
+        RetrieveConfig {
+            min_fusion_depth: 200,
+            ..Default::default()
+        },
+    );
+    let res = deep.search_with(query, 5, opts).await.unwrap();
+    assert!(
+        !keys(&res.items).contains(&"target"),
+        "{:?}",
+        keys(&res.items)
+    );
+}
+
+#[tokio::test]
+async fn neighbours_follow_positions_after_rechunking() {
+    // Re-chunk an item after another item was indexed: neighbours still come from the same item
+    // and adjacent positions.
+    let store = Store::open_in_memory().unwrap();
+    add(
+        &store,
+        Doc::new("story", "The Story", &["Old zero.", "Old one."]),
+        None,
+    );
+    add(
+        &store,
+        Doc::new("other", "Other", &["Unrelated text about a quokka."]),
+        None,
+    );
+    let ids = add(
+        &store,
+        Doc::new(
+            "story",
+            "The Story",
+            &[
+                "Intro paragraph.",
+                "The zephyr arrives at dawn.",
+                "Closing paragraph.",
+            ],
+        ),
+        None,
+    );
+    let r = Retriever::new(store, None, RetrieveConfig::default());
+    let ctx = r.pack_context("zephyr", 1000).await.unwrap();
+    assert_eq!(ctx.passages.len(), 1);
+    assert_eq!(ctx.passages[0].chunk_ids, ids);
+    assert!(!ctx.response.text.contains("quokka"));
+    assert!(ctx.response.text.contains("Intro paragraph."));
+    assert!(ctx.response.text.contains("Closing paragraph."));
+}
+
+#[tokio::test]
+async fn title_only_match_is_retrieved() {
+    let store = Store::open_in_memory().unwrap();
+    add(
+        &store,
+        Doc::new(
+            "pension",
+            "Pension consolidation",
+            &["Moved the two old workplace pots into one provider in May."],
+        ),
+        None,
+    );
+    add(
+        &store,
+        Doc::new("other", "Groceries", &["Eggs, milk and bread."]),
+        None,
+    );
+    let r = Retriever::new(store, None, RetrieveConfig::default());
+    let res = r.search("pension", 5).await.unwrap();
+    assert_eq!(keys(&res.items), ["pension"]);
 }
 
 #[tokio::test]

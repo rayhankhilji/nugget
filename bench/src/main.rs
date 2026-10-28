@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! cargo run --release -p nugget-bench -- perf memory
+//! cargo run --release -p nugget-bench -- memory --backend real --scale quick --strict
 //! cargo run -p nugget-bench -- all --scale smoke --no-write
 //! cargo run -p nugget-bench -- --list
 //! ```
@@ -12,7 +13,9 @@ use std::process::ExitCode;
 
 use clap::Parser;
 use nugget_bench::report::SCHEMA_JSON;
-use nugget_bench::{Benchmark, Report, RunConfig, Scale, Status, find, registry, run_benchmark};
+use nugget_bench::{
+    Backend, Benchmark, Comparison, Report, RunConfig, Scale, Status, find, registry, run_benchmark,
+};
 
 /// Default report directory: `bench/results` in the source tree.
 const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results");
@@ -44,6 +47,20 @@ struct Cli {
     #[arg(long, default_value_t = 42)]
     seed: u64,
 
+    /// What `memory` runs against: the in-crate fake index (fast), or the real store, ingest
+    /// pipeline, files watcher and retriever in process. Other suites ignore it.
+    #[arg(long, value_enum, default_value_t = Backend::Fake)]
+    backend: Backend,
+
+    /// Real backend: OpenAI-compatible embeddings endpoint (e.g. `http://127.0.0.1:8080/v1`)
+    /// instead of the in-process deterministic embedder.
+    #[arg(long, value_name = "URL")]
+    embed_url: Option<String>,
+
+    /// Model name sent to `--embed-url`.
+    #[arg(long, value_name = "MODEL", requires = "embed_url")]
+    embed_model: Option<String>,
+
     /// Directory for `<suite>-<timestamp>.json` reports.
     #[arg(long, env = "NUGGET_BENCH_RESULTS_DIR", default_value = DEFAULT_RESULTS_DIR)]
     out_dir: PathBuf,
@@ -56,7 +73,8 @@ struct Cli {
     #[arg(long)]
     json: bool,
 
-    /// Exit non-zero if a selected suite is not implemented yet.
+    /// Exit non-zero if a selected suite is not implemented yet (3) or a metric misses its
+    /// target (4).
     #[arg(long)]
     strict: bool,
 }
@@ -89,7 +107,7 @@ fn select(names: &[String]) -> Result<Vec<Box<dyn Benchmark>>, String> {
 
 fn summary(report: &Report) -> String {
     let mut s = format!(
-        "== {} [{}] {} ms, scale={}, seed={}, {} build\n",
+        "== {} [{}] {} ms, scale={}, seed={}, backend={}, {} build\n",
         report.suite,
         match report.status {
             Status::Ok => "ok",
@@ -99,6 +117,12 @@ fn summary(report: &Report) -> String {
         report.duration_ms,
         report.config.scale,
         report.config.seed,
+        report
+            .config
+            .params
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("-"),
         report.environment.build_profile,
     );
     let width = report
@@ -116,6 +140,19 @@ fn summary(report: &Report) -> String {
         s.push_str(&format!(
             "  {:width$}  {:>14.4} {}{}\n",
             m.name, m.value, m.unit, target
+        ));
+    }
+    for t in &report.targets {
+        let op = match t.comparison {
+            Comparison::AtLeast => ">=",
+            Comparison::AtMost => "<=",
+        };
+        s.push_str(&format!(
+            "  target {}: {} {op} {} -> {}\n",
+            t.metric,
+            t.value,
+            t.target,
+            if t.pass { "PASS" } else { "FAIL" }
         ));
     }
     if let Some(msg) = &report.message {
@@ -148,16 +185,23 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if cfg!(debug_assertions) && suites.iter().any(|b| b.name() == "perf") {
+    let timed = |b: &dyn Benchmark| {
+        b.name() == "perf" || (b.name() == "memory" && cli.backend == Backend::Real)
+    };
+    if cfg!(debug_assertions) && suites.iter().any(|b| timed(b.as_ref())) {
         eprintln!("note: debug build; timings are not representative (use `cargo run --release`)");
     }
 
     let config = RunConfig {
         scale: cli.scale,
         seed: cli.seed,
+        backend: cli.backend,
+        embed_url: cli.embed_url.clone(),
+        embed_model: cli.embed_model.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;
+    let mut missed = false;
     for bench in suites {
         let report = run_benchmark(bench.as_ref(), &config);
         let text = summary(&report);
@@ -191,10 +235,19 @@ fn main() -> ExitCode {
             Status::NotImplemented => unimplemented = true,
             Status::Failed => failed = true,
         }
+        missed |= report.targets_missed();
     }
+    exit_code(failed, missed, unimplemented, cli.strict)
+}
+
+/// 1: a suite failed or a report could not be written. With `--strict`: 4 if a target was
+/// missed, else 3 if a suite is not implemented. Otherwise 0.
+fn exit_code(failed: bool, missed: bool, unimplemented: bool, strict: bool) -> ExitCode {
     if failed {
         ExitCode::FAILURE
-    } else if unimplemented && cli.strict {
+    } else if strict && missed {
+        ExitCode::from(4)
+    } else if strict && unimplemented {
         ExitCode::from(3)
     } else {
         ExitCode::SUCCESS
@@ -227,7 +280,55 @@ mod tests {
         assert_eq!(cli.scale, Scale::Quick);
         assert_eq!(cli.seed, 9);
         assert!(!cli.no_write);
+        assert_eq!(cli.backend, Backend::Fake, "fake stays the default");
         assert!(Cli::try_parse_from(["nugget-bench", "perf", "--scale", "huge"]).is_err());
+
+        let real = Cli::try_parse_from([
+            "nugget-bench",
+            "memory",
+            "--backend",
+            "real",
+            "--embed-url",
+            "http://127.0.0.1:8080/v1",
+            "--embed-model",
+            "nomic",
+            "--strict",
+        ])
+        .unwrap();
+        assert_eq!(real.backend, Backend::Real);
+        assert_eq!(real.embed_url.as_deref(), Some("http://127.0.0.1:8080/v1"));
+        assert_eq!(real.embed_model.as_deref(), Some("nomic"));
+        assert!(real.strict);
+        assert!(Cli::try_parse_from(["nugget-bench", "memory", "--backend", "mock"]).is_err());
+        assert!(
+            Cli::try_parse_from(["nugget-bench", "memory", "--embed-model", "x"]).is_err(),
+            "--embed-model needs --embed-url"
+        );
+    }
+
+    #[test]
+    fn exit_codes() {
+        let code = |f, m, u, s| format!("{:?}", exit_code(f, m, u, s));
+        assert_eq!(
+            code(false, false, false, true),
+            format!("{:?}", ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            code(false, true, true, false),
+            format!("{:?}", ExitCode::SUCCESS)
+        );
+        assert_eq!(
+            code(false, true, true, true),
+            format!("{:?}", ExitCode::from(4))
+        );
+        assert_eq!(
+            code(false, false, true, true),
+            format!("{:?}", ExitCode::from(3))
+        );
+        assert_eq!(
+            code(true, true, true, true),
+            format!("{:?}", ExitCode::FAILURE)
+        );
     }
 
     #[test]

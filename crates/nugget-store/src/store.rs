@@ -213,6 +213,18 @@ impl Store {
         })
     }
 
+    /// Forget the sync cursor of `source`, so its next pass starts from scratch (a full
+    /// backfill, reconciled against stored item versions). Items are kept. Returns whether a
+    /// cursor existed.
+    pub fn clear_cursor(&self, source: &SourceId) -> Result<bool> {
+        self.with_conn(|c| {
+            let n = c
+                .execute("DELETE FROM cursors WHERE source = ?1", [source.as_str()])
+                .db("clear cursor")?;
+            Ok(n > 0)
+        })
+    }
+
     /// Embedding dimension fixed for this database, once the first embedding was stored.
     pub fn embedding_dim(&self) -> Result<Option<usize>> {
         self.with_conn(|c| crate::items::embedding_dim(c))

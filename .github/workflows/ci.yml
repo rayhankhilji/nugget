@@ -67,6 +67,14 @@ jobs:
         shell: bash
         run: cargo run --locked -p nugget-bench -- all --scale smoke --out-dir "$RUNNER_TEMP/bench-results"
 
+      # The real stack in process (encrypted store, ingest, files watcher, retriever): about 15 s
+      # at smoke scale on a debug build. A failed run fails the job; target verdicts are in the
+      # report (no --strict: at smoke scale the recall gate can tie its baseline).
+      - name: Bench memory, real backend (smoke)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: cargo run --locked -p nugget-bench -- memory --backend real --scale smoke --out-dir "$RUNNER_TEMP/bench-results"
+
       - name: Validate bench reports against the schema
         if: runner.os == 'Linux'
         shell: bash

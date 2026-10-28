@@ -13,8 +13,9 @@
 //!    reciprocal-rank fusion of bm25 and vector kNN.
 //! 3. **Grouping by item**: the best chunk per item, other matching chunks recorded.
 //! 4. Optional **recency boost** (off by default).
-//! 5. **MMR diversity** over the top items: cosine similarity of passage embeddings when the
-//!    query was embedded, token-set Jaccard otherwise.
+//! 5. **MMR diversity** over the top items: cosine similarity of the passages' stored embeddings
+//!    (read back from the store, not re-embedded) when the query was embedded, token-set Jaccard
+//!    otherwise.
 //! 6. Mapping to [`nugget_core::ipc::SearchHit`] (with `url` from item metadata) via
 //!    [`SearchResults::hits`].
 //!

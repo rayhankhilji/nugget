@@ -22,8 +22,8 @@ use crate::types::{
 
 /// Longest accepted `url` metadata value.
 const MAX_URL_LEN: usize = 4096;
-/// Store limit on ids per `get_chunks` call.
-const GET_CHUNKS_BATCH: usize = 512;
+/// Store limit on ids per `get_chunks` / `get_embeddings` call.
+const GET_CHUNKS_BATCH: usize = nugget_store::MAX_CHUNK_IDS;
 
 /// Retrieval over a [`Store`], optionally with query embeddings from a [`Router`].
 ///
@@ -187,6 +187,12 @@ impl Retriever {
             .max(self.config.min_candidates)
             .min(self.config.max_candidates.max(1))
             .max(limit);
+        // Each list's contribution to rank fusion is tied to what was asked for (see
+        // `RetrieveConfig::fusion_depth_factor`), not to the over-fetched candidate count.
+        let fusion_depth = limit
+            .saturating_mul(self.config.fusion_depth_factor.max(1))
+            .max(self.config.min_fusion_depth)
+            .max(limit);
         // Function words would match nearly every chunk in the OR-ed full-text query and, through
         // rank fusion, crowd out passages only the vector leg found.
         let fts = text_query(query);
@@ -206,24 +212,29 @@ impl Retriever {
                     hits,
                 )
             }
-            (_, Ok((p, v))) => match self.store.search_hybrid(&fts, Some(&v), n) {
-                Ok(hits) => (
-                    RetrievalMode::Hybrid {
-                        provider: p.id().clone(),
-                    },
-                    Some(p),
-                    hits,
-                ),
-                // The dimension was checked, but the store may have changed since.
-                Err(Error::Invalid(msg)) => (
-                    RetrievalMode::TextOnly {
-                        reason: TextOnlyReason::DimensionMismatch(msg),
-                    },
-                    None,
-                    self.store.search_text(&fts, n)?,
-                ),
-                Err(e) => return Err(e),
-            },
+            (_, Ok((p, v))) => {
+                match self
+                    .store
+                    .search_hybrid_with_depth(&fts, Some(&v), n, fusion_depth)
+                {
+                    Ok(hits) => (
+                        RetrievalMode::Hybrid {
+                            provider: p.id().clone(),
+                        },
+                        Some(p),
+                        hits,
+                    ),
+                    // The dimension was checked, but the store may have changed since.
+                    Err(Error::Invalid(msg)) => (
+                        RetrievalMode::TextOnly {
+                            reason: TextOnlyReason::DimensionMismatch(msg),
+                        },
+                        None,
+                        self.store.search_text(&fts, n)?,
+                    ),
+                    Err(e) => return Err(e),
+                }
+            }
             (_, Err(reason)) => (
                 RetrievalMode::TextOnly { reason },
                 None,
@@ -328,6 +339,12 @@ impl Retriever {
     }
 
     /// MMR order over `pool` (indices) and the similarity used.
+    ///
+    /// When the query was embedded (`provider` is set) and [`RetrieveConfig::mmr_vectors`] is on,
+    /// passages are compared by their **stored** chunk embeddings, read back from the store, so
+    /// nothing is re-embedded. Only passages stored without a vector (e.g. indexed while no
+    /// embedder was available) are embedded, in one batch with the query's provider. Otherwise,
+    /// or if that fails, MMR uses token-set Jaccard.
     async fn diversify(
         &self,
         pool: &[Ranked],
@@ -347,25 +364,70 @@ impl Retriever {
         let rel: Vec<f32> = pool.iter().map(|r| r.cand.rel).collect();
         let lambda = self.config.mmr_lambda;
 
-        if let (Some(p), true) = (provider, self.config.mmr_vectors) {
-            let inputs: Vec<String> = texts
-                .iter()
-                .map(|t| t.chars().take(self.config.mmr_embed_chars.max(1)).collect())
-                .collect();
-            match p.embed(&inputs).await {
-                Ok(vectors) if validate_vectors(&vectors, inputs.len()).is_ok() => {
-                    let sim = |i: usize, j: usize| cosine(&vectors[i], &vectors[j]);
-                    return Ok((mmr_select(&rel, limit, lambda, &sim), Similarity::Vector));
-                }
-                Ok(_) => tracing::warn!(provider = %p.id(), "bad passage embeddings; lexical MMR"),
-                Err(e) => {
-                    tracing::warn!(provider = %p.id(), error = %e, "passage embedding failed; lexical MMR");
-                }
-            }
+        if let (Some(p), true) = (provider, self.config.mmr_vectors)
+            && let Some(vectors) = self.pool_vectors(&ids, &texts, p).await?
+        {
+            let sim = |i: usize, j: usize| cosine(&vectors[i], &vectors[j]);
+            return Ok((mmr_select(&rel, limit, lambda, &sim), Similarity::Vector));
         }
         let sets: Vec<BTreeSet<String>> = texts.iter().map(|t| token_set(t)).collect();
         let sim = |i: usize, j: usize| jaccard(&sets[i], &sets[j]);
         Ok((mmr_select(&rel, limit, lambda, &sim), Similarity::Lexical))
+    }
+
+    /// One vector per pool passage: stored embeddings first, the rest embedded with `p`.
+    /// `None` (lexical MMR) if the missing ones cannot be embedded or the vectors disagree in
+    /// dimension.
+    async fn pool_vectors(
+        &self,
+        ids: &[ChunkId],
+        texts: &[String],
+        p: &Arc<dyn Provider>,
+    ) -> Result<Option<Vec<Vec<f32>>>> {
+        let mut stored = self.embeddings_by_id(ids)?;
+        let mut vectors: Vec<Option<Vec<f32>>> = ids.iter().map(|id| stored.remove(id)).collect();
+        let missing: Vec<usize> = (0..ids.len()).filter(|&i| vectors[i].is_none()).collect();
+        if !missing.is_empty() {
+            let inputs: Vec<String> = missing
+                .iter()
+                .map(|&i| {
+                    texts[i]
+                        .chars()
+                        .take(self.config.mmr_embed_chars.max(1))
+                        .collect()
+                })
+                .collect();
+            match p.embed(&inputs).await {
+                Ok(fresh) if validate_vectors(&fresh, inputs.len()).is_ok() => {
+                    for (i, v) in missing.into_iter().zip(fresh) {
+                        vectors[i] = Some(v);
+                    }
+                }
+                Ok(_) => {
+                    tracing::warn!(provider = %p.id(), "bad passage embeddings; lexical MMR");
+                    return Ok(None);
+                }
+                Err(e) => {
+                    tracing::warn!(provider = %p.id(), error = %e, "passage embedding failed; lexical MMR");
+                    return Ok(None);
+                }
+            }
+        }
+        let vectors: Vec<Vec<f32>> = vectors.into_iter().flatten().collect();
+        let dim = vectors.first().map_or(0, Vec::len);
+        if vectors.len() != ids.len() || vectors.iter().any(|v| v.len() != dim) {
+            tracing::warn!(provider = %p.id(), "passage vectors disagree in dimension; lexical MMR");
+            return Ok(None);
+        }
+        Ok(Some(vectors))
+    }
+
+    fn embeddings_by_id(&self, ids: &[ChunkId]) -> Result<HashMap<ChunkId, Vec<f32>>> {
+        let mut out = HashMap::with_capacity(ids.len());
+        for batch in ids.chunks(GET_CHUNKS_BATCH) {
+            out.extend(self.store.get_embeddings(batch)?);
+        }
+        Ok(out)
     }
 
     fn load_items(&self, cands: &[Candidate]) -> Result<Vec<Option<Item>>> {
@@ -384,17 +446,12 @@ impl Retriever {
 
     /// Fetch primary, neighbouring and secondary chunks for packing.
     ///
-    /// The store has no "chunk by (item, ord)" lookup, so neighbours are found by id: an item's
-    /// chunks are inserted in order in one transaction, so `ord ± 1` sits at `id ± 1`. Every
-    /// neighbour is verified (same item, adjacent ord); anything else is ignored.
+    /// Neighbours are the chunks at `ord ± 1` of the same item, looked up by position with
+    /// [`Store::neighbours`].
     fn pack_items(&self, ranked: &[Ranked]) -> Result<Vec<PackItem>> {
         let mut ids: Vec<ChunkId> = Vec::new();
         for r in ranked {
-            let id = r.cand.chunk_id;
-            ids.push(id);
-            if self.config.expand_neighbours {
-                ids.extend([id.saturating_sub(1), id.saturating_add(1)]);
-            }
+            ids.push(r.cand.chunk_id);
             if self.config.include_secondary_matches {
                 ids.extend(r.cand.matches.iter().map(|m| m.chunk_id));
             }
@@ -410,18 +467,11 @@ impl Retriever {
                 continue;
             };
             let neighbours = if self.config.expand_neighbours {
-                let before = primary.ord.checked_sub(1);
-                let after = primary.ord.checked_add(1);
-                [
-                    (r.cand.chunk_id.saturating_sub(1), before),
-                    (r.cand.chunk_id.saturating_add(1), after),
-                ]
-                .into_iter()
-                .filter_map(|(id, ord)| {
-                    let c = chunks.get(&id)?;
-                    (c.item == primary.item && Some(c.ord) == ord).then(|| c.clone())
-                })
-                .collect()
+                self.store
+                    .neighbours(primary.id, 1)?
+                    .into_iter()
+                    .filter(|c| c.item == primary.item && c.ord != primary.ord)
+                    .collect()
             } else {
                 Vec::new()
             };

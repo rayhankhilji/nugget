@@ -65,92 +65,236 @@ fn validate_ref(item: &ItemRef) -> Result<()> {
     Ok(())
 }
 
+/// An item's fields prepared for writing (serialised once, outside the lock).
+struct PreparedItem<'a> {
+    new: &'a NewItem,
+    metadata: String,
+    modified: Option<String>,
+    now: String,
+}
+
+impl<'a> PreparedItem<'a> {
+    fn new(new: &'a NewItem) -> Result<Self> {
+        validate_ref(&new.item)?;
+        if new.content_hash.trim().is_empty() {
+            return Err(Error::Invalid("content_hash must be non-empty".into()));
+        }
+        Ok(Self {
+            new,
+            metadata: serde_json::to_string(&new.metadata)?,
+            modified: new.source_modified_at.map(format_time).transpose()?,
+            now: format_time(OffsetDateTime::now_utc())?,
+        })
+    }
+}
+
+/// What [`upsert_row`] did, with the row id.
+struct RowUpsert {
+    outcome: UpsertOutcome,
+    item_id: i64,
+}
+
+/// Insert or update the item row inside `tx` (see [`Store::upsert_item`] for the rules).
+fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
+    let new = p.new;
+    match find_item(tx, &new.item)? {
+        None => {
+            tx.execute(
+                "INSERT INTO items (source, key, title, content_hash, mime, text, metadata,
+                                    source_modified_at, created_at, updated_at, version)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
+                params![
+                    new.item.source.as_str(),
+                    new.item.key.as_str(),
+                    new.title,
+                    new.content_hash,
+                    new.mime,
+                    new.text,
+                    p.metadata,
+                    p.modified,
+                    p.now,
+                    new.version,
+                ],
+            )
+            .db("insert item")?;
+            Ok(RowUpsert {
+                outcome: UpsertOutcome::Inserted,
+                item_id: tx.last_insert_rowid(),
+            })
+        }
+        Some(old) => {
+            let content_changed = old.content_hash != new.content_hash;
+            let modified_unchanged = match (&old.source_modified_at, &new.source_modified_at) {
+                (None, None) => true,
+                (Some(o), Some(n)) => parse_time(o)? == *n,
+                _ => false,
+            };
+            let unchanged = !content_changed
+                && old.title == new.title
+                && old.mime == new.mime
+                && old.text == new.text
+                && old.metadata == p.metadata
+                && old.version == new.version
+                && modified_unchanged;
+            if unchanged {
+                return Ok(RowUpsert {
+                    outcome: UpsertOutcome::Unchanged,
+                    item_id: old.id,
+                });
+            }
+            tx.execute(
+                "UPDATE items SET title = ?2, content_hash = ?3, mime = ?4, text = ?5,
+                                  metadata = ?6, source_modified_at = ?7,
+                                  updated_at = ?8, version = ?9
+                 WHERE id = ?1",
+                params![
+                    old.id,
+                    new.title,
+                    new.content_hash,
+                    new.mime,
+                    new.text,
+                    p.metadata,
+                    p.modified,
+                    p.now,
+                    new.version,
+                ],
+            )
+            .db("update item")?;
+            if content_changed {
+                tx.execute("DELETE FROM chunks WHERE item_id = ?1", [old.id])
+                    .db("drop stale chunks")?;
+            }
+            Ok(RowUpsert {
+                outcome: UpsertOutcome::Updated,
+                item_id: old.id,
+            })
+        }
+    }
+}
+
+/// Validate a chunk batch: finite, non-empty embeddings of one dimension. Returns that
+/// dimension (`None` when no chunk carries an embedding).
+fn validate_chunks(chunks: &[NewChunk]) -> Result<Option<usize>> {
+    let mut dim = None;
+    for (i, ch) in chunks.iter().enumerate() {
+        if let Some(e) = &ch.embedding {
+            validate_embedding(e).map_err(|m| Error::Invalid(format!("chunk {i}: {m}")))?;
+            match dim {
+                None => dim = Some(e.len()),
+                Some(d) if d != e.len() => {
+                    return Err(Error::Invalid(format!(
+                        "chunk {i}: embedding dimension {} differs from {d} in the same batch",
+                        e.len()
+                    )));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    Ok(dim)
+}
+
+/// Replace every chunk of `item_id` inside `tx`. `dim` comes from [`validate_chunks`].
+fn write_chunks(
+    tx: &Connection,
+    item_id: i64,
+    chunks: &[NewChunk],
+    dim: Option<usize>,
+) -> Result<Vec<ChunkId>> {
+    if let Some(d) = dim {
+        ensure_vec_table(tx, d)?;
+    }
+    tx.execute("DELETE FROM chunks WHERE item_id = ?1", [item_id])
+        .db("delete old chunks")?;
+    let mut ids = Vec::with_capacity(chunks.len());
+    let mut ins = tx
+        .prepare_cached("INSERT INTO chunks (item_id, ord, text) VALUES (?1, ?2, ?3)")
+        .db("prepare chunk insert")?;
+    let mut ins_vec = match dim {
+        Some(_) => Some(
+            tx.prepare_cached("INSERT INTO chunk_vec (rowid, embedding) VALUES (?1, ?2)")
+                .db("prepare vector insert")?,
+        ),
+        None => None,
+    };
+    for (ord, ch) in chunks.iter().enumerate() {
+        ins.execute(params![item_id, ord as i64, ch.text])
+            .db("insert chunk")?;
+        let id = tx.last_insert_rowid();
+        if let (Some(e), Some(stmt)) = (&ch.embedding, ins_vec.as_mut()) {
+            stmt.execute(params![id, f32_blob(e)]).db("insert vector")?;
+        }
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
 impl Store {
     /// Insert or update an item, keyed by `(source, key)`.
     ///
     /// Re-upserting identical content and fields returns `Unchanged` without writing. When the
     /// content hash changes, the item's chunks (derived from the old content) are deleted so stale
-    /// text never stays searchable; re-chunk with [`Store::replace_chunks`].
+    /// text never stays searchable; re-chunk with [`Store::replace_chunks`], or write item and
+    /// chunks together with [`Store::upsert_item_with_chunks`].
     pub fn upsert_item(&self, new: &NewItem) -> Result<UpsertOutcome> {
-        validate_ref(&new.item)?;
-        if new.content_hash.trim().is_empty() {
-            return Err(Error::Invalid("content_hash must be non-empty".into()));
-        }
-        let metadata = serde_json::to_string(&new.metadata)?;
-        let modified = new.source_modified_at.map(format_time).transpose()?;
-        let now = format_time(OffsetDateTime::now_utc())?;
-
+        let p = PreparedItem::new(new)?;
         self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .db("begin upsert")?;
-            let outcome = match find_item(&tx, &new.item)? {
-                None => {
-                    tx.execute(
-                        "INSERT INTO items (source, key, title, content_hash, mime, text, metadata,
-                                            source_modified_at, created_at, updated_at, version)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
-                        params![
-                            new.item.source.as_str(),
-                            new.item.key.as_str(),
-                            new.title,
-                            new.content_hash,
-                            new.mime,
-                            new.text,
-                            metadata,
-                            modified,
-                            now,
-                            new.version,
-                        ],
-                    )
-                    .db("insert item")?;
-                    UpsertOutcome::Inserted
-                }
-                Some(old) => {
-                    let content_changed = old.content_hash != new.content_hash;
-                    let modified_unchanged =
-                        match (&old.source_modified_at, &new.source_modified_at) {
-                            (None, None) => true,
-                            (Some(o), Some(n)) => parse_time(o)? == *n,
-                            _ => false,
-                        };
-                    let unchanged = !content_changed
-                        && old.title == new.title
-                        && old.mime == new.mime
-                        && old.text == new.text
-                        && old.metadata == metadata
-                        && old.version == new.version
-                        && modified_unchanged;
-                    if unchanged {
+            let row = upsert_row(&tx, &p)?;
+            tx.commit().db("commit upsert")?;
+            Ok(row.outcome)
+        })
+    }
+
+    /// Write an item and its chunks in **one transaction**: the item row (including its
+    /// `version`), its chunks, their full-text entries and vectors become visible together, or
+    /// (on any error) nothing changes. A crash can therefore never leave an item whose version
+    /// says "indexed" without its chunks.
+    ///
+    /// - `Inserted` / `Updated`: the item's chunks are replaced by `chunks` (as with
+    ///   [`Store::replace_chunks`]; an empty slice leaves the item without chunks).
+    /// - `Unchanged` (same hash and fields): nothing is written, with one exception: if the stored
+    ///   item has **no** chunks but `chunks` is non-empty (an earlier non-atomic write was
+    ///   interrupted between the item and its chunks), the chunks are written and the outcome
+    ///   is `Updated`.
+    ///
+    /// Embeddings follow the [`Store::replace_chunks`] rules (one dimension per database).
+    pub fn upsert_item_with_chunks(
+        &self,
+        new: &NewItem,
+        chunks: &[NewChunk],
+    ) -> Result<UpsertOutcome> {
+        let p = PreparedItem::new(new)?;
+        let dim = validate_chunks(chunks)?;
+        self.with_conn(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .db("begin upsert_item_with_chunks")?;
+            let row = upsert_row(&tx, &p)?;
+            let outcome = match row.outcome {
+                UpsertOutcome::Unchanged => {
+                    let has_chunks: bool = tx
+                        .query_row(
+                            "SELECT EXISTS (SELECT 1 FROM chunks WHERE item_id = ?1)",
+                            [row.item_id],
+                            |r| r.get(0),
+                        )
+                        .db("count chunks")?;
+                    if has_chunks || chunks.is_empty() {
                         UpsertOutcome::Unchanged
                     } else {
-                        tx.execute(
-                            "UPDATE items SET title = ?2, content_hash = ?3, mime = ?4, text = ?5,
-                                              metadata = ?6, source_modified_at = ?7,
-                                              updated_at = ?8, version = ?9
-                             WHERE id = ?1",
-                            params![
-                                old.id,
-                                new.title,
-                                new.content_hash,
-                                new.mime,
-                                new.text,
-                                metadata,
-                                modified,
-                                now,
-                                new.version,
-                            ],
-                        )
-                        .db("update item")?;
-                        if content_changed {
-                            tx.execute("DELETE FROM chunks WHERE item_id = ?1", [old.id])
-                                .db("drop stale chunks")?;
-                        }
+                        write_chunks(&tx, row.item_id, chunks, dim)?;
                         UpsertOutcome::Updated
                     }
                 }
+                outcome => {
+                    write_chunks(&tx, row.item_id, chunks, dim)?;
+                    outcome
+                }
             };
-            tx.commit().db("commit upsert")?;
+            tx.commit().db("commit upsert_item_with_chunks")?;
             Ok(outcome)
         })
     }
@@ -181,7 +325,8 @@ impl Store {
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.
     pub fn delete_item(&self, item: &ItemRef) -> Result<bool> {
         self.with_conn(|c| {
-            // `ON DELETE CASCADE` removes chunks; chunk triggers clean FTS and vectors.
+            // `ON DELETE CASCADE` removes chunks; chunk triggers clean FTS and vectors, and the
+            // item trigger cleans the title index.
             let n = c
                 .execute(
                     "DELETE FROM items WHERE source = ?1 AND key = ?2",
@@ -198,23 +343,7 @@ impl Store {
     /// another dimension are rejected with `Error::Invalid`. Fails with `Error::NotFound` if the
     /// item does not exist. Atomic: on error nothing changes.
     pub fn replace_chunks(&self, item: &ItemRef, chunks: &[NewChunk]) -> Result<Vec<ChunkId>> {
-        let mut dim = None;
-        for (i, ch) in chunks.iter().enumerate() {
-            if let Some(e) = &ch.embedding {
-                validate_embedding(e).map_err(|m| Error::Invalid(format!("chunk {i}: {m}")))?;
-                match dim {
-                    None => dim = Some(e.len()),
-                    Some(d) if d != e.len() => {
-                        return Err(Error::Invalid(format!(
-                            "chunk {i}: embedding dimension {} differs from {d} in the same batch",
-                            e.len()
-                        )));
-                    }
-                    Some(_) => {}
-                }
-            }
-        }
-
+        let dim = validate_chunks(chunks)?;
         self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -228,34 +357,7 @@ impl Store {
                 .optional()
                 .db("find item")?
                 .ok_or_else(|| Error::NotFound(format!("item {}:{}", item.source, item.key)))?;
-            if let Some(d) = dim {
-                ensure_vec_table(&tx, d)?;
-            }
-            tx.execute("DELETE FROM chunks WHERE item_id = ?1", [item_id])
-                .db("delete old chunks")?;
-
-            let mut ids = Vec::with_capacity(chunks.len());
-            {
-                let mut ins = tx
-                    .prepare("INSERT INTO chunks (item_id, ord, text) VALUES (?1, ?2, ?3)")
-                    .db("prepare chunk insert")?;
-                let mut ins_vec = match dim {
-                    Some(_) => Some(
-                        tx.prepare("INSERT INTO chunk_vec (rowid, embedding) VALUES (?1, ?2)")
-                            .db("prepare vector insert")?,
-                    ),
-                    None => None,
-                };
-                for (ord, ch) in chunks.iter().enumerate() {
-                    ins.execute(params![item_id, ord as i64, ch.text])
-                        .db("insert chunk")?;
-                    let id = tx.last_insert_rowid();
-                    if let (Some(e), Some(stmt)) = (&ch.embedding, ins_vec.as_mut()) {
-                        stmt.execute(params![id, f32_blob(e)]).db("insert vector")?;
-                    }
-                    ids.push(id);
-                }
-            }
+            let ids = write_chunks(&tx, item_id, chunks, dim)?;
             tx.commit().db("commit replace_chunks")?;
             Ok(ids)
         })
@@ -289,6 +391,18 @@ pub(crate) fn validate_embedding(e: &[f32]) -> std::result::Result<(), String> {
 /// Little-endian `f32` blob, the binary vector format `sqlite-vec` accepts.
 pub(crate) fn f32_blob(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// Inverse of [`f32_blob`]; `None` if the blob is not a whole number of `f32`s.
+pub(crate) fn f32_from_blob(blob: &[u8]) -> Option<Vec<f32>> {
+    if !blob.len().is_multiple_of(4) {
+        return None;
+    }
+    Some(
+        blob.chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+    )
 }
 
 pub(crate) fn embedding_dim(conn: &Connection) -> Result<Option<usize>> {

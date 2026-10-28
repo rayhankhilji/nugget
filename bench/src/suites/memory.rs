@@ -8,8 +8,9 @@
 //!   measured apply time; propagation checks that edits replace old content and deletes remove
 //!   the item everywhere. The plan's target is about 60 s from change to searchable.
 //!
-//! M0 runs against the in-crate [`FakeIndex`]; M1 swaps in `nugget-store` and the real ingest
-//! scheduler while keeping metric names stable.
+//! `--backend fake` (the default) runs against the in-crate [`FakeIndex`] with a simulated
+//! watcher. `--backend real` runs the real stack in process ([`crate::real`]) and keeps the
+//! metric names stable where they mean the same thing.
 
 use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
@@ -17,7 +18,7 @@ use std::time::Instant;
 use crate::corpus::{Corpus, CorpusConfig, Rng, marker};
 use crate::index::FakeIndex;
 use crate::report::{Direction, Metric};
-use crate::runner::{BenchError, Benchmark, RunContext, Scale};
+use crate::runner::{Backend, BenchError, Benchmark, RunContext, Scale};
 use crate::stats::summarize;
 use crate::suites::{doc_text, item_ref};
 
@@ -64,11 +65,14 @@ impl Benchmark for MemoryBench {
     }
 
     fn description(&self) -> &'static str {
-        "Retrieval recall@k/MRR and change-to-searchable freshness with edit/delete propagation (M0: fake index)"
+        "Retrieval recall@k/MRR and change-to-searchable freshness with edit/delete propagation (--backend fake|real)"
     }
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        run_with(ctx, &MemoryParams::for_scale(ctx.scale()))
+        match ctx.backend() {
+            Backend::Fake => run_with(ctx, &MemoryParams::for_scale(ctx.scale())),
+            Backend::Real => crate::real::run(ctx),
+        }
     }
 }
 
@@ -104,7 +108,13 @@ pub fn run_with(ctx: &mut RunContext, p: &MemoryParams) -> Result<Vec<Metric>, B
     Ok(out)
 }
 
-fn retrieval(corpus: &Corpus, ix: &FakeIndex, p: &MemoryParams, seed: u64) -> Vec<Metric> {
+/// Known-item retrieval metrics of `ix` (also the real backend's baseline).
+pub(crate) fn retrieval(
+    corpus: &Corpus,
+    ix: &FakeIndex,
+    p: &MemoryParams,
+    seed: u64,
+) -> Vec<Metric> {
     const KS: [usize; 3] = [1, 5, 10];
     let queries = corpus.queries(p.queries, p.query_terms, p.query_noise, seed);
     let mut out = Vec::new();
@@ -404,6 +414,7 @@ mod tests {
             &RunConfig {
                 scale: Scale::Smoke,
                 seed: 11,
+                ..RunConfig::default()
             },
         )
     }

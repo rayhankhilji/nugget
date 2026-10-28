@@ -6,7 +6,8 @@ use std::time::Instant;
 use time::OffsetDateTime;
 
 use crate::report::{
-    Environment, Metric, Report, ReportConfig, SCHEMA_VERSION, Status, detect_git_commit,
+    Environment, Metric, Report, ReportConfig, SCHEMA_VERSION, Status, TargetCheck,
+    detect_git_commit,
 };
 use crate::suites;
 
@@ -42,10 +43,36 @@ impl Scale {
     }
 }
 
+/// What a suite runs against. Only `memory` has a real backend so far; other suites ignore it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
+pub enum Backend {
+    /// The in-crate [`FakeIndex`](crate::index::FakeIndex) with a simulated watcher (fast; CI).
+    #[default]
+    Fake,
+    /// The real stack in process: an encrypted `nugget-store`, `nugget-ingest` with the `files`
+    /// connector watching a temporary folder, and `nugget-retrieve` for queries.
+    Real,
+}
+
+impl Backend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Backend::Fake => "fake",
+            Backend::Real => "real",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunConfig {
     pub scale: Scale,
     pub seed: u64,
+    pub backend: Backend,
+    /// Real backend only: base URL of an OpenAI-compatible embeddings server (e.g.
+    /// `http://127.0.0.1:8080/v1`) to use instead of the in-process deterministic embedder.
+    pub embed_url: Option<String>,
+    /// Model name sent to `embed_url`.
+    pub embed_model: Option<String>,
 }
 
 impl Default for RunConfig {
@@ -53,6 +80,9 @@ impl Default for RunConfig {
         Self {
             scale: Scale::default(),
             seed: 42,
+            backend: Backend::default(),
+            embed_url: None,
+            embed_model: None,
         }
     }
 }
@@ -81,6 +111,10 @@ impl RunContext {
         self.config.seed
     }
 
+    pub fn backend(&self) -> Backend {
+        self.config.backend
+    }
+
     /// Record a parameter in the report's `config.params`.
     pub fn param(&mut self, name: &str, value: impl Into<serde_json::Value>) {
         self.params.insert(name.to_owned(), value.into());
@@ -100,6 +134,8 @@ pub enum BenchError {
     Failed(String),
     #[error(transparent)]
     Core(#[from] nugget_core::Error),
+    #[error("i/o: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// A benchmark suite.
@@ -193,6 +229,10 @@ pub fn run_benchmark(bench: &dyn Benchmark, config: &RunConfig) -> Report {
         Err(e) => (Status::Failed, Vec::new(), Some(e.to_string())),
     };
 
+    let targets = metrics
+        .iter()
+        .filter_map(TargetCheck::from_metric)
+        .collect();
     Report {
         schema_version: SCHEMA_VERSION,
         suite: bench.name().to_owned(),
@@ -209,6 +249,7 @@ pub fn run_benchmark(bench: &dyn Benchmark, config: &RunConfig) -> Report {
             params: ctx.params,
         },
         metrics,
+        targets,
         message,
     }
 }
@@ -279,6 +320,25 @@ mod tests {
         assert_eq!(r.config.seed, 42);
         assert!(r.finished_at >= r.started_at);
         assert!(r.message.is_none());
+    }
+
+    #[test]
+    fn targets_are_derived_from_metrics_with_targets() {
+        let r = run_benchmark(
+            &Fixed(vec![
+                Metric::new("lat", 70.0, "s", Direction::LowerIsBetter, "").with_target(60.0),
+                Metric::new("rec", 0.9, "ratio", Direction::HigherIsBetter, "").with_target(0.8),
+                m("info", 1.0),
+            ]),
+            &RunConfig::default(),
+        );
+        assert_eq!(r.targets.len(), 2);
+        assert_eq!(r.targets[0].metric, "lat");
+        assert!(!r.targets[0].pass);
+        assert!(r.targets[1].pass);
+        assert!(r.targets_missed());
+        let ok = run_benchmark(&Fixed(vec![m("a", 1.0)]), &RunConfig::default());
+        assert!(ok.targets.is_empty() && !ok.targets_missed());
     }
 
     #[test]

@@ -1,8 +1,9 @@
 //! The benchmark report: a stable, versioned JSON document.
 //!
-//! The schema lives in `bench/schema/report.schema.json`. Any change to these types that alters
-//! the JSON must bump [`SCHEMA_VERSION`] and update the schema file; the tests enforce that the
-//! two stay in sync.
+//! The schema lives in `bench/schema/report.schema.json`. Any incompatible change to these types
+//! must bump [`SCHEMA_VERSION`] and update the schema file; the tests enforce that the two stay in
+//! sync. Additive, optional fields (like `targets`) keep version 1: every earlier report still
+//! validates and deserializes.
 
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -86,6 +87,48 @@ impl Metric {
     }
 }
 
+/// How a metric's value is compared with its target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Comparison {
+    /// Pass when `value >= target` (a `higher_is_better` metric).
+    AtLeast,
+    /// Pass when `value <= target` (a `lower_is_better` metric).
+    AtMost,
+}
+
+/// Pass/fail of one target, one per metric that has a target. Derived from the metrics by the
+/// runner, so it always agrees with each metric's `target_met`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetCheck {
+    /// Name of the metric the target applies to.
+    pub metric: String,
+    pub comparison: Comparison,
+    pub target: f64,
+    pub value: f64,
+    pub pass: bool,
+}
+
+impl TargetCheck {
+    /// The check for `m`, if it has a target and a direction.
+    pub fn from_metric(m: &Metric) -> Option<Self> {
+        let target = m.target?;
+        let comparison = match m.direction {
+            Direction::HigherIsBetter => Comparison::AtLeast,
+            Direction::LowerIsBetter => Comparison::AtMost,
+            Direction::Info => return None,
+        };
+        Some(Self {
+            metric: m.name.clone(),
+            comparison,
+            target,
+            value: m.value,
+            pass: m.target_met?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Environment {
@@ -142,6 +185,10 @@ pub struct Report {
     pub environment: Environment,
     pub config: ReportConfig,
     pub metrics: Vec<Metric>,
+    /// Pass/fail per metric target (added in harness 0.0.1 for M1; optional, omitted when no
+    /// metric has a target, so reports written before it still validate).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub targets: Vec<TargetCheck>,
     /// Plan (for `not_implemented`), error (for `failed`), or a note.
     pub message: Option<String>,
 }
@@ -149,6 +196,11 @@ pub struct Report {
 impl Report {
     pub fn metric(&self, name: &str) -> Option<&Metric> {
         self.metrics.iter().find(|m| m.name == name)
+    }
+
+    /// Whether any target was missed.
+    pub fn targets_missed(&self) -> bool {
+        self.targets.iter().any(|t| !t.pass)
     }
 
     pub fn to_json_pretty(&self) -> serde_json::Result<String> {
@@ -270,6 +322,13 @@ mod tests {
                 Metric::new("freshness.p95_s", 3.0, "s", Direction::LowerIsBetter, "y")
                     .with_target(60.0),
             ],
+            targets: vec![TargetCheck {
+                metric: "freshness.p95_s".to_owned(),
+                comparison: Comparison::AtMost,
+                target: 60.0,
+                value: 3.0,
+                pass: true,
+            }],
             message: None,
         }
     }
@@ -296,6 +355,36 @@ mod tests {
         assert_eq!(v["status"], "ok");
         assert_eq!(v["metrics"][0]["direction"], "higher_is_better");
         assert_eq!(v["started_at"], "2026-09-21T14:13:20Z");
+    }
+
+    #[test]
+    fn target_checks_follow_metric_targets() {
+        let up = Metric::new("r", 0.9, "ratio", Direction::HigherIsBetter, "").with_target(0.95);
+        let c = TargetCheck::from_metric(&up).unwrap();
+        assert_eq!(c.comparison, Comparison::AtLeast);
+        assert!(!c.pass);
+        let down = Metric::new("f", 3.0, "s", Direction::LowerIsBetter, "").with_target(60.0);
+        assert!(TargetCheck::from_metric(&down).unwrap().pass);
+        let info = Metric::new("i", 1.0, "x", Direction::Info, "").with_target(1.0);
+        assert!(TargetCheck::from_metric(&info).is_none());
+        assert!(
+            TargetCheck::from_metric(&Metric::new("n", 1.0, "x", Direction::Info, "")).is_none()
+        );
+    }
+
+    #[test]
+    fn reports_without_targets_still_deserialize() {
+        // A report as written before `targets` existed.
+        let mut r = sample(Status::Ok);
+        let mut v = serde_json::to_value(&r).unwrap();
+        v.as_object_mut().unwrap().remove("targets");
+        let back: Report = serde_json::from_value(v).unwrap();
+        r.targets.clear();
+        assert_eq!(back, r);
+        // ...and an empty list is not written at all.
+        let v = serde_json::to_value(&r).unwrap();
+        assert!(v.get("targets").is_none());
+        assert!(!r.targets_missed());
     }
 
     #[test]

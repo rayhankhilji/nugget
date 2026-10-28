@@ -5,9 +5,11 @@
 //! panics on any keyword it does not know, so extending the schema forces this test to be
 //! extended too.
 
-use nugget_bench::report::{Direction, SCHEMA_JSON};
+use nugget_bench::report::{Comparison, Direction, SCHEMA_JSON};
 use nugget_bench::runner::valid_metric_name;
-use nugget_bench::{RunConfig, SCHEMA_VERSION, Scale, Status, registry, run_benchmark};
+use nugget_bench::{
+    Backend, Report, RunConfig, SCHEMA_VERSION, Scale, Status, find, registry, run_benchmark,
+};
 use serde_json::{Value, json};
 
 fn schema() -> Value {
@@ -150,6 +152,7 @@ fn smoke_reports() -> Vec<Value> {
     let cfg = RunConfig {
         scale: Scale::Smoke,
         seed: 5,
+        ..RunConfig::default()
     };
     registry()
         .iter()
@@ -201,12 +204,22 @@ fn schema_enums_match_rust_enums() {
     for scale in [Scale::Smoke, Scale::Quick, Scale::Standard, Scale::Full] {
         assert!(scales.contains(&scale.as_str()));
     }
+
+    let cmp = s["$defs"]["target"]["properties"]["comparison"]["enum"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let from_rust: Vec<Value> = [Comparison::AtLeast, Comparison::AtMost]
+        .iter()
+        .map(|x| serde_json::to_value(x).unwrap())
+        .collect();
+    assert_eq!(cmp, from_rust);
 }
 
-#[test]
-fn every_suite_report_conforms() {
-    let reports = smoke_reports();
-    assert_eq!(reports.len(), 4);
+/// Fields that may be absent (added after version 1 shipped).
+const OPTIONAL: &[&str] = &["targets"];
+
+fn check_keys(r: &Value) {
     let root = schema();
     let mut required: Vec<&str> = root["required"]
         .as_array()
@@ -215,13 +228,31 @@ fn every_suite_report_conforms() {
         .map(|v| v.as_str().unwrap())
         .collect();
     required.sort_unstable();
+    // Every serialised field is required except the optional additions, so optional values of
+    // the original fields are explicit nulls.
+    let mut keys: Vec<&str> = r
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !OPTIONAL.contains(k))
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, required);
+    for k in OPTIONAL {
+        assert!(!required.contains(k), "{k} must stay optional");
+        assert!(root["properties"].get(*k).is_some());
+    }
+}
+
+#[test]
+fn every_suite_report_conforms() {
+    let reports = smoke_reports();
+    assert_eq!(reports.len(), 4);
     for r in &reports {
         let errors = errors_for(r);
         assert!(errors.is_empty(), "{} report: {errors:#?}", r["suite"]);
-        // Every serialised field is required, so optional values are explicit nulls.
-        let mut keys: Vec<&str> = r.as_object().unwrap().keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        assert_eq!(keys, required);
+        check_keys(r);
     }
     let status = |suite: &str| {
         reports
@@ -234,6 +265,96 @@ fn every_suite_report_conforms() {
     assert_eq!(status("perf"), "ok");
     assert_eq!(status("draft"), "not_implemented");
     assert_eq!(status("cua"), "not_implemented");
+    // The fake memory suite has targets; the planned suites have none and omit the field.
+    let memory = reports.iter().find(|r| r["suite"] == "memory").unwrap();
+    let targets = memory["targets"].as_array().unwrap();
+    assert!(targets.iter().any(|t| t["metric"] == "freshness.p95_s"));
+    assert!(
+        reports
+            .iter()
+            .find(|r| r["suite"] == "cua")
+            .unwrap()
+            .get("targets")
+            .is_none()
+    );
+}
+
+#[test]
+fn reports_from_before_targets_still_validate() {
+    // A memory report as harness 0.0.1 wrote it in M0: no `targets`.
+    let mut old = smoke_reports().remove(0);
+    old.as_object_mut().unwrap().remove("targets");
+    assert!(errors_for(&old).is_empty());
+    let parsed: Report = serde_json::from_value(old).unwrap();
+    assert!(parsed.targets.is_empty());
+}
+
+#[test]
+fn bad_targets_are_rejected() {
+    let good = smoke_reports().remove(0);
+    assert!(errors_for(&good).is_empty());
+    let mut cases = Vec::new();
+    for (field, value) in [
+        ("pass", json!("yes")),
+        ("comparison", json!("equal")),
+        ("metric", json!("Not A Metric")),
+        ("value", json!(null)),
+    ] {
+        let mut v = good.clone();
+        v["targets"][0][field] = value;
+        cases.push(v);
+    }
+    let mut v = good.clone();
+    v["targets"][0].as_object_mut().unwrap().remove("target");
+    cases.push(v);
+    let mut v = good;
+    v["targets"][0]["extra"] = json!(1);
+    cases.push(v);
+    for (i, case) in cases.iter().enumerate() {
+        assert!(!errors_for(case).is_empty(), "case {i} should fail");
+    }
+}
+
+/// The real stack in process (encrypted store, ingest, files watcher, retriever) at smoke
+/// scale: the report conforms, every file operation propagates, and freshness meets its target.
+/// The recall gate is evaluated but not asserted here: at smoke scale (50 queries) it can tie the
+/// baseline, and score ties break on chunk ids, which follow the directory listing order of the
+/// file system. Linux only, like the CI step that runs it from the CLI.
+#[cfg(target_os = "linux")]
+#[test]
+fn real_memory_backend_smoke() {
+    let report = run_benchmark(
+        find("memory").unwrap().as_ref(),
+        &RunConfig {
+            scale: Scale::Smoke,
+            seed: 42,
+            backend: Backend::Real,
+            ..RunConfig::default()
+        },
+    );
+    assert_eq!(report.status, Status::Ok, "{:?}", report.message);
+    let v = serde_json::to_value(&report).unwrap();
+    assert!(errors_for(&v).is_empty(), "{:#?}", errors_for(&v));
+    check_keys(&v);
+    assert_eq!(report.config.params["backend"], "real");
+    let get = |n: &str| report.metric(n).unwrap_or_else(|| panic!("{n}")).value;
+    for kind in ["edit", "insert", "delete", "rename"] {
+        assert_eq!(get(&format!("propagation.{kind}_rate")), 1.0, "{kind}");
+    }
+    assert_eq!(get("propagation.final_keys_match"), 1.0);
+    assert_eq!(get("propagation.final_content_match"), 1.0);
+    assert!(get("freshness.p95_s") > 0.0);
+    assert!(get("ingest.files_per_s") > 0.0);
+    assert!(get("resources.db_bytes") > 0.0);
+    assert_eq!(get("retrieval.hybrid.text_only_fallbacks"), 0.0);
+    let check = |t: &str| report.targets.iter().find(|c| c.metric == t).cloned();
+    assert!(check("freshness.p95_s").unwrap().pass);
+    assert!(check("retrieval.eval.hybrid.recall@10").unwrap().pass);
+    let recall = check("retrieval.hybrid.recall@10").expect("recall gate evaluated");
+    assert_eq!(
+        recall.target,
+        get("baseline.fake.retrieval.hybrid.recall@10")
+    );
 }
 
 #[test]
@@ -280,6 +401,7 @@ fn reports_written_to_disk_round_trip() {
         &RunConfig {
             scale: Scale::Smoke,
             seed: 1,
+            ..RunConfig::default()
         },
     );
     let path = report.write_to_dir(dir.path()).unwrap();

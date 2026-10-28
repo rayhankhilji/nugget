@@ -100,6 +100,32 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE items ADD COLUMN version TEXT;
     CREATE INDEX IF NOT EXISTS items_source ON items (source);
     "#,
+    // v3: full-text index over item titles, fused into text search (see `search::search_text`).
+    // External-content table over `items`, kept in sync by triggers. A missing title is indexed
+    // as '' so the insert, delete and update triggers always see the same values (an FTS5
+    // 'delete' must be given exactly what was indexed). Existing rows are backfilled.
+    r#"
+    CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5 (
+        title,
+        content = 'items',
+        content_rowid = 'id',
+        tokenize = 'porter unicode61 remove_diacritics 2'
+    );
+    CREATE TRIGGER IF NOT EXISTS items_fts_ai AFTER INSERT ON items BEGIN
+        INSERT INTO items_fts (rowid, title) VALUES (new.id, coalesce(new.title, ''));
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_fts_ad AFTER DELETE ON items BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, coalesce(old.title, ''));
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_fts_au AFTER UPDATE OF title ON items
+        WHEN old.title IS NOT new.title BEGIN
+        INSERT INTO items_fts (items_fts, rowid, title)
+            VALUES ('delete', old.id, coalesce(old.title, ''));
+        INSERT INTO items_fts (rowid, title) VALUES (new.id, coalesce(new.title, ''));
+    END;
+    INSERT INTO items_fts (rowid, title) SELECT id, coalesce(title, '') FROM items;
+    "#,
 ];
 
 /// Schema version this build creates and understands.
@@ -175,6 +201,72 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(MIGRATIONS[0]).unwrap();
         conn.execute_batch(MIGRATIONS[0]).unwrap();
+    }
+
+    /// Apply migrations up to (and including) version `to` only, as an older build would.
+    fn migrate_to(conn: &mut Connection, to: u32) {
+        for (idx, sql) in MIGRATIONS.iter().enumerate().take(to as usize) {
+            conn.execute_batch(sql).unwrap();
+            conn.pragma_update(None, "user_version", idx as u32 + 1)
+                .unwrap();
+        }
+    }
+
+    fn title_matches(conn: &Connection, q: &str) -> Vec<i64> {
+        let mut stmt = conn
+            .prepare("SELECT rowid FROM items_fts WHERE items_fts MATCH ?1 ORDER BY rowid")
+            .unwrap();
+        stmt.query_map([q], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn v2_database_with_data_migrates_to_v3_with_searchable_titles() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 2);
+        assert_eq!(user_version(&conn).unwrap(), 2);
+        conn.execute_batch(
+            "INSERT INTO items (id, source, key, title, content_hash, created_at, updated_at, version)
+                 VALUES (1, 's', 'a', 'Boiler repair notes', 'h1', 't', 't', 'v1'),
+                        (2, 's', 'b', NULL, 'h2', 't', 't', NULL),
+                        (3, 's', 'c', 'Garden plan', 'h3', 't', 't', NULL);
+             INSERT INTO chunks (item_id, ord, text) VALUES (1, 0, 'gas valve'), (2, 0, 'x');",
+        )
+        .unwrap();
+
+        assert_eq!(migrate(&mut conn).unwrap(), LATEST_VERSION - 2);
+        assert_eq!(user_version(&conn).unwrap(), LATEST_VERSION);
+        // Existing rows were backfilled; data and v2 columns are intact.
+        assert_eq!(title_matches(&conn, "boiler"), vec![1]);
+        assert_eq!(title_matches(&conn, "gardens"), vec![3], "stemmed");
+        let version: String = conn
+            .query_row("SELECT version FROM items WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(version, "v1");
+        conn.execute_batch("INSERT INTO items_fts (items_fts) VALUES ('integrity-check');")
+            .unwrap();
+
+        // Triggers keep the index in step: title change, NULL ↔ text, delete.
+        conn.execute_batch(
+            "UPDATE items SET title = 'Kitchen boiler' WHERE id = 3;
+             UPDATE items SET title = 'Untitled draft' WHERE id = 2;
+             UPDATE items SET title = NULL WHERE id = 1;
+             UPDATE items SET content_hash = 'h4' WHERE id = 3;",
+        )
+        .unwrap();
+        assert_eq!(title_matches(&conn, "boiler"), vec![3]);
+        assert_eq!(title_matches(&conn, "draft"), vec![2]);
+        assert!(title_matches(&conn, "garden").is_empty());
+        conn.execute_batch("DELETE FROM items WHERE id = 3;")
+            .unwrap();
+        assert!(title_matches(&conn, "boiler").is_empty());
+        conn.execute_batch("INSERT INTO items_fts (items_fts) VALUES ('integrity-check');")
+            .unwrap();
+
+        // Re-running is a no-op.
+        assert_eq!(migrate(&mut conn).unwrap(), 0);
     }
 
     #[test]

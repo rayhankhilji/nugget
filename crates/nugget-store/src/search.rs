@@ -1,15 +1,23 @@
 //! Full-text (FTS5 bm25), vector (`sqlite-vec` cosine kNN) and hybrid (RRF) search.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use nugget_core::{Error, Result};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
 use crate::error::DbExt;
 use crate::items::{embedding_dim, f32_blob, item_ref, validate_embedding};
 use crate::types::{ChunkId, Hit};
 
+/// Weight of an item's title bm25 score, added to the bm25 score of each of its matching chunks
+/// in text search. Kept low on purpose: titles are often uninformative (file names, "Re: quick
+/// question"). Measured (M1-J): on the `nugget-retrieve` eval fixtures (informative titles) 0.25
+/// lifts every metric over title-less search (hybrid MRR@10 0.758 → 0.780) and higher weights
+/// help further (1.0: 0.812); on the synthetic benchmark corpus (titles of random topic words,
+/// queries from bodies) hybrid recall@10 falls from 0.936 (0) to 0.930 (0.25), 0.920 (0.5) and
+/// 0.896 (1.0). 0.5 and 0.75 also cost text-only recall@5 on the fixtures.
+pub const TITLE_WEIGHT: f64 = 0.25;
 /// RRF damping constant (Cormack et al. 2009).
 const RRF_K: f64 = 60.0;
 /// Hybrid search pulls this many candidates per list for each requested hit...
@@ -51,10 +59,15 @@ fn excerpt(text: &str) -> String {
 }
 
 impl Store {
-    /// Full-text search over chunks, ranked by bm25 (best first).
+    /// Full-text search over chunks **and item titles**, ranked by bm25 (best first).
     ///
     /// The query is treated as plain words: punctuation and FTS5 operators are ignored. Words are
     /// stemmed (Porter) and diacritics folded.
+    ///
+    /// Titles live in their own FTS5 index. A title match adds [`TITLE_WEIGHT`] × its bm25 score
+    /// to every matching chunk of that item, and an item whose title matches but none of whose
+    /// chunks do is represented by its first chunk (snippet: the chunk's opening text). Items
+    /// without chunks cannot be returned (a hit is a chunk).
     pub fn search_text(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
         let Some(q) = fts_query(query) else {
             return Ok(Vec::new());
@@ -62,33 +75,7 @@ impl Store {
         if limit == 0 {
             return Ok(Vec::new());
         }
-        self.with_conn(|c| {
-            let mut stmt = c
-                .prepare_cached(
-                    "SELECT ch.id, i.source, i.key, i.title,
-                            snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
-                     FROM chunks_fts
-                     JOIN chunks ch ON ch.id = chunks_fts.rowid
-                     JOIN items i ON i.id = ch.item_id
-                     WHERE chunks_fts MATCH ?1
-                     ORDER BY bm25(chunks_fts), ch.id
-                     LIMIT ?2",
-                )
-                .db("prepare text search")?;
-            let rows = stmt
-                .query_map(params![q, limit as i64], |r| {
-                    let rank: f64 = r.get(5)?;
-                    Ok(Hit {
-                        chunk_id: r.get(0)?,
-                        item: item_ref(r.get(1)?, r.get(2)?),
-                        title: r.get(3)?,
-                        snippet: r.get(4)?,
-                        score: -rank as f32,
-                    })
-                })
-                .db("text search")?;
-            rows.collect::<rusqlite::Result<_>>().db("text search")
-        })
+        self.with_conn(|c| text_hits(c, &q, limit))
     }
 
     /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
@@ -167,25 +154,148 @@ impl Store {
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with
     /// reciprocal-rank fusion, `score = Σ 1 / (60 + rank)`. Chunks found by both lists rise to
     /// the top. Snippets come from the full-text hit when there is one.
+    ///
+    /// Each list contributes its top `max(4 × limit, 50)` hits; see
+    /// [`Store::search_hybrid_with_depth`] to choose that depth.
     pub fn search_hybrid(
         &self,
         query: &str,
         embedding: Option<&[f32]>,
         limit: usize,
     ) -> Result<Vec<Hit>> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let candidates = limit
+        let depth = limit
             .saturating_mul(HYBRID_OVERFETCH)
             .max(HYBRID_MIN_CANDIDATES);
-        let text = self.search_text(query, candidates)?;
+        self.search_hybrid_with_depth(query, embedding, limit, depth)
+    }
+
+    /// [`Store::search_hybrid`] with an explicit fusion depth: each list (full-text, and vector
+    /// when `embedding` is given) contributes its top `depth` hits (the vector list at most
+    /// 4096), and the best `limit` fused hits are returned.
+    ///
+    /// Depth matters for quality, not just cost: with RRF, a chunk ranked moderately in *both*
+    /// lists outscores one ranked first in only one of them, so the deeper the lists, the more
+    /// such middling chunks can push a strong single-list match down. Callers that over-fetch
+    /// (to group chunks by item, say) should keep `depth` tied to the number of results they
+    /// will show and pass the larger number as `limit`.
+    pub fn search_hybrid_with_depth(
+        &self,
+        query: &str,
+        embedding: Option<&[f32]>,
+        limit: usize,
+        depth: usize,
+    ) -> Result<Vec<Hit>> {
+        if limit == 0 || depth == 0 {
+            return Ok(Vec::new());
+        }
+        let text = self.search_text(query, depth)?;
         let vector = match embedding {
-            Some(e) => self.search_vector(e, candidates.min(MAX_KNN))?,
+            Some(e) => self.search_vector(e, depth.min(MAX_KNN))?,
             None => Vec::new(),
         };
         Ok(rrf_fuse([text, vector], limit))
     }
+}
+
+/// Chunk and title full-text legs, fused (see [`Store::search_text`]). `q` is an FTS5 query
+/// from [`fts_query`].
+fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
+    let lim = limit.min(i64::MAX as usize) as i64;
+    let mut hits: Vec<(i64, Hit)> = {
+        let mut stmt = c
+            .prepare_cached(
+                "SELECT ch.id, ch.item_id, i.source, i.key, i.title,
+                        snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
+                 FROM chunks_fts
+                 JOIN chunks ch ON ch.id = chunks_fts.rowid
+                 JOIN items i ON i.id = ch.item_id
+                 WHERE chunks_fts MATCH ?1
+                 ORDER BY bm25(chunks_fts), ch.id
+                 LIMIT ?2",
+            )
+            .db("prepare text search")?;
+        let rows = stmt
+            .query_map(params![q, lim], |r| {
+                let rank: f64 = r.get(6)?;
+                Ok((
+                    r.get::<_, i64>(1)?,
+                    Hit {
+                        chunk_id: r.get(0)?,
+                        item: item_ref(r.get(2)?, r.get(3)?),
+                        title: r.get(4)?,
+                        snippet: r.get(5)?,
+                        score: -rank as f32,
+                    },
+                ))
+            })
+            .db("text search")?;
+        rows.collect::<rusqlite::Result<_>>().db("text search")?
+    };
+
+    // Title leg: item id → weighted title score.
+    let titles: Vec<(i64, f64)> = {
+        let mut stmt = c
+            .prepare_cached(
+                "SELECT rowid, bm25(items_fts) FROM items_fts
+                 WHERE items_fts MATCH ?1
+                 ORDER BY bm25(items_fts), rowid
+                 LIMIT ?2",
+            )
+            .db("prepare title search")?;
+        let rows = stmt
+            .query_map(params![q, lim], |r| {
+                Ok((r.get::<_, i64>(0)?, -r.get::<_, f64>(1)? * TITLE_WEIGHT))
+            })
+            .db("title search")?;
+        rows.collect::<rusqlite::Result<_>>().db("title search")?
+    };
+    if titles.is_empty() {
+        return Ok(hits.into_iter().map(|(_, h)| h).collect());
+    }
+    let title_score: HashMap<i64, f64> = titles.iter().copied().collect();
+    let mut with_chunk_hits: HashSet<i64> = HashSet::new();
+    for (item_id, hit) in &mut hits {
+        if let Some(t) = title_score.get(item_id) {
+            hit.score = (f64::from(hit.score) + t) as f32;
+            with_chunk_hits.insert(*item_id);
+        }
+    }
+    let mut first_chunk = c
+        .prepare_cached(
+            "SELECT ch.id, i.source, i.key, i.title, ch.text
+             FROM chunks ch JOIN items i ON i.id = ch.item_id
+             WHERE ch.item_id = ?1
+             ORDER BY ch.ord
+             LIMIT 1",
+        )
+        .db("prepare first chunk lookup")?;
+    for (item_id, t) in titles {
+        if with_chunk_hits.contains(&item_id) {
+            continue;
+        }
+        let hit = first_chunk
+            .query_row([item_id], |r| {
+                let text: String = r.get(4)?;
+                Ok(Hit {
+                    chunk_id: r.get(0)?,
+                    item: item_ref(r.get(1)?, r.get(2)?),
+                    title: r.get(3)?,
+                    snippet: excerpt(&text),
+                    score: t as f32,
+                })
+            })
+            .optional()
+            .db("first chunk lookup")?;
+        hits.extend(hit.map(|h| (item_id, h)));
+    }
+    let mut out: Vec<Hit> = hits.into_iter().map(|(_, h)| h).collect();
+    out.sort_by(|a, b| {
+        b.score
+            .total_cmp(&a.score)
+            .then(a.chunk_id.cmp(&b.chunk_id))
+    });
+    out.truncate(limit);
+    Ok(out)
 }
 
 /// Reciprocal-rank fusion of ranked lists (each best-first). The first list's hit wins for the

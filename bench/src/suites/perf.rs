@@ -261,6 +261,7 @@ mod tests {
             &RunConfig {
                 scale: Scale::Smoke,
                 seed: 7,
+                ..RunConfig::default()
             },
         );
         assert_eq!(report.status, Status::Ok, "{:?}", report.message);

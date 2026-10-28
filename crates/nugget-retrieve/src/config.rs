@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct RetrieveConfig {
-    /// Send queries (and, for vector MMR, candidate passages) to a `Cloud`-locality embedding
-    /// provider. Off by default: embeddings stay on this device or the local network, and a
-    /// cloud-only embedding tier means text-only search.
+    /// Send queries (and, for vector MMR, candidate passages stored without a vector) to a
+    /// `Cloud`-locality embedding provider. Off by default: embeddings stay on this device or the
+    /// local network, and a cloud-only embedding tier means text-only search.
     pub allow_cloud_embedding: bool,
     /// Candidate chunks fetched per requested result before grouping by item.
     pub overfetch: usize,
@@ -17,6 +17,14 @@ pub struct RetrieveConfig {
     pub min_candidates: usize,
     /// ...and at most this many (bounded by the store's per-call limits).
     pub max_candidates: usize,
+    /// Hybrid search fuses the top `max(limit × fusion_depth_factor, min_fusion_depth)` hits of
+    /// each list (full-text and vector), where `limit` is the number of results asked for, not
+    /// the over-fetched candidate count. Deeper lists let chunks that are mediocre in both lists
+    /// outrank a strong match from one (reciprocal-rank fusion), which cost about 8 points of
+    /// known-item recall@10 on the benchmark corpus at 32× depth.
+    pub fusion_depth_factor: usize,
+    /// ...but at least this many hits per list.
+    pub min_fusion_depth: usize,
     /// Re-rank with maximal marginal relevance (MMR) for diversity.
     pub mmr: bool,
     /// MMR trade-off: 1.0 is pure relevance, 0.0 pure novelty.
@@ -25,10 +33,13 @@ pub struct RetrieveConfig {
     pub mmr_pool_factor: usize,
     /// Upper bound on the MMR pool size (items).
     pub mmr_pool_max: usize,
-    /// When the query was embedded, also embed the MMR pool's passages (with the same provider)
-    /// so MMR compares vectors. Otherwise, or if that fails, MMR uses token-set Jaccard.
+    /// When the query was embedded, MMR compares the pool's passages by vector: their stored
+    /// chunk embeddings (read back from the store, never re-embedded), with any passage stored
+    /// without a vector embedded by the query's provider. Otherwise, or if that fails, MMR uses
+    /// token-set Jaccard.
     pub mmr_vectors: bool,
-    /// Characters of each candidate passage sent for MMR embedding.
+    /// Characters of each candidate passage sent for MMR embedding (only passages stored without
+    /// a vector are embedded).
     pub mmr_embed_chars: usize,
     /// Optional boost for recently modified items. Off by default.
     pub recency: Option<RecencyBoost>,
@@ -52,6 +63,8 @@ impl Default for RetrieveConfig {
             overfetch: 8,
             min_candidates: 64,
             max_candidates: 512,
+            fusion_depth_factor: 4,
+            min_fusion_depth: 40,
             mmr: true,
             mmr_lambda: 0.7,
             mmr_pool_factor: 3,

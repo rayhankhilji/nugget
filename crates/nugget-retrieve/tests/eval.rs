@@ -84,19 +84,20 @@ async fn hybrid_is_at_least_as_good_as_text_only() {
         hybrid_mmr.recall_at_10,
         text.recall_at_10
     );
-    // Sanity floors so a regression in any stage shows up.
+    // Floors so a regression in any stage shows up (measured with title search in the store:
+    // text-only R@10 0.881, hybrid R@10 0.976, hybrid MRR@10 0.780).
     assert!(
-        text.recall_at_10 >= 0.75,
+        text.recall_at_10 >= 0.85,
         "text-only recall@10 {}",
         text.recall_at_10
     );
     assert!(
-        hybrid.recall_at_10 >= 0.85,
+        hybrid.recall_at_10 >= 0.9,
         "hybrid recall@10 {}",
         hybrid.recall_at_10
     );
     assert!(
-        hybrid.mrr_at_10 >= 0.7,
+        hybrid.mrr_at_10 >= 0.75,
         "hybrid MRR@10 {}",
         hybrid.mrr_at_10
     );
