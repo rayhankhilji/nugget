@@ -150,3 +150,11 @@ Tauri 2 shell: React, TypeScript, Vite, pnpm. The crate is named `nugget-desktop
 - Ships user-level service install and uninstall for launchd, a Windows scheduled task and a systemd user unit.
 - Handles graceful shutdown.
 - End-to-end test: start the daemon on a temp `NUGGET_HOME`, connect with the client, then check status, chat (against a wiremock provider), search and the egress list.
+
+## Contract notes after wave 1
+- **IPC results.** Every method's result type is listed in the doc comment on `nugget_core::ipc::method`. `chat.cancel` and `models.install` return `null`; progress for those calls arrives as notifications.
+- **Long-running handlers.** `nugget-ipc` drops a connection's in-flight handler futures when the client disconnects. Work that must outlive the call (chat streams, model installs) is `tokio::spawn`ed with a cloned `Notifier`. The spawned task stops when `Notifier::send` returns `Disconnected`.
+- **Running `nuggetd`.** Started with no arguments, `nuggetd` runs in the foreground and binds with `nugget_ipc::bind(&Paths)`. If `bind` returns `AddrInUse`, a daemon is already running: exit 0 with a message.
+- **Router.** A provider that hasn't been probed only serves plain chat. Probe results are persisted by `nuggetd`, under the store's `meta` table or the config dir, and loaded at start into `Router::set_capabilities`.
+- **Keychain naming.** Use `nugget_core::secrets` for all keychain entries: the service is `dev.nugget.Nugget`, and provider keys use the account `provider:NAME`.
+- **New error variants.** `Error::{Network, RateLimited, InsufficientSpace}` exist; use them instead of `Provider`/`Other`/`Storage` strings.

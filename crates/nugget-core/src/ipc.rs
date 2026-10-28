@@ -13,6 +13,19 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// Socket name; `nugget-ipc` maps it to a platform path/pipe name.
 pub const SOCKET_NAME: &str = "nuggetd.sock";
 
+/// Request → response types, by method:
+///
+/// | method | params | result |
+/// |---|---|---|
+/// | `status` | `{}` | [`StatusResponse`] |
+/// | `chat` | [`ChatRequest`] | [`ChatStarted`], then `chat.delta`/`chat.done` notifications |
+/// | `chat.cancel` | [`ChatCancel`] | `null` |
+/// | `search` | [`SearchRequest`] | `Vec<`[`SearchHit`]`>` |
+/// | `providers.list` | `{}` | `Vec<`[`ProviderInfo`]`>` |
+/// | `providers.probe` | [`ProbeRequest`] | [`Capabilities`] |
+/// | `models.list` | `{}` | `Vec<`[`ModelInfo`]`>` |
+/// | `models.install` | [`ModelInstallRequest`] | `null`, then `models.progress` notifications |
+/// | `egress.recent` | [`EgressRecentRequest`] | [`EgressRecentResponse`] |
 pub mod method {
     pub const STATUS: &str = "status";
     pub const CHAT: &str = "chat";
@@ -124,6 +137,9 @@ pub struct SearchRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SearchHit {
     pub item: ItemRef,
+    /// Store chunk id of the matching passage, when known.
+    #[serde(default)]
+    pub chunk_id: Option<i64>,
     pub title: Option<String>,
     pub snippet: String,
     pub score: f32,
@@ -131,12 +147,24 @@ pub struct SearchHit {
 
 // ---- models ----
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub id: String,
     pub size_bytes: u64,
     pub installed: bool,
     pub recommended: bool,
+    #[serde(default)]
+    pub family: String,
+    #[serde(default)]
+    pub tiers: Vec<Tier>,
+    #[serde(default)]
+    pub license: String,
+    /// Pinned upstream revision of the weights.
+    #[serde(default)]
+    pub revision: String,
+    /// An installed copy differs from the manifest entry.
+    #[serde(default)]
+    pub update_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,9 +177,17 @@ pub struct ModelProgress {
     pub id: String,
     pub downloaded: u64,
     pub total: u64,
-    /// `downloading`, `verifying`, `installed`, `failed`.
-    pub phase: String,
+    pub phase: ModelPhase,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPhase {
+    Downloading,
+    Verifying,
+    Installed,
+    Failed,
 }
 
 // ---- egress ----

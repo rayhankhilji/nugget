@@ -85,6 +85,7 @@ export interface ItemRef {
 
 export interface SearchHit {
   item: ItemRef;
+  chunk_id?: number | null;
   title: string | null;
   snippet: string;
   score: number;
@@ -95,6 +96,11 @@ export interface ModelInfo {
   size_bytes: number;
   installed: boolean;
   recommended: boolean;
+  family?: string;
+  tiers?: Tier[];
+  license?: string;
+  revision?: string;
+  update_available?: boolean;
 }
 
 export type ModelPhase = "downloading" | "verifying" | "installed" | "failed";
@@ -103,7 +109,7 @@ export interface ModelProgress {
   id: string;
   downloaded: number;
   total: number;
-  phase: ModelPhase | (string & {});
+  phase: ModelPhase;
   error: string | null;
 }
 

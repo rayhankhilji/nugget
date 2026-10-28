@@ -148,6 +148,7 @@ impl From<Hit> for nugget_core::ipc::SearchHit {
     fn from(h: Hit) -> Self {
         Self {
             item: h.item,
+            chunk_id: Some(h.chunk_id),
             title: h.title,
             snippet: h.snippet,
             score: h.score,

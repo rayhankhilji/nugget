@@ -96,7 +96,7 @@ async fn parallel_parts_download_verify_and_install() {
         (Phase::Installed, SIZE as u64, SIZE as u64)
     );
     let ipc: nugget_core::ipc::ModelProgress = last.into();
-    assert_eq!(ipc.phase, "installed");
+    assert_eq!(ipc.phase, nugget_core::ipc::ModelPhase::Installed);
 }
 
 #[tokio::test]

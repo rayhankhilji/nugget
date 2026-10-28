@@ -15,6 +15,13 @@ pub enum Error {
     Provider(String),
     #[error("storage error: {0}")]
     Storage(String),
+    #[error("network error: {0}")]
+    Network(String),
+    /// The remote asked us to back off. `retry_after_ms` is the server hint, if any.
+    #[error("rate limited{}", .retry_after_ms.map(|ms| format!(" (retry after {ms} ms)")).unwrap_or_default())]
+    RateLimited { retry_after_ms: Option<u64> },
+    #[error("insufficient disk space: need {needed} bytes, {available} available")]
+    InsufficientSpace { needed: u64, available: u64 },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("serialization error: {0}")]

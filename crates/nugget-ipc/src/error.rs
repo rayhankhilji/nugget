@@ -109,7 +109,8 @@ impl From<nugget_core::Error> for RpcError {
             E::Integrity(_) => code::INTEGRITY,
             E::Unsupported(_) => code::UNSUPPORTED,
             E::Provider(_) => code::PROVIDER,
-            E::Storage(_) => code::STORAGE,
+            E::Storage(_) | E::InsufficientSpace { .. } => code::STORAGE,
+            E::Network(_) | E::RateLimited { .. } => code::PROVIDER,
             E::Io(_) => code::IO,
             E::Cancelled => code::CANCELLED,
             E::Other(_) => code::SERVER_ERROR,
@@ -122,7 +123,9 @@ impl From<nugget_core::Error> for RpcError {
             | E::Unsupported(m)
             | E::Provider(m)
             | E::Storage(m)
+            | E::Network(m)
             | E::Other(m) => m,
+            e @ (E::RateLimited { .. } | E::InsufficientSpace { .. }) => e.to_string(),
             E::Io(e) => e.to_string(),
             E::Serde(e) => e.to_string(),
             E::Cancelled => "cancelled".to_owned(),

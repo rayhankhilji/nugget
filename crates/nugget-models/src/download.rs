@@ -105,7 +105,12 @@ impl From<&Progress> for nugget_core::ipc::ModelProgress {
             id: p.id.clone(),
             downloaded: p.done,
             total: p.total,
-            phase: p.phase.as_str().to_string(),
+            phase: match p.phase {
+                Phase::Downloading => nugget_core::ipc::ModelPhase::Downloading,
+                Phase::Verifying => nugget_core::ipc::ModelPhase::Verifying,
+                Phase::Installed => nugget_core::ipc::ModelPhase::Installed,
+                Phase::Failed => nugget_core::ipc::ModelPhase::Failed,
+            },
             error: p.error.clone(),
         }
     }
