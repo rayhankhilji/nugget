@@ -77,7 +77,58 @@ pub const ALWAYS_SKIP_DIRS: &[&str] = &[
     ".fseventsd",
     ".DocumentRevisions-V100",
     ".TemporaryItems",
+    // Credential stores: private keys, cloud and cluster credentials, password stores. Indexed
+    // text is searchable by the assistant (and so reachable by a prompt-injected request), so
+    // these are never read, even with `include_hidden` and a catch-all `include`.
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".azure",
+    ".kube",
+    ".docker",
+    ".password-store",
 ];
+
+/// Credential files never indexed, whatever the settings say (ASCII case-insensitive).
+const SECRET_FILES: &[&str] = &[
+    ".env",
+    ".netrc",
+    "_netrc",
+    ".npmrc",
+    ".pypirc",
+    ".pgpass",
+    ".git-credentials",
+    "credentials.json",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "id_ecdsa_sk",
+    "id_ed25519_sk",
+];
+/// `.env.local`, `.env.production`, ...
+const SECRET_PREFIXES: &[&str] = &[".env."];
+/// Private keys, certificates bundles with keys, keystores and password databases.
+const SECRET_SUFFIXES: &[&str] = &[
+    ".pem",
+    ".key",
+    ".p12",
+    ".pfx",
+    ".ppk",
+    ".jks",
+    ".keystore",
+    ".kdbx",
+    ".gpg",
+    ".asc",
+];
+
+/// Whether a file with this name typically holds credentials (never indexed).
+pub fn is_secret_file(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    SECRET_FILES.contains(&lower.as_str())
+        || SECRET_PREFIXES.iter().any(|p| lower.starts_with(p))
+        || SECRET_SUFFIXES.iter().any(|s| lower.ends_with(s))
+}
 
 /// OS junk and editor temporaries, never indexed.
 const JUNK_FILES: &[&str] = &[
@@ -543,6 +594,7 @@ impl Config {
             .any(|d| self.skip_dir_name(d) || (!self.include_hidden && d.starts_with('.')))
             || self.skip_dir_name(last)
             || is_junk_file(last)
+            || is_secret_file(last)
             || (!self.include_hidden && last.starts_with('.'))
     }
 }
