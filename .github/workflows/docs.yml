@@ -1,0 +1,54 @@
+name: Docs
+
+# Builds the book in docs/book, checks its links, and checks it against the code. It runs on every
+# change, not only docs changes: renaming a config key, CLI flag, IPC method, MCP tool or connector
+# setting must fail here until the book is updated. The book is not published anywhere yet.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  book:
+    name: Build and check the book
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The drift check needs only the repository and the Python standard library.
+      - name: Check the book against the code
+        run: python3 docs/book/check-refs.py
+
+      # mdBook (MPL-2.0) is a build tool only; it is not linked into Nugget. Prebuilt, pinned.
+      - name: Install mdBook and mdbook-linkcheck
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.4.52,mdbook-linkcheck@0.7.7
+
+      # book.toml enables the linkcheck renderer: broken internal links and anchors fail the build.
+      - name: Build the book
+        run: mdbook build docs/book
+
+      - name: Upload the built book
+        uses: actions/upload-artifact@v4
+        with:
+          name: book
+          path: docs/book/build/html
+          retention-days: 7
