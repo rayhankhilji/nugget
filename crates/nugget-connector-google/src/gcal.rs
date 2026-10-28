@@ -1,0 +1,783 @@
+//! `gcal`: Google Calendar over the REST API with `calendar.readonly`.
+//!
+//! Cursor (JSON): `{"v":1,"calendars":{"<calendarId>":<state>}}` where `<state>` is
+//! - `{"sync_token":"<tok>"}` once a calendar is in incremental mode, or
+//! - `{"time_min":"<rfc3339>","time_max":"<rfc3339>","page_token":"<tok>"|null,"resync":bool}`
+//!   while a full (windowed) listing is in progress.
+
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use futures::StreamExt;
+use nugget_connector::{
+    AuthFlow, AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext,
+    ConnectorFactory, Content, Document, KindInfo,
+};
+use nugget_core::ids::ItemKey;
+use nugget_core::{Error, Result};
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+
+use crate::api::{GoogleApi, OAuthSettings, api_url};
+use crate::settings::CalendarSettings;
+use crate::text::{strip_html, truncate_chars};
+use crate::{GoogleEndpoints, RetryPolicy};
+
+pub(crate) const KIND: &str = "gcal";
+const FEATURE: &str = "sync:gcal";
+const EVENTS_PAGE: &str = "250";
+const MAX_VERIFY: usize = 500;
+const VERIFY_CONCURRENCY: usize = 4;
+const MAX_DESCRIPTION: usize = 20_000;
+const MAX_ATTENDEES: usize = 200;
+/// Guard against a server that keeps invalidating tokens.
+const MAX_RESTARTS: u32 = 3;
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+struct CalState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sync_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    time_min: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    time_max: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    page_token: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    resync: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct Cursor {
+    v: u32,
+    #[serde(default)]
+    calendars: BTreeMap<String, CalState>,
+}
+
+impl Default for Cursor {
+    fn default() -> Self {
+        Self {
+            v: 1,
+            calendars: BTreeMap::new(),
+        }
+    }
+}
+
+impl Cursor {
+    fn to_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+}
+
+/// Factory for `gcal` sources.
+#[derive(Debug, Clone, Default)]
+pub struct CalendarFactory {
+    endpoints: GoogleEndpoints,
+    retry: RetryPolicy,
+}
+
+impl CalendarFactory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_endpoints(mut self, endpoints: GoogleEndpoints) -> Self {
+        self.endpoints = endpoints;
+        self
+    }
+
+    pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
+    }
+}
+
+impl ConnectorFactory for CalendarFactory {
+    fn info(&self) -> KindInfo {
+        KindInfo {
+            kind: KIND,
+            display_name: "Google Calendar",
+            auth: AuthKind::OAuth,
+            settings_schema: CalendarSettings::schema(),
+        }
+    }
+
+    fn validate(&self, settings: &Value) -> Result<()> {
+        CalendarSettings::parse(settings).map(|_| ())
+    }
+
+    fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
+        let settings = CalendarSettings::parse(settings)?;
+        let api = GoogleApi::new(
+            FEATURE,
+            nugget_oauth::google::SCOPE_CALENDAR_READONLY,
+            OAuthSettings {
+                client_id: settings.client_id.clone(),
+                client_secret: settings.client_secret.clone(),
+                login_hint: settings.account_hint.clone(),
+            },
+            &self.endpoints,
+            self.retry,
+            ctx.clone(),
+        )?;
+        Ok(Arc::new(CalendarConnector {
+            api,
+            base: self.endpoints.calendar_api.clone(),
+            settings,
+            ctx,
+        }))
+    }
+}
+
+/// One Google account's calendars.
+pub struct CalendarConnector {
+    api: GoogleApi,
+    base: String,
+    settings: CalendarSettings,
+    ctx: ConnectorContext,
+}
+
+impl std::fmt::Debug for CalendarConnector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalendarConnector")
+            .field("source", &self.ctx.source)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Deserialize)]
+struct CalendarList {
+    #[serde(default)]
+    items: Vec<CalendarEntry>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CalendarEntry {
+    id: String,
+    #[serde(default)]
+    selected: bool,
+    #[serde(default)]
+    deleted: bool,
+}
+
+#[derive(Deserialize)]
+struct EventList {
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default, rename = "timeZone")]
+    time_zone: Option<String>,
+    #[serde(default)]
+    items: Vec<Event>,
+    #[serde(rename = "nextPageToken")]
+    next_page_token: Option<String>,
+    #[serde(rename = "nextSyncToken")]
+    next_sync_token: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Event {
+    id: String,
+    status: Option<String>,
+    etag: Option<String>,
+    updated: Option<String>,
+    created: Option<String>,
+    #[serde(rename = "htmlLink")]
+    html_link: Option<String>,
+    summary: Option<String>,
+    description: Option<String>,
+    location: Option<String>,
+    organizer: Option<Person>,
+    attendees: Vec<Attendee>,
+    start: Option<EventTime>,
+    end: Option<EventTime>,
+    #[serde(rename = "recurringEventId")]
+    recurring_event_id: Option<String>,
+    #[serde(rename = "iCalUID")]
+    ical_uid: Option<String>,
+    #[serde(rename = "hangoutLink")]
+    hangout_link: Option<String>,
+}
+
+#[derive(Deserialize, Default, Clone)]
+#[serde(default)]
+struct Person {
+    email: Option<String>,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Attendee {
+    email: Option<String>,
+    #[serde(rename = "displayName")]
+    display_name: Option<String>,
+    #[serde(rename = "responseStatus")]
+    response_status: Option<String>,
+    optional: bool,
+    resource: bool,
+}
+
+#[derive(Deserialize, Default, Clone)]
+#[serde(default)]
+struct EventTime {
+    date: Option<String>,
+    #[serde(rename = "dateTime")]
+    date_time: Option<String>,
+    #[serde(rename = "timeZone")]
+    time_zone: Option<String>,
+}
+
+/// Names and default time zone of the calendar being listed.
+#[derive(Default, Clone)]
+struct CalInfo {
+    id: String,
+    summary: Option<String>,
+    time_zone: Option<String>,
+}
+
+#[async_trait]
+impl Connector for CalendarConnector {
+    fn kind(&self) -> &'static str {
+        KIND
+    }
+
+    fn poll_interval(&self) -> Duration {
+        Duration::from_secs(300)
+    }
+
+    async fn begin_auth(&self) -> Result<AuthFlow> {
+        self.api.begin_auth().await
+    }
+
+    async fn sync(
+        &self,
+        cursor: Option<Value>,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<Value> {
+        self.api.ensure_token().await?;
+        let mut cur = cursor
+            .and_then(|v| match serde_json::from_value::<Cursor>(v) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    tracing::warn!(source = %self.ctx.source, "unreadable gcal cursor ({e}); starting over");
+                    None
+                }
+            })
+            .unwrap_or_default();
+        let calendars = match self.settings.calendar_ids() {
+            Some(c) => c,
+            None => self.selected_calendars(cancel).await?,
+        };
+
+        // Calendars no longer synced: drop their events from the index.
+        let wanted: HashSet<&str> = calendars.iter().map(String::as_str).collect();
+        let dropped: Vec<String> = cur
+            .calendars
+            .keys()
+            .filter(|c| !wanted.contains(c.as_str()))
+            .cloned()
+            .collect();
+        if !dropped.is_empty() {
+            let known = self.ctx.known.versions().await?;
+            for cal in &dropped {
+                let prefix = format!("{cal}/");
+                for key in known.keys().filter(|k| k.as_str().starts_with(&prefix)) {
+                    sink.send(Change::Delete(key.clone())).await?;
+                }
+                cur.calendars.remove(cal);
+            }
+            sink.checkpoint(cur.to_value()).await?;
+        }
+
+        for cal in &calendars {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            self.sync_calendar(cal, &mut cur, sink, cancel).await?;
+            sink.checkpoint(cur.to_value()).await?;
+        }
+        Ok(cur.to_value())
+    }
+}
+
+impl CalendarConnector {
+    /// Every calendar the user has selected (shown) in Google Calendar.
+    async fn selected_calendars(&self, cancel: &CancellationToken) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        let mut page: Option<String> = None;
+        for _ in 0..50 {
+            let mut query = vec![("maxResults", "250"), ("minAccessRole", "reader")];
+            if let Some(p) = &page {
+                query.push(("pageToken", p));
+            }
+            let url = api_url(&self.base, &["users", "me", "calendarList"], &query)?;
+            let resp = self.api.get(&url, cancel).await?;
+            if resp.status.as_u16() != 200 {
+                return Err(Error::Other(format!(
+                    "gcal calendarList: HTTP {}",
+                    resp.status
+                )));
+            }
+            let list: CalendarList = GoogleApi::json(&resp, "gcal calendarList")?;
+            out.extend(
+                list.items
+                    .into_iter()
+                    .filter(|c| c.selected && !c.deleted && valid_calendar_id(&c.id))
+                    .map(|c| c.id),
+            );
+            match list.next_page_token.filter(|t| !t.is_empty()) {
+                Some(t) => page = Some(t),
+                None => break,
+            }
+        }
+        Ok(out)
+    }
+
+    fn window(&self) -> (String, String) {
+        let now = OffsetDateTime::now_utc()
+            .replace_nanosecond(0)
+            .unwrap_or(OffsetDateTime::now_utc());
+        let min = now - time::Duration::days(i64::from(self.settings.past_days));
+        let max = now + time::Duration::days(i64::from(self.settings.future_days));
+        (
+            min.format(&Rfc3339).unwrap_or_default(),
+            max.format(&Rfc3339).unwrap_or_default(),
+        )
+    }
+
+    async fn sync_calendar(
+        &self,
+        cal: &str,
+        cur: &mut Cursor,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let mut state = cur.calendars.get(cal).cloned().unwrap_or_default();
+        let mut info = CalInfo {
+            id: cal.to_string(),
+            ..Default::default()
+        };
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut restarts = 0u32;
+        loop {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let full = state.sync_token.is_none() || state.time_min.is_some();
+            if full && state.time_min.is_none() {
+                let (min, max) = self.window();
+                state.time_min = Some(min);
+                state.time_max = Some(max);
+                state.page_token = None;
+                state.sync_token = None;
+            }
+            let mut query: Vec<(&str, &str)> =
+                vec![("singleEvents", "true"), ("maxResults", EVENTS_PAGE)];
+            if full {
+                query.push(("timeMin", state.time_min.as_deref().unwrap_or_default()));
+                query.push(("timeMax", state.time_max.as_deref().unwrap_or_default()));
+            } else if let Some(t) = &state.sync_token {
+                query.push(("syncToken", t));
+            }
+            if let Some(p) = &state.page_token {
+                query.push(("pageToken", p));
+            }
+            let url = api_url(&self.base, &["calendars", cal, "events"], &query)?;
+            let resp = self.api.get(&url, cancel).await?;
+            match resp.status.as_u16() {
+                200 => {}
+                410 if restarts < MAX_RESTARTS => {
+                    // Sync token (or page token) invalidated: full resync of this calendar.
+                    tracing::info!(source = %self.ctx.source, calendar = cal, "gcal token expired (410); full resync");
+                    restarts += 1;
+                    state = CalState {
+                        resync: true,
+                        ..Default::default()
+                    };
+                    seen.clear();
+                    continue;
+                }
+                404 => {
+                    return Err(Error::NotFound(format!(
+                        "calendar `{cal}` not found or not shared"
+                    )));
+                }
+                s => return Err(Error::Other(format!("gcal events.list: HTTP {s}"))),
+            }
+            let page: EventList = GoogleApi::json(&resp, "gcal events.list")?;
+            if page.summary.is_some() {
+                info.summary = page.summary.clone();
+            }
+            if page.time_zone.is_some() {
+                info.time_zone = page.time_zone.clone();
+            }
+            for ev in page.items {
+                if !valid_event_id(&ev.id) {
+                    continue;
+                }
+                let key = format!("{cal}/{}", ev.id);
+                if ev.status.as_deref() == Some("cancelled") {
+                    sink.send(Change::Delete(ItemKey::new(key))).await?;
+                } else {
+                    seen.insert(key);
+                    sink.send(Change::Upsert(event_document(&info, ev))).await?;
+                }
+            }
+            if let Some(t) = page.next_page_token.filter(|t| !t.is_empty()) {
+                state.page_token = Some(t);
+                cur.calendars.insert(cal.to_string(), state.clone());
+                sink.checkpoint(cur.to_value()).await?;
+                continue;
+            }
+            // Last page.
+            if full && state.resync {
+                self.verify_missing(cal, &seen, sink, cancel).await?;
+            }
+            let sync_token = page
+                .next_sync_token
+                .filter(|t| !t.is_empty())
+                .or_else(|| if full { None } else { state.sync_token.clone() });
+            let done = match sync_token {
+                Some(t) => CalState {
+                    sync_token: Some(t),
+                    ..Default::default()
+                },
+                // No sync token offered: the next pass lists the window again.
+                None => CalState::default(),
+            };
+            cur.calendars.insert(cal.to_string(), done);
+            return Ok(());
+        }
+    }
+
+    /// After a resync: indexed events of this calendar not listed again are either outside the
+    /// window or gone. Check a bounded number and delete the gone or cancelled ones.
+    async fn verify_missing(
+        &self,
+        cal: &str,
+        seen: &HashSet<String>,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let prefix = format!("{cal}/");
+        let mut missing: Vec<String> = self
+            .ctx
+            .known
+            .versions()
+            .await?
+            .into_keys()
+            .map(|k| k.0)
+            .filter(|k| k.starts_with(&prefix) && !seen.contains(k))
+            .collect();
+        missing.sort();
+        missing.truncate(MAX_VERIFY);
+        let plen = prefix.len();
+        let mut checks = futures::stream::iter(missing)
+            .map(|key: String| async move {
+                let exists = self.event_exists(cal, &key[plen..], cancel).await;
+                (key, exists)
+            })
+            .buffered(VERIFY_CONCURRENCY);
+        while let Some((key, exists)) = checks.next().await {
+            if !exists? {
+                sink.send(Change::Delete(ItemKey::new(key))).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn event_exists(&self, cal: &str, id: &str, cancel: &CancellationToken) -> Result<bool> {
+        if !valid_event_id(id) {
+            return Ok(false);
+        }
+        let url = api_url(&self.base, &["calendars", cal, "events", id], &[])?;
+        let resp = self.api.get(&url, cancel).await?;
+        match resp.status.as_u16() {
+            404 | 410 => Ok(false),
+            200 => {
+                let ev: Event = GoogleApi::json(&resp, "gcal events.get")?;
+                Ok(ev.status.as_deref() != Some("cancelled"))
+            }
+            s => Err(Error::Other(format!("gcal events.get: HTTP {s}"))),
+        }
+    }
+}
+
+fn valid_calendar_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 1024 && !id.contains('/') && !id.chars().any(char::is_control)
+}
+
+/// Event ids are base32hex, plus `_` and an instance suffix for recurring instances.
+fn valid_event_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 1024
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'@' || b == b'.')
+}
+
+fn person(name: Option<&str>, email: Option<&str>) -> Option<String> {
+    match (
+        name.filter(|s| !s.is_empty()),
+        email.filter(|s| !s.is_empty()),
+    ) {
+        (Some(n), Some(e)) if n != e => Some(format!("{n} <{e}>")),
+        (Some(n), _) => Some(n.to_string()),
+        (None, Some(e)) => Some(e.to_string()),
+        (None, None) => None,
+    }
+}
+
+fn parse_time(t: &EventTime) -> Option<OffsetDateTime> {
+    t.date_time
+        .as_deref()
+        .and_then(|s| OffsetDateTime::parse(s, &Rfc3339).ok())
+}
+
+fn fmt_date(d: time::Date) -> String {
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
+}
+
+fn fmt_offset(o: time::UtcOffset) -> String {
+    let (h, m, _) = o.as_hms();
+    let sign = if o.is_negative() { '-' } else { '+' };
+    format!("UTC{sign}{:02}:{:02}", h.unsigned_abs(), m.unsigned_abs())
+}
+
+/// "2025-11-03 10:00 – 11:00 (Europe/Paris, UTC+01:00)" or "2025-11-03 (all day)".
+fn describe_when(
+    start: Option<&EventTime>,
+    end: Option<&EventTime>,
+    cal_tz: Option<&str>,
+) -> Option<String> {
+    let start = start?;
+    if let Some(d) = start.date.as_deref() {
+        let first = time::Date::parse(d, &time::format_description::well_known::Iso8601::DATE).ok();
+        // All-day end dates are exclusive.
+        let last = end
+            .and_then(|e| e.date.as_deref())
+            .and_then(|e| {
+                time::Date::parse(e, &time::format_description::well_known::Iso8601::DATE).ok()
+            })
+            .and_then(|e| e.previous_day());
+        return Some(match (first, last) {
+            (Some(f), Some(l)) if l > f => format!("{} – {} (all day)", fmt_date(f), fmt_date(l)),
+            (Some(f), _) => format!("{} (all day)", fmt_date(f)),
+            _ => format!("{d} (all day)"),
+        });
+    }
+    let s = parse_time(start);
+    let e = end.and_then(parse_time);
+    let tz = start.time_zone.as_deref().or(cal_tz);
+    let Some(s) = s else {
+        return start.date_time.clone();
+    };
+    let hm = |t: OffsetDateTime| format!("{:02}:{:02}", t.hour(), t.minute());
+    let mut out = format!("{} {}", fmt_date(s.date()), hm(s));
+    if let Some(e) = e {
+        let e = e.to_offset(s.offset());
+        if e.date() == s.date() {
+            out.push_str(&format!(" – {}", hm(e)));
+        } else {
+            out.push_str(&format!(" – {} {}", fmt_date(e.date()), hm(e)));
+        }
+    }
+    let off = fmt_offset(s.offset());
+    out.push_str(&match tz {
+        Some(tz) => format!(" ({tz}, {off})"),
+        None => format!(" ({off})"),
+    });
+    Some(out)
+}
+
+fn event_document(cal: &CalInfo, ev: Event) -> Document {
+    let key = format!("{}/{}", cal.id, ev.id);
+    let title = ev
+        .summary
+        .as_deref()
+        .map(|s| truncate_chars(s.trim(), 500))
+        .filter(|s| !s.is_empty());
+    let when = describe_when(ev.start.as_ref(), ev.end.as_ref(), cal.time_zone.as_deref());
+    let organizer = ev
+        .organizer
+        .as_ref()
+        .and_then(|o| person(o.display_name.as_deref(), o.email.as_deref()));
+    let attendees: Vec<&Attendee> = ev.attendees.iter().take(MAX_ATTENDEES).collect();
+
+    let mut text = String::new();
+    text.push_str(title.as_deref().unwrap_or("(no title)"));
+    text.push('\n');
+    if let Some(w) = &when {
+        text.push_str(&format!("When: {w}\n"));
+    }
+    if let Some(l) = ev.location.as_deref().filter(|l| !l.trim().is_empty()) {
+        text.push_str(&format!("Where: {}\n", truncate_chars(l.trim(), 1000)));
+    }
+    if let Some(o) = &organizer {
+        text.push_str(&format!("Organizer: {o}\n"));
+    }
+    let people: Vec<String> = attendees
+        .iter()
+        .filter(|a| !a.resource)
+        .filter_map(|a| {
+            let p = person(a.display_name.as_deref(), a.email.as_deref())?;
+            let mut extra = Vec::new();
+            if let Some(r) = a.response_status.as_deref() {
+                extra.push(match r {
+                    "needsAction" => "no response",
+                    "accepted" => "accepted",
+                    "declined" => "declined",
+                    "tentative" => "maybe",
+                    other => other,
+                });
+            }
+            if a.optional {
+                extra.push("optional");
+            }
+            Some(if extra.is_empty() {
+                p
+            } else {
+                format!("{p} ({})", extra.join(", "))
+            })
+        })
+        .collect();
+    if !people.is_empty() {
+        text.push_str(&format!("Attendees: {}\n", people.join("; ")));
+    }
+    if let Some(h) = ev.hangout_link.as_deref() {
+        text.push_str(&format!("Video call: {h}\n"));
+    }
+    if let Some(c) = cal.summary.as_deref() {
+        text.push_str(&format!("Calendar: {c}\n"));
+    }
+    if let Some(d) = ev.description.as_deref() {
+        let d = strip_html(d, MAX_DESCRIPTION);
+        if !d.is_empty() {
+            text.push('\n');
+            text.push_str(&d);
+            text.push('\n');
+        }
+    }
+
+    let time_json = |t: Option<&EventTime>| {
+        t.map(|t| json!({"date": t.date, "date_time": t.date_time, "time_zone": t.time_zone}))
+    };
+    let metadata = json!({
+        "calendar_id": cal.id,
+        "calendar": cal.summary,
+        "event_id": ev.id,
+        "status": ev.status,
+        "start": time_json(ev.start.as_ref()),
+        "end": time_json(ev.end.as_ref()),
+        "all_day": ev.start.as_ref().is_some_and(|s| s.date.is_some()),
+        "time_zone": ev.start.as_ref().and_then(|s| s.time_zone.clone()).or(cal.time_zone.clone()),
+        "location": ev.location,
+        "organizer": ev.organizer.as_ref().map(|o| json!({"email": o.email, "name": o.display_name})),
+        "attendees": attendees.iter().map(|a| json!({
+            "email": a.email, "name": a.display_name, "response": a.response_status,
+            "optional": a.optional, "resource": a.resource,
+        })).collect::<Vec<_>>(),
+        "recurring_event_id": ev.recurring_event_id,
+        "ical_uid": ev.ical_uid,
+        "hangout_link": ev.hangout_link,
+        "created": ev.created,
+        "updated": ev.updated,
+    });
+
+    let mut doc = Document::new(key, "text/plain", Content::Text(text));
+    doc.title = title;
+    doc.version = ev.etag.clone().or_else(|| ev.updated.clone());
+    doc.modified_at = ev
+        .updated
+        .as_deref()
+        .and_then(|u| OffsetDateTime::parse(u, &Rfc3339).ok());
+    doc.url = ev.html_link.clone();
+    doc.metadata = metadata;
+    doc
+}
+
+#[cfg(test)]
+mod unit {
+    use super::*;
+
+    fn t(dt: &str, tz: Option<&str>) -> EventTime {
+        EventTime {
+            date: None,
+            date_time: Some(dt.into()),
+            time_zone: tz.map(Into::into),
+        }
+    }
+
+    fn d(date: &str) -> EventTime {
+        EventTime {
+            date: Some(date.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn describes_times_with_zone() {
+        let s = t("2025-11-03T10:00:00+01:00", Some("Europe/Paris"));
+        let e = t("2025-11-03T11:30:00+01:00", None);
+        assert_eq!(
+            describe_when(Some(&s), Some(&e), None).unwrap(),
+            "2025-11-03 10:00 – 11:30 (Europe/Paris, UTC+01:00)"
+        );
+        let e2 = t("2025-11-04T05:00:00Z", None);
+        assert_eq!(
+            describe_when(
+                Some(&t("2025-11-03T22:00:00-05:00", None)),
+                Some(&e2),
+                Some("America/New_York")
+            )
+            .unwrap(),
+            "2025-11-03 22:00 – 2025-11-04 00:00 (America/New_York, UTC-05:00)"
+        );
+    }
+
+    #[test]
+    fn describes_all_day_events() {
+        assert_eq!(
+            describe_when(Some(&d("2025-11-03")), Some(&d("2025-11-04")), None).unwrap(),
+            "2025-11-03 (all day)"
+        );
+        assert_eq!(
+            describe_when(Some(&d("2025-11-03")), Some(&d("2025-11-06")), None).unwrap(),
+            "2025-11-03 – 2025-11-05 (all day)"
+        );
+        assert_eq!(
+            describe_when(Some(&d("garbage")), None, None).unwrap(),
+            "garbage (all day)"
+        );
+        assert_eq!(
+            describe_when(Some(&t("nope", None)), None, None).unwrap(),
+            "nope"
+        );
+        assert!(describe_when(None, None, None).is_none());
+    }
+
+    #[test]
+    fn cursor_shape() {
+        let mut c = Cursor::default();
+        c.calendars.insert(
+            "primary".into(),
+            CalState {
+                sync_token: Some("st".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            c.to_value(),
+            json!({"v": 1, "calendars": {"primary": {"sync_token": "st"}}})
+        );
+    }
+}

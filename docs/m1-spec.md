@@ -61,3 +61,6 @@ query ──▶ nugget-retrieve (hybrid + MMR + packing with citations) ──�
 - **Google client secret.** The UI sends it through `sources.secret.set`, never in settings. For OAuth kinds the daemon stores it under a dedicated account (`oauth_client_secret:<source>`), and the connector reads it from there.
 - **`sources.changed` payload.** It is a single `SourceInfo`, and the UI also tolerates a list.
 - After a secret is set, the UI calls `sources.sync`.
+- **Google `client_secret`.** The connectors accept `client_secret` in settings, but the daemon never persists it there. It stores the secret through `sources.secret.set` under `oauth_client_secret:<source>`, and injects it into the settings passed to `ConnectorFactory::build`.
+- **Google app verification.** While the user's OAuth app is in Testing mode, refresh tokens expire after 7 days. The UI should explain that reconnecting will be needed.
+- **`AuthFlow::done`.** The daemon spawns it and awaits it for up to 5 minutes. Dropping it aborts the flow.

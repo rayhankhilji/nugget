@@ -1,5 +1,6 @@
 [package]
 name = "nugget-oauth"
+description = "OAuth 2.0 (PKCE, loopback redirect) for Nugget connectors"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,20 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+nugget-connector.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+getrandom = "0.3"
+sha2 = "0.10"
+url = "2.5"
+
+[dev-dependencies]
+wiremock = "0.6"
 
 [lints]
 workspace = true
