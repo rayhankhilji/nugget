@@ -1,0 +1,172 @@
+{
+ "note": "Modelled on Messages.app: bubbles are AXGroups whose description carries sender, text and time.",
+ "app": {
+  "id": "com.apple.MobileSMS",
+  "name": "Messages",
+  "window_title": "Messages"
+ },
+ "field_value": "",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "Messages",
+  "bounds": [
+   0,
+   0,
+   900,
+   700
+  ],
+  "children": [
+   {
+    "role": "group",
+    "raw_role": "AXSplitGroup",
+    "bounds": [
+     0,
+     0,
+     900,
+     700
+    ],
+    "children": [
+     {
+      "role": "scroll_area",
+      "raw_role": "AXScrollArea",
+      "name": "Conversations",
+      "bounds": [
+       0,
+       0,
+       300,
+       700
+      ],
+      "children": [
+       {
+        "role": "table",
+        "raw_role": "AXTable",
+        "bounds": [
+         0,
+         0,
+         300,
+         700
+        ],
+        "children": [
+         {
+          "role": "row",
+          "raw_role": "AXRow",
+          "name": "Alice Smith, Are we still on for lunch tomorrow?, 10:41 AM",
+          "bounds": [
+           0,
+           0,
+           300,
+           60
+          ]
+         },
+         {
+          "role": "row",
+          "raw_role": "AXRow",
+          "name": "Mum, Call me when you land, Yesterday",
+          "bounds": [
+           0,
+           60,
+           300,
+           60
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "role": "group",
+      "raw_role": "AXGroup",
+      "bounds": [
+       300,
+       0,
+       600,
+       700
+      ],
+      "children": [
+       {
+        "role": "scroll_area",
+        "raw_role": "AXScrollArea",
+        "name": "Messages",
+        "bounds": [
+         300,
+         40,
+         600,
+         560
+        ],
+        "children": [
+         {
+          "role": "static_text",
+          "raw_role": "AXStaticText",
+          "value": "Today 10:30 AM",
+          "bounds": [
+           550,
+           45,
+           100,
+           15
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "description": "Alice Smith, Are we still on for lunch tomorrow?, 10:41 AM",
+          "bounds": [
+           310,
+           0,
+           260,
+           30
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "description": "Alice Smith, The new place on 5th, 10:41 AM",
+          "bounds": [
+           310,
+           0,
+           200,
+           30
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "description": "Your iMessage, Yes! Noon works, 10:43 AM",
+          "bounds": [
+           700,
+           0,
+           190,
+           30
+          ]
+         }
+        ]
+       },
+       {
+        "role": "text_field",
+        "raw_role": "AXTextField",
+        "name": "iMessage",
+        "value": "",
+        "states": {
+         "focused": true,
+         "editable": true,
+         "multiline": false
+        },
+        "bounds": [
+         310,
+         620,
+         580,
+         30
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  0,
+  1,
+  1
+ ]
+}

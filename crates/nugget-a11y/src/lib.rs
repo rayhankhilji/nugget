@@ -11,8 +11,34 @@
 //! - Insertion prefers the accessibility API (insert at selection), verifies by reading the field
 //!   back, and falls back to a clipboard paste that saves and restores every pasteboard type.
 
+//!
+//! **Layout (added by M3-A).** Platform-neutral policy lives in [`engine::Backend`], which runs
+//! over a small per-OS [`engine::Platform`]: [`tree`] (element trait, snapshots and the bounded
+//! walk), [`role`] (role normalisation), [`thread`] (message-list heuristics), [`verify`]
+//! (read-back), [`clipboard`] (save, paste, restore), [`deny`] (excluded apps) and [`sanitize`]
+//! (untrusted text). The OS code is in `platform/` behind `cfg`.
+
 use nugget_core::Result;
 use nugget_core::ipc::{AppInfo, FieldInfo, ThreadMessage};
+
+pub mod clipboard;
+pub mod deny;
+pub mod engine;
+mod platform;
+pub mod role;
+pub mod sanitize;
+pub mod thread;
+pub mod tree;
+pub mod verify;
+
+pub use deny::{DenyList, DenyRule};
+pub use engine::{A11yConfig, Backend, InsertStrategy, Platform};
+#[cfg(target_os = "linux")]
+pub use platform::linux::AtspiPlatform;
+#[cfg(target_os = "macos")]
+pub use platform::macos::AxPlatform;
+#[cfg(target_os = "windows")]
+pub use platform::windows::UiaPlatform;
 
 /// Screen rectangle in logical points, origin top-left of the primary display.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -95,5 +121,17 @@ impl Accessibility for Unsupported {
 
 /// The backend for the current OS.
 pub fn system() -> Box<dyn Accessibility> {
-    Box::new(Unsupported)
+    system_with(A11yConfig::default())
+}
+
+/// The OS clipboard with full save and restore of every format, as used by the insertion
+/// fallback (the desktop app can use it for its own paste flows).
+pub fn system_clipboard() -> Result<Box<dyn clipboard::Clipboard>> {
+    platform::system_clipboard()
+}
+
+/// The backend for the current OS with explicit configuration (deny list, limits, insertion
+/// strategy, the user's own names for `from_me`).
+pub fn system_with(config: A11yConfig) -> Box<dyn Accessibility> {
+    platform::system_with(config)
 }

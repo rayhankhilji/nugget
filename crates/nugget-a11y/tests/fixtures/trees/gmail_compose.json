@@ -1,0 +1,372 @@
+{
+ "note": "Modelled on Gmail's conversation view: messages are ARIA list items; the reply has To chips.",
+ "app": {
+  "id": "com.google.Chrome",
+  "name": "Google Chrome",
+  "window_title": "Re: Lunch on Friday - me@example.com - Gmail"
+ },
+ "field_value": "",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "Re: Lunch on Friday - me@example.com - Gmail",
+  "bounds": [
+   0,
+   0,
+   1300,
+   900
+  ],
+  "children": [
+   {
+    "role": "web_area",
+    "raw_role": "AXWebArea",
+    "name": "Re: Lunch on Friday - me@example.com - Gmail",
+    "bounds": [
+     0,
+     80,
+     1300,
+     820
+    ],
+    "attrs": {
+     "url": "https://mail.google.com/mail/u/0/#inbox/FMfcgz"
+    },
+    "children": [
+     {
+      "role": "group",
+      "raw_role": "AXGroup",
+      "name": "Main menu",
+      "children": [
+       {
+        "role": "link",
+        "raw_role": "AXLink",
+        "name": "Inbox 3"
+       },
+       {
+        "role": "link",
+        "raw_role": "AXLink",
+        "name": "Starred"
+       },
+       {
+        "role": "link",
+        "raw_role": "AXLink",
+        "name": "Sent"
+       }
+      ]
+     },
+     {
+      "role": "group",
+      "raw_role": "AXGroup",
+      "bounds": [
+       200,
+       80,
+       1000,
+       820
+      ],
+      "children": [
+       {
+        "role": "heading",
+        "raw_role": "AXHeading",
+        "name": "Lunch on Friday",
+        "bounds": [
+         220,
+         90,
+         400,
+         30
+        ]
+       },
+       {
+        "role": "list",
+        "raw_role": "AXList",
+        "bounds": [
+         200,
+         130,
+         1000,
+         400
+        ],
+        "children": [
+         {
+          "role": "list_item",
+          "raw_role": "AXGroup",
+          "bounds": [
+           200,
+           130,
+           900,
+           120
+          ],
+          "children": [
+           {
+            "role": "heading",
+            "raw_role": "AXHeading",
+            "name": "Alice Smith",
+            "bounds": [
+             220,
+             130,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "<alice@example.com>",
+            "bounds": [
+             430,
+             130,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "Mon, 2 Mar, 10:00",
+            "bounds": [
+             900,
+             130,
+             180,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             220,
+             160,
+             860,
+             80
+            ],
+            "children": [
+             {
+              "role": "paragraph",
+              "raw_role": "AXGroup",
+              "value": "Shall we do lunch on Friday? The usual place.",
+              "bounds": [
+               220,
+               160,
+               860,
+               40
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "list_item",
+          "raw_role": "AXGroup",
+          "bounds": [
+           200,
+           260,
+           900,
+           120
+          ],
+          "children": [
+           {
+            "role": "heading",
+            "raw_role": "AXHeading",
+            "name": "me",
+            "bounds": [
+             220,
+             260,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "",
+            "bounds": [
+             430,
+             260,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "Mon, 2 Mar, 11:30",
+            "bounds": [
+             900,
+             260,
+             180,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             220,
+             290,
+             860,
+             80
+            ],
+            "children": [
+             {
+              "role": "paragraph",
+              "raw_role": "AXGroup",
+              "value": "Sounds good. 12:30?",
+              "bounds": [
+               220,
+               290,
+               860,
+               40
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "list_item",
+          "raw_role": "AXGroup",
+          "bounds": [
+           200,
+           390,
+           900,
+           120
+          ],
+          "children": [
+           {
+            "role": "heading",
+            "raw_role": "AXHeading",
+            "name": "Alice Smith",
+            "bounds": [
+             220,
+             390,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "<alice@example.com>",
+            "bounds": [
+             430,
+             390,
+             200,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "Mon, 2 Mar, 11:45",
+            "bounds": [
+             900,
+             390,
+             180,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+             220,
+             420,
+             860,
+             80
+            ],
+            "children": [
+             {
+              "role": "paragraph",
+              "raw_role": "AXGroup",
+              "value": "Perfect, see you there. Bringing Bob.",
+              "bounds": [
+               220,
+               420,
+               860,
+               40
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup",
+        "name": "Reply",
+        "bounds": [
+         200,
+         540,
+         1000,
+         300
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "name": "To",
+          "bounds": [
+           220,
+           540,
+           900,
+           30
+          ],
+          "children": [
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Alice Smith <alice@example.com>"
+           },
+           {
+            "role": "button",
+            "raw_role": "AXButton",
+            "name": "Bob Jones <bob@example.com>"
+           },
+           {
+            "role": "combo_box",
+            "raw_role": "AXComboBox",
+            "name": "To recipients",
+            "value": "",
+            "states": {
+             "editable": true
+            }
+           }
+          ]
+         },
+         {
+          "role": "text_area",
+          "raw_role": "AXTextArea",
+          "name": "Message Body",
+          "value": "",
+          "states": {
+           "focused": true,
+           "editable": true,
+           "multiline": true
+          },
+          "bounds": [
+           220,
+           580,
+           900,
+           200
+          ]
+         },
+         {
+          "role": "button",
+          "raw_role": "AXButton",
+          "name": "Send"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  0,
+  1,
+  2,
+  1
+ ]
+}

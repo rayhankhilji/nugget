@@ -1,0 +1,283 @@
+{
+ "note": "Modelled on WhatsApp desktop through UIA: own messages are right-aligned bubbles.",
+ "app": {
+  "id": "WhatsApp.exe",
+  "name": "WhatsApp",
+  "window_title": "WhatsApp"
+ },
+ "field_value": "",
+ "root": {
+  "role": "window",
+  "raw_role": "50032",
+  "name": "WhatsApp",
+  "bounds": [
+   0,
+   0,
+   1200,
+   800
+  ],
+  "children": [
+   {
+    "role": "list",
+    "raw_role": "50008",
+    "name": "Chats",
+    "bounds": [
+     0,
+     60,
+     400,
+     740
+    ],
+    "children": [
+     {
+      "role": "list_item",
+      "raw_role": "50007",
+      "name": "Alice Smith",
+      "bounds": [
+       0,
+       60,
+       400,
+       70
+      ],
+      "children": [
+       {
+        "role": "static_text",
+        "raw_role": "50020",
+        "name": "Alice Smith"
+       },
+       {
+        "role": "static_text",
+        "raw_role": "50020",
+        "name": "Ok!"
+       }
+      ]
+     },
+     {
+      "role": "list_item",
+      "raw_role": "50007",
+      "name": "Family",
+      "bounds": [
+       0,
+       130,
+       400,
+       70
+      ],
+      "children": [
+       {
+        "role": "static_text",
+        "raw_role": "50020",
+        "name": "Family"
+       },
+       {
+        "role": "static_text",
+        "raw_role": "50020",
+        "name": "Mum: dinner Sunday?"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "role": "group",
+    "raw_role": "50026",
+    "bounds": [
+     400,
+     0,
+     800,
+     800
+    ],
+    "children": [
+     {
+      "role": "toolbar",
+      "raw_role": "50021",
+      "name": "Alice Smith",
+      "bounds": [
+       400,
+       0,
+       800,
+       60
+      ],
+      "children": [
+       {
+        "role": "button",
+        "raw_role": "50000",
+        "name": "Video call"
+       }
+      ]
+     },
+     {
+      "role": "list",
+      "raw_role": "50008",
+      "name": "Messages",
+      "bounds": [
+       400,
+       60,
+       800,
+       640
+      ],
+      "children": [
+       {
+        "role": "list_item",
+        "raw_role": "50007",
+        "bounds": [
+         400,
+         0,
+         800,
+         50
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "50026",
+          "bounds": [
+           410,
+           0,
+           300,
+           50
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "Did you get the tickets?",
+            "bounds": [
+             420,
+             5,
+             260,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "09:12",
+            "bounds": [
+             630,
+             30,
+             60,
+             15
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "list_item",
+        "raw_role": "50007",
+        "bounds": [
+         400,
+         0,
+         800,
+         50
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "50026",
+          "bounds": [
+           880,
+           0,
+           300,
+           50
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "Yes, two for Friday",
+            "bounds": [
+             890,
+             5,
+             260,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "09:15",
+            "bounds": [
+             1100,
+             30,
+             60,
+             15
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "list_item",
+        "raw_role": "50007",
+        "bounds": [
+         400,
+         0,
+         800,
+         50
+        ],
+        "children": [
+         {
+          "role": "group",
+          "raw_role": "50026",
+          "bounds": [
+           410,
+           0,
+           300,
+           50
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "Amazing, thank you!",
+            "bounds": [
+             420,
+             5,
+             260,
+             20
+            ]
+           },
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "09:16",
+            "bounds": [
+             630,
+             30,
+             60,
+             15
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "role": "text_field",
+      "raw_role": "50004",
+      "name": "Type a message",
+      "value": "",
+      "states": {
+       "focused": true,
+       "editable": true,
+       "multiline": true
+      },
+      "bounds": [
+       420,
+       720,
+       760,
+       40
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  1,
+  2
+ ]
+}

@@ -1,0 +1,605 @@
+{
+ "note": "Modelled on Slack's Electron web content as exposed through AX (ARIA list of message groups).",
+ "app": {
+  "id": "com.tinyspeck.slackmacgap",
+  "name": "Slack",
+  "window_title": "general (Channel) - Acme - Slack"
+ },
+ "field_value": "",
+ "root": {
+  "role": "window",
+  "raw_role": "AXWindow",
+  "name": "general (Channel) - Acme - Slack",
+  "bounds": [
+   0,
+   0,
+   1200,
+   800
+  ],
+  "children": [
+   {
+    "role": "group",
+    "raw_role": "AXGroup",
+    "children": [
+     {
+      "role": "web_area",
+      "raw_role": "AXWebArea",
+      "name": "Slack",
+      "bounds": [
+       0,
+       0,
+       1200,
+       800
+      ],
+      "attrs": {
+       "url": "https://app.slack.com/client/T01/C01"
+      },
+      "children": [
+       {
+        "role": "group",
+        "raw_role": "AXGroup",
+        "name": "Sidebar",
+        "bounds": [
+         0,
+         40,
+         340,
+         760
+        ],
+        "children": [
+         {
+          "role": "list",
+          "raw_role": "AXList",
+          "name": "Channels and direct messages",
+          "bounds": [
+           0,
+           60,
+           340,
+           400
+          ],
+          "children": [
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             60,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "general",
+              "bounds": [
+               20,
+               60,
+               200,
+               28
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             88,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "random",
+              "bounds": [
+               20,
+               88,
+               200,
+               28
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             116,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "design-reviews",
+              "bounds": [
+               20,
+               116,
+               200,
+               28
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             144,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "eng-accessibility",
+              "bounds": [
+               20,
+               144,
+               200,
+               28
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             172,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Alice Smith",
+              "bounds": [
+               20,
+               172,
+               200,
+               28
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "AXGroup",
+            "bounds": [
+             0,
+             200,
+             300,
+             28
+            ],
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "Bob Jones",
+              "bounds": [
+               20,
+               200,
+               200,
+               28
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "AXGroup",
+        "bounds": [
+         340,
+         40,
+         860,
+         760
+        ],
+        "children": [
+         {
+          "role": "heading",
+          "raw_role": "AXHeading",
+          "name": "general",
+          "bounds": [
+           360,
+           40,
+           200,
+           30
+          ]
+         },
+         {
+          "role": "list",
+          "raw_role": "AXList",
+          "name": "general (channel)",
+          "bounds": [
+           340,
+           80,
+           860,
+           560
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "AXStaticText",
+            "value": "Yesterday",
+            "bounds": [
+             700,
+             90,
+             80,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "description": "",
+            "bounds": [
+             360,
+             120,
+             760,
+             44
+            ],
+            "attrs": {
+             "subrole": "AXListItem"
+            },
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Alice Smith",
+              "bounds": [
+               380,
+               120,
+               90,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "4:58 PM",
+              "bounds": [
+               480,
+               120,
+               60,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               380,
+               138,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Can someone review the a11y PR today?",
+                "bounds": [
+                 380,
+                 138,
+                 400,
+                 20
+                ]
+               }
+              ]
+             },
+             {
+              "role": "toolbar",
+              "raw_role": "AXToolbar",
+              "name": "Message actions",
+              "children": [
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Add reaction"
+               },
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Reply in thread"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "description": "",
+            "bounds": [
+             360,
+             170,
+             760,
+             44
+            ],
+            "attrs": {
+             "subrole": "AXListItem"
+            },
+            "children": [
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "4:59 PM",
+              "bounds": [
+               480,
+               170,
+               60,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               380,
+               188,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "It touches the AT-SPI backend.",
+                "bounds": [
+                 380,
+                 188,
+                 400,
+                 20
+                ]
+               }
+              ]
+             },
+             {
+              "role": "toolbar",
+              "raw_role": "AXToolbar",
+              "name": "Message actions",
+              "children": [
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Add reaction"
+               },
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Reply in thread"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "description": "",
+            "bounds": [
+             360,
+             220,
+             760,
+             44
+            ],
+            "attrs": {
+             "subrole": "AXListItem"
+            },
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Tanuj",
+              "bounds": [
+               380,
+               220,
+               90,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "5:10 PM",
+              "bounds": [
+               480,
+               220,
+               60,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               380,
+               238,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "On it, will look after standup.",
+                "bounds": [
+                 380,
+                 238,
+                 400,
+                 20
+                ]
+               }
+              ]
+             },
+             {
+              "role": "toolbar",
+              "raw_role": "AXToolbar",
+              "name": "Message actions",
+              "children": [
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Add reaction"
+               },
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Reply in thread"
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "description": "",
+            "bounds": [
+             360,
+             270,
+             760,
+             44
+            ],
+            "attrs": {
+             "subrole": "AXListItem"
+            },
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Bob Jones",
+              "bounds": [
+               380,
+               270,
+               90,
+               18
+              ]
+             },
+             {
+              "role": "link",
+              "raw_role": "AXLink",
+              "name": "5:12 PM",
+              "bounds": [
+               480,
+               270,
+               60,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "AXGroup",
+              "bounds": [
+               380,
+               288,
+               700,
+               20
+              ],
+              "children": [
+               {
+                "role": "static_text",
+                "raw_role": "AXStaticText",
+                "value": "Thanks! Ping me if the tests are flaky.",
+                "bounds": [
+                 380,
+                 288,
+                 400,
+                 20
+                ]
+               }
+              ]
+             },
+             {
+              "role": "toolbar",
+              "raw_role": "AXToolbar",
+              "name": "Message actions",
+              "children": [
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Add reaction"
+               },
+               {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Reply in thread"
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "AXGroup",
+          "name": "Message composer",
+          "bounds": [
+           360,
+           660,
+           820,
+           100
+          ],
+          "children": [
+           {
+            "role": "toolbar",
+            "raw_role": "AXToolbar",
+            "name": "Formatting",
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "AXButton",
+              "name": "Bold"
+             }
+            ]
+           },
+           {
+            "role": "text_area",
+            "raw_role": "AXTextArea",
+            "name": "Message to general",
+            "value": "",
+            "states": {
+             "focused": true,
+             "editable": true,
+             "multiline": true
+            },
+            "bounds": [
+             360,
+             690,
+             820,
+             40
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  0,
+  0,
+  1,
+  2,
+  1
+ ]
+}

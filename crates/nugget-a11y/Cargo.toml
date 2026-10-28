@@ -1,5 +1,6 @@
 [package]
 name = "nugget-a11y"
+description = "Cross-platform accessibility: read the focused field and thread, insert with read-back verification"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,43 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# AT-SPI 2 over zbus (pure Rust D-Bus); the blocking API runs on zbus' own executor thread.
+atspi = { version = "0.30", default-features = false, features = ["proxies", "zbus"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Clipboard fallback: X11 selections + XTest paste (pure Rust protocol), and Wayland.
+x11rb = { version = "0.14", features = ["xtest"] }
+wl-clipboard-rs = "0.9"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# AX (HIServices), the pasteboard and CGEvent through the objc2 bindings (MIT/Apache/Zlib).
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSEnumerator", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSPasteboard", "NSPasteboardItem", "NSRunningApplication"] }
+objc2-application-services = { version = "0.3", default-features = false, features = ["std", "libc", "AXError", "AXUIElement", "AXValue", "AXValueConstants", "HIServices"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFArray", "CFBase", "CFDictionary", "CFNumber", "CFString", "CFURL", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation"] }
+
+[target.'cfg(windows)'.dependencies]
+# UI Automation, the Win32 clipboard and SendInput.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [lints]
 workspace = true

@@ -1,0 +1,159 @@
+# nugget-a11y
+
+Cross-platform accessibility for Double Tap: read the focused text field and the conversation
+around it, and insert text at the caret with read-back verification. M4 (computer use) builds on
+the same element tree.
+
+```rust
+let a11y = nugget_a11y::system();            // or system_with(A11yConfig { .. })
+if a11y.permission() != Permission::Granted {
+    a11y.request_permission()?;              // macOS prompt / enable AT-SPI on Linux
+}
+if let Some(f) = a11y.focused()? {           // app, field, caret, thread, recipients, subject
+    let out = a11y.insert("Sounds good!")?;  // InsertOutcome { method, verified }
+}
+```
+
+Call these from a blocking context (`spawn_blocking` under tokio): every call talks to other
+processes and is bounded by timeouts, not instant.
+
+## How it works
+
+| Layer | Module | What it does |
+|---|---|---|
+| Contract | `lib.rs` | `Accessibility`, `Focused`, `Rect`, `Permission`, `InsertOutcome`, `system()` (frozen) |
+| Policy | `engine` | `Backend<P: Platform>`: role normalisation, secure fields, deny list, thread walk, verification, clipboard fallback |
+| Elements | `tree` | `Element` trait over live objects, serde `Node`/`Snapshot`, a bounded nearest-first walk around the focus |
+| Roles | `role` | AX / UIA / AT-SPI roles to one `Role`; the field role (`text_area`, `text_field`, `combo_box`, `document`, `web_area`, `search_field`) |
+| Thread | `thread` | Finds the message list around the composer and parses messages, per app family |
+| Verify | `verify` | Expected value after inserting over the selection; tolerant comparison |
+| Clipboard | `clipboard` | `Clipboard` trait, save, paste, verify, restore on every path |
+| Safety | `deny`, `sanitize` | Excluded apps; control/bidi stripping and size caps on every string |
+| OS | `platform/{linux,macos,windows}` | `Platform` implementations |
+
+**Insertion.** The backend first inserts through accessibility: `AXSelectedText` on macOS,
+`ValuePattern` on Windows (plain edits only), `EditableText.InsertText` on Linux. It then polls the
+field and compares it with the expected value. If the field did not change, it falls back to the
+clipboard: it saves every format, writes the text, synthesises a paste (Cmd+V, Ctrl+V or AT-SPI
+`PasteText`), verifies the result, then restores the saved formats. If the field changed but not as
+expected, the backend reports `verified: false` and does not insert a second copy. It never
+synthesises Return, and it strips `\r` and control characters from the inserted text.
+
+**Thread heuristics.** These are platform-neutral and run on snapshots:
+
+- The backend walks the composer's ancestors, nearest first, and scores containers in the sibling
+  subtrees. A container scores higher for more message-like children, for a `log` or `list` role,
+  and for a name like "Messages" or "Conversation". It also scores higher when it sits in the
+  composer's column and above it. Sidebars, chat lists and channel lists score lower.
+- Each item is split into author, timestamp and body.
+- App families (Mail, Gmail, Outlook web, Slack, Teams, iMessage, WhatsApp, generic) add their own
+  rules:
+  - summaries such as "Your iMessage, …" or "Alice, text, 10:41 AM";
+  - consecutive messages grouped under one author (Slack, Teams);
+  - "You" or "me" taken as the user;
+  - quoted mail ("On … wrote:", Outlook `From:/Sent:` blocks);
+  - To/Cc/Bcc recipients, and the subject from the Subject field or a reply-style window title.
+- `from_me` comes from the author, the item summary, `ThreadLimits::self_names`, or (in chat apps)
+  right-aligned bubbles.
+- The result keeps the newest 30 messages, up to 20 KB.
+
+**Safety.**
+
+- Only the frontmost app's focused window is read.
+- The value of a secure field (`AXSecureTextField`, UIA `IsPassword`, AT-SPI `password text`) is
+  never requested. The field is reported with `secure: true`, an empty value, no selection and no
+  thread, and insertion into it is refused.
+- In a denied app, `focused()` returns no thread, recipients, subject or value, and `insert()`
+  refuses. `DenyList::defaults()` covers password managers, keychains, system settings and
+  banking/payment apps and sites. Users add rules with `DenyList::with_user_rules(["id:…",
+  "name:…", "name~…", "host:…", "host~…"])`.
+- Every string read from another app is sanitised and capped: C0/C1 controls, bidi overrides and
+  isolates, zero-width characters and BOMs are removed. URLs lose their userinfo, and only
+  `http(s)`/`file` URLs are kept.
+- On Windows, the temporary text and the restored clipboard are excluded from clipboard history,
+  cloud clipboard and clipboard monitors.
+
+## Platform support
+
+| | Linux (AT-SPI) | macOS (AX) | Windows (UIA) |
+|---|---|---|---|
+| Frontmost app, window title | active toplevel; desktop-file id from the process | `AXFocusedApplication`, bundle id | foreground window, exe name |
+| Browser URL | `Document` `DocURL` | `AXURL` on `AXWebArea` | document `ValuePattern` (Chromium) |
+| Field role, label, placeholder | ✓ | ✓ | ✓ (placeholder from HelpText) |
+| Value, selection | `Text` | `AXValue`, `AXSelectedTextRange` (UTF-16 converted) | `ValuePattern`/`TextPattern` |
+| Caret bounds | `GetCharacterExtents` | `AXBoundsForRange` | `TextPattern` rectangles, DPI-scaled |
+| Secure fields | `password text` role | `AXSecureTextField` subrole | `IsPassword` |
+| Thread walk | ✓ | ✓ (batched attribute reads) | ✓ (cache requests) |
+| A11y insertion | `EditableText` | `AXSelectedText` | `ValuePattern.SetValue` (plain edits) |
+| Clipboard fallback | X11 selections (INCR) or Wayland data-control; XTest Ctrl+V, `PasteText` | NSPasteboard items × types; CGEvent Cmd+V | all memory formats + EMF; `SendInput` Ctrl+V |
+| Permission | `org.a11y.Status.IsEnabled` (request enables it) | `AXIsProcessTrustedWithOptions` | not required |
+| **Status** | **run and verified** (integration tests) | compile-checked (`aarch64-apple-darwin`) | compile-checked (`x86_64-pc-windows-msvc`) |
+
+## Tests
+
+```sh
+cargo test -p nugget-a11y                 # unit tests: roles, thread fixtures, verify, clipboard, deny, engine
+cargo clippy -p nugget-a11y --all-targets -- -D warnings
+# cross-checks (rustup target add aarch64-apple-darwin x86_64-pc-windows-msvc)
+cargo clippy -p nugget-a11y --target aarch64-apple-darwin --all-targets -- -D warnings
+cargo clippy -p nugget-a11y --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+```
+
+The thread heuristics are tested on trees in `tests/fixtures/trees/`:
+
+- `gtk_recorded_atspi.json` was recorded from a real app.
+- The others are modelled on how Slack, Messages, WhatsApp, Gmail and Apple Mail expose their
+  trees. Replace them with real recordings as they become available: `Backend::snapshot()` →
+  `Snapshot::to_json()`, after redacting personal content.
+
+### Linux integration tests (`NUGGET_A11Y_IT=1`)
+
+The tests do the following:
+
+1. They start Xvfb and a private `dbus-daemon`. The accessibility bus is started by D-Bus
+   activation.
+2. They re-run the test binary with that environment.
+3. They drive the small GTK 3 app in `tests/fixtures/gtk_test_app.py`. The app prints its own
+   buffer contents, which gives the tests an oracle independent of AT-SPI.
+
+The scenarios are:
+
+- the permission (enable AT-SPI);
+- reading the composer and its thread;
+- accessibility insertion of non-ASCII, multi-line text, verified;
+- clipboard insertion through XTest Ctrl+V, with every saved format restored (including a 300 KB
+  format sent with INCR);
+- secure-field handling;
+- placeholder and search-field detection;
+- the deny list;
+- a real snapshot.
+
+Setup on Debian/Ubuntu:
+
+```sh
+sudo apt-get install -y xvfb dbus dbus-x11 at-spi2-core python3-gi gir1.2-gtk-3.0
+NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi -- --nocapture
+```
+
+- If `python3` is not the interpreter that has PyGObject (for example, a newer Python sits ahead of
+  the system one in `PATH`), set `NUGGET_A11Y_IT_PYTHON=/usr/bin/python3.12` or whichever version
+  has `gi`.
+- Set `NUGGET_A11Y_RECORD=<dir>` to write the recorded tree to `<dir>/gtk_recorded.json`.
+
+## Known gaps
+
+- macOS and Windows have not been run on a real machine yet. Their logic is shared with Linux
+  through `engine`, but the OS calls are compile-checked only.
+- On macOS, rich web editors (Mail compose, some contenteditable regions) expose their text
+  through text markers (`AXSelectedTextMarkerRange`) rather than `AXValue` or
+  `AXSelectedTextRange`. Value and selection may then be empty, so insertion relies on the
+  clipboard path.
+- On Windows, accessibility insertion is limited to plain edit controls. Rich edits, documents
+  and web content use the clipboard.
+- On Wayland, the clipboard needs a compositor with data-control (wlroots, KDE). On GNOME
+  Wayland, the X11 path through XWayland is used, and key synthesis falls back to AT-SPI
+  `PasteText`.
+- The AT-SPI tree walk reads each node with several D-Bus calls. The `Cache.GetItems` bulk read is
+  a possible optimisation.
+- The thread heuristics for apps other than the GTK test app are tested on modelled trees, not on
+  recordings.
