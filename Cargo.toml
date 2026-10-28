@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/nugget-core",
+    "crates/nugget-store",
+    "crates/nugget-infer",
+    "crates/nugget-models",
+    "crates/nugget-ipc",
+    "crates/nuggetd",
+    "apps/desktop/src-tauri",
+    "bench",
+]
+# The Tauri shell needs system webview libraries; keep everyday builds headless.
+default-members = [
+    "crates/nugget-core",
+    "crates/nugget-store",
+    "crates/nugget-infer",
+    "crates/nugget-models",
+    "crates/nugget-ipc",
+    "crates/nuggetd",
+    "bench",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/rayhankhilji/nugget"
+
+[workspace.dependencies]
+nugget-core = { path = "crates/nugget-core" }
+nugget-store = { path = "crates/nugget-store" }
+nugget-infer = { path = "crates/nugget-infer" }
+nugget-models = { path = "crates/nugget-models" }
+nugget-ipc = { path = "crates/nugget-ipc" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
