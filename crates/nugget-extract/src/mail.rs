@@ -1,7 +1,9 @@
 //! RFC 822 / MIME mail via `mail-parser`: headers into metadata, the text/plain body (or the
 //! HTML body converted), quoted replies and signatures moved into metadata, attachment names.
 
-use mail_parser::{Address, HeaderValue, Message, MessageParser, MimeHeaders, PartType};
+use mail_parser::{
+    Address, HeaderForm, HeaderValue, Message, MessageParser, MimeHeaders, PartType,
+};
 use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 
@@ -45,6 +47,23 @@ fn text_list(h: &HeaderValue<'_>) -> Vec<String> {
         return list.iter().take(500).map(|s| s.to_string()).collect();
     }
     h.as_text().map(|s| vec![s.to_owned()]).unwrap_or_default()
+}
+
+/// Bulk / automated-mail headers kept verbatim (unfolded, RFC 2047 decoded) under snake_case keys.
+const LIST_HEADERS: [(&str, &str); 4] = [
+    ("list_unsubscribe", "List-Unsubscribe"),
+    ("list_id", "List-Id"),
+    ("precedence", "Precedence"),
+    ("auto_submitted", "Auto-Submitted"),
+];
+
+/// First occurrence of `name` as unstructured text, whitespace-collapsed; `None` when absent or blank.
+fn header_text(msg: &Message<'_>, name: &str) -> Option<String> {
+    msg.header_as(name, HeaderForm::Text)
+        .first()
+        .and_then(HeaderValue::as_text)
+        .map(util::normalize_ws)
+        .filter(|s| !s.is_empty())
 }
 
 pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
@@ -92,6 +111,11 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
     ] {
         if !list.is_empty() {
             meta.insert(key.into(), json!(list));
+        }
+    }
+    for (key, name) in LIST_HEADERS {
+        if let Some(v) = header_text(&msg, name) {
+            meta.insert(key.into(), Value::String(v));
         }
     }
 
@@ -388,5 +412,61 @@ mod tests {
         );
         assert_eq!(s.main, "Yes");
         assert!(s.quoted.contains("Carol Example"));
+    }
+
+    fn meta(raw: &str) -> Map<String, Value> {
+        let opts = crate::ExtractOptions::default();
+        let ctx = Ctx {
+            opts: &opts,
+            mime: "message/rfc822",
+            charset: None,
+            path: None,
+            ocr: None,
+        };
+        match extract(raw.as_bytes(), &ctx).unwrap().metadata {
+            Value::Object(m) => m,
+            other => panic!("metadata not an object: {other}"),
+        }
+    }
+
+    #[test]
+    fn list_headers_into_metadata() {
+        let m = meta(
+            "From: News <news@example.com>\r\nTo: a@example.org\r\nSubject: Weekly\r\n\
+             List-Unsubscribe: <mailto:unsub@example.com?subject=unsubscribe>,\r\n\
+             \t<https://example.com/unsub?id=1>\r\n\
+             List-Id: Example News <news.example.com>\r\n\
+             Precedence:  bulk \r\n\
+             Auto-Submitted: =?utf-8?q?auto-generated?=\r\n\r\nHello\r\n",
+        );
+        assert_eq!(
+            m["list_unsubscribe"],
+            "<mailto:unsub@example.com?subject=unsubscribe>, <https://example.com/unsub?id=1>"
+        );
+        assert_eq!(m["list_id"], "Example News <news.example.com>");
+        assert_eq!(m["precedence"], "bulk");
+        assert_eq!(m["auto_submitted"], "auto-generated");
+    }
+
+    #[test]
+    fn list_headers_absent() {
+        let m = meta("From: a@example.com\r\nSubject: Hi\r\n\r\nHello\r\n");
+        for (key, _) in LIST_HEADERS {
+            assert!(!m.contains_key(key), "{key} should be absent");
+        }
+        assert_eq!(m["subject"], "Hi");
+    }
+
+    #[test]
+    fn list_headers_case_insensitive() {
+        let m = meta(
+            "from: a@example.com\r\nLIST-UNSUBSCRIBE: <mailto:u@example.com>\r\n\
+             list-id: <l.example.com>\r\nPRECEDENCE: list\r\nauto-submitted: auto-replied\r\n\
+             \r\nHello\r\n",
+        );
+        assert_eq!(m["list_unsubscribe"], "<mailto:u@example.com>");
+        assert_eq!(m["list_id"], "<l.example.com>");
+        assert_eq!(m["precedence"], "list");
+        assert_eq!(m["auto_submitted"], "auto-replied");
     }
 }

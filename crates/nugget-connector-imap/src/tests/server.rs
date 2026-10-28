@@ -77,6 +77,8 @@ pub struct State {
     /// Announce this literal length for message bodies, send a few bytes, then go silent.
     pub lie_literal: Option<u64>,
     pub logins: usize,
+    /// Advertise and serve `UID MOVE` (RFC 6851).
+    pub move_cap: bool,
 }
 
 impl State {
@@ -94,6 +96,7 @@ impl State {
             raw_examine: None,
             lie_literal: None,
             logins: 0,
+            move_cap: false,
         }
     }
 
@@ -438,6 +441,9 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                 if s.idle {
                     caps.push_str(" IDLE");
                 }
+                if s.move_cap {
+                    caps.push_str(" MOVE");
+                }
                 put(&mut out, &caps);
                 put(&mut out, &format!("{tag} OK done"));
             }
@@ -670,6 +676,25 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                     }
                     "STORE" => {
                         put(&mut out, &format!("{tag} NO read-only test server"));
+                    }
+                    "MOVE" if s.move_cap => {
+                        let set_str = toks[3].clone();
+                        let dest = toks[4].clone();
+                        if !s.mailboxes.contains_key(&dest) {
+                            put(&mut out, &format!("{tag} NO [TRYCREATE] no such mailbox"));
+                        } else {
+                            let uids = uid_set(&set_str, &s.mailboxes[&mbname].msgs);
+                            for uid in uids {
+                                let m = s.mailboxes.get_mut(&mbname).unwrap().msgs[&uid].clone();
+                                s.expunge(&mbname, uid);
+                                let d = s.mailboxes.get_mut(&dest).unwrap();
+                                let nu = d.uidnext;
+                                d.uidnext += 1;
+                                d.modseq += 1;
+                                d.msgs.insert(nu, m);
+                            }
+                            put(&mut out, &format!("{tag} OK move done"));
+                        }
                     }
                     _ => put(&mut out, &format!("{tag} BAD unknown UID command")),
                 }

@@ -52,7 +52,7 @@ struct Cli {
 
     /// What `memory` runs against: the in-crate fake index (fast), or the real store, ingest
     /// pipeline, files watcher and retriever in process. `proactive`: the reference engine
-    /// (fake) or the real `nugget-proactive` crate (real; wave 2). Other suites ignore it.
+    /// (fake) or the real `nugget-proactive` crate (real). Other suites ignore it.
     #[arg(long, value_enum, default_value_t = Backend::Fake)]
     backend: Backend,
 

@@ -382,6 +382,32 @@ impl Vault {
         page.map(|p| self.fs.abs(&p.path)).transpose()
     }
 
+    /// Write a free-standing note (not an entity page), e.g. meeting prep, as
+    /// `<folder>/<title>.md`. `folder` and `title` are sanitised like page names; a note never
+    /// replaces an existing file (the name gets ` 2`, ` 3`, ... instead). The write is atomic and
+    /// never follows a symlink. The vault does not track, merge or re-render notes: they are the
+    /// user's from then on. Returns the note's absolute path.
+    pub fn write_note(&self, folder: &str, title: &str, text: &str) -> Result<PathBuf> {
+        let _st = self.lock();
+        let dir = sanitize_name(folder, 80);
+        let name = sanitize_name(title, self.config.max_name_chars);
+        for n in 1..=1000u32 {
+            let rel = if n == 1 {
+                format!("{dir}/{name}.md")
+            } else {
+                format!("{dir}/{name} {n}.md")
+            };
+            if self.fs.entry_exists(&rel) {
+                continue;
+            }
+            self.fs.write(&rel, text)?;
+            return self.fs.abs(&rel);
+        }
+        Err(Error::Invalid(format!(
+            "too many notes named {name:?} in {dir}"
+        )))
+    }
+
     /// Vault status for IPC.
     pub fn status(&self) -> VaultStatus {
         let st = self.lock();

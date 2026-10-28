@@ -62,6 +62,25 @@ pub fn classify(raw: &str) -> Result<Target, String> {
     }
 }
 
+/// Drafted replies can carry a long body; mail apps cope with a few tens of KiB.
+pub const MAX_MAILTO_LEN: usize = 32 * 1024;
+
+/// Validate a `mailto:` link (a drafted reply the user opens in their mail app). Only `mailto:`
+/// is accepted here; [`classify`] keeps refusing it, so search results can't open one.
+pub fn mailto(raw: &str) -> Result<Url, String> {
+    if raw.is_empty() || raw.len() > MAX_MAILTO_LEN {
+        return Err("That mail link can't be opened.".into());
+    }
+    if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return Err("That link contains spaces or control characters.".into());
+    }
+    let url = Url::parse(raw).map_err(|_| "That isn't a valid link.".to_string())?;
+    if url.scheme() != "mailto" {
+        return Err("Only mail links can be opened here.".into());
+    }
+    Ok(url)
+}
+
 fn file_target(url: &Url) -> Result<PathBuf, String> {
     // A host means a network share (`file://server/share`): opening it can leak credentials to
     // that server (SMB/NTLM), so only local files are opened.
@@ -377,5 +396,22 @@ mod tests {
     fn opened_serializes_for_the_frontend() {
         assert_eq!(serde_json::to_value(Opened::Revealed).unwrap(), "revealed");
         assert_eq!(serde_json::to_value(Opened::Opened).unwrap(), "opened");
+    }
+
+    #[test]
+    fn mailto_accepts_only_mail_links() {
+        assert!(mailto("mailto:ana@example.com?subject=Re%3A%20Q3&body=Hi%20Ana%2C%0A").is_ok());
+        assert!(mailto("MAILTO:ana@example.com").is_ok());
+        for url in [
+            "",
+            "https://example.com/",
+            "javascript:alert(1)",
+            "file:///tmp/x.ics",
+            "mailto:ana@example.com?body=a b",
+            "mailto:ana@example.com\n",
+        ] {
+            assert!(mailto(url).is_err(), "{url:?} must be rejected");
+        }
+        assert!(mailto(&format!("mailto:a@b.c?body={}", "a".repeat(MAX_MAILTO_LEN))).is_err());
     }
 }

@@ -294,6 +294,23 @@ is logged) and the rest of the daemon runs normally. The keys are not final; the
 
 When a feature lands, its keys get their own table on this page.
 
+### `[proactive]`
+
+Proactive cards and the morning brief (the Today page). Unknown keys are an error.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | `false`: no background refreshes and no brief; `cards.list` reports `enabled: false` |
+| `brief_time` | `"HH:MM"` | `"08:00"` | Local time of the morning brief (`brief.ready`). A brief missed while the daemon was off is sent after the first refresh |
+| `judge` | `"local"`, `"cloud"` or `"off"` | `"local"` | Where the optional card judge may run. `cloud` never receives sensitive candidates |
+| `refresh_minutes` | integer ≥ 1 | `30` | Refresh cards this often (also after ingest and knowledge runs) |
+| `debounce_secs` | integer | `60` | Wait this long after the last ingest or knowledge event before refreshing |
+| `utc_offset` | `"+HH:MM"` | the machine's | The user's offset for "today" and the brief time; read once at start |
+
+`[proactive.engine]` tunes the card generators and ranking (`nugget_proactive::ProactiveConfig`),
+e.g. `min_score` (`0.45`, cards ranked below it are kept but not offered), `max_inbox`,
+`user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
+
 ## Example
 
 ```toml

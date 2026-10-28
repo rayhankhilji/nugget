@@ -56,12 +56,17 @@ use super::{Feature, FeatureContext, section, start};
 use crate::hub::Hub;
 
 /// Start the W3 features (policy, browser, agent) in that order. They share one [`Safety`].
-pub(crate) async fn register(cx: &FeatureContext<'_>, list: &mut Vec<Arc<dyn Feature>>) {
+///
+/// Returns the daemon's shared [`Safety`] for other features that gate actions (proactive).
+pub(crate) async fn register(
+    cx: &FeatureContext<'_>,
+    list: &mut Vec<Arc<dyn Feature>>,
+) -> Option<Arc<Safety>> {
     let safety = match Safety::open(cx) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = %e, "safety policy did not start; agent features left out");
-            return;
+            return None;
         }
     };
     start(list, "policy", super::policy::start(cx, &safety));
@@ -83,6 +88,7 @@ pub(crate) async fn register(cx: &FeatureContext<'_>, list: &mut Vec<Arc<dyn Fea
     // Plugin tools come from the plugins feature, which `features::build` starts first.
     tools.extend(super::plugins::agent_tools(&cx.state.paths).await);
     start(list, "agent", self::start_agent(cx, &safety, tools).await);
+    Some(safety)
 }
 
 /// Computer-use tools (`nugget-computer`) over the OS accessibility backend, unless

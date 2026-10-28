@@ -56,6 +56,17 @@ pub struct ProactiveConfig {
     pub renewal_lookback_days: i64,
     /// Promises in sent mail younger than this many days are tracked.
     pub followup_max_days: i64,
+    /// A dated promise becomes a card only this many days before its deadline.
+    pub followup_lead_days: i64,
+    /// A question the user sent becomes a "no answer yet" card after this many days without a
+    /// reply.
+    pub awaiting_reply_days: i64,
+    /// How far back a receipt or payment from a vendor counts as proof that the user pays them
+    /// (renewals from vendors without one are ignored). Long enough for annual plans.
+    pub renewal_receipt_lookback_days: i64,
+    /// Cards ranked below this are kept (and keep learning) but not offered in the inbox or the
+    /// brief.
+    pub min_score: f64,
     /// Cards without a natural deadline expire this many days after creation.
     pub card_ttl_days: i64,
     /// Terminal cards (dismissed, done, expired) are kept this long as dedup tombstones.
@@ -82,9 +93,13 @@ impl Default for ProactiveConfig {
             commitment_horizon_days: 7,
             commitment_overdue_max_days: 30,
             meeting_horizon_hours: 48,
-            renewal_horizon_days: 14,
+            renewal_horizon_days: 7,
             renewal_lookback_days: 45,
             followup_max_days: 14,
+            followup_lead_days: 2,
+            awaiting_reply_days: 3,
+            renewal_receipt_lookback_days: 400,
+            min_score: 0.45,
             card_ttl_days: 14,
             tombstone_days: 90,
             max_inbox: 12,

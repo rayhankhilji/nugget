@@ -903,3 +903,29 @@ fn lost_manifest_still_applies_edits() {
     assert!(t.contains("keep me") && !t.contains("oat milk"));
     assert!(v2.validate().unwrap().is_ok());
 }
+
+#[test]
+fn notes_are_written_inside_the_vault_and_never_overwrite() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let v = Vault::new(dir.path().join("v"), g, Arc::new(NoItems), config()).unwrap();
+    let root = v.root().to_path_buf();
+    let a = v
+        .write_note("Notes", "Prep: Acme / kickoff", "# Prep\n\n- agenda\n")
+        .unwrap();
+    assert_eq!(a, root.join("Notes").join("Prep- Acme - kickoff.md"));
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "# Prep\n\n- agenda\n");
+    let b = v
+        .write_note("Notes", "Prep: Acme / kickoff", "second")
+        .unwrap();
+    assert_eq!(b, root.join("Notes").join("Prep- Acme - kickoff 2.md"));
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "# Prep\n\n- agenda\n");
+    // Hostile names stay inside the vault.
+    let c = v.write_note("../..", "../../escape", "x").unwrap();
+    assert!(c.starts_with(&root), "{c:?}");
+    assert!(!dir.path().join("escape.md").exists());
+    // Notes are not pages: rendering and validation leave them alone.
+    v.render_all().unwrap();
+    assert!(a.exists() && b.exists());
+    assert!(v.validate().unwrap().is_ok());
+}

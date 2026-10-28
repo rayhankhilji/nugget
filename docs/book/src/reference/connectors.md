@@ -68,6 +68,7 @@ OAuth client.
 | `account_hint` | string | none | Email address to pre-select on Google's consent screen |
 | `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
 | `include_spam_trash` | bool | `false` | Also index Spam and Trash |
+| `allow_modify` | bool | `false` | Let approved proactive actions archive threads (remove the `INBOX` label). Asks for the `gmail.modify` scope, so reconnect the account after turning it on |
 
 Sync: newest-first backfill, then `history.list` deltas every 60 s. An expired history id triggers a
 bounded resync.

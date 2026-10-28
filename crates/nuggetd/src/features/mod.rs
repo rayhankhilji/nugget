@@ -29,6 +29,7 @@ mod browser;
 mod draft;
 pub(crate) mod plugins;
 mod policy;
+mod proactive;
 
 /// One wired-in subsystem.
 #[async_trait]
@@ -116,8 +117,12 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     start(&mut list, "draft", draft::start(cx).await);
     // Plugins before the agent, which registers their tools.
     start(&mut list, "plugins", plugins::start(cx).await);
-    agent::register(cx, &mut list).await; // W3: policy, browser, agent
-    // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
+    let safety = agent::register(cx, &mut list).await; // W3: policy, browser, agent
+    start(
+        &mut list,
+        "proactive",
+        proactive::start(cx, safety.as_ref()).await,
+    );
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

@@ -3,8 +3,8 @@
 //! The benchmark drives any [`ProactiveEngine`]: it feeds the world's items in day order, asks
 //! for each morning's brief, reports the simulated user's feedback, and asks the engine to execute
 //! an accepted card's action with the [`Approval`] the user gave. It never reaches into engine
-//! internals, so the same loop scores the reference engine, the recency baseline and (in wave 2)
-//! an adapter over the real `nugget-proactive` crate.
+//! internals, so the same loop scores the reference engine, the recency baseline and the adapter
+//! over the real `nugget-proactive` crate ([`super::real`]).
 
 use super::world::{CardKind, Item};
 
@@ -20,6 +20,8 @@ pub enum ActionKind {
     DraftReply,
     CreateReminder,
     CreatePrepNote,
+    CreateEvent,
+    ArchiveThread,
 }
 
 impl ActionKind {
@@ -28,6 +30,8 @@ impl ActionKind {
             ActionKind::DraftReply => "draft_reply",
             ActionKind::CreateReminder => "create_reminder",
             ActionKind::CreatePrepNote => "create_prep_note",
+            ActionKind::CreateEvent => "create_event",
+            ActionKind::ArchiveThread => "archive_thread",
         }
     }
 }

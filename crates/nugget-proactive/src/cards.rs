@@ -47,6 +47,11 @@ impl CardState {
     pub fn is_open(self) -> bool {
         matches!(self, Self::New | Self::Seen)
     }
+
+    /// The wire name (`new`, `seen`, `snoozed`, `accepted`, `dismissed`, `done`, `expired`).
+    pub fn as_str(self) -> &'static str {
+        state_name(self)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

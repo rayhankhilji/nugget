@@ -7,12 +7,15 @@
 //! dry-run coverage of actions and the approval gate, against a Sentient-style recency baseline.
 //! Methodology: `bench/README.md`.
 //!
-//! The engine under test is the in-crate [`reference::ReferenceEngine`] until the real
-//! `nugget-proactive` crate lands (wave 2), which plugs in by implementing [`ProactiveEngine`].
+//! `--backend fake` (the default) scores the in-crate [`reference::ReferenceEngine`].
+//! `--backend real` scores the real `nugget-proactive` crate through [`real::RealEngine`] (an
+//! encrypted temporary store per run, no network), with the reference engine reported next to
+//! it as the bar to clear.
 
 pub mod baseline;
 pub mod engine;
 pub mod generate;
+pub mod real;
 pub mod reference;
 pub mod sim;
 pub mod world;
@@ -30,10 +33,6 @@ pub const K: usize = 5;
 /// Probability the simulated user's accept or dismiss is flipped.
 pub const USER_NOISE: f64 = 0.1;
 
-pub const REAL_PLAN: &str = "`proactive --backend real` runs the real nugget-proactive crate through the \
-ProactiveEngine adapter. The crate is still a stub, so the adapter lands in wave 2; until then the suite \
-scores the in-crate reference engine (`--backend fake`, the default). See bench/README.md.";
-
 pub struct ProactiveBench;
 
 impl Benchmark for ProactiveBench {
@@ -46,9 +45,6 @@ impl Benchmark for ProactiveBench {
     }
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        if ctx.backend() == Backend::Real {
-            return Err(BenchError::NotImplemented(REAL_PLAN.into()));
-        }
         let world = world::load_world()
             .map_err(|e| BenchError::Failed(format!("fixtures/proactive/world.json: {e}")))?;
         let gold = world::load_gold()
@@ -64,25 +60,112 @@ impl Benchmark for ProactiveBench {
                 .iter()
                 .map(|&seed| {
                     let mut engine = make();
-                    let cfg = sim::SimConfig {
-                        k: K,
-                        noise: USER_NOISE,
-                        seed,
-                    };
-                    let run = sim::run(&world, &gold, engine.as_mut(), cfg);
+                    let run = sim::run(&world, &gold, engine.as_mut(), sim_config(seed));
                     sim::score(&world, &gold, &run, K)
                 })
                 .collect();
             sim::mean(&scores)
         };
         let user = world.user.email.clone();
-        let ours = arm(&|| Box::new(reference::ReferenceEngine::new(&user, true)));
-        let frozen = arm(&|| Box::new(reference::ReferenceEngine::new(&user, false)));
+        let reference = arm(&|| Box::new(reference::ReferenceEngine::new(&user, true)));
         let base = arm(&|| Box::new(baseline::RecencyJudge::new(&user)));
-        ctx.param("engine", "reference");
         ctx.param("baseline", "recency_judge");
-        Ok(metrics(&ours, &frozen, &base))
+        if ctx.backend() == Backend::Real {
+            let ours = real_arm(&world, &gold, &seeds, true)?;
+            let frozen = real_arm(&world, &gold, &seeds, false)?;
+            ctx.param("backend", "real");
+            ctx.param("engine", "nugget-proactive");
+            ctx.param("store", "encrypted, temporary, one per user seed");
+            ctx.param("brief_hour_utc", real::BRIEF_HOUR);
+            ctx.param("judge", "none");
+            ctx.param("drafter", "deterministic stub");
+            ctx.param("policy", "PolicyEngine::default()");
+            let mut out = metrics(&ours, &frozen, &base);
+            out.extend(reference_metrics(&ours, &reference));
+            return Ok(out);
+        }
+        let frozen = arm(&|| Box::new(reference::ReferenceEngine::new(&user, false)));
+        ctx.param("engine", "reference");
+        Ok(metrics(&reference, &frozen, &base))
     }
+}
+
+fn sim_config(seed: u64) -> sim::SimConfig {
+    sim::SimConfig {
+        k: K,
+        noise: USER_NOISE,
+        seed,
+    }
+}
+
+/// The real crate over every user seed: mean scores. Any store or crate error fails the run.
+fn real_arm(
+    world: &World,
+    gold: &Gold,
+    seeds: &[u64],
+    learning: bool,
+) -> Result<BTreeMap<String, f64>, BenchError> {
+    let mut scores = Vec::with_capacity(seeds.len());
+    for &seed in seeds {
+        let mut engine = real::RealEngine::new(&world.user.email, learning, seed)?;
+        let run = sim::run(world, gold, &mut engine, sim_config(seed));
+        if let Some(e) = engine.errors().first() {
+            return Err(BenchError::Failed(format!(
+                "nugget-proactive (seed {seed}, {} errors): {e}",
+                engine.errors().len()
+            )));
+        }
+        scores.push(sim::score(world, gold, &run, K));
+    }
+    Ok(sim::mean(&scores))
+}
+
+/// The real crate next to the reference engine on the same seeds (`--backend real` only).
+fn reference_metrics(
+    ours: &BTreeMap<String, f64>,
+    reference: &BTreeMap<String, f64>,
+) -> Vec<Metric> {
+    use Direction::Info;
+    let get = |m: &BTreeMap<String, f64>, k: &str| m.get(k).copied().unwrap_or(0.0);
+    let p = format!("precision@{K}");
+    let mut out: Vec<Metric> = [
+        (p.as_str(), "precision@5"),
+        ("recall", "recall of gold cards"),
+        ("distractors.fpr", "distractor false-positive rate"),
+        ("precision.days_21_30", "precision days 21-30"),
+    ]
+    .into_iter()
+    .map(|(key, what)| {
+        let name = match key {
+            "distractors.fpr" => "reference.distractors.false_positive_rate".to_owned(),
+            _ => format!("reference.{key}"),
+        };
+        Metric::new(
+            name,
+            get(reference, key),
+            "ratio",
+            Info,
+            format!("In-crate reference engine (--backend fake) on the same seeds: {what}"),
+        )
+    })
+    .collect();
+    out.extend([
+        Metric::new(
+            format!("comparison.{p}_vs_reference"),
+            get(ours, &p) - get(reference, &p),
+            "ratio",
+            Info,
+            "precision@5 of nugget-proactive minus the reference engine's",
+        ),
+        Metric::new(
+            "comparison.recall_vs_reference",
+            get(ours, "recall") - get(reference, "recall"),
+            "ratio",
+            Info,
+            "Recall of nugget-proactive minus the reference engine's",
+        ),
+    ]);
+    out
 }
 
 fn record_params(ctx: &mut RunContext, world: &World, gold: &Gold, runs: usize) {

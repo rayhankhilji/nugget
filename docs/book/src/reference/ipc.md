@@ -173,17 +173,21 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 
 ### Proactive cards and brief (milestone M5)
 
-Status: being wired in (wave W). The names are planned; parameters and results are not final.
+Types are in the `Proactive (M5)` block of `nugget_core::ipc`. An approval is bound to the exact
+preview it was given for (a keyed digest, valid once), and every action goes through the safety
+policy.
 
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `cards.list` | Filters | Current suggestion cards | in progress |
-| `cards.feedback` | A card id and `accept`, `dismiss` or `snooze` | Records what you did with a card | in progress |
-| `cards.preview` | A card id | A dry run of the card's action, with a digest the approval is bound to | in progress |
-| `cards.execute` | A card id and the preview's digest | Runs the action, through the safety policy | in progress |
-| `brief.get` | `{}` | Today's brief | in progress |
-| `proactive.metrics` | `{}` | Acceptance and dismissal counts | in progress |
+| `cards.list` | `CardsListRequest`: `{include_closed}` | `CardsList`: the open cards best first, each with its top factors, evidence and offered actions | yes |
+| `cards.feedback` | `CardFeedbackRequest`: a card id and `accept`, `dismiss` (with a reason), `snooze` (until), `seen` or `done` | The updated `CardView` | yes |
+| `cards.preview` | `CardPreviewRequest`: a card id and an action index | `CardPreview`: a dry-run diff and the digest an approval is bound to | yes |
+| `cards.execute` | `CardExecuteRequest`: card id, action index, the preview's digest, `confirmed` | `CardExecuteResult`: `executed` (with an artifact for the app to finish), `needs_confirmation`, `denied` or `halted` | yes |
+| `brief.get` | `{}` | `BriefView`: today's brief | yes |
+| `proactive.metrics` | `{}` | `ProactiveMetrics`: precision, time to action, dismiss reasons | yes |
+| `proactive.refresh` | `{}` | `CardsChanged`: runs a refresh now | yes |
+| `reminders.list` | `{}` | Pending `ReminderView`s, soonest first | yes |
 
 ### Plugins (milestone M6)
 
@@ -218,7 +222,9 @@ Being wired in (wave W); the names are planned and the parameters not final:
 |---|---|---|---|
 | `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | yes |
 | `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) | yes |
-| `cards.changed` | Not final | The set of suggestion cards changed | in progress |
+| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback or an executed action); refetch `cards.list` | yes |
+| `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) | yes |
+| `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification | yes |
 | `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | yes |
 
 ## Errors
@@ -289,8 +295,8 @@ wire format).
 ### An error
 
 ```json
-→ {"jsonrpc":"2.0","id":7,"method":"cards.list","params":{}}
-← {"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"method not found: cards.list"}}
+→ {"jsonrpc":"2.0","id":7,"method":"cards.nope","params":{}}
+← {"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"method not found: cards.nope"}}
 ```
 
 The exact values in these examples (ids, stream ids, message wording, the generated source id) are

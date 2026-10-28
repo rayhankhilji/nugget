@@ -12,8 +12,8 @@
 //! `cua` runs computer-use tasks on local test apps ([`suites::cua`]).
 //! `draft` compares Nugget's drafting prompt with a Sentient-style whole-vault baseline on a
 //! fictional fixture corpus, against a deterministic fake model or a real provider.
-//! `proactive` scores proactive cards over a 30-day fixture world (reference engine until the
-//! real `nugget-proactive` crate is wired in).
+//! `proactive` scores proactive cards over a 30-day fixture world (the reference engine, or the
+//! real `nugget-proactive` crate with `--backend real`).
 //! `knowledge` ([`suites::knowledge`]) scores the M2 knowledge pipeline on a labelled fixture
 //! corpus ([`knowledge`]); built without the `pipeline` feature it reports `not_implemented`.
 

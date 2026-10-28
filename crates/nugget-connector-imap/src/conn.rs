@@ -643,6 +643,74 @@ impl Imap {
         }
     }
 
+    /// SELECT (read-write, for [`uid_move`](Self::uid_move)). `None` when the server says NO.
+    pub(crate) async fn select(&mut self, mailbox: &str) -> Result<Option<Selected>> {
+        let mut sel = Selected::default();
+        let done = self
+            .exec(&format!("SELECT {}", quote(mailbox)?), |r| {
+                match r {
+                    Response::Data {
+                        status: Status::Ok,
+                        outcome,
+                    } => {
+                        if let Some(ResponseCode::UidValidity(v)) = &outcome.code {
+                            sel.uidvalidity = Some(*v);
+                        }
+                    }
+                    Response::MailboxData(MailboxDatum::Exists(n)) => sel.exists = Some(*n),
+                    _ => {}
+                }
+                Ok(())
+            })
+            .await?;
+        match done {
+            Done::Ok => Ok(Some(sel)),
+            Done::No(m) => {
+                tracing::warn!(mailbox, "IMAP SELECT refused: {m}");
+                Ok(None)
+            }
+            Done::Bad(m) => Err(net(format!("IMAP SELECT failed: {m}"))),
+        }
+    }
+
+    /// `UID MOVE <set> <mailbox>` (RFC 6851) in the selected mailbox.
+    pub(crate) async fn uid_move(&mut self, set: &str, dest: &str) -> Result<()> {
+        self.exec_ok(&format!("UID MOVE {set} {}", quote(dest)?), |_| Ok(()))
+            .await
+    }
+
+    /// Where archived mail goes: the `\Archive` special-use mailbox, else `\All` (e.g. Gmail's
+    /// "All Mail", where moving out of the inbox only drops the Inbox label), else a mailbox
+    /// named `Archive`.
+    pub(crate) async fn archive_mailbox(&mut self) -> Result<Option<String>> {
+        let (mut archive, mut all, mut named) = (None, None, None);
+        self.exec_ok("LIST \"\" \"*\"", |r| {
+            if let Response::MailboxData(MailboxDatum::List(l)) = r {
+                let noselect = l.name_attributes.iter().any(|a| {
+                    matches!(a, NameAttribute::NoSelect)
+                        || matches!(a, NameAttribute::Extension(e) if e.eq_ignore_ascii_case("\\NonExistent"))
+                });
+                if noselect {
+                    return Ok(());
+                }
+                let name = l.name.to_string();
+                for a in &l.name_attributes {
+                    match a {
+                        NameAttribute::Archive if archive.is_none() => archive = Some(name.clone()),
+                        NameAttribute::All if all.is_none() => all = Some(name.clone()),
+                        _ => {}
+                    }
+                }
+                if named.is_none() && name.eq_ignore_ascii_case("Archive") {
+                    named = Some(name);
+                }
+            }
+            Ok(())
+        })
+        .await?;
+        Ok(archive.or(all).or(named))
+    }
+
     pub(crate) async fn uid_search(&mut self, criteria: &str) -> Result<Vec<u32>> {
         let mut uids = Vec::new();
         self.exec_ok(&format!("UID SEARCH {criteria}"), |r| {

@@ -15,6 +15,7 @@ import { loadLocale } from "./i18n";
 
 /** Each page, and text from the mocked daemon that proves it rendered real content. */
 const PAGES: [PageId, string][] = [
+  ["today", "Needs you"],
   ["chat", "Light"],
   ["search", "Search"],
   ["knowledge", "Ada Lovelace"],

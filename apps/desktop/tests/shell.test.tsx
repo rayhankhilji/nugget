@@ -22,7 +22,7 @@ describe("navigation", () => {
     await render(<App />);
     expect(navButtons().map((b) => b.textContent)).toEqual(PAGES.map((p) => t(p.label)));
     expect(navButtons()[0]!.getAttribute("aria-keyshortcuts")).toBe("Control+1");
-    expect(navButtons()[1]!.title).toBe("Search (Ctrl+2)");
+    expect(navButtons()[1]!.title).toBe("Chat (Ctrl+2)");
     expect(navButtons()[0]!.getAttribute("aria-current")).toBe("page");
   });
 
@@ -30,7 +30,7 @@ describe("navigation", () => {
     finishedOnboarding("models");
     await render(<App />);
     expect(mainLabel()).toBe(t("app.nav.models"));
-    await click(navButtons()[2]);
+    await click(navButtons()[3]);
     expect(mainLabel()).toBe(t("app.nav.knowledge"));
     expect(localStorage.getItem("nugget.page")).toBe("knowledge");
   });
@@ -56,7 +56,7 @@ describe("navigation", () => {
   it("ignores shortcuts during IME composition", async () => {
     await render(<App />);
     await key({ key: "2", code: "Digit2", ctrlKey: true, isComposing: true }, document.body);
-    expect(mainLabel()).toBe(t("app.nav.chat"));
+    expect(mainLabel()).toBe(t("app.nav.today"));
   });
 
   it("arrow keys move focus between nav items", async () => {

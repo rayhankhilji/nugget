@@ -146,6 +146,26 @@ impl GoogleApi {
     /// 401 refreshes the token once; 429, rate-limit 403s, 408 and 5xx are retried with
     /// exponential backoff (honouring `Retry-After`) up to the policy's limit.
     pub(crate) async fn get(&self, url: &Url, cancel: &CancellationToken) -> Result<Response> {
+        self.call(Method::GET, url, None, cancel).await
+    }
+
+    /// POST a JSON body to `url`, with the same status handling and retries as [`get`](Self::get).
+    pub(crate) async fn post_json(
+        &self,
+        url: &Url,
+        body: &serde_json::Value,
+        cancel: &CancellationToken,
+    ) -> Result<Response> {
+        self.call(Method::POST, url, Some(body), cancel).await
+    }
+
+    async fn call(
+        &self,
+        method: Method,
+        url: &Url,
+        body: Option<&serde_json::Value>,
+        cancel: &CancellationToken,
+    ) -> Result<Response> {
         let mut attempt = 0u32;
         let mut refreshed = false;
         loop {
@@ -153,11 +173,16 @@ impl GoogleApi {
                 return Err(Error::Cancelled);
             }
             let token = self.tokens.access_token().await?;
-            let req = self
+            let mut req = self
                 .http
-                .request(Method::GET, url.as_str())
+                .request(method.clone(), url.as_str())
                 .bearer_auth(&token)
                 .header(ACCEPT, "application/json");
+            if let Some(b) = body {
+                req = req
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(serde_json::to_vec(b)?);
+            }
             let outcome = match self.http.send(req, &[]).await {
                 Ok(resp) => classify(resp),
                 Err(e @ Error::Network(_)) => Outcome::Retry(e),
