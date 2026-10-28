@@ -25,6 +25,10 @@ pub mod event {
     pub const CHAT_DONE: &str = "nugget:chat-done";
     /// `nugget_core::ipc::ModelProgress`.
     pub const MODELS_PROGRESS: &str = "nugget:models-progress";
+    /// `nugget_core::ipc::IngestProgress`.
+    pub const INGEST_PROGRESS: &str = "nugget:ingest-progress";
+    /// The params of `sources.changed`, as sent (the UI refetches `sources.list` on it).
+    pub const SOURCES_CHANGED: &str = "nugget:sources-changed";
     /// Every daemon notification as `{ method, params }`, including unknown ones.
     pub const NOTIFICATION: &str = "nugget:notification";
     /// A page id (`"status"`, ...): the tray asks the window to navigate.
@@ -250,6 +254,8 @@ fn forward_notifications(app: AppHandle, client: &Client, generation: u64, socke
                 notification::CHAT_DELTA => Some(event::CHAT_DELTA),
                 notification::CHAT_DONE => Some(event::CHAT_DONE),
                 notification::MODELS_PROGRESS => Some(event::MODELS_PROGRESS),
+                notification::INGEST_PROGRESS => Some(event::INGEST_PROGRESS),
+                notification::SOURCES_CHANGED => Some(event::SOURCES_CHANGED),
                 _ => None,
             };
             if let Some(name) = specific

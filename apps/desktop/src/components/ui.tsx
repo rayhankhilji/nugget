@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ApiError, errorMessage } from "../api";
+import { ApiError, errorMessage, NOT_AVAILABLE } from "../api";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: ReactNode; actions?: ReactNode }) {
   return (
@@ -21,6 +21,7 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
 export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   if (!error) return null;
   const e = ApiError.from(error);
+  if (e.isMethodNotFound) return <NotAvailable />;
   return (
     <div className={e.isOffline ? "note" : "note note-error"} role="alert">
       <span>{e.isOffline ? "Nugget isn't reachable right now." : errorMessage(e)}</span>
@@ -45,4 +46,25 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 
 export function Spinner({ label = "Loading" }: { label?: string }) {
   return <span className="spinner" role="status" aria-label={label} />;
+}
+
+/** The daemon doesn't implement this yet (JSON-RPC "method not found"). */
+export function NotAvailable({ what }: { what?: string }) {
+  return (
+    <div className="note" role="status">
+      <span>
+        {what ? `${what}: ` : ""}
+        {NOT_AVAILABLE}.
+      </span>
+      <span className="small">Update the Nugget background service to use this.</span>
+    </div>
+  );
+}
+
+export function ProgressBar({ done, total, label }: { done: number; total: number | null | undefined; label: string }) {
+  if (total && total > 0) {
+    return <progress aria-label={label} max={total} value={Math.min(done, total)} />;
+  }
+  // Unknown total: indeterminate.
+  return <progress aria-label={label} />;
 }

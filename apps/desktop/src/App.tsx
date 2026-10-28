@@ -5,6 +5,7 @@ import { Logo } from "./components/Logo";
 import { Offline } from "./components/Offline";
 import { ChatPage } from "./pages/Chat";
 import { SearchPage } from "./pages/Search";
+import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
@@ -12,6 +13,7 @@ import { StatusPage } from "./pages/Status";
 const PAGES: { id: PageId; label: string }[] = [
   { id: "chat", label: "Chat" },
   { id: "search", label: "Search" },
+  { id: "sources", label: "Sources" },
   { id: "models", label: "Models" },
   { id: "privacy", label: "Privacy" },
   { id: "status", label: "Status" },
@@ -131,6 +133,8 @@ function Page({ id }: { id: PageId }) {
       return <ChatPage />;
     case "search":
       return <SearchPage />;
+    case "sources":
+      return <SourcesPage />;
     case "models":
       return <ModelsPage />;
     case "privacy":

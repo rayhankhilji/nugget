@@ -1,19 +1,45 @@
 import { useEffect, useState } from "react";
-import { api, errorMessage, PROTOCOL_VERSION, type Capabilities, type ProviderInfo } from "../api";
-import { useAsync } from "../hooks";
-import { formatDuration, LOCALITY_LABEL, TIER_LABEL } from "../format";
-import { Badge, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import {
+  api,
+  errorMessage,
+  events,
+  isMethodNotFound,
+  PROTOCOL_VERSION,
+  type Capabilities,
+  type IngestStatus,
+  type ProviderInfo,
+  type RuntimeInfo,
+  type RuntimeState,
+} from "../api";
+import { useAsync, useEvent, useNow } from "../hooks";
+import { formatDuration, formatLatency, formatRelative, LOCALITY_LABEL, SOURCE_KIND_LABEL, TIER_LABEL } from "../format";
+import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 export function StatusPage() {
   const status = useAsync(api.status);
   const conn = useAsync(api.connection);
+  const ingest = useAsync(api.ingestStatus);
+  const runtime = useAsync(api.runtimeStatus);
 
-  // Light auto-refresh while the page is open.
+  // Light auto-refresh while the page is open. Methods the daemon lacks are not re-polled.
   const { reload } = status;
+  const reloadIngest = ingest.reload;
+  const reloadRuntime = runtime.reload;
+  const ingestMissing = isMethodNotFound(ingest.error);
+  const runtimeMissing = isMethodNotFound(runtime.error);
   useEffect(() => {
-    const t = window.setInterval(reload, 10_000);
+    const t = window.setInterval(() => {
+      reload();
+      if (!ingestMissing) reloadIngest();
+      if (!runtimeMissing) reloadRuntime();
+    }, 10_000);
     return () => window.clearInterval(t);
-  }, [reload]);
+  }, [reload, reloadIngest, reloadRuntime, ingestMissing, runtimeMissing]);
+  const refreshAll = () => {
+    status.reload();
+    ingest.reload();
+    runtime.reload();
+  };
 
   const s = status.data;
 
@@ -22,7 +48,7 @@ export function StatusPage() {
       <PageHeader
         title="Status"
         actions={
-          <button type="button" className="btn btn-ghost" onClick={status.reload} disabled={status.loading}>
+          <button type="button" className="btn btn-ghost" onClick={refreshAll} disabled={status.loading}>
             Refresh
           </button>
         }
@@ -92,6 +118,9 @@ export function StatusPage() {
           )}
         </>
       )}
+
+      <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
+      <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
 
       <h2>Connection</h2>
       <p className="muted small">
@@ -192,5 +221,168 @@ function ProviderRow({ provider: p, onProbed }: { provider: ProviderInfo; onProb
         )}
       </td>
     </tr>
+  );
+}
+
+// ---- indexing (M1) ----
+
+function IndexingCard({
+  data,
+  error,
+  loading,
+  onRetry,
+}: {
+  data: IngestStatus | undefined;
+  error: unknown;
+  loading: boolean;
+  onRetry: () => void;
+}) {
+  const now = useNow();
+  // Queue depth moves fast while syncing; refresh on progress, at most every 2 s.
+  const [lastPoke, setLastPoke] = useState(0);
+  useEvent(events.onIngestProgress, () => {
+    if (Date.now() - lastPoke > 2000) {
+      setLastPoke(Date.now());
+      onRetry();
+    }
+  });
+
+  const failing = (data?.sources ?? []).filter((s) => s.last_error);
+  return (
+    <section className="status-card" aria-labelledby="indexing-title">
+      <h2 id="indexing-title">Indexing</h2>
+      {isMethodNotFound(error) ? (
+        <NotAvailable />
+      ) : (
+        <>
+          <ErrorNote error={error} onRetry={onRetry} />
+          {loading && !data && <Spinner />}
+          {data && (
+            <>
+              <dl className="stats">
+                <div>
+                  <dt>Queue</dt>
+                  <dd>
+                    {data.queue_depth.toLocaleString()}
+                    <span className="muted small stat-unit"> waiting</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Freshness p50</dt>
+                  <dd>{formatLatency(data.freshness_p50_ms)}</dd>
+                </div>
+                <div>
+                  <dt>Freshness p95</dt>
+                  <dd>
+                    {formatLatency(data.freshness_p95_ms)}
+                    {data.freshness_p95_ms != null && data.freshness_p95_ms > 60_000 && (
+                      <>
+                        {" "}
+                        <Badge tone="warn">Over 60 s</Badge>
+                      </>
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Embeddings</dt>
+                  <dd className="stat-text">{data.embedding_provider ?? <span className="muted">Text-only search</span>}</dd>
+                </div>
+                <div>
+                  <dt>Triage</dt>
+                  <dd className="stat-text">{data.triage_provider ?? <span className="muted">Off</span>}</dd>
+                </div>
+              </dl>
+              <p className="muted small">Freshness is the time from a change in a source to it being searchable, over recent changes.</p>
+              {failing.length > 0 && (
+                <>
+                  <h3 className="ask-sub">Errors</h3>
+                  <ul className="error-list">
+                    {failing.map((s) => (
+                      <li key={s.id}>
+                        <b>{s.name}</b> <span className="muted small">({SOURCE_KIND_LABEL[s.kind] ?? s.kind}, synced {formatRelative(s.last_sync, now)})</span>
+                        <div className="note note-error small">{s.last_error}</div>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+// ---- local runtime (M1) ----
+
+const RUNTIME_STATE: Record<RuntimeState, { label: string; tone: "neutral" | "accent" | "good" | "warn" | "bad" }> = {
+  not_installed: { label: "Not installed", tone: "neutral" },
+  stopped: { label: "Stopped", tone: "neutral" },
+  starting: { label: "Starting", tone: "accent" },
+  ready: { label: "Ready", tone: "good" },
+  failed: { label: "Failed", tone: "bad" },
+};
+
+function RuntimeCard({
+  data,
+  error,
+  loading,
+  onRetry,
+}: {
+  data: RuntimeInfo[] | undefined;
+  error: unknown;
+  loading: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <section className="status-card" aria-labelledby="runtime-title">
+      <h2 id="runtime-title">Local runtime</h2>
+      {isMethodNotFound(error) ? (
+        <NotAvailable />
+      ) : (
+        <>
+          <ErrorNote error={error} onRetry={onRetry} />
+          {loading && !data && <Spinner />}
+          {data && data.length === 0 && (
+            <p className="muted">No local model servers. Install a local model on the Models page to run chat and embeddings on this device.</p>
+          )}
+          {data && data.length > 0 && (
+            <div className="table-wrap" tabIndex={0} role="region" aria-label="Local runtimes">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Model</th>
+                    <th scope="col">Role</th>
+                    <th scope="col">State</th>
+                    <th scope="col">Provider</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.map((r) => {
+                    const st = RUNTIME_STATE[r.state] ?? { label: r.state, tone: "neutral" as const };
+                    return (
+                      <tr key={`${r.provider}\u0000${r.model_id}`}>
+                        <th scope="row">
+                          <code>{r.model_id}</code>
+                        </th>
+                        <td>{r.role === "embedding" ? "Embeddings" : "Chat"}</td>
+                        <td>
+                          <Badge tone={st.tone}>{st.label}</Badge>
+                          {r.error && <div className="note note-error small">{r.error}</div>}
+                        </td>
+                        <td>
+                          <code>{r.provider}</code>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }

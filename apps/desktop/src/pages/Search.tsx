@@ -1,8 +1,45 @@
-import { useState, type FormEvent } from "react";
-import { api, type SearchHit } from "../api";
-import { Empty, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import { useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  api,
+  errorMessage,
+  events,
+  isMethodNotFound,
+  isOpenableUrl,
+  type ChatDone,
+  type Citation,
+  type ContextResponse,
+  type SearchHit,
+  type SourceInfo,
+} from "../api";
+import { useAsync, useEvent } from "../hooks";
+import { contextPrompt, splitCitations } from "../citations";
+import { SOURCE_KIND_LABEL } from "../format";
+import { SourceIcon } from "../components/SourceIcon";
+import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 const LIMITS = [10, 25, 50];
+const BUDGETS = [1000, 2000, 4000, 8000];
+
+/** `open_url`, reporting the outcome in the page's live region. */
+function useOpener() {
+  const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
+  const open = async (url: string, label: string) => {
+    setStatus(null);
+    try {
+      const r = await api.openUrl(url);
+      setStatus({
+        text:
+          r === "revealed"
+            ? `Showed “${label}” in its folder instead of opening it, because this kind of file can run programs.`
+            : `Opened “${label}”.`,
+        error: false,
+      });
+    } catch (e) {
+      setStatus({ text: `Couldn't open “${label}”: ${errorMessage(e)}`, error: true });
+    }
+  };
+  return { status, open };
+}
 
 export function SearchPage() {
   const [query, setQuery] = useState("");
@@ -11,6 +48,11 @@ export function SearchPage() {
   const [searched, setSearched] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const opener = useOpener();
+  // Source names and kinds for badges. Optional: older daemons don't have `sources.list`.
+  const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
+  const byId = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
   const run = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -30,7 +72,15 @@ export function SearchPage() {
 
   return (
     <div className="page">
-      <PageHeader title="Search" description="Full-text and semantic search over everything Nugget has indexed." />
+      <PageHeader
+        title="Search"
+        description="Full-text and semantic search over everything Nugget has indexed."
+        actions={
+          <button type="button" className="btn btn-ghost" aria-expanded={askOpen} aria-controls="ask-panel" onClick={() => setAskOpen((o) => !o)}>
+            {askOpen ? "Hide Ask with context" : "Ask with context"}
+          </button>
+        }
+      />
       <form className="search-bar" role="search" onSubmit={run}>
         <label htmlFor="search-q" className="visually-hidden">
           Search query
@@ -58,8 +108,13 @@ export function SearchPage() {
         </button>
       </form>
 
+      {askOpen && <AskPanel initialQuestion={query.trim()} byId={byId} onOpen={opener.open} />}
+
       <ErrorNote error={error} onRetry={() => void run()} />
 
+      <div aria-live="polite" className={opener.status ? (opener.status.error ? "note note-error" : "note") : "visually-hidden"}>
+        {opener.status?.text}
+      </div>
       <div aria-live="polite" className="visually-hidden">
         {hits && `${hits.length} result${hits.length === 1 ? "" : "s"} for ${searched}`}
       </div>
@@ -71,23 +126,277 @@ export function SearchPage() {
       )}
       {hits && hits.length > 0 && (
         <ol className="results">
-          {hits.map((h, i) => (
-            <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
-              <div className="result-head">
-                <span className="result-title">{h.title || h.item.key}</span>
-                <span className="muted small" title="Relevance score">
-                  {h.score.toFixed(3)}
-                </span>
-              </div>
-              <p className="result-snippet">{h.snippet}</p>
-              <p className="muted small">
-                {h.item.source} · <code>{h.item.key}</code>
-              </p>
-            </li>
-          ))}
+          {hits.map((h, i) => {
+            const title = h.title || h.item.key;
+            return (
+              <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
+                <div className="result-head">
+                  <span className="result-title">{title}</span>
+                  <span className="result-tools">
+                    <span className="muted small" title="Relevance score">
+                      {h.score.toFixed(3)}
+                    </span>
+                    {isOpenableUrl(h.url) && (
+                      <button type="button" className="btn btn-small" onClick={() => void opener.open(h.url!, title)} aria-label={`Open ${title}`}>
+                        Open
+                      </button>
+                    )}
+                  </span>
+                </div>
+                <p className="result-snippet">{h.snippet}</p>
+                <p className="muted small result-meta">
+                  <SourceBadge id={h.item.source} source={byId.get(h.item.source)} /> <code>{h.item.key}</code>
+                </p>
+              </li>
+            );
+          })}
         </ol>
       )}
       {!hits && !error && <Empty title="Type a query to search">Results come only from this device.</Empty>}
     </div>
+  );
+}
+
+function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefined }) {
+  const kind = source?.kind ?? "";
+  return (
+    <span className="source-badge" title={source ? `${SOURCE_KIND_LABEL[kind] ?? kind} · ${id}` : id}>
+      <SourceIcon kind={kind} size={13} />
+      {source?.name ?? id}
+    </span>
+  );
+}
+
+// ---- Ask with context ----
+
+type Answer = { streamId: string | null; provider: string | null; text: string; done: ChatDone | null; error: string | null };
+
+function AskPanel({
+  initialQuestion,
+  byId,
+  onOpen,
+}: {
+  initialQuestion: string;
+  byId: Map<string, SourceInfo>;
+  onOpen: (url: string, label: string) => Promise<void>;
+}) {
+  const [question, setQuestion] = useState(initialQuestion);
+  const [budget, setBudget] = useState(2000);
+  const [ctx, setCtx] = useState<ContextResponse | null>(null);
+  const [asked, setAsked] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [answer, setAnswer] = useState<Answer | null>(null);
+  // Chat events can arrive before `chat` returns the stream id; buffer them by id.
+  const streams = useRef(new Map<string, { text: string; done: ChatDone | null }>());
+  const listRef = useRef<HTMLOListElement>(null);
+
+  const valid = useMemo(() => new Set((ctx?.citations ?? []).map((c) => c.n)), [ctx]);
+  const byN = useMemo(() => new Map((ctx?.citations ?? []).map((c) => [c.n, c])), [ctx]);
+
+  const sync = (id: string) => {
+    const s = streams.current.get(id);
+    if (!s) return;
+    setAnswer((a) => (a && a.streamId === id ? { ...a, text: s.text, done: s.done, error: s.done?.error ?? null } : a));
+  };
+  useEvent(events.onChatDelta, (d) => {
+    const s = streams.current.get(d.stream_id) ?? { text: "", done: null };
+    s.text += d.text;
+    streams.current.set(d.stream_id, s);
+    sync(d.stream_id);
+  });
+  useEvent(events.onChatDone, (d) => {
+    const s = streams.current.get(d.stream_id) ?? { text: "", done: null };
+    s.done = d;
+    streams.current.set(d.stream_id, s);
+    sync(d.stream_id);
+  });
+
+  const getContext = async (e: FormEvent) => {
+    e.preventDefault();
+    const q = question.trim();
+    if (!q) return;
+    setBusy(true);
+    setError(null);
+    setAnswer(null);
+    try {
+      setCtx(await api.retrieveContext({ query: q, budget_tokens: budget }));
+      setAsked(q);
+    } catch (err) {
+      setCtx(null);
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ask = async () => {
+    if (!ctx) return;
+    streams.current.clear();
+    setAnswer({ streamId: null, provider: null, text: "", done: null, error: null });
+    try {
+      const started = await api.chat({
+        provider: null,
+        tier: "synthesis",
+        messages: [
+          { role: "system", text: contextPrompt(ctx.text) },
+          { role: "user", text: asked },
+        ],
+      });
+      const s = streams.current.get(started.stream_id);
+      setAnswer({
+        streamId: started.stream_id,
+        provider: started.provider,
+        text: s?.text ?? "",
+        done: s?.done ?? null,
+        error: s?.done?.error ?? null,
+      });
+    } catch (err) {
+      setAnswer({ streamId: null, provider: null, text: "", done: null, error: errorMessage(err) });
+    }
+  };
+
+  const cite = (n: number) => {
+    const c = byN.get(n);
+    if (!c) return;
+    if (isOpenableUrl(c.url)) {
+      void onOpen(c.url, c.title || c.item.key);
+    } else {
+      listRef.current?.querySelector<HTMLElement>(`#cite-${n}`)?.focus();
+    }
+  };
+
+  const streaming = answer !== null && answer.done === null && answer.error === null;
+
+  return (
+    <section id="ask-panel" className="ask-panel" aria-labelledby="ask-title">
+      <h2 id="ask-title">Ask with context</h2>
+      <p className="muted small">
+        Nugget packs the most relevant passages from your sources, with numbered citations. Review them, then ask a model to
+        answer from them.
+      </p>
+      <form className="ask-form" onSubmit={getContext}>
+        <label htmlFor="ask-q" className="visually-hidden">
+          Question
+        </label>
+        <input id="ask-q" type="text" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask a question about your data…" autoFocus />
+        <label className="field-inline">
+          <span>Budget</span>
+          <select value={budget} onChange={(e) => setBudget(Number(e.target.value))}>
+            {BUDGETS.map((b) => (
+              <option key={b} value={b}>
+                {b.toLocaleString()} tokens
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="btn" disabled={busy || !question.trim()}>
+          {busy ? <Spinner label="Finding context" /> : "Find context"}
+        </button>
+      </form>
+
+      {isMethodNotFound(error) ? <NotAvailable what="Context retrieval" /> : <ErrorNote error={error} />}
+
+      {ctx && ctx.citations.length === 0 && <p className="muted">Nothing relevant was found for “{asked}”.</p>}
+      {ctx && ctx.citations.length > 0 && (
+        <>
+          <h3 className="ask-sub">Context</h3>
+          <div className="context-text" tabIndex={0} role="region" aria-label="Retrieved context">
+            <CitedText text={ctx.text} valid={valid} byN={byN} onCite={cite} />
+          </div>
+          <h3 className="ask-sub">Citations</h3>
+          <ol className="citations" ref={listRef}>
+            {ctx.citations.map((c) => (
+              <CitationItem key={c.n} c={c} source={byId.get(c.item.source)} onOpen={onOpen} />
+            ))}
+          </ol>
+          <div className="ask-actions">
+            <button type="button" className="btn btn-primary" onClick={() => void ask()} disabled={streaming}>
+              {streaming ? <Spinner label="Answering" /> : answer ? "Ask again" : "Ask with this context"}
+            </button>
+            <span className="muted small">The question and this context go to the model for the Synthesis tier.</span>
+          </div>
+        </>
+      )}
+
+      {answer && (
+        <div className="answer" aria-live="polite" aria-busy={streaming}>
+          <h3 className="ask-sub">
+            Answer{answer.provider && <span className="muted small"> · {answer.provider}</span>}
+          </h3>
+          {answer.error ? (
+            <p className="note note-error" role="alert">
+              {answer.error}
+            </p>
+          ) : (
+            <div className="answer-text">
+              {answer.text ? <CitedText text={answer.text} valid={valid} byN={byN} onCite={cite} /> : <Spinner label="Waiting for the model" />}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CitedText({
+  text,
+  valid,
+  byN,
+  onCite,
+}: {
+  text: string;
+  valid: ReadonlySet<number>;
+  byN: Map<number, Citation>;
+  onCite: (n: number) => void;
+}) {
+  const parts = useMemo(() => splitCitations(text, valid), [text, valid]);
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.kind === "text" ? (
+          <span key={i}>{p.text}</span>
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="cite"
+            onClick={() => onCite(p.n)}
+            aria-label={`Citation ${p.n}: ${byN.get(p.n)?.title || byN.get(p.n)?.item.key || ""}`}
+            title={byN.get(p.n)?.title ?? undefined}
+          >
+            {p.raw}
+          </button>
+        ),
+      )}
+    </>
+  );
+}
+
+function CitationItem({
+  c,
+  source,
+  onOpen,
+}: {
+  c: Citation;
+  source: SourceInfo | undefined;
+  onOpen: (url: string, label: string) => Promise<void>;
+}) {
+  const title = c.title || c.item.key;
+  return (
+    <li id={`cite-${c.n}`} tabIndex={-1} className="citation">
+      <span className="cite-n">[{c.n}]</span>
+      <span className="citation-body">
+        <span className="citation-title">{title}</span>
+        <span className="muted small">
+          <SourceBadge id={c.item.source} source={source} />
+        </span>
+      </span>
+      {isOpenableUrl(c.url) && (
+        <button type="button" className="btn btn-small" onClick={() => void onOpen(c.url!, title)} aria-label={`Open ${title}`}>
+          Open
+        </button>
+      )}
+    </li>
   );
 }

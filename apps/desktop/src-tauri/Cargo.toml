@@ -22,6 +22,10 @@ tokio.workspace = true
 tracing.workspace = true
 futures.workspace = true
 tauri = { version = "2", features = ["tray-icon"] }
+# Rust-side APIs only: no plugin command is granted to the webview (see capabilities/default.json).
+# Pinned to the last releases on the Tauri 2.11 line (newer ones need tauri 2.12 and Rust 1.90).
+tauri-plugin-opener = "=2.5.5"
+tauri-plugin-dialog = "=2.7.3"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [lints]

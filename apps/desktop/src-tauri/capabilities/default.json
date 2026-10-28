@@ -1,7 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: the app's own commands (allowed without a core permission) plus listening to the app's events. Nothing else from core: the UI uses no window, app, path, menu, tray, image or webview APIs.",
-  "windows": ["main"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+  "description": "Main window: the app's own commands (allowed without a core permission) plus listening to the app's events. Nothing else from core: the UI uses no window, app, path, menu, tray, image or webview APIs. No plugin permissions either: the dialog and opener plugins are used only from Rust, behind the validated `pick_folders` and `open_url` commands.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

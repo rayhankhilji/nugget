@@ -5,6 +5,7 @@
 
 mod commands;
 mod daemon;
+mod open;
 mod tray;
 
 #[cfg(target_os = "macos")]
@@ -20,6 +21,9 @@ fn main() {
         .init();
 
     let app = tauri::Builder::default()
+        // Only the Rust API is used (`commands::pick_folders`); the webview is granted none of the
+        // plugin's own commands.
+        .plugin(tauri_plugin_dialog::init())
         .manage(daemon::Daemon::new())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
@@ -33,6 +37,18 @@ fn main() {
             commands::models_list,
             commands::models_install,
             commands::egress_recent,
+            commands::sources_list,
+            commands::sources_add,
+            commands::sources_update,
+            commands::sources_remove,
+            commands::sources_sync,
+            commands::sources_auth_begin,
+            commands::sources_secret_set,
+            commands::ingest_status,
+            commands::retrieve_context,
+            commands::runtime_status,
+            commands::open_url,
+            commands::pick_folders,
         ])
         .setup(|app| {
             if let Err(e) = tray::build(app) {
