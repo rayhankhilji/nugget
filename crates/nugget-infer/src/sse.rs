@@ -43,7 +43,8 @@ impl SseParser {
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<SseEvent>, LineTooLong> {
         let mut out = Vec::new();
         let mut chunk = chunk;
-        if self.pending_cr {
+        // An empty chunk carries no information: keep a pending `\r` for the next one.
+        if self.pending_cr && !chunk.is_empty() {
             self.pending_cr = false;
             if let Some(rest) = chunk.strip_prefix(b"\n") {
                 chunk = rest;
@@ -190,6 +191,13 @@ mod tests {
         assert_eq!(ev.len(), 2);
         assert_eq!(ev[0].data, "x");
         assert_eq!(ev[1].data, "y");
+    }
+
+    #[test]
+    fn empty_chunk_between_cr_and_lf_keeps_the_crlf_together() {
+        let ev = parse_chunks(&[b"data: x\r", b"", b"\ndata: y\n\n"]);
+        assert_eq!(ev.len(), 1, "{ev:?}");
+        assert_eq!(ev[0].data, "x\ny");
     }
 
     #[test]

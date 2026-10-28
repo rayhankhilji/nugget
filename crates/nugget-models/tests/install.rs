@@ -540,3 +540,85 @@ async fn cancelled_install_keeps_staged_bytes() {
     // Nothing left to discard; discarding is idempotent.
     st.discard_staging(e).unwrap();
 }
+
+/// gc runs while install re-verifies a blob that is present but not yet referenced (the hash
+/// does not hold the store lock). Install must notice the blob is gone and fetch it again rather
+/// than activate a slot that points at nothing.
+#[tokio::test]
+async fn gc_during_verify_of_existing_blob_does_not_activate_a_missing_blob() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = Arc::new(store(tmp.path(), Arc::default()));
+    let srv = TestServer::start().await;
+    let bytes = data(SIZE, 61);
+    let e = entry("m", &srv.add("m", bytes.clone()), &bytes);
+    // An unreferenced blob with the right bytes, e.g. left behind by an older version.
+    let blob = st.root().join("blobs").join("sha256").join(&e.sha256);
+    std::fs::create_dir_all(blob.parent().unwrap()).unwrap();
+    std::fs::write(&blob, &bytes).unwrap();
+
+    let ran_gc = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (gc_store, flag, sha) = (st.clone(), ran_gc.clone(), e.sha256.clone());
+    let handle = tokio::runtime::Handle::current();
+    let installed = st
+        .install(&e, move |p| {
+            // Runs on the hashing thread, after the blob was read and before activation.
+            if p.phase == Phase::Verifying
+                && p.done == p.total
+                && !flag.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let report = handle.block_on(gc_store.gc()).unwrap();
+                assert_eq!(report.removed, vec![sha.clone()]);
+            }
+        })
+        .await
+        .unwrap();
+    assert!(ran_gc.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(installed.sha256, e.sha256);
+    assert_eq!(std::fs::read(st.path("m").unwrap()).unwrap(), bytes);
+    assert!(
+        !srv.requests().is_empty(),
+        "the removed blob was downloaded again"
+    );
+}
+
+/// Dropping an install future stops its blocking SHA-256 within about 1 MiB, instead of reading
+/// the whole (here 4 GiB, sparse) file and holding up runtime shutdown.
+#[tokio::test]
+async fn dropped_install_stops_hashing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let st = store(tmp.path(), Arc::default());
+    let size: u64 = 4 << 30;
+    let url = format!("http://127.0.0.1:9/big/resolve/{}/big.gguf", common::REV);
+    let mut e = entry("big", &url, b"x");
+    e.size = size;
+    let blob = st.root().join("blobs").join("sha256").join(&e.sha256);
+    std::fs::create_dir_all(blob.parent().unwrap()).unwrap();
+    std::fs::File::create(&blob).unwrap().set_len(size).unwrap();
+
+    let hashed = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (started_tx, started) = tokio::sync::oneshot::channel();
+    let started_tx = Mutex::new(Some(started_tx));
+    let h = hashed.clone();
+    let install = st.install(&e, move |p| {
+        if p.phase == Phase::Verifying && p.done > 0 {
+            h.store(p.done, std::sync::atomic::Ordering::SeqCst);
+            if let Some(tx) = started_tx.lock().unwrap().take() {
+                let _ = tx.send(());
+            }
+        }
+    });
+    tokio::select! {
+        r = install => panic!("install finished before it was cancelled: {r:?}"),
+        _ = started => {}
+    }
+    // The install future is dropped here.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let after_cancel = hashed.load(std::sync::atomic::Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let later = hashed.load(std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(
+        after_cancel, later,
+        "hashing continued after the install was dropped"
+    );
+    assert!(later < size);
+}

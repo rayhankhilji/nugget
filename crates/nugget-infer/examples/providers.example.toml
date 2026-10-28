@@ -20,8 +20,14 @@
 #            (Secret Service: GNOME Keyring, KWallet or KeePassXC; on headless machines use env:VAR)
 #
 # Locality is derived from the base_url host: localhost/127.0.0.1/::1 => on_device (no egress
-# record); private ranges, *.local, single-label hosts => local_network; everything else => cloud.
-# Every request to a non-on_device provider is written to the egress ledger.
+# record); private IP ranges => local_network; everything else => cloud. Any other host name is
+# resolved once when the provider is built: it is on_device/local_network only if EVERY address is
+# loopback/private (and the connection is pinned to those addresses); otherwise, or if it does not
+# resolve, it is cloud (https required). Every request to a non-on_device provider is written to
+# the egress ledger. Redirects are never followed.
+#
+# Extra `headers` that carry credentials (authorization, x-api-key, cookie, ...) must be
+# "env:VAR" or "keychain:NAME", like api_key.
 
 # --- Local (on-device) via Ollama: triage + embeddings ------------------------------------------
 [[providers]]

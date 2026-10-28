@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use nugget_core::egress::EgressSink;
@@ -64,8 +64,12 @@ pub(crate) struct State {
     pub started: Instant,
     pub store: Store,
     pub router: Arc<Router>,
-    /// Configs of the providers that were built, in config order.
+    /// Every configured provider, in config order (including ones that failed to build).
     pub configs: Vec<ProviderConfig>,
+    /// Providers that could not be built, with the reason. They are not in the router.
+    pub unavailable: HashMap<ProviderId, String>,
+    /// Result of verifying the audit hash chain; unset until the startup check finishes.
+    pub audit_chain_ok: Arc<OnceLock<bool>>,
     pub probes: Arc<Mutex<ProbeCache>>,
     pub manifest: std::result::Result<Manifest, String>,
     pub models: Arc<ModelStore>,
@@ -79,7 +83,11 @@ pub(crate) struct State {
 }
 
 impl State {
+    /// Config of a provider that was built (and so is in the router).
     pub fn config_of(&self, id: &ProviderId) -> Option<&ProviderConfig> {
+        if self.unavailable.contains_key(id) {
+            return None;
+        }
         self.configs.iter().find(|c| &c.id == id)
     }
 
@@ -174,14 +182,20 @@ impl Daemon {
         };
         let egress: Arc<dyn EgressSink> = Arc::new(store.clone());
 
-        let (providers, configs) = {
+        let (providers, unavailable) = {
             let egress = egress.clone();
             let wanted = config.providers.clone();
             blocking(move || Ok(build_providers(&wanted, egress))).await?
         };
-        let router = Router::new(providers, tier_map_from_configs(&configs));
+        let configs = config.providers.clone();
+        let built: Vec<ProviderConfig> = configs
+            .iter()
+            .filter(|c| !unavailable.contains_key(&c.id))
+            .cloned()
+            .collect();
+        let router = Router::new(providers, tier_map_from_configs(&built));
         let probes = ProbeCache::load(ProbeCache::path_for(&paths));
-        for cfg in &configs {
+        for cfg in &built {
             if let Some(caps) = probes.get(cfg) {
                 router.set_capabilities(&cfg.id, caps.clone());
             }
@@ -212,11 +226,15 @@ impl Daemon {
         tracing::info!(
             version = env!("CARGO_PKG_VERSION"),
             socket = %socket,
-            providers = configs.len(),
+            providers = built.len(),
+            unavailable = unavailable.len(),
             encrypted = store.is_encrypted(),
             ram_gb = hardware.total_ram / nugget_models::GIB,
             "nuggetd ready"
         );
+
+        let audit_chain_ok = Arc::new(OnceLock::new());
+        spawn_audit_check(store.clone(), audit_chain_ok.clone());
 
         Ok(Startup::Ready(Box::new(Daemon {
             state: Arc::new(State {
@@ -225,6 +243,8 @@ impl Daemon {
                 store,
                 router: Arc::new(router),
                 configs,
+                unavailable,
+                audit_chain_ok,
                 probes: Arc::new(Mutex::new(probes)),
                 manifest,
                 models: Arc::new(models),
@@ -255,24 +275,24 @@ impl Daemon {
 
     /// Serve IPC until `shutdown` resolves, then stop chat streams and installs (waiting up to
     /// a few seconds for them) and close the socket.
+    ///
+    /// Connections stay open while background tasks wind down, so chat streams can tell their
+    /// clients (`chat.done`) that the daemon is stopping.
     pub async fn run_until<F>(self, shutdown: F) -> Result<()>
     where
         F: Future<Output = ()>,
     {
         let state = self.state;
         let handler = Arc::new(RpcHandler::new(state.clone()));
+        let winding = state.clone();
+        let shutdown = async move {
+            shutdown.await;
+            wind_down(&winding).await;
+        };
         let served = nugget_ipc::serve_until(self.listener, handler, shutdown).await;
-        tracing::info!("shutting down");
-        state.shutdown.cancel();
-        state.tasks.close();
-        if tokio::time::timeout(SHUTDOWN_GRACE, state.tasks.wait())
-            .await
-            .is_err()
-        {
-            tracing::warn!(
-                remaining = state.tasks.len(),
-                "background tasks did not stop in time"
-            );
+        // `serve_until` can also return early on a listener failure.
+        if !state.shutdown.is_cancelled() {
+            wind_down(&state).await;
         }
         served.map_err(Error::Io)?;
         tracing::info!("stopped");
@@ -280,27 +300,61 @@ impl Daemon {
     }
 }
 
+/// Signal background tasks to stop and wait (bounded) for them to finish.
+async fn wind_down(state: &State) {
+    tracing::info!("shutting down");
+    state.shutdown.cancel();
+    state.tasks.close();
+    if tokio::time::timeout(SHUTDOWN_GRACE, state.tasks.wait())
+        .await
+        .is_err()
+    {
+        tracing::warn!(
+            remaining = state.tasks.len(),
+            "background tasks did not stop in time"
+        );
+    }
+}
+
+/// Verify the audit hash chain in the background; the result lands in `out`. A broken chain is
+/// logged loudly but does not stop the daemon.
+fn spawn_audit_check(store: Store, out: Arc<OnceLock<bool>>) {
+    tokio::task::spawn_blocking(move || {
+        let ok = match store.verify_audit_chain() {
+            Ok(()) => {
+                tracing::info!("audit chain verified");
+                true
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "AUDIT CHAIN VERIFICATION FAILED: the audit log may have been tampered with");
+                false
+            }
+        };
+        let _ = out.set(ok);
+    });
+}
+
 /// Build every provider that can be built. One that cannot (for example its API key variable is
-/// unset) is skipped with a warning instead of keeping the daemon from starting.
+/// unset) is reported with its reason instead of keeping the daemon from starting.
 fn build_providers(
     configs: &[ProviderConfig],
     egress: Arc<dyn EgressSink>,
-) -> (Vec<Arc<dyn Provider>>, Vec<ProviderConfig>) {
+) -> (Vec<Arc<dyn Provider>>, HashMap<ProviderId, String>) {
     let mut providers = Vec::new();
-    let mut built = Vec::new();
+    let mut unavailable = HashMap::new();
     for cfg in configs {
         match build_provider(cfg, egress.clone()) {
             Ok(p) => {
                 tracing::info!(provider = %cfg.id, kind = %cfg.kind, model = %cfg.model, locality = ?p.meta().locality, "provider ready");
                 providers.push(p);
-                built.push(cfg.clone());
             }
             Err(e) => {
-                tracing::warn!(provider = %cfg.id, error = %e, "provider unavailable; skipping");
+                tracing::warn!(provider = %cfg.id, error = %e, "provider unavailable; not routed");
+                unavailable.insert(cfg.id.clone(), e.to_string());
             }
         }
     }
-    (providers, built)
+    (providers, unavailable)
 }
 
 /// Run blocking work (SQLite, keychain, filesystem) off the async workers.

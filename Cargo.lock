@@ -2864,6 +2864,7 @@ name = "nugget-ipc"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "fs4",
  "futures",
  "interprocess",
  "nugget-core",
@@ -2875,6 +2876,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

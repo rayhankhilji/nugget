@@ -70,6 +70,12 @@ pub fn format_status(s: &StatusResponse, socket: &str) -> String {
     );
     let _ = writeln!(out, "socket:    {socket}");
     let _ = writeln!(out, "store:     {} items, {} chunks", s.items, s.chunks);
+    let audit = match s.audit_chain_ok {
+        Some(true) => "chain verified",
+        Some(false) => "CHAIN VERIFICATION FAILED (see the daemon log)",
+        None => "not checked yet",
+    };
+    let _ = writeln!(out, "audit:     {audit}");
     if s.providers.is_empty() {
         let _ = writeln!(out, "providers: none configured");
         return out;
@@ -77,9 +83,10 @@ pub fn format_status(s: &StatusResponse, socket: &str) -> String {
     let _ = writeln!(out, "providers:");
     for p in &s.providers {
         let tiers: Vec<&str> = p.tiers.iter().map(|t| tier_name(*t)).collect();
-        let caps = match &p.capabilities {
-            None => "not probed".to_string(),
-            Some(c) => {
+        let caps = match (&p.error, &p.capabilities) {
+            (Some(e), _) => format!("unavailable: {e}"),
+            (None, None) => "not probed".to_string(),
+            (None, Some(c)) => {
                 let names: Vec<&str> = [
                     ("streaming", c.streaming),
                     ("vision", c.vision),
@@ -153,8 +160,17 @@ mod tests {
                     }),
                     error: None,
                 },
+                ProviderInfo {
+                    id: ProviderId::new("broken"),
+                    kind: "anthropic".into(),
+                    model: "b".into(),
+                    locality: Locality::Cloud,
+                    tiers: vec![Tier::Synthesis],
+                    capabilities: None,
+                    error: Some("api_key env:X: not set".into()),
+                },
             ],
-            audit_chain_ok: None,
+            audit_chain_ok: Some(false),
         };
         let out = format_status(&s, "/tmp/sock");
         assert!(out.starts_with("nuggetd 0.0.1 running (protocol 1), up 1h 2m\n"));
@@ -165,6 +181,10 @@ mod tests {
             )
         );
         assert!(out.contains("  cloud  anthropic c  cloud  tiers: -  probed: streaming, tools"));
+        assert!(out.contains(
+            "  broken  anthropic b  cloud  tiers: synthesis  unavailable: api_key env:X: not set"
+        ));
+        assert!(out.contains("audit:     CHAIN VERIFICATION FAILED"));
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::sync::{Arc, PoisonError};
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use nugget_core::capability::Tier;
+use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     self, ChatCancel, ChatDelta, ChatDone, ChatStarted, EgressRecentRequest, ModelInfo,
@@ -13,7 +13,10 @@ use nugget_core::ipc::{
     Role as IpcRole, SearchHit, SearchRequest, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
-use nugget_infer::{ChatEvent, ChatRequest, Message, ProbeOptions, Provider, StopReason};
+use nugget_infer::{
+    ChatEvent, ChatRequest, ChatStream, FEATURE_PROBE, Message, ProbeOptions, Provider,
+    ProviderConfig, StopReason, probe_with,
+};
 use nugget_ipc::{Handler, Notifier, RpcError, code, parse_params, to_result};
 use nugget_models::{InstalledModel, ModelEntry, recommend};
 use nugget_store::AuditEntry;
@@ -75,18 +78,24 @@ impl RpcHandler {
             items: counts.items,
             chunks: counts.chunks,
             providers: self.provider_infos(),
-            audit_chain_ok: None,
+            audit_chain_ok: self.state.audit_chain_ok.get().copied(),
         })
     }
 
+    /// Every configured provider in config order, including ones that failed to build (with
+    /// `error` set), so a misconfigured provider never silently disappears.
     fn provider_infos(&self) -> Vec<ProviderInfo> {
         let router = &self.state.router;
-        router
-            .providers()
+        self.state
+            .configs
             .iter()
-            .map(|p| {
+            .filter_map(|cfg| {
+                if let Some(reason) = self.state.unavailable.get(&cfg.id) {
+                    return Some(unavailable_info(cfg, reason));
+                }
+                let p = router.provider(&cfg.id)?;
                 let meta = p.meta();
-                ProviderInfo {
+                Some(ProviderInfo {
                     id: p.id().clone(),
                     kind: meta.kind.as_str().to_string(),
                     model: meta.model,
@@ -94,7 +103,7 @@ impl RpcHandler {
                     tiers: router.tiers_of(p.id()),
                     capabilities: router.capabilities(p.id()),
                     error: None,
-                }
+                })
             })
             .collect()
     }
@@ -104,10 +113,46 @@ impl RpcHandler {
             .state
             .config_of(&req.provider)
             .cloned()
-            .ok_or_else(|| not_configured(&req.provider))?;
+            .ok_or_else(|| self.unknown_provider(&req.provider))?;
+        let provider = self
+            .state
+            .router
+            .provider(&req.provider)
+            .ok_or_else(|| self.unknown_provider(&req.provider))?;
         let opts = ProbeOptions::default();
-        let report = self.state.router.probe(&req.provider, &opts).await?;
+        // A probe against a server that is down would record every capability as missing and
+        // block plain chat until the next probe. Only record results from a reachable server.
+        let checked = match ensure_reachable(provider.as_ref(), &opts).await {
+            Ok(()) => {
+                let report = probe_with(provider.as_ref(), &opts).await;
+                if report.capabilities.streaming {
+                    Ok(report)
+                } else {
+                    // The server may have gone away during the probe.
+                    ensure_reachable(provider.as_ref(), &opts)
+                        .await
+                        .map(|()| report)
+                }
+            }
+            Err(e) => Err(e),
+        };
+        let report = match checked {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(provider = %req.provider, error = %e, "probe not recorded: provider unreachable");
+                self.audit(
+                    "provider.probe",
+                    req.provider.as_str(),
+                    json!({"model": cfg.model, "error": e.to_string()}),
+                )
+                .await;
+                return Err(RpcError::from(e));
+            }
+        };
         let caps = report.capabilities.clone();
+        self.state
+            .router
+            .set_capabilities(&req.provider, caps.clone());
         tracing::info!(provider = %req.provider, ?caps, "probe finished");
 
         let probes = self.state.probes.clone();
@@ -142,23 +187,43 @@ impl RpcHandler {
     // ---- chat ----
 
     async fn chat(&self, req: ipc::ChatRequest, notify: Notifier) -> Result<Value, RpcError> {
+        if self.state.shutdown.is_cancelled() {
+            return Err(shutting_down());
+        }
         let infer_req = to_infer_request(req.messages)?;
-        let provider: Arc<dyn Provider> = match &req.provider {
-            Some(id) => self
-                .state
-                .router
-                .provider(id)
-                .ok_or_else(|| not_configured(id))?,
-            None => self
-                .state
-                .router
-                .route(req.tier, &infer_req.required_capabilities())?,
+        let messages = infer_req.messages.len();
+        // Open the stream first (with fallback across the tier's providers), so `ChatStarted`
+        // names the provider that is actually serving it: the UI shows on-device vs cloud.
+        let router = &self.state.router;
+        let start = async {
+            match &req.provider {
+                // An explicit provider is used alone, never substituted.
+                Some(id) => {
+                    let p = router
+                        .provider(id)
+                        .ok_or_else(|| self.unknown_provider(id))?;
+                    match p.chat(infer_req).await {
+                        Ok(stream) => Ok((p, stream)),
+                        Err(e) => {
+                            if is_provider_failure(&e) {
+                                router.report_failure(p.id());
+                            }
+                            Err(RpcError::from(e))
+                        }
+                    }
+                }
+                None => router
+                    .chat(req.tier, &Capabilities::default(), infer_req)
+                    .await
+                    .map_err(RpcError::from),
+            }
         };
+        let (provider, stream) = tokio::select! {
+            r = start => r?,
+            () = self.state.shutdown.cancelled() => return Err(shutting_down()),
+        };
+
         let stream_id = uuid::Uuid::new_v4().to_string();
-        let token = CancellationToken::new();
-        self.state
-            .streams()
-            .insert(stream_id.clone(), token.clone());
         let meta = provider.meta();
         tracing::info!(stream = %stream_id, provider = %provider.id(), tier = tier_name(req.tier), "chat started");
         self.audit(
@@ -170,18 +235,22 @@ impl RpcHandler {
                 "explicit_provider": req.provider.is_some(),
                 "model": meta.model,
                 "locality": meta.locality,
-                "messages": infer_req.messages.len(),
+                "messages": messages,
             }),
         )
         .await;
 
+        // No `.await` between registering the token and handing its guard to the task: if this
+        // call is dropped (client gone), the guard still removes the token.
+        let token = CancellationToken::new();
+        let guard = StreamGuard::register(self.state.clone(), stream_id.clone(), token.clone());
         let started = ChatStarted {
             stream_id: stream_id.clone(),
             provider: provider.id().clone(),
         };
         let state = self.state.clone();
         self.state.tasks.spawn(run_chat(
-            state, provider, infer_req, stream_id, token, notify,
+            state, provider, stream, stream_id, token, guard, notify,
         ));
         to_result(started)
     }
@@ -290,6 +359,72 @@ impl RpcHandler {
     async fn audit(&self, action: &str, target: &str, detail: Value) {
         append_audit(&self.state, action, target, detail).await;
     }
+
+    /// Not found, or found in config but unavailable (with the reason).
+    fn unknown_provider(&self, id: &ProviderId) -> RpcError {
+        match self.state.unavailable.get(id) {
+            Some(reason) => RpcError::from(Error::NotFound(format!(
+                "provider `{id}` is unavailable: {reason}"
+            ))),
+            None => not_configured(id),
+        }
+    }
+}
+
+/// A provider that failed to build: what config says about it, plus why.
+fn unavailable_info(cfg: &ProviderConfig, reason: &str) -> ProviderInfo {
+    let mut tiers = cfg.tiers.clone();
+    tiers.sort_by_key(|t| *t as u8);
+    tiers.dedup();
+    ProviderInfo {
+        id: cfg.id.clone(),
+        kind: cfg.kind.as_str().to_string(),
+        model: cfg.model.clone(),
+        // If the URL cannot even be classified, assume the worst for privacy.
+        locality: cfg.effective_locality().unwrap_or(Locality::Cloud),
+        tiers,
+        capabilities: None,
+        error: Some(reason.to_string()),
+    }
+}
+
+/// Check that a provider's server answers at all, with one small chat. Only transport-level
+/// failures (and timeouts) count as unreachable: any answer from the server, even an error
+/// status, means it is up.
+async fn ensure_reachable(provider: &dyn Provider, opts: &ProbeOptions) -> Result<()> {
+    let req = ChatRequest::new(vec![Message::user_text("Reply with one word: pong")])
+        .with_max_tokens(16)
+        .with_feature(FEATURE_PROBE);
+    let attempt = async {
+        let mut stream = provider.chat(req).await?;
+        match stream.next().await {
+            Some(Err(e)) => Err(e),
+            _ => Ok(()),
+        }
+    };
+    let unreachable = |why: String| {
+        Error::Network(format!(
+            "provider `{}` is unreachable ({why}); probe results were not recorded",
+            provider.id()
+        ))
+    };
+    match tokio::time::timeout(opts.timeout, attempt).await {
+        Err(_) => Err(unreachable(format!("no answer within {:?}", opts.timeout))),
+        Ok(Err(e)) if is_transport_failure(&e) => Err(unreachable(e.to_string())),
+        Ok(_) => Ok(()),
+    }
+}
+
+/// Failures that say the server could not be reached or would not serve right now.
+fn is_transport_failure(e: &Error) -> bool {
+    matches!(
+        e,
+        Error::Network(_) | Error::RateLimited { .. } | Error::Io(_)
+    )
+}
+
+fn shutting_down() -> RpcError {
+    RpcError::new(code::SERVER_ERROR, "nuggetd is shutting down")
 }
 
 async fn append_audit(state: &State, action: &str, target: &str, detail: Value) {
@@ -357,10 +492,17 @@ enum ChatEnd {
     Disconnected,
 }
 
-/// Removes a stream's cancellation token when its task ends.
+/// Registers a stream's cancellation token; removes it when dropped.
 struct StreamGuard {
     state: Arc<State>,
     id: String,
+}
+
+impl StreamGuard {
+    fn register(state: Arc<State>, id: String, token: CancellationToken) -> Self {
+        state.streams().insert(id.clone(), token);
+        Self { state, id }
+    }
 }
 
 impl Drop for StreamGuard {
@@ -372,22 +514,19 @@ impl Drop for StreamGuard {
 async fn run_chat(
     state: Arc<State>,
     provider: Arc<dyn Provider>,
-    req: ChatRequest,
+    stream: ChatStream,
     stream_id: String,
     token: CancellationToken,
+    _guard: StreamGuard,
     notify: Notifier,
 ) {
-    let _guard = StreamGuard {
-        state: state.clone(),
-        id: stream_id.clone(),
-    };
     // Dropping `pump` drops the provider stream, which closes the HTTP request.
     let end = tokio::select! {
         biased;
         () = token.cancelled() => ChatEnd::Cancelled,
         () = state.shutdown.cancelled() => ChatEnd::Shutdown,
         () = notify.closed() => ChatEnd::Disconnected,
-        end = pump(provider.as_ref(), req, &stream_id, &notify) => end,
+        end = pump(stream, provider.id(), &stream_id, &notify) => end,
     };
 
     let mut done = ChatDone {
@@ -423,7 +562,10 @@ async fn run_chat(
             tracing::info!(stream = %stream_id, "chat cancelled");
             done.error = Some("cancelled".into());
         }
-        ChatEnd::Shutdown => done.error = Some("nuggetd is shutting down".into()),
+        ChatEnd::Shutdown => {
+            tracing::info!(stream = %stream_id, "chat stopped for shutdown");
+            done.error = Some("nuggetd is shutting down".into());
+        }
         ChatEnd::Disconnected => {
             tracing::info!(stream = %stream_id, "client disconnected; chat stopped");
             return;
@@ -432,17 +574,13 @@ async fn run_chat(
     let _ = notify.send(notification::CHAT_DONE, &done).await;
 }
 
-/// Forward a provider stream as `chat.delta` notifications until it ends.
+/// Forward an open provider stream as `chat.delta` notifications until it ends.
 async fn pump(
-    provider: &dyn Provider,
-    req: ChatRequest,
+    mut stream: ChatStream,
+    provider: &ProviderId,
     stream_id: &str,
     notify: &Notifier,
 ) -> ChatEnd {
-    let mut stream = match provider.chat(req).await {
-        Ok(s) => s,
-        Err(e) => return ChatEnd::Failed(e),
-    };
     while let Some(ev) = stream.next().await {
         match ev {
             Ok(ChatEvent::TextDelta(text)) if !text.is_empty() => {
@@ -471,8 +609,7 @@ async fn pump(
         }
     }
     ChatEnd::Failed(Error::Provider(format!(
-        "{}: stream ended before completion",
-        provider.id()
+        "{provider}: stream ended before completion"
     )))
 }
 

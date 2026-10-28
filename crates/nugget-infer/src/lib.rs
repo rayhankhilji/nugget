@@ -6,8 +6,9 @@
 //!   LM Studio, llama-server, vLLM, OpenRouter).
 //! - [`ProviderConfig`] (TOML) + [`build_provider`]: API keys come from `env:VAR` or
 //!   `keychain:NAME`, never plaintext.
-//! - [`locality`]: `OnDevice` / `LocalNetwork` / `Cloud` from the base URL host. Every request to
-//!   a non-`OnDevice` provider is recorded in the egress ledger ([`nugget_core::egress`]).
+//! - [`locality`]: `OnDevice` / `LocalNetwork` / `Cloud` from the base URL host, resolved once at
+//!   build time and pinned. Every request to a non-`OnDevice` provider is recorded in the egress
+//!   ledger ([`nugget_core::egress`]); redirects are never followed.
 //! - [`probe()`]: proves streaming, vision, tool use, JSON-schema output and embeddings with live
 //!   requests.
 //! - [`Router`]: tier → ordered providers, capability-aware, with fallback.
@@ -26,7 +27,8 @@ pub mod sse;
 mod types;
 
 pub use config::{
-    ApiKeyRef, MaxTokensParam, ProviderConfig, ProvidersFile, Secret, SecretResolver, SystemSecrets,
+    ApiKeyRef, MaxTokensParam, ProviderConfig, ProvidersFile, Secret, SecretResolver,
+    SystemSecrets, is_sensitive_header,
 };
 pub use probe::{ProbeCheck, ProbeOptions, ProbeReport, probe, probe_with};
 pub use provider::{Provider, build_provider, build_provider_with};

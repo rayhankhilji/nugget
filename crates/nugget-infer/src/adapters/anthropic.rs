@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 
 use crate::config::{ANTHROPIC_DEFAULT_API_VERSION, ProviderConfig, Secret, merge_extra_body};
 use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
-use crate::provider::{Common, Provider, auth_header};
+use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema;
 use crate::sse::SseEvent;
 use crate::types::{
@@ -48,6 +48,7 @@ impl AnthropicProvider {
         cfg: &ProviderConfig,
         egress: Arc<dyn EgressSink>,
         key: Option<Secret>,
+        prepared: Prepared,
     ) -> Result<Self> {
         let api_version = cfg
             .anthropic_version
@@ -58,7 +59,7 @@ impl AnthropicProvider {
             .map_err(|_| Error::Invalid(format!("anthropic_version {api_version:?}")))?;
         auth.push((HeaderName::from_static("anthropic-version"), version));
         Ok(Self {
-            common: Common::new(cfg, egress, auth)?,
+            common: Common::new(cfg, egress, auth, prepared)?,
             api_version,
             eager_input_streaming: cfg.eager_input_streaming.unwrap_or(true),
         })

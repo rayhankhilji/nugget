@@ -11,6 +11,10 @@ Items are grouped by where they'll most likely land.
 | Audit chain uses unkeyed SHA-256, so anyone holding the store key can rewrite the chain and its head | Low | Needs a design for keying and anchoring | M1: HMAC keyed from the store key, with the head anchored in the OS keychain or periodically signed |
 | Ollama `-cloud` models are served from localhost but forward prompts to ollama.com, so they show as on-device | Design | Not detectable from the URL alone | Docs now; M1: a known-forwarder model list and a UI warning |
 
+- **Chat start latency vs. cancel**: tier-routed chats reply `ChatStarted` only after the first token (needed so the reported provider is truthful after fallback), so Stop is unavailable until then. M1/M3: return a provisional stream id immediately and let `chat.cancel` abort the routing attempt.
+- **Windows named-pipe server check** (`nugget-ipc`) is compile-checked only; the client also cannot set `SECURITY_IDENTIFICATION` QoS through interprocess.
+- **Daemon lock** is held for the process lifetime (not the listener's), because `bind` returns interprocess's `Listener`.
+
 ## Platform verification
 - Nothing has run on real macOS or Windows yet. The first CI run is the first real check of:
   - the keychain backends

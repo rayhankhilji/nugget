@@ -19,7 +19,7 @@ use serde_json::{Map, Value, json};
 use crate::adapters::data_url;
 use crate::config::{ProviderConfig, Secret, merge_extra_body};
 use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
-use crate::provider::{Common, Provider, auth_header};
+use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema::is_strict_compatible;
 use crate::sse::SseEvent;
 use crate::types::{
@@ -36,10 +36,11 @@ impl OpenAiResponsesProvider {
         cfg: &ProviderConfig,
         egress: Arc<dyn EgressSink>,
         key: Option<Secret>,
+        prepared: Prepared,
     ) -> Result<Self> {
         let auth = auth_header("authorization", key, |k| format!("Bearer {k}"))?;
         Ok(Self {
-            common: Common::new(cfg, egress, auth)?,
+            common: Common::new(cfg, egress, auth, prepared)?,
             store: cfg.store.unwrap_or(false),
         })
     }

@@ -35,6 +35,8 @@ export interface ProviderInfo {
   tiers: Tier[];
   /** `null` until a probe has run. */
   capabilities: Capabilities | null;
+  /** Why the provider is unavailable (e.g. it failed to build from config); not routed to. */
+  error?: string | null;
 }
 
 export interface StatusResponse {
@@ -44,6 +46,8 @@ export interface StatusResponse {
   items: number;
   chunks: number;
   providers: ProviderInfo[];
+  /** Audit hash-chain check at daemon start: `null` until it has run. */
+  audit_chain_ok?: boolean | null;
 }
 
 export type Role = "system" | "user" | "assistant";

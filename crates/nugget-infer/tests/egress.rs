@@ -178,3 +178,70 @@ fn missing_api_key_fails_to_build() {
         "{err}"
     );
 }
+
+/// A provider that answers 3xx must not move the key, headers or body to another host behind the
+/// ledger's back: the redirect is reported, the exchange with the original host is recorded, and
+/// the target receives nothing.
+#[tokio::test]
+async fn redirects_are_not_followed() {
+    let target = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(sse_response(done_stream()))
+        .expect(0)
+        .mount(&target)
+        .await;
+    let origin = MockServer::start().await;
+    for (p, status) in [("/v1/chat/completions", 307), ("/v1/embeddings", 302)] {
+        Mock::given(method("POST"))
+            .and(path(p))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .insert_header("location", format!("{}{p}", target.uri()).as_str()),
+            )
+            .mount(&origin)
+            .await;
+    }
+    let (p, sink) = provider(
+        &format!(
+            "{OAI}\nlocality = \"cloud\"\napi_key = \"env:K\"\nmax_retries = 2\n\
+             headers = {{ \"x-custom\" = \"v\" }}"
+        ),
+        &format!("{}/v1", origin.uri()),
+    );
+    let want = format!(
+        "unexpected redirect to 127.0.0.1:{}",
+        target.address().port()
+    );
+    let err = match p
+        .chat(ChatRequest::new(vec![Message::user_text("secret note")]))
+        .await
+    {
+        Err(e) => e,
+        Ok(s) => collect_all(s)
+            .await
+            .into_iter()
+            .find_map(|r| r.err())
+            .unwrap(),
+    };
+    assert!(
+        matches!(&err, Error::Provider(m) if m.contains(&want)),
+        "{err}"
+    );
+    let err = p.embed(&["x".into()]).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Provider(m) if m.contains(&want)),
+        "{err}"
+    );
+
+    assert!(target.received_requests().await.unwrap().is_empty());
+    // Not retried; each exchange with the origin is recorded once.
+    assert_eq!(origin.received_requests().await.unwrap().len(), 2);
+    let events = sink.events();
+    assert_eq!(events.len(), 2);
+    let origin_host = format!("127.0.0.1:{}", origin.address().port());
+    assert!(
+        events
+            .iter()
+            .all(|e| e.host == origin_host && e.bytes_sent > 0)
+    );
+}

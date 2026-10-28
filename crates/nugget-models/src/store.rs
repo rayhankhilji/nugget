@@ -8,6 +8,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,8 +19,8 @@ use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::download::{
-    DATA_FILE, Download, DownloadOptions, Phase, Progress, ProgressFn, Reporter, sha256_file,
-    staged_bytes,
+    CancelOnDrop, DATA_FILE, Download, DownloadOptions, Phase, Progress, ProgressFn, Reporter,
+    sha256_file, staged_bytes,
 };
 use crate::manifest::{ModelEntry, is_sha256_hex};
 use crate::preflight::{DiskSpace, SystemDiskSpace, check_disk_space};
@@ -164,7 +165,8 @@ impl ModelStore {
     /// of the same model id is kept as `previous` for [`ModelStore::rollback`].
     ///
     /// `entry` must come from a manifest accepted by [`crate::verify_manifest`]; it is re-validated
-    /// here regardless. Cancel by dropping the future: staged bytes are kept for the next call.
+    /// here regardless. Cancel by dropping the future: staged bytes are kept for the next call,
+    /// and a hash in progress stops within 1 MiB.
     pub async fn install(
         &self,
         entry: &ModelEntry,
@@ -172,7 +174,9 @@ impl ModelStore {
     ) -> Result<InstalledModel> {
         let f: ProgressFn = Arc::new(on_progress);
         let reporter = Reporter::new(&entry.id, entry.size, f, self.opts.progress_interval);
-        let res = self.install_inner(entry, &reporter).await;
+        // Dropped with this future: stops any blocking hash it started.
+        let cancel = CancelOnDrop::new();
+        let res = self.install_inner(entry, &reporter, &cancel.flag()).await;
         match &res {
             Ok(_) => reporter.emit(Phase::Installed, entry.size),
             Err(e) => reporter.fail(e),
@@ -184,6 +188,7 @@ impl ModelStore {
         &self,
         entry: &ModelEntry,
         reporter: &Reporter,
+        cancel: &Arc<AtomicBool>,
     ) -> Result<InstalledModel> {
         entry.validate()?;
         if !entry.compatible_with(&self.app_version) {
@@ -197,12 +202,21 @@ impl ModelStore {
         // Already have these exact bytes (another id, or a reinstall)? Re-verify and activate.
         let blob = self.blob_path(&entry.sha256);
         if blob.exists() {
-            if hash_with_progress(&blob, reporter.clone()).await? == entry.sha256 {
-                return self.activate(entry).await;
+            if hash_with_progress(&blob, reporter.clone(), cancel).await? == entry.sha256 {
+                // The hash ran without the lock, so gc may have removed the (then unreferenced)
+                // blob since. Activate only if it is still there; otherwise download it again.
+                if let Some(installed) = self.activate_existing(entry).await? {
+                    return Ok(installed);
+                }
+                tracing::warn!(model = %entry.id, "verified blob was removed meanwhile; re-downloading");
+            } else {
+                tracing::warn!(model = %entry.id, "existing blob failed verification; re-downloading");
+                let _lock = self.lock.lock().await;
+                match std::fs::remove_file(&blob) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                    _ => {}
+                }
             }
-            tracing::warn!(model = %entry.id, "existing blob failed verification; re-downloading");
-            let _lock = self.lock.lock().await;
-            std::fs::remove_file(&blob)?;
         }
 
         let staging = self.staging_dir(&entry.sha256);
@@ -226,7 +240,7 @@ impl ModelStore {
 
         let len = std::fs::metadata(&data)?.len();
         let actual = if len == entry.size {
-            Some(hash_with_progress(&data, reporter.clone()).await?)
+            Some(hash_with_progress(&data, reporter.clone(), cancel).await?)
         } else {
             None
         };
@@ -255,9 +269,18 @@ impl ModelStore {
         self.activate_locked(entry)
     }
 
-    async fn activate(&self, entry: &ModelEntry) -> Result<InstalledModel> {
+    /// Activate an already present blob, re-checking under the lock (which gc also takes) that
+    /// it still exists with the expected size. `None` if it is gone or wrong.
+    async fn activate_existing(&self, entry: &ModelEntry) -> Result<Option<InstalledModel>> {
         let _lock = self.lock.lock().await;
-        self.activate_locked(entry)
+        match std::fs::metadata(self.blob_path(&entry.sha256)) {
+            Ok(md) if md.is_file() && md.len() == entry.size => {
+                self.activate_locked(entry).map(Some)
+            }
+            Ok(_) => Ok(None),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn activate_locked(&self, entry: &ModelEntry) -> Result<InstalledModel> {
@@ -326,7 +349,9 @@ impl ModelStore {
     pub async fn verify(&self, id: &str) -> Result<()> {
         let slot = self.slot(id)?.ok_or_else(|| not_installed(id))?;
         let path = self.checked_blob(id, &slot.active)?;
-        let actual = tokio::task::spawn_blocking(move || sha256_file(&path, |_| {}))
+        let cancel = CancelOnDrop::new();
+        let flag = cancel.flag();
+        let actual = tokio::task::spawn_blocking(move || sha256_file(&path, &flag, |_| {}))
             .await
             .map_err(|e| Error::Other(format!("hash task failed: {e}")))??;
         if actual != slot.active.sha256 {
@@ -484,13 +509,19 @@ fn not_installed(id: &str) -> Error {
     Error::NotFound(format!("model `{id}` is not installed"))
 }
 
-async fn hash_with_progress(path: &Path, reporter: Reporter) -> Result<String> {
+async fn hash_with_progress(
+    path: &Path,
+    reporter: Reporter,
+    cancel: &Arc<AtomicBool>,
+) -> Result<String> {
     let path = path.to_path_buf();
+    let cancel = cancel.clone();
     reporter.emit(Phase::Verifying, 0);
-    tokio::task::spawn_blocking(move || sha256_file(&path, |n| reporter.emit(Phase::Verifying, n)))
-        .await
-        .map_err(|e| Error::Other(format!("hash task failed: {e}")))?
-        .map_err(Error::from)
+    tokio::task::spawn_blocking(move || {
+        sha256_file(&path, &cancel, |n| reporter.emit(Phase::Verifying, n))
+    })
+    .await
+    .map_err(|e| Error::Other(format!("hash task failed: {e}")))?
 }
 
 fn sync_file(path: &Path) -> Result<()> {

@@ -53,7 +53,19 @@ export function StatusPage() {
               <dt>Chunks</dt>
               <dd>{s.chunks.toLocaleString()}</dd>
             </div>
+            <div>
+              <dt>Audit log</dt>
+              <dd>
+                <AuditChain ok={s.audit_chain_ok} />
+              </dd>
+            </div>
           </dl>
+          {s.audit_chain_ok === false && (
+            <p className="note note-error" role="alert">
+              The audit log failed its integrity check: an entry was changed, removed or inserted outside Nugget. The
+              daemon log has the details.
+            </p>
+          )}
 
           <h2>Providers</h2>
           {s.providers.length === 0 ? (
@@ -89,6 +101,12 @@ export function StatusPage() {
   );
 }
 
+function AuditChain({ ok }: { ok: boolean | null | undefined }) {
+  if (ok === true) return <Badge tone="good">Verified</Badge>;
+  if (ok === false) return <Badge tone="bad">Tampered</Badge>;
+  return <span className="muted small">Checking…</span>;
+}
+
 const CAPS: [keyof Capabilities, string][] = [
   ["streaming", "Streaming"],
   ["vision", "Vision"],
@@ -115,6 +133,29 @@ function ProviderRow({ provider: p, onProbed }: { provider: ProviderInfo; onProb
   };
 
   const tone = p.locality === "cloud" ? "warn" : "good";
+  if (p.error) {
+    return (
+      <tr>
+        <th scope="row">
+          {p.id}
+          <div className="muted small">{p.kind}</div>
+        </th>
+        <td>
+          <code>{p.model}</code>
+        </td>
+        <td>
+          <Badge tone={tone}>{LOCALITY_LABEL[p.locality] ?? p.locality}</Badge>
+        </td>
+        <td>{p.tiers.map((t) => TIER_LABEL[t] ?? t).join(", ") || "–"}</td>
+        <td>
+          <Badge tone="bad">Unavailable</Badge>
+          <div className="note note-error small" role="status">
+            {p.error}
+          </div>
+        </td>
+      </tr>
+    );
+  }
   return (
     <tr>
       <th scope="row">

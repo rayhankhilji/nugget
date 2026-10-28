@@ -9,6 +9,7 @@ use rusqlite::{Connection, ErrorCode, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+use crate::egress::EgressWriter;
 use crate::error::{DbExt, format_time};
 use crate::key::{StoreKey, create_private_dir};
 use crate::types::Counts;
@@ -18,20 +19,40 @@ use crate::{schema, vec_ext};
 ///
 /// Calls are serialized on an internal mutex. M0 traffic (one daemon, light writes) does not
 /// need more; a reader pool can be added behind the same API later.
+///
+/// Egress events recorded through [`EgressSink`](nugget_core::egress::EgressSink) are written by
+/// a dedicated thread so async callers never wait on SQLite. Dropping the last clone writes every
+/// queued event before it returns.
 #[derive(Clone)]
 pub struct Store {
     inner: Arc<Inner>,
 }
 
 struct Inner {
+    db: Arc<Db>,
+    /// Owns the ledger writer thread; dropping it drains the queue and joins the thread.
+    egress: EgressWriter,
+}
+
+/// The connection, shared by [`Store`] clones and the egress writer thread.
+pub(crate) struct Db {
     conn: Mutex<Connection>,
     encrypted: bool,
+}
+
+impl Db {
+    pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
+        // A panic while holding the lock cannot leave SQLite inconsistent (open transactions are
+        // rolled back when dropped), so a poisoned mutex is safe to reuse.
+        let mut conn = self.conn.lock().unwrap_or_else(PoisonError::into_inner);
+        f(&mut conn)
+    }
 }
 
 impl std::fmt::Debug for Store {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Store")
-            .field("encrypted", &self.inner.encrypted)
+            .field("encrypted", &self.inner.db.encrypted)
             .finish_non_exhaustive()
     }
 }
@@ -111,17 +132,19 @@ impl Store {
 
     fn finish(mut conn: Connection, encrypted: bool) -> Result<Self> {
         schema::migrate(&mut conn)?;
+        let db = Arc::new(Db {
+            conn: Mutex::new(conn),
+            encrypted,
+        });
+        let egress = EgressWriter::spawn(db.clone())?;
         Ok(Self {
-            inner: Arc::new(Inner {
-                conn: Mutex::new(conn),
-                encrypted,
-            }),
+            inner: Arc::new(Inner { db, egress }),
         })
     }
 
     /// Whether the database file is encrypted (false only for [`Store::open_in_memory`]).
     pub fn is_encrypted(&self) -> bool {
-        self.inner.encrypted
+        self.inner.db.encrypted
     }
 
     /// Current schema version (`PRAGMA user_version`).
@@ -135,14 +158,11 @@ impl Store {
     }
 
     pub(crate) fn with_conn<T>(&self, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
-        // A panic while holding the lock cannot leave SQLite inconsistent (open transactions are
-        // rolled back when dropped), so a poisoned mutex is safe to reuse.
-        let mut conn = self
-            .inner
-            .conn
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        f(&mut conn)
+        self.inner.db.with_conn(f)
+    }
+
+    pub(crate) fn egress_writer(&self) -> &EgressWriter {
+        &self.inner.egress
     }
 
     /// Number of items and chunks.

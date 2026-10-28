@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use nugget_core::capability::Locality;
 use nugget_core::egress::EgressSink;
 use nugget_core::ids::ProviderId;
 use nugget_core::{Error, Result};
@@ -11,8 +12,9 @@ use reqwest::header::{HeaderName, HeaderValue};
 
 use crate::adapters::openai_responses::OpenAiResponsesProvider;
 use crate::adapters::{anthropic::AnthropicProvider, openai_compatible::OpenAiCompatibleProvider};
-use crate::config::{ProviderConfig, Secret, SecretResolver, SystemSecrets};
+use crate::config::{ProviderConfig, Secret, SecretResolver, SystemSecrets, resolve_headers};
 use crate::http::{Http, HttpSettings};
+use crate::locality::{HostResolver, Resolved, SystemResolver};
 use crate::types::{ChatRequest, ChatStream, ProviderKind, ProviderMeta};
 
 /// One model behind one API. Implementations are cheap to share (`Arc<dyn Provider>`).
@@ -36,12 +38,38 @@ pub fn build_provider(
 }
 
 /// [`build_provider`] with an explicit secret resolver.
+///
+/// A `base_url` host name other than `localhost` is resolved here, once, with the system resolver
+/// (a blocking lookup; call from a blocking context), and the client is pinned to the result. See
+/// [`crate::locality`].
 pub fn build_provider_with(
     cfg: &ProviderConfig,
     egress: Arc<dyn EgressSink>,
     secrets: &dyn SecretResolver,
 ) -> Result<Arc<dyn Provider>> {
+    build_provider_inner(cfg, egress, secrets, &SystemResolver)
+}
+
+/// Everything resolved at build time that the adapters hand to [`Common::new`].
+pub(crate) struct Prepared {
+    pub locality: Locality,
+    pub resolved: Resolved,
+    pub headers: Vec<(HeaderName, HeaderValue)>,
+}
+
+pub(crate) fn build_provider_inner(
+    cfg: &ProviderConfig,
+    egress: Arc<dyn EgressSink>,
+    secrets: &dyn SecretResolver,
+    resolver: &dyn HostResolver,
+) -> Result<Arc<dyn Provider>> {
     cfg.validate()?;
+    let (locality, resolved) = cfg.resolve_network(resolver)?;
+    let prepared = Prepared {
+        locality,
+        resolved,
+        headers: resolve_headers(cfg, secrets)?,
+    };
     let key = cfg
         .api_key
         .as_ref()
@@ -55,10 +83,12 @@ pub fn build_provider_with(
         })
         .transpose()?;
     Ok(match cfg.kind {
-        ProviderKind::Anthropic => Arc::new(AnthropicProvider::new(cfg, egress, key)?),
-        ProviderKind::OpenaiResponses => Arc::new(OpenAiResponsesProvider::new(cfg, egress, key)?),
+        ProviderKind::Anthropic => Arc::new(AnthropicProvider::new(cfg, egress, key, prepared)?),
+        ProviderKind::OpenaiResponses => {
+            Arc::new(OpenAiResponsesProvider::new(cfg, egress, key, prepared)?)
+        }
         ProviderKind::OpenaiCompatible => {
-            Arc::new(OpenAiCompatibleProvider::new(cfg, egress, key)?)
+            Arc::new(OpenAiCompatibleProvider::new(cfg, egress, key, prepared)?)
         }
     })
 }
@@ -76,16 +106,25 @@ impl Common {
         cfg: &ProviderConfig,
         egress: Arc<dyn EgressSink>,
         auth: Vec<(HeaderName, HeaderValue)>,
+        prepared: Prepared,
     ) -> Result<Self> {
         let base = cfg.base_url()?;
-        let locality = cfg.effective_locality()?;
+        let Prepared {
+            locality,
+            resolved,
+            headers,
+        } = prepared;
         let settings = HttpSettings {
             connect_timeout: Duration::from_secs(cfg.connect_timeout_secs.unwrap_or(10)),
             idle_timeout: Duration::from_secs(cfg.idle_timeout_secs.unwrap_or(600)),
             max_retries: cfg.max_retries.unwrap_or(2),
             retry_base: Duration::from_millis(cfg.retry_base_ms.unwrap_or(500)),
             max_retry_delay: Duration::from_secs(60),
-            headers: cfg.headers.clone(),
+            headers,
+            pin: resolved.pin,
+            // Traffic to this machine or the LAN never goes through a proxy (which would also
+            // re-resolve the name and defeat the pin).
+            direct: resolved.locality != Locality::Cloud,
         };
         let http = Http::new(cfg.id.clone(), base, locality, egress, settings, auth)?;
         Ok(Self {
@@ -117,4 +156,118 @@ pub(crate) fn auth_header(
     })?;
     v.set_sensitive(true);
     Ok(vec![(HeaderName::from_static(name), v)])
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
+
+    use nugget_core::egress::EgressEvent;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
+    use crate::config::ApiKeyRef;
+    use crate::locality::tests::FakeResolver;
+
+    #[derive(Default)]
+    struct Sink(Mutex<Vec<EgressEvent>>);
+    impl EgressSink for Sink {
+        fn record(&self, e: EgressEvent) {
+            self.0.lock().unwrap().push(e);
+        }
+    }
+
+    struct NoSecrets;
+    impl SecretResolver for NoSecrets {
+        fn resolve(&self, _: &ApiKeyRef) -> Result<Secret> {
+            Err(Error::NotFound("none".into()))
+        }
+    }
+
+    fn cfg(base_url: &str, extra: &str) -> ProviderConfig {
+        ProviderConfig::from_toml_str(&format!(
+            "id = \"p\"\nkind = \"openai_compatible\"\nmodel = \"m\"\nmax_retries = 0\n\
+             base_url = \"{base_url}\"\n{extra}"
+        ))
+        .unwrap()
+    }
+
+    fn build(c: &ProviderConfig, r: &FakeResolver) -> Result<(Arc<dyn Provider>, Arc<Sink>)> {
+        let sink = Arc::new(Sink::default());
+        let p = build_provider_inner(c, sink.clone(), &NoSecrets, r)?;
+        Ok((p, sink))
+    }
+
+    /// A name is classified by what it resolves to at build time, and the client is pinned to
+    /// those addresses: `lan-gpu.invalid` does not exist in real DNS, so reaching the mock server
+    /// proves the pin is used, and the resolver is asked exactly once (no rebinding window).
+    #[tokio::test]
+    async fn host_names_are_resolved_once_and_pinned() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/embeddings"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({"data": [{"index": 0, "embedding": [0.5]}]})),
+            )
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let r = FakeResolver::new(vec![
+            ("lan-gpu.invalid", vec!["127.0.0.1"]),
+            ("nas.invalid", vec!["192.168.7.7"]),
+            ("public.invalid", vec!["192.168.7.7", "8.8.8.8"]),
+        ]);
+
+        let c = cfg(&format!("http://lan-gpu.invalid:{port}/v1"), "");
+        let (p, sink) = build(&c, &r).unwrap();
+        assert_eq!(p.meta().locality, Locality::OnDevice);
+        assert_eq!(r.calls.load(Ordering::SeqCst), 1);
+        for _ in 0..3 {
+            assert_eq!(p.embed(&["x".into()]).await.unwrap(), vec![vec![0.5]]);
+        }
+        assert_eq!(r.calls.load(Ordering::SeqCst), 1, "resolved once, at build");
+        assert!(sink.0.lock().unwrap().is_empty());
+
+        // Upgrade-only override still applies on top of the resolved class.
+        let c = cfg(
+            &format!("http://lan-gpu.invalid:{port}/v1"),
+            "locality = \"cloud\"",
+        );
+        let (p, sink) = build(&c, &r).unwrap();
+        assert_eq!(p.meta().locality, Locality::Cloud);
+        p.embed(&["x".into()]).await.unwrap();
+        assert_eq!(sink.0.lock().unwrap().len(), 1);
+        let c = cfg("http://nas.invalid:1/v1", "locality = \"on_device\"");
+        assert!(build(&c, &r).is_err(), "override may not hide egress");
+
+        // Private-only answers are LocalNetwork; any public address makes the name Cloud, and
+        // a Cloud (or unresolvable) name over plaintext http is refused.
+        let (p, _) = build(&cfg("http://nas.invalid:1/v1", ""), &r).unwrap();
+        assert_eq!(p.meta().locality, Locality::LocalNetwork);
+        for url in ["http://public.invalid/v1", "http://unresolvable.invalid/v1"] {
+            let err = build(&cfg(url, ""), &r).err().unwrap();
+            assert!(err.to_string().contains("plaintext http"), "{url}: {err}");
+        }
+        let (p, _) = build(&cfg("https://unresolvable.invalid/v1", ""), &r).unwrap();
+        assert_eq!(p.meta().locality, Locality::Cloud);
+    }
+
+    #[test]
+    fn literals_need_no_resolution() {
+        let r = FakeResolver::new(vec![]);
+        for (url, want) in [
+            ("http://localhost:11434/v1", Locality::OnDevice),
+            ("http://127.0.0.1:1/v1", Locality::OnDevice),
+            ("http://[::1]:1/v1", Locality::OnDevice),
+            ("http://10.1.2.3:1/v1", Locality::LocalNetwork),
+        ] {
+            let (p, _) = build(&cfg(url, ""), &r).unwrap();
+            assert_eq!(p.meta().locality, want, "{url}");
+        }
+        assert_eq!(r.calls.load(Ordering::SeqCst), 0);
+    }
 }

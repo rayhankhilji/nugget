@@ -18,9 +18,18 @@ async-trait.workspace = true
 futures.workspace = true
 interprocess = { version = "2.2", features = ["tokio"] }
 tokio-util = { version = "0.7", features = ["codec"] }
+# Single-daemon lock file (same crate and version as nugget-models).
+fs4 = "1"
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"
+# Token/SID checks on the named pipe server (already in the tree via interprocess).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tempfile = "3"

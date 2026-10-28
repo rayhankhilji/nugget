@@ -649,3 +649,31 @@ fn store_is_shareable_across_threads() {
     assert_eq!(s.search_text("shared", 1000).unwrap().len(), 100);
     s.verify_audit_chain().unwrap();
 }
+
+/// Events queued through the sink are all written before the last `Store` handle is gone.
+#[test]
+fn egress_events_survive_dropping_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = db_path(&dir);
+    {
+        let s = Store::open(&path, &key_a()).unwrap();
+        let sink: Arc<dyn EgressSink> = Arc::new(s.clone());
+        drop(s);
+        for i in 0..200u64 {
+            sink.record(EgressEvent {
+                at: OffsetDateTime::from_unix_timestamp(1_750_000_000).unwrap(),
+                host: "api.example.com".into(),
+                feature: "chat".into(),
+                bytes_sent: i,
+                bytes_received: 0,
+                items: vec![],
+            });
+        }
+        // The last handle: dropping it must flush the queue and join the writer.
+        drop(sink);
+    }
+    let s = Store::open(&path, &key_a()).unwrap();
+    let got = s.recent_egress(1000).unwrap();
+    assert_eq!(got.len(), 200);
+    assert_eq!(got[0].bytes_sent, 199);
+}

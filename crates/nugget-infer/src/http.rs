@@ -1,6 +1,5 @@
 //! Shared HTTP plumbing: client construction, egress metering, retries and error mapping.
 
-use std::collections::BTreeMap;
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
@@ -67,7 +66,12 @@ pub(crate) struct HttpSettings {
     pub retry_base: Duration,
     /// Never wait longer than this for a single retry; a longer `retry-after` fails fast.
     pub max_retry_delay: Duration,
-    pub headers: BTreeMap<String, String>,
+    /// Extra headers (already resolved and marked sensitive).
+    pub headers: Vec<(HeaderName, HeaderValue)>,
+    /// Connect to exactly these addresses for this host (see [`crate::locality`]).
+    pub pin: Option<(String, Vec<std::net::SocketAddr>)>,
+    /// Bypass any proxy: the endpoint is on this machine or the LAN.
+    pub direct: bool,
 }
 
 /// One provider's HTTP endpoint.
@@ -93,22 +97,26 @@ impl Http {
         auth: Vec<(HeaderName, HeaderValue)>,
     ) -> Result<Self> {
         let mut default_headers = HeaderMap::new();
-        for (k, v) in &settings.headers {
-            let name = HeaderName::from_bytes(k.as_bytes())
-                .map_err(|e| Error::Invalid(format!("header name {k:?}: {e}")))?;
-            let mut value = HeaderValue::from_str(v)
-                .map_err(|e| Error::Invalid(format!("header {k:?} value: {e}")))?;
+        for (name, value) in &settings.headers {
+            let mut value = value.clone();
             value.set_sensitive(true);
-            default_headers.insert(name, value);
+            default_headers.insert(name.clone(), value);
         }
         let mut builder = reqwest::Client::builder()
             .user_agent(concat!("nugget/", env!("CARGO_PKG_VERSION")))
             .default_headers(default_headers)
             .connect_timeout(settings.connect_timeout)
-            .read_timeout(settings.idle_timeout);
-        if locality != Locality::Cloud {
+            .read_timeout(settings.idle_timeout)
+            // Never follow redirects: a redirect would carry the key, headers and body to a host
+            // the egress ledger and locality checks never saw. A 3xx is an error instead.
+            .redirect(reqwest::redirect::Policy::none());
+        if settings.direct {
             // Requests to this machine or the LAN must never be routed through a proxy.
             builder = builder.no_proxy();
+        }
+        if let Some((host, addrs)) = &settings.pin {
+            // Connect only to the addresses classified at build time (DNS-rebinding guard).
+            builder = builder.resolve_to_addrs(host, addrs);
         }
         let client = builder
             .build()
@@ -183,6 +191,17 @@ impl Http {
             let can_retry = attempt < self.settings.max_retries;
             match req.send().await {
                 Ok(resp) if resp.status().is_success() => return Ok((resp, meter)),
+                Ok(resp) if resp.status().is_redirection() => {
+                    let target = redirect_target(&url, resp.headers());
+                    let body = read_limited(resp, MAX_ERROR_BODY).await;
+                    meter.add_received(body.len());
+                    drop(meter);
+                    return Err(Error::Provider(format!(
+                        "{}: unexpected redirect to {target} (redirects are not followed; \
+                         check base_url)",
+                        self.provider
+                    )));
+                }
                 Ok(resp) => {
                     let status = resp.status();
                     let delay = retry_after(resp.headers());
@@ -374,6 +393,24 @@ fn retry_after(headers: &HeaderMap) -> Option<Duration> {
         .and_then(|s| s.trim().parse::<f64>().ok())
         .filter(|s| s.is_finite() && *s >= 0.0)
         .map(Duration::from_secs_f64)
+}
+
+/// The host (`host` or `host:port`) a 3xx `Location` points at, for the error message.
+fn redirect_target(from: &Url, headers: &HeaderMap) -> String {
+    let Some(loc) = headers
+        .get(reqwest::header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+    else {
+        return "<no location>".into();
+    };
+    match from.join(loc) {
+        Ok(u) => match (u.host_str(), u.port()) {
+            (Some(h), Some(p)) => format!("{h}:{p}"),
+            (Some(h), None) => h.to_string(),
+            (None, _) => "<no host>".into(),
+        },
+        Err(_) => "<invalid location>".into(),
+    }
 }
 
 async fn read_limited(resp: reqwest::Response, limit: usize) -> String {

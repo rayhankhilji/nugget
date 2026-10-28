@@ -6,11 +6,15 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use nugget_core::ipc::{StatusResponse, method};
 use nugget_core::paths::Paths;
 use nuggetd::{Daemon, DaemonOptions, Startup, cli, logging, service};
+
+/// How long exit waits for blocking work (hashing, SQLite) still running after the daemon stops.
+const RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Parser)]
 #[command(name = "nuggetd", version, about = "Nugget background daemon")]
@@ -56,7 +60,7 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match args.command {
+    let code = match args.command {
         None => runtime.block_on(run(paths)),
         Some(Command::Status { json }) => {
             logging::init_cli();
@@ -71,7 +75,11 @@ fn main() -> ExitCode {
             logging::init_cli();
             report(service::uninstall())
         }
-    }
+    };
+    // Dropping the runtime would wait for every `spawn_blocking` job (a multi-GB model hash can
+    // take minutes); give them a bounded grace period instead.
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_GRACE);
+    code
 }
 
 fn report(result: nugget_core::Result<String>) -> ExitCode {

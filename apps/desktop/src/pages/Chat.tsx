@@ -171,8 +171,8 @@ export function ChatPage() {
               <select value={provider} onChange={(e) => setProvider(e.target.value)}>
                 <option value="">Auto (route by tier)</option>
                 {list.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.id} · {p.model} ({LOCALITY_LABEL[p.locality] ?? p.locality})
+                  <option key={p.id} value={p.id} disabled={!!p.error}>
+                    {p.id} · {p.model} ({LOCALITY_LABEL[p.locality] ?? p.locality}){p.error ? " – unavailable" : ""}
                   </option>
                 ))}
               </select>

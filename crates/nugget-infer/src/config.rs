@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use url::Url;
 
-use crate::locality::{classify_parsed, rank};
+use crate::locality::{HostResolver, Resolved, literal_locality, rank, resolve_url};
 use crate::types::ProviderKind;
 
 /// Keychain service name under which `keychain:NAME` secrets are stored (account =
@@ -229,6 +229,9 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub retry_base_ms: Option<u64>,
     /// Extra HTTP headers on every request (e.g. `anthropic-beta`, OpenRouter attribution).
+    /// A value of the form `env:VAR` or `keychain:NAME` is resolved like `api_key` and sent as a
+    /// sensitive header. Credential-bearing names (see [`is_sensitive_header`]) MUST use such a
+    /// reference: plaintext secrets in config files are rejected.
     #[serde(default)]
     pub headers: BTreeMap<String, String>,
     /// JSON object merged into every chat request body (top-level keys override ours).
@@ -324,10 +327,20 @@ impl ProviderConfig {
         Ok(url)
     }
 
-    /// Locality classified from the host, raised by the optional `locality` override.
+    /// Locality classified from the host WITHOUT DNS, raised by the optional `locality`
+    /// override. Only `localhost` and IP literals classify below `Cloud` here; any other host
+    /// name reports `Cloud` until a built provider resolves it (see [`crate::locality`] and
+    /// [`crate::ProviderMeta::locality`]).
     pub fn effective_locality(&self) -> Result<Locality> {
         let url = self.base_url()?;
-        let classified = classify_parsed(&url)?;
+        match literal_locality(&url)? {
+            Some(classified) => self.apply_locality_override(classified, &url),
+            None => Ok(Locality::Cloud),
+        }
+    }
+
+    /// Raise `classified` by the `locality` override; refuse an override that would lower it.
+    fn apply_locality_override(&self, classified: Locality, url: &Url) -> Result<Locality> {
         match self.locality {
             None => Ok(classified),
             Some(o) if rank(o) >= rank(classified) => Ok(o),
@@ -336,6 +349,31 @@ impl ProviderConfig {
                 self.id, url
             ))),
         }
+    }
+
+    /// Resolve the base URL's host once (see [`crate::locality`]) and return the effective
+    /// locality plus the resolution to pin the client to. Refuses plaintext http to anything that
+    /// is (or could not be shown not to be) an internet host.
+    pub(crate) fn resolve_network(
+        &self,
+        resolver: &dyn HostResolver,
+    ) -> Result<(Locality, Resolved)> {
+        let url = self.base_url()?;
+        let resolved = resolve_url(&url, resolver)?;
+        if url.scheme() == "http" && resolved.locality == Locality::Cloud {
+            let why = if resolved.unresolved {
+                " (it did not resolve, so it is treated as one)"
+            } else {
+                ""
+            };
+            return Err(Error::Invalid(format!(
+                "provider {}: refusing plaintext http to internet host {}{why}",
+                self.id,
+                url.host_str().unwrap_or_default()
+            )));
+        }
+        let locality = self.apply_locality_override(resolved.locality, &url)?;
+        Ok((locality, resolved))
     }
 
     /// Check the config for mistakes without touching the network or secrets.
@@ -348,12 +386,24 @@ impl ProviderConfig {
             return Err(Error::Invalid(format!("provider {id}: model is empty")));
         }
         let url = self.base_url()?;
-        self.effective_locality()?;
-        if url.scheme() == "http" && classify_parsed(&url)? == Locality::Cloud {
-            return Err(Error::Invalid(format!(
-                "provider {id}: refusing plaintext http to internet host {}",
-                url.host_str().unwrap_or_default()
-            )));
+        // Host names are classified (and plaintext http to them refused) only once they are
+        // resolved, when the provider is built. Literals are checked here.
+        if let Some(classified) = literal_locality(&url)? {
+            self.apply_locality_override(classified, &url)?;
+            if url.scheme() == "http" && classified == Locality::Cloud {
+                return Err(Error::Invalid(format!(
+                    "provider {id}: refusing plaintext http to internet host {}",
+                    url.host_str().unwrap_or_default()
+                )));
+            }
+        }
+        for (name, value) in &self.headers {
+            if is_sensitive_header(name) && value.parse::<ApiKeyRef>().is_err() {
+                return Err(Error::Invalid(format!(
+                    "provider {id}: header {name:?} carries a credential; set it to \"env:VAR\" \
+                     or \"keychain:NAME\" (plaintext secrets are not accepted)"
+                )));
+            }
         }
         if self.max_output_tokens == Some(0) {
             return Err(Error::Invalid(format!(
@@ -401,6 +451,76 @@ impl ProviderConfig {
         }
         Ok(())
     }
+}
+
+/// Header names that carry credentials and so may only be set from `env:VAR`/`keychain:NAME` in
+/// [`ProviderConfig::headers`]: `authorization`, `proxy-authorization`, `cookie`, `x-api-key`,
+/// `api-key`, and any name containing `auth`, `key`, `token`, `secret`, `password`, `cookie`,
+/// `session` or `credential` (case-insensitive).
+pub fn is_sensitive_header(name: &str) -> bool {
+    const EXACT: [&str; 6] = [
+        "authorization",
+        "proxy-authorization",
+        "cookie",
+        "set-cookie",
+        "x-api-key",
+        "api-key",
+    ];
+    const PARTS: [&str; 9] = [
+        "auth",
+        "key",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "cookie",
+        "session",
+        "credential",
+    ];
+    let n = name.trim().to_ascii_lowercase();
+    EXACT.contains(&n.as_str()) || PARTS.iter().any(|p| n.contains(p))
+}
+
+/// Resolve `cfg.headers`: `env:VAR`/`keychain:NAME` values through `secrets`, everything else
+/// verbatim. Every value is marked sensitive so it never appears in logs.
+pub(crate) fn resolve_headers(
+    cfg: &ProviderConfig,
+    secrets: &dyn SecretResolver,
+) -> Result<Vec<(reqwest::header::HeaderName, reqwest::header::HeaderValue)>> {
+    use reqwest::header::{HeaderName, HeaderValue};
+    let mut out = Vec::with_capacity(cfg.headers.len());
+    for (k, v) in &cfg.headers {
+        let name = HeaderName::from_bytes(k.as_bytes())
+            .map_err(|e| Error::Invalid(format!("provider {}: header name {k:?}: {e}", cfg.id)))?;
+        let mut value = match v.parse::<ApiKeyRef>() {
+            Ok(r) => {
+                let secret = secrets.resolve(&r).map_err(|e| match e {
+                    Error::NotFound(m) => {
+                        Error::NotFound(format!("provider {}: header {k} {r}: {m}", cfg.id))
+                    }
+                    other => other,
+                })?;
+                HeaderValue::from_str(secret.expose()).map_err(|_| {
+                    Error::Invalid(format!(
+                        "provider {}: header {k} {r}: value has characters not allowed in an HTTP header",
+                        cfg.id
+                    ))
+                })?
+            }
+            Err(_) if is_sensitive_header(k) => {
+                return Err(Error::Invalid(format!(
+                    "provider {}: header {k:?} must be \"env:VAR\" or \"keychain:NAME\"",
+                    cfg.id
+                )));
+            }
+            Err(_) => HeaderValue::from_str(v).map_err(|e| {
+                Error::Invalid(format!("provider {}: header {k:?} value: {e}", cfg.id))
+            })?,
+        };
+        value.set_sensitive(true);
+        out.push((name, value));
+    }
+    Ok(out)
 }
 
 /// Shallow-merge `extra` into the request body object.
@@ -460,9 +580,9 @@ mod tests {
         assert!(cfg("id='a'\nkind='anthropic'\nmodel='m'\napi_key='sk-123'").is_err());
         // openai_compatible needs base_url
         assert!(cfg("id='a'\nkind='openai_compatible'\nmodel='m'").is_err());
-        // plaintext http to the internet
+        // plaintext http to an internet IP literal (names are checked when built, after DNS)
         assert!(
-            cfg("id='a'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://example.com/v1'")
+            cfg("id='a'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://8.8.8.8/v1'")
                 .is_err()
         );
         // credentials in URL
@@ -472,8 +592,11 @@ mod tests {
             )
             .is_err()
         );
-        // locality override may not hide egress
-        assert!(cfg("id='a'\nkind='anthropic'\nmodel='m'\nlocality='on_device'").is_err());
+        // locality override may not hide egress (for names this is checked after DNS, at build)
+        assert!(
+            cfg("id='a'\nkind='anthropic'\nmodel='m'\nbase_url='https://8.8.8.8'\nlocality='on_device'")
+                .is_err()
+        );
         // kind-specific option on the wrong kind
         assert!(
             cfg("id='a'\nkind='openai_compatible'\nmodel='m'\nbase_url='http://localhost:1/v1'\nanthropic_version='x'")
@@ -498,6 +621,70 @@ mod tests {
         )
         .unwrap();
         assert_eq!(c.effective_locality().unwrap(), Locality::LocalNetwork);
+    }
+
+    #[test]
+    fn credential_headers_must_be_references() {
+        let base = "id='a'\nkind='anthropic'\nmodel='m'\n";
+        for name in [
+            "authorization",
+            "Authorization",
+            "x-api-key",
+            "api-key",
+            "proxy-authorization",
+            "cookie",
+            "x-goog-api-key",
+            "x-auth-token",
+            "openai-organization-secret",
+        ] {
+            assert!(is_sensitive_header(name), "{name}");
+            let plain = format!("{base}headers = {{ \"{name}\" = \"sk-plaintext\" }}");
+            let err = cfg(&plain).unwrap_err();
+            assert!(err.to_string().contains("credential"), "{name}: {err}");
+            for r in ["env:MY_KEY", "keychain:gw"] {
+                cfg(&format!("{base}headers = {{ \"{name}\" = \"{r}\" }}")).unwrap();
+            }
+        }
+        for name in ["anthropic-beta", "X-Title", "HTTP-Referer", "user-agent"] {
+            assert!(!is_sensitive_header(name), "{name}");
+        }
+        cfg(&format!("{base}headers = {{ \"X-Title\" = \"Nugget\" }}")).unwrap();
+    }
+
+    #[test]
+    fn header_references_resolve_to_sensitive_values() {
+        struct Fake;
+        impl SecretResolver for Fake {
+            fn resolve(&self, key: &ApiKeyRef) -> Result<Secret> {
+                match key {
+                    ApiKeyRef::Env(v) if v == "GW_TOKEN" => Ok(Secret::new("Bearer abc")),
+                    ApiKeyRef::Keychain(n) if n == "cookie" => Ok(Secret::new("sid=1")),
+                    _ => Err(Error::NotFound("unset".into())),
+                }
+            }
+        }
+        let c = cfg(r#"
+            id = "a"
+            kind = "anthropic"
+            model = "m"
+            headers = { "proxy-authorization" = "env:GW_TOKEN", "cookie" = "keychain:cookie", "X-Title" = "Nugget" }
+        "#)
+        .unwrap();
+        let h = resolve_headers(&c, &Fake).unwrap();
+        let get = |n: &str| h.iter().find(|(k, _)| k.as_str() == n).unwrap().1.clone();
+        assert_eq!(get("proxy-authorization").to_str().unwrap(), "Bearer abc");
+        assert_eq!(get("cookie").to_str().unwrap(), "sid=1");
+        assert_eq!(get("x-title").to_str().unwrap(), "Nugget");
+        assert!(h.iter().all(|(_, v)| v.is_sensitive()));
+        let mut missing = c.clone();
+        missing
+            .headers
+            .insert("x-api-key".into(), "env:NOPE".into());
+        let err = resolve_headers(&missing, &Fake).unwrap_err();
+        assert!(
+            matches!(&err, Error::NotFound(m) if m.contains("x-api-key")),
+            "{err}"
+        );
     }
 
     #[test]

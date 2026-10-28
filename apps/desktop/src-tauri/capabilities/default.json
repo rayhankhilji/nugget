@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: app commands plus core event listening.",
+  "description": "Main window: the app's own commands (allowed without a core permission) plus listening to the app's events. Nothing else from core: the UI uses no window, app, path, menu, tray, image or webview APIs.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
 }

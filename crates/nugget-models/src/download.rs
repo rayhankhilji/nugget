@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -843,14 +843,23 @@ async fn run_sequential(ctx: &Ctx, first: reqwest::Response) -> Result<()> {
 }
 
 /// Streaming SHA-256 of a file (blocking; run on a blocking thread). `on_bytes` gets the running
-/// count of hashed bytes.
-pub(crate) fn sha256_file(path: &Path, mut on_bytes: impl FnMut(u64)) -> std::io::Result<String> {
+/// count of hashed bytes. `cancel` is checked every 1 MiB: once set, hashing stops with
+/// [`Error::Cancelled`], so a dropped install does not keep reading gigabytes (and does not hold
+/// up runtime shutdown).
+pub(crate) fn sha256_file(
+    path: &Path,
+    cancel: &AtomicBool,
+    mut on_bytes: impl FnMut(u64),
+) -> Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1024 * 1024];
+    let mut buf = vec![0u8; HASH_CHUNK];
     let mut total = 0u64;
     loop {
-        let n = f.read(&mut buf)?;
+        if cancel.load(Ordering::Relaxed) {
+            return Err(Error::Cancelled);
+        }
+        let n = read_full(&mut f, &mut buf)?;
         if n == 0 {
             break;
         }
@@ -859,6 +868,43 @@ pub(crate) fn sha256_file(path: &Path, mut on_bytes: impl FnMut(u64)) -> std::io
         on_bytes(total);
     }
     Ok(hex::encode(hasher.finalize()))
+}
+
+/// Bytes hashed between cancellation checks.
+const HASH_CHUNK: usize = 1024 * 1024;
+
+/// Fill `buf` unless EOF comes first; returns the bytes read (0 only at EOF).
+fn read_full(f: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match f.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(filled)
+}
+
+/// Sets a cancel flag when dropped. Held by an install/verify future, so dropping the future
+/// stops its blocking hash.
+pub(crate) struct CancelOnDrop(pub(crate) Arc<AtomicBool>);
+
+impl CancelOnDrop {
+    pub(crate) fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub(crate) fn flag(&self) -> Arc<AtomicBool> {
+        self.0.clone()
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -975,8 +1021,31 @@ mod tests {
         let p = dir.path().join("f");
         std::fs::write(&p, b"abc").unwrap();
         assert_eq!(
-            sha256_file(&p, |_| {}).unwrap(),
+            sha256_file(&p, &AtomicBool::new(false), |_| {}).unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn hashing_stops_within_a_chunk_of_cancellation() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("big");
+        // Sparse: no disk used.
+        std::fs::File::create(&p)
+            .unwrap()
+            .set_len(64 * HASH_CHUNK as u64)
+            .unwrap();
+        let cancel = CancelOnDrop::new();
+        let flag = cancel.flag();
+        let mut cancel = Some(cancel);
+        let mut hashed = 0;
+        let res = sha256_file(&p, &flag, |n| {
+            hashed = n;
+            if n >= 3 * HASH_CHUNK as u64 {
+                drop(cancel.take()); // the install future going away
+            }
+        });
+        assert!(matches!(res, Err(Error::Cancelled)), "{res:?}");
+        assert_eq!(hashed, 3 * HASH_CHUNK as u64);
     }
 }

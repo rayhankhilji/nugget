@@ -288,14 +288,28 @@ pub fn find_nuggetd() -> Option<PathBuf> {
         .ok()
         .and_then(|exe| exe.parent().map(|dir| dir.join(&name)));
     sibling
-        .filter(|p| p.is_file())
+        .filter(|p| is_executable(p))
         .or_else(|| find_on_path(&name, std::env::var_os("PATH")?))
 }
 
+/// Search `PATH` for `name`. Relative and empty entries (which would resolve against whatever
+/// the current directory happens to be) are skipped, as are files that are not executable.
 fn find_on_path(name: &str, path: std::ffi::OsString) -> Option<PathBuf> {
     std::env::split_paths(&path)
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(name))
-        .find(|p| p.is_file())
+        .find(|p| is_executable(p))
+}
+
+#[cfg(unix)]
+fn is_executable(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable(p: &Path) -> bool {
+    p.is_file()
 }
 
 /// Start the daemon so it outlives the app and never grabs a console or the terminal.
@@ -345,14 +359,70 @@ mod tests {
         assert_eq!(v["kind"], "not_running");
     }
 
+    fn write_exe(path: &Path) {
+        std::fs::write(path, b"").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
     #[test]
     fn finds_daemon_on_path() {
         let dir = std::env::temp_dir().join(format!("nugget-desktop-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let exe = dir.join(daemon_file_name());
-        std::fs::write(&exe, b"").unwrap();
-        let path = std::env::join_paths([PathBuf::from("/nonexistent"), dir.clone()]).unwrap();
+        write_exe(&exe);
+        let missing = std::env::temp_dir().join("nugget-desktop-test-nonexistent");
+        let path = std::env::join_paths([missing, dir.clone()]).unwrap();
         assert_eq!(find_on_path(&daemon_file_name(), path), Some(exe));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn path_search_skips_relative_entries_and_non_executables() {
+        let base = std::env::temp_dir().join(format!("nugget-desktop-path-{}", std::process::id()));
+        let name = daemon_file_name();
+
+        // A daemon reachable through a relative PATH entry (`../../tmp/...`, resolved against the
+        // current directory) or an empty one must not be picked up, even though it exists.
+        let rel_dir = base.join("rel");
+        std::fs::create_dir_all(&rel_dir).unwrap();
+        write_exe(&rel_dir.join(&name));
+        let cwd = std::env::current_dir().unwrap();
+        let mut rel = PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            rel.push("..");
+        }
+        let rel_target: PathBuf = rel_dir.components().skip(1).collect();
+        let rel = rel.join(rel_target);
+        assert!(rel.is_relative());
+        if cfg!(unix) {
+            assert!(
+                rel.join(&name).is_file(),
+                "fixture resolves relative to the cwd"
+            );
+        }
+        let path = std::env::join_paths([rel.clone(), PathBuf::new()]).unwrap();
+        assert_eq!(find_on_path(&name, path), None);
+
+        // A non-executable file is skipped in favour of a later executable one (Unix only:
+        // elsewhere any file counts).
+        let plain = base.join("plain");
+        let good = base.join("good");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::create_dir_all(&good).unwrap();
+        std::fs::write(plain.join(&name), b"").unwrap();
+        write_exe(&good.join(&name));
+        let path = std::env::join_paths([rel, plain.clone(), good.clone()]).unwrap();
+        let found = find_on_path(&name, path);
+        if cfg!(unix) {
+            assert_eq!(found, Some(good.join(&name)));
+        } else {
+            assert_eq!(found, Some(plain.join(&name)));
+        }
+
+        let _ = std::fs::remove_dir_all(base);
     }
 }
