@@ -501,6 +501,9 @@ pub enum RuntimeState {
     Stopped,
     Starting,
     Ready,
+    /// Asked to stop: no longer accepting requests, the server process is shutting down.
+    /// Becomes `Stopped` once it exited.
+    Stopping,
     /// Crashed or failed health checks; restarting with backoff.
     Failed,
 }

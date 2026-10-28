@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use nugget_core::egress::{EgressEvent, EgressSink};
+use nugget_core::egress::{EgressExchange, EgressSink};
 use nugget_core::{Error, Result};
 use reqwest::StatusCode;
 use reqwest::header::{CONTENT_RANGE, RANGE, RETRY_AFTER};
@@ -284,40 +284,67 @@ pub(crate) fn staged_bytes(dir: &Path, entry: &ModelEntry) -> u64 {
 // Egress accounting
 // ---------------------------------------------------------------------------------------------
 
-/// Per-host byte counts; recorded to the sink when dropped (success, failure or cancellation).
+/// Push running totals to the ledger after this many unflushed bytes...
+const EGRESS_FLUSH_BYTES: u64 = 8 * 1024 * 1024;
+/// ...or this long after the last flush, whichever comes first.
+const EGRESS_FLUSH_INTERVAL: Duration = Duration::from_secs(2);
+
+/// One ledger exchange per host: opened before the first request to that host, flushed
+/// periodically while bytes arrive, finished when dropped (success, failure or cancellation).
 struct EgressTally {
     sink: Arc<dyn EgressSink>,
     feature: &'static str,
-    hosts: Mutex<BTreeMap<String, (u64, u64)>>,
+    inner: Mutex<TallyInner>,
+}
+
+struct TallyInner {
+    hosts: BTreeMap<String, EgressExchange>,
+    unflushed: u64,
+    last_flush: Instant,
 }
 
 impl EgressTally {
-    fn add(&self, host: &str, sent: u64, received: u64) {
-        let mut h = lock(&self.hosts);
-        let e = h.entry(host.to_string()).or_default();
-        e.0 += sent;
-        e.1 += received;
+    fn new(sink: Arc<dyn EgressSink>, feature: &'static str) -> Self {
+        Self {
+            sink,
+            feature,
+            inner: Mutex::new(TallyInner {
+                hosts: BTreeMap::new(),
+                unflushed: 0,
+                last_flush: Instant::now(),
+            }),
+        }
     }
 
+    fn add(&self, host: &str, sent: u64, received: u64) {
+        let mut guard = lock(&self.inner);
+        let t = &mut *guard;
+        match t.hosts.get_mut(host) {
+            Some(x) => {
+                x.add_sent(sent);
+                x.add_received(received);
+            }
+            None => {
+                // First request to this host: the row is written before it is sent (`begin`
+                // waits briefly for that, once per host).
+                let mut x =
+                    EgressExchange::begin(self.sink.clone(), host, self.feature, Vec::new(), sent);
+                x.add_received(received);
+                t.hosts.insert(host.to_string(), x);
+            }
+        }
+        t.unflushed = t.unflushed.saturating_add(sent + received);
+        if t.unflushed >= EGRESS_FLUSH_BYTES || t.last_flush.elapsed() >= EGRESS_FLUSH_INTERVAL {
+            t.hosts.values_mut().for_each(EgressExchange::flush);
+            t.unflushed = 0;
+            t.last_flush = Instant::now();
+        }
+    }
+
+    /// Call before sending a request to `url`.
     fn request(&self, url: &str) {
         // Request line + typical headers; an estimate, documented as such.
         self.add(&host_of(url), url.len() as u64 + 160, 0);
-    }
-}
-
-impl Drop for EgressTally {
-    fn drop(&mut self) {
-        let hosts = std::mem::take(&mut *lock(&self.hosts));
-        for (host, (sent, received)) in hosts {
-            self.sink.record(EgressEvent {
-                at: time::OffsetDateTime::now_utc(),
-                host,
-                feature: self.feature.to_string(),
-                bytes_sent: sent,
-                bytes_received: received,
-                items: Vec::new(),
-            });
-        }
     }
 }
 
@@ -476,11 +503,7 @@ impl Download<'_> {
             let _ = std::fs::remove_file(&data);
         }
 
-        let tally = Arc::new(EgressTally {
-            sink: egress,
-            feature,
-            hosts: Mutex::new(BTreeMap::new()),
-        });
+        let tally = Arc::new(EgressTally::new(egress, feature));
 
         let (url, probe) = probe_sources(client, entry, opts, &tally).await?;
 

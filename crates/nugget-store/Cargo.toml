@@ -19,6 +19,7 @@ tracing.workspace = true
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }
 sqlite-vec = "0.1.6"
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 getrandom = "0.3"
 zeroize = "1"
@@ -30,6 +31,15 @@ keyring = { workspace = true, features = ["apple-native"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { workspace = true, features = ["windows-native"] }
+# Protected DACLs on the data directory and key file (same version as nugget-ipc).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
 
 # Secret Service over a pure-Rust D-Bus client (zbus), so there is no libdbus system dependency.
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd"))'.dependencies]

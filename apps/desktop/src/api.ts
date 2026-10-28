@@ -275,7 +275,7 @@ export interface AskStarted {
 // ---- local runtime ----
 
 export type RuntimeRole = "chat" | "embedding";
-export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "failed";
+export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "stopping" | "failed";
 
 export interface RuntimeInfo {
   model_id: string;

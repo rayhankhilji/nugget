@@ -60,6 +60,15 @@ pub async fn connect_stream(paths: &Paths) -> io::Result<Stream> {
     Ok(stream)
 }
 
+/// Server side: refuse an accepted connection whose peer is not the current user.
+///
+/// On Unix the peer's effective uid (`SO_PEERCRED` on Linux, `LOCAL_PEERCRED`, which backs
+/// `getpeereid`, on macOS/BSD) must equal ours; this backs up the 0700 socket directory. On
+/// Windows the pipe's DACL already admits only the owner and LocalSystem, so this accepts.
+pub(crate) fn verify_client(stream: &Stream) -> io::Result<()> {
+    imp::verify_client(stream)
+}
+
 /// The single-daemon lock: an exclusive, non-blocking `fs4` lock on [`lock_path`].
 #[cfg(any(unix, windows))]
 mod daemon_lock {
@@ -169,6 +178,7 @@ mod imp {
     use std::path::{Path, PathBuf};
 
     use interprocess::local_socket::tokio::{Listener, Stream};
+    use interprocess::local_socket::traits::StreamCommon as _;
     use interprocess::local_socket::traits::tokio::Stream as _;
     use interprocess::local_socket::{GenericFilePath, ListenerOptions, Name, ToFsName};
 
@@ -265,6 +275,25 @@ mod imp {
         Ok(())
     }
 
+    /// Whether a peer with effective uid `peer` (`None`: the OS did not report one) may talk
+    /// to a server running as `ours`. Unknown peers are refused.
+    pub(super) fn peer_uid_allowed(peer: Option<u32>, ours: u32) -> bool {
+        peer == Some(ours)
+    }
+
+    pub(super) fn verify_client(stream: &Stream) -> io::Result<()> {
+        let peer = stream.peer_creds()?.euid();
+        let ours = rustix::process::geteuid().as_raw();
+        if peer_uid_allowed(peer, ours) {
+            return Ok(());
+        }
+        let who = peer.map_or_else(|| "an unknown user".to_owned(), |uid| format!("uid {uid}"));
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("peer runs as {who}, not as the daemon's uid {ours}"),
+        ))
+    }
+
     pub(super) fn check_before_connect(paths: &Paths) -> io::Result<()> {
         // Only the fallback can be planted by another user; the preferred
         // directory lives under the user's own data dir.
@@ -350,6 +379,11 @@ mod imp {
     }
 
     pub(super) fn check_before_connect(_paths: &Paths) -> io::Result<()> {
+        Ok(())
+    }
+
+    pub(super) fn verify_client(_stream: &Stream) -> io::Result<()> {
+        // `PIPE_SDDL` admits only the owner and LocalSystem.
         Ok(())
     }
 
@@ -526,6 +560,12 @@ mod imp {
         Ok(())
     }
 
+    pub(super) fn verify_client(
+        _stream: &interprocess::local_socket::tokio::Stream,
+    ) -> io::Result<()> {
+        Ok(())
+    }
+
     pub(super) async fn bind(paths: &Paths) -> io::Result<Listener> {
         ListenerOptions::new().name(name(paths)?).create_tokio()
     }
@@ -562,6 +602,14 @@ mod tests {
         set_mode(0o755);
         assert_eq!(imp::runtime_dir(&paths, Some(rt.path().into())), None);
         assert!(imp::socket_dir_in(&paths, None).starts_with(std::env::temp_dir()));
+    }
+
+    #[test]
+    fn only_peers_running_as_our_uid_are_allowed() {
+        assert!(imp::peer_uid_allowed(Some(501), 501));
+        assert!(!imp::peer_uid_allowed(Some(502), 501));
+        assert!(!imp::peer_uid_allowed(Some(0), 501));
+        assert!(!imp::peer_uid_allowed(None, 501));
     }
 
     #[test]

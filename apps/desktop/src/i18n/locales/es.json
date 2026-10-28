@@ -386,6 +386,7 @@
   "status.runtime.stopped": "Detenido",
   "status.runtime.starting": "Iniciando",
   "status.runtime.ready": "Listo",
+  "status.runtime.stopping": "Deteniendo",
   "status.runtime.failed": "Error",
   "status.localRuntime": "Entorno de ejecución local",
   "status.noRuntimes": "No hay servidores de modelos locales. Instala un modelo local en la página Modelos para ejecutar el chat y los embeddings en este dispositivo.",

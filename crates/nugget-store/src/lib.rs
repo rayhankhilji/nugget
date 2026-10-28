@@ -17,6 +17,7 @@
 //! The API is synchronous. [`Store`] is cheap to clone and safe to share between threads; async
 //! callers should use `spawn_blocking` for heavy calls.
 
+mod acl;
 mod audit;
 mod changes;
 mod egress;
@@ -31,6 +32,8 @@ mod store;
 mod types;
 mod vec_ext;
 
+pub use audit::AuditAnchor;
+pub use egress::{EgressRow, EgressState};
 pub use graph::{ENTITY_ID_PREFIX, MAX_MERGE_DEPTH, MAX_NEIGHBOURHOOD_NODES, SqliteGraph};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;

@@ -386,6 +386,7 @@
   "status.runtime.stopped": "रुका हुआ",
   "status.runtime.starting": "शुरू हो रहा है",
   "status.runtime.ready": "तैयार",
+  "status.runtime.stopping": "रुक रहा है",
   "status.runtime.failed": "विफल",
   "status.localRuntime": "लोकल रनटाइम",
   "status.noRuntimes": "कोई लोकल मॉडल सर्वर नहीं है। इस डिवाइस पर चैट और एम्बेडिंग चलाने के लिए मॉडल पेज पर कोई लोकल मॉडल इंस्टॉल करें।",

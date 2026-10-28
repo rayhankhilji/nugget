@@ -386,6 +386,7 @@
   "status.runtime.stopped": "已停止",
   "status.runtime.starting": "正在启动",
   "status.runtime.ready": "就绪",
+  "status.runtime.stopping": "正在停止",
   "status.runtime.failed": "失败",
   "status.localRuntime": "本地运行时",
   "status.noRuntimes": "没有本地模型服务器。在“模型”页面安装本地模型，即可在此设备上运行聊天和嵌入。",
