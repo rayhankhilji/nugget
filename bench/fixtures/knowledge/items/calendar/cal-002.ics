@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:harbourline-review-20260929@glimmerfen.test
+DTSTAMP:20260901T000000Z
+DTSTART:20260929T140000Z
+DTEND:20260929T150000Z
+SUMMARY:Harbourline scope review
+LOCATION:Ostrander Depot
+ORGANIZER;CN="Robin Ashgrove":mailto:robin.ashgrove@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+ATTENDEE;CN="Sam Okafor";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:sam.okafor@ostrander-freight.test
+ATTENDEE;CN="Yusuf Brightmore";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:yusuf.brightmore@ostrander-freight.test
+END:VEVENT
+END:VCALENDAR

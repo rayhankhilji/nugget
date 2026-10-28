@@ -33,3 +33,4 @@
 
 # Test fixtures are byte-exact (e.g. CRLF line endings in .ics/.eml samples).
 crates/**/tests/fixtures/** -text
+bench/fixtures/** -text

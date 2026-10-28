@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:tidewater-review-20261020@vellumthistle.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261020T130000Z
+DTEND:20261020T140000Z
+SUMMARY:Tidewater contract review
+DESCRIPTION:Review of the Tidewater Billing vendor contract (video call).
+ORGANIZER;CN="Lucia Penhallow":mailto:lucia.penhallow@vellumthistle.test
+ATTENDEE;CN="Lucia Penhallow";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:lucia.penhallow@vellumthistle.test
+ATTENDEE;CN="Clementine Arkwright";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:clem.arkwright@vellumthistle.test
+ATTENDEE;CN="Ines Halloran";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:ines.halloran@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

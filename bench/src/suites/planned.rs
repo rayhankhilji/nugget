@@ -23,7 +23,7 @@ impl Benchmark for DraftBench {
         false
     }
     fn run(&self, _ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        Err(BenchError::NotImplemented(DRAFT_PLAN))
+        Err(BenchError::NotImplemented(DRAFT_PLAN.into()))
     }
 }
 
@@ -47,6 +47,6 @@ impl Benchmark for CuaBench {
         false
     }
     fn run(&self, _ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        Err(BenchError::NotImplemented(CUA_PLAN))
+        Err(BenchError::NotImplemented(CUA_PLAN.into()))
     }
 }

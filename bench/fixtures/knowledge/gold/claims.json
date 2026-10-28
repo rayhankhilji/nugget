@@ -1,0 +1,3254 @@
+[
+  {
+    "id": "e-coffee-maggie held_at l-copper-kettle",
+    "subject": "e-coffee-maggie",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-copper-kettle"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-coffee-maggie starts_at '2026-09-29'",
+    "subject": "e-coffee-maggie",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-09-29"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-driftwood-review held_at l-glimmerfen-studio",
+    "subject": "e-driftwood-review",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-glimmerfen-studio"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-035",
+        "quote": "I've booked the Driftwood API design review at Glimmerfen Studio"
+      },
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-driftwood-review starts_at '2026-10-30'",
+    "subject": "e-driftwood-review",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-10-30"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-fundraiser-planning held_at l-boathouse",
+    "subject": "e-fundraiser-planning",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-boathouse"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-fundraiser-planning starts_at '2026-11-08'",
+    "subject": "e-fundraiser-planning",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-08"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-gp-appointment held_at l-reedbed",
+    "subject": "e-gp-appointment",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-reedbed"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-gp-appointment starts_at '2026-10-06'",
+    "subject": "e-gp-appointment",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-10-06"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-harbourline-review held_at l-depot",
+    "subject": "e-harbourline-review",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-depot"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-harbourline-review starts_at '2026-09-29'",
+    "subject": "e-harbourline-review",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-09-29"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-hiring-panel starts_at '2026-11-03'",
+    "subject": "e-hiring-panel",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-03"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-jonah-birthday held_at l-copper-kettle",
+    "subject": "e-jonah-birthday",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-copper-kettle"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-jonah-birthday starts_at '2026-11-14'",
+    "subject": "e-jonah-birthday",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-14"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-lodestar-kickoff held_at l-cindergate-hq",
+    "subject": "e-lodestar-kickoff",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-cindergate-hq"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-lodestar-kickoff starts_at '2026-09-10'",
+    "subject": "e-lodestar-kickoff",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-09-10"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-mentor-meeting starts_at '2026-11-04'",
+    "subject": "e-mentor-meeting",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-04"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-007",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-moorland-sync held_at l-cindergate-hq",
+    "subject": "e-moorland-sync",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-cindergate-hq"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-moorland-sync starts_at '2026-10-27'",
+    "subject": "e-moorland-sync",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-10-27"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-quarry-planning starts_at '2026-10-28'",
+    "subject": "e-quarry-planning",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-10-28"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-regatta-committee held_at l-boathouse",
+    "subject": "e-regatta-committee",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-boathouse"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-regatta-committee starts_at '2026-09-17'",
+    "subject": "e-regatta-committee",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-09-17"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-summit held_at l-fernhollow",
+    "subject": "e-summit",
+    "predicate": "held_at",
+    "object": {
+      "entity": "l-fernhollow"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-026",
+        "quote": "the Data Platform Summit at Fernhollow Conference Centre"
+      },
+      {
+        "item": "cal-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-summit starts_at '2026-11-18'",
+    "subject": "e-summit",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-18"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-tidewater-review starts_at '2026-10-20'",
+    "subject": "e-tidewater-review",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-10-20"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "e-wren-usability starts_at '2026-11-10'",
+    "subject": "e-wren-usability",
+    "predicate": "starts_at",
+    "object": {
+      "literal": "2026-11-10"
+    },
+    "status": "active",
+    "optional": true,
+    "support": [
+      {
+        "item": "cal-011",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-driftwood part_of o-glimmerfen",
+    "subject": "j-driftwood",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-012",
+        "quote": "Driftwood API is part of Glimmerfen Labs' platform"
+      },
+      {
+        "item": "note-018",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-fennel part_of o-glimmerfen",
+    "subject": "j-fennel",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-011",
+        "quote": "Fennel is a joint Glimmerfen Labs project"
+      },
+      {
+        "item": "note-016",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-harbourline part_of o-glimmerfen",
+    "subject": "j-harbourline",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "I own Harbourline on the Glimmerfen side"
+      },
+      {
+        "item": "note-017",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-lodestar part_of o-glimmerfen",
+    "subject": "j-lodestar",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "I'm leading Project Lodestar for Glimmerfen Labs this quarter"
+      },
+      {
+        "item": "note-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-moorland part_of o-cindergate",
+    "subject": "j-moorland",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-cindergate"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-016",
+        "quote": "Oskar Lindqvist-Hale leads Moorland Survey on our side"
+      },
+      {
+        "item": "note-021",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-quarry part_of o-quillfeather",
+    "subject": "j-quarry",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-quillfeather"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-030",
+        "quote": "I lead Quarry Bridge on the Quillfeather side"
+      },
+      {
+        "item": "note-023",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-regatta part_of o-marrowbank",
+    "subject": "j-regatta",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-marrowbank"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-024",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-saffron part_of o-glimmerfen",
+    "subject": "j-saffron",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-031",
+        "quote": "Saffron Onboarding is a Glimmerfen Labs project for new customers"
+      },
+      {
+        "item": "note-022",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-tidewater part_of o-glimmerfen",
+    "subject": "j-tidewater",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-010",
+        "quote": "Tidewater Billing is a Glimmerfen Labs project"
+      },
+      {
+        "item": "note-020",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "j-wren part_of o-glimmerfen",
+    "subject": "j-wren",
+    "predicate": "part_of",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-019",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "k-book-boathouse due_on '2026-11-15'",
+    "subject": "k-book-boathouse",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-11-15"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "I'll book the boathouse for the fundraiser by 15 November"
+      }
+    ]
+  },
+  {
+    "id": "k-deposit due_on '2026-10-30'",
+    "subject": "k-deposit",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-10-30"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-008",
+        "quote": "I will send the venue deposit to Marrowbank by Friday 30 October"
+      }
+    ]
+  },
+  {
+    "id": "k-quarry-proposal due_on '2026-11-20'",
+    "subject": "k-quarry-proposal",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-11-20"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-023",
+        "quote": "Priya will send the Quarry Bridge proposal to Cormac by 20 November"
+      }
+    ]
+  },
+  {
+    "id": "k-redlines due_on '2026-11-12'",
+    "subject": "k-redlines",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-11-12"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "I will review the Tidewater contract redlines by 12 November"
+      },
+      {
+        "item": "mail-044",
+        "quote": "I will review the Tidewater contract redlines by 12 November"
+      }
+    ]
+  },
+  {
+    "id": "k-schema due_on '2026-11-06'",
+    "subject": "k-schema",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-11-06"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-024",
+        "quote": "I'll share the Lodestar data schema with Cindergate by 6 November"
+      },
+      {
+        "item": "note-025",
+        "quote": "Theo will share the Lodestar data schema with Cindergate by 6 November"
+      }
+    ]
+  },
+  {
+    "id": "k-tracking-feed due_on '2026-12-01'",
+    "subject": "k-tracking-feed",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-12-01"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "I will deliver the Harbourline tracking feed by 1 December"
+      }
+    ]
+  },
+  {
+    "id": "k-wren-prototype due_on '2026-11-15'",
+    "subject": "k-wren-prototype",
+    "predicate": "due_on",
+    "object": {
+      "literal": "2026-11-15"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-013",
+        "quote": "I will finish the Wren Mobile prototype by 15 November"
+      }
+    ]
+  },
+  {
+    "id": "p-ada attended e-wren-usability",
+    "subject": "p-ada",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-wren-usability"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-011",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ada has_role 'QA Lead'",
+    "subject": "p-ada",
+    "predicate": "has_role",
+    "object": {
+      "literal": "QA Lead"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ada leads j-saffron",
+    "subject": "p-ada",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-saffron"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-031",
+        "quote": "I own the whole Saffron Onboarding flow now"
+      },
+      {
+        "item": "note-014",
+        "quote": "owns [[Saffron Onboarding]]"
+      },
+      {
+        "item": "note-022",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ada works_at o-glimmerfen",
+    "subject": "p-ada",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ada works_on j-driftwood",
+    "subject": "p-ada",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-driftwood"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-012",
+        "quote": "I'm leading the Driftwood API work and Ada Wexford is helping with the test plan"
+      },
+      {
+        "item": "note-014",
+        "quote": "QA for [[Driftwood API]] and [[Wren Mobile]]"
+      },
+      {
+        "item": "note-018",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ada works_on j-wren",
+    "subject": "p-ada",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-wren"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-013",
+        "quote": "Ada will run the usability test with me"
+      },
+      {
+        "item": "note-014",
+        "quote": "QA for [[Driftwood API]] and [[Wren Mobile]]"
+      },
+      {
+        "item": "note-019",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-bart has_role 'CEO'",
+    "subject": "p-bart",
+    "predicate": "has_role",
+    "object": {
+      "literal": "CEO"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-016",
+        "quote": "As CEO of Cindergate Analytics"
+      }
+    ]
+  },
+  {
+    "id": "p-bart works_at o-cindergate",
+    "subject": "p-bart",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-cindergate"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-016",
+        "quote": "As CEO of Cindergate Analytics"
+      }
+    ]
+  },
+  {
+    "id": "p-bea attended e-mentor-meeting",
+    "subject": "p-bea",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-mentor-meeting"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-007",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-bea has_role 'Teacher'",
+    "subject": "p-bea",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Teacher"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-019",
+        "quote": "I teach Year 4 at Bramblecote Primary School"
+      }
+    ]
+  },
+  {
+    "id": "p-bea works_at o-bramblecote",
+    "subject": "p-bea",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-bramblecote"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-019",
+        "quote": "I teach Year 4 at Bramblecote Primary School"
+      }
+    ]
+  },
+  {
+    "id": "p-clem attended e-tidewater-review",
+    "subject": "p-clem",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-tidewater-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-clem has_role 'Paralegal'",
+    "subject": "p-clem",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Paralegal"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "Clementine Arkwright, a paralegal here"
+      }
+    ]
+  },
+  {
+    "id": "p-clem works_at o-vellum",
+    "subject": "p-clem",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-vellum"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "Clementine Arkwright, a paralegal here"
+      }
+    ]
+  },
+  {
+    "id": "p-cormac attended e-quarry-planning",
+    "subject": "p-cormac",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-quarry-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-cormac has_role 'CEO'",
+    "subject": "p-cormac",
+    "predicate": "has_role",
+    "object": {
+      "literal": "CEO"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-022",
+        "quote": "Cormac Ellery, our CEO"
+      }
+    ]
+  },
+  {
+    "id": "p-cormac leads j-quarry",
+    "subject": "p-cormac",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-quarry"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-030",
+        "quote": "I lead Quarry Bridge on the Quillfeather side"
+      },
+      {
+        "item": "note-023",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-cormac works_at o-quillfeather",
+    "subject": "p-cormac",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-quillfeather"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-022",
+        "quote": "Cormac Ellery, our CEO"
+      }
+    ]
+  },
+  {
+    "id": "p-desmond attended e-driftwood-review",
+    "subject": "p-desmond",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-driftwood-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-desmond has_role 'Chief Technology Officer'",
+    "subject": "p-desmond",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Chief Technology Officer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-003",
+        "quote": "Chief Technology Officer, Glimmerfen Labs"
+      },
+      {
+        "item": "note-007",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-desmond works_at o-glimmerfen",
+    "subject": "p-desmond",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-003",
+        "quote": "Chief Technology Officer, Glimmerfen Labs"
+      },
+      {
+        "item": "note-007",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix attended e-driftwood-review",
+    "subject": "p-felix",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-driftwood-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix attended e-lodestar-kickoff",
+    "subject": "p-felix",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      },
+      {
+        "item": "note-025",
+        "quote": "Attendees: [[Theo Brannigan]], Maggie, Priya, Felix, Saoirse"
+      }
+    ]
+  },
+  {
+    "id": "p-felix has_role 'Backend Engineer'",
+    "subject": "p-felix",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Backend Engineer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix leads j-driftwood",
+    "subject": "p-felix",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-driftwood"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-003",
+        "quote": "Felix will lead the Driftwood API"
+      },
+      {
+        "item": "mail-012",
+        "quote": "I'm leading the Driftwood API work"
+      },
+      {
+        "item": "note-006",
+        "quote": "Leads [[Driftwood API]]"
+      },
+      {
+        "item": "note-018",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix reports_to p-theo",
+    "subject": "p-felix",
+    "predicate": "reports_to",
+    "object": {
+      "entity": "p-theo"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-003",
+        "quote": "Felix reports to Theo for day-to-day work"
+      },
+      {
+        "item": "note-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix works_at o-glimmerfen",
+    "subject": "p-felix",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-felix works_on j-lodestar",
+    "subject": "p-felix",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-lodestar"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "Felix Ravensworth and Saoirse Penrose will both work on Lodestar with us"
+      },
+      {
+        "item": "note-006",
+        "quote": "Also on [[Project Lodestar]]"
+      },
+      {
+        "item": "note-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-harriet has_role 'Chief Operating Officer'",
+    "subject": "p-harriet",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Chief Operating Officer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "Harriet Quennell, your Chief Operating Officer"
+      },
+      {
+        "item": "mail-028",
+        "quote": "Harriet Quennell\nChief Operating Officer"
+      }
+    ]
+  },
+  {
+    "id": "p-harriet works_at o-ostrander",
+    "subject": "p-harriet",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-ostrander"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "Harriet Quennell, your Chief Operating Officer"
+      }
+    ]
+  },
+  {
+    "id": "p-hugo attended e-quarry-planning",
+    "subject": "p-hugo",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-quarry-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-hugo works_at o-quillfeather",
+    "subject": "p-hugo",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-quillfeather"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-023",
+        "quote": "I handle partnerships sales at Quillfeather Systems"
+      }
+    ]
+  },
+  {
+    "id": "p-hugo works_on j-quarry",
+    "subject": "p-hugo",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-quarry"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-023",
+        "quote": "will work on Quarry Bridge with Priya"
+      },
+      {
+        "item": "note-023",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-imogen attended e-wren-usability",
+    "subject": "p-imogen",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-wren-usability"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-011",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-imogen committed_to k-wren-prototype",
+    "subject": "p-imogen",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-wren-prototype"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-013",
+        "quote": "I will finish the Wren Mobile prototype by 15 November"
+      }
+    ]
+  },
+  {
+    "id": "p-imogen has_role 'Product Designer'",
+    "subject": "p-imogen",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Product Designer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-imogen leads j-wren",
+    "subject": "p-imogen",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-wren"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-019",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-imogen works_at o-glimmerfen",
+    "subject": "p-imogen",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-imogen works_on j-wren",
+    "subject": "p-imogen",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-wren"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-013",
+        "quote": "I'm designing the Wren Mobile redesign"
+      },
+      {
+        "item": "note-008",
+        "quote": "Designing [[Wren Mobile]]"
+      }
+    ]
+  },
+  {
+    "id": "p-ines attended e-tidewater-review",
+    "subject": "p-ines",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-tidewater-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ines has_role 'Finance Manager'",
+    "subject": "p-ines",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Finance Manager"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ines leads j-tidewater",
+    "subject": "p-ines",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-tidewater"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-010",
+        "quote": "I'm the owner of Tidewater Billing in finance"
+      },
+      {
+        "item": "note-020",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-ines works_at o-glimmerfen",
+    "subject": "p-ines",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-jonah attended e-jonah-birthday",
+    "subject": "p-jonah",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-jonah-birthday"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-jonah sibling_of p-robin",
+    "subject": "p-jonah",
+    "predicate": "sibling_of",
+    "object": {
+      "entity": "p-robin"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-020",
+        "quote": "It's your little brother"
+      },
+      {
+        "item": "note-011",
+        "quote": "Younger brother of Robin Ashgrove"
+      }
+    ]
+  },
+  {
+    "id": "p-lucia attended e-tidewater-review",
+    "subject": "p-lucia",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-tidewater-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-lucia committed_to k-redlines",
+    "subject": "p-lucia",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-redlines"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "I will review the Tidewater contract redlines by 12 November"
+      },
+      {
+        "item": "mail-044",
+        "quote": "I will review the Tidewater contract redlines by 12 November"
+      }
+    ]
+  },
+  {
+    "id": "p-lucia has_role 'Partner'",
+    "subject": "p-lucia",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Partner"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "Partner, Vellum & Thistle LLP"
+      }
+    ]
+  },
+  {
+    "id": "p-lucia works_at o-vellum",
+    "subject": "p-lucia",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-vellum"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-009",
+        "quote": "Partner, Vellum & Thistle LLP"
+      }
+    ]
+  },
+  {
+    "id": "p-maggie attended e-coffee-maggie",
+    "subject": "p-maggie",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-coffee-maggie"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-maggie attended e-lodestar-kickoff",
+    "subject": "p-maggie",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      },
+      {
+        "item": "note-025",
+        "quote": "Attendees: [[Theo Brannigan]], Maggie, Priya, Felix, Saoirse"
+      }
+    ]
+  },
+  {
+    "id": "p-maggie attended e-moorland-sync",
+    "subject": "p-maggie",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-moorland-sync"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-maggie has_role 'Partnerships Director'",
+    "subject": "p-maggie",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Partnerships Director"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "she is their Partnerships Director"
+      },
+      {
+        "item": "note-001",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-maggie prefers r-morning-meetings",
+    "subject": "p-maggie",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-morning-meetings"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-002",
+        "quote": "I much prefer morning meetings"
+      },
+      {
+        "item": "mail-036",
+        "quote": "I prefer morning meetings"
+      },
+      {
+        "item": "note-001",
+        "quote": "Prefers morning meetings"
+      }
+    ]
+  },
+  {
+    "id": "p-maggie prefers r-vegetarian",
+    "subject": "p-maggie",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-vegetarian"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-015",
+        "quote": "I prefer vegetarian food"
+      },
+      {
+        "item": "note-001",
+        "quote": "Vegetarian."
+      }
+    ]
+  },
+  {
+    "id": "p-maggie works_at o-cindergate",
+    "subject": "p-maggie",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-cindergate"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "Margaret Thistlewood from Cindergate Analytics is our partner contact"
+      },
+      {
+        "item": "note-001",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-maggie works_on j-moorland",
+    "subject": "p-maggie",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-moorland"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-017",
+        "quote": "Margaret Thistlewood also works on Moorland Survey with me"
+      },
+      {
+        "item": "note-001",
+        "quote": "Works on [[Moorland Survey]] with [[Oskar Lindqvist-Hale]]"
+      },
+      {
+        "item": "note-021",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-nadia attended e-gp-appointment",
+    "subject": "p-nadia",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-gp-appointment"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-nadia has_role 'GP'",
+    "subject": "p-nadia",
+    "predicate": "has_role",
+    "object": {
+      "literal": "GP"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-018",
+        "quote": "Dr. Nadia Kerrigan-Holt, GP at Saltmarsh Family Clinic"
+      },
+      {
+        "item": "note-026",
+        "quote": "GP is [[Nadia Kerrigan-Holt]] at Saltmarsh Family Clinic"
+      }
+    ]
+  },
+  {
+    "id": "p-nadia works_at o-saltmarsh",
+    "subject": "p-nadia",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-saltmarsh"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-018",
+        "quote": "Dr. Nadia Kerrigan-Holt, GP at Saltmarsh Family Clinic"
+      },
+      {
+        "item": "note-026",
+        "quote": "GP is [[Nadia Kerrigan-Holt]] at Saltmarsh Family Clinic"
+      }
+    ]
+  },
+  {
+    "id": "p-oskar attended e-moorland-sync",
+    "subject": "p-oskar",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-moorland-sync"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-oskar has_role 'Data Engineer'",
+    "subject": "p-oskar",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Data Engineer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-oskar leads j-moorland",
+    "subject": "p-oskar",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-moorland"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-016",
+        "quote": "Oskar Lindqvist-Hale leads Moorland Survey on our side"
+      },
+      {
+        "item": "note-010",
+        "quote": "Leads [[Moorland Survey]]"
+      },
+      {
+        "item": "note-021",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-oskar works_at o-cindergate",
+    "subject": "p-oskar",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-cindergate"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-047",
+        "quote": "Oskar is coordinating from Cindergate"
+      },
+      {
+        "item": "note-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-oskar works_on j-fennel",
+    "subject": "p-oskar",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-fennel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-021",
+        "quote": "Oskar will take over Fennel from me"
+      },
+      {
+        "item": "note-010",
+        "quote": "took over [[Fennel]] from Priya in October"
+      },
+      {
+        "item": "note-016",
+        "quote": "Priya handed her part over to [[Oskar Lindqvist-Hale]]"
+      },
+      {
+        "item": "note-016",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-priya attended e-lodestar-kickoff",
+    "subject": "p-priya",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      },
+      {
+        "item": "note-025",
+        "quote": "Attendees: [[Theo Brannigan]], Maggie, Priya, Felix, Saoirse"
+      }
+    ]
+  },
+  {
+    "id": "p-priya attended e-quarry-planning",
+    "subject": "p-priya",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-quarry-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-priya attended e-summit",
+    "subject": "p-priya",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-summit"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-037",
+        "quote": "I'm also speaking at the Data Platform Summit"
+      },
+      {
+        "item": "cal-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-priya committed_to k-quarry-proposal",
+    "subject": "p-priya",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-quarry-proposal"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-023",
+        "quote": "Priya will send the Quarry Bridge proposal to Cormac by 20 November"
+      }
+    ]
+  },
+  {
+    "id": "p-priya has_role 'Head of Data'",
+    "subject": "p-priya",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Head of Data"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-022",
+        "quote": "I've joined Quillfeather Systems as Head of Data"
+      },
+      {
+        "item": "note-002",
+        "quote": "Now Head of Data at Quillfeather"
+      },
+      {
+        "item": "note-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-priya has_role 'Senior Data Scientist'",
+    "subject": "p-priya",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Senior Data Scientist"
+    },
+    "status": "superseded",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-002",
+        "quote": "Priya Castellane, our Senior Data Scientist, will join from the Cindergate side"
+      }
+    ]
+  },
+  {
+    "id": "p-priya works_at o-cindergate",
+    "subject": "p-priya",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-cindergate"
+    },
+    "status": "superseded",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-002",
+        "quote": "Priya Castellane, our Senior Data Scientist, will join from the Cindergate side"
+      }
+    ]
+  },
+  {
+    "id": "p-priya works_at o-quillfeather",
+    "subject": "p-priya",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-quillfeather"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-022",
+        "quote": "I've joined Quillfeather Systems as Head of Data"
+      },
+      {
+        "item": "note-002",
+        "quote": "Now Head of Data at Quillfeather"
+      },
+      {
+        "item": "note-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-priya works_on j-fennel",
+    "subject": "p-priya",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-fennel"
+    },
+    "status": "superseded",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-011",
+        "quote": "Saoirse Penrose and I are both working on Fennel"
+      }
+    ]
+  },
+  {
+    "id": "p-priya works_on j-quarry",
+    "subject": "p-priya",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-quarry"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-023",
+        "quote": "will work on Quarry Bridge with Priya"
+      },
+      {
+        "item": "note-002",
+        "quote": "Working on [[Quarry Bridge]]"
+      },
+      {
+        "item": "note-023",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-coffee-maggie",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-coffee-maggie"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-driftwood-review",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-driftwood-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-fundraiser-planning",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-fundraiser-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-gp-appointment",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-gp-appointment"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-006",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-harbourline-review",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-harbourline-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-hiring-panel",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-hiring-panel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-jonah-birthday",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-jonah-birthday"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-014",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-lodestar-kickoff",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-mentor-meeting",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-mentor-meeting"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-007",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-moorland-sync",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-moorland-sync"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-quarry-planning",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-quarry-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-009",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-regatta-committee",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-regatta-committee"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-summit",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-summit"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-032",
+        "quote": "I'm travelling to the Data Platform Summit by train"
+      },
+      {
+        "item": "cal-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-tidewater-review",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-tidewater-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin attended e-wren-usability",
+    "subject": "p-robin",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-wren-usability"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-011",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin committed_to k-deposit",
+    "subject": "p-robin",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-deposit"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-008",
+        "quote": "I will send the venue deposit to Marrowbank by Friday 30 October"
+      }
+    ]
+  },
+  {
+    "id": "p-robin committed_to k-tracking-feed",
+    "subject": "p-robin",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-tracking-feed"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "I will deliver the Harbourline tracking feed by 1 December"
+      }
+    ]
+  },
+  {
+    "id": "p-robin has_role 'Product Lead'",
+    "subject": "p-robin",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Product Lead"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-012",
+        "quote": "Product Lead at [[Glimmerfen Labs]]"
+      },
+      {
+        "item": "note-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin leads j-harbourline",
+    "subject": "p-robin",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-harbourline"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-005",
+        "quote": "I own Harbourline on the Glimmerfen side"
+      },
+      {
+        "item": "note-017",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin lives_in l-kingsbarrow",
+    "subject": "p-robin",
+    "predicate": "lives_in",
+    "object": {
+      "entity": "l-kingsbarrow"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-012",
+        "quote": "I live in [[Kingsbarrow]]"
+      }
+    ]
+  },
+  {
+    "id": "p-robin member_of o-marrowbank",
+    "subject": "p-robin",
+    "predicate": "member_of",
+    "object": {
+      "entity": "o-marrowbank"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-007",
+        "quote": "I've been a member of Marrowbank Rowing Club for six years"
+      },
+      {
+        "item": "note-012",
+        "quote": "row at [[Marrowbank Rowing Club]]"
+      },
+      {
+        "item": "note-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin prefers r-window-seats",
+    "subject": "p-robin",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-window-seats"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-032",
+        "quote": "I always book window seats"
+      },
+      {
+        "item": "note-027",
+        "quote": "Always book window seats on the train"
+      }
+    ]
+  },
+  {
+    "id": "p-robin works_at o-glimmerfen",
+    "subject": "p-robin",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-012",
+        "quote": "Product Lead at [[Glimmerfen Labs]]"
+      },
+      {
+        "item": "note-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin works_on j-quarry",
+    "subject": "p-robin",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-quarry"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-023",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-robin works_on j-regatta",
+    "subject": "p-robin",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-regatta"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "I'd like you to help run this year's Regatta Fundraiser"
+      },
+      {
+        "item": "mail-007",
+        "quote": "I'm happy to help with the Regatta Fundraiser"
+      },
+      {
+        "item": "note-024",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-rupert attended e-fundraiser-planning",
+    "subject": "p-rupert",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-fundraiser-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-rupert attended e-regatta-committee",
+    "subject": "p-rupert",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-regatta-committee"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-rupert has_role 'Treasurer'",
+    "subject": "p-rupert",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Treasurer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "Rupert Gaskell, our treasurer"
+      }
+    ]
+  },
+  {
+    "id": "p-rupert member_of o-marrowbank",
+    "subject": "p-rupert",
+    "predicate": "member_of",
+    "object": {
+      "entity": "o-marrowbank"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "Rupert Gaskell, our treasurer"
+      }
+    ]
+  },
+  {
+    "id": "p-rupert works_on j-regatta",
+    "subject": "p-rupert",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-regatta"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "help run this year's Regatta Fundraiser with Rupert Gaskell, our treasurer"
+      },
+      {
+        "item": "note-004",
+        "quote": "Organising the [[Regatta Fundraiser]] with [[Rupert Gaskell]]"
+      },
+      {
+        "item": "note-024",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samo attended e-harbourline-review",
+    "subject": "p-samo",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-harbourline-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samo has_role 'Logistics Manager'",
+    "subject": "p-samo",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Logistics Manager"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "As Logistics Manager at Ostrander Freight Cooperative"
+      },
+      {
+        "item": "note-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samo prefers r-phone-calls",
+    "subject": "p-samo",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-phone-calls"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "I prefer phone calls to long email threads"
+      },
+      {
+        "item": "note-003",
+        "quote": "Prefers phone calls"
+      }
+    ]
+  },
+  {
+    "id": "p-samo works_at o-ostrander",
+    "subject": "p-samo",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-ostrander"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "As Logistics Manager at Ostrander Freight Cooperative"
+      },
+      {
+        "item": "note-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samo works_on j-harbourline",
+    "subject": "p-samo",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-harbourline"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "I'll be your day-to-day contact for the Harbourline integration"
+      },
+      {
+        "item": "note-003",
+        "quote": "My contact for [[Harbourline]] at Ostrander"
+      },
+      {
+        "item": "note-017",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw attended e-fundraiser-planning",
+    "subject": "p-samw",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-fundraiser-planning"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw attended e-regatta-committee",
+    "subject": "p-samw",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-regatta-committee"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-003",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw committed_to k-book-boathouse",
+    "subject": "p-samw",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-book-boathouse"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "I'll book the boathouse for the fundraiser by 15 November"
+      }
+    ]
+  },
+  {
+    "id": "p-samw has_role 'Captain'",
+    "subject": "p-samw",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Captain"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "As captain of Marrowbank Rowing Club"
+      },
+      {
+        "item": "note-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw leads j-regatta",
+    "subject": "p-samw",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-regatta"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-004",
+        "quote": "Organising the [[Regatta Fundraiser]] with [[Rupert Gaskell]]"
+      },
+      {
+        "item": "note-024",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw member_of o-marrowbank",
+    "subject": "p-samw",
+    "predicate": "member_of",
+    "object": {
+      "entity": "o-marrowbank"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "As captain of Marrowbank Rowing Club"
+      },
+      {
+        "item": "note-004",
+        "quote": "Captain of [[Marrowbank Rowing Club]]"
+      },
+      {
+        "item": "note-004",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-samw prefers r-dawn-outings",
+    "subject": "p-samw",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-dawn-outings"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-006",
+        "quote": "I always prefer the dawn outings"
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse attended e-hiring-panel",
+    "subject": "p-saoirse",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-hiring-panel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse attended e-lodestar-kickoff",
+    "subject": "p-saoirse",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      },
+      {
+        "item": "note-025",
+        "quote": "Attendees: [[Theo Brannigan]], Maggie, Priya, Felix, Saoirse"
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse attended e-summit",
+    "subject": "p-saoirse",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-summit"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-026",
+        "quote": "I'll be at the Data Platform Summit"
+      },
+      {
+        "item": "cal-008",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse has_role 'Data Engineer'",
+    "subject": "p-saoirse",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Data Engineer"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse leads j-fennel",
+    "subject": "p-saoirse",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-fennel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-013",
+        "quote": "Owns [[Fennel]]"
+      },
+      {
+        "item": "note-016",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse works_at o-glimmerfen",
+    "subject": "p-saoirse",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-013",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse works_on j-fennel",
+    "subject": "p-saoirse",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-fennel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-011",
+        "quote": "Saoirse Penrose and I are both working on Fennel"
+      }
+    ]
+  },
+  {
+    "id": "p-saoirse works_on j-lodestar",
+    "subject": "p-saoirse",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-lodestar"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "Felix Ravensworth and Saoirse Penrose will both work on Lodestar with us"
+      },
+      {
+        "item": "note-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-theo attended e-driftwood-review",
+    "subject": "p-theo",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-driftwood-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-010",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-theo attended e-lodestar-kickoff",
+    "subject": "p-theo",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-lodestar-kickoff"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-001",
+        "quote": null
+      },
+      {
+        "item": "note-025",
+        "quote": "Attendees: [[Theo Brannigan]], Maggie, Priya, Felix, Saoirse"
+      }
+    ]
+  },
+  {
+    "id": "p-theo committed_to k-schema",
+    "subject": "p-theo",
+    "predicate": "committed_to",
+    "object": {
+      "entity": "k-schema"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-024",
+        "quote": "I'll share the Lodestar data schema with Cindergate by 6 November"
+      },
+      {
+        "item": "note-025",
+        "quote": "Theo will share the Lodestar data schema with Cindergate by 6 November"
+      }
+    ]
+  },
+  {
+    "id": "p-theo has_role 'Engineering Manager'",
+    "subject": "p-theo",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Engineering Manager"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-theo leads j-lodestar",
+    "subject": "p-theo",
+    "predicate": "leads",
+    "object": {
+      "entity": "j-lodestar"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-001",
+        "quote": "I'm leading Project Lodestar for Glimmerfen Labs this quarter"
+      },
+      {
+        "item": "note-005",
+        "quote": "leads [[Project Lodestar]]"
+      },
+      {
+        "item": "note-015",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-theo prefers r-async-updates",
+    "subject": "p-theo",
+    "predicate": "prefers",
+    "object": {
+      "entity": "r-async-updates"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-024",
+        "quote": "I prefer async written updates over status meetings"
+      },
+      {
+        "item": "note-005",
+        "quote": "Prefers async written updates"
+      }
+    ]
+  },
+  {
+    "id": "p-theo reports_to p-desmond",
+    "subject": "p-theo",
+    "predicate": "reports_to",
+    "object": {
+      "entity": "p-desmond"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-027",
+        "quote": "As you report to Desmond"
+      },
+      {
+        "item": "note-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-theo works_at o-glimmerfen",
+    "subject": "p-theo",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "note-005",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-wenna attended e-hiring-panel",
+    "subject": "p-wenna",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-hiring-panel"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-012",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-wenna has_role 'Recruiter'",
+    "subject": "p-wenna",
+    "predicate": "has_role",
+    "object": {
+      "literal": "Recruiter"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-014",
+        "quote": "I'm the recruiter at Glimmerfen Labs"
+      }
+    ]
+  },
+  {
+    "id": "p-wenna works_at o-glimmerfen",
+    "subject": "p-wenna",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-glimmerfen"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-014",
+        "quote": "I'm the recruiter at Glimmerfen Labs"
+      }
+    ]
+  },
+  {
+    "id": "p-yusuf attended e-harbourline-review",
+    "subject": "p-yusuf",
+    "predicate": "attended",
+    "object": {
+      "entity": "e-harbourline-review"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "cal-002",
+        "quote": null
+      }
+    ]
+  },
+  {
+    "id": "p-yusuf works_at o-ostrander",
+    "subject": "p-yusuf",
+    "predicate": "works_at",
+    "object": {
+      "entity": "o-ostrander"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "Yusuf Brightmore from our engineering team will work on Harbourline as well"
+      }
+    ]
+  },
+  {
+    "id": "p-yusuf works_on j-harbourline",
+    "subject": "p-yusuf",
+    "predicate": "works_on",
+    "object": {
+      "entity": "j-harbourline"
+    },
+    "status": "active",
+    "optional": false,
+    "support": [
+      {
+        "item": "mail-004",
+        "quote": "Yusuf Brightmore from our engineering team will work on Harbourline as well"
+      },
+      {
+        "item": "note-017",
+        "quote": null
+      }
+    ]
+  }
+]

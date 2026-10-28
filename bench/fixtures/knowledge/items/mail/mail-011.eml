@@ -1,0 +1,15 @@
+From: "Priya Castellane" <priya.castellane@cindergate.test>
+To: "Robin Ashgrove" <robin.ashgrove@glimmerfen.test>
+Cc: "Saoirse Penrose" <saoirse.penrose@glimmerfen.test>
+Subject: Fennel migration plan
+Date: Wed, 16 Sep 2026 15:30:00 +0000
+Message-ID: <mail-011.kb@cindergate.test>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Hi Robin,
+
+Saoirse Penrose and I are both working on Fennel, the warehouse migration. Fennel is a joint Glimmerfen Labs project with Cindergate support. I'll draft the cut-over plan this week.
+
+Priya

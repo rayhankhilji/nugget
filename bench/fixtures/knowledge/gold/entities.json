@@ -1,0 +1,1254 @@
+[
+  {
+    "id": "p-robin",
+    "kind": "person",
+    "name": "Robin Ashgrove",
+    "surfaces": [
+      "Robin Ashgrove",
+      "Robin",
+      "robin.ashgrove@glimmerfen.test",
+      "robin@ashgrove.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "robin.ashgrove@glimmerfen.test"
+      },
+      {
+        "scheme": "email",
+        "value": "robin@ashgrove.test"
+      }
+    ],
+    "optional": false,
+    "note": "the mailbox and vault owner"
+  },
+  {
+    "id": "p-maggie",
+    "kind": "person",
+    "name": "Margaret Thistlewood",
+    "surfaces": [
+      "Margaret Thistlewood",
+      "Maggie",
+      "M. Thistlewood",
+      "Maggie Thistlewood",
+      "Margaret",
+      "Maggie T",
+      "margaret.thistlewood@cindergate.test",
+      "maggie.t@mail.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "margaret.thistlewood@cindergate.test"
+      },
+      {
+        "scheme": "email",
+        "value": "maggie.t@mail.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: nickname, a second (personal) address and calendar attendee names"
+  },
+  {
+    "id": "p-samo",
+    "kind": "person",
+    "name": "Sam Okafor",
+    "surfaces": [
+      "Sam Okafor",
+      "Sam",
+      "sam.okafor@ostrander-freight.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "sam.okafor@ostrander-freight.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: shares a first name with Sam Whitlock"
+  },
+  {
+    "id": "p-samw",
+    "kind": "person",
+    "name": "Sam Whitlock",
+    "surfaces": [
+      "Sam Whitlock",
+      "Sam",
+      "sam@marrowbank-rc.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "sam@marrowbank-rc.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: shares a first name with Sam Okafor"
+  },
+  {
+    "id": "p-priya",
+    "kind": "person",
+    "name": "Priya Castellane",
+    "surfaces": [
+      "Priya Castellane",
+      "Priya",
+      "priya.castellane@cindergate.test",
+      "priya.castellane@quillfeather.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "priya.castellane@cindergate.test"
+      },
+      {
+        "scheme": "email",
+        "value": "priya.castellane@quillfeather.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: changes job (Cindergate -> Quillfeather) and address"
+  },
+  {
+    "id": "p-theo",
+    "kind": "person",
+    "name": "Theo Brannigan",
+    "surfaces": [
+      "Theo Brannigan",
+      "Theo",
+      "theo.brannigan@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "theo.brannigan@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-imogen",
+    "kind": "person",
+    "name": "Imogen Farrow-Lake",
+    "surfaces": [
+      "Imogen Farrow-Lake",
+      "Imogen",
+      "imogen@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "imogen@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-desmond",
+    "kind": "person",
+    "name": "Desmond Achterberg",
+    "surfaces": [
+      "Desmond Achterberg",
+      "Desmond",
+      "desmond.achterberg@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "desmond.achterberg@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-lucia",
+    "kind": "person",
+    "name": "Lucia Penhallow",
+    "surfaces": [
+      "Lucia Penhallow",
+      "Lucia",
+      "lucia.penhallow@vellumthistle.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "lucia.penhallow@vellumthistle.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-felix",
+    "kind": "person",
+    "name": "Felix Ravensworth",
+    "surfaces": [
+      "Felix Ravensworth",
+      "Felix",
+      "felix.ravensworth@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "felix.ravensworth@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-harriet",
+    "kind": "person",
+    "name": "Harriet Quennell",
+    "surfaces": [
+      "Harriet Quennell",
+      "Harriet",
+      "harriet.quennell@ostrander-freight.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "harriet.quennell@ostrander-freight.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-oskar",
+    "kind": "person",
+    "name": "Oskar Lindqvist-Hale",
+    "surfaces": [
+      "Oskar Lindqvist-Hale",
+      "Oskar",
+      "oskar@cindergate.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "oskar@cindergate.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-wenna",
+    "kind": "person",
+    "name": "Wenna Coldridge",
+    "surfaces": [
+      "Wenna Coldridge",
+      "Wenna",
+      "wenna.coldridge@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "wenna.coldridge@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-nadia",
+    "kind": "person",
+    "name": "Nadia Kerrigan-Holt",
+    "surfaces": [
+      "Nadia Kerrigan-Holt",
+      "Dr. Nadia Kerrigan-Holt",
+      "Dr. Kerrigan-Holt",
+      "n.kerrigan@saltmarsh-clinic.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "n.kerrigan@saltmarsh-clinic.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-bea",
+    "kind": "person",
+    "name": "Bea Hollowell",
+    "surfaces": [
+      "Bea Hollowell",
+      "Bea",
+      "bea.hollowell@bramblecote-school.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "bea.hollowell@bramblecote-school.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-jonah",
+    "kind": "person",
+    "name": "Jonah Ashgrove",
+    "surfaces": [
+      "Jonah Ashgrove",
+      "Jonah",
+      "jonah.ashgrove@mail.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "jonah.ashgrove@mail.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-cormac",
+    "kind": "person",
+    "name": "Cormac Ellery",
+    "surfaces": [
+      "Cormac Ellery",
+      "Cormac",
+      "cormac.ellery@quillfeather.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "cormac.ellery@quillfeather.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-ines",
+    "kind": "person",
+    "name": "Ines Halloran",
+    "surfaces": [
+      "Ines Halloran",
+      "Ines",
+      "ines.halloran@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "ines.halloran@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-rupert",
+    "kind": "person",
+    "name": "Rupert Gaskell",
+    "surfaces": [
+      "Rupert Gaskell",
+      "Rupert",
+      "rupert.gaskell@marrowbank-rc.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "rupert.gaskell@marrowbank-rc.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-yusuf",
+    "kind": "person",
+    "name": "Yusuf Brightmore",
+    "surfaces": [
+      "Yusuf Brightmore",
+      "Yusuf",
+      "yusuf.brightmore@ostrander-freight.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "yusuf.brightmore@ostrander-freight.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-clem",
+    "kind": "person",
+    "name": "Clementine Arkwright",
+    "surfaces": [
+      "Clementine Arkwright",
+      "Clem",
+      "clem.arkwright@vellumthistle.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "clem.arkwright@vellumthistle.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-bart",
+    "kind": "person",
+    "name": "Bart Fenwick",
+    "surfaces": [
+      "Bart Fenwick",
+      "Bart",
+      "bart.fenwick@cindergate.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "bart.fenwick@cindergate.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-saoirse",
+    "kind": "person",
+    "name": "Saoirse Penrose",
+    "surfaces": [
+      "Saoirse Penrose",
+      "Saoirse",
+      "saoirse.penrose@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "saoirse.penrose@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-hugo",
+    "kind": "person",
+    "name": "Hugo Tremaine",
+    "surfaces": [
+      "Hugo Tremaine",
+      "Hugo",
+      "hugo.tremaine@quillfeather.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "hugo.tremaine@quillfeather.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-ada",
+    "kind": "person",
+    "name": "Ada Wexford",
+    "surfaces": [
+      "Ada Wexford",
+      "Ada",
+      "ada.wexford@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "ada.wexford@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "p-mallory",
+    "kind": "person",
+    "name": "Mallory Quint",
+    "surfaces": [
+      "Mallory Quint"
+    ],
+    "identifiers": [],
+    "optional": true,
+    "note": "appears only in the prompt-injection mail"
+  },
+  {
+    "id": "p-prizedesk",
+    "kind": "person",
+    "name": "Prize Desk",
+    "surfaces": [
+      "Prize Desk",
+      "Prize Desk Team",
+      "winner@prize-desk.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "winner@prize-desk.test"
+      }
+    ],
+    "optional": true,
+    "note": "sender of the prompt-injection mail"
+  },
+  {
+    "id": "o-glimmerfen",
+    "kind": "organization",
+    "name": "Glimmerfen Labs",
+    "surfaces": [
+      "Glimmerfen Labs",
+      "Glimmerfen"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-cindergate",
+    "kind": "organization",
+    "name": "Cindergate Analytics",
+    "surfaces": [
+      "Cindergate Analytics",
+      "Cindergate"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "cindergate.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-ostrander",
+    "kind": "organization",
+    "name": "Ostrander Freight Cooperative",
+    "surfaces": [
+      "Ostrander Freight Cooperative",
+      "Ostrander Freight",
+      "Ostrander"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "ostrander-freight.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-vellum",
+    "kind": "organization",
+    "name": "Vellum & Thistle LLP",
+    "surfaces": [
+      "Vellum & Thistle LLP",
+      "Vellum & Thistle"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "vellumthistle.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-marrowbank",
+    "kind": "organization",
+    "name": "Marrowbank Rowing Club",
+    "surfaces": [
+      "Marrowbank Rowing Club",
+      "Marrowbank",
+      "news@marrowbank-rc.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "news@marrowbank-rc.test"
+      },
+      {
+        "scheme": "domain",
+        "value": "marrowbank-rc.test"
+      }
+    ],
+    "optional": false,
+    "note": "also sends a newsletter from news@marrowbank-rc.test (an organisation, not a person)"
+  },
+  {
+    "id": "o-quillfeather",
+    "kind": "organization",
+    "name": "Quillfeather Systems",
+    "surfaces": [
+      "Quillfeather Systems",
+      "Quillfeather"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "quillfeather.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-saltmarsh",
+    "kind": "organization",
+    "name": "Saltmarsh Family Clinic",
+    "surfaces": [
+      "Saltmarsh Family Clinic"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "saltmarsh-clinic.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-bramblecote",
+    "kind": "organization",
+    "name": "Bramblecote Primary School",
+    "surfaces": [
+      "Bramblecote Primary School",
+      "Bramblecote Primary"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "bramblecote-school.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "o-prizedesk",
+    "kind": "organization",
+    "name": "prize-desk.test",
+    "surfaces": [
+      "prize-desk.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "domain",
+        "value": "prize-desk.test"
+      }
+    ],
+    "optional": true
+  },
+  {
+    "id": "j-lodestar",
+    "kind": "project",
+    "name": "Project Lodestar",
+    "surfaces": [
+      "Project Lodestar",
+      "Lodestar"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-fennel",
+    "kind": "project",
+    "name": "Fennel",
+    "surfaces": [
+      "Fennel",
+      "Project Fennel"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-harbourline",
+    "kind": "project",
+    "name": "Harbourline",
+    "surfaces": [
+      "Harbourline"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-driftwood",
+    "kind": "project",
+    "name": "Driftwood API",
+    "surfaces": [
+      "Driftwood API"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-wren",
+    "kind": "project",
+    "name": "Wren Mobile",
+    "surfaces": [
+      "Wren Mobile"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-tidewater",
+    "kind": "project",
+    "name": "Tidewater Billing",
+    "surfaces": [
+      "Tidewater Billing"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-moorland",
+    "kind": "project",
+    "name": "Moorland Survey",
+    "surfaces": [
+      "Moorland Survey"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-saffron",
+    "kind": "project",
+    "name": "Saffron Onboarding",
+    "surfaces": [
+      "Saffron Onboarding"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-quarry",
+    "kind": "project",
+    "name": "Quarry Bridge",
+    "surfaces": [
+      "Quarry Bridge"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "j-regatta",
+    "kind": "project",
+    "name": "Regatta Fundraiser",
+    "surfaces": [
+      "Regatta Fundraiser"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-boathouse",
+    "kind": "place",
+    "name": "Marrowbank Boathouse",
+    "surfaces": [
+      "Marrowbank Boathouse"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-cindergate-hq",
+    "kind": "place",
+    "name": "Cindergate HQ",
+    "surfaces": [
+      "Cindergate HQ"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-copper-kettle",
+    "kind": "place",
+    "name": "The Copper Kettle",
+    "surfaces": [
+      "The Copper Kettle"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-glimmerfen-studio",
+    "kind": "place",
+    "name": "Glimmerfen Studio",
+    "surfaces": [
+      "Glimmerfen Studio"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-fernhollow",
+    "kind": "place",
+    "name": "Fernhollow Conference Centre",
+    "surfaces": [
+      "Fernhollow Conference Centre"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-depot",
+    "kind": "place",
+    "name": "Ostrander Depot",
+    "surfaces": [
+      "Ostrander Depot"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-kingsbarrow",
+    "kind": "place",
+    "name": "Kingsbarrow",
+    "surfaces": [
+      "Kingsbarrow"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "l-reedbed",
+    "kind": "place",
+    "name": "Reedbed Lane Surgery",
+    "surfaces": [
+      "Reedbed Lane Surgery"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "e-lodestar-kickoff",
+    "kind": "event",
+    "name": "Lodestar kickoff",
+    "surfaces": [
+      "Lodestar kickoff"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "lodestar-kickoff-20260910@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-harbourline-review",
+    "kind": "event",
+    "name": "Harbourline scope review",
+    "surfaces": [
+      "Harbourline scope review"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "harbourline-review-20260929@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-regatta-committee",
+    "kind": "event",
+    "name": "Regatta committee meeting",
+    "surfaces": [
+      "Regatta committee meeting"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "regatta-committee-20260917@marrowbank-rc.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-coffee-maggie",
+    "kind": "event",
+    "name": "Coffee with Maggie",
+    "surfaces": [
+      "Coffee with Maggie"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "coffee-maggie-20260929@ashgrove.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-tidewater-review",
+    "kind": "event",
+    "name": "Tidewater contract review",
+    "surfaces": [
+      "Tidewater contract review"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "tidewater-review-20261020@vellumthistle.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-gp-appointment",
+    "kind": "event",
+    "name": "GP appointment",
+    "surfaces": [
+      "GP appointment"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "gp-20261006@saltmarsh-clinic.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-mentor-meeting",
+    "kind": "event",
+    "name": "Reading mentor meeting",
+    "surfaces": [
+      "Reading mentor meeting"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "mentors-20261104@bramblecote-school.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-summit",
+    "kind": "event",
+    "name": "Data Platform Summit",
+    "surfaces": [
+      "Data Platform Summit"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "summit-20261118@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-quarry-planning",
+    "kind": "event",
+    "name": "Quarry Bridge planning",
+    "surfaces": [
+      "Quarry Bridge planning"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "quarry-planning-20261028@quillfeather.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-driftwood-review",
+    "kind": "event",
+    "name": "Driftwood API design review",
+    "surfaces": [
+      "Driftwood API design review"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "driftwood-review-20261030@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-wren-usability",
+    "kind": "event",
+    "name": "Wren Mobile usability test",
+    "surfaces": [
+      "Wren Mobile usability test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "wren-usability-20261110@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-hiring-panel",
+    "kind": "event",
+    "name": "Hiring panel: Senior Data Engineer",
+    "surfaces": [
+      "Hiring panel: Senior Data Engineer"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "hiring-panel-20261103@glimmerfen.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-moorland-sync",
+    "kind": "event",
+    "name": "Moorland Survey sync",
+    "surfaces": [
+      "Moorland Survey sync"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "moorland-sync-20261027@cindergate.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-jonah-birthday",
+    "kind": "event",
+    "name": "Jonah's birthday dinner",
+    "surfaces": [
+      "Jonah's birthday dinner"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "jonah-birthday-20261114@ashgrove.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "e-fundraiser-planning",
+    "kind": "event",
+    "name": "Regatta Fundraiser planning",
+    "surfaces": [
+      "Regatta Fundraiser planning"
+    ],
+    "identifiers": [
+      {
+        "scheme": "ical_uid",
+        "value": "fundraiser-planning-20261108@marrowbank-rc.test"
+      }
+    ],
+    "optional": false
+  },
+  {
+    "id": "k-deposit",
+    "kind": "commitment",
+    "name": "Send the venue deposit to Marrowbank",
+    "surfaces": [
+      "Send the venue deposit to Marrowbank",
+      "send the venue deposit to Marrowbank",
+      "venue deposit"
+    ],
+    "identifiers": [],
+    "optional": false,
+    "note": "only stated in mail-008, which the scenario deletes"
+  },
+  {
+    "id": "k-schema",
+    "kind": "commitment",
+    "name": "Share the Lodestar data schema with Cindergate",
+    "surfaces": [
+      "Share the Lodestar data schema with Cindergate",
+      "share the Lodestar data schema with Cindergate"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "k-redlines",
+    "kind": "commitment",
+    "name": "Review the Tidewater contract redlines",
+    "surfaces": [
+      "Review the Tidewater contract redlines",
+      "review the Tidewater contract redlines",
+      "Tidewater redlines"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "k-tracking-feed",
+    "kind": "commitment",
+    "name": "Deliver the Harbourline tracking feed",
+    "surfaces": [
+      "Deliver the Harbourline tracking feed",
+      "deliver the Harbourline tracking feed",
+      "Harbourline tracking feed"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "k-quarry-proposal",
+    "kind": "commitment",
+    "name": "Send the Quarry Bridge proposal to Cormac",
+    "surfaces": [
+      "Send the Quarry Bridge proposal to Cormac",
+      "send the Quarry Bridge proposal to Cormac",
+      "Quarry Bridge proposal"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "k-book-boathouse",
+    "kind": "commitment",
+    "name": "Book the boathouse for the fundraiser",
+    "surfaces": [
+      "Book the boathouse for the fundraiser",
+      "book the boathouse for the fundraiser"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "k-wren-prototype",
+    "kind": "commitment",
+    "name": "Finish the Wren Mobile prototype",
+    "surfaces": [
+      "Finish the Wren Mobile prototype",
+      "finish the Wren Mobile prototype",
+      "Wren Mobile prototype"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-morning-meetings",
+    "kind": "preference",
+    "name": "Morning meetings",
+    "surfaces": [
+      "Morning meetings",
+      "morning meetings"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-vegetarian",
+    "kind": "preference",
+    "name": "Vegetarian food",
+    "surfaces": [
+      "Vegetarian food",
+      "vegetarian food",
+      "Vegetarian"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-window-seats",
+    "kind": "preference",
+    "name": "Window seats",
+    "surfaces": [
+      "Window seats",
+      "window seats"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-async-updates",
+    "kind": "preference",
+    "name": "Async written updates",
+    "surfaces": [
+      "Async written updates",
+      "async written updates"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-phone-calls",
+    "kind": "preference",
+    "name": "Phone calls",
+    "surfaces": [
+      "Phone calls",
+      "phone calls"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "r-dawn-outings",
+    "kind": "preference",
+    "name": "Dawn outings",
+    "surfaces": [
+      "Dawn outings",
+      "dawn outings",
+      "Dawn outing"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-hiring",
+    "kind": "topic",
+    "name": "hiring",
+    "surfaces": [
+      "hiring",
+      "#hiring"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-rowing",
+    "kind": "topic",
+    "name": "rowing",
+    "surfaces": [
+      "rowing",
+      "#rowing"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-budget",
+    "kind": "topic",
+    "name": "budget",
+    "surfaces": [
+      "budget",
+      "#budget"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-travel",
+    "kind": "topic",
+    "name": "travel",
+    "surfaces": [
+      "travel",
+      "#travel"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-data-platform",
+    "kind": "topic",
+    "name": "data-platform",
+    "surfaces": [
+      "data-platform",
+      "#data-platform"
+    ],
+    "identifiers": [],
+    "optional": false
+  },
+  {
+    "id": "t-health",
+    "kind": "topic",
+    "name": "health",
+    "surfaces": [
+      "health",
+      "#health"
+    ],
+    "identifiers": [],
+    "optional": false
+  }
+]

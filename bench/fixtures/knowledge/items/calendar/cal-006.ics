@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:gp-20261006@saltmarsh-clinic.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261006T101500Z
+DTEND:20261006T103000Z
+SUMMARY:GP appointment
+LOCATION:Reedbed Lane Surgery
+ORGANIZER;CN="Dr. Nadia Kerrigan-Holt":mailto:n.kerrigan@saltmarsh-clinic.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin@ashgrove.test
+ATTENDEE;CN="Dr. Nadia Kerrigan-Holt";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:n.kerrigan@saltmarsh-clinic.test
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:coffee-maggie-20260929@ashgrove.test
+DTSTAMP:20260901T000000Z
+DTSTART:20260929T083000Z
+DTEND:20260929T093000Z
+SUMMARY:Coffee with Maggie
+LOCATION:The Copper Kettle
+ORGANIZER;CN="Robin Ashgrove":mailto:robin@ashgrove.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin@ashgrove.test
+ATTENDEE;CN="Maggie Thistlewood";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:maggie.t@mail.test
+END:VEVENT
+END:VCALENDAR

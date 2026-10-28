@@ -9,11 +9,14 @@
 //! and hybrid fusion). `memory --backend real` ([`real`]) runs the real stack in process: an
 //! encrypted `nugget-store`, `nugget-ingest` with the `files` connector watching a temporary
 //! folder, and `nugget-retrieve`.
+//! `knowledge` ([`suites::knowledge`]) scores the M2 knowledge pipeline on a labelled fixture
+//! corpus ([`knowledge`]); built without the `pipeline` feature it reports `not_implemented`.
 //! `draft` and `cua` are registered but not yet implemented; their methodology is in
 //! `bench/README.md`.
 
 pub mod corpus;
 pub mod index;
+pub mod knowledge;
 pub mod real;
 pub mod report;
 pub mod runner;

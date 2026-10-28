@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:hiring-panel-20261103@glimmerfen.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261103T100000Z
+DTEND:20261103T120000Z
+SUMMARY:Hiring panel: Senior Data Engineer
+ORGANIZER;CN="Wenna Coldridge":mailto:wenna.coldridge@glimmerfen.test
+ATTENDEE;CN="Wenna Coldridge";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:wenna.coldridge@glimmerfen.test
+ATTENDEE;CN="Saoirse Penrose";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:saoirse.penrose@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

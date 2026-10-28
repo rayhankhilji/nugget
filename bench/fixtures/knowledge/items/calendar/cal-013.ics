@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:moorland-sync-20261027@cindergate.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261027T090000Z
+DTEND:20261027T093000Z
+SUMMARY:Moorland Survey sync
+LOCATION:Cindergate HQ
+ORGANIZER;CN="Oskar Lindqvist-Hale":mailto:oskar@cindergate.test
+ATTENDEE;CN="Oskar Lindqvist-Hale";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:oskar@cindergate.test
+ATTENDEE;CN="Margaret Thistlewood";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:margaret.thistlewood@cindergate.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

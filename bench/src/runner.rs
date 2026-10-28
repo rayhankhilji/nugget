@@ -1,5 +1,6 @@
 //! The `Benchmark` trait, the suite registry and the runner that turns a run into a [`Report`].
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::time::Instant;
 
@@ -127,9 +128,10 @@ impl RunContext {
 
 #[derive(Debug, thiserror::Error)]
 pub enum BenchError {
-    /// The suite is registered but not built yet. The string is a one-paragraph plan.
+    /// The suite is registered but not built yet (or a crate it measures is still a stub). The
+    /// string is a one-paragraph plan, or says what is missing.
     #[error("not yet implemented: {0}")]
-    NotImplemented(&'static str),
+    NotImplemented(Cow<'static, str>),
     #[error("{0}")]
     Failed(String),
     #[error(transparent)]
@@ -159,6 +161,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::perf::PerfBench),
         Box::new(suites::planned::DraftBench),
         Box::new(suites::planned::CuaBench),
+        Box::new(suites::knowledge::KnowledgeBench),
     ]
 }
 
@@ -224,7 +227,7 @@ pub fn run_benchmark(bench: &dyn Benchmark, config: &RunConfig) -> Report {
             Err(e) => (Status::Failed, Vec::new(), Some(e)),
         },
         Err(BenchError::NotImplemented(plan)) => {
-            (Status::NotImplemented, Vec::new(), Some(plan.to_owned()))
+            (Status::NotImplemented, Vec::new(), Some(plan.into_owned()))
         }
         Err(e) => (Status::Failed, Vec::new(), Some(e.to_string())),
     };
@@ -291,9 +294,10 @@ mod tests {
     }
 
     #[test]
-    fn registry_has_the_four_suites() {
+    fn registry_has_the_five_suites() {
         let names: Vec<&str> = registry().iter().map(|b| b.name()).collect();
-        assert_eq!(names, ["memory", "perf", "draft", "cua"]);
+        assert_eq!(names, ["memory", "perf", "draft", "cua", "knowledge"]);
+        assert!(find("knowledge").is_some_and(|b| b.implemented()));
         assert!(find("perf").is_some_and(|b| b.implemented()));
         assert!(find("memory").is_some_and(|b| b.implemented()));
         assert!(find("draft").is_some_and(|b| !b.implemented()));

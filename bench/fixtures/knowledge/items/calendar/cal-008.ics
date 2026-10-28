@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:summit-20261118@glimmerfen.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261118T090000Z
+DTEND:20261118T170000Z
+SUMMARY:Data Platform Summit
+LOCATION:Fernhollow Conference Centre
+DESCRIPTION:Priya Castellane (Quillfeather Systems) speaking on warehouse migrations.
+ORGANIZER;CN="Robin Ashgrove":mailto:robin.ashgrove@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+ATTENDEE;CN="Saoirse Penrose";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:saoirse.penrose@glimmerfen.test
+ATTENDEE;CN="Priya Castellane";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:priya.castellane@quillfeather.test
+END:VEVENT
+END:VCALENDAR

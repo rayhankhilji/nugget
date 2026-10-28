@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:quarry-planning-20261028@quillfeather.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261028T160000Z
+DTEND:20261028T170000Z
+SUMMARY:Quarry Bridge planning
+DESCRIPTION:Planning session for Quarry Bridge.
+ORGANIZER;CN="Cormac Ellery":mailto:cormac.ellery@quillfeather.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+ATTENDEE;CN="Priya Castellane";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:priya.castellane@quillfeather.test
+ATTENDEE;CN="Hugo Tremaine";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:hugo.tremaine@quillfeather.test
+ATTENDEE;CN="Cormac Ellery";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:cormac.ellery@quillfeather.test
+END:VEVENT
+END:VCALENDAR

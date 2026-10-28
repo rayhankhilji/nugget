@@ -63,6 +63,8 @@ jobs:
       - name: cargo test
         run: cargo test --locked --workspace --exclude nugget-desktop
 
+      # `all` includes `knowledge` (the real M2 pipeline on the fixture corpus, about 2 s).
+      # TODO(wave 2): add `knowledge --strict` once nugget-knowledge meets the M2 targets.
       - name: Bench smoke run
         shell: bash
         run: cargo run --locked -p nugget-bench -- all --scale smoke --out-dir "$RUNNER_TEMP/bench-results"

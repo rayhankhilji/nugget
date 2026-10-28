@@ -1,6 +1,6 @@
 [package]
 name = "nugget-bench"
-description = "Benchmark harness for Nugget: memory, perf, draft and computer-use suites"
+description = "Benchmark harness for Nugget: memory, perf, knowledge, draft and computer-use suites"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -32,6 +32,21 @@ nugget-infer.workspace = true
 tokio.workspace = true
 # Temporary NUGGET_HOME and watched folder for the real backend.
 tempfile = "3"
+# `knowledge`: graph contract, ingest-equivalent extraction, the scripted fake LLM provider.
+nugget-graph.workspace = true
+nugget-extract.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+# `knowledge`: the pipeline under test (feature `pipeline`, see src/knowledge/wired.rs).
+nugget-knowledge = { workspace = true, optional = true }
+nugget-vault = { workspace = true, optional = true }
+nugget-mcp = { workspace = true, optional = true }
+
+[features]
+default = ["pipeline"]
+# The M2 knowledge pipeline for the `knowledge` suite. Without it the suite reports
+# `not_implemented` (an escape hatch while those crates change).
+pipeline = ["dep:nugget-knowledge", "dep:nugget-vault", "dep:nugget-mcp"]
 
 [lints]
 workspace = true
