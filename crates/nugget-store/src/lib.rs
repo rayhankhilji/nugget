@@ -34,6 +34,7 @@ mod sources;
 mod store;
 mod types;
 mod vec_ext;
+mod vector;
 
 pub use audit::AuditAnchor;
 pub use egress::{EgressRow, EgressState};
@@ -47,5 +48,6 @@ pub use types::{
     AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, ItemChange, ItemDates, NewChunk,
     NewItem, SourceCounts, UpsertOutcome, content_hash,
 };
+pub use vector::{ANN_MIN_VECTORS, ANN_OVERSAMPLE};
 
 pub use nugget_core::{Error, Result};

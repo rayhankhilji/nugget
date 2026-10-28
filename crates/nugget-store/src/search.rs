@@ -2,13 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nugget_core::{Error, Result};
+use nugget_core::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
 use crate::error::DbExt;
 use crate::fts;
-use crate::items::{embedding_dim, f32_blob, item_ref, validate_embedding};
+use crate::items::item_ref;
 use crate::types::{ChunkId, Hit};
 
 /// Weight of an item's title bm25 score, added to the bm25 score of each of its matching chunks
@@ -26,11 +26,11 @@ const HYBRID_OVERFETCH: usize = 4;
 /// ...but at least this many.
 const HYBRID_MIN_CANDIDATES: usize = 50;
 /// `sqlite-vec` caps `k` for kNN queries.
-const MAX_KNN: usize = 4096;
+pub(crate) const MAX_KNN: usize = 4096;
 /// Snippet length for vector hits (characters).
 const SNIPPET_CHARS: usize = 200;
 
-fn excerpt(text: &str) -> String {
+pub(crate) fn excerpt(text: &str) -> String {
     let text = text.trim();
     match text.char_indices().nth(SNIPPET_CHARS) {
         None => text.to_owned(),
@@ -66,79 +66,6 @@ impl Store {
             return Ok(Vec::new());
         }
         self.with_read_conn(|c| text_hits(c, &q, limit))
-    }
-
-    /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
-    ///
-    /// Returns `Error::Invalid` if the query's dimension differs from the store's. An empty result
-    /// is returned while no embeddings have been stored.
-    pub fn search_vector(&self, embedding: &[f32], limit: usize) -> Result<Vec<Hit>> {
-        validate_embedding(embedding).map_err(Error::Invalid)?;
-        self.with_conn(|c| {
-            let Some(dim) = embedding_dim(c)? else {
-                return Ok(Vec::new());
-            };
-            if dim != embedding.len() {
-                return Err(Error::Invalid(format!(
-                    "query embedding dimension {} does not match this store's dimension {dim}",
-                    embedding.len()
-                )));
-            }
-            let k = limit.min(MAX_KNN);
-            if k == 0 {
-                return Ok(Vec::new());
-            }
-            // vec0 kNN queries must stand alone (no joins or extra ORDER BY), so fetch the
-            // neighbours first, then their chunk and item rows.
-            let neighbours: Vec<(ChunkId, f64)> = {
-                let mut knn = c
-                    .prepare_cached(
-                        "SELECT rowid, distance FROM chunk_vec
-                         WHERE embedding MATCH ?1 AND k = ?2
-                         ORDER BY distance",
-                    )
-                    .db("prepare vector search")?;
-                let rows = knn
-                    .query_map(params![f32_blob(embedding), k as i64], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .db("vector search")?;
-                rows.collect::<rusqlite::Result<_>>().db("vector search")?
-            };
-            let mut details = c
-                .prepare_cached(
-                    "SELECT i.source, i.key, i.title, ch.text
-                     FROM chunks ch JOIN items i ON i.id = ch.item_id
-                     WHERE ch.id = ?1",
-                )
-                .db("prepare chunk lookup")?;
-            let mut hits = Vec::with_capacity(neighbours.len());
-            for (chunk_id, distance) in neighbours {
-                let hit = details
-                    .query_row([chunk_id], |r| {
-                        let text: String = r.get(3)?;
-                        Ok(Hit {
-                            chunk_id,
-                            item: item_ref(r.get(0)?, r.get(1)?),
-                            title: r.get(2)?,
-                            snippet: excerpt(&text),
-                            score: (1.0 - distance) as f32,
-                        })
-                    })
-                    .optional()
-                    .db("chunk lookup")?;
-                // A vector without a chunk cannot happen (the delete trigger removes both), but
-                // skipping it is the safe reading if it ever does.
-                hits.extend(hit);
-            }
-            // Equal distances: order by chunk id for determinism.
-            hits.sort_by(|a, b| {
-                b.score
-                    .total_cmp(&a.score)
-                    .then(a.chunk_id.cmp(&b.chunk_id))
-            });
-            Ok(hits)
-        })
     }
 
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with

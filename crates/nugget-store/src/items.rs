@@ -18,6 +18,7 @@ use crate::Store;
 use crate::error::{DbExt, format_time, parse_time};
 use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::types::{ChunkId, Item, NewChunk, NewItem, UpsertOutcome};
+use crate::vector::AnnWriter;
 
 /// Upper bound accepted by `sqlite-vec`'s `vec0` tables.
 pub(crate) const MAX_EMBEDDING_DIM: usize = 8192;
@@ -347,12 +348,20 @@ fn write_chunks(
         ),
         None => None,
     };
+    // The approximate-search index, once built, is maintained in the same transaction.
+    let mut ann = match dim {
+        Some(_) => AnnWriter::prepare(tx)?,
+        None => None,
+    };
     for (ord, ch) in chunks.iter().enumerate() {
         ins.execute(params![item_id, ord as i64, ch.text])
             .db("insert chunk")?;
         let id = tx.last_insert_rowid();
         if let (Some(e), Some(stmt)) = (&ch.embedding, ins_vec.as_mut()) {
             stmt.execute(params![id, f32_blob(e)]).db("insert vector")?;
+            if let Some(ann) = ann.as_mut() {
+                ann.insert(id, e)?;
+            }
         }
         ids.push(id);
     }
