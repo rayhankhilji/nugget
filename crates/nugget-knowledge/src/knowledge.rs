@@ -41,6 +41,9 @@ pub struct RunStats {
     /// Claims retracted because their last evidence went away.
     pub claims_retracted: u64,
     pub mentions_added: u64,
+    /// Entities left without claims or mentions by retractions, removed (tombstoned).
+    #[serde(default)]
+    pub entities_pruned: u64,
     /// Wikilinks resolved into `references` claims.
     pub links_resolved: u64,
     pub llm_requests: u64,
@@ -93,10 +96,11 @@ pub(crate) struct Inner {
 /// The knowledge pipeline. Cheap to clone; clones share state.
 ///
 /// ```text
-/// store items ──(work queue: ledger diff)──▶ retract_item ─▶ deterministic extractors
+/// store items ──(work queue: change log, or ledger diff)──▶ retract_item ─▶ deterministic extractors
 ///                                                         ─▶ LLM extractor (optional, gated)
-///                                            ─▶ resolve entities ─▶ mentions, claims
-///                                            ─▶ supersede / aggregate ─▶ subscribe()
+///                                            ─▶ resolve entities ─▶ mentions, claims, provenance
+///                                               (one GraphBatch per item)
+///                                            ─▶ supersede / aggregate ─▶ prune orphans ─▶ subscribe()
 /// ```
 ///
 /// `run_once` performs short synchronous store and graph calls between its awaits (the plan
@@ -217,8 +221,22 @@ impl Knowledge {
             done += 1;
         }
         s.resolve_pending_links()?;
-        s.flush()?;
+        if s.retracted_any {
+            // Retractions may leave entities with nothing behind them. Every batch is applied
+            // by now, so whatever is orphaned really is.
+            let pruned = self.inner.graph.prune_orphans(None)?;
+            s.stats.entities_pruned += pruned.len() as u64;
+            s.touched.extend(pruned);
+        }
         s.stats.remaining = total - done;
+        if s.stats.remaining == 0
+            && let Some(c) = p.next_cursor
+        {
+            // Everything up to `c` is processed; a budget cut keeps the old cursor, so the next
+            // run plans the rest again (processed items are then seen as unchanged).
+            s.state.item_cursor = Some(c);
+        }
+        s.flush()?;
         s.stats.changed_entities = s.touched.len() as u64;
         s.stats.elapsed_ms = started.elapsed().as_millis() as u64;
         if !s.touched.is_empty() {
@@ -255,6 +273,7 @@ impl Knowledge {
                 l.flush(feed.as_ref(), &source)?;
             }
             state.sources.clear();
+            state.item_cursor = None;
             state.save(feed.as_ref())
         })
         .await

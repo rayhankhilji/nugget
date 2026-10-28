@@ -14,7 +14,7 @@ use nugget_core::ids::ProviderId;
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
 use nugget_infer::{Provider, ProviderConfig, Router, build_provider};
-use nugget_ingest::{Ingest, KeyringSecrets, MemorySecrets};
+use nugget_ingest::{Ingest, KeyringSecrets, MemorySecrets, PowerPolicy, SystemPowerPolicy};
 use nugget_ipc::Listener;
 use nugget_models::{
     DownloadOptions, Hardware, Manifest, ModelStore, RuntimeAccel, default_manifest,
@@ -28,7 +28,9 @@ use tokio_util::task::TaskTracker;
 use crate::config::{Config, tier_name};
 use crate::handler::RpcHandler;
 use crate::hub::Hub;
+use crate::knowledge::KnowledgeService;
 use crate::local::{self, LocalRuntime, RuntimeSlot};
+use crate::mcp::{DaemonBackend, McpService};
 use crate::probes::ProbeCache;
 use crate::sources;
 
@@ -46,6 +48,17 @@ pub struct DaemonOptions {
     pub source_secrets: Option<Arc<dyn SecretStore>>,
     /// Local runtime overrides (tests).
     pub runtime: RuntimeOverrides,
+    /// Power policy for ingest and knowledge extraction. Default: the system policy at
+    /// `[ingest] low_battery_threshold`.
+    pub power: Option<Arc<dyn PowerPolicy>>,
+    /// Vault directory when `[vault] path` is unset. Default: `<data>/vault`; the binary passes
+    /// `~/Nugget Vault` for a normal install (no `--home` / `NUGGET_HOME`).
+    pub default_vault_dir: Option<PathBuf>,
+    /// The data root given with `--home` / `NUGGET_HOME`, which MCP setup snippets pass on as
+    /// `NUGGET_HOME` so the launched bridge finds this daemon.
+    pub home: Option<PathBuf>,
+    /// The `nuggetd` executable MCP setup snippets launch. Default: this executable.
+    pub nuggetd_exe: Option<PathBuf>,
 }
 
 /// Test hooks for the local runtime and model manifest.
@@ -67,6 +80,10 @@ impl DaemonOptions {
             store_key: None,
             source_secrets: None,
             runtime: RuntimeOverrides::default(),
+            power: None,
+            default_vault_dir: None,
+            home: None,
+            nuggetd_exe: None,
         }
     }
 }
@@ -98,6 +115,10 @@ pub(crate) struct State {
     pub local: Option<Arc<LocalRuntime>>,
     pub ingest: Ingest,
     pub retriever: Retriever,
+    /// Knowledge extraction, the graph and the vault.
+    pub knowledge: Arc<KnowledgeService>,
+    /// The MCP server, unless `[mcp] enabled = false`.
+    pub mcp: Option<Arc<McpService>>,
     pub secrets: Arc<dyn SecretStore>,
     /// Broadcast notifications to every connection.
     pub hub: Arc<Hub>,
@@ -378,6 +399,9 @@ impl Daemon {
         let registry = sources::registry();
         let resolver =
             sources::client_secret_resolver(secrets.clone(), sources::oauth_kinds(&registry));
+        let power: Arc<dyn PowerPolicy> = opts.power.unwrap_or_else(|| {
+            Arc::new(SystemPowerPolicy::new(config.ingest.low_battery_threshold))
+        });
         let ingest = Ingest::builder(
             config.ingest.clone(),
             store.clone(),
@@ -387,6 +411,7 @@ impl Daemon {
         .router(Some(router.clone()))
         .secrets(secrets.clone())
         .settings_resolver(resolver)
+        .power(power.clone())
         .start()
         .await
         .map_err(|e| match e {
@@ -405,6 +430,55 @@ impl Daemon {
         let retriever =
             Retriever::new(store.clone(), Some(router.clone()), config.retrieve.clone());
         let hub = Arc::new(Hub::default());
+        let tasks = TaskTracker::new();
+        let shutdown = CancellationToken::new();
+
+        // Knowledge graph and vault.
+        let default_vault = opts
+            .default_vault_dir
+            .clone()
+            .unwrap_or_else(|| crate::knowledge::default_vault_dir(&paths));
+        let vault_dir = crate::knowledge::vault_root(&config.vault, &default_vault)?;
+        let knowledge = {
+            let (store, router, hub, power) =
+                (store.clone(), router.clone(), hub.clone(), power.clone());
+            let (kcfg, vcfg) = (config.knowledge.clone(), config.vault.clone());
+            Arc::new(
+                blocking(move || {
+                    KnowledgeService::new(store, router, kcfg, &vcfg, vault_dir, power, hub)
+                })
+                .await?,
+            )
+        };
+
+        // MCP: backend over store, graph and retriever; HTTP on loopback when enabled.
+        let mcp = if config.mcp.enabled {
+            let backend = Arc::new(DaemonBackend {
+                store: store.clone(),
+                graph: knowledge.graph.clone(),
+                retriever: retriever.clone(),
+            });
+            let exe = opts
+                .nuggetd_exe
+                .clone()
+                .or_else(|| std::env::current_exe().ok())
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "nuggetd".into());
+            Some(Arc::new(
+                McpService::start(
+                    &config.mcp,
+                    backend,
+                    store.clone(),
+                    exe,
+                    opts.home.clone(),
+                    &tasks,
+                    shutdown.clone(),
+                )
+                .await?,
+            ))
+        } else {
+            None
+        };
 
         tracing::info!(
             version = env!("CARGO_PKG_VERSION"),
@@ -412,6 +486,9 @@ impl Daemon {
             providers = built.len(),
             unavailable = unavailable.len(),
             local_runtime = local.is_some(),
+            knowledge = config.knowledge.enabled,
+            vault = knowledge.vault.is_some(),
+            mcp_http = mcp.as_ref().and_then(|m| m.http_addr()).map(|a| a.to_string()),
             encrypted = store.is_encrypted(),
             ram_gb = hardware.total_ram / nugget_models::GIB,
             "nuggetd ready"
@@ -428,6 +505,8 @@ impl Daemon {
             local,
             ingest,
             retriever,
+            knowledge,
+            mcp,
             secrets,
             hub,
             configs,
@@ -439,12 +518,15 @@ impl Daemon {
             hardware,
             streams: Mutex::new(HashMap::new()),
             installs: Arc::new(InFlight::default()),
-            tasks: TaskTracker::new(),
-            shutdown: CancellationToken::new(),
+            tasks,
+            shutdown,
         });
 
         // Forward ingest events to every client; start installed local models (not awaited).
         crate::hub::spawn_forwarder(state.hub.clone(), &state.ingest, state.shutdown.clone());
+        state
+            .knowledge
+            .spawn(&state.ingest, &state.tasks, state.shutdown.clone());
         if let Some(l) = &state.local {
             for slot in &l.slots {
                 if slot.is_installed() {
@@ -473,6 +555,20 @@ impl Daemon {
     /// The daemon's store (tests seed it directly).
     pub fn store(&self) -> Store {
         self.state.store.clone()
+    }
+
+    /// Where the MCP HTTP listener is bound, if it runs.
+    pub fn mcp_http_addr(&self) -> Option<std::net::SocketAddr> {
+        self.state.mcp.as_ref().and_then(|m| m.http_addr())
+    }
+
+    /// The vault root, if the vault is enabled.
+    pub fn vault_root(&self) -> Option<PathBuf> {
+        self.state
+            .knowledge
+            .vault
+            .as_ref()
+            .map(|v| v.root().to_path_buf())
     }
 
     pub fn paths(&self) -> &Paths {
@@ -505,6 +601,9 @@ impl Daemon {
         // `serve_until` can also return early on a listener failure.
         if !state.shutdown.is_cancelled() {
             wind_down(&state).await;
+        }
+        if let Some(m) = &state.mcp {
+            m.shutdown().await;
         }
         state.ingest.shutdown().await;
         if let Some(l) = &state.local {

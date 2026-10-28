@@ -2,6 +2,7 @@
 
 pub mod cua;
 pub mod draft;
+pub mod knowledge;
 pub mod memory;
 pub mod perf;
 pub mod proactive;

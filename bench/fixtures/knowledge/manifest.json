@@ -1,0 +1,1744 @@
+{
+  "name": "nugget-bench knowledge fixtures",
+  "version": 1,
+  "items": [
+    {
+      "id": "mail-001",
+      "kind": "mail",
+      "path": "items/mail/mail-001.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/101",
+      "title": "Lodestar kickoff prep",
+      "modified": "2026-09-02T09:14:00Z",
+      "version": "modseq:1001",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-001.kb@glimmerfen.test>",
+        "size": 662
+      }
+    },
+    {
+      "id": "mail-002",
+      "kind": "mail",
+      "path": "items/mail/mail-002.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/102",
+      "title": "Re: Lodestar partnership",
+      "modified": "2026-09-03T08:05:00Z",
+      "version": "modseq:1002",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-002.kb@cindergate.test>",
+        "size": 633
+      }
+    },
+    {
+      "id": "mail-003",
+      "kind": "mail",
+      "path": "items/mail/mail-003.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/103",
+      "title": "Driftwood API ownership",
+      "modified": "2026-09-04T16:40:00Z",
+      "version": "modseq:1003",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-003.kb@glimmerfen.test>",
+        "size": 660
+      }
+    },
+    {
+      "id": "mail-004",
+      "kind": "mail",
+      "path": "items/mail/mail-004.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/104",
+      "title": "Harbourline integration scope",
+      "modified": "2026-09-07T10:22:00Z",
+      "version": "modseq:1004",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-004.kb@ostrander-freight.test>",
+        "size": 659
+      }
+    },
+    {
+      "id": "mail-005",
+      "kind": "mail",
+      "path": "items/mail/mail-005.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/105",
+      "title": "Re: Harbourline integration scope",
+      "modified": "2026-09-08T09:01:00Z",
+      "version": "modseq:1005",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-005.kb@glimmerfen.test>",
+        "size": 628
+      }
+    },
+    {
+      "id": "mail-006",
+      "kind": "mail",
+      "path": "items/mail/mail-006.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/106",
+      "title": "Regatta fundraiser",
+      "modified": "2026-09-09T19:45:00Z",
+      "version": "modseq:1006",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-006.kb@marrowbank-rc.test>",
+        "size": 566
+      }
+    },
+    {
+      "id": "mail-007",
+      "kind": "mail",
+      "path": "items/mail/mail-007.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/107",
+      "title": "Re: Regatta fundraiser",
+      "modified": "2026-09-10T07:30:00Z",
+      "version": "modseq:1007",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-007.kb@ashgrove.test>",
+        "size": 437
+      }
+    },
+    {
+      "id": "mail-008",
+      "kind": "mail",
+      "path": "items/mail/mail-008.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/108",
+      "title": "Venue deposit",
+      "modified": "2026-09-21T20:10:00Z",
+      "version": "modseq:1008",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-008.kb@ashgrove.test>",
+        "size": 393
+      }
+    },
+    {
+      "id": "mail-009",
+      "kind": "mail",
+      "path": "items/mail/mail-009.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/109",
+      "title": "Tidewater Billing contract",
+      "modified": "2026-09-14T11:00:00Z",
+      "version": "modseq:1009",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-009.kb@vellumthistle.test>",
+        "size": 769
+      }
+    },
+    {
+      "id": "mail-010",
+      "kind": "mail",
+      "path": "items/mail/mail-010.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/110",
+      "title": "Tidewater budget",
+      "modified": "2026-09-15T13:12:00Z",
+      "version": "modseq:1010",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-010.kb@glimmerfen.test>",
+        "size": 529
+      }
+    },
+    {
+      "id": "mail-011",
+      "kind": "mail",
+      "path": "items/mail/mail-011.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/111",
+      "title": "Fennel migration plan",
+      "modified": "2026-09-16T15:30:00Z",
+      "version": "modseq:1011",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-011.kb@cindergate.test>",
+        "size": 587
+      }
+    },
+    {
+      "id": "mail-012",
+      "kind": "mail",
+      "path": "items/mail/mail-012.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/112",
+      "title": "Driftwood API v2 timeline",
+      "modified": "2026-09-17T10:05:00Z",
+      "version": "modseq:1012",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-012.kb@glimmerfen.test>",
+        "size": 515
+      }
+    },
+    {
+      "id": "mail-013",
+      "kind": "mail",
+      "path": "items/mail/mail-013.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/113",
+      "title": "Wren Mobile prototype",
+      "modified": "2026-09-18T14:44:00Z",
+      "version": "modseq:1013",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-013.kb@glimmerfen.test>",
+        "size": 481
+      }
+    },
+    {
+      "id": "mail-014",
+      "kind": "mail",
+      "path": "items/mail/mail-014.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/114",
+      "title": "Senior Data Engineer hiring panel",
+      "modified": "2026-09-21T09:00:00Z",
+      "version": "modseq:1014",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-014.kb@glimmerfen.test>",
+        "size": 557
+      }
+    },
+    {
+      "id": "mail-015",
+      "kind": "mail",
+      "path": "items/mail/mail-015.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/115",
+      "title": "coffee?",
+      "modified": "2026-09-22T18:20:00Z",
+      "version": "modseq:1015",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-015.kb@mail.test>",
+        "size": 474
+      }
+    },
+    {
+      "id": "mail-016",
+      "kind": "mail",
+      "path": "items/mail/mail-016.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/116",
+      "title": "Cindergate x Glimmerfen",
+      "modified": "2026-09-23T12:00:00Z",
+      "version": "modseq:1016",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-016.kb@cindergate.test>",
+        "size": 589
+      }
+    },
+    {
+      "id": "mail-017",
+      "kind": "mail",
+      "path": "items/mail/mail-017.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/117",
+      "title": "Moorland Survey data",
+      "modified": "2026-09-24T10:10:00Z",
+      "version": "modseq:1017",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-017.kb@cindergate.test>",
+        "size": 551
+      }
+    },
+    {
+      "id": "mail-018",
+      "kind": "mail",
+      "path": "items/mail/mail-018.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/118",
+      "title": "Appointment reminder",
+      "modified": "2026-09-25T08:00:00Z",
+      "version": "modseq:1018",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-018.kb@saltmarsh-clinic.test>",
+        "size": 516
+      }
+    },
+    {
+      "id": "mail-019",
+      "kind": "mail",
+      "path": "items/mail/mail-019.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/119",
+      "title": "Reading mentors",
+      "modified": "2026-09-26T16:15:00Z",
+      "version": "modseq:1019",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-019.kb@bramblecote-school.test>",
+        "size": 524
+      }
+    },
+    {
+      "id": "mail-020",
+      "kind": "mail",
+      "path": "items/mail/mail-020.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/120",
+      "title": "Birthday dinner",
+      "modified": "2026-09-28T21:03:00Z",
+      "version": "modseq:1020",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-020.kb@mail.test>",
+        "size": 444
+      }
+    },
+    {
+      "id": "mail-021",
+      "kind": "mail",
+      "path": "items/mail/mail-021.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/121",
+      "title": "Some news",
+      "modified": "2026-10-01T17:45:00Z",
+      "version": "modseq:1021",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-021.kb@cindergate.test>",
+        "size": 470
+      }
+    },
+    {
+      "id": "mail-022",
+      "kind": "mail",
+      "path": "items/mail/mail-022.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/122",
+      "title": "New role at Quillfeather",
+      "modified": "2026-10-05T09:30:00Z",
+      "version": "modseq:1022",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-022.kb@quillfeather.test>",
+        "size": 560
+      }
+    },
+    {
+      "id": "mail-023",
+      "kind": "mail",
+      "path": "items/mail/mail-023.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/123",
+      "title": "Quarry Bridge commercial terms",
+      "modified": "2026-10-06T11:20:00Z",
+      "version": "modseq:1023",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-023.kb@quillfeather.test>",
+        "size": 588
+      }
+    },
+    {
+      "id": "mail-024",
+      "kind": "mail",
+      "path": "items/mail/mail-024.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/124",
+      "title": "Lodestar schema",
+      "modified": "2026-10-07T08:50:00Z",
+      "version": "modseq:1024",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-024.kb@glimmerfen.test>",
+        "size": 563
+      }
+    },
+    {
+      "id": "mail-025",
+      "kind": "mail",
+      "path": "items/mail/mail-025.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/125",
+      "title": "Action required: update your records",
+      "modified": "2026-10-09T03:12:00Z",
+      "version": "modseq:1025",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-025.kb@prize-desk.test>",
+        "size": 779
+      }
+    },
+    {
+      "id": "mail-026",
+      "kind": "mail",
+      "path": "items/mail/mail-026.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/126",
+      "title": "Data Platform Summit",
+      "modified": "2026-10-12T13:33:00Z",
+      "version": "modseq:1026",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-026.kb@glimmerfen.test>",
+        "size": 478
+      }
+    },
+    {
+      "id": "mail-027",
+      "kind": "mail",
+      "path": "items/mail/mail-027.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/127",
+      "title": "Driftwood staffing",
+      "modified": "2026-10-13T10:00:00Z",
+      "version": "modseq:1027",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-027.kb@glimmerfen.test>",
+        "size": 467
+      }
+    },
+    {
+      "id": "mail-028",
+      "kind": "mail",
+      "path": "items/mail/mail-028.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/128",
+      "title": "Harbourline go-live",
+      "modified": "2026-10-14T15:05:00Z",
+      "version": "modseq:1028",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-028.kb@ostrander-freight.test>",
+        "size": 601
+      }
+    },
+    {
+      "id": "mail-029",
+      "kind": "mail",
+      "path": "items/mail/mail-029.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/129",
+      "title": "Committee minutes",
+      "modified": "2026-10-15T20:30:00Z",
+      "version": "modseq:1029",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-029.kb@marrowbank-rc.test>",
+        "size": 454
+      }
+    },
+    {
+      "id": "mail-030",
+      "kind": "mail",
+      "path": "items/mail/mail-030.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/130",
+      "title": "Quarry Bridge",
+      "modified": "2026-10-16T09:40:00Z",
+      "version": "modseq:1030",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-030.kb@quillfeather.test>",
+        "size": 578
+      }
+    },
+    {
+      "id": "mail-031",
+      "kind": "mail",
+      "path": "items/mail/mail-031.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/131",
+      "title": "Saffron Onboarding test plan",
+      "modified": "2026-10-19T14:00:00Z",
+      "version": "modseq:1031",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-031.kb@glimmerfen.test>",
+        "size": 469
+      }
+    },
+    {
+      "id": "mail-032",
+      "kind": "mail",
+      "path": "items/mail/mail-032.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/132",
+      "title": "Summit travel",
+      "modified": "2026-10-20T07:55:00Z",
+      "version": "modseq:1032",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-032.kb@glimmerfen.test>",
+        "size": 457
+      }
+    },
+    {
+      "id": "mail-033",
+      "kind": "mail",
+      "path": "items/mail/mail-033.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/133",
+      "title": "Clause summary",
+      "modified": "2026-10-21T11:11:00Z",
+      "version": "modseq:1033",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-033.kb@vellumthistle.test>",
+        "size": 485
+      }
+    },
+    {
+      "id": "mail-034",
+      "kind": "mail",
+      "path": "items/mail/mail-034.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/134",
+      "title": "Harbourline staging feed",
+      "modified": "2026-10-22T16:20:00Z",
+      "version": "modseq:1034",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-034.kb@ostrander-freight.test>",
+        "size": 497
+      }
+    },
+    {
+      "id": "mail-035",
+      "kind": "mail",
+      "path": "items/mail/mail-035.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/135",
+      "title": "Driftwood review",
+      "modified": "2026-10-23T10:30:00Z",
+      "version": "modseq:1035",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-035.kb@glimmerfen.test>",
+        "size": 504
+      }
+    },
+    {
+      "id": "mail-036",
+      "kind": "mail",
+      "path": "items/mail/mail-036.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/136",
+      "title": "Moorland sync",
+      "modified": "2026-10-24T08:15:00Z",
+      "version": "modseq:1036",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-036.kb@cindergate.test>",
+        "size": 433
+      }
+    },
+    {
+      "id": "mail-037",
+      "kind": "mail",
+      "path": "items/mail/mail-037.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/137",
+      "title": "Planning session",
+      "modified": "2026-10-26T12:40:00Z",
+      "version": "modseq:1037",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-037.kb@quillfeather.test>",
+        "size": 471
+      }
+    },
+    {
+      "id": "mail-038",
+      "kind": "mail",
+      "path": "items/mail/mail-038.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/138",
+      "title": "Weekly Driftwood update",
+      "modified": "2026-09-30T17:00:00Z",
+      "version": "modseq:1038",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-038.kb@glimmerfen.test>",
+        "size": 473
+      }
+    },
+    {
+      "id": "mail-039",
+      "kind": "mail",
+      "path": "items/mail/mail-039.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/139",
+      "title": "Hiring panel shortlist",
+      "modified": "2026-10-02T09:25:00Z",
+      "version": "modseq:1039",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-039.kb@glimmerfen.test>",
+        "size": 454
+      }
+    },
+    {
+      "id": "mail-040",
+      "kind": "mail",
+      "path": "items/mail/mail-040.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/140",
+      "title": "Q4 budget",
+      "modified": "2026-10-08T15:15:00Z",
+      "version": "modseq:1040",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-040.kb@glimmerfen.test>",
+        "size": 391
+      }
+    },
+    {
+      "id": "mail-041",
+      "kind": "mail",
+      "path": "items/mail/mail-041.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/141",
+      "title": "Lodestar sprint review",
+      "modified": "2026-10-10T11:50:00Z",
+      "version": "modseq:1041",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-041.kb@glimmerfen.test>",
+        "size": 498
+      }
+    },
+    {
+      "id": "mail-042",
+      "kind": "mail",
+      "path": "items/mail/mail-042.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/142",
+      "title": "Lodestar steering",
+      "modified": "2026-10-11T10:05:00Z",
+      "version": "modseq:1042",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-042.kb@cindergate.test>",
+        "size": 415
+      }
+    },
+    {
+      "id": "mail-043",
+      "kind": "mail",
+      "path": "items/mail/mail-043.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/143",
+      "title": "Train booked",
+      "modified": "2026-10-18T19:00:00Z",
+      "version": "modseq:1043",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-043.kb@mail.test>",
+        "size": 366
+      }
+    },
+    {
+      "id": "mail-044",
+      "kind": "mail",
+      "path": "items/mail/mail-044.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/144",
+      "title": "Tidewater redlines status",
+      "modified": "2026-10-25T09:45:00Z",
+      "version": "modseq:1044",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-044.kb@vellumthistle.test>",
+        "size": 467
+      }
+    },
+    {
+      "id": "mail-045",
+      "kind": "mail",
+      "path": "items/mail/mail-045.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/145",
+      "title": "Feed test results",
+      "modified": "2026-10-27T13:00:00Z",
+      "version": "modseq:1045",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-045.kb@ostrander-freight.test>",
+        "size": 438
+      }
+    },
+    {
+      "id": "mail-046",
+      "kind": "mail",
+      "path": "items/mail/mail-046.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/146",
+      "title": "Wren Mobile feedback",
+      "modified": "2026-09-12T10:30:00Z",
+      "version": "modseq:1046",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-046.kb@glimmerfen.test>",
+        "size": 403
+      }
+    },
+    {
+      "id": "mail-047",
+      "kind": "mail",
+      "path": "items/mail/mail-047.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/147",
+      "title": "Fennel cut-over",
+      "modified": "2026-10-20T16:45:00Z",
+      "version": "modseq:1047",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-047.kb@glimmerfen.test>",
+        "size": 418
+      }
+    },
+    {
+      "id": "mail-048",
+      "kind": "mail",
+      "path": "items/mail/mail-048.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/148",
+      "title": "Club newsletter",
+      "modified": "2026-10-27T06:00:00Z",
+      "version": "modseq:1048",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [],
+        "message_id": "<mail-048.kb@marrowbank-rc.test>",
+        "size": 428
+      }
+    },
+    {
+      "id": "cal-001",
+      "kind": "calendar",
+      "path": "items/calendar/cal-001.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/lodestar-kickoff-20260910.ics",
+      "title": "Lodestar kickoff",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-1\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/lodestar-kickoff-20260910.ics",
+        "etag": "\"etag-1\""
+      }
+    },
+    {
+      "id": "cal-002",
+      "kind": "calendar",
+      "path": "items/calendar/cal-002.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/harbourline-review-20260929.ics",
+      "title": "Harbourline scope review",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-2\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/harbourline-review-20260929.ics",
+        "etag": "\"etag-2\""
+      }
+    },
+    {
+      "id": "cal-003",
+      "kind": "calendar",
+      "path": "items/calendar/cal-003.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/regatta-committee-20260917.ics",
+      "title": "Regatta committee meeting",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-3\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/regatta-committee-20260917.ics",
+        "etag": "\"etag-3\""
+      }
+    },
+    {
+      "id": "cal-004",
+      "kind": "calendar",
+      "path": "items/calendar/cal-004.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/coffee-maggie-20260929.ics",
+      "title": "Coffee with Maggie",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-4\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/coffee-maggie-20260929.ics",
+        "etag": "\"etag-4\""
+      }
+    },
+    {
+      "id": "cal-005",
+      "kind": "calendar",
+      "path": "items/calendar/cal-005.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/tidewater-review-20261020.ics",
+      "title": "Tidewater contract review",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-5\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/tidewater-review-20261020.ics",
+        "etag": "\"etag-5\""
+      }
+    },
+    {
+      "id": "cal-006",
+      "kind": "calendar",
+      "path": "items/calendar/cal-006.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/gp-20261006.ics",
+      "title": "GP appointment",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-6\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/gp-20261006.ics",
+        "etag": "\"etag-6\""
+      }
+    },
+    {
+      "id": "cal-007",
+      "kind": "calendar",
+      "path": "items/calendar/cal-007.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/mentors-20261104.ics",
+      "title": "Reading mentor meeting",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-7\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/mentors-20261104.ics",
+        "etag": "\"etag-7\""
+      }
+    },
+    {
+      "id": "cal-008",
+      "kind": "calendar",
+      "path": "items/calendar/cal-008.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/summit-20261118.ics",
+      "title": "Data Platform Summit",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-8\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/summit-20261118.ics",
+        "etag": "\"etag-8\""
+      }
+    },
+    {
+      "id": "cal-009",
+      "kind": "calendar",
+      "path": "items/calendar/cal-009.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/quarry-planning-20261028.ics",
+      "title": "Quarry Bridge planning",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-9\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/quarry-planning-20261028.ics",
+        "etag": "\"etag-9\""
+      }
+    },
+    {
+      "id": "cal-010",
+      "kind": "calendar",
+      "path": "items/calendar/cal-010.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/driftwood-review-20261030.ics",
+      "title": "Driftwood API design review",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-10\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/driftwood-review-20261030.ics",
+        "etag": "\"etag-10\""
+      }
+    },
+    {
+      "id": "cal-011",
+      "kind": "calendar",
+      "path": "items/calendar/cal-011.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/wren-usability-20261110.ics",
+      "title": "Wren Mobile usability test",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-11\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/wren-usability-20261110.ics",
+        "etag": "\"etag-11\""
+      }
+    },
+    {
+      "id": "cal-012",
+      "kind": "calendar",
+      "path": "items/calendar/cal-012.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/hiring-panel-20261103.ics",
+      "title": "Hiring panel: Senior Data Engineer",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-12\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/hiring-panel-20261103.ics",
+        "etag": "\"etag-12\""
+      }
+    },
+    {
+      "id": "cal-013",
+      "kind": "calendar",
+      "path": "items/calendar/cal-013.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/moorland-sync-20261027.ics",
+      "title": "Moorland Survey sync",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-13\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/moorland-sync-20261027.ics",
+        "etag": "\"etag-13\""
+      }
+    },
+    {
+      "id": "cal-014",
+      "kind": "calendar",
+      "path": "items/calendar/cal-014.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/jonah-birthday-20261114.ics",
+      "title": "Jonah's birthday dinner",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-14\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/jonah-birthday-20261114.ics",
+        "etag": "\"etag-14\""
+      }
+    },
+    {
+      "id": "cal-015",
+      "kind": "calendar",
+      "path": "items/calendar/cal-015.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/personal/fundraiser-planning-20261108.ics",
+      "title": "Regatta Fundraiser planning",
+      "modified": "2026-09-01T00:00:00Z",
+      "version": "\"etag-15\"",
+      "metadata": {
+        "calendar": "Personal",
+        "calendar_href": "/calendars/robin/personal/",
+        "href": "/calendars/robin/personal/fundraiser-planning-20261108.ics",
+        "etag": "\"etag-15\""
+      }
+    },
+    {
+      "id": "note-001",
+      "kind": "note",
+      "path": "items/notes/people/Margaret Thistlewood.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Margaret Thistlewood.md",
+      "title": "Margaret Thistlewood",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:1",
+      "metadata": {
+        "path": "people/Margaret Thistlewood.md",
+        "size": 418,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-002",
+      "kind": "note",
+      "path": "items/notes/people/Priya Castellane.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Priya Castellane.md",
+      "title": "Priya Castellane",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:2",
+      "metadata": {
+        "path": "people/Priya Castellane.md",
+        "size": 328,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-003",
+      "kind": "note",
+      "path": "items/notes/people/Sam Okafor.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Sam Okafor.md",
+      "title": "Sam Okafor",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:3",
+      "metadata": {
+        "path": "people/Sam Okafor.md",
+        "size": 276,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-004",
+      "kind": "note",
+      "path": "items/notes/people/Sam Whitlock.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Sam Whitlock.md",
+      "title": "Sam Whitlock",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:4",
+      "metadata": {
+        "path": "people/Sam Whitlock.md",
+        "size": 228,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-005",
+      "kind": "note",
+      "path": "items/notes/people/Theo Brannigan.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Theo Brannigan.md",
+      "title": "Theo Brannigan",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:5",
+      "metadata": {
+        "path": "people/Theo Brannigan.md",
+        "size": 257,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-006",
+      "kind": "note",
+      "path": "items/notes/people/Felix Ravensworth.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Felix Ravensworth.md",
+      "title": "Felix Ravensworth",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:6",
+      "metadata": {
+        "path": "people/Felix Ravensworth.md",
+        "size": 231,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-007",
+      "kind": "note",
+      "path": "items/notes/people/Desmond Achterberg.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Desmond Achterberg.md",
+      "title": "Desmond Achterberg",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:7",
+      "metadata": {
+        "path": "people/Desmond Achterberg.md",
+        "size": 190,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-008",
+      "kind": "note",
+      "path": "items/notes/people/Imogen Farrow-Lake.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Imogen Farrow-Lake.md",
+      "title": "Imogen Farrow-Lake",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:8",
+      "metadata": {
+        "path": "people/Imogen Farrow-Lake.md",
+        "size": 160,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-009",
+      "kind": "note",
+      "path": "items/notes/people/Ines Halloran.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Ines Halloran.md",
+      "title": "Ines Halloran",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:9",
+      "metadata": {
+        "path": "people/Ines Halloran.md",
+        "size": 173,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-010",
+      "kind": "note",
+      "path": "items/notes/people/Oskar Lindqvist-Hale.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Oskar Lindqvist-Hale.md",
+      "title": "Oskar Lindqvist-Hale",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:10",
+      "metadata": {
+        "path": "people/Oskar Lindqvist-Hale.md",
+        "size": 207,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-011",
+      "kind": "note",
+      "path": "items/notes/people/Jonah Ashgrove.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Jonah Ashgrove.md",
+      "title": "Jonah Ashgrove",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:11",
+      "metadata": {
+        "path": "people/Jonah Ashgrove.md",
+        "size": 119,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-012",
+      "kind": "note",
+      "path": "items/notes/people/Robin Ashgrove.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Robin Ashgrove.md",
+      "title": "Robin Ashgrove",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:12",
+      "metadata": {
+        "path": "people/Robin Ashgrove.md",
+        "size": 307,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-013",
+      "kind": "note",
+      "path": "items/notes/people/Saoirse Penrose.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Saoirse Penrose.md",
+      "title": "Saoirse Penrose",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:13",
+      "metadata": {
+        "path": "people/Saoirse Penrose.md",
+        "size": 179,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-014",
+      "kind": "note",
+      "path": "items/notes/people/Ada Wexford.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "people/Ada Wexford.md",
+      "title": "Ada Wexford",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:14",
+      "metadata": {
+        "path": "people/Ada Wexford.md",
+        "size": 197,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-015",
+      "kind": "note",
+      "path": "items/notes/projects/Project Lodestar.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Project Lodestar.md",
+      "title": "Project Lodestar",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:15",
+      "metadata": {
+        "path": "projects/Project Lodestar.md",
+        "size": 335,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-016",
+      "kind": "note",
+      "path": "items/notes/projects/Fennel.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Fennel.md",
+      "title": "Fennel",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:16",
+      "metadata": {
+        "path": "projects/Fennel.md",
+        "size": 275,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-017",
+      "kind": "note",
+      "path": "items/notes/projects/Harbourline.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Harbourline.md",
+      "title": "Harbourline",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:17",
+      "metadata": {
+        "path": "projects/Harbourline.md",
+        "size": 266,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-018",
+      "kind": "note",
+      "path": "items/notes/projects/Driftwood API.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Driftwood API.md",
+      "title": "Driftwood API",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:18",
+      "metadata": {
+        "path": "projects/Driftwood API.md",
+        "size": 186,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-019",
+      "kind": "note",
+      "path": "items/notes/projects/Wren Mobile.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Wren Mobile.md",
+      "title": "Wren Mobile",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:19",
+      "metadata": {
+        "path": "projects/Wren Mobile.md",
+        "size": 195,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-020",
+      "kind": "note",
+      "path": "items/notes/projects/Tidewater Billing.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Tidewater Billing.md",
+      "title": "Tidewater Billing",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:20",
+      "metadata": {
+        "path": "projects/Tidewater Billing.md",
+        "size": 252,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-021",
+      "kind": "note",
+      "path": "items/notes/projects/Moorland Survey.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Moorland Survey.md",
+      "title": "Moorland Survey",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:21",
+      "metadata": {
+        "path": "projects/Moorland Survey.md",
+        "size": 207,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-022",
+      "kind": "note",
+      "path": "items/notes/projects/Saffron Onboarding.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Saffron Onboarding.md",
+      "title": "Saffron Onboarding",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:22",
+      "metadata": {
+        "path": "projects/Saffron Onboarding.md",
+        "size": 150,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-023",
+      "kind": "note",
+      "path": "items/notes/projects/Quarry Bridge.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Quarry Bridge.md",
+      "title": "Quarry Bridge",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:23",
+      "metadata": {
+        "path": "projects/Quarry Bridge.md",
+        "size": 272,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-024",
+      "kind": "note",
+      "path": "items/notes/projects/Regatta Fundraiser.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "projects/Regatta Fundraiser.md",
+      "title": "Regatta Fundraiser",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:24",
+      "metadata": {
+        "path": "projects/Regatta Fundraiser.md",
+        "size": 313,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-025",
+      "kind": "note",
+      "path": "items/notes/journal/2026-09-10 Lodestar kickoff notes.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/2026-09-10 Lodestar kickoff notes.md",
+      "title": "2026-09-10 Lodestar kickoff notes",
+      "modified": "2026-09-10T12:30:00Z",
+      "version": "mtime:25",
+      "metadata": {
+        "path": "journal/2026-09-10 Lodestar kickoff notes.md",
+        "size": 253,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-026",
+      "kind": "note",
+      "path": "items/notes/journal/Health.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Health.md",
+      "title": "Health",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:26",
+      "metadata": {
+        "path": "journal/Health.md",
+        "size": 145,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-027",
+      "kind": "note",
+      "path": "items/notes/journal/Travel.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Travel.md",
+      "title": "Travel",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:27",
+      "metadata": {
+        "path": "journal/Travel.md",
+        "size": 142,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-028",
+      "kind": "note",
+      "path": "items/notes/journal/Hiring.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Hiring.md",
+      "title": "Hiring",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:28",
+      "metadata": {
+        "path": "journal/Hiring.md",
+        "size": 134,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-029",
+      "kind": "note",
+      "path": "items/notes/journal/Rowing log.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Rowing log.md",
+      "title": "Rowing log",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:29",
+      "metadata": {
+        "path": "journal/Rowing log.md",
+        "size": 133,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-030",
+      "kind": "note",
+      "path": "items/notes/journal/Q4 budget.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Q4 budget.md",
+      "title": "Q4 budget",
+      "modified": "2026-10-01T12:00:00Z",
+      "version": "mtime:30",
+      "metadata": {
+        "path": "journal/Q4 budget.md",
+        "size": 124,
+        "vault": "Robin's notes"
+      }
+    }
+  ]
+}

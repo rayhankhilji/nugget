@@ -411,7 +411,7 @@ fn added_fact_lines_and_links() {
 }
 
 #[test]
-fn deleted_fact_is_retracted() {
+fn deleted_fact_is_rejected_and_stays_rejected_after_re_extraction() {
     let f = fixture();
     f.vault.render_all().unwrap();
     f.edit(&f.sam, |t| {
@@ -422,13 +422,90 @@ fn deleted_fact_is_retracted() {
     });
     let r = f.vault.render_all().unwrap();
     assert_eq!(r.edits.retracted, vec![f.works_at]);
-    assert_eq!(f.status(f.works_at), ClaimStatus::Retracted);
+    assert_eq!(f.status(f.works_at), ClaimStatus::Rejected);
     assert_eq!(f.status(f.prefers), ClaimStatus::Active);
     let t = f.read(&f.sam);
     assert!(!t.contains("works at"));
     // The other side of the relation was re-rendered as well.
     assert!(f.read(&f.acme).contains("_No related entities yet._"));
     assert!(f.vault.validate().unwrap().is_ok());
+
+    // Its source is re-extracted (retracted, then the same fact found again): it does not come
+    // back.
+    f.graph.retract_item(&item("mail", "msg-1")).unwrap();
+    let again = f
+        .graph
+        .add_claim(&claim(
+            &f.sam,
+            "works_at",
+            ClaimObject::Entity(f.acme.clone()),
+            "Samantha works at Acme.",
+            vec![ev("mail", "msg-1", "Sam from Acme here")],
+        ))
+        .unwrap();
+    assert_eq!(again, f.works_at);
+    assert_eq!(f.status(f.works_at), ClaimStatus::Rejected);
+    f.vault.render_all().unwrap();
+    assert!(!f.read(&f.sam).contains("works at"), "{}", f.read(&f.sam));
+}
+
+#[test]
+fn split_moves_fact_lines_to_the_new_page() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    let (_, seq) = f.graph.changes_since(0, 0).unwrap();
+    let mut spec = NewEntity::new(EntityKind::Person, "Sam Lee");
+    spec.aliases = vec!["Sam".into()];
+    let sam2 = f.graph.split(&f.sam, &[f.works_at], &spec).unwrap();
+    let r = f.vault.render_changed(seq).unwrap();
+    assert!(
+        r.edits.is_empty(),
+        "a split is not a user edit: {:?}",
+        r.edits
+    );
+    assert_eq!(f.status(f.works_at), ClaimStatus::Active);
+    let old = f.read(&f.sam);
+    let new = f.read(&sam2);
+    assert!(!old.contains("<!-- c:1 -->"), "{old}");
+    assert!(new.contains("<!-- c:1 -->"), "{new}");
+    assert!(new.contains("# Sam Lee"));
+    assert!(old.contains("<!-- c:2 -->"));
+    assert!(f.vault.validate().unwrap().is_ok());
+}
+
+#[test]
+fn an_edit_to_a_fact_split_off_since_the_last_render_lands_on_its_new_entity() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    // The user edits the works_at line while (before the next render) the fact is split off.
+    f.edit(&f.sam, |t| {
+        t.lines()
+            .map(|l| {
+                if l.contains("<!-- c:1 -->") {
+                    "- Works at Acme as CTO <!-- c:1 -->".to_string()
+                } else {
+                    l.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    });
+    let sam2 = f
+        .graph
+        .split(
+            &f.sam,
+            &[f.works_at],
+            &NewEntity::new(EntityKind::Person, "Sam Lee"),
+        )
+        .unwrap();
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.superseded, vec![f.works_at]);
+    assert_eq!(r.edits.asserted.len(), 1);
+    let asserted = f.graph.get_claim(r.edits.asserted[0]).unwrap().unwrap();
+    assert_eq!(asserted.subject, sam2, "the edit follows the fact");
+    assert_eq!(asserted.status, ClaimStatus::UserAsserted);
+    assert!(f.read(&sam2).contains("Works at Acme as CTO"));
+    assert!(!f.read(&f.sam).contains("Works at Acme as CTO"));
 }
 
 #[test]
@@ -754,7 +831,7 @@ async fn watcher_applies_edits() {
     let p = f.prefers;
     let applied = tokio::task::spawn_blocking(move || {
         wait_for(Duration::from_secs(15), || {
-            g.get_claim(p).unwrap().unwrap().status == ClaimStatus::Retracted
+            g.get_claim(p).unwrap().unwrap().status == ClaimStatus::Rejected
         })
     })
     .await

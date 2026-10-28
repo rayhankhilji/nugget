@@ -1,0 +1,14 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:mentors-20261104@bramblecote-school.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261104T153000Z
+DTEND:20261104T163000Z
+SUMMARY:Reading mentor meeting
+ORGANIZER;CN="Bea Hollowell":mailto:bea.hollowell@bramblecote-school.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin@ashgrove.test
+ATTENDEE;CN="Bea Hollowell";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:bea.hollowell@bramblecote-school.test
+END:VEVENT
+END:VCALENDAR

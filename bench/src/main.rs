@@ -4,6 +4,7 @@
 //! cargo run --release -p nugget-bench -- perf memory
 //! cargo run --release -p nugget-bench -- memory --backend real --scale quick --strict
 //! cargo run -p nugget-bench -- all --scale smoke --no-write
+//! cargo run -p nugget-bench -- knowledge --strict
 //! cargo run -p nugget-bench -- --list
 //! cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict
 //! ```
@@ -29,7 +30,7 @@ const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results"
     about = "Run Nugget benchmark suites and write JSON reports"
 )]
 struct Cli {
-    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `cua`), or `all`.
+    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`), or `all`.
     #[arg(value_name = "SUITE")]
     suites: Vec<String>,
 
@@ -194,7 +195,7 @@ fn main() -> ExitCode {
             } else {
                 " [not yet implemented]"
             };
-            println!("{:8} {}{}", b.name(), b.description(), state);
+            println!("{:9} {}{}", b.name(), b.description(), state);
         }
         return ExitCode::SUCCESS;
     }
@@ -390,11 +391,11 @@ mod tests {
         assert_eq!(names(&["perf"]).unwrap(), ["perf"]);
         assert_eq!(
             names(&["all"]).unwrap(),
-            ["memory", "perf", "proactive", "draft", "cua"]
+            ["memory", "perf", "proactive", "draft", "cua", "knowledge"]
         );
         assert_eq!(
             names(&["perf", "all", "perf"]).unwrap(),
-            ["perf", "memory", "proactive", "draft", "cua"]
+            ["perf", "memory", "proactive", "draft", "cua", "knowledge"]
         );
         assert!(names(&[]).is_err());
         assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));

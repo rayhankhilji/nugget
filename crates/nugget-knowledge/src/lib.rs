@@ -2,9 +2,11 @@
 //!
 //! # Pipeline
 //! [`Knowledge::run_once`] works through a queue of changed items:
-//! 1. **Work queue.** Each source's item keys and versions are diffed against a ledger kept in
-//!    the store's cursor table (see [`ItemFeed`]). New and changed items are extracted; items
-//!    gone from the store are retracted. Progress is persisted as items complete, so runs are
+//! 1. **Work queue.** The store's item change log (`items_changed_since`, with deletion
+//!    tombstones) since the last fully processed position; the first run, and any run after a
+//!    reset or an extractor upgrade, diffs each source's item keys and versions against a ledger
+//!    kept in the store's cursor table instead (see [`ItemFeed`]). New and changed items are
+//!    extracted; items gone from the store are retracted. Progress is persisted as items complete, so runs are
 //!    resumable, and re-processing is idempotent: an item's old evidence is retracted
 //!    (`GraphStore::retract_item`) before it is extracted again, and claims that come back
 //!    keep their ids.
@@ -18,8 +20,12 @@
 //! 4. **Entity resolution** (`resolve`): identifiers, then names and aliases,
 //!    then (optionally) embeddings and LLM adjudication; never across conflicting identifiers.
 //! 5. **Claim lifecycle:** single-valued predicates (`works_at`, `lives_in`, ...) keep one
-//!    active value, the one with the freshest evidence; confidence rises with independent
-//!    evidence (noisy-OR).
+//!    active value, the one with the freshest evidence; a superseded value gets `valid_to` (when
+//!    the newer value's evidence is from); confidence rises with independent evidence
+//!    (noisy-OR). A fact the user **rejected** stays rejected: re-extraction only adds evidence
+//!    to it. One item's mention, claim, evidence and provenance writes are applied as one
+//!    `GraphBatch` (one transaction). Entities left with nothing behind them after retractions
+//!    are pruned (never the user's entity).
 //!
 //! Every claim carries [`Evidence`](nugget_graph::Evidence) `{ item, chunk_id when known,
 //! quote }`, and every entity occurrence is recorded as a mention.

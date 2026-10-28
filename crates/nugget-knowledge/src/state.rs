@@ -1,7 +1,7 @@
 //! Persistent pipeline state, kept in the store's cursor table through [`ItemFeed`]:
 //!
 //! - `knowledge`: [`State`] (extractor version, the user's entity and learned addresses, the
-//!   sources seen, unresolved wikilinks);
+//!   sources seen, the item change-log cursor and retry hints, unresolved wikilinks);
 //! - `knowledge/l/<bucket>/<source>`: the **ledger**, one entry per processed item (connector
 //!   version, content fingerprint, LLM status), sharded into [`BUCKETS`] buckets per source so a
 //!   flush rewrites only what changed;
@@ -44,6 +44,14 @@ pub(crate) struct State {
     #[serde(skip)]
     pub links_dirty: bool,
     pub processed_total: u64,
+    /// Position in the feed's item change log up to which every change was processed. `None`:
+    /// the next run diffs every source against the ledger (first run, after a reset, after an
+    /// extractor upgrade, or with a feed that keeps no change log).
+    pub item_cursor: Option<u64>,
+    /// Some ledger entry may be due for a retry after a processing failure.
+    pub retry_failed: bool,
+    /// Some ledger entry may be waiting for the LLM extractor.
+    pub retry_llm: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

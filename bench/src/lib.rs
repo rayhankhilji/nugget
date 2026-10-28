@@ -14,9 +14,12 @@
 //! fictional fixture corpus, against a deterministic fake model or a real provider.
 //! `proactive` scores proactive cards over a 30-day fixture world (reference engine until the
 //! real `nugget-proactive` crate is wired in).
+//! `knowledge` ([`suites::knowledge`]) scores the M2 knowledge pipeline on a labelled fixture
+//! corpus ([`knowledge`]); built without the `pipeline` feature it reports `not_implemented`.
 
 pub mod corpus;
 pub mod index;
+pub mod knowledge;
 pub mod real;
 pub mod report;
 pub mod runner;

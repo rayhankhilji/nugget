@@ -10,7 +10,9 @@ use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
 use nugget_infer::ProviderConfig;
 use nugget_ingest::IngestConfig;
+use nugget_knowledge::KnowledgeConfig;
 use nugget_retrieve::RetrieveConfig;
+use nugget_vault::VaultConfig;
 use serde::{Deserialize, Serialize};
 
 /// Written to `Paths::config_file()` when no config exists.
@@ -55,6 +57,34 @@ enabled = true
 # Stop a server after this many idle minutes (0 = keep running); it restarts on the next request.
 idle_stop_minutes = 30
 
+# --- Knowledge graph ---------------------------------------------------------------------------
+# People, organisations, projects and facts extracted from your indexed items, every fact cited.
+# Extraction runs after indexing, periodically and at start. Deterministic extractors always run;
+# the LLM extractor only uses models on this device or your network unless you list sources in
+# `llm.cloud_sources` (sensitive items never go to the cloud).
+[knowledge]
+enabled = true
+# Who you are, so mail and calendar facts hang off your own entity.
+# [knowledge.me]
+# name = "Your Name"
+# emails = ["you@example.com"]
+
+# --- Markdown vault --------------------------------------------------------------------------------
+# One Markdown page per entity, with footnote citations. Your edits are merged back: changed or
+# added fact lines become facts you asserted. Default location: ~/Nugget Vault.
+[vault]
+enabled = true
+# path = "~/Nugget Vault"
+
+# --- MCP (Model Context Protocol) -----------------------------------------------------------------
+# Lets AI apps (Claude Desktop, Claude Code, Cursor) read your knowledge with a per-app token,
+# scoped and audited. Local only: stdio through `nuggetd mcp --client <id>` and, when `http` is
+# on, streamable HTTP on 127.0.0.1. Set apps up with `nuggetd mcp install --client <app>`.
+[mcp]
+enabled = true
+http = true
+port = 7319
+
 # --- On-device: Ollama ---------------------------------------------------------------------------
 # Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
 [[providers]]
@@ -97,8 +127,106 @@ pub struct Config {
     /// `[retrieve]`: search tunables (`nugget_retrieve::RetrieveConfig`; every field optional).
     #[serde(default)]
     pub retrieve: RetrieveConfig,
+    /// `[knowledge]`: the extraction pipeline.
+    #[serde(default)]
+    pub knowledge: KnowledgeSection,
+    /// `[vault]`: the Markdown vault.
+    #[serde(default)]
+    pub vault: VaultSection,
+    /// `[mcp]`: the MCP server.
+    #[serde(default)]
+    pub mcp: McpSection,
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+}
+
+/// `[knowledge]`: scheduling, plus every `nugget_knowledge::KnowledgeConfig` field (`me`, `llm`,
+/// `resolution`, ...) passed through as is.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KnowledgeSection {
+    /// Run extraction at all (default true).
+    pub enabled: bool,
+    /// Run again this often even without new items (retries of LLM extraction); 0 = never.
+    pub interval_minutes: u64,
+    /// Wait this long after the last indexed change before a run.
+    pub debounce_ms: u64,
+    /// Items processed per run at most; a run that leaves items is followed by another one.
+    pub max_items_per_run: usize,
+    /// LLM extraction requests per run at most (none while the power policy is constrained).
+    pub max_llm_requests_per_run: usize,
+    /// Wall-clock limit of one run, in seconds (0 = none).
+    pub max_run_seconds: u64,
+    /// The pipeline's own configuration.
+    #[serde(flatten)]
+    pub pipeline: KnowledgeConfig,
+}
+
+impl Default for KnowledgeSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_minutes: 10,
+            debounce_ms: 1500,
+            max_items_per_run: 500,
+            max_llm_requests_per_run: 50,
+            max_run_seconds: 120,
+            pipeline: KnowledgeConfig::default(),
+        }
+    }
+}
+
+/// `[vault]`: where and how the graph is rendered as Markdown, plus every
+/// `nugget_vault::VaultConfig` field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VaultSection {
+    /// Render and watch the vault (default true).
+    pub enabled: bool,
+    /// Vault directory; a leading `~` is the home directory. Unset: `~/Nugget Vault` for a normal
+    /// install, `<data>/vault` when Nugget runs with `--home`/`NUGGET_HOME`.
+    pub path: Option<String>,
+    #[serde(flatten)]
+    pub render: VaultConfig,
+}
+
+impl Default for VaultSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: None,
+            render: VaultConfig::default(),
+        }
+    }
+}
+
+/// Default loopback port of the MCP HTTP listener.
+pub const DEFAULT_MCP_PORT: u16 = 7319;
+
+/// `[mcp]`: the MCP server (stdio bridge and loopback HTTP).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct McpSection {
+    /// Serve MCP at all (clients, the stdio bridge and HTTP). Default true.
+    pub enabled: bool,
+    /// Listen for streamable HTTP on 127.0.0.1 (default true).
+    pub http: bool,
+    /// HTTP port on 127.0.0.1 (default 7319; 0 picks a free port).
+    pub port: u16,
+    /// Exact `Origin` values allowed on HTTP requests (e.g. the MCP Inspector's). Empty: any
+    /// request with an `Origin` header (a browser page) is refused.
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for McpSection {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            http: true,
+            port: DEFAULT_MCP_PORT,
+            allowed_origins: Vec::new(),
+        }
+    }
 }
 
 /// `[runtime]`: local inference through `nugget-runtime`.
@@ -226,6 +354,30 @@ impl Config {
             return Err(Error::Invalid(
                 "runtime.idle_stop_minutes must be at most 10080 (one week)".into(),
             ));
+        }
+        let k = &self.knowledge;
+        if k.max_items_per_run == 0 {
+            return Err(Error::Invalid(
+                "knowledge.max_items_per_run must be at least 1".into(),
+            ));
+        }
+        if k.debounce_ms > 10 * 60 * 1000 || k.interval_minutes > 7 * 24 * 60 {
+            return Err(Error::Invalid(
+                "knowledge.debounce_ms must be at most 600000 and knowledge.interval_minutes at most 10080"
+                    .into(),
+            ));
+        }
+        if let Some(p) = &self.vault.path
+            && p.trim().is_empty()
+        {
+            return Err(Error::Invalid("vault.path must not be empty".into()));
+        }
+        for o in &self.mcp.allowed_origins {
+            if !(o.starts_with("http://") || o.starts_with("https://")) || o.ends_with('/') {
+                return Err(Error::Invalid(format!(
+                    "mcp.allowed_origins: `{o}` is not an origin like http://localhost:6274"
+                )));
+            }
         }
         Ok(())
     }

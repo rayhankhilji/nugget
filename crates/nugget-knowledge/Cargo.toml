@@ -21,6 +21,7 @@ tracing.workspace = true
 [dev-dependencies]
 async-trait.workspace = true
 futures.workspace = true
+tempfile = "3"
 tokio = { workspace = true }
 
 [lints]

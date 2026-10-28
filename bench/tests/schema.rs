@@ -248,7 +248,7 @@ fn check_keys(r: &Value) {
 #[test]
 fn every_suite_report_conforms() {
     let reports = smoke_reports();
-    assert_eq!(reports.len(), 5);
+    assert_eq!(reports.len(), 6);
     for r in &reports {
         let errors = errors_for(r);
         assert!(errors.is_empty(), "{} report: {errors:#?}", r["suite"]);
@@ -266,6 +266,15 @@ fn every_suite_report_conforms() {
     assert_eq!(status("proactive"), "ok");
     assert_eq!(status("draft"), "ok");
     assert_eq!(status("cua"), "ok");
+    // The real M2 pipeline with the default `pipeline` feature; `not_implemented` without it.
+    let expected = if cfg!(feature = "pipeline") {
+        "ok"
+    } else {
+        "not_implemented"
+    };
+    assert_eq!(status("knowledge"), expected);
+    let knowledge = reports.iter().find(|r| r["suite"] == "knowledge").unwrap();
+    assert!(knowledge["config"]["params"]["items"].as_u64().unwrap() >= 60);
     // Suites with targets list them.
     let memory = reports.iter().find(|r| r["suite"] == "memory").unwrap();
     let targets = memory["targets"].as_array().unwrap();

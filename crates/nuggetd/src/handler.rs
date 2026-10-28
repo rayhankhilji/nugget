@@ -56,7 +56,7 @@ const ALL_TIERS: [Tier; 5] = [
 ];
 
 pub(crate) struct RpcHandler {
-    state: Arc<State>,
+    pub(crate) state: Arc<State>,
 }
 
 #[async_trait]
@@ -83,6 +83,20 @@ impl Handler for RpcHandler {
             method::INGEST_STATUS => to_result(self.state.ingest.status().await?),
             method::RETRIEVE_CONTEXT => self.retrieve_context(parse_params(params)?).await,
             method::RETRIEVE_ASK => self.retrieve_ask(parse_params(params)?, notify).await,
+            method::KNOWLEDGE_ENTITIES => self.knowledge_entities(parse_params(params)?).await,
+            method::KNOWLEDGE_ENTITY => self.knowledge_entity(parse_params(params)?).await,
+            method::KNOWLEDGE_GRAPH => self.knowledge_graph(parse_params(params)?).await,
+            method::KNOWLEDGE_MERGE => self.knowledge_merge(parse_params(params)?).await,
+            method::KNOWLEDGE_CLAIM_STATUS => {
+                self.knowledge_claim_status(parse_params(params)?).await
+            }
+            method::KNOWLEDGE_STATUS => self.knowledge_status().await,
+            method::MCP_CLIENTS_LIST => self.mcp_clients_list().await,
+            method::MCP_CLIENTS_CREATE => self.mcp_clients_create(parse_params(params)?).await,
+            method::MCP_CLIENTS_REVOKE => self.mcp_clients_revoke(parse_params(params)?).await,
+            crate::mcp::BRIDGE_OPEN => self.mcp_bridge_open(parse_params(params)?, notify).await,
+            crate::mcp::BRIDGE_SEND => self.mcp_bridge_send(parse_params(params)?).await,
+            crate::mcp::BRIDGE_CLOSE => self.mcp_bridge_close(parse_params(params)?),
             method::RUNTIME_STATUS => to_result(
                 self.state
                     .local
@@ -552,6 +566,8 @@ impl RpcHandler {
             tracing::warn!(source = %req.id, error = %e, "cannot delete the OAuth client secret");
         }
         tracing::info!(source = %req.id, purge = req.purge, "source removed");
+        // Retract what the removed items supported.
+        self.state.knowledge.wake();
         self.audit(
             "source.remove",
             req.id.as_str(),
@@ -711,7 +727,7 @@ impl RpcHandler {
         })
     }
 
-    async fn audit(&self, action: &str, target: &str, detail: Value) {
+    pub(crate) async fn audit(&self, action: &str, target: &str, detail: Value) {
         append_audit(&self.state, action, target, detail).await;
     }
 

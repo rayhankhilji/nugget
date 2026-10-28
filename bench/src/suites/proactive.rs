@@ -47,7 +47,7 @@ impl Benchmark for ProactiveBench {
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
         if ctx.backend() == Backend::Real {
-            return Err(BenchError::NotImplemented(REAL_PLAN));
+            return Err(BenchError::NotImplemented(REAL_PLAN.into()));
         }
         let world = world::load_world()
             .map_err(|e| BenchError::Failed(format!("fixtures/proactive/world.json: {e}")))?;

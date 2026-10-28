@@ -527,10 +527,23 @@ pub(crate) async fn load_entity(
     if id.is_empty() || id.chars().count() > 200 {
         return Err(ToolFailure::rejected("invalid entity id"));
     }
-    b.get_entity(&EntityId::new(id), scope.filter())
+    let Some(e) = b
+        .get_entity(&EntityId::new(id), scope.filter())
         .await
         .map_err(ToolFailure::backend)?
-        .and_then(|e| scope.entity(e))
+    else {
+        return Err(ToolFailure::rejected(NOT_AVAILABLE_ENTITY));
+    };
+    // Per-detail provenance only matters when some origin is out of scope.
+    let details = if scope.filter().allows_all(&e.origins) {
+        None
+    } else {
+        b.entity_detail_origins(&e.id, scope.filter())
+            .await
+            .map_err(ToolFailure::backend)?
+    };
+    scope
+        .entity_with_details(e, details.as_ref())
         .ok_or_else(|| ToolFailure::rejected(NOT_AVAILABLE_ENTITY))
 }
 
@@ -570,8 +583,8 @@ pub(crate) fn entity_markdown(se: &ScopedEntity) -> (String, Vec<ItemRef>) {
     }
     if se.details_withheld {
         md.push_str(
-            "(aliases, identifiers and attributes withheld: some of this entity's sources are \
-             outside this client's scopes)\n",
+            "(some aliases, identifiers or attributes withheld: they come from sources outside \
+             this client's scopes)\n",
         );
     }
     let mut cites: Vec<&EvidenceRecord> = Vec::new();

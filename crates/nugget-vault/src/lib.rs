@@ -102,7 +102,8 @@ const WRITE_ATTEMPTS: usize = 3;
 pub struct EditReport {
     /// New (or confirmed) user-asserted claims.
     pub asserted: Vec<ClaimId>,
-    /// Claims retracted because their line was deleted.
+    /// Claims whose line the user deleted. They are now `rejected` (not `retracted`), so
+    /// re-extracting their sources never brings them back.
     pub retracted: Vec<ClaimId>,
     /// Claims superseded because their line was edited.
     pub superseded: Vec<ClaimId>,
@@ -659,28 +660,40 @@ impl Vault {
                 pass.affected.insert(id.clone());
             }
         };
+        // A line gone because its claim moved to another entity (a split) is not a deletion:
+        // the fact now lives on the other page.
         for &id in &plan.retract {
             if let Some(c) = g.get_claim(id)?
                 && mine(&c)
                 && c.status.is_active()
             {
-                g.set_claim_status(id, ClaimStatus::Retracted)?;
+                g.set_claim_status(id, ClaimStatus::Rejected)?;
                 rep.retracted.push(id);
                 touch(pass, &c.object);
             }
         }
         for (id, nf) in &plan.supersede {
             let Some(c) = g.get_claim(*id)? else { continue };
-            if !mine(&c) {
-                continue;
-            }
+            // An edited line whose claim was split off to another entity since the last render:
+            // the edit applies there.
+            let owner = if mine(&c) {
+                e.clone()
+            } else {
+                match g.get_entity(&c.subject)? {
+                    Some(o) => o,
+                    None => continue,
+                }
+            };
             if c.status.is_active() {
                 g.set_claim_status(*id, ClaimStatus::Superseded)?;
                 rep.superseded.push(*id);
                 touch(pass, &c.object);
             }
-            let new = self.user_claim(st, e, &nf.predicate, &nf.content);
+            let new = self.user_claim(st, &owner, &nf.predicate, &nf.content);
             touch(pass, &new.object);
+            if owner.id != e.id {
+                pass.affected.insert(owner.id.clone());
+            }
             rep.asserted.push(g.add_claim(&new)?);
         }
         for nf in &plan.add {

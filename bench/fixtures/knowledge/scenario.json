@@ -1,0 +1,39 @@
+{
+  "me": "p-robin",
+  "webmail_domains": [
+    "mail.test"
+  ],
+  "delete": [
+    "mail-008",
+    "note-025"
+  ],
+  "injection": [
+    "mail-025"
+  ],
+  "hard_cases": {
+    "nickname_identity": "p-maggie",
+    "same_first_name": [
+      "p-samo",
+      "p-samw"
+    ],
+    "job_change": {
+      "superseded": [
+        "p-priya works_at o-cindergate",
+        "p-priya has_role 'Senior Data Scientist'"
+      ],
+      "current": [
+        "p-priya works_at o-quillfeather",
+        "p-priya has_role 'Head of Data'"
+      ]
+    }
+  },
+  "user_edit_pages": 8,
+  "mcp_queries": [
+    "Who is Maggie?",
+    "Where does Priya Castellane work now?",
+    "What has Robin committed to deliver?",
+    "Which projects is Ostrander Freight involved in?",
+    "When is the Data Platform Summit and who is going?",
+    "Who is Sam Whitlock?"
+  ]
+}

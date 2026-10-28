@@ -4,7 +4,9 @@
 //! user's facts region is compared with the last render (the merge base), line by marker:
 //! - a marked line whose content changed: the old claim becomes `superseded` and the new text
 //!   becomes a `user_asserted` claim (same subject and predicate, no evidence);
-//! - a marked line that is gone (or emptied): the claim becomes `retracted`;
+//! - a marked line that is gone (or emptied): the claim becomes `rejected` (a user decision that
+//!   survives re-extraction of its sources), unless the claim was split off to another entity
+//!   since the last render (then its line moving away is expected);
 //! - a new bullet without a marker: a new `user_asserted` claim, with the predicate of the group
 //!   heading it sits under (`note` outside any group).
 //!

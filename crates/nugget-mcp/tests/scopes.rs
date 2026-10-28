@@ -516,3 +516,57 @@ async fn argument_errors_are_tool_errors() {
         assert_eq!(err.outcome, Outcome::Rejected, "{tool}: {}", err.message);
     }
 }
+
+#[tokio::test]
+async fn details_from_in_scope_sources_are_shown_with_provenance() {
+    use nugget_core::ids::EntityId;
+    use nugget_mcp::DetailOrigins;
+    use nugget_mcp::backend::Origin;
+    for leaky in [false, true] {
+        let b = backend(leaky);
+        // "Sam" came from the files note; the address only from the sensitive mail.
+        b.set_detail_origins(
+            EntityId::new("ent_sam"),
+            DetailOrigins {
+                aliases: vec![("Sam".into(), vec![Origin::new(FILES, false)])],
+                identifiers: vec![(
+                    ("email".into(), "sam@example.com".into()),
+                    vec![Origin::new(MAIL, true)],
+                )],
+            },
+        );
+        let s = McpServer::builder(b.clone()).build();
+        let out = call(&s, all_scopes(), "get_entity", json!({"id": "ent_sam"})).await;
+        let text = everything(&out);
+        assert_eq!(out.structured["aliases"], json!(["Sam"]), "{text}");
+        assert!(!text.contains("sam@example.com"), "{text}");
+        assert!(
+            !text.contains("\"role\""),
+            "attributes have no provenance: {text}"
+        );
+        assert_eq!(out.structured["details_withheld"], json!(true));
+
+        // Only the mail source (with sensitive items): the address is shown, the alias is not.
+        let out = call(
+            &s,
+            scopes(Some(&[MAIL]), &[], true),
+            "get_entity",
+            json!({"id": "ent_sam"}),
+        )
+        .await;
+        let text = everything(&out);
+        assert!(text.contains("sam@example.com"), "{text}");
+        assert_eq!(out.structured["aliases"], json!([]), "{text}");
+
+        // Every origin allowed: everything, nothing withheld.
+        let out = call(
+            &s,
+            scopes(None, &[], true),
+            "get_entity",
+            json!({"id": "ent_sam"}),
+        )
+        .await;
+        assert_eq!(out.structured["details_withheld"], json!(false));
+        assert!(everything(&out).contains("sam@example.com"));
+    }
+}

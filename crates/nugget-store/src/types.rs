@@ -229,3 +229,31 @@ pub struct AuditRecord {
     /// Hex SHA-256 over this record's fields and `prev_hash`.
     pub hash: String,
 }
+
+/// One entry of the item change feed ([`Store::items_changed_since`](crate::Store::items_changed_since)).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemChange {
+    pub item: ItemRef,
+    /// Position in the feed; strictly increasing, and the item's latest change.
+    pub seq: u64,
+    /// The item was deleted (a tombstone). A later re-insert replaces the tombstone.
+    pub deleted: bool,
+    /// The item's current connector version (`None` when deleted or never set).
+    #[serde(default)]
+    pub version: Option<String>,
+}
+
+/// An item's dates ([`Store::item_dates`](crate::Store::item_dates)).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDates {
+    /// `metadata.extracted.date` as the extractor wrote it (format depends on the extractor,
+    /// usually RFC 3339), when it is a string.
+    #[serde(default)]
+    pub extracted_date: Option<String>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub source_modified_at: Option<OffsetDateTime>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
+}

@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:fundraiser-planning-20261108@marrowbank-rc.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261108T180000Z
+DTEND:20261108T193000Z
+SUMMARY:Regatta Fundraiser planning
+LOCATION:Marrowbank Boathouse
+ORGANIZER;CN="Sam Whitlock":mailto:sam@marrowbank-rc.test
+ATTENDEE;CN="Sam Whitlock";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:sam@marrowbank-rc.test
+ATTENDEE;CN="Rupert Gaskell";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:rupert.gaskell@marrowbank-rc.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin@ashgrove.test
+END:VEVENT
+END:VCALENDAR

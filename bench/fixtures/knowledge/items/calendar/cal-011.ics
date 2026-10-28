@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:wren-usability-20261110@glimmerfen.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261110T130000Z
+DTEND:20261110T150000Z
+SUMMARY:Wren Mobile usability test
+DESCRIPTION:Usability test of the Wren Mobile prototype.
+ORGANIZER;CN="Imogen Farrow-Lake":mailto:imogen@glimmerfen.test
+ATTENDEE;CN="Imogen Farrow-Lake";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:imogen@glimmerfen.test
+ATTENDEE;CN="Ada Wexford";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:ada.wexford@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

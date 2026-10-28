@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget Bench//Knowledge Fixtures//EN
+BEGIN:VEVENT
+UID:driftwood-review-20261030@glimmerfen.test
+DTSTAMP:20260901T000000Z
+DTSTART:20261030T110000Z
+DTEND:20261030T120000Z
+SUMMARY:Driftwood API design review
+LOCATION:Glimmerfen Studio
+ORGANIZER;CN="Desmond Achterberg":mailto:desmond.achterberg@glimmerfen.test
+ATTENDEE;CN="Felix Ravensworth";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:felix.ravensworth@glimmerfen.test
+ATTENDEE;CN="Theo Brannigan";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:theo.brannigan@glimmerfen.test
+ATTENDEE;CN="Desmond Achterberg";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:desmond.achterberg@glimmerfen.test
+ATTENDEE;CN="Robin Ashgrove";ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED:mailto:robin.ashgrove@glimmerfen.test
+END:VEVENT
+END:VCALENDAR

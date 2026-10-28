@@ -58,7 +58,7 @@ pub use backend::*;
 pub use fake::FakeBackend;
 pub use http::{HttpConfig, HttpHandle};
 pub use rate::RateLimit;
-pub use scope::{Scope, ScopeFilter, VAULT_SOURCE};
+pub use scope::{DetailOrigins, Scope, ScopeFilter, VAULT_SOURCE};
 pub use server::{McpConfig, McpHandler, McpServer, McpServerBuilder};
 pub use snippets::{SnippetOptions, client_created, setup_snippets};
 pub use stdio::{TOKEN_ENV, accept_bridge, bridge_connect, serve_stdio};

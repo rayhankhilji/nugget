@@ -6,10 +6,10 @@ use std::time::Instant;
 use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 use nugget_core::{Error, Result};
 use nugget_graph::{
-    Claim, ClaimId, ClaimObject, ClaimStatus, EntityKind, EntityPatch, Evidence, Identifier,
-    Mention, NewClaim, NewEntity,
+    Claim, ClaimId, ClaimObject, ClaimPatch, ClaimStatus, EntityDetail, EntityKind, EntityPatch,
+    Evidence, GraphBatch, GraphOp, Identifier, Mention, NewClaim, NewEntity,
 };
-use nugget_store::Item;
+use nugget_store::{Item, ItemChange};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
@@ -57,18 +57,83 @@ pub(crate) struct Plan {
     pub ledgers: HashMap<SourceId, SourceLedger>,
     pub deletes: Vec<ItemRef>,
     pub upserts: Vec<Work>,
+    /// Change-log position to store once every planned item is done (`None`: the feed keeps no
+    /// change log).
+    pub next_cursor: Option<u64>,
 }
 
-/// Diff every source's items against the ledger (blocking: run off the async runtime).
+/// Whether an item needs processing given its ledger entry and current connector version, and
+/// whether that is only an LLM retry.
+fn decide(
+    prev: Option<&Entry>,
+    version: &Option<String>,
+    llm_ready: bool,
+    max_llm_attempts: u32,
+) -> (bool, bool) {
+    match prev {
+        None => (true, false),
+        Some(e) if e.failures > 0 && e.failures < MAX_FAILURES => (true, false),
+        Some(_) if version.is_none() => (true, false),
+        Some(e) if *version != e.version => (true, false),
+        Some(e) => {
+            let retry = llm_ready && llm_retry_due(e, max_llm_attempts);
+            (retry, retry)
+        }
+    }
+}
+
+fn llm_retry_due(e: &Entry, max_llm_attempts: u32) -> bool {
+    e.llm >= LLM_PENDING && e.llm - LLM_PENDING < max_llm_attempts
+}
+
+fn failure_retry_due(e: &Entry) -> bool {
+    e.failures > 0 && e.failures < MAX_FAILURES
+}
+
+/// Build the work queue (blocking: run off the async runtime). With a change log and a stored
+/// cursor, only items changed or deleted since the cursor are looked at, plus ledger entries due
+/// for a retry when the retry hints say there may be some; otherwise every source is diffed
+/// against the ledger.
 pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) -> Result<Plan> {
     let mut state = State::load(feed)?;
     let notes = Notes::load(feed)?;
+    let reset = state.version != EXTRACTOR_VERSION;
+    if reset {
+        state.item_cursor = None;
+        state.version = EXTRACTOR_VERSION;
+    }
+    if let Some(cursor) = state.item_cursor
+        && let Some((changes, next)) = feed.items_changed_since(cursor, 0)?
+    {
+        return plan_incremental(
+            feed,
+            state,
+            notes,
+            changes,
+            next,
+            llm_ready,
+            max_llm_attempts,
+        );
+    }
+    plan_full(feed, state, notes, reset, llm_ready, max_llm_attempts)
+}
+
+fn plan_full(
+    feed: &dyn ItemFeed,
+    mut state: State,
+    notes: Notes,
+    reset: bool,
+    llm_ready: bool,
+    max_llm_attempts: u32,
+) -> Result<Plan> {
+    // Taken before the scan: changes made during it are seen (again) by the next run.
+    let head = feed.item_changes_head()?;
     let mut sources: BTreeSet<SourceId> = feed.sources()?.into_iter().collect();
     sources.extend(state.sources.iter().cloned());
-    let reset = state.version != EXTRACTOR_VERSION;
     let mut ledgers = HashMap::new();
     let mut deletes = Vec::new();
     let mut upserts = Vec::new();
+    let (mut retry_failed, mut retry_llm) = (false, false);
     for source in sources {
         let versions = feed.item_versions(&source)?;
         let mut ledger = SourceLedger::load(feed, &source)?;
@@ -88,17 +153,11 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
         keys.sort_by(|a, b| a.0.cmp(b.0));
         for (key, version) in keys {
             let prev = ledger.get(key).cloned();
-            let (todo, llm_retry) = match &prev {
-                None => (true, false),
-                Some(e) if e.failures > 0 && e.failures < MAX_FAILURES => (true, false),
-                Some(_) if version.is_none() => (true, false),
-                Some(e) if *version != e.version => (true, false),
-                Some(e) => {
-                    let retry =
-                        llm_ready && e.llm >= LLM_PENDING && e.llm - LLM_PENDING < max_llm_attempts;
-                    (retry, retry)
-                }
-            };
+            if let Some(e) = &prev {
+                retry_failed |= failure_retry_due(e);
+                retry_llm |= llm_retry_due(e, max_llm_attempts);
+            }
+            let (todo, llm_retry) = decide(prev.as_ref(), version, llm_ready, max_llm_attempts);
             if todo {
                 upserts.push(Work {
                     item: ItemRef {
@@ -113,8 +172,91 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
         }
         ledgers.insert(source, ledger);
     }
-    if reset {
-        state.version = EXTRACTOR_VERSION;
+    state.retry_failed = retry_failed;
+    state.retry_llm = retry_llm;
+    Ok(Plan {
+        state,
+        notes,
+        ledgers,
+        deletes,
+        upserts,
+        next_cursor: head,
+    })
+}
+
+fn plan_incremental(
+    feed: &dyn ItemFeed,
+    mut state: State,
+    notes: Notes,
+    changes: Vec<ItemChange>,
+    next: u64,
+    llm_ready: bool,
+    max_llm_attempts: u32,
+) -> Result<Plan> {
+    let mut ledgers: HashMap<SourceId, SourceLedger> = HashMap::new();
+    let mut deletes = Vec::new();
+    let mut upserts = Vec::new();
+    let mut planned: HashSet<ItemRef> = HashSet::new();
+    for c in changes {
+        if !ledgers.contains_key(&c.item.source) {
+            let l = SourceLedger::load(feed, &c.item.source)?;
+            ledgers.insert(c.item.source.clone(), l);
+        }
+        let ledger = &ledgers[&c.item.source];
+        let prev = ledger.get(&c.item.key).cloned();
+        if c.deleted {
+            if prev.is_some() {
+                deletes.push(c.item.clone());
+                planned.insert(c.item);
+            }
+            continue;
+        }
+        let (todo, llm_retry) = decide(prev.as_ref(), &c.version, llm_ready, max_llm_attempts);
+        if todo {
+            planned.insert(c.item.clone());
+            upserts.push(Work {
+                item: c.item,
+                version: c.version,
+                prev,
+                llm_retry,
+            });
+        }
+    }
+    // Entries due for a retry are only in the ledgers: scan them when a hint says so.
+    if state.retry_failed || (llm_ready && state.retry_llm) {
+        let (mut retry_failed, mut retry_llm) = (false, false);
+        for source in state.sources.clone() {
+            if !ledgers.contains_key(&source) {
+                let l = SourceLedger::load(feed, &source)?;
+                ledgers.insert(source.clone(), l);
+            }
+            let ledger = &ledgers[&source];
+            let mut keys: Vec<&String> = ledger.keys().collect();
+            keys.sort();
+            for k in keys {
+                let key = ItemKey::new(k.as_str());
+                let Some(e) = ledger.get(&key) else { continue };
+                let failed = failure_retry_due(e);
+                let llm = llm_retry_due(e, max_llm_attempts);
+                retry_failed |= failed;
+                retry_llm |= llm;
+                let item = ItemRef {
+                    source: source.clone(),
+                    key,
+                };
+                if (failed || (llm_ready && llm)) && !planned.contains(&item) {
+                    planned.insert(item.clone());
+                    upserts.push(Work {
+                        item,
+                        version: e.version.clone(),
+                        prev: Some(e.clone()),
+                        llm_retry: !failed,
+                    });
+                }
+            }
+        }
+        state.retry_failed = retry_failed;
+        state.retry_llm = retry_llm;
     }
     Ok(Plan {
         state,
@@ -122,6 +264,7 @@ pub(crate) fn plan(feed: &dyn ItemFeed, llm_ready: bool, max_llm_attempts: u32) 
         ledgers,
         deletes,
         upserts,
+        next_cursor: Some(next),
     })
 }
 
@@ -147,6 +290,14 @@ fn aggregate(c: f32, n: usize) -> f32 {
     (1.0 - (1.0 - c).powi(n)).min(MAX_AGGREGATE.max(c))
 }
 
+/// Where a claim written during the current item lives: an op of the pending batch (its id is
+/// known once the batch is applied) or an existing claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Queued {
+    Op(usize),
+    Id(ClaimId),
+}
+
 /// Claims retracted from an item just before it is re-extracted, to revive rather than
 /// duplicate (stable claim ids across edits).
 #[derive(Default)]
@@ -167,6 +318,16 @@ pub(crate) struct Session<'a> {
     since_flush: usize,
     me_set: HashSet<String>,
     single_valued: HashSet<String>,
+    /// One item's mention, claim, evidence and provenance writes, applied together
+    /// ([`Session::commit`]).
+    batch: GraphBatch,
+    /// Claims already written in `batch`, by triple key, so a triple seen twice in one item
+    /// lands in one claim.
+    queued: HashMap<String, Queued>,
+    /// Claims to re-aggregate (noisy-OR) once `batch` is applied, with their base confidence.
+    agg: Vec<(Queued, f32)>,
+    /// Some item's provenance was retracted during this run (orphans may be left).
+    pub retracted_any: bool,
 }
 
 impl<'a> Session<'a> {
@@ -203,6 +364,10 @@ impl<'a> Session<'a> {
             since_flush: 0,
             me_set,
             single_valued,
+            batch: GraphBatch::new(),
+            queued: HashMap::new(),
+            agg: Vec::new(),
+            retracted_any: false,
         }
     }
 
@@ -241,6 +406,8 @@ impl<'a> Session<'a> {
     }
 
     fn record(&mut self, item: &ItemRef, entry: Entry) -> Result<()> {
+        self.state.retry_failed |= failure_retry_due(&entry);
+        self.state.retry_llm |= entry.llm >= LLM_PENDING;
         self.ledger(&item.source).set(&item.key, entry);
         if !self.state.sources.contains(&item.source) {
             self.state.sources.push(item.source.clone());
@@ -405,6 +572,7 @@ impl<'a> Session<'a> {
 
     fn retract(&mut self, item: &ItemRef) -> Result<Retracted> {
         let affected = self.graph().retract_item(item)?;
+        self.retracted_any = true;
         let mut out = Retracted::default();
         for id in affected {
             let Some(c) = self.graph().get_claim(id)? else {
@@ -458,6 +626,16 @@ impl<'a> Session<'a> {
             }
             if let Some((_, id)) = best {
                 self.graph().set_claim_status(id, ClaimStatus::Active)?;
+                // It is current again (if it folded into a live twin, the twin is unaffected).
+                if self.graph().get_claim(id)?.is_some() {
+                    self.graph().update_claim(
+                        id,
+                        &ClaimPatch {
+                            valid_to: Some(None),
+                            ..Default::default()
+                        },
+                    )?;
+                }
                 self.stats.claims_reactivated += 1;
                 if let Some(c) = self.graph().get_claim(id)? {
                     self.touch_claim(&c);
@@ -479,19 +657,31 @@ impl<'a> Session<'a> {
 
     // ---------------------------------------------------------------- items
 
-    fn item_date(&mut self, item: &ItemRef) -> Result<Option<OffsetDateTime>> {
-        if let Some(d) = self.dates.get(item) {
-            return Ok(*d);
+    /// Load the dates of `items` not cached yet, in one feed call.
+    fn prefetch_dates<'i>(&mut self, items: impl IntoIterator<Item = &'i ItemRef>) -> Result<()> {
+        let mut missing: Vec<ItemRef> = Vec::new();
+        for i in items {
+            if !self.dates.contains_key(i) && !missing.contains(i) {
+                missing.push(i.clone());
+            }
         }
-        let d = self
-            .feed()
-            .get_item(item)?
-            .map(|i| crate::extract::item_date(&i));
-        if self.dates.len() > 10_000 {
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let found = self.feed().item_dates(&missing)?;
+        if self.dates.len() + missing.len() > 10_000 {
             self.dates.clear();
         }
-        self.dates.insert(item.clone(), d);
-        Ok(d)
+        for i in missing {
+            let d = found.get(&i).copied();
+            self.dates.insert(i, d);
+        }
+        Ok(())
+    }
+
+    fn item_date(&mut self, item: &ItemRef) -> Result<Option<OffsetDateTime>> {
+        self.prefetch_dates(std::iter::once(item))?;
+        Ok(self.dates.get(item).copied().flatten())
     }
 
     /// The newest date among a claim's evidence (user assertions: when asserted).
@@ -499,14 +689,12 @@ impl<'a> Session<'a> {
         if c.evidence.is_empty() {
             return Ok(Some(c.updated_at));
         }
-        let mut best = None;
-        for ev in c.evidence.iter().rev().take(FRESHNESS_SCAN) {
-            let d = self.item_date(&ev.item)?;
-            if d > best {
-                best = d;
-            }
-        }
-        Ok(best)
+        let scan: Vec<&Evidence> = c.evidence.iter().rev().take(FRESHNESS_SCAN).collect();
+        self.prefetch_dates(scan.iter().map(|e| &e.item))?;
+        Ok(scan
+            .iter()
+            .filter_map(|e| self.dates.get(&e.item).copied().flatten())
+            .max())
     }
 
     /// Process a changed (or new) item. Returns `false` when it turned out unchanged.
@@ -594,7 +782,11 @@ impl<'a> Session<'a> {
         }
         let llm = self.llm_step(item, &chunks, &mut ex, prev_llm).await;
         let mut reuse = retracted.reuse;
-        self.apply(ex, item, date, &mut reuse).await?;
+        if let Err(e) = self.apply(ex, item, date, &mut reuse).await {
+            self.discard();
+            return Err(e);
+        }
+        self.commit()?;
         self.stats.claims_retracted += reuse.len() as u64;
         self.restore_superseded(&retracted.single_valued)?;
         Ok(llm)
@@ -690,14 +882,35 @@ impl<'a> Session<'a> {
                 self.touch(t);
             }
             for m in &spec.mentions {
-                self.graph().add_mention(&Mention {
-                    entity: r.id.clone(),
-                    item: item.item.clone(),
-                    chunk_id: m.chunk_id,
-                    surface: truncate_chars(&m.surface, 200),
-                    confidence: m.confidence.clamp(0.0, 1.0),
-                })?;
+                self.batch.push(GraphOp::AddMention {
+                    mention: Mention {
+                        entity: r.id.clone(),
+                        item: item.item.clone(),
+                        chunk_id: m.chunk_id,
+                        surface: truncate_chars(&m.surface, 200),
+                        confidence: m.confidence.clamp(0.0, 1.0),
+                    },
+                });
                 self.stats.mentions_added += 1;
+            }
+            // Which item supplied each alias and identifier (scoped MCP clients see only the
+            // ones from sources they may read).
+            let mut details: Vec<EntityDetail> = spec
+                .identifiers
+                .iter()
+                .cloned()
+                .map(EntityDetail::Identifier)
+                .collect();
+            if !spec.weak_name {
+                details.push(EntityDetail::Alias(spec.name.clone()));
+            }
+            details.extend(spec.aliases.iter().cloned().map(EntityDetail::Alias));
+            for detail in details {
+                self.batch.push(GraphOp::AddDetailSource {
+                    entity: r.id.clone(),
+                    detail,
+                    item: item.item.clone(),
+                });
             }
             self.touch(&r.id);
             ids.push(r.id);
@@ -870,40 +1083,123 @@ impl<'a> Session<'a> {
             self.state.links_dirty = true;
         }
         self.state.pending_links = keep;
-        Ok(())
+        self.commit()
     }
 
     // ---------------------------------------------------------------- claims
 
+    /// Apply the pending batch (one transaction for the item's writes), then re-aggregate the
+    /// confidence of the claims it wrote.
+    pub fn commit(&mut self) -> Result<()> {
+        let batch = std::mem::take(&mut self.batch);
+        self.queued.clear();
+        let agg = std::mem::take(&mut self.agg);
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let results = self.graph().apply_batch(&batch)?;
+        let mut seen = HashSet::new();
+        let mut follow = GraphBatch::new();
+        for (target, base) in agg {
+            let id = match target {
+                Queued::Id(id) => Some(id),
+                Queued::Op(i) => results.get(i).and_then(|r| r.claim()),
+            };
+            if let Some(id) = id
+                && seen.insert(id)
+                && let Some(patch) = self.aggregated(id, base)?
+            {
+                follow.push(GraphOp::UpdateClaim { claim: id, patch });
+            }
+        }
+        if !follow.is_empty() {
+            self.graph().apply_batch(&follow)?;
+        }
+        Ok(())
+    }
+
+    /// Drop the pending batch (the item failed).
+    fn discard(&mut self) {
+        self.batch = GraphBatch::new();
+        self.queued.clear();
+        self.agg.clear();
+    }
+
+    fn add_evidence_op(&mut self, claim: ClaimId, evidence: &[Evidence]) {
+        for ev in evidence {
+            self.batch.push(GraphOp::AddEvidence {
+                claim,
+                evidence: ev.clone(),
+            });
+        }
+    }
+
+    fn status_op(
+        &mut self,
+        claim: ClaimId,
+        status: ClaimStatus,
+        valid_to: Option<Option<OffsetDateTime>>,
+    ) {
+        self.batch.push(GraphOp::SetClaimStatus { claim, status });
+        if let Some(v) = valid_to {
+            self.batch.push(GraphOp::UpdateClaim {
+                claim,
+                patch: ClaimPatch {
+                    valid_to: Some(v),
+                    ..Default::default()
+                },
+            });
+        }
+    }
+
     /// Add a claim with its lifecycle: revive a just-retracted twin, supersede older values of
-    /// single-valued predicates, and aggregate confidence over evidence.
+    /// single-valued predicates, and aggregate confidence over evidence. The writes go to the
+    /// item's batch.
     fn add_claim(
         &mut self,
         mut new: NewClaim,
         date: OffsetDateTime,
         reuse: &mut HashMap<String, ClaimId>,
-    ) -> Result<ClaimId> {
-        if let Some(q) = new.evidence.iter_mut().find_map(|e| e.quote.as_mut()) {
-            *q = truncate_chars(q, MAX_QUOTE_CHARS);
+    ) -> Result<()> {
+        for ev in &mut new.evidence {
+            if let Some(q) = ev.quote.as_mut() {
+                *q = truncate_chars(q, MAX_QUOTE_CHARS);
+            }
         }
         let key = claim_key(&new.subject, &new.predicate, &new.object);
-        let id = if self.single_valued.contains(&new.predicate) {
+        self.touched.insert(new.subject.clone());
+        if let ClaimObject::Entity(o) = &new.object {
+            self.touched.insert(o.clone());
+        }
+        // The same triple again in this item: one claim, more evidence.
+        if let Some(q) = self.queued.get(&key).copied() {
+            match q {
+                Queued::Op(i) => {
+                    if let Some(GraphOp::AddClaim { claim }) = self.batch.ops.get_mut(i) {
+                        for ev in &new.evidence {
+                            if !claim.evidence.contains(ev) {
+                                claim.evidence.push(ev.clone());
+                            }
+                        }
+                        claim.confidence = claim.confidence.max(new.confidence);
+                    }
+                }
+                Queued::Id(id) => self.add_evidence_op(id, &new.evidence),
+            }
+            return Ok(());
+        }
+        let target = if self.single_valued.contains(&new.predicate) {
             self.add_single_valued(&mut new, date, reuse.remove(&key))?
         } else if let Some(id) = reuse.remove(&key) {
-            for ev in &new.evidence {
-                self.graph().add_evidence(id, ev)?;
-            }
-            id
+            self.add_evidence_op(id, &new.evidence);
+            Queued::Id(id)
         } else {
-            let id = self.graph().add_claim(&new)?;
             self.stats.claims_added += 1;
-            id
+            Queued::Op(self.batch.push(GraphOp::AddClaim { claim: new.clone() }))
         };
-        self.aggregate_confidence(id, new.confidence)?;
-        if let Some(c) = self.graph().get_claim(id)? {
-            self.touch_claim(&c);
-        }
-        Ok(id)
+        self.queued.insert(key, target);
+        self.agg.push((target, new.confidence));
+        Ok(())
     }
 
     fn add_single_valued(
@@ -911,29 +1207,46 @@ impl<'a> Session<'a> {
         new: &mut NewClaim,
         date: OffsetDateTime,
         revive: Option<ClaimId>,
-    ) -> Result<ClaimId> {
+    ) -> Result<Queued> {
         let all: Vec<Claim> = self
             .graph()
             .claims_for(&new.subject, true)?
             .into_iter()
             .filter(|c| c.subject == new.subject && c.predicate == new.predicate)
             .collect();
-        // The same value, already known (active, superseded, or about to be revived).
+        // The same value, already known (active, rejected, superseded, or about to be revived).
         let same = all
             .iter()
             .filter(|c| c.object == new.object)
             .filter(|c| {
                 matches!(
                     c.status,
-                    ClaimStatus::Active | ClaimStatus::UserAsserted | ClaimStatus::Superseded
+                    ClaimStatus::Active
+                        | ClaimStatus::UserAsserted
+                        | ClaimStatus::Rejected
+                        | ClaimStatus::Superseded
                 ) || Some(c.id) == revive
             })
             .min_by_key(|c| match c.status {
-                ClaimStatus::Active | ClaimStatus::UserAsserted => 0,
-                ClaimStatus::Superseded => 1,
-                ClaimStatus::Retracted => 2,
+                ClaimStatus::Rejected => 0,
+                ClaimStatus::Active | ClaimStatus::UserAsserted => 1,
+                ClaimStatus::Superseded => 2,
+                ClaimStatus::Retracted => 3,
             })
             .cloned();
+        // The user rejected this value: keep the evidence, change nothing else.
+        if let Some(c) = &same
+            && c.status == ClaimStatus::Rejected
+        {
+            self.add_evidence_op(c.id, &new.evidence);
+            return Ok(Queued::Id(c.id));
+        }
+        let all_evidence: Vec<ItemRef> = all
+            .iter()
+            .flat_map(|c| c.evidence.iter().rev().take(FRESHNESS_SCAN))
+            .map(|e| e.item.clone())
+            .collect();
+        self.prefetch_dates(all_evidence.iter())?;
         let mut fresh = Some(date);
         if let Some(c) = &same {
             fresh = fresh.max(self.freshness(c)?);
@@ -950,77 +1263,66 @@ impl<'a> Session<'a> {
         // Older than a current value: recorded as history.
         let historical = newest_other.is_some_and(|o| Some(o) > fresh);
 
-        let id = match same {
+        let target = match same {
             Some(c) => {
-                for ev in &new.evidence {
-                    self.graph().add_evidence(c.id, ev)?;
-                }
-                let status = self.graph().get_claim(c.id)?.map(|x| x.status);
-                if historical && status == Some(ClaimStatus::Active) {
-                    self.graph()
-                        .set_claim_status(c.id, ClaimStatus::Superseded)?;
+                self.add_evidence_op(c.id, &new.evidence);
+                // Adding evidence revives a retracted claim.
+                let status = match c.status {
+                    ClaimStatus::Retracted => ClaimStatus::Active,
+                    s => s,
+                };
+                if historical && status == ClaimStatus::Active {
+                    self.status_op(c.id, ClaimStatus::Superseded, Some(newest_other));
                     self.stats.claims_superseded += 1;
-                } else if !historical && status == Some(ClaimStatus::Superseded) {
-                    self.graph().set_claim_status(c.id, ClaimStatus::Active)?;
+                } else if !historical && status == ClaimStatus::Superseded {
+                    self.status_op(c.id, ClaimStatus::Active, Some(None));
                     self.stats.claims_reactivated += 1;
                 }
-                c.id
+                Queued::Id(c.id)
             }
             None => {
                 if historical {
                     new.status = ClaimStatus::Superseded;
                     new.valid_to = newest_other;
                 }
-                let id = self.graph().add_claim(new)?;
                 self.stats.claims_added += 1;
                 if historical {
                     self.stats.claims_superseded += 1;
                 }
-                id
+                Queued::Op(self.batch.push(GraphOp::AddClaim { claim: new.clone() }))
             }
         };
         if !historical {
             for (c, f) in others {
                 if c.status == ClaimStatus::Active && f < fresh {
-                    self.graph()
-                        .set_claim_status(c.id, ClaimStatus::Superseded)?;
+                    // Valid until the newer value's evidence.
+                    self.status_op(c.id, ClaimStatus::Superseded, fresh.map(Some));
                     self.stats.claims_superseded += 1;
                     self.touch_claim(&c);
                 }
             }
         }
-        Ok(id)
+        Ok(target)
     }
 
-    /// Raise a claim's confidence to the noisy-OR of its distinct evidence items.
-    fn aggregate_confidence(&mut self, id: ClaimId, base: f32) -> Result<()> {
+    /// The patch raising a claim's confidence to the noisy-OR of its distinct evidence items,
+    /// if that is higher.
+    fn aggregated(&self, id: ClaimId, base: f32) -> Result<Option<ClaimPatch>> {
         let Some(c) = self.graph().get_claim(id)? else {
-            return Ok(());
+            return Ok(None);
         };
         if c.status != ClaimStatus::Active {
-            return Ok(());
+            return Ok(None);
         }
         let items: HashSet<&ItemRef> = c.evidence.iter().map(|e| &e.item).collect();
         if items.len() < 2 {
-            return Ok(());
+            return Ok(None);
         }
         let target = aggregate(base, items.len());
-        if target > c.confidence + 0.005 {
-            // `add_claim` on an active triple adds the evidence (already there) and keeps the
-            // higher confidence.
-            self.graph().add_claim(&NewClaim {
-                subject: c.subject.clone(),
-                predicate: c.predicate.clone(),
-                object: c.object.clone(),
-                text: c.text.clone(),
-                confidence: target,
-                status: ClaimStatus::Active,
-                evidence: c.evidence.iter().rev().take(1).cloned().collect(),
-                valid_from: c.valid_from,
-                valid_to: c.valid_to,
-            })?;
-        }
-        Ok(())
+        Ok((target > c.confidence + 0.005).then(|| ClaimPatch {
+            confidence: Some(target),
+            ..Default::default()
+        }))
     }
 
     pub fn out_of_time(&self, deadline: Option<Instant>) -> bool {

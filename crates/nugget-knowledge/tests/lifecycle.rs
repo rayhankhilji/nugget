@@ -132,14 +132,20 @@ async fn edits_and_deletes_retract_evidence() {
         stats.claims_retracted >= 2,
         "corresponded_with and works_at"
     );
+    // Alice is left with nothing behind her: she is pruned with her retracted claims.
+    assert!(stats.entities_pruned >= 1);
+    assert!(env.g().get_entity(&alice.id).unwrap().is_none());
+    assert!(env.try_entity(EntityKind::Person, "Alice Smith").is_none());
     let all = env.claims(&me, "corresponded_with");
-    let alice_claim = all
-        .iter()
-        .find(|c| c.object == ClaimObject::Entity(alice.id.clone()))
-        .unwrap();
-    assert_eq!(alice_claim.status, ClaimStatus::Retracted);
-    assert!(env.active(&alice, "works_at").is_empty());
+    assert!(
+        all.iter()
+            .all(|c| c.object != ClaimObject::Entity(alice.id.clone()))
+    );
     assert!(env.g().mentions_for(&alice.id, 0).unwrap().is_empty());
+    assert!(
+        env.g().get_entity(&me.id).unwrap().is_some(),
+        "never the user"
+    );
     // Bob's claims are untouched.
     let bob = env.entity(EntityKind::Person, "Bob Jones");
     assert_eq!(env.active(&bob, "works_at").len(), 1);
