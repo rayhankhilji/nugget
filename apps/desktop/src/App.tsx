@@ -1,0 +1,152 @@
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
+import { useEvent } from "./hooks";
+import { Logo } from "./components/Logo";
+import { Offline } from "./components/Offline";
+import { ChatPage } from "./pages/Chat";
+import { SearchPage } from "./pages/Search";
+import { ModelsPage } from "./pages/Models";
+import { PrivacyPage } from "./pages/Privacy";
+import { StatusPage } from "./pages/Status";
+
+const PAGES: { id: PageId; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "search", label: "Search" },
+  { id: "models", label: "Models" },
+  { id: "privacy", label: "Privacy" },
+  { id: "status", label: "Status" },
+];
+
+const PAGE_KEY = "nugget.page";
+
+function initialPage(): PageId {
+  try {
+    const saved = localStorage.getItem(PAGE_KEY);
+    if (PAGES.some((p) => p.id === saved)) return saved as PageId;
+  } catch {
+    /* storage unavailable */
+  }
+  return "chat";
+}
+
+/** `null` while the first connection attempt is in flight. */
+type Connection = ConnectionInfo | null;
+
+export function App() {
+  const [page, setPage] = useState<PageId>(initialPage);
+  const [conn, setConn] = useState<Connection>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  const go = useCallback((id: PageId) => {
+    setPage(id);
+    try {
+      localStorage.setItem(PAGE_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const refreshConnection = useCallback(async () => {
+    try {
+      setConn(await api.connection());
+    } catch (e) {
+      setConn({ connected: false, socket: "", error: errorMessage(e) });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshConnection();
+  }, [refreshConnection]);
+
+  // While offline, poll quietly so a daemon started elsewhere (service, terminal) is picked up.
+  useEffect(() => {
+    if (conn?.connected !== false) return;
+    const t = window.setInterval(() => void refreshConnection(), 5000);
+    return () => window.clearInterval(t);
+  }, [conn?.connected, refreshConnection]);
+
+  useEvent(events.onConnection, setConn);
+  useEvent(events.onNavigate, (p) => {
+    go(p);
+    mainRef.current?.focus();
+  });
+
+  // Arrow keys move between nav items (roving focus), as in a tab list.
+  const onNavKey = (e: KeyboardEvent<HTMLElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const buttons = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+    const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const next = buttons[(i + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length];
+    next?.focus();
+  };
+
+  const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
+
+  return (
+    <div className="shell">
+      <a className="skip-link" href="#main">
+        Skip to content
+      </a>
+      <aside className="sidebar">
+        <div className="brand">
+          <Logo />
+          <span>Nugget</span>
+        </div>
+        <nav aria-label="Main" onKeyDown={onNavKey}>
+          <ul>
+            {PAGES.map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className="nav-item"
+                  aria-current={p.id === page ? "page" : undefined}
+                  onClick={() => go(p.id)}
+                >
+                  {p.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <ConnectionPill conn={conn} />
+      </aside>
+      <main id="main" ref={mainRef} tabIndex={-1} aria-label={current.label}>
+        {conn === null ? (
+          <div className="center muted">Connecting to Nugget…</div>
+        ) : !conn.connected ? (
+          <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
+        ) : (
+          <Page id={page} />
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Page({ id }: { id: PageId }) {
+  switch (id) {
+    case "chat":
+      return <ChatPage />;
+    case "search":
+      return <SearchPage />;
+    case "models":
+      return <ModelsPage />;
+    case "privacy":
+      return <PrivacyPage />;
+    case "status":
+      return <StatusPage />;
+  }
+}
+
+function ConnectionPill({ conn }: { conn: Connection }) {
+  const state = conn === null ? "pending" : conn.connected ? "up" : "down";
+  const label = state === "pending" ? "Connecting" : state === "up" ? "Connected" : "Not running";
+  return (
+    <div className={`conn conn-${state}`} role="status" title={conn?.socket || undefined}>
+      <span className="dot" aria-hidden="true" />
+      {label}
+    </div>
+  );
+}

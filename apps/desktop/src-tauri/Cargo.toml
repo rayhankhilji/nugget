@@ -1,14 +1,28 @@
 [package]
 name = "nugget-desktop"
+description = "Nugget desktop shell (Tauri 2)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 publish = false
+default-run = "nugget-desktop"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
 
 [dependencies]
 nugget-core.workspace = true
+nugget-ipc.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+futures.workspace = true
+tauri = { version = "2", features = ["tray-icon"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [lints]
 workspace = true

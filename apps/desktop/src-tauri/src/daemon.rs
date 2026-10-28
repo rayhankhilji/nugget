@@ -1,0 +1,358 @@
+//! Connection to `nuggetd`: lazy connect, reconnect on demand, notification forwarding, and
+//! starting the daemon when it is not running.
+
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+use futures::StreamExt;
+use nugget_core::ipc::notification;
+use nugget_core::paths::Paths;
+use nugget_ipc::{Client, IpcError};
+use serde::de::DeserializeOwned;
+use serde::{Serialize, Serializer};
+use tauri::{AppHandle, Emitter};
+use tokio::sync::Mutex;
+
+/// Tauri event names (Tauri allows only `[A-Za-z0-9-/:_]`, so dots become dashes).
+pub mod event {
+    /// `ConnectionInfo`, whenever the daemon connection comes up or goes down.
+    pub const CONNECTION: &str = "nugget:connection";
+    /// `nugget_core::ipc::ChatDelta`.
+    pub const CHAT_DELTA: &str = "nugget:chat-delta";
+    /// `nugget_core::ipc::ChatDone`.
+    pub const CHAT_DONE: &str = "nugget:chat-done";
+    /// `nugget_core::ipc::ModelProgress`.
+    pub const MODELS_PROGRESS: &str = "nugget:models-progress";
+    /// Every daemon notification as `{ method, params }`, including unknown ones.
+    pub const NOTIFICATION: &str = "nugget:notification";
+    /// A page id (`"status"`, ...): the tray asks the window to navigate.
+    pub const NAVIGATE: &str = "nugget:navigate";
+}
+
+/// How long `start_daemon` waits for a freshly spawned daemon to answer.
+const START_TIMEOUT: Duration = Duration::from_secs(20);
+const START_POLL: Duration = Duration::from_millis(250);
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectionInfo {
+    pub connected: bool,
+    /// Socket path or pipe name.
+    pub socket: String,
+    /// Why the last connection attempt failed.
+    pub error: Option<String>,
+}
+
+/// Error returned by every command. Serialized as `{ kind, message, code }` for `api.ts`.
+#[derive(Debug, thiserror::Error)]
+pub enum CmdError {
+    #[error("Nugget isn't running: {0}")]
+    NotRunning(String),
+    #[error("lost the connection to Nugget")]
+    Disconnected,
+    #[error("{message}")]
+    Rpc { code: i64, message: String },
+    #[error("unexpected response from Nugget: {0}")]
+    Protocol(String),
+    #[error("{0}")]
+    Spawn(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl CmdError {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::NotRunning(_) => "not_running",
+            Self::Disconnected => "disconnected",
+            Self::Rpc { .. } => "rpc",
+            Self::Protocol(_) => "protocol",
+            Self::Spawn(_) => "spawn",
+            Self::Other(_) => "other",
+        }
+    }
+
+    fn from_ipc(err: IpcError, method: &str) -> Self {
+        match err {
+            IpcError::Connect(e) => Self::NotRunning(e.to_string()),
+            IpcError::Disconnected | IpcError::Io(_) => Self::Disconnected,
+            IpcError::Rpc(e) => Self::Rpc {
+                code: e.code,
+                message: e.message,
+            },
+            IpcError::Serde(e) => Self::Protocol(format!("{method}: {e}")),
+            IpcError::Protocol(e) => Self::Protocol(format!("{method}: {e}")),
+            other => Self::Other(other.to_string()),
+        }
+    }
+}
+
+impl Serialize for CmdError {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut st = s.serialize_struct("CmdError", 3)?;
+        st.serialize_field("kind", self.kind())?;
+        st.serialize_field("message", &self.to_string())?;
+        st.serialize_field(
+            "code",
+            &match self {
+                Self::Rpc { code, .. } => Some(*code),
+                _ => None,
+            },
+        )?;
+        st.end()
+    }
+}
+
+pub struct Daemon {
+    paths: Result<Paths, String>,
+    client: Mutex<Option<Client>>,
+    /// Bumped on every new connection, so a stale forwarder never reports a newer
+    /// connection as down.
+    generation: AtomicU64,
+    start_lock: Mutex<()>,
+}
+
+impl Default for Daemon {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Daemon {
+    pub fn new() -> Self {
+        Self {
+            paths: Paths::discover().map_err(|e| e.to_string()),
+            client: Mutex::new(None),
+            generation: AtomicU64::new(0),
+            start_lock: Mutex::new(()),
+        }
+    }
+
+    fn paths(&self) -> Result<&Paths, CmdError> {
+        self.paths.as_ref().map_err(|e| CmdError::Other(e.clone()))
+    }
+
+    pub fn socket(&self) -> String {
+        self.paths
+            .as_ref()
+            .map(nugget_ipc::socket_display)
+            .unwrap_or_default()
+    }
+
+    /// The live client, connecting first if needed.
+    pub async fn client(&self, app: &AppHandle) -> Result<Client, CmdError> {
+        let mut slot = self.client.lock().await;
+        if let Some(c) = slot.as_ref()
+            && !c.is_closed()
+        {
+            return Ok(c.clone());
+        }
+        *slot = None;
+        let client = Client::connect(self.paths()?)
+            .await
+            .map_err(|e| CmdError::from_ipc(e, "connect"))?;
+        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        forward_notifications(app.clone(), &client, generation, self.socket());
+        *slot = Some(client.clone());
+        drop(slot);
+        tracing::info!(socket = %self.socket(), "connected to nuggetd");
+        crate::tray::set_connected(app, true);
+        let _ = app.emit(event::CONNECTION, self.info(None));
+        Ok(client)
+    }
+
+    fn info(&self, error: Option<String>) -> ConnectionInfo {
+        ConnectionInfo {
+            connected: error.is_none(),
+            socket: self.socket(),
+            error,
+        }
+    }
+
+    pub async fn connection_info(&self, app: &AppHandle) -> ConnectionInfo {
+        match self.client(app).await {
+            Ok(_) => self.info(None),
+            Err(e) => {
+                crate::tray::set_connected(app, false);
+                self.info(Some(e.to_string()))
+            }
+        }
+    }
+
+    /// Call a daemon method, decoding the result into `R`.
+    pub async fn call<P, R>(&self, app: &AppHandle, method: &str, params: &P) -> Result<R, CmdError>
+    where
+        P: Serialize + ?Sized,
+        R: DeserializeOwned,
+    {
+        let client = self.client(app).await?;
+        client
+            .call(method, params)
+            .await
+            .map_err(|e| CmdError::from_ipc(e, method))
+    }
+
+    /// Spawn `nuggetd` if it is not answering, then wait until it does.
+    pub async fn start(&self, app: &AppHandle) -> Result<ConnectionInfo, CmdError> {
+        let _one_at_a_time = self.start_lock.lock().await;
+        if self.client(app).await.is_ok() {
+            return Ok(self.info(None));
+        }
+        let exe = find_nuggetd().ok_or_else(|| {
+            CmdError::Spawn(
+                "Couldn't find nuggetd next to the app or on PATH. Reinstall Nugget, or start nuggetd yourself."
+                    .into(),
+            )
+        })?;
+        tracing::info!(exe = %exe.display(), "starting nuggetd");
+        let mut child = spawn_detached(&exe)
+            .map_err(|e| CmdError::Spawn(format!("Couldn't start {}: {e}", exe.display())))?;
+
+        let deadline = Instant::now() + START_TIMEOUT;
+        let result = loop {
+            tokio::time::sleep(START_POLL).await;
+            match self.client(app).await {
+                Ok(_) => break Ok(self.info(None)),
+                Err(CmdError::NotRunning(_)) => {}
+                Err(e) => break Err(e),
+            }
+            match child.try_wait() {
+                // Some daemons fork and exit 0; keep polling for the socket in that case.
+                Ok(Some(status)) if !status.success() => {
+                    break Err(CmdError::Spawn(format!(
+                        "nuggetd exited ({status}) before it was ready. Check its log for details."
+                    )));
+                }
+                Ok(_) | Err(_) => {}
+            }
+            if Instant::now() >= deadline {
+                break Err(CmdError::Spawn(format!(
+                    "nuggetd started but did not answer within {} s.",
+                    START_TIMEOUT.as_secs()
+                )));
+            }
+        };
+        // Reap the child whenever it exits, without blocking the runtime.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+        result
+    }
+}
+
+fn forward_notifications(app: AppHandle, client: &Client, generation: u64, socket: String) {
+    let mut notes = client.notifications();
+    tauri::async_runtime::spawn(async move {
+        while let Some(n) = notes.next().await {
+            let specific = match n.method.as_str() {
+                notification::CHAT_DELTA => Some(event::CHAT_DELTA),
+                notification::CHAT_DONE => Some(event::CHAT_DONE),
+                notification::MODELS_PROGRESS => Some(event::MODELS_PROGRESS),
+                _ => None,
+            };
+            if let Some(name) = specific
+                && let Err(e) = app.emit(name, &n.params)
+            {
+                tracing::warn!(error = %e, event = name, "emit failed");
+            }
+            let _ = app.emit(event::NOTIFICATION, &n);
+        }
+        // The stream ends when the connection closes.
+        use tauri::Manager;
+        let daemon = app.state::<Daemon>();
+        if daemon.generation.load(Ordering::SeqCst) == generation {
+            tracing::info!("disconnected from nuggetd");
+            crate::tray::set_connected(&app, false);
+            let _ = app.emit(
+                event::CONNECTION,
+                ConnectionInfo {
+                    connected: false,
+                    socket,
+                    error: Some("connection closed".into()),
+                },
+            );
+        }
+    });
+}
+
+fn daemon_file_name() -> String {
+    format!("nuggetd{}", std::env::consts::EXE_SUFFIX)
+}
+
+/// `nuggetd` next to the app binary (installed bundles, `target/<profile>/` in dev), else on PATH.
+pub fn find_nuggetd() -> Option<PathBuf> {
+    let name = daemon_file_name();
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join(&name)));
+    sibling
+        .filter(|p| p.is_file())
+        .or_else(|| find_on_path(&name, std::env::var_os("PATH")?))
+}
+
+fn find_on_path(name: &str, path: std::ffi::OsString) -> Option<PathBuf> {
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|p| p.is_file())
+}
+
+/// Start the daemon so it outlives the app and never grabs a console or the terminal.
+fn spawn_detached(exe: &Path) -> std::io::Result<Child> {
+    let mut cmd = Command::new(exe);
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Own process group: Ctrl-C in the terminal that launched the app doesn't reach it.
+        cmd.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    cmd.spawn()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn errors_serialize_for_the_frontend() {
+        let e = CmdError::Rpc {
+            code: -32001,
+            message: "no such model".into(),
+        };
+        let v = serde_json::to_value(&e).unwrap();
+        assert_eq!(v["kind"], "rpc");
+        assert_eq!(v["code"], -32001);
+        assert_eq!(v["message"], "no such model");
+
+        let v = serde_json::to_value(CmdError::from_ipc(IpcError::Disconnected, "status")).unwrap();
+        assert_eq!(v["kind"], "disconnected");
+        assert!(v["code"].is_null());
+
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        let v = serde_json::to_value(CmdError::from_ipc(IpcError::Connect(refused), "connect"))
+            .unwrap();
+        assert_eq!(v["kind"], "not_running");
+    }
+
+    #[test]
+    fn finds_daemon_on_path() {
+        let dir = std::env::temp_dir().join(format!("nugget-desktop-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(daemon_file_name());
+        std::fs::write(&exe, b"").unwrap();
+        let path = std::env::join_paths([PathBuf::from("/nonexistent"), dir.clone()]).unwrap();
+        assert_eq!(find_on_path(&daemon_file_name(), path), Some(exe));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

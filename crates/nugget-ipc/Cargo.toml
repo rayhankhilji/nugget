@@ -1,5 +1,6 @@
 [package]
 name = "nugget-ipc"
+description = "Local JSON-RPC 2.0 transport between the Nugget app and nuggetd"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +9,21 @@ repository.workspace = true
 
 [dependencies]
 nugget-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+interprocess = { version = "2.2", features = ["tokio"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+[target.'cfg(windows)'.dependencies]
+widestring = "1"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true
