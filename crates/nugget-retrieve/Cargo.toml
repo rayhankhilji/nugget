@@ -17,9 +17,15 @@ serde_json.workspace = true
 time.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
+# Timeouts around the reranker and query rewriting.
+tokio = { workspace = true }
+# Local cross-encoder reranking over HTTP (the workspace TLS stack, see the root Cargo.toml).
+reqwest.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+futures.workspace = true
+wiremock = "0.6"
 
 [lints]
 workspace = true

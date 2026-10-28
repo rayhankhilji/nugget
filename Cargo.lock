@@ -4300,15 +4300,18 @@ name = "nugget-retrieve"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "futures",
  "nugget-core",
  "nugget-extract",
  "nugget-infer",
  "nugget-store",
+ "reqwest",
  "serde",
  "serde_json",
  "time",
  "tokio",
  "tracing",
+ "wiremock",
 ]
 
 [[package]]

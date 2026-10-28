@@ -5,7 +5,23 @@ use nugget_core::ipc::{ContextResponse, SearchHit};
 use nugget_store::ChunkId;
 use serde::{Deserialize, Serialize};
 
+pub use crate::dates::DateRange;
 pub use crate::rank::ChunkMatch;
+pub use crate::rewrite::QueryRewrite;
+
+/// A date phrase found in the query and what it did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DateFilter {
+    /// The phrase as written, e.g. `"last week"`.
+    pub phrase: String,
+    /// Items modified in this range were kept (by source modification time, else store update
+    /// time).
+    pub range: DateRange,
+    /// `true`: the query without the phrase was searched and only items in `range` kept.
+    /// `false`: nothing in range matched, so the original query was searched unfiltered (the
+    /// phrase may have been part of the topic, as in "what to cook this week").
+    pub applied: bool,
+}
 
 /// Which retrieval signals answered a query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,6 +167,16 @@ pub struct SearchResults {
     pub mode: RetrievalMode,
     pub similarity: Similarity,
     pub items: Vec<RetrievedItem>,
+    /// A reranker scored the top candidates (false without one, or when it failed or timed out).
+    #[serde(default)]
+    pub reranked: bool,
+    /// The date phrase parsed from the query, if any.
+    #[serde(default)]
+    pub date: Option<DateFilter>,
+    /// The query actually searched, when
+    /// [`Retriever::search_in_conversation`](crate::Retriever::search_in_conversation) rewrote it.
+    #[serde(default)]
+    pub rewrite: Option<QueryRewrite>,
 }
 
 impl SearchResults {
@@ -181,4 +207,10 @@ pub struct PackedContext {
     /// `nugget_extract::estimate_tokens(&response.text)`, never above the budget.
     pub tokens: usize,
     pub passages: Vec<PackedPassage>,
+    /// See [`SearchResults::reranked`].
+    #[serde(default)]
+    pub reranked: bool,
+    /// See [`SearchResults::date`].
+    #[serde(default)]
+    pub date: Option<DateFilter>,
 }
