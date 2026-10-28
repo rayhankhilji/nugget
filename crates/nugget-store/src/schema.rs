@@ -360,6 +360,18 @@ const MIGRATIONS: &[&str] = &[
             ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 1;
     END;
     "#,
+    // v6: item text stored once. When an item's chunks cover its text, the text is kept as a
+    // compact layout over the chunks (literal gaps + chunk byte ranges, see `items::text_layout`)
+    // in `item_text`, and `items.text` is NULL. A row here always takes precedence over
+    // `items.text`; it goes away with the item. Existing rows keep their text in `items.text`.
+    // Kept in a side table (not a column on `items`) so re-chunking an item rewrites its layout
+    // without touching the `items` row, its `updated_at` or the item change feed.
+    r#"
+    CREATE TABLE IF NOT EXISTS item_text (
+        item_id INTEGER PRIMARY KEY REFERENCES items (id) ON DELETE CASCADE,
+        layout  BLOB NOT NULL
+    );
+    "#,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
