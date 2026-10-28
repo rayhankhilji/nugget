@@ -969,8 +969,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "models" | "privacy" | "status" | "doubletap";
-export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "models" | "privacy" | "status";
+export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -1335,3 +1334,251 @@ export const setPluginEnabled = (id: string, enabled: boolean) =>
   call<PluginInfo>("plugins_enable", { request: { id, enabled } });
 /** Native file picker for `.nuggetplugin` packages; `null` when cancelled. */
 export const pickPluginFile = () => call<string | null>("pick_plugin_file");
+// ---- W3: agent and safety ----
+//
+// Mirrors the `// ---- Agent (M4) ----` block of `nugget_core::ipc`. Values the daemon carries as
+// JSON (`nugget_agent::AgentEvent`, `nugget_policy::PolicyConfig`, ...) are typed here from their
+// serde form. Each method maps to the Tauri command of the same name with `.` → `_`
+// (`agent.run` → `agent_run`), whose argument is `{ request }` like the other commands.
+
+/** `nugget_policy::RiskClass`, lowest to highest. */
+export type RiskClass = "observe" | "edit" | "send" | "destroy" | "spend" | "security";
+export const RISK_CLASSES: readonly RiskClass[] = ["observe", "edit", "send", "destroy", "spend", "security"];
+/** Classes a confirmation can be approved for the rest of a task (`ConfirmChoice::Task`). */
+export const TASK_APPROVABLE_RISKS: readonly RiskClass[] = ["send", "destroy"];
+
+/** `nugget_policy::ActionDescriptor`. */
+export interface ActionDescriptor {
+  target_app: string;
+  verb: string;
+  target_label?: string | null;
+  text_preview?: string | null;
+  declared_risk: RiskClass;
+  task_id: string;
+}
+
+/** `nugget_agent::ConfirmationRequest`. */
+export interface ConfirmationRequest {
+  request_id: string;
+  action_id: string;
+  tool: string;
+  action: ActionDescriptor;
+  reason: string;
+  forced_by_injection: boolean;
+  timeout_ms: number;
+}
+
+/** `nugget_agent::Verification` (adjacently tagged: `{ status, detail }`). */
+export type Verification = { status: "passed"; detail: string } | { status: "failed"; detail: string } | { status: "unverifiable"; detail?: undefined };
+
+/** `nugget_agent::Budget`. */
+export type AgentBudget =
+  | { budget: "steps"; limit: number }
+  | { budget: "deadline"; limit_ms: number }
+  | { budget: "tokens"; limit: number }
+  | { budget: "tool_rate"; tool: string; max_calls: number; window_ms: number };
+
+/** `nugget_agent::Outcome` (adjacently tagged: `{ outcome, detail }`). */
+export type AgentOutcome =
+  | { outcome: "succeeded" | "partial" | "halted" | "cancelled"; detail?: undefined }
+  | { outcome: "unverified" | "failed" | "needs_input" | "refused" | "error"; detail: string }
+  | { outcome: "budget_exhausted"; detail: AgentBudget };
+
+export interface InjectionFinding {
+  patterns: string[];
+  excerpt: string;
+}
+
+export type ConfirmAnswer = "approved" | "rejected" | "timed_out";
+
+/** `nugget_agent::AgentEvent`, tagged by `event`. */
+export type AgentEvent =
+  | { event: "run_started"; task_id: string; goal: string }
+  | { event: "step_started"; task_id: string; step: number }
+  | { event: "model_replied"; task_id: string; step: number; text: string; tool_calls: string[] }
+  | { event: "action_proposed"; task_id: string; step: number; action_id: string; tool: string; action: ActionDescriptor }
+  | { event: "confirmation_needed"; task_id: string; request: ConfirmationRequest }
+  | { event: "confirmation_resolved"; task_id: string; request_id: string; answer: ConfirmAnswer }
+  | { event: "action_denied"; task_id: string; action_id: string; tool: string; reason: string }
+  | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
+  | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
+  | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
+  | { event: "suspended"; task_id: string; question: string }
+  | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
+
+/** One `agent.event` notification. */
+export interface AgentEventNotice {
+  task_id: string;
+  event: AgentEvent;
+}
+
+export interface AgentBudgets {
+  max_steps?: number | null;
+  deadline_secs?: number | null;
+  max_tokens?: number | null;
+}
+
+export interface AgentRunRequest {
+  goal: string;
+  context?: string | null;
+  /** `null`/absent: every registered tool. */
+  tools?: string[] | null;
+  budgets?: AgentBudgets;
+  provider?: string | null;
+}
+
+export interface AgentStarted {
+  task_id: string;
+  tools: string[];
+}
+
+export type ConfirmChoice = "once" | "task" | "deny";
+
+export type AgentTaskState = "running" | "confirming" | "needs_input" | "finished" | "interrupted";
+
+export interface AgentVerificationCounts {
+  passed: number;
+  failed: number;
+  unverifiable: number;
+}
+
+export interface AgentTaskSummary {
+  task_id: string;
+  goal: string;
+  state: AgentTaskState;
+  /** `Outcome::label()` once finished. */
+  outcome?: string | null;
+  detail?: string | null;
+  /** Unix milliseconds. */
+  started_ms: number;
+  finished_ms?: number | null;
+  steps: number;
+  verification: AgentVerificationCounts;
+}
+
+export interface AgentTaskDetail {
+  summary: AgentTaskSummary;
+  /** `nugget_agent::LogEntry`s (tagged by `kind`). */
+  entries: Record<string, unknown>[];
+  explain: string;
+  pending: ConfirmationRequest[];
+  question?: string | null;
+}
+
+export type PolicyEffect = "allow" | "confirm" | "deny";
+export const POLICY_EFFECTS: readonly PolicyEffect[] = ["allow", "confirm", "deny"];
+
+/** `nugget_policy::Rule`. Empty lists are omitted on the wire. */
+export interface PolicyRule {
+  id: string;
+  description?: string | null;
+  targets?: string[];
+  verbs?: string[];
+  risks?: RiskClass[];
+  labels?: string[];
+  effect: PolicyEffect;
+}
+
+/** `nugget_policy::PolicyConfig`. Unknown fields are kept when it is edited and sent back. */
+export interface PolicyConfig {
+  version?: number;
+  rules: PolicyRule[];
+  disabled_defaults: string[];
+  /** Per-task maximum per risk class; a missing class is unlimited. */
+  rate_limits: Partial<Record<RiskClass, number>>;
+  confirm_timeout_secs: number;
+  [extra: string]: unknown;
+}
+
+export interface DefaultRuleView {
+  rule: PolicyRule;
+  enabled: boolean;
+}
+
+export interface ActionLogStatus {
+  entries: number;
+  /** `[seq, hash]` of the last entry. */
+  head?: [number, string] | null;
+  chain_ok: boolean;
+  error?: string | null;
+}
+
+export interface PolicyState {
+  config: PolicyConfig;
+  defaults: DefaultRuleView[];
+  halted: boolean;
+  log: ActionLogStatus;
+}
+
+export interface TaskApprovalView {
+  task_id: string;
+  risk: string;
+  target?: string | null;
+}
+
+export interface PolicyApprovals {
+  pending: ConfirmationRequest[];
+  task: TaskApprovalView[];
+}
+
+export interface KillState {
+  halted: boolean;
+}
+
+export interface PolicyLogExport {
+  jsonl: string;
+  status: ActionLogStatus;
+}
+
+export interface BrowserStatus {
+  connected: boolean;
+  origin?: string | null;
+  host_version?: string | null;
+  tools: string[];
+}
+
+/** Daemon notification methods (`nugget_core::ipc::agent_notification`). */
+export const AGENT_NOTIFICATION = {
+  agentEvent: "agent.event",
+  killChanged: "policy.kill.changed",
+} as const;
+
+export function isAgentEventNotice(v: unknown): v is AgentEventNotice {
+  return isRecord(v) && typeof v.task_id === "string" && isRecord(v.event) && typeof v.event.event === "string";
+}
+
+export function isKillState(v: unknown): v is KillState {
+  return isRecord(v) && typeof v.halted === "boolean";
+}
+
+export const agentApi = {
+  /** Events for the returned task arrive as `agent.event` notifications (see `agentEvents`). */
+  agentRun: (request: AgentRunRequest) => call<AgentStarted>("agent_run", { request }),
+  agentCancel: (taskId: string) => call<void>("agent_cancel", { request: { task_id: taskId } }),
+  agentConfirm: (taskId: string, requestId: string, choice: ConfirmChoice) =>
+    call<void>("agent_confirm", { request: { task_id: taskId, request_id: requestId, choice } }),
+  agentAnswer: (taskId: string, answer: string) => call<void>("agent_answer", { request: { task_id: taskId, answer } }),
+  agentList: (limit?: number) => call<AgentTaskSummary[]>("agent_list", { request: { limit: limit ?? null } }),
+  agentGet: (taskId: string) => call<AgentTaskDetail>("agent_get", { request: { task_id: taskId } }),
+
+  policyGet: () => call<PolicyState>("policy_get"),
+  policySet: (config: PolicyConfig) => call<PolicyState>("policy_set", { request: { config } }),
+  policyApprovals: () => call<PolicyApprovals>("policy_approvals"),
+  policyKill: () => call<KillState>("policy_kill"),
+  policyResume: () => call<KillState>("policy_resume"),
+  policyLogExport: () => call<PolicyLogExport>("policy_log_export"),
+  browserStatus: () => call<BrowserStatus>("browser_status"),
+};
+
+export const agentEvents = {
+  /** `agent.event` notifications; malformed payloads are dropped. */
+  onAgentEvent: (h: (n: AgentEventNotice) => void) =>
+    events.onNotification((n) => {
+      if (n.method === AGENT_NOTIFICATION.agentEvent && isAgentEventNotice(n.params)) h(n.params);
+    }),
+  /** The kill switch was engaged or released. */
+  onKillChanged: (h: (k: KillState) => void) =>
+    events.onNotification((n) => {
+      if (n.method === AGENT_NOTIFICATION.killChanged && isKillState(n.params)) h(n.params);
+    }),
+};

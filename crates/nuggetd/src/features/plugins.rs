@@ -597,11 +597,7 @@ impl Connector for PluginSource {
 // ---- agent tools ----
 
 /// Agent tools of the loaded, enabled plugins of this data dir (empty when the feature is off).
-// W3 hook: the agent feature registers these with its tool registry.
-#[allow(
-    dead_code,
-    reason = "W3 hook: the agent feature registers plugin tools"
-)]
+// Registered by the agent feature (`features::agent::register`) at startup.
 pub(crate) async fn agent_tools(paths: &Paths) -> Vec<Arc<dyn nugget_agent::Tool>> {
     let rt = runtimes().get(&paths.data).cloned();
     match rt {

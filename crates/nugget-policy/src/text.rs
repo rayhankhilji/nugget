@@ -5,10 +5,30 @@ use unicode_normalization::UnicodeNormalization;
 /// NFKC, lowercase, invisible characters removed, whitespace collapsed. Fullwidth letters,
 /// ligatures and compatibility forms fold to their plain forms; zero-width and bidi controls
 /// (often used to split a word like "De\u{200B}lete") disappear.
-pub(crate) fn normalize(s: &str) -> String {
+///
+/// Public as [`crate::normalize_text`].
+pub fn normalize(s: &str) -> String {
+    normalize_with(s, false)
+}
+
+/// Like [`normalize`], but invisible characters become a space instead of disappearing, so
+/// words joined by one (`ignore\u{2060}previous`) stay separate words. Scanners looking for
+/// phrases should try both forms: deleting catches a split word (`Ign\u{200B}ore`), spacing
+/// catches joined words.
+///
+/// Public as [`crate::normalize_text_spaced`].
+pub fn normalize_spaced(s: &str) -> String {
+    normalize_with(s, true)
+}
+
+fn normalize_with(s: &str, invisible_as_space: bool) -> String {
     let folded: String = s
         .nfkc()
-        .filter(|c| !is_invisible(*c))
+        .filter_map(|c| match (is_invisible(c), invisible_as_space) {
+            (false, _) => Some(c),
+            (true, true) => Some(' '),
+            (true, false) => None,
+        })
         .collect::<String>()
         .to_lowercase();
     let mut out = String::with_capacity(folded.len());
@@ -57,7 +77,7 @@ fn is_invisible(c: char) -> bool {
 /// Map Cyrillic and Greek letters that look like Latin ones to Latin, so "dеlete" with a
 /// Cyrillic `е` still reads as "delete". Applied as a second pass only; native Cyrillic keywords
 /// are matched on the unfolded text.
-pub(crate) fn fold_confusables(s: &str) -> String {
+pub fn fold_confusables(s: &str) -> String {
     s.chars()
         .map(|c| match c {
             'а' => 'a',
@@ -185,6 +205,20 @@ mod tests {
         assert_eq!(normalize("ＤＥＬＥＴＥ"), "delete");
         assert_eq!(normalize("P a y"), "pay");
         assert_eq!(normalize("Send \u{202A}(⌘Enter)\u{202C}"), "send (⌘enter)");
+    }
+
+    #[test]
+    fn spaced_variant_keeps_joined_words_apart() {
+        assert_eq!(
+            normalize_spaced("ignore\u{2060}previous  Instructions"),
+            "ignore previous instructions"
+        );
+        assert_eq!(normalize("ignore\u{2060}previous"), "ignoreprevious");
+        assert_eq!(normalize_spaced("Ign\u{200B}ore"), "ign ore");
+        assert_eq!(
+            fold_confusables(&normalize("Ignоre ＰＲＥＶＩＯＵＳ")),
+            "ignore previous"
+        );
     }
 
     #[test]

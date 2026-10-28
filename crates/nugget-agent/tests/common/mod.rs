@@ -173,11 +173,18 @@ pub struct FakeGate {
     rules: Mutex<HashMap<String, Decision>>,
     pub halted: AtomicBool,
     pub seen: Mutex<Vec<ActionDescriptor>>,
+    /// Approvals `record_approved` still accepts (`u32::MAX` by default).
+    pub approvals_left: AtomicU32,
+    /// Actions passed to `record_approved`, with their risk.
+    pub approved: Mutex<Vec<(ActionDescriptor, RiskClass)>>,
 }
 
 impl FakeGate {
     pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+        Arc::new(Self {
+            approvals_left: AtomicU32::new(u32::MAX),
+            ..Self::default()
+        })
     }
 
     /// Decision for actions whose verb is `verb`.
@@ -208,6 +215,13 @@ impl PolicyGate for FakeGate {
 
     fn halted(&self) -> bool {
         self.halted.load(Ordering::SeqCst)
+    }
+
+    fn record_approved(&self, action: &ActionDescriptor, risk: RiskClass) -> bool {
+        self.approved.lock().unwrap().push((action.clone(), risk));
+        self.approvals_left
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok()
     }
 }
 

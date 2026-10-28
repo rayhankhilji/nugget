@@ -11,7 +11,7 @@ use crate::glob::glob_match;
 use crate::kill::{HookGuard, KillSwitch};
 use crate::log::{ActionLog, LogEvent};
 use crate::redact::RedactedAction;
-use crate::rules::{Effect, MatchInput, PolicyConfig, Rule, target_candidates};
+use crate::rules::{Effect, MatchInput, PolicyConfig, Rule, target_sets};
 use crate::store::PolicyStore;
 use crate::text::cap;
 use crate::{ActionContext, ActionDescriptor, Decision, PolicyGate, RiskClass};
@@ -251,6 +251,22 @@ impl PolicyEngine {
         }
     }
 
+    /// Every standing per-task approval, as `(task_id, approval)`, sorted by task id (approvals
+    /// of one task in the order they were granted).
+    pub fn task_approvals(&self) -> Vec<(String, TaskApproval)> {
+        let tasks = self.lock_tasks();
+        let mut ids: Vec<&String> = tasks.keys().collect();
+        ids.sort();
+        ids.into_iter()
+            .flat_map(|id| {
+                tasks[id]
+                    .approvals
+                    .iter()
+                    .map(move |a| (id.clone(), a.clone()))
+            })
+            .collect()
+    }
+
     /// How many actions of `risk` this task has used against its rate limit.
     pub fn used(&self, task_id: &str, risk: RiskClass) -> u32 {
         self.lock_tasks()
@@ -272,7 +288,28 @@ impl PolicyEngine {
     /// for the risk class; a `Confirm` consumes one when the user approves it through the
     /// [`crate::ConfirmationBroker`] (or [`PolicyEngine::consume`]). The decision is logged.
     pub fn assess(&self, action: &ActionDescriptor, ctx: &ActionContext) -> Assessment {
-        let assessment = self.decide(action, ctx);
+        let assessment = self.decide(action, ctx, true);
+        self.log_assessment(action, ctx, &assessment);
+        assessment
+    }
+
+    /// Re-evaluate an action an outer gate already decided on and let through (an executor that
+    /// runs under the agent loop checks again with what it sees itself). Same precedence as
+    /// [`PolicyEngine::assess`] except that the rate limit is neither checked nor consumed: the
+    /// outer evaluation did both, and counting twice would deny the last allowed action. The
+    /// decision is logged.
+    pub fn recheck(&self, action: &ActionDescriptor, ctx: &ActionContext) -> Assessment {
+        let assessment = self.decide(action, ctx, false);
+        self.log_assessment(action, ctx, &assessment);
+        assessment
+    }
+
+    fn log_assessment(
+        &self,
+        action: &ActionDescriptor,
+        ctx: &ActionContext,
+        assessment: &Assessment,
+    ) {
         self.record(LogEvent::Decision {
             action: RedactedAction::new(action, ctx),
             risk: assessment.risk,
@@ -280,7 +317,6 @@ impl PolicyEngine {
             rule: assessment.rule.clone(),
             reasons: assessment.reasons.clone(),
         });
-        assessment
     }
 
     /// Count an approved action against the task's rate limit. Returns `false` (and counts
@@ -301,7 +337,12 @@ impl PolicyEngine {
         true
     }
 
-    fn decide(&self, action: &ActionDescriptor, ctx: &ActionContext) -> Assessment {
+    fn decide(
+        &self,
+        action: &ActionDescriptor,
+        ctx: &ActionContext,
+        rate_limited: bool,
+    ) -> Assessment {
         let classification = self.classifier.classify_with_context(action, ctx);
         let risk = classification.risk;
         let mut out = Assessment {
@@ -317,7 +358,8 @@ impl PolicyEngine {
             return out;
         }
 
-        let targets = target_candidates(action, ctx);
+        let (primary, mentioned) = target_sets(action, ctx);
+        let targets: Vec<String> = primary.iter().chain(mentioned.iter()).cloned().collect();
         let labels: Vec<String> = [action.target_label.as_deref(), ctx.window_title.as_deref()]
             .into_iter()
             .flatten()
@@ -326,6 +368,7 @@ impl PolicyEngine {
         let verb = action.verb.to_lowercase();
         let input = MatchInput {
             targets: &targets,
+            primary: &primary,
             verb: &verb,
             risk,
             labels: &labels,
@@ -354,16 +397,21 @@ impl PolicyEngine {
             return out;
         }
 
-        let limit = cfg.rate_limits.get(&risk).copied();
+        let limit = if rate_limited {
+            cfg.rate_limits.get(&risk).copied()
+        } else {
+            None
+        };
         drop(cfg);
 
-        // Per-task approvals.
+        // Per-task approvals: only on what the action is performed on (never on a host a label
+        // or the typed text merely mentions).
         let approved = self.lock_tasks().get(&action.task_id).is_some_and(|t| {
             t.approvals.iter().any(|a| {
                 a.risk == risk
                     && a.target
                         .as_deref()
-                        .is_none_or(|g| targets.iter().any(|t| glob_match(g, t)))
+                        .is_none_or(|g| primary.iter().any(|t| glob_match(g, t)))
             })
         });
         let (effect, rule_id) = if approved {
@@ -446,6 +494,44 @@ impl PolicyGate for PolicyEngine {
         context: &ActionContext,
     ) -> Decision {
         self.assess(action, context).decision
+    }
+
+    /// Counts the approval against the task's limit for the effective risk (the larger of
+    /// `risk` and what the classifier makes of `action`), like [`PolicyEngine::consume`].
+    fn record_approved(&self, action: &ActionDescriptor, risk: RiskClass) -> bool {
+        let classified = self
+            .classifier
+            .classify_with_context(action, &ActionContext::default())
+            .risk;
+        self.consume(&action.task_id, risk.max(classified))
+    }
+}
+
+/// A [`PolicyGate`] over [`PolicyEngine::recheck`]: for an executor whose actions were already
+/// evaluated (and their rate limit counted) by an outer gate, such as the agent loop.
+#[derive(Debug, Clone)]
+pub struct RecheckGate(pub Arc<PolicyEngine>);
+
+impl PolicyGate for RecheckGate {
+    fn evaluate(&self, action: &ActionDescriptor) -> Decision {
+        self.0.recheck(action, &ActionContext::default()).decision
+    }
+
+    fn halted(&self) -> bool {
+        self.0.halted()
+    }
+
+    fn evaluate_with_context(
+        &self,
+        action: &ActionDescriptor,
+        context: &ActionContext,
+    ) -> Decision {
+        self.0.recheck(action, context).decision
+    }
+
+    /// The outer gate counted the approval already; counting again would halve the limit.
+    fn record_approved(&self, _action: &ActionDescriptor, _risk: RiskClass) -> bool {
+        true
     }
 }
 
@@ -947,6 +1033,179 @@ mod tests {
             .collect();
         assert_eq!(kinds, ["decision", "halted", "decision", "resumed"]);
         log.verify_chain().unwrap();
+    }
+
+    fn act2(
+        app: &str,
+        verb: &str,
+        label: Option<&str>,
+        preview: Option<&str>,
+        risk: RiskClass,
+    ) -> ActionDescriptor {
+        ActionDescriptor {
+            text_preview: preview.map(Into::into),
+            task_id: "t1".into(),
+            ..act(app, verb, label, risk)
+        }
+    }
+
+    // Security review PA-1 (regression): approvals and Allow rules match only primary targets.
+    #[test]
+    fn pa1_task_approval_does_not_leak_to_other_site_via_label_url() {
+        let e = engine();
+        e.approve_for_task(
+            "t1",
+            TaskApproval {
+                risk: RiskClass::Send,
+                target: Some("mail.google.com".into()),
+            },
+        )
+        .unwrap();
+        let plain = act2(
+            "evil.example",
+            "click",
+            Some("button \"Post comment\""),
+            None,
+            RiskClass::Send,
+        );
+        assert!(is_confirm(&e.evaluate(&plain)));
+        let spoof = act2(
+            "evil.example",
+            "click",
+            Some("button \"Post https://mail.google.com/x\""),
+            None,
+            RiskClass::Send,
+        );
+        assert!(is_confirm(&e.evaluate(&spoof)), "{:?}", e.evaluate(&spoof));
+        // The approved site itself still is approved.
+        let real = act2(
+            "mail.google.com",
+            "click",
+            Some("Send"),
+            None,
+            RiskClass::Send,
+        );
+        assert_eq!(e.evaluate(&real), Decision::Allow);
+    }
+
+    #[test]
+    fn pa1_user_allow_rule_does_not_leak_via_preview_url() {
+        let e = engine();
+        e.upsert_rule(
+            Rule::new("u:work", Effect::Allow)
+                .targets(["*.corp.example"])
+                .risks([RiskClass::Send]),
+        )
+        .unwrap();
+        let a = act2(
+            "com.tinyspeck.slackmacgap",
+            "send_message",
+            Some("Message #general"),
+            Some("see https://wiki.corp.example/page"),
+            RiskClass::Send,
+        );
+        assert!(is_confirm(&e.evaluate(&a)), "{:?}", e.evaluate(&a));
+        // Deny rules still see mentioned hosts.
+        e.upsert_rule(Rule::new("u:no-corp", Effect::Deny).targets(["*.corp.example"]))
+            .unwrap();
+        assert!(is_deny(&e.evaluate(&a)));
+        // Navigating to a deep link or domain makes it a primary target.
+        e.remove_rule("u:no-corp").unwrap();
+        let nav = act2(
+            "com.google.chrome",
+            "navigate",
+            Some("https://wiki.corp.example/page"),
+            None,
+            RiskClass::Send,
+        );
+        assert_eq!(e.evaluate(&nav), Decision::Allow);
+    }
+
+    // Security review PA-6: approvals count against the rate limit through the gate.
+    #[test]
+    fn pa6_record_approved_counts_against_the_rate_limit() {
+        let e = Arc::new(engine());
+        e.update_config("limit", |c| {
+            c.rate_limits.insert(RiskClass::Spend, 2);
+        })
+        .unwrap();
+        let buy = act("shop.example", "click", Some("Buy now"), RiskClass::Spend);
+        let gate: &dyn PolicyGate = e.as_ref();
+        assert!(gate.record_approved(&buy, RiskClass::Spend));
+        assert!(gate.record_approved(&buy, RiskClass::Spend));
+        assert!(!gate.record_approved(&buy, RiskClass::Spend));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 2);
+        assert!(is_deny(&e.evaluate(&buy)));
+        // The classifier's risk counts even when the caller under-declares.
+        let mut other = buy.clone();
+        other.task_id = "task-2".into();
+        assert!(gate.record_approved(&other, RiskClass::Edit));
+        assert_eq!(e.used("task-2", RiskClass::Spend), 1);
+        // A recheck gate never counts twice.
+        let re = RecheckGate(Arc::clone(&e));
+        assert!(re.record_approved(&buy, RiskClass::Spend));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 2);
+    }
+
+    #[test]
+    fn task_approvals_are_listed() {
+        let e = engine();
+        assert!(e.task_approvals().is_empty());
+        let send = TaskApproval {
+            risk: RiskClass::Send,
+            target: Some("com.apple.mail".into()),
+        };
+        let destroy = TaskApproval {
+            risk: RiskClass::Destroy,
+            target: None,
+        };
+        e.approve_for_task("t2", destroy.clone()).unwrap();
+        e.approve_for_task("t1", send.clone()).unwrap();
+        e.approve_for_task("t1", destroy.clone()).unwrap();
+        // Rate-limit counters alone make no approval.
+        e.consume("t3", RiskClass::Send);
+        assert_eq!(
+            e.task_approvals(),
+            vec![
+                ("t1".to_string(), send),
+                ("t1".to_string(), destroy.clone()),
+                ("t2".to_string(), destroy),
+            ]
+        );
+        e.end_task("t1");
+        assert_eq!(e.task_approvals().len(), 1);
+    }
+
+    #[test]
+    fn recheck_skips_the_rate_limit_but_not_the_rules() {
+        let e = Arc::new(engine());
+        e.update_config("limit", |c| {
+            c.rate_limits.insert(RiskClass::Edit, 1);
+        })
+        .unwrap();
+        let typing = act("com.apple.notes", "type", Some("Body"), RiskClass::Edit);
+        // The outer gate uses the only unit; the executor's recheck still allows it.
+        assert_eq!(e.evaluate(&typing), Decision::Allow);
+        let gate = RecheckGate(Arc::clone(&e));
+        assert_eq!(gate.evaluate(&typing), Decision::Allow);
+        assert_eq!(e.used("task-1", RiskClass::Edit), 1);
+        assert!(is_deny(&e.evaluate(&typing)));
+        // Deny rules, confirmations and the kill switch still apply.
+        assert!(is_deny(&gate.evaluate(&act(
+            "chase.com",
+            "scroll",
+            None,
+            RiskClass::Observe
+        ))));
+        assert!(is_confirm(&gate.evaluate(&act(
+            "com.apple.mail",
+            "click",
+            Some("Send"),
+            RiskClass::Send
+        ))));
+        e.halt();
+        assert!(gate.halted());
+        assert!(is_deny(&gate.evaluate(&typing)));
     }
 
     #[test]

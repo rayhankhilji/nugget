@@ -24,8 +24,11 @@ use serde_json::Value;
 use crate::config::Config;
 use crate::daemon::State;
 
+mod agent;
+mod browser;
 mod draft;
 pub(crate) mod plugins;
+mod policy;
 
 /// One wired-in subsystem.
 #[async_trait]
@@ -111,9 +114,10 @@ impl Features {
 pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     let mut list: Vec<Arc<dyn Feature>> = Vec::new();
     start(&mut list, "draft", draft::start(cx).await);
-    // W3 agent/safety: start(&mut list, "agent", agent::start(cx).await);
-    // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
+    // Plugins before the agent, which registers their tools.
     start(&mut list, "plugins", plugins::start(cx).await);
+    agent::register(cx, &mut list).await; // W3: policy, browser, agent
+    // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

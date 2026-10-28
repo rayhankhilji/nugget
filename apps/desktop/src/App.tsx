@@ -13,6 +13,8 @@ import { SearchPage } from "./pages/Search";
 import { KnowledgePage } from "./pages/Knowledge";
 import { AppsPage } from "./pages/Apps";
 import { PluginsPage } from "./pages/Plugins";
+import { AgentPage } from "./pages/Agent";
+import { SafetyPage } from "./pages/Safety";
 import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
@@ -46,6 +48,8 @@ export const PAGES: readonly PageDef[] = [
   { id: "sources", label: "app.nav.sources", Component: SourcesPage, keywords: "app.keywords.sources" },
   { id: "apps", label: "app.nav.apps", Component: AppsPage, keywords: "app.keywords.apps" },
   { id: "plugins", label: "app.nav.plugins", Component: PluginsPage },
+  { id: "agent", label: "app.nav.agent", Component: AgentPage },
+  { id: "safety", label: "app.nav.safety", Component: SafetyPage },
   { id: "models", label: "app.nav.models", Component: ModelsPage, keywords: "app.keywords.models" },
   { id: "doubletap", label: "app.nav.doubletap", Component: DoubleTapPage },
   { id: "privacy", label: "app.nav.privacy", Component: PrivacyPage, keywords: "app.keywords.privacy" },

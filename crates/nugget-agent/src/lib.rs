@@ -15,10 +15,12 @@
 //!   [`Outcome::Failed`].
 //! - Prompt-injection hardening ([`injection`]): untrusted tool output is fenced as data, the
 //!   system prompt says so, and a detector forces a confirmation on the next risky action.
-//! - [`ActionLog`] (append-only; [`MemoryLog`], [`JsonlLog`]) with [`explain`] for a readable
+//! - [`ActionLog`] (append-only; [`MemoryLog`], [`JsonlLog`], and [`ChainedLog`] on the policy
+//!   crate's hash-chained log) with [`explain`] for a readable
 //!   report, and an [`AgentEvent`] stream for the UI.
 
 mod agent;
+pub mod chained;
 pub mod events;
 pub mod injection;
 pub mod ledger;
@@ -30,6 +32,7 @@ pub use agent::{
     ActionRecord, Agent, AgentConfig, AgentRun, Budgets, FEATURE_AGENT, Model, MutationRecord,
     PendingAsk, RunState, Task, ToolRate, VerificationSummary,
 };
+pub use chained::{AGENT_SOURCE, ChainedLog, agent_entries};
 pub use events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
 pub use injection::{HeuristicDetector, InjectionDetector, InjectionFinding};
 pub use ledger::{ActionLedger, LedgerEntry, MemoryLedger, action_id};

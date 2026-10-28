@@ -139,11 +139,11 @@ Status: being wired in (wave W, Double Tap). The contracts below are already in 
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens` | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | in progress |
-| `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | in progress |
-| `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | in progress |
-| `draft.prewarm` | Not final | Not final. Sent by the desktop when the trigger fires, so the model can load the prompt prefix before `draft.begin`; it may end up as a notification (no `id`) rather than a method | in progress |
-| `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | in progress |
+| `draft.begin` | `DraftRequest`: `context` (`DraftContext`: `app`, `field`, `thread`, `recipients`, `subject`, `screenshot_png_base64`), `instruction`, `provider`, `max_tokens` | `DraftStarted`: `stream_id`, `provider`, `locality`, `field_kind`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | yes |
+| `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
+| `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | yes |
+| `draft.prewarm` | A partial `DraftContext` (as much as is known when the trigger fires) | `{provider, locality, retrieval}`, or `null` when drafting is refused or disabled. Starts provider warm-up, retrieval and the voice lookup before `draft.begin` | yes |
+| `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | yes |
 
 A field with `secure: true` (a password field) is refused, and its value is never read.
 
@@ -154,18 +154,21 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `agent.run` | A goal, the tools it may use, budgets | A task id; progress arrives as `agent.event` notifications | in progress |
-| `agent.cancel` | A task id | Stops a running task | in progress |
-| `agent.confirm` | A task id and an answer | Answers a pending confirmation (approve once, for this task, or deny) | in progress |
-| `agent.list` | Filters | Past and running tasks, from the action log | in progress |
-| `agent.get` | A task id | One task with its steps and an explanation of what it did | in progress |
-| `policy.get` | `{}` | The safety rules per app and site | in progress |
-| `policy.set` | The rules | Replaces the safety rules | in progress |
-| `policy.approvals` | `{}` | Standing approvals | in progress |
-| `policy.kill` | `{}` | Stops every agent now (the kill switch) | in progress |
-| `policy.resume` | `{}` | Allows agents to run again after a kill | in progress |
-| `browser.host.attach` | Host registration | Long-lived call from the browser extension's native host; returns when the daemon detaches it | in progress |
-| `browser.host.deliver` | An extension message | A reply or event from the extension, delivered by the native host | in progress |
+| `agent.run` | A goal, the tools it may use, budgets | A task id; progress arrives as `agent.event` notifications | yes |
+| `agent.cancel` | A task id | Stops a running task | yes |
+| `agent.confirm` | A task id and an answer | Answers a pending confirmation (approve once, for this task, or deny) | yes |
+| `agent.list` | Filters | Past and running tasks, from the action log | yes |
+| `agent.get` | A task id | One task with its steps and an explanation of what it did | yes |
+| `agent.answer` | `AgentAnswer`: a task id and the answer text | `null`; resumes a run waiting on `ask_user` | yes |
+| `policy.get` | `{}` | The safety rules per app and site | yes |
+| `policy.set` | The rules | Replaces the safety rules | yes |
+| `policy.approvals` | `{}` | Standing approvals | yes |
+| `policy.kill` | `{}` | Stops every agent now (the kill switch) | yes |
+| `policy.resume` | `{}` | Allows agents to run again after a kill | yes |
+| `policy.log.export` | `{}` | `PolicyLogExport`: the hash-chained action log as JSONL, with its chain status | yes |
+| `browser.host.attach` | Host registration | Long-lived call from the browser extension's native host; returns when the daemon detaches it | yes |
+| `browser.host.deliver` | An extension message | A reply or event from the extension, delivered by the native host | yes |
+| `browser.status` | `{}` | `BrowserStatus`: whether the extension is connected, its origin and host version, and the browser tools registered for the agent | yes |
 
 ### Proactive cards and brief (milestone M5)
 
@@ -188,12 +191,12 @@ Status: being wired in (wave W). The names are planned; parameters and results a
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `plugins.list` | `{}` | Installed plugins | in progress |
-| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | in progress |
-| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | in progress |
-| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | in progress |
-| `plugins.remove` | A plugin | Uninstalls it | in progress |
-| `plugins.enable` | A plugin and on or off | Turns it on or off | in progress |
+| `plugins.list` | `{}` | Installed plugins | yes |
+| `plugins.inspect` | A plugin | Its manifest, the capabilities it asks for and its signature status | yes |
+| `plugins.install` | A local `.nuggetplugin` path | The capabilities to approve | yes |
+| `plugins.approve` | A plugin and its capabilities | Approves them for this plugin version | yes |
+| `plugins.remove` | A plugin | Uninstalls it | yes |
+| `plugins.enable` | A plugin and on or off | Turns it on or off | yes |
 
 ## Notifications
 
@@ -212,9 +215,10 @@ Being wired in (wave W); the names are planned and the parameters not final:
 <!-- check-refs: ipc.notifications -->
 | Notification | Params | Sent when | Daemon |
 |---|---|---|---|
-| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | in progress |
+| `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | yes |
+| `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) | yes |
 | `cards.changed` | Not final | The set of suggestion cards changed | in progress |
-| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | in progress |
+| `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | yes |
 
 ## Errors
 

@@ -72,10 +72,7 @@ use super::{Feature, FeatureContext, section};
 use crate::daemon::{State, blocking};
 use voice::SharedVoice;
 
-/// Sent by the desktop the moment the trigger fires, before the full accessibility read.
-/// Params: a (partial) [`DraftContext`]. Result: `{"provider", "locality", "retrieval"}`, or
-/// `null` when drafting would be refused.
-pub(crate) const DRAFT_PREWARM: &str = "draft.prewarm";
+use nugget_core::ipc::method::DRAFT_PREWARM;
 
 const METHODS: &[&str] = &[
     method::DRAFT_BEGIN,

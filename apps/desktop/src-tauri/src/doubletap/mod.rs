@@ -29,9 +29,7 @@ use settings::DoubleTapSettings;
 pub const OVERLAY_LABEL: &str = "doubletap-overlay";
 /// The event carrying an `OverlayView` to the overlay window.
 pub const OVERLAY_EVENT: &str = "doubletap:overlay";
-/// Daemon notification/method sent the moment the trigger fires (defined by the daemon's draft
-/// feature; not part of `nugget_core::ipc`).
-pub const DRAFT_PREWARM: &str = "draft.prewarm";
+pub use nugget_core::ipc::method::DRAFT_PREWARM;
 /// The overlay's size in logical pixels.
 pub const OVERLAY_SIZE: (f64, f64) = (440.0, 200.0);
 
