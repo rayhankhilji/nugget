@@ -1,6 +1,6 @@
 /**
- * Finds user-visible text that bypasses the catalog, for `i18n.test.ts` (and `node`-free use in
- * Vitest only: it reads files through the TypeScript compiler API).
+ * Finds user-visible text that bypasses the catalog (used by `lint.test.ts`; it parses with the
+ * TypeScript compiler API, so it is test-only and never bundled).
  *
  * Flags, in `.tsx` files:
  * - JSX text containing a letter (`<p>Hello</p>`)
@@ -9,8 +9,9 @@
  *   more words starting with a capital, or one capitalised word ending in `.`, `…`, `!` or `?`.
  *
  * Text made only of symbols, digits and punctuation (`·`, `–`, `→`) is fine. A line containing
- * `i18n-ignore` (or the line after a comment containing it) is skipped: use it for brand names,
- * code samples and the like, with a reason.
+ * `i18n-ignore` (or the line after a comment containing it) is skipped, as is everything between
+ * `i18n-ignore-block` and `i18n-ignore-end`: use them for brand names, code samples and the like,
+ * with a reason.
  */
 import ts from "typescript";
 
@@ -53,7 +54,14 @@ export function looksLikeProse(s: string): boolean {
 function ignored(sf: ts.SourceFile, node: ts.Node): boolean {
   const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
   const lines = sf.text.split("\n");
-  return Boolean(lines[line]?.includes("i18n-ignore") || lines[line - 1]?.includes("i18n-ignore"));
+  const marker = /i18n-ignore(?!-end)/;
+  if (marker.test(lines[line] ?? "") || marker.test(lines[line - 1] ?? "")) return true;
+  // Inside an `i18n-ignore-block` … `i18n-ignore-end` region.
+  for (let i = line; i >= 0; i--) {
+    if (lines[i]?.includes("i18n-ignore-end")) return false;
+    if (lines[i]?.includes("i18n-ignore-block")) return true;
+  }
+  return false;
 }
 
 export function lintSource(file: string, source: string): Finding[] {

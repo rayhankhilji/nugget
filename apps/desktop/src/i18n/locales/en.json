@@ -159,7 +159,7 @@
   "onboarding.source.later": "You can add and remove sources any time on the Sources page.",
   "onboarding.perm.heading": "Permissions, explained",
   "onboarding.perm.lead": "Double Tap drafts a reply right where you're typing. To do that, your system has to let Nugget read the text field you're in and type into it. Nothing is requested now: you'll be asked the first time you use Double Tap, and you can say no.",
-  "onboarding.perm.yourSystem": "On this computer",
+  "onboarding.perm.yourSystem": "On this computer: {os}",
   "onboarding.perm.otherSystems": "Other systems",
   "onboarding.perm.os.macos": "macOS",
   "onboarding.perm.os.windows": "Windows",

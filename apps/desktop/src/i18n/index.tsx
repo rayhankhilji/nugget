@@ -33,12 +33,13 @@ export const LOCALES: readonly LocaleInfo[] = [
   { code: "es", name: "Español", dir: "ltr" },
   { code: "de", name: "Deutsch", dir: "ltr" },
   { code: "fr", name: "Français", dir: "ltr" },
-  { code: "pt-BR", name: "Português (Brasil)", dir: "ltr" }, // i18n-ignore (endonym)
+  { code: "pt-BR", name: "Português (Brasil)", dir: "ltr" },
   { code: "zh-CN", name: "简体中文", dir: "ltr" },
   { code: "ja", name: "日本語", dir: "ltr" },
   { code: "hi", name: "हिन्दी", dir: "ltr" },
   { code: "ar", name: "العربية", dir: "rtl", stub: true },
 ];
+// i18n-ignore-end
 
 export const DEFAULT_LOCALE = "en";
 const STORAGE_KEY = "nugget.locale";

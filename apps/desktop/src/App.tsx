@@ -12,6 +12,9 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
+import { Onboarding } from "./onboarding/Onboarding";
+import { SidebarSettings } from "./onboarding/SidebarSettings";
+import { shouldShowOnboarding } from "./onboarding/machine";
 
 const PAGES: { id: PageId; label: MessageKey }[] = [
   { id: "chat", label: "app.nav.chat" },
@@ -43,6 +46,8 @@ export function App() {
   const t = useT();
   const [page, setPage] = useState<PageId>(initialPage);
   const [conn, setConn] = useState<Connection>(null);
+  const [onboarding, setOnboarding] = useState(shouldShowOnboarding);
+  const endOnboarding = useCallback(() => setOnboarding(false), []);
   const mainRef = useRef<HTMLElement>(null);
 
   const go = useCallback((id: PageId) => {
@@ -92,6 +97,8 @@ export function App() {
 
   const current = PAGES.find((p) => p.id === page) ?? PAGES[0]!;
 
+  if (onboarding) return <Onboarding connected={conn?.connected === true} onExit={endOnboarding} />;
+
   return (
     <div className="shell">
       <a className="skip-link" href="#main">
@@ -119,6 +126,7 @@ export function App() {
           </ul>
         </nav>
         <ConnectionPill conn={conn} />
+        <SidebarSettings onSetup={() => setOnboarding(true)} />
       </aside>
       <main id="main" ref={mainRef} tabIndex={-1} aria-label={t(current.label)}>
         {conn === null ? (
