@@ -27,6 +27,8 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         // Driven from `updater.rs` only; the webview has no `updater:` permission.
         .plugin(tauri_plugin_updater::Builder::new().build())
+        // Driven from `commands::notify` only; the webview has no `notification:` permission.
+        .plugin(tauri_plugin_notification::init())
         .manage(daemon::Daemon::new())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
@@ -62,6 +64,16 @@ fn main() {
             commands::mcp_clients_revoke,
             commands::open_url,
             commands::pick_folders,
+            commands::cards_list,
+            commands::cards_feedback,
+            commands::cards_preview,
+            commands::cards_execute,
+            commands::brief_get,
+            commands::proactive_metrics,
+            commands::proactive_refresh,
+            commands::reminders_list,
+            commands::notify,
+            commands::open_mailto,
             updater::updates_status,
             updater::updates_set_settings,
             updater::updates_check,

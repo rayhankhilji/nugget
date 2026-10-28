@@ -12,11 +12,14 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
+import { TodayPage } from "./pages/Today";
+import { startProactiveNotifications } from "./proactiveNotifications";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { shouldShowOnboarding } from "./onboarding/machine";
 
 const PAGES: { id: PageId; label: MessageKey }[] = [
+  { id: "today", label: "app.nav.today" },
   { id: "chat", label: "app.nav.chat" },
   { id: "search", label: "app.nav.search" },
   { id: "knowledge", label: "app.nav.knowledge" },
@@ -36,7 +39,7 @@ function initialPage(): PageId {
   } catch {
     /* storage unavailable */
   }
-  return "chat";
+  return "today";
 }
 
 /** `null` while the first connection attempt is in flight. */
@@ -47,7 +50,10 @@ export function App() {
   const [page, setPage] = useState<PageId>(initialPage);
   const [conn, setConn] = useState<Connection>(null);
   const [onboarding, setOnboarding] = useState(shouldShowOnboarding);
-  const endOnboarding = useCallback(() => setOnboarding(false), []);
+  const endOnboarding = useCallback(() => {
+    setOnboarding(false);
+    setPage("today");
+  }, []);
   const mainRef = useRef<HTMLElement>(null);
 
   const go = useCallback((id: PageId) => {
@@ -77,6 +83,8 @@ export function App() {
     const t = window.setInterval(() => void refreshConnection(), 5000);
     return () => window.clearInterval(t);
   }, [conn?.connected, refreshConnection]);
+
+  useEffect(() => startProactiveNotifications(), []);
 
   useEvent(events.onConnection, setConn);
   useEvent(events.onNavigate, (p) => {
@@ -143,6 +151,8 @@ export function App() {
 
 function Page({ id }: { id: PageId }) {
   switch (id) {
+    case "today":
+      return <TodayPage />;
     case "chat":
       return <ChatPage />;
     case "search":
