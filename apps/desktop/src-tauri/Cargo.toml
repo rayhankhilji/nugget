@@ -26,6 +26,9 @@ tauri = { version = "2", features = ["tray-icon"] }
 # Pinned to the last releases on the Tauri 2.11 line (newer ones need tauri 2.12 and Rust 1.90).
 tauri-plugin-opener = "=2.5.5"
 tauri-plugin-dialog = "=2.7.3"
+# Signed self-update (minisign). 2.12.0 is the last release that accepts tauri 2.11 and Rust 1.88;
+# 2.13+ needs tauri 2.12 and Rust 1.90. Driven only from Rust (`updater.rs`), never the webview.
+tauri-plugin-updater = "=2.12.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [lints]

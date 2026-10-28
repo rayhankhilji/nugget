@@ -1,4 +1,4 @@
-//! Tray / menu-bar icon: Open, Status, Quit, plus a live "running / not running" line.
+//! Tray / menu-bar icon: Open, Status, Updates, Quit, plus a live "running / not running" line.
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -7,17 +7,20 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::event;
 
 const TRAY_ID: &str = "nugget";
+const UPDATES_LABEL: &str = "Updates…";
 
 /// Present in app state only when the tray was created; the window then hides on close
 /// instead of quitting.
 pub struct Tray<R: Runtime> {
     state_line: MenuItem<R>,
+    update: MenuItem<R>,
 }
 
 pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
     let state_line = MenuItem::with_id(app, "state", "Nugget: checking…", false, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open Nugget", true, None::<&str>)?;
     let status = MenuItem::with_id(app, "status", "Status", true, None::<&str>)?;
+    let update = MenuItem::with_id(app, "update", UPDATES_LABEL, true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Nugget", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -26,6 +29,7 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
             &PredefinedMenuItem::separator(app)?,
             &open,
             &status,
+            &update,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -37,7 +41,8 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, e| match e.id().as_ref() {
             "open" => show_main(app, None),
-            "status" => show_main(app, Some("status")),
+            // The update settings panel lives on the Status page.
+            "status" | "update" => show_main(app, Some("status")),
             "quit" => app.exit(0),
             _ => {}
         })
@@ -56,7 +61,7 @@ pub fn build<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<()> {
         builder = builder.icon(icon.clone());
     }
     builder.build(app)?;
-    app.manage(Tray { state_line });
+    app.manage(Tray { state_line, update });
     Ok(())
 }
 
@@ -88,5 +93,17 @@ pub fn set_connected<R: Runtime>(app: &AppHandle<R>, connected: bool) {
     }
     if let Some(t) = app.try_state::<Tray<R>>() {
         let _ = t.state_line.set_text(text);
+    }
+}
+
+/// Show "Update available: vX" in the menu (it opens the panel with the release notes), or the
+/// plain "Updates…" item.
+pub fn set_update<R: Runtime>(app: &AppHandle<R>, version: Option<&str>) {
+    if let Some(t) = app.try_state::<Tray<R>>() {
+        let text = version.map_or_else(
+            || UPDATES_LABEL.to_owned(),
+            |v| format!("Update available: {v}…"),
+        );
+        let _ = t.update.set_text(text);
     }
 }

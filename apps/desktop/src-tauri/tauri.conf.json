@@ -27,15 +27,65 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "msi",
+      "appimage",
+      "deb",
+      "rpm"
+    ],
     "category": "Productivity",
     "shortDescription": "Local-first personal AI",
     "icon": [
       "icons/32x32.png",
+      "icons/64x64.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Nugget contributors",
+    "copyright": "Copyright Nugget contributors. Licensed under Apache-2.0.",
+    "license": "Apache-2.0",
+    "homepage": "https://github.com/rayhankhilji/nugget",
+    "longDescription": "Nugget is a local-first personal AI. A background service (nuggetd) keeps your knowledge on this device; the desktop app talks to it over local IPC.",
+    "linux": {
+      "deb": {
+        "section": "utils",
+        "depends": []
+      },
+      "rpm": {
+        "release": "1"
+      },
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "hardenedRuntime": true,
+      "dmg": {}
+    },
+    "windows": {
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "../../../packaging/windows/installer-hooks.nsh"
+      },
+      "wix": {}
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

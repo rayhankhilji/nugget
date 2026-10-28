@@ -16,6 +16,7 @@ import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
 import { formatDuration, formatLatency, formatRelative, LOCALITY_LABEL, SOURCE_KIND_LABEL, TIER_LABEL } from "../format";
 import { Badge, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { UpdateSettings } from "../components/UpdateSettings";
 
 export function StatusPage() {
   const status = useAsync(api.status);
@@ -129,6 +130,7 @@ export function StatusPage() {
       <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
       <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
       <KnowledgeCard data={knowledge.data} error={knowledge.error} loading={knowledge.loading} onRetry={knowledge.reload} />
+      <UpdateSettings />
 
       <h2>Connection</h2>
       <p className="muted small">

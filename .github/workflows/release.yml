@@ -1,0 +1,394 @@
+name: Release
+
+# How releases work (details and the key ceremony: docs/release.md):
+#
+# 1. A maintainer pushes an annotated tag `vX.Y.Z[-pre]`. Its message is the release notes.
+# 2. `build` makes the installers on each OS. OS code signing (Apple, Authenticode) uses the
+#    `release-build` environment's secrets and is skipped, with a warning, when they are absent.
+#    Build jobs never see the updater key.
+# 3. `sign` runs in the `release` environment, which requires a second maintainer's approval.
+#    Only that job can read the updater (minisign) key. It signs the update payloads, writes
+#    latest.json, SHA256SUMS, SBOMs and provenance attestations, and creates a DRAFT release.
+# 4. A maintainer reviews the draft and publishes it by hand. The `release: published` event
+#    then moves the channel feeds (`updater-feed` release: beta.json, and stable.json for
+#    non-prereleases) that installed apps check. Nothing reaches users before step 4.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+  release:
+    types: [published]
+  # Dry run: build unsigned bundles from any ref; nothing is signed or released.
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    if: github.event_name != 'release'
+    runs-on: ${{ matrix.os }}
+    # OS signing secrets live in this environment, which only `v*` tags may use. Dry runs get none.
+    environment: ${{ github.event_name == 'push' && 'release-build' || '' }}
+    permissions:
+      contents: read
+    timeout-minutes: 120
+    # Linux arm64 runners are newer; a failure there must not hold back the other platforms.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin, bundles: "app,dmg", arch: aarch64, experimental: false }
+          - { os: macos-15-intel, target: x86_64-apple-darwin, bundles: "app,dmg", arch: x64, experimental: false }
+          - { os: windows-2022, target: x86_64-pc-windows-msvc, bundles: "nsis,msi", arch: x64, experimental: false }
+          # 22.04 for an older glibc baseline, so the packages run on more distributions.
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, bundles: "appimage,deb,rpm", arch: amd64, experimental: false }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, bundles: "appimage,deb,rpm", arch: arm64, experimental: true }
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Reproducibility: timestamps come from the tagged commit, paths are not embedded.
+      - name: Deterministic build environment
+        shell: bash
+        run: |
+          {
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+            echo "RUSTFLAGS=--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$HOME/.cargo=/cargo"
+          } >> "$GITHUB_ENV"
+
+      - name: Check the tag matches the app version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          app=$(python3 -c "import json;print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          if [ "v$app" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match tauri.conf.json version $app"
+            exit 1
+          fi
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file rpm xdg-utils \
+            libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add ${{ matrix.target }}
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      # No cache restore on release builds: every byte comes from this run.
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        shell: bash
+        run: packaging/scripts/stage-sidecar.sh ${{ matrix.target }}
+
+      # Each signing step writes a Tauri config fragment; the build merges whichever exist.
+      - name: macOS signing setup
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        # Tauri treats a variable that is set but empty as configured, so each one is exported
+        # to the build step only when its secret exists.
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ]; then
+            echo "::warning::No Apple certificate: the app is ad-hoc signed and not notarized."
+            echo '{"bundle":{"macOS":{"signingIdentity":"-"}}}' > "$RUNNER_TEMP/signing.json"
+            exit 0
+          fi
+          echo '{}' > "$RUNNER_TEMP/signing.json"
+          {
+            echo "APPLE_CERTIFICATE=$APPLE_CERTIFICATE"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD"
+            if [ -n "$APPLE_SIGNING_IDENTITY" ]; then echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY"; fi
+          } >> "$GITHUB_ENV"
+          if [ -n "$APPLE_API_KEY_P8" ] && [ -n "$APPLE_API_ISSUER" ] && [ -n "$APPLE_API_KEY_ID" ]; then
+            key="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
+            {
+              echo "APPLE_API_ISSUER=$APPLE_API_ISSUER"
+              echo "APPLE_API_KEY=$APPLE_API_KEY_ID"
+              echo "APPLE_API_KEY_PATH=$key"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::warning::No App Store Connect API key: the app is signed but not notarized."
+          fi
+
+      - name: Windows signing setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'signing.json'
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Output '::warning::No Authenticode certificate: the installers are unsigned.'
+            '{}' | Out-File -FilePath $out -Encoding utf8NoBOM
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx
+          @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint } } } |
+            ConvertTo-Json -Depth 4 | Out-File -FilePath $out -Encoding utf8NoBOM
+
+      - name: Linux signing setup
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo '{}' > "$RUNNER_TEMP/signing.json"
+
+      - name: Build bundles
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          # Public key only: the app verifies updates against it. Set as a repository variable.
+          NUGGET_UPDATER_PUBKEY: ${{ github.event_name == 'push' && vars.NUGGET_UPDATER_PUBKEY || '' }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          version=$(python3 -c "import json;print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
+          bundle="target/${{ matrix.target }}/release/bundle"
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          case "${{ runner.os }}" in
+            macOS)
+              cp "$bundle"/dmg/*.dmg "$out/"
+              # The updater payload: the signed (and stapled) .app as a tarball.
+              tar -C "$bundle/macos" --uid 0 --gid 0 --numeric-owner -czf \
+                "$out/Nugget_${version}_${{ matrix.arch }}.app.tar.gz" Nugget.app ;;
+            Windows)
+              cp "$bundle"/nsis/*-setup.exe "$bundle"/msi/*.msi "$out/" ;;
+            Linux)
+              cp "$bundle"/appimage/*.AppImage "$bundle"/deb/*.deb "$bundle"/rpm/*.rpm "$out/" ;;
+          esac
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bundle-${{ matrix.target }}
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: error
+          retention-days: 14
+
+  sbom:
+    name: SBOMs
+    if: github.event_name != 'release'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - name: Rust SBOMs (CycloneDX)
+        run: |
+          cargo install --locked cargo-cyclonedx --version 0.5.9
+          cargo cyclonedx --format json --spec-version 1.5 \
+            --manifest-path crates/nuggetd/Cargo.toml --override-filename nuggetd.cdx
+          cargo cyclonedx --format json --spec-version 1.5 \
+            --manifest-path apps/desktop/src-tauri/Cargo.toml --override-filename nugget-desktop.cdx
+          mkdir -p "$RUNNER_TEMP/sbom"
+          cp crates/nuggetd/nuggetd.cdx.json apps/desktop/src-tauri/nugget-desktop.cdx.json "$RUNNER_TEMP/sbom/"
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Frontend SBOM (CycloneDX)
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          npx --yes @cyclonedx/cdxgen@12.9.0 -t pnpm --required-only --spec-version 1.5 \
+            -o "$RUNNER_TEMP/sbom/nugget-desktop-frontend.cdx.json" .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/sbom/
+          if-no-files-found: error
+          retention-days: 14
+
+  sign:
+    name: Sign updates and draft the release
+    needs: [build, sbom]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-22.04
+    # Required reviewers (a second maintainer, self-review prevented) and a `v*` tag rule.
+    # The updater private key exists only in this environment's secrets.
+    environment: release
+    permissions:
+      contents: write # create the draft release
+      id-token: write # provenance attestation (Sigstore)
+      attestations: write
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      # Only the locked Tauri CLI is needed (`tauri signer sign`); no install scripts run in the
+      # job that holds the key.
+      - name: Install the Tauri CLI
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+
+      - name: Sign update payloads
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          NUGGET_UPDATER_PUBKEY: ${{ vars.NUGGET_UPDATER_PUBKEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$NUGGET_UPDATER_PUBKEY" ]; then
+            echo "::warning::No updater key: the release is drafted without signed updates; installed apps will not offer it."
+            exit 0
+          fi
+          python3 ../../packaging/scripts/updater_manifest.py payloads "$RUNNER_TEMP/dist" |
+            while read -r f; do pnpm exec tauri signer sign "$f"; done
+
+      - name: Release notes, manifest and checksums
+        shell: bash
+        run: |
+          dist="$RUNNER_TEMP/dist"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" | sed '/-----BEGIN PGP SIGNATURE-----/,$d' > "$RUNNER_TEMP/notes.md"
+          if ls "$dist"/*.sig >/dev/null 2>&1; then
+            python3 packaging/scripts/updater_manifest.py manifest "$dist" \
+              --version "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md" \
+              --pub-date "$(git log -1 --format=%cI "$GITHUB_REF_NAME")" \
+              --base-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME" \
+              --out "$dist/latest.json"
+          fi
+          python3 packaging/scripts/updater_manifest.py checksums "$dist"
+          cat "$dist/SHA256SUMS"
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: sbom
+          path: ${{ runner.temp }}/dist/sbom
+
+      - name: SBOM checksums
+        run: |
+          cd "$RUNNER_TEMP/dist"
+          for f in sbom/*.json; do mv "$f" .; done
+          rmdir sbom
+          python3 "$GITHUB_WORKSPACE/packaging/scripts/updater_manifest.py" checksums .
+
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-checksums: ${{ runner.temp }}/dist/SHA256SUMS
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag $prerelease \
+            --title "Nugget ${GITHUB_REF_NAME#v}" --notes-file "$RUNNER_TEMP/notes.md" \
+            "$RUNNER_TEMP"/dist/*
+
+  channels:
+    name: Move the update channels
+    # A maintainer published a release (drafts never trigger this).
+    if: github.event_name == 'release' && !github.event.release.draft
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # upload to the rolling `updater-feed` release
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Update beta.json and stable.json
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/feed"
+          mkdir -p "$work" && cd "$work"
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p latest.json; then
+            echo "::warning::$TAG has no latest.json (unsigned release); channels unchanged."
+            exit 0
+          fi
+          if ! gh release view updater-feed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create updater-feed --repo "$GITHUB_REPOSITORY" --prerelease \
+              --target "${{ github.event.repository.default_branch }}" --title "Update feed" \
+              --notes "Channel manifests read by installed Nugget apps. Moved automatically when a release is published; do not edit by hand."
+          fi
+          channels="beta"
+          [ "$PRERELEASE" = "true" ] || channels="beta stable"
+          for ch in $channels; do
+            rm -f current.json
+            gh release download updater-feed --repo "$GITHUB_REPOSITORY" -p "$ch.json" -O current.json 2>/dev/null || true
+            if [ -n "$(python3 "$GITHUB_WORKSPACE/packaging/scripts/updater_manifest.py" promote latest.json current.json)" ]; then
+              cp latest.json "$ch.json"
+              gh release upload updater-feed --repo "$GITHUB_REPOSITORY" --clobber "$ch.json"
+              echo "$ch -> $TAG"
+            fi
+          done
