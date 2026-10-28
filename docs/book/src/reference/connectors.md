@@ -1,8 +1,8 @@
 # Connector settings
 
 The `settings` object of each source kind, as sent in `sources.add` and `sources.update` and returned in
-`SourceInfo`. Unknown keys are rejected. Settings never contain secrets: passwords and OAuth client
-secrets go through `sources.secret.set` and live in the OS keychain.
+`SourceInfo`. Unknown keys are rejected. Settings never contain secrets: passwords, API tokens and
+OAuth client secrets go through `sources.secret.set` and live in the OS keychain.
 
 Each connector also publishes its settings as a JSON Schema (draft 2020-12), which the desktop app
 uses to build its forms.
@@ -119,7 +119,157 @@ Sync: discovery through `current-user-principal` and `calendar-home-set`, then R
 `sync-collection` per calendar, or a `getctag` check plus an ETag listing when the server has no sync
 support. Polled every 5 minutes. Item keys are the event's absolute href path.
 
-## Planned kinds
+## Kinds being wired in (wave W)
 
-`nugget-connector-microsoft` (Outlook mail, calendar, OneDrive) and `nugget-connector-saas` (Slack,
-Notion, GitHub, Linear) are stubs; they register no kinds yet.
+> **Status: being wired in (wave W).** These kinds are implemented in `nugget-connector-microsoft`,
+> `nugget-connector-saas` and `nugget-plugin`, and are being registered in `nuggetd` in this wave.
+> This build's `sources.add` refuses them. Their tables are compared with the connector crates, not with the
+> daemon's registry.
+
+<!-- check-refs: connector.kinds -->
+| Kind | Display name | Sign-in | Keychain accounts |
+|---|---|---|---|
+| `outlook` | Outlook mail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` (optional) |
+| `outlook-calendar` | Outlook calendar | OAuth | as for `outlook` |
+| `onedrive` | OneDrive | OAuth | as for `outlook` |
+| `slack` | Slack | password (pasted token) | `password:<source id>` |
+| `notion` | Notion | password (pasted token) | `password:<source id>` |
+| `github` | GitHub | password (pasted token), or the device flow with `client_id` | `password:<source id>`, `oauth:<source id>` (device-flow tokens) |
+| `linear` | Linear | password (pasted API key), or OAuth with `client_id` | `password:<source id>`, `oauth:<source id>`, `oauth_client_secret:<source id>` (optional) |
+
+Plugin connectors register as `plugin:<plugin id>`, with the display name from the plugin's manifest,
+no sign-in or a password, and their own secrets under `plugin:<plugin id>:<name>` (see
+[below](#pluginplugin-id)).
+
+For the SaaS kinds the token is looked up in this order: the `token_env` environment variable if that
+setting is present, then `oauth:<source id>`, then `password:<source id>`. Nothing found is
+`needs_auth`.
+
+## `outlook`
+
+Scopes `offline_access`, `User.Read`, `Mail.Read`. See [Microsoft 365](../guide/sources-microsoft.md)
+for registering the app.
+
+<!-- check-refs: connector.outlook -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `client_id` | string | required | Application (client) ID of your own Microsoft Entra app registration (public client, redirect URI `http://localhost`) |
+| `client_secret` | string | none | Optional: public clients need none. Set it with `sources.secret.set`, never in settings; the daemon injects it when it builds the connector |
+| `tenant` | string | `common` | `common` (work, school and personal accounts), `organizations`, `consumers`, a tenant id or a verified domain. Anything else is refused |
+| `account_hint` | string | none | Email address to pre-select on the sign-in screen |
+| `folders` | array of strings, at most 100 | `["inbox", "sentitems"]` | Well-known folder names (`inbox`, `sentitems`, `archive`, ...) or folder ids |
+| `window_days` | integer, 1 to 3650 | `365` | How far back to index mail on first sync (and on a resync) |
+
+Sync: per-folder `messages/delta` over the window, then delta links every 60 s. Each message is fetched
+as MIME; messages over 35 MiB and drafts are skipped. An expired delta token (`410`,
+`syncStateNotFound`) triggers a resync. Item keys are `<folder>/<immutable message id>`.
+
+## `outlook-calendar`
+
+Scopes `offline_access`, `User.Read`, `Calendars.Read`.
+
+<!-- check-refs: connector.outlook_calendar -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `client_id` | string | required | As for `outlook` |
+| `client_secret` | string | none | As for `outlook` |
+| `tenant` | string | `common` | As for `outlook` |
+| `account_hint` | string | none | As for `outlook` |
+| `past_days` | integer, 0 to 3650 | `365` | Days of past events |
+| `future_days` | integer, 0 to 3650 | `365` | Days of future events. `past_days` and `future_days` cannot both be `0` |
+
+Sync: `calendarView/delta` over the window (recurring series expanded), then delta links every
+5 minutes. When the window has slid by more than 7 days, the next pass lists the current window. Item
+keys are event ids.
+
+## `onedrive`
+
+Scopes `offline_access`, `User.Read`, `Files.Read`.
+
+<!-- check-refs: connector.onedrive -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `client_id` | string | required | As for `outlook` |
+| `client_secret` | string | none | As for `outlook` |
+| `tenant` | string | `common` | As for `outlook` |
+| `account_hint` | string | none | As for `outlook` |
+| `include_folders` | array of paths, at most 200 | `[]` (the whole drive) | Folder paths from the drive root, for example `/Documents/Work`. Case-insensitive |
+| `exclude_folders` | array of paths, at most 200 | `[]` | Folder paths never indexed; wins over `include_folders` |
+| `max_file_mb` | integer, 1 to 500 | `25` | Larger files are skipped |
+
+Sync: `drive/root/delta`, polled every 5 minutes. Supported types: `md`, `markdown`, `txt`, `text`,
+`log`, `rst`, `org`, `html`, `htm`, `csv`, `tsv`, `json`, `eml`, `ics`, `pdf`, `docx`, `xlsx`, `pptx`.
+Downloads use the pre-authenticated link without the bearer token, over HTTPS, from Microsoft download
+hosts only. Item keys are drive item ids.
+
+## `slack`
+
+<!-- check-refs: connector.slack -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `token_env` | environment variable name | none | Read the token from this variable instead of the keychain |
+| `conversations` | array of strings, at most 1000 | every conversation you are in | Channel ids (`C…`, `G…`, `D…`) or names (`general`, `#general`) |
+| `include_dms` | bool | `true` | With no `conversations`: include DMs and group DMs |
+| `include_channels` | bool | `true` | With no `conversations`: include public and private channels you are a member of |
+| `max_conversations` | integer, 1 to 1000 | `100` | Most conversations synced |
+| `window_days` | integer, 1 to 3650 | `90` | How far back to index messages on first sync |
+| `recheck_days` | integer, 0 to 30 | `3` | Days re-read every 6 hours to pick up edits, deletions and thread replies |
+
+Token: a user token (`xoxp-…`) with `channels:history`, `groups:history`, `im:history`,
+`mpim:history`, `channels:read`, `groups:read`, `im:read`, `mpim:read` and `users:read`. Sync: one
+`conversations.history` probe per conversation and pass, every 5 minutes. Item keys are
+`<channel>/day/<YYYY-MM-DD>` (top-level messages of one UTC day) and `<channel>/thread/<ts>`.
+
+## `notion`
+
+<!-- check-refs: connector.notion -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `token_env` | environment variable name | none | As for `slack` |
+| `include_databases` | bool | `true` | Index databases shared with the integration, and their rows |
+| `max_pages` | integer, 1 to 100000 | `5000` | The most recently edited pages kept in the index |
+| `max_depth` | integer, 1 to 12 | `6` | How deeply nested blocks are rendered |
+
+Token: an internal integration secret with the **Read content** capability. API version `2022-06-28`.
+Sync: `search` by `last_edited_time` every 5 minutes, and a full listing every 6 hours. Item keys are
+`page/<id>` and `database/<id>`.
+
+## `github`
+
+<!-- check-refs: connector.github -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `token_env` | environment variable name | none | As for `slack` |
+| `client_id` | string | none | Client ID of your own OAuth App (or GitHub App) with the device flow enabled. Enables `sources.auth.begin` |
+| `client_secret` | string | none | Only for refreshing expiring GitHub App user tokens. Not settable in this build |
+| `repos` | array of `owner/name`, at most 100 | everything involving you | Repositories to index |
+| `all_activity` | bool | `false` | With `repos`: index everything in them, not only what involves you. Requires `repos` |
+| `include_discussions` | bool | `true` | Also index discussions |
+| `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
+
+Token: a fine-grained token with read-only Issues, Pull requests, Discussions and Metadata. The device
+flow requests `repo` and `read:discussion`. Sync: GraphQL `search` with `updated:>=` every 10 minutes,
+and an ids-only listing daily. Item keys are `issue/<owner>/<repo>/<number>` (issues and pull requests)
+and `discussion/<owner>/<repo>/<number>`.
+
+## `linear`
+
+<!-- check-refs: connector.linear -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `token_env` | environment variable name | none | As for `slack` |
+| `client_id` | string | none | Client ID of your own Linear OAuth application (redirect URI `http://127.0.0.1`). Enables `sources.auth.begin` (PKCE, scope `read`) |
+| `client_secret` | string | none | Optional with PKCE. The connector reads it from `oauth_client_secret:<source id>`, which this build has no way to set |
+| `include` | array of `assigned`, `created`, `subscribed` | all three | Which of your issues to index. Must not be empty |
+| `teams` | array of team keys, at most 200 | every team | For example `["ENG"]` |
+| `window_days` | integer, 1 to 3650 | `365` | How far back to index on first sync |
+
+Sync: GraphQL `issues` with `updatedAt` filters every 5 minutes (archived issues included, so they
+become deletes), and an ids-only listing every 6 hours. Item keys are `issue/<uuid>`.
+
+## `plugin:<plugin id>`
+
+A plugin connector's settings are whatever JSON object its manifest's `settings_schema` describes
+(any object when it declares none); the plugin validates them. It is polled every
+`poll_interval_secs` from the manifest (default 1800, at least 60). See
+[Plugins](../guide/plugins.md).

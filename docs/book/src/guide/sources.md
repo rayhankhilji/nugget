@@ -13,8 +13,27 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`imap`](sources-imap-caldav.md) | Any IMAP mailbox over TLS | Password or app password | IMAP IDLE on the inbox, plus polling |
 | [`caldav`](sources-imap-caldav.md) | Any CalDAV calendar over https | Password or app password | Polled every 5 min (`sync-collection`) |
 
-Microsoft 365, Slack, Notion, GitHub, Linear and the macOS-only sources (Apple Notes, Messages, Mail)
-are planned and not available yet.
+> **Status: being wired in (wave W).** The kinds below are implemented in their connector crates and
+> are being registered in the daemon and the Sources wizard in this wave. Until then `sources.add`
+> refuses them.
+
+| Kind | What it indexes | Sign-in | How changes arrive |
+|---|---|---|---|
+| [`outlook`](sources-microsoft.md) | Outlook / Exchange Online mail, read-only | Your own Microsoft Entra app (client id) | Polled every 60 s (Graph delta queries) |
+| [`outlook-calendar`](sources-microsoft.md) | Your default Outlook calendar, read-only | Your own Microsoft Entra app | Polled every 5 min (Graph delta queries) |
+| [`onedrive`](sources-microsoft.md) | Documents in OneDrive, read-only | Your own Microsoft Entra app | Polled every 5 min (Graph delta queries) |
+| [`slack`](sources-saas.md#slack) | Your DMs and channels | Pasted user token | Polled every 5 min, recent days re-read every 6 h |
+| [`notion`](sources-saas.md#notion) | Pages and databases shared with your integration | Pasted integration secret | Polled every 5 min, full listing every 6 h |
+| [`github`](sources-saas.md#github) | Issues, pull requests and discussions involving you | Pasted token, or the device flow | Polled every 10 min, full listing daily |
+| [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | Pasted API key, or OAuth with PKCE | Polled every 5 min, full listing every 6 h |
+
+**Plugin connectors** (also being wired in, wave W) add kinds named `plugin:<plugin id>`, for example
+`plugin:dev.nugget.example.feeds` for the example feed reader. They are WebAssembly plugins you install
+and approve on the [**Plugins**](plugins.md) page; each one reaches only the hosts it declared, and its
+traffic is in the egress ledger under `sync:plugin:<plugin id>`. A plugin connector signs in with
+nothing or with a secret you set, never with OAuth.
+
+The macOS-only sources (Apple Notes, Messages, Mail) are planned and not available yet.
 
 ## What every source guarantees
 
@@ -25,8 +44,8 @@ are planned and not available yet.
   are not marked as read.
 - **Resumable.** Progress is saved only after the items before it are stored, so a crash or restart
   never skips anything; at worst a few items are re-checked.
-- **Secrets stay in the keychain.** Passwords, OAuth tokens and OAuth client secrets go to the OS
-  keychain. They never appear in `sources.toml`, logs, the audit log or IPC responses.
+- **Secrets stay in the keychain.** Passwords, API tokens, OAuth tokens and OAuth client secrets go
+  to the OS keychain. They never appear in `sources.toml`, logs, the audit log or IPC responses.
 - **Every network request is in the egress ledger**, with the feature `sync:<kind>` (for example
   `sync:gmail`).
 

@@ -285,6 +285,25 @@ fn classify(resp: Response) -> Outcome {
     }
 }
 
+/// Stops a listing that never ends: a page token the server already handed out in this loop
+/// means it is going in circles (a broken or hostile server), and the pass fails instead of
+/// spinning, re-fetching and re-checkpointing the same pages forever.
+#[derive(Default)]
+pub(crate) struct PageGuard(std::collections::HashSet<String>);
+
+impl PageGuard {
+    /// Record `token` (the next page to request); an error if it was seen before.
+    pub(crate) fn next(&mut self, token: &str, what: &str) -> Result<()> {
+        if self.0.insert(token.to_string()) {
+            Ok(())
+        } else {
+            Err(Error::Network(format!(
+                "{what}: the server repeated a page token; stopping the listing"
+            )))
+        }
+    }
+}
+
 /// `<base>/<segments...>?<query>`, with each segment percent-encoded.
 pub(crate) fn api_url(base: &str, segments: &[&str], query: &[(&str, &str)]) -> Result<Url> {
     let mut url =

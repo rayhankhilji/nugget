@@ -1282,3 +1282,59 @@ export const proactiveEvents = {
       if (n?.method === PROACTIVE_NOTIFICATION.reminderDue && isReminderView(n.params)) h(n.params);
     }),
 };
+
+// ---- W11: chat history ----
+
+/** One saved chat message (mirrors `src-tauri/src/history.rs`). */
+export interface StoredChatMessage {
+  role: "user" | "assistant";
+  text: string;
+  provider?: string | null;
+  /** How an assistant turn ended. */
+  state?: "done" | "error" | "cancelled" | null;
+  error?: string | null;
+  output_tokens?: number | null;
+  /** Sources the reply cites as `[n]`, when it came with any. */
+  citations?: Citation[] | null;
+}
+
+export interface StoredConversation {
+  id: string;
+  title: string;
+  /** Milliseconds since the epoch; set by the shell on save. */
+  updated_at: number;
+  messages: StoredChatMessage[];
+}
+
+/**
+ * Chat history is kept by the desktop shell (not the daemon) in its app data folder, as plain
+ * unencrypted JSON. Older shells lack these commands ("method not found").
+ */
+export const chatHistory = {
+  /** Most recent first. */
+  load: () => call<StoredConversation[]>("chat_history_load"),
+  save: (conversation: StoredConversation) => call<void>("chat_history_save", { conversation }),
+  remove: (id: string) => call<void>("chat_history_delete", { id }),
+  clear: () => call<void>("chat_history_clear"),
+};
+
+/** A shell without the chat history commands answers like an unknown method. */
+export function isCommandMissing(err: unknown): boolean {
+  if (isMethodNotFound(err)) return true;
+  const e = ApiError.from(err);
+  return /not found|unknown command|not allowed/i.test(e.message) && e.kind !== "rpc";
+}
+
+// ---- W11: desktop shell ----
+
+/** "Open Nugget at login" (the desktop app itself, hidden in the tray); see `autostart.rs`. */
+export interface AutostartStatus {
+  /** This platform can register a login entry. */
+  supported: boolean;
+  enabled: boolean;
+}
+
+export const autostart = {
+  get: () => call<AutostartStatus>("autostart_get"),
+  set: (enabled: boolean) => call<AutostartStatus>("autostart_set", { enabled }),
+};

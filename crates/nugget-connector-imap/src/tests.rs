@@ -644,6 +644,18 @@ async fn huge_literal_headers_are_refused_before_buffering() {
         matches!(&err, Error::Network(m) if m.contains("300000000-byte literal")),
         "{err:?}"
     );
+
+    // Leading zeros: imap-proto reads `{000…300000000}` as 300 MB too. Before, the guard gave
+    // up on digit runs over 19 characters and let async-imap size its buffer from it.
+    let mut st = mailbox_state();
+    st.raw_examine =
+        Some(b"* 1 FETCH (UID 1 BODY[] {00000000000000000000000300000000}\r\nabc".to_vec());
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let err = h.sync(None).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Network(m) if m.contains("300000000-byte literal")),
+        "{err:?}"
+    );
 }
 
 #[tokio::test]

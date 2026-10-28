@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, isMethodNotFound, type McpClientInfo, type SourceInfo } from "../api";
 import { useAsync, useNow } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { summarizeScopes } from "../mcp";
 import { ConnectAppWizard } from "../components/ConnectAppWizard";
 import { Dialog } from "../components/Dialog";
-import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { useT } from "../i18n";
 
 /** Connected AI apps: MCP clients with their scopes, plus connect and revoke. */
@@ -18,6 +18,8 @@ export function AppsPage() {
   const [revoking, setRevoking] = useState<McpClientInfo | null>(null);
   const [announce, setAnnounce] = useState("");
   const now = useNow();
+  // The revoked row (and its button) disappears; focus goes back to a stable control.
+  const connectRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (loaded.data) setClients(loaded.data);
@@ -33,7 +35,7 @@ export function AppsPage() {
         description={t("apps.description")}
         actions={
           !unavailable && (
-            <button type="button" className="btn btn-primary" onClick={() => setConnecting(true)}>
+            <button type="button" className="btn btn-primary" ref={connectRef} onClick={() => setConnecting(true)}>
               {t("apps.connect")}
             </button>
           )
@@ -48,13 +50,29 @@ export function AppsPage() {
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-          {loaded.loading && !clients && <Spinner />}
+          {loaded.loading && !clients && <Loading label={t("apps.loading")} />}
           {clients && list.length === 0 && (
-            <Empty title={t("apps.emptyTitle")}>{t("apps.emptyBody")}</Empty>
+            <EmptyState
+              title={t("apps.emptyTitle")}
+              action={
+                <button type="button" className="btn" onClick={() => setConnecting(true)}>
+                  {t("apps.connect")}
+                </button>
+              }
+            >
+              {t("apps.emptyBody")}
+            </EmptyState>
           )}
           {list.length > 0 && (
-            <div className="table-wrap" tabIndex={0} role="region" aria-label={t("apps.tableLabel")}>
+            <div
+              className={loaded.loading ? "table-wrap pg-stale" : "table-wrap"}
+              tabIndex={0}
+              role="region"
+              aria-label={t("apps.tableLabel")}
+              aria-busy={loaded.loading}
+            >
               <table>
+                <caption className="visually-hidden">{t("apps.tableLabel")}</caption>
                 <thead>
                   <tr>
                     <th scope="col">{t("apps.col.app")}</th>
@@ -135,6 +153,8 @@ export function AppsPage() {
             setClients((l) => (l ?? []).filter((c) => c.id !== revoking.id));
             setAnnounce(t("apps.announce.revoked", { name: revoking.name }));
             setRevoking(null);
+            // After the dialog has closed and restored focus to the (now removed) row.
+            window.setTimeout(() => connectRef.current?.focus(), 0);
           }}
         />
       )}

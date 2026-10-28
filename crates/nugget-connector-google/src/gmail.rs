@@ -36,7 +36,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 
-use crate::api::{GoogleApi, OAuthSettings, api_url};
+use crate::api::{GoogleApi, OAuthSettings, PageGuard, api_url};
 use crate::settings::GmailSettings;
 use crate::text::mail_headers;
 use crate::{GoogleEndpoints, RetryPolicy};
@@ -456,6 +456,10 @@ impl GmailConnector {
         let known: HashMap<ItemKey, Option<String>> = self.ctx.known.versions().await?;
         let mut seen: HashSet<String> = HashSet::new();
         let q = format!("after:{after}");
+        let mut pages = PageGuard::default();
+        if let Some(t) = &page_token {
+            pages.next(t, "gmail messages.list")?;
+        }
         loop {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -501,6 +505,7 @@ impl GmailConnector {
             drop(fetched);
             match list.next_page_token.filter(|t| !t.is_empty()) {
                 Some(t) => {
+                    pages.next(&t, "gmail messages.list")?;
                     page_token = Some(t);
                     let c = Cursor::Backfill {
                         history_id: history_id.clone(),
@@ -625,6 +630,12 @@ impl GmailConnector {
             s => return Err(Error::Other(format!("gmail messages.get: HTTP {s}"))),
         }
         let msg: Message = GoogleApi::json(&resp, "gmail messages.get")?;
+        if msg.id != id {
+            // The item key comes from the response: never let it name another message.
+            return Err(Error::Invalid(format!(
+                "gmail messages.get for {id} returned a different message"
+            )));
+        }
         if !self.indexable(&msg.label_ids) {
             return Ok(None);
         }
@@ -689,6 +700,7 @@ impl GmailConnector {
     ) -> Result<HistoryOutcome> {
         let mut page_token: Option<String> = None;
         let mut last_record = start.to_string();
+        let mut pages = PageGuard::default();
         loop {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -721,6 +733,7 @@ impl GmailConnector {
             self.apply(plan, sink, cancel).await?;
             match page.next_page_token.filter(|t| !t.is_empty()) {
                 Some(t) => {
+                    pages.next(&t, "gmail history.list")?;
                     page_token = Some(t);
                     let c = Cursor::Incremental {
                         history_id: last_record.clone(),

@@ -849,3 +849,73 @@ async fn archive_is_unsupported_without_allow_modify() {
     assert!(matches!(err, Error::Unsupported(_)));
     assert!(h.server.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn a_repeating_page_token_stops_the_listing() {
+    // history.list that hands out the same page token forever: before, the pass looped (and
+    // checkpointed) without end.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/history")))
+        .respond_with(history_page(json!([]), Some("again"), "200"))
+        .mount(&h.server)
+        .await;
+    let conn = gmail(&h, fast_retry(0));
+    let r = tokio::time::timeout(
+        Duration::from_secs(10),
+        run(
+            &conn,
+            Some(json!({"phase": "incremental", "history_id": "100"})),
+            &RecSink::default(),
+        ),
+    )
+    .await
+    .expect("history listing never ended");
+    assert!(
+        matches!(&r, Err(Error::Network(m)) if m.contains("repeated a page token")),
+        "{r:?}"
+    );
+    assert!(h.server.received_requests().await.unwrap().len() <= 3);
+
+    // Same for messages.list in the backfill.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    mount_profile(&h.server, "5").await;
+    mount_list_page(&h.server, None, &[], Some("p2")).await;
+    mount_list_page(&h.server, Some("p2"), &[], Some("p2")).await;
+    let conn = gmail(&h, fast_retry(0));
+    let r = tokio::time::timeout(
+        Duration::from_secs(10),
+        run(&conn, None, &RecSink::default()),
+    )
+    .await
+    .expect("backfill listing never ended");
+    assert!(
+        matches!(&r, Err(Error::Network(m)) if m.contains("repeated a page token")),
+        "{r:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_fetched_message_must_be_the_one_asked_for() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    mount_profile(&h.server, "5").await;
+    mount_list_page(&h.server, None, &["m1"], None).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/messages/m1")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(raw_msg(
+            "victim",
+            "3",
+            &["INBOX"],
+            "spoofed",
+        )))
+        .mount(&h.server)
+        .await;
+    let conn = gmail(&h, fast_retry(0));
+    let sink = RecSink::default();
+    let r = run(&conn, None, &sink).await;
+    assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+    assert!(sink.upserts().is_empty());
+}

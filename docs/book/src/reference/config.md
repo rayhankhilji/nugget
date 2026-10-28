@@ -8,10 +8,10 @@ local-first default there (readable only by you) and says so.
 `env:VAR` (an environment variable of the daemon) or `keychain:NAME` (an OS keychain entry, service
 `dev.nugget.Nugget`, account `provider:NAME`). A plaintext key is rejected.
 
-**Validation.** Unknown sections and unknown keys in `[models]`, `[models.selected]`, `[runtime]` and
-`[[providers]]` are errors, as are out-of-range values, duplicate provider ids and malformed model ids.
-Unknown keys inside `[ingest]` and `[retrieve]` are currently **ignored**, not rejected, so check their
-spelling against this page.
+**Validation.** Unknown sections and unknown keys in `[models]`, `[models.selected]`, `[runtime]`,
+`[mcp]` and `[[providers]]` are errors, as are out-of-range values, duplicate provider ids and
+malformed model ids. Unknown keys inside `[ingest]`, `[retrieve]`, `[knowledge]` and `[vault]` are
+currently **ignored**, not rejected, so check their spelling against this page.
 
 <!-- check-refs: config.sections -->
 | Section | What it configures |
@@ -20,7 +20,16 @@ spelling against this page.
 | `runtime` | The on-device `llama-server` runtime that `nuggetd` manages |
 | `ingest` | Indexing: extraction, chunking, triage, embeddings, scheduling |
 | `retrieve` | Search and context packing |
+| `knowledge` | The knowledge graph: extraction runs, who you are, the optional LLM extractor, entity resolution |
+| `vault` | The Markdown vault the knowledge graph is rendered into |
+| `mcp` | The MCP server for AI apps: stdio bridge and loopback HTTP |
 | `providers` | Model providers, as an array of tables (`[[providers]]`) |
+| `draft` | Double Tap drafting and the voice profile. Owned by a daemon feature; see [Feature sections](#feature-sections) |
+| `agent` | The agent runtime and computer use. Feature section |
+| `policy` | The safety policy for agent actions. Feature section |
+| `browser` | The browser extension bridge. Feature section |
+| `proactive` | Proactive cards and the morning brief. Feature section |
+| `plugins` | WebAssembly plugins. Feature section |
 
 Every key below is optional; an empty file is valid and gives the defaults (with no providers).
 
@@ -131,6 +140,98 @@ required.
 | `half_life_days` | float | `30` | Age at which the boost halves |
 | `weight` | float | `0.2` | Size of the boost for a brand-new item |
 
+## `[knowledge]`
+
+The knowledge graph: people, organisations, projects and facts extracted from your indexed items,
+every fact cited. Extraction runs after indexing settles, periodically and at start. Deterministic
+extractors (mail headers, calendar attendees, contacts) always run; the LLM extractor uses a
+synthesis-tier model on this device or your network, unless you list sources in `llm.cloud_sources`.
+Sensitive items never go to a cloud model.
+
+<!-- check-refs: config.knowledge -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Run extraction at all |
+| `interval_minutes` | integer, 0 to 10080 | `10` | Run again this often even without new items (retries LLM extraction); `0` never |
+| `debounce_ms` | integer, 0 to 600000 | `1500` | Wait this long after the last indexed change before a run |
+| `max_items_per_run` | integer, at least 1 | `500` | Items processed per run; a run that leaves items is followed by another one |
+| `max_llm_requests_per_run` | integer | `50` | LLM extraction requests per run (none while on low battery) |
+| `max_run_seconds` | integer | `120` | Wall-clock limit of one run; `0` none |
+| `me` | table | empty | Who you are, below |
+| `extra_freemail_domains` | array of strings | `[]` | Webmail domains added to the built-in list. Addresses there never produce organisations or `works_at` facts |
+| `mail_works_at_confidence` | float, 0 to 1 | `0.5` | Confidence of a `works_at` fact inferred from a work mail domain |
+| `max_correspondents` | integer | `20` | Messages with more participants than this link only the sender (mailing lists, announcements) |
+| `single_valued_predicates` | array of strings | built-in list | Predicates that hold one value at a time, so a newer fact supersedes older ones. Replaces the built-in list when not empty |
+| `llm` | table | see below | The optional LLM extractor |
+| `resolution` | table | see below | Entity resolution beyond identifiers and exact names |
+| `flush_every` | integer | `64` | Save work-queue progress at least every this many items |
+| `max_chunks_per_item` | integer | `512` | Chunks read per item at most (longer items are cut for extraction) |
+
+### `[knowledge.me]`
+
+<!-- check-refs: config.knowledge.me -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | unset | Your display name. Unset: inferred from sent mail, else `Me` |
+| `emails` | array of strings | `[]` | Your own mail addresses, so mail and calendar facts hang off your own entity |
+| `infer_from_sent` | bool | `true` | Learn further addresses from the `From` of mail in a sent folder |
+
+### `[knowledge.llm]`
+
+<!-- check-refs: config.knowledge.llm -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Use the LLM extractor when a suitable model exists |
+| `cloud_sources` | array of source ids | `[]` | Sources whose **non-sensitive** items may be sent to a cloud provider. Empty: local models only |
+| `max_input_chars` | integer | `12000` | Characters of text per request |
+| `max_requests_per_item` | integer | `4` | Requests per item; the rest of a long item is not sent |
+| `max_output_tokens` | integer | `2048` | Output cap per request |
+| `timeout_ms` | integer | `120000` | Timeout of one request |
+| `max_confidence` | float, 0 to 1 | `0.85` | Upper bound on the confidence of an LLM-extracted fact |
+| `max_attempts` | integer | `3` | Give up on an item after this many failures, until it changes |
+
+### `[knowledge.resolution]`
+
+Both steps are off by default and only ever use local models.
+
+<!-- check-refs: config.knowledge.resolution -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `embedding` | bool | `false` | Also match entity names by embedding similarity |
+| `embedding_threshold` | float, 0 to 1 | `0.95` | Similarity at or above which two names are the same entity |
+| `embedding_kinds` | array of entity kinds | `["organization", "project", "topic", "place"]` | Kinds the embedding check applies to |
+| `adjudicate` | bool | `false` | Ask a local synthesis-tier model about ambiguous pairs |
+| `adjudicate_above` | float, 0 to 1 | `0.85` | Pairs with similarity from here up to `embedding_threshold` are ambiguous |
+| `max_candidates` | integer | `20` | Candidates compared per entity at most |
+
+## `[vault]`
+
+One Markdown page per entity, with footnote citations, under `<Kind>/<Name> (<id>).md`. Your edits
+are merged back: changed or added fact lines become facts you asserted. See
+[Data directory](data-dir.md#the-vault).
+
+<!-- check-refs: config.vault -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Render and watch the vault |
+| `path` | path | `~/Nugget Vault` | Vault directory, absolute or starting with `~`. With `--home` or `NUGGET_HOME` the default is `<data>/vault` |
+| `include_identifiers` | bool | `false` | Put identifiers (mail addresses, phone numbers) in page frontmatter. Off because the vault is plain text that may be synced elsewhere |
+| `max_name_chars` | integer | `80` | Longest entity-name part of a file name, in characters |
+| `debounce` | integer, milliseconds | `750` | How long the watcher waits for a burst of edits to settle |
+
+## `[mcp]`
+
+The MCP server that lets AI apps read your knowledge with a per-app token. See
+[Connecting AI apps over MCP](../guide/mcp.md).
+
+<!-- check-refs: config.mcp -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | Serve MCP at all: clients, the stdio bridge and HTTP. Off: the `mcp.clients.*` methods fail |
+| `http` | bool | `true` | Also listen for streamable HTTP on `127.0.0.1` |
+| `port` | integer | `7319` | HTTP port on `127.0.0.1`; `0` picks a free port. If the port is taken, HTTP is skipped (with a warning) and stdio still works |
+| `allowed_origins` | array of origins | `[]` | Exact `Origin` values allowed on HTTP requests, such as `http://localhost:6274` for the MCP Inspector. Empty: any request with an `Origin` header (a browser page) is refused |
+
 ## `[[providers]]`
 
 One table per model provider. Tiers are tried in this order: on-device and local-network providers in
@@ -161,6 +262,8 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `stream_usage` | bool | `true` | OpenAI-compatible only: ask for token usage in the stream. Turn off for servers that reject `stream_options` |
 | `max_tokens_param` | `max_tokens` or `max_completion_tokens` | `max_tokens` | OpenAI-compatible only: the name of the output-cap field (OpenAI reasoning models need `max_completion_tokens`) |
 | `embed_batch_size` | integer | `64` | OpenAI-compatible only: texts per embeddings request |
+| `llama_cpp` | bool | `true` for on-device endpoints, else `false` | OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then ask it to reuse the cached prompt prefix, and the stable prefix can be evaluated ahead of a request. Ollama, LM Studio and vLLM ignore the extra fields |
+| `slot_affinity` | bool | `false` | OpenAI-compatible `llama-server` only: send requests that share a cache key to a fixed server slot. Off by default, because `llama-server` already picks the idle slot with the longest cached prefix, and a pinned request waits when its slot is busy |
 
 ### Locality
 
@@ -171,6 +274,24 @@ file order, then the managed runtime, then cloud providers in file order. See
 | Anything else | `cloud` | Recorded |
 
 Host names are resolved once, when the provider is built, and the result is pinned.
+
+## Feature sections
+
+Status: being wired in (wave W). `[draft]`, `[agent]`, `[policy]`, `[browser]`, `[proactive]` and
+`[plugins]` are accepted today but not read by anything yet. Each belongs to a daemon feature that
+parses its own section when it starts; a feature whose section is invalid does not start (the error
+is logged) and the rest of the daemon runs normally. The keys are not final; the plan for this wave:
+
+| Section | Planned keys |
+|---|---|
+| `draft` | The model provider per app, apps excluded from Double Tap (password managers and banking apps by default), a context budget |
+| `agent` | Settings of the agent runtime and computer use; not settled yet |
+| `policy` | The safety policy for agent actions; rules are edited from the Safety page (`policy.set`) |
+| `browser` | Settings of the browser extension bridge; not settled yet |
+| `proactive` | `enabled`, the time of the morning brief, and where the card judge may run (its locality) |
+| `plugins` | `trusted_keys` (trusted publisher keys) and a developer-mode switch that allows unsigned plugins |
+
+When a feature lands, its keys get their own table on this page.
 
 ## Example
 
@@ -196,6 +317,23 @@ mmr = true
 half_life_days = 30
 weight = 0.2
 
+[knowledge]
+interval_minutes = 10
+
+[knowledge.me]
+name = "Ada Example"
+emails = ["ada@example.com"]
+
+[knowledge.llm]
+cloud_sources = []
+
+[vault]
+path = "~/Nugget Vault"
+
+[mcp]
+http = true
+port = 7319
+
 # A LAN server, tried before the managed runtime.
 [[providers]]
 id = "workstation"
@@ -208,7 +346,7 @@ tiers = ["synthesis"]
 [[providers]]
 id = "anthropic"
 kind = "anthropic"
-model = "claude-opus-5-5"
+model = "<model name>"
 api_key = "env:ANTHROPIC_API_KEY"
 tiers = ["synthesis", "agentic"]
 ```

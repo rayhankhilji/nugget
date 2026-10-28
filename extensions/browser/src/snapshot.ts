@@ -8,6 +8,7 @@
 // - Hidden subtrees (`hidden`, `display: none`, `aria-hidden="true"`) are skipped unless
 //   `include_hidden` is set; `visibility: hidden` and zero-size elements are listed as not visible.
 
+import { isOverlay } from "./overlay";
 import { ElementRegistry } from "./registry";
 import {
   type ElementInfo,
@@ -49,8 +50,8 @@ export function buildSnapshot(doc: Document, ctx: SnapshotContext, options: Snap
   const win = doc.defaultView;
   return {
     snapshot_id: ctx.registry.nextSnapshotId(),
-    url: doc.URL,
-    title: doc.title,
+    url: cap(doc.URL, LIMITS.maxUrlChars),
+    title: cap(doc.title, LIMITS.maxTitleChars),
     captured_at_ms: now(),
     viewport: {
       width: win?.innerWidth ?? 0,
@@ -94,7 +95,9 @@ class Walker {
     }
     if (node.nodeType !== 1 /* ELEMENT_NODE */) return;
     const el = node as Element;
-    if (SKIP_TAGS.has(el.tagName) || el.hasAttribute("data-nugget-overlay")) return;
+    // The overlay is recognised by identity, not by its attribute: a page could otherwise hide
+    // its own content from Nugget by copying the attribute.
+    if (SKIP_TAGS.has(el.tagName) || isOverlay(el)) return;
 
     const style = el.ownerDocument.defaultView?.getComputedStyle(el);
     const removed =
@@ -107,7 +110,12 @@ class Walker {
       return;
     }
 
-    if (isInteractive(el)) this.addElement(el, frameId, inShadow, nowInvisible);
+    // Sensitivity is sticky per element (see `ElementRegistry.noteSensitive`).
+    const sens = this.ctx.registry.noteSensitive(el, sensitivity(el));
+    if (isInteractive(el)) this.addElement(el, frameId, inShadow, nowInvisible, sens);
+    // A password/payment editable's contents are its value: never walk into them (page text,
+    // nested elements), whatever kind of element holds them.
+    if (sens) return;
 
     const block = BLOCK_TAGS.has(el.tagName);
     if (block) this.appendText("\n");
@@ -149,17 +157,22 @@ class Walker {
     if (sameOrigin && doc && !invisible) this.walkDocument(doc, id);
   }
 
-  private addElement(el: Element, frameId: string | undefined, inShadow: boolean, invisible: boolean): void {
+  private addElement(
+    el: Element,
+    frameId: string | undefined,
+    inShadow: boolean,
+    invisible: boolean,
+    sensitive: Sensitive | undefined,
+  ): void {
     if (this.elements.length >= LIMITS.maxElements) {
       this.elementsTruncated = true;
       return;
     }
     const rect = this.measure(el);
-    const sensitive = sensitivity(el);
     const info: ElementInfo = {
       id: this.ctx.registry.idFor(el),
       role: roleOf(el),
-      name: cap(accessibleName(el), LIMITS.maxNameChars),
+      name: cap(accessibleName(el, sensitive !== undefined), LIMITS.maxNameChars),
       tag: el.tagName.toLowerCase(),
       disabled: isDisabled(el),
       editable: isEditable(el),
@@ -177,8 +190,8 @@ class Walker {
     }
     const checked = checkedOf(el);
     if (checked !== undefined) info.checked = checked;
-    if (el.tagName === "SELECT") info.options = optionsOf(el as HTMLSelectElement);
-    if (el.tagName === "A" && el.hasAttribute("href")) info.href = (el as HTMLAnchorElement).href;
+    if (el.tagName === "SELECT") info.options = optionsOf(el as HTMLSelectElement, sensitive !== undefined);
+    if (el.tagName === "A" && el.hasAttribute("href")) info.href = cap((el as HTMLAnchorElement).href, LIMITS.maxHrefChars);
     const form = formOf(el);
     if (form) info.form = this.ctx.registry.idFor(form);
     if (frameId) info.frame = frameId;
@@ -238,9 +251,14 @@ function originFromSrc(frame: HTMLIFrameElement, top: Document): string {
   }
 }
 
+function isEditingHost(el: Element): boolean {
+  const ce = el.getAttribute("contenteditable");
+  return (el as HTMLElement).isContentEditable === true || (ce !== null && ce.toLowerCase() !== "false");
+}
+
 export function sensitivity(el: Element): Sensitive | undefined {
   const tag = el.tagName;
-  if (tag !== "INPUT" && tag !== "TEXTAREA" && !(el as HTMLElement).isContentEditable) return undefined;
+  if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT" && !isEditingHost(el)) return undefined;
   const type = (el.getAttribute("type") ?? "").toLowerCase();
   if (type === "password") return "password";
   const autocomplete = (el.getAttribute("autocomplete") ?? "").toLowerCase().split(/\s+/);
@@ -320,11 +338,24 @@ export function roleOf(el: Element): string {
   }
 }
 
+/** Text content, leaving out form-control contents and anything inside a sensitive field. */
 function textOf(el: Element): string {
-  return (el.textContent ?? "").replace(/\s+/g, " ").trim();
+  let out = "";
+  const visit = (n: Node) => {
+    if (n.nodeType === 3) out += n.nodeValue ?? "";
+    else if (n.nodeType === 1 && !isSecretContainer(n as Element)) n.childNodes.forEach(visit);
+  };
+  if (!isSecretContainer(el)) el.childNodes.forEach(visit);
+  return out.replace(/\s+/g, " ").trim();
 }
 
-export function accessibleName(el: Element): string {
+/** Elements whose text is (or may be) a field value rather than a label. */
+function isSecretContainer(el: Element): boolean {
+  return el.tagName === "TEXTAREA" || el.tagName === "INPUT" || sensitivity(el) !== undefined;
+}
+
+/** For a `sensitive` field the name is never derived from the element's own contents. */
+export function accessibleName(el: Element, sensitive = false): string {
   const doc = el.ownerDocument;
   const labelledby = el.getAttribute("aria-labelledby");
   if (labelledby) {
@@ -351,7 +382,7 @@ export function accessibleName(el: Element): string {
     }
     if (type === "image") return el.getAttribute("alt") ?? "";
   }
-  if (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT") {
+  if (!sensitive && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT") {
     const t = textOf(el);
     if (t) return t;
     const img = el.querySelector("img[alt]");
@@ -365,7 +396,8 @@ function labelText(label: HTMLLabelElement): string {
   let out = "";
   const visit = (n: Node) => {
     if (n.nodeType === 3) out += n.nodeValue ?? "";
-    else if (n.nodeType === 1 && !["INPUT", "SELECT", "TEXTAREA"].includes((n as Element).tagName)) {
+    else if (n.nodeType === 1 && !["INPUT", "SELECT", "TEXTAREA"].includes((n as Element).tagName) &&
+      sensitivity(n as Element) === undefined) {
       n.childNodes.forEach(visit);
     }
   };
@@ -416,10 +448,15 @@ function checkedOf(el: Element): boolean | undefined {
   return undefined;
 }
 
-function optionsOf(select: HTMLSelectElement): SelectOption[] {
+/** For a sensitive select the choices are listed but which one is selected is not. */
+function optionsOf(select: HTMLSelectElement, sensitive: boolean): SelectOption[] {
   return Array.from(select.options)
     .slice(0, LIMITS.maxOptions)
-    .map((o) => ({ value: cap(o.value, LIMITS.maxValueChars), label: cap(textOf(o), LIMITS.maxNameChars), selected: o.selected }));
+    .map((o) => ({
+      value: cap(o.value, LIMITS.maxValueChars),
+      label: cap(textOf(o), LIMITS.maxNameChars),
+      selected: !sensitive && o.selected,
+    }));
 }
 
 function formOf(el: Element): HTMLFormElement | null {

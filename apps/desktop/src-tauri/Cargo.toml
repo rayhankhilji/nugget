@@ -33,6 +33,14 @@ tauri-plugin-updater = "=2.12.0"
 # the last release that accepts tauri 2.11 and Rust 1.88.
 tauri-plugin-notification = "=2.4.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# A second launch focuses the running window. 2.4.5 is the last release that accepts tauri 2.11
+# and Rust 1.88 (MSRV 1.77.2); 2.5+ needs tauri 2.12 and Rust 1.90.
+tauri-plugin-single-instance = "=2.4.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Asks the session bus whether a StatusNotifier host exists before creating the tray (tray.rs).
+# Same major version the single-instance plugin already pulls in on Linux.
+zbus = "5.9"
 
 [lints]
 workspace = true
