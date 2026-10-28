@@ -5,10 +5,12 @@
 //! panics on any keyword it does not know, so extending the schema forces this test to be
 //! extended too.
 
+#[cfg(target_os = "linux")]
+use nugget_bench::Backend;
 use nugget_bench::report::{Comparison, Direction, SCHEMA_JSON};
 use nugget_bench::runner::valid_metric_name;
 use nugget_bench::{
-    Backend, Report, RunConfig, SCHEMA_VERSION, Scale, Status, find, registry, run_benchmark,
+    Report, RunConfig, SCHEMA_VERSION, Scale, Status, find, registry, run_benchmark,
 };
 use serde_json::{Value, json};
 

@@ -945,9 +945,13 @@ async fn start_new(
         if let Some(entry) = &runtime {
             launch.binary = ctx.install_entry(entry, on_progress).await?;
         }
-        if opts.use_socket() {
-            let dir = socket::private_dir(&ctx.cfg.paths)?;
-            launch.plan.socket = Some(socket::socket_path(&dir, role_name(rs.role)));
+        let server_socket = if opts.use_socket() {
+            socket::server_socket(&ctx.cfg.paths, role_name(rs.role))?
+        } else {
+            None
+        };
+        if let Some(path) = server_socket {
+            launch.plan.socket = Some(path);
             launch.plan.port = 0;
         } else {
             launch.plan.socket = None;

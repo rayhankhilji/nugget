@@ -917,8 +917,13 @@ mod tests {
         assert!(check_plugin_field("id", &id.id).is_ok());
         assert!(check_plugin_field("id", " ").is_err());
 
+        let absolute = if cfg!(windows) {
+            r"C:\Users\me\rss.nuggetplugin"
+        } else {
+            "/home/me/rss.nuggetplugin"
+        };
         let install: PluginInstallParams =
-            serde_json::from_value(json!({ "path": "/home/me/rss.nuggetplugin" })).unwrap();
+            serde_json::from_value(json!({ "path": absolute })).unwrap();
         assert!(check_plugin_install(&install).is_ok());
         let relative = PluginInstallParams {
             path: "rss.nuggetplugin".into(),
