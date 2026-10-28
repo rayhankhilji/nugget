@@ -4,8 +4,10 @@
 Window "Nugget IT - chat": a message list (three messages, the last one "from me"), a
 multi-line composer (GtkTextView), a single-line entry with a placeholder and a password entry.
 Usage: gtk_test_app.py <composer|entry|password>  -- which widget takes focus.
-Prints "READY" on stdout once the window is mapped and focused.
+Prints "READY" on stdout once the window is mapped and focused, then "COMPOSER <json>" and
+"ENTRY <json>" whenever those widgets change, as an oracle independent of AT-SPI.
 """
+import json
 import sys
 
 import gi
@@ -52,6 +54,15 @@ password.set_visibility(False)
 password.set_text("hunter2-secret")
 password.get_accessible().set_name("Password")
 box.pack_start(password, False, False, 0)
+
+def report(kind, text):
+    print(kind, json.dumps(text), flush=True)
+
+
+composer.get_buffer().connect(
+    "changed", lambda b: report("COMPOSER", b.get_text(b.get_start_iter(), b.get_end_iter(), True))
+)
+entry.connect("changed", lambda e: report("ENTRY", e.get_text()))
 
 win.connect("destroy", Gtk.main_quit)
 win.show_all()

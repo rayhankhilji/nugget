@@ -1430,6 +1430,24 @@ mod tests {
     }
 
     #[test]
+    fn fixture_recorded_gtk_tree() {
+        // A real tree recorded over AT-SPI (no hand-written bounds or roles).
+        let (ctx, _) = run("gtk_recorded_atspi", &ThreadLimits::default());
+        assert_eq!(
+            summary(&ctx),
+            vec![
+                (
+                    Some("Alice"),
+                    "Are we still on for lunch tomorrow?",
+                    Some(false)
+                ),
+                (Some("Bob"), "I can bring the slides.", Some(false)),
+                (Some("You"), "Yes, noon works for me.", Some(true)),
+            ]
+        );
+    }
+
+    #[test]
     fn fixture_limits_apply() {
         let limits = ThreadLimits {
             max_messages: 2,

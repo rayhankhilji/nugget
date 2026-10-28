@@ -13,5 +13,13 @@ serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# AT-SPI 2 over zbus (pure Rust D-Bus); the blocking API runs on zbus' own executor thread.
+atspi = { version = "0.30", default-features = false, features = ["proxies", "zbus"] }
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
+# Clipboard fallback: X11 selections + XTest paste (pure Rust protocol), and Wayland.
+x11rb = { version = "0.14", features = ["xtest"] }
+wl-clipboard-rs = "0.9"
+
 [lints]
 workspace = true

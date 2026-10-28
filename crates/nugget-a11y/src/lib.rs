@@ -124,6 +124,12 @@ pub fn system() -> Box<dyn Accessibility> {
     system_with(A11yConfig::default())
 }
 
+/// The OS clipboard with full save and restore of every format, as used by the insertion
+/// fallback (the desktop app can use it for its own paste flows).
+pub fn system_clipboard() -> Result<Box<dyn clipboard::Clipboard>> {
+    platform::system_clipboard()
+}
+
 /// The backend for the current OS with explicit configuration (deny list, limits, insertion
 /// strategy, the user's own names for `from_me`).
 pub fn system_with(config: A11yConfig) -> Box<dyn Accessibility> {

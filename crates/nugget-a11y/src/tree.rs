@@ -18,16 +18,31 @@ use crate::sanitize;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct States {
+    #[serde(skip_serializing_if = "is_false")]
     pub focused: bool,
+    #[serde(skip_serializing_if = "is_false")]
     pub editable: bool,
     /// Password or otherwise protected. The value is never read.
+    #[serde(skip_serializing_if = "is_false")]
     pub secure: bool,
     /// `Some(true)` multi-line, `Some(false)` single-line, `None` unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multiline: Option<bool>,
+    #[serde(skip_serializing_if = "is_false")]
     pub selected: bool,
     /// Off screen or hidden.
+    #[serde(skip_serializing_if = "is_false")]
     pub offscreen: bool,
+}
+
+impl States {
+    fn is_default(&self) -> bool {
+        *self == States::default()
+    }
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// An owned snapshot of one element and (some of) its descendants. Every string is sanitised and
@@ -49,6 +64,7 @@ pub struct Node {
     pub value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+    #[serde(skip_serializing_if = "States::is_default")]
     pub states: States,
     #[serde(skip_serializing_if = "Option::is_none", with = "rect_serde")]
     pub bounds: Option<Rect>,
