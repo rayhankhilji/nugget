@@ -1,0 +1,23 @@
+# Manifest of the example feed plugin. Replace `hosts` with the feed hosts you want to allow:
+# the host refuses requests to anything not listed here.
+id = "dev.nugget.example.feeds"
+name = "RSS and Atom feeds"
+version = "0.1.0"
+description = "Indexes the entries of one RSS or Atom feed, and offers a tool that lists a feed's latest headlines."
+kind = ["connector", "tool"]
+
+[capabilities]
+hosts = ["feeds.example.com"]
+kv_max_bytes = 4096
+
+[connector]
+display_name = "RSS / Atom feed"
+poll_interval_secs = 1800
+
+[connector.settings_schema]
+type = "object"
+required = ["url"]
+
+[connector.settings_schema.properties.url]
+type = "string"
+format = "uri"

@@ -1,0 +1,34 @@
+# Guest-side SDK for Nugget plugins, plus the example and test plugins. This is its own cargo
+# workspace (not a member of the root one): everything here builds for `wasm32-wasip2`
+# (see `.cargo/config.toml`), with its own lockfile.
+[workspace]
+members = [".", "examples/feed-reader", "test-guests/hostile"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/rayhankhilji/nugget"
+
+[workspace.dependencies]
+nugget-plugin-sdk = { path = ".", version = "0.1.0" }
+serde_json = "1"
+
+[package]
+name = "nugget-plugin-sdk"
+description = "Write Nugget connectors and agent tools as WebAssembly components"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+# Generates the guest bindings from ../wit/plugin.wit (the world the host implements).
+wit-bindgen = { version = "0.46", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+strip = true
+codegen-units = 1
