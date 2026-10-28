@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-use crate::scope::ScopeFilter;
+use crate::scope::{DetailOrigins, ScopeFilter};
 
 /// One source an entity, edge or fact draws on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -163,8 +163,10 @@ pub struct EntityRecord {
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
     /// Distinct origins over **all** the entity's evidence and mentions, not only the ones
-    /// returned. Aliases, identifiers and attributes carry no provenance of their own, so they are
-    /// shown only to clients allowed to see every origin.
+    /// returned. Aliases and identifiers are shown to a client allowed to see every origin, or
+    /// one allowed to see an origin that supplied them
+    /// ([`KnowledgeBackend::entity_detail_origins`]); attributes carry no provenance, so only the
+    /// former.
     pub origins: Vec<Origin>,
 }
 
@@ -291,4 +293,17 @@ pub trait KnowledgeBackend: Send + Sync {
         limit: usize,
         filter: &ScopeFilter,
     ) -> Result<RecentChanges>;
+
+    /// Per-alias and per-identifier provenance of an entity (following merges), from
+    /// `GraphStore::entity_provenance` with each item mapped to its [`Origin`]. Lets the MCP
+    /// layer show a scoped client the details that come from sources it may read, instead of
+    /// withholding all of them. The default reports none (all-or-nothing scoping).
+    async fn entity_detail_origins(
+        &self,
+        id: &EntityId,
+        filter: &ScopeFilter,
+    ) -> Result<Option<DetailOrigins>> {
+        let _ = (id, filter);
+        Ok(None)
+    }
 }

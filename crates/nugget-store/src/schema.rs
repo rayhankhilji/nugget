@@ -269,7 +269,118 @@ const MIGRATIONS: &[&str] = &[
     );
     CREATE UNIQUE INDEX IF NOT EXISTS graph_changes_seq ON graph_changes (seq);
     "#,
+    // v5: knowledge-graph contract additions (M2 wave 2) and the item change feed.
+    //
+    // - `claims` is rebuilt so its status CHECK admits 'rejected' (SQLite cannot alter a CHECK).
+    //   `migrate` runs migrations with foreign keys off, so dropping the old table does not
+    //   cascade into `claim_evidence`; the AUTOINCREMENT high-water mark is carried over so claim
+    //   ids are still never reused. `PRAGMA foreign_key_check` runs before the commit.
+    // - `entities.deleted_at` marks entities removed by `prune_orphans` (tombstones: the row and
+    //   its id stay, so ids are never reused; lookups treat it as gone).
+    // - `entity_detail_sources`: which item supplied each alias / identifier of an entity
+    //   (provenance for scoped MCP clients). Keyed by kind, scheme and normalised value.
+    // - `item_changes`: one row per item key with the seq of its latest insert, update or delete
+    //   (`deleted = 1`: a tombstone), maintained by triggers on `items` so every write path
+    //   (upserts, `delete_item`, `delete_source`) is covered. Existing items are backfilled in id
+    //   order.
+    r#"
+    CREATE TABLE claims_v5 (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        subject        TEXT NOT NULL REFERENCES entities (id),
+        predicate      TEXT NOT NULL,
+        object_entity  TEXT REFERENCES entities (id),
+        object_literal TEXT,
+        text           TEXT NOT NULL,
+        confidence     REAL NOT NULL,
+        status         TEXT NOT NULL
+            CHECK (status IN ('active', 'superseded', 'retracted', 'user_asserted', 'rejected')),
+        valid_from     TEXT,
+        valid_to       TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL,
+        CHECK ((object_entity IS NULL) <> (object_literal IS NULL))
+    );
+    INSERT INTO claims_v5 (id, subject, predicate, object_entity, object_literal, text,
+                           confidence, status, valid_from, valid_to, created_at, updated_at)
+        SELECT id, subject, predicate, object_entity, object_literal, text, confidence, status,
+               valid_from, valid_to, created_at, updated_at
+        FROM claims ORDER BY id;
+    DELETE FROM sqlite_sequence WHERE name = 'claims_v5';
+    INSERT INTO sqlite_sequence (name, seq)
+        SELECT 'claims_v5', seq FROM sqlite_sequence WHERE name = 'claims';
+    DROP TABLE claims;
+    ALTER TABLE claims_v5 RENAME TO claims;
+    CREATE INDEX IF NOT EXISTS claims_triple
+        ON claims (subject, predicate, object_entity, object_literal, status);
+    CREATE INDEX IF NOT EXISTS claims_object
+        ON claims (object_entity, status) WHERE object_entity IS NOT NULL;
+
+    -- `entities.deleted_at` is added by `ADDED_COLUMNS` (only when missing).
+
+    CREATE TABLE IF NOT EXISTS entity_detail_sources (
+        id         INTEGER PRIMARY KEY,
+        entity_id  TEXT NOT NULL REFERENCES entities (id),
+        kind       TEXT NOT NULL CHECK (kind IN ('alias', 'identifier')),
+        scheme     TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        source     TEXT NOT NULL,
+        key        TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS entity_detail_sources_unique
+        ON entity_detail_sources (entity_id, kind, scheme, value, source, key);
+    CREATE INDEX IF NOT EXISTS entity_detail_sources_item ON entity_detail_sources (source, key);
+
+    CREATE TABLE IF NOT EXISTS item_changes (
+        source  TEXT NOT NULL,
+        key     TEXT NOT NULL,
+        seq     INTEGER NOT NULL,
+        deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+        PRIMARY KEY (source, key)
+    ) WITHOUT ROWID;
+    CREATE UNIQUE INDEX IF NOT EXISTS item_changes_seq ON item_changes (seq);
+    INSERT OR IGNORE INTO item_changes (source, key, seq, deleted)
+        SELECT source, key, row_number() OVER (ORDER BY id), 0 FROM items;
+    CREATE TRIGGER IF NOT EXISTS items_changes_ai AFTER INSERT ON items BEGIN
+        INSERT INTO item_changes (source, key, seq, deleted)
+            VALUES (new.source, new.key,
+                    (SELECT coalesce(max(seq), 0) + 1 FROM item_changes), 0)
+            ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 0;
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_changes_au AFTER UPDATE ON items BEGIN
+        INSERT INTO item_changes (source, key, seq, deleted)
+            VALUES (new.source, new.key,
+                    (SELECT coalesce(max(seq), 0) + 1 FROM item_changes), 0)
+            ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 0;
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_changes_ad AFTER DELETE ON items BEGIN
+        INSERT INTO item_changes (source, key, seq, deleted)
+            VALUES (old.source, old.key,
+                    (SELECT coalesce(max(seq), 0) + 1 FROM item_changes), 1)
+            ON CONFLICT (source, key) DO UPDATE SET seq = excluded.seq, deleted = 1;
+    END;
+    "#,
 ];
+
+/// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
+/// missing, so these migrations stay idempotent (`ALTER TABLE ADD COLUMN` cannot be made
+/// conditional in SQL).
+const ADDED_COLUMNS: &[(u32, &str, &str, &str)] = &[(5, "entities", "deleted_at", "TEXT")];
+
+fn ensure_column(conn: &Connection, table: &str, column: &str, ty: &str) -> Result<()> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+            [table, column],
+            |r| r.get(0),
+        )
+        .db("inspect table columns")?;
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {ty};"))
+            .db(&format!("add column {table}.{column}"))?;
+    }
+    Ok(())
+}
 
 /// Schema version this build creates and understands.
 pub const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -289,6 +400,28 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
              upgrade Nugget"
         )));
     }
+    if current == LATEST_VERSION {
+        return Ok(0);
+    }
+    // Table rebuilds (v5) must not cascade deletes, and `PRAGMA foreign_keys` cannot change
+    // inside a transaction: switch enforcement off around the migrations and check before each
+    // commit instead.
+    let fk_on: bool = conn
+        .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+        .db("read foreign key setting")?;
+    if fk_on {
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")
+            .db("disable foreign keys for migration")?;
+    }
+    let res = apply_migrations(conn, current);
+    if fk_on {
+        conn.execute_batch("PRAGMA foreign_keys = ON;")
+            .db("re-enable foreign keys")?;
+    }
+    res
+}
+
+fn apply_migrations(conn: &mut Connection, current: u32) -> Result<u32> {
     let mut applied = 0;
     for (idx, sql) in MIGRATIONS.iter().enumerate().skip(current as usize) {
         let target = idx as u32 + 1;
@@ -301,6 +434,19 @@ pub(crate) fn migrate(conn: &mut Connection) -> Result<u32> {
         }
         tx.execute_batch(sql)
             .db(&format!("apply migration v{target}"))?;
+        for (_, table, column, ty) in ADDED_COLUMNS.iter().filter(|c| c.0 == target) {
+            ensure_column(&tx, table, column, ty)?;
+        }
+        let violations: i64 = tx
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .db("check foreign keys")?;
+        if violations > 0 {
+            return Err(Error::Integrity(format!(
+                "migration v{target} would leave {violations} foreign key violations"
+            )));
+        }
         tx.pragma_update(None, "user_version", target)
             .db("bump schema version")?;
         tx.commit().db("commit migration")?;
@@ -350,9 +496,112 @@ mod tests {
     fn migrate_to(conn: &mut Connection, to: u32) {
         for (idx, sql) in MIGRATIONS.iter().enumerate().take(to as usize) {
             conn.execute_batch(sql).unwrap();
+            for (_, t, c, ty) in ADDED_COLUMNS.iter().filter(|c| c.0 == idx as u32 + 1) {
+                ensure_column(conn, t, c, ty).unwrap();
+            }
             conn.pragma_update(None, "user_version", idx as u32 + 1)
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn v4_graph_migrates_to_v5_keeping_claims_evidence_and_ids() {
+        use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+        use nugget_graph::{
+            ClaimObject, ClaimStatus, EntityKind, Evidence, GraphStore, NewClaim, NewEntity,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let key = [9u8; 32];
+        {
+            let mut conn = Connection::open(&path).unwrap();
+            conn.execute_batch(&format!("PRAGMA key = \"x'{}'\";", hex::encode(key)))
+                .unwrap();
+            conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+            migrate_to(&mut conn, 4);
+            // Claim 2 was folded away by a merge: the AUTOINCREMENT mark (3) is above max(id).
+            conn.execute_batch(
+                "INSERT INTO items (id, source, key, content_hash, created_at, updated_at)
+                     VALUES (1, 'mail', 'm1', 'h1', 't', 't'), (2, 'mail', 'm2', 'h2', 't', 't');
+                 INSERT INTO entities (id, kind, name, name_lower, created_at, updated_at)
+                     VALUES ('ent_a', 'person', 'Sam', 'sam', '2026-01-01T00:00:00Z',
+                             '2026-01-01T00:00:00Z');
+                 INSERT INTO entity_aliases (entity_id, alias, alias_norm, alias_lower, is_name)
+                     VALUES ('ent_a', 'Sam', 'sam', 'sam', 1);
+                 INSERT INTO claims (id, subject, predicate, object_literal, text, confidence,
+                                     status, created_at, updated_at)
+                     VALUES (1, 'ent_a', 'likes', 'tea', 'Sam likes tea', 0.8, 'active',
+                             '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+                            (3, 'ent_a', 'likes', 'jazz', 'Sam likes jazz', 0.7, 'superseded',
+                             '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+                 UPDATE sqlite_sequence SET seq = 3 WHERE name = 'claims';
+                 INSERT INTO claim_evidence (claim_id, source, key, chunk_id, quote, created_at)
+                     VALUES (1, 'mail', 'm1', 1, 'tea please', 't'),
+                            (3, 'mail', 'm2', NULL, NULL, 't');",
+            )
+            .unwrap();
+        }
+        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert_eq!(store.schema_version().unwrap(), LATEST_VERSION);
+        let g = store.graph();
+        let tea = g.get_claim(1).unwrap().unwrap();
+        assert_eq!(
+            tea.evidence.len(),
+            1,
+            "evidence survived the claims rebuild"
+        );
+        assert_eq!(tea.evidence[0].quote.as_deref(), Some("tea please"));
+        assert_eq!(
+            g.get_claim(3).unwrap().unwrap().status,
+            ClaimStatus::Superseded
+        );
+        // The new status is accepted, and ids keep counting from the old high-water mark.
+        g.set_claim_status(1, ClaimStatus::Rejected).unwrap();
+        let sam = nugget_core::ids::EntityId::new("ent_a");
+        let next = g
+            .add_claim(&NewClaim {
+                subject: sam.clone(),
+                predicate: "plays".into(),
+                object: ClaimObject::Literal("chess".into()),
+                text: "Sam plays chess".into(),
+                confidence: 0.5,
+                status: ClaimStatus::Active,
+                evidence: vec![Evidence {
+                    item: ItemRef {
+                        source: SourceId::new("mail"),
+                        key: ItemKey::new("m1"),
+                    },
+                    chunk_id: None,
+                    quote: None,
+                }],
+                valid_from: None,
+                valid_to: None,
+            })
+            .unwrap();
+        assert_eq!(next, 4, "claim ids are never reused across the rebuild");
+        // Existing items were backfilled into the change feed, in id order.
+        let (changes, head) = store.items_changed_since(0, 0).unwrap();
+        let keys: Vec<&str> = changes.iter().map(|c| c.item.key.as_str()).collect();
+        assert_eq!(keys, ["m1", "m2"]);
+        assert_eq!(head, 2);
+        // Foreign keys hold and cascade again after the migration.
+        store
+            .with_conn(|c| {
+                let fk: bool = c
+                    .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+                    .db("fk")?;
+                assert!(fk, "foreign keys re-enabled");
+                c.execute_batch("PRAGMA foreign_key_check;").db("fk check")
+            })
+            .unwrap();
+        assert!(g.prune_orphans(None).unwrap().is_empty());
+        g.create_entity(&NewEntity::new(EntityKind::Topic, "Tea"))
+            .unwrap();
+        drop(g);
+        drop(store);
+        let store = crate::Store::open(&path, &crate::StoreKey::from_bytes(key)).unwrap();
+        assert_eq!(store.migrate().unwrap(), 0);
     }
 
     fn title_matches(conn: &Connection, q: &str) -> Vec<i64> {

@@ -1,17 +1,19 @@
 //! Where items come from, and where the pipeline keeps its progress.
 //!
-//! [`ItemFeed`] is the small slice of the store the pipeline needs. It is implemented for
-//! [`nugget_store::Store`] with today's APIs: the work queue lists each source's item keys and
-//! versions (`item_versions`) and diffs them against its own ledger, which also reveals deletions.
-//! A store-side change feed (`items_changed_since`, plus deletion tombstones) would make the scan
-//! incremental; the daemon can provide one by implementing this trait.
+//! [`ItemFeed`] is the small slice of the store the pipeline needs. The first run (and any run
+//! after a reset) lists each source's item keys and versions (`item_versions`) and diffs them
+//! against the pipeline's ledger, which also reveals deletions. After that, a feed with a change
+//! log ([`ItemFeed::items_changed_since`], implemented for [`nugget_store::Store`] over its item
+//! change feed with deletion tombstones) makes every run incremental: only changed and deleted
+//! items are looked at. Feeds without one keep the full diff.
 
 use std::collections::HashMap;
 
 use nugget_core::Result;
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_store::{Chunk, Item, Store};
+use nugget_store::{Chunk, Item, ItemChange, Store};
 use serde_json::Value;
+use time::OffsetDateTime;
 
 /// Chunk positions requested per `get_chunks_by_ord` call.
 const ORD_PAGE: u32 = 128;
@@ -29,6 +31,36 @@ pub trait ItemFeed: Send + Sync {
     fn get_state(&self, key: &str) -> Result<Option<Value>>;
     fn set_state(&self, key: &str, value: Value) -> Result<()>;
     fn clear_state(&self, key: &str) -> Result<()>;
+
+    /// Items changed or deleted after `cursor` (at most `limit`, 0 = all) and the next cursor, or
+    /// `None` when this feed keeps no change log (the pipeline then diffs every source on every
+    /// run).
+    fn items_changed_since(
+        &self,
+        cursor: u64,
+        limit: usize,
+    ) -> Result<Option<(Vec<ItemChange>, u64)>> {
+        let _ = (cursor, limit);
+        Ok(None)
+    }
+
+    /// The change log's current position (`None` without a change log).
+    fn item_changes_head(&self) -> Result<Option<u64>> {
+        Ok(None)
+    }
+
+    /// The date each item's facts are as of (see `extract::item_date`: the extracted content
+    /// date, else the source's modification time, else when it was stored). Unknown items are
+    /// left out. The default loads each item.
+    fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, OffsetDateTime>> {
+        let mut out = HashMap::new();
+        for i in items {
+            if let Some(item) = self.get_item(i)? {
+                out.insert(i.clone(), crate::extract::item_date(&item));
+            }
+        }
+        Ok(out)
+    }
 }
 
 impl ItemFeed for Store {
@@ -76,5 +108,32 @@ impl ItemFeed for Store {
 
     fn clear_state(&self, key: &str) -> Result<()> {
         self.clear_cursor(&SourceId::new(key)).map(|_| ())
+    }
+
+    fn items_changed_since(
+        &self,
+        cursor: u64,
+        limit: usize,
+    ) -> Result<Option<(Vec<ItemChange>, u64)>> {
+        Store::items_changed_since(self, cursor, limit).map(Some)
+    }
+
+    fn item_changes_head(&self) -> Result<Option<u64>> {
+        Store::item_changes_head(self).map(Some)
+    }
+
+    fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, OffsetDateTime>> {
+        Ok(Store::item_dates(self, items)?
+            .into_iter()
+            .map(|(i, d)| {
+                let at = d
+                    .extracted_date
+                    .as_deref()
+                    .and_then(crate::extract::parse_when)
+                    .or(d.source_modified_at)
+                    .unwrap_or(d.updated_at);
+                (i, at)
+            })
+            .collect())
     }
 }

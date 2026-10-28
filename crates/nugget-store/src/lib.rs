@@ -4,7 +4,8 @@
 //! - **items** (one per source document, deduplicated by content hash) and their **chunks**,
 //! - an **FTS5** index (bm25) and a **`sqlite-vec`** index (cosine kNN) over chunks, fused with
 //!   reciprocal-rank fusion for hybrid search,
-//! - per-source **cursors**,
+//! - per-source **cursors**, and an **item change feed** with deletion tombstones
+//!   ([`Store::items_changed_since`]),
 //! - the **egress ledger** (`impl EgressSink for Store`),
 //! - a hash-chained, append-only **audit log**,
 //! - the **knowledge graph** (entities, claims with evidence, mentions, a change feed):
@@ -17,6 +18,7 @@
 //! callers should use `spawn_blocking` for heavy calls.
 
 mod audit;
+mod changes;
 mod egress;
 mod error;
 mod graph;
@@ -36,8 +38,8 @@ pub use search::TITLE_WEIGHT;
 pub use sources::{MAX_CHUNK_IDS, MAX_NEIGHBOUR_RADIUS};
 pub use store::Store;
 pub use types::{
-    AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, NewChunk, NewItem, SourceCounts,
-    UpsertOutcome, content_hash,
+    AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, ItemChange, ItemDates, NewChunk,
+    NewItem, SourceCounts, UpsertOutcome, content_hash,
 };
 
 pub use nugget_core::{Error, Result};

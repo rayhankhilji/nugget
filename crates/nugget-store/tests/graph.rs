@@ -655,3 +655,114 @@ fn graph_is_shareable_across_threads() {
     assert_eq!(g.retract_item(&iref("s", "1")).unwrap().len(), 100);
     assert_eq!(g.counts().unwrap().claims, 0);
 }
+
+// ---------------------------------------------------------------- M2 wave 2
+
+#[test]
+fn deleting_an_item_keeps_rejections_and_drops_detail_provenance() {
+    use nugget_graph::EntityDetail;
+    let s = Store::open_in_memory().unwrap();
+    let g = s.graph();
+    let m1 = stored_item(&s, "mail", "1");
+    let m2 = stored_item(&s, "mail", "2");
+    let sam = entity(&g, EntityKind::Person, "Sam");
+    g.add_identifier(&sam, &Identifier::new("email", "sam@x.test"))
+        .unwrap();
+    let email = EntityDetail::Identifier(Identifier::new("email", "sam@x.test"));
+    g.add_detail_source(&sam, &email, &m1).unwrap();
+    g.add_detail_source(&sam, &email, &m2).unwrap();
+    let rejected = g
+        .add_claim(&claim(
+            &sam,
+            "lives_in",
+            ClaimObject::Literal("Oslo".into()),
+            vec![ev("mail", "1")],
+        ))
+        .unwrap();
+    g.set_claim_status(rejected, ClaimStatus::Rejected).unwrap();
+
+    assert!(s.delete_item(&m1).unwrap());
+    let c = g.get_claim(rejected).unwrap().unwrap();
+    assert_eq!(
+        c.status,
+        ClaimStatus::Rejected,
+        "store deletes keep rejections"
+    );
+    assert!(c.evidence.is_empty());
+    let p = g.entity_provenance(&sam).unwrap().unwrap();
+    assert_eq!(p.identifiers[0].1, vec![m2.clone()]);
+    s.delete_source(&SourceId::new("mail")).unwrap();
+    let p = g.entity_provenance(&sam).unwrap().unwrap();
+    assert!(
+        p.identifiers[0].1.is_empty(),
+        "delete_source drops provenance"
+    );
+}
+
+#[test]
+fn a_batch_is_one_transaction_and_one_feed_step_per_entity() {
+    use nugget_graph::{GraphBatch, GraphOp};
+    let g = mem();
+    let sam = entity(&g, EntityKind::Person, "Sam");
+    let acme = entity(&g, EntityKind::Organization, "Acme");
+    let (_, start) = g.changes_since(0, 0).unwrap();
+    let mut b = GraphBatch::new();
+    for i in 0..50 {
+        b.push(GraphOp::AddClaim {
+            claim: claim(
+                &sam,
+                "knows_fact",
+                ClaimObject::Literal(format!("fact {i}")),
+                vec![ev("mail", &i.to_string())],
+            ),
+        });
+        b.push(GraphOp::AddMention {
+            mention: mention(&sam, "mail", &i.to_string(), "Sam"),
+        });
+    }
+    b.push(GraphOp::AddClaim {
+        claim: claim(
+            &sam,
+            "works_at",
+            ClaimObject::Entity(acme.clone()),
+            vec![ev("mail", "1")],
+        ),
+    });
+    let out = g.apply_batch(&b).unwrap();
+    assert_eq!(out.len(), 101);
+    let (changed, high) = g.changes_since(start, 0).unwrap();
+    assert_eq!(changed.len(), 2, "each touched entity enters the feed once");
+    assert_eq!(high, start + 2);
+    assert_eq!(g.claims_for(&sam, false).unwrap().len(), 51);
+}
+
+#[test]
+fn pruned_entities_stay_tombstoned_across_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = db_path(&dir);
+    let key = StoreKey::from_bytes([3u8; 32]);
+    let (gone, kept) = {
+        let s = Store::open(&path, &key).unwrap();
+        let g = s.graph();
+        let gone = entity(&g, EntityKind::Topic, "Ephemeral");
+        g.add_mention(&mention(&gone, "mail", "1", "eph")).unwrap();
+        let kept = entity(&g, EntityKind::Topic, "Kept");
+        g.add_mention(&mention(&kept, "mail", "2", "kept")).unwrap();
+        let old = entity(&g, EntityKind::Topic, "Merged Away");
+        g.merge(&gone, &old).unwrap();
+        g.retract_item(&iref("mail", "1")).unwrap();
+        assert_eq!(g.prune_orphans(None).unwrap(), vec![gone.clone()]);
+        assert!(
+            g.get_entity(&old).unwrap().is_none(),
+            "merged ids follow to the tombstone"
+        );
+        (gone, kept)
+    };
+    let s = Store::open(&path, &key).unwrap();
+    let g = s.graph();
+    assert!(g.get_entity(&gone).unwrap().is_none());
+    assert!(g.get_entity(&kept).unwrap().is_some());
+    assert_eq!(g.counts().unwrap().entities, 1);
+    assert!(g.list_entities(&EntityQuery::default()).unwrap().len() == 1);
+    assert!(g.neighbourhood(&gone, 1, 0).is_err());
+}

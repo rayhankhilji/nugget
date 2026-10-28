@@ -11,7 +11,7 @@ use crate::backend::{
     ContextPack, ContextPassage, EntityRecord, EntitySummaryRecord, ItemRecord, ItemSummaryRecord,
     KnowledgeBackend, NeighbourhoodRecord, RecentChanges, SearchRecord,
 };
-use crate::scope::ScopeFilter;
+use crate::scope::{DetailOrigins, ScopeFilter};
 
 /// Holds items, entities and graph views. Search matches items whose title or text contains any
 /// query word (case-insensitive), scored by matching words.
@@ -23,6 +23,7 @@ pub struct FakeBackend {
     items: Mutex<Vec<ItemRecord>>,
     entities: Mutex<Vec<EntityRecord>>,
     graphs: Mutex<Vec<(EntityId, NeighbourhoodRecord)>>,
+    details: Mutex<Vec<(EntityId, DetailOrigins)>>,
     ignore_filter: bool,
     calls: Mutex<Vec<String>>,
 }
@@ -50,6 +51,13 @@ impl FakeBackend {
         let mut v = lock(&self.entities);
         v.retain(|e| e.id != entity.id);
         v.push(entity);
+    }
+
+    /// Per-detail provenance returned for `id` by `entity_detail_origins`.
+    pub fn set_detail_origins(&self, id: EntityId, details: DetailOrigins) {
+        let mut d = lock(&self.details);
+        d.retain(|(i, _)| i != &id);
+        d.push((id, details));
     }
 
     /// The neighbourhood returned for `center` (at any depth).
@@ -217,6 +225,17 @@ impl KnowledgeBackend for FakeBackend {
                 .then_with(|| a.id.cmp(&b.id))
         });
         Ok(v.into_iter().skip(offset).take(limit).collect())
+    }
+
+    async fn entity_detail_origins(
+        &self,
+        id: &EntityId,
+        _f: &ScopeFilter,
+    ) -> Result<Option<DetailOrigins>> {
+        Ok(lock(&self.details)
+            .iter()
+            .find(|(i, _)| i == id)
+            .map(|(_, d)| d.clone()))
     }
 
     async fn get_entity(&self, id: &EntityId, _f: &ScopeFilter) -> Result<Option<EntityRecord>> {

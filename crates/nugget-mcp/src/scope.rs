@@ -7,9 +7,11 @@
 //!   context passages, item reads, fact evidence, mentions and graph provenance.
 //! - **Facts** keep only the evidence the client may see; a fact left without evidence is
 //!   dropped, so a fact backed only by a sensitive item never reaches the client.
-//! - **Entities** are visible when at least one of their origins is allowed. Their aliases,
-//!   identifiers and attributes have no per-field provenance, so they are shown only when
-//!   *every* origin is allowed; otherwise they are withheld and the result says so.
+//! - **Entities** are visible when at least one of their origins is allowed. An alias or
+//!   identifier is shown when every origin of the entity is allowed, or when the backend reports
+//!   its per-detail provenance ([`DetailOrigins`]) and one of the items that supplied it is
+//!   allowed. Details without recorded provenance, and attributes (which have none), fall back to
+//!   the all-origins rule. Whatever is withheld, the result says so.
 //! - **Vault-only content** (user-asserted facts and entities with no source evidence) counts as
 //!   the pseudo-source [`VAULT_SOURCE`]: visible with all sources, or when the allow-list names it.
 //! - **Tools**: only allow-listed tools are listed and callable (`McpScopes::tools`, empty = all).
@@ -72,6 +74,32 @@ impl ScopeFilter {
             return self.allows_vault();
         }
         origins.iter().all(|o| self.allows_origin(o))
+    }
+}
+
+/// Which origins supplied each alias and identifier of an entity: the graph's per-detail
+/// provenance (`GraphStore::entity_provenance`) with each item mapped to its [`Origin`]. A
+/// detail missing here, or listed with no origins, has no recorded provenance.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetailOrigins {
+    pub aliases: Vec<(String, Vec<Origin>)>,
+    /// `(scheme, value)` as in [`EntityRecord::identifiers`].
+    pub identifiers: Vec<((String, String), Vec<Origin>)>,
+}
+
+impl DetailOrigins {
+    fn alias(&self, a: &str) -> Option<&[Origin]> {
+        self.aliases
+            .iter()
+            .find(|(x, _)| x == a)
+            .map(|(_, o)| o.as_slice())
+    }
+
+    fn identifier(&self, i: &(String, String)) -> Option<&[Origin]> {
+        self.identifiers
+            .iter()
+            .find(|(x, _)| x == i)
+            .map(|(_, o)| o.as_slice())
     }
 }
 
@@ -159,12 +187,30 @@ impl Scope {
         (!fact.evidence.is_empty()).then_some(fact)
     }
 
-    /// The scoped entity, or `None` when the client may not see it at all.
-    pub fn entity(&self, mut e: EntityRecord) -> Option<ScopedEntity> {
+    /// The scoped entity, or `None` when the client may not see it at all. Without per-detail
+    /// provenance: aliases, identifiers and attributes are shown only when every origin is
+    /// allowed (see [`Scope::entity_with_details`]).
+    pub fn entity(&self, e: EntityRecord) -> Option<ScopedEntity> {
+        self.entity_with_details(e, None)
+    }
+
+    /// Like [`Scope::entity`], keeping each alias and identifier one of whose supplying origins
+    /// the client may see (see the module rules).
+    pub fn entity_with_details(
+        &self,
+        mut e: EntityRecord,
+        details: Option<&DetailOrigins>,
+    ) -> Option<ScopedEntity> {
         if !self.entity_visible(&e.origins) {
             return None;
         }
         let complete = self.filter.allows_all(&e.origins);
+        let shown = |o: Option<&[Origin]>| {
+            complete
+                || o.is_some_and(|o| {
+                    !o.is_empty() && o.iter().any(|x| self.filter.allows_origin(x))
+                })
+        };
         let facts = std::mem::take(&mut e.facts)
             .into_iter()
             .filter_map(|f| self.fact(f))
@@ -172,15 +218,21 @@ impl Scope {
         e.facts = facts;
         e.mentions
             .retain(|m| self.filter.allows(&m.item.source, m.sensitive));
+        let mut withheld = false;
         if !complete {
-            e.aliases.clear();
-            e.identifiers.clear();
+            let before = (e.aliases.len(), e.identifiers.len());
+            e.aliases
+                .retain(|a| shown(details.and_then(|d| d.alias(a))));
+            e.identifiers
+                .retain(|i| shown(details.and_then(|d| d.identifier(i))));
+            withheld = before != (e.aliases.len(), e.identifiers.len())
+                || e.attributes.as_object().is_none_or(|o| !o.is_empty());
             e.attributes = serde_json::Value::Object(Default::default());
         }
         e.origins.clear();
         Some(ScopedEntity {
             entity: e,
-            details_withheld: !complete,
+            details_withheld: withheld,
         })
     }
 
@@ -265,8 +317,8 @@ impl Scope {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ScopedEntity {
     pub entity: EntityRecord,
-    /// Aliases, identifiers and attributes were withheld because some of the entity's sources are
-    /// outside the client's scope.
+    /// Some aliases, identifiers or attributes were withheld because they come from (or may come
+    /// from) sources outside the client's scope.
     pub details_withheld: bool,
 }
 
