@@ -48,6 +48,6 @@ pub use types::{
     AuditEntry, AuditRecord, Chunk, ChunkId, Counts, Hit, Item, ItemChange, ItemDates, NewChunk,
     NewItem, SourceCounts, UpsertOutcome, content_hash,
 };
-pub use vector::{ANN_MIN_VECTORS, ANN_OVERSAMPLE};
+pub use vector::{ANN_MIN_VECTOR_BYTES, ANN_MIN_VECTORS, ANN_OVERSAMPLE};
 
 pub use nugget_core::{Error, Result};

@@ -3,7 +3,8 @@
 //!
 //! `sqlite-vec`'s `vec0` kNN is a brute-force scan, linear in the number of vectors (each one a
 //! `4 × dim`-byte float array that SQLCipher must decrypt), which dominates query latency from
-//! roughly a hundred thousand chunks. From [`ANN_MIN_VECTORS`] vectors on, search instead:
+//! once the vectors no longer fit the connection's page cache. From [`ANN_MIN_VECTOR_BYTES`] of
+//! vectors on (with at least [`ANN_MIN_VECTORS`] of them), search instead:
 //!
 //! 1. scans `ann_bits`, a `vec0 (bits bit[dim])` table holding the **sign bits** of each
 //!    embedding (32× smaller than the floats; hamming distance is a popcount), for the
@@ -42,11 +43,14 @@ use crate::items::{embedding_dim, f32_blob, f32_from_blob, item_ref, validate_em
 use crate::search::{MAX_KNN, excerpt};
 use crate::types::{ChunkId, Hit};
 
-/// Vector count from which [`Store::search_vector`] switches from exact to approximate search.
-///
-/// Below it the exact scan is fast enough (tens of milliseconds on an encrypted file) and the
-/// approximate path would cost recall and the index's storage for little gain.
+/// Least vector count for [`Store::search_vector`] to switch from exact to approximate search.
 pub const ANN_MIN_VECTORS: usize = 20_000;
+/// Stored vector bytes (`count × dim × 4`) from which [`Store::search_vector`] goes approximate:
+/// the size of a connection's page cache (`PRAGMA cache_size`, 32 MiB). While the vectors fit,
+/// the exact scan reads cached pages and stays fast; past it every scan decrypts them all again.
+/// Measured at 384 dimensions on an encrypted file: exact 12 ms at 20k vectors (29 MiB),
+/// 270 ms at 50k (73 MiB) and 556 ms at 100k; approximate 4 ms, 8 ms and 14 ms at k = 10.
+pub const ANN_MIN_VECTOR_BYTES: usize = 32 << 20;
 /// Approximate search rescores this many hamming candidates per requested hit...
 pub const ANN_OVERSAMPLE: usize = 10;
 /// ...but at least this many.
@@ -344,7 +348,7 @@ fn vector_count(conn: &Connection) -> Result<usize> {
 /// Which kNN strategy a vector search uses.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
-    /// Exact below [`ANN_MIN_VECTORS`], approximate from there on.
+    /// Exact below [`ANN_MIN_VECTORS`] and [`ANN_MIN_VECTOR_BYTES`], approximate from there on.
     Auto,
     Exact,
     Approx,
@@ -449,7 +453,8 @@ fn neighbour_hits(c: &Connection, neighbours: Vec<(ChunkId, f64)>) -> Result<Vec
 impl Store {
     /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
     ///
-    /// Exact while the store holds fewer than [`ANN_MIN_VECTORS`] vectors, for sparse queries (or when
+    /// Exact while the store's vectors fit the page cache ([`ANN_MIN_VECTOR_BYTES`],
+    /// [`ANN_MIN_VECTORS`]), for sparse queries (or when
     /// `limit × ANN_OVERSAMPLE` exceeds 4096); approximate from there on, through the
     /// binary-quantized index described in this module: scores stay exact, but a true
     /// neighbour may occasionally be missed. The first approximate search builds that index
@@ -502,7 +507,10 @@ impl Store {
                 Mode::Exact => false,
                 Mode::Approx => true,
                 Mode::Auto => {
-                    quantizable(embedding) && self.with_read_conn(vector_count)? >= ANN_MIN_VECTORS
+                    quantizable(embedding) && {
+                        let n = self.with_read_conn(vector_count)?;
+                        n >= ANN_MIN_VECTORS && n.saturating_mul(dim * 4) >= ANN_MIN_VECTOR_BYTES
+                    }
                 }
             };
         let approx = wanted
