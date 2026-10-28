@@ -192,3 +192,270 @@ fn tampering_on_disk_is_detected_at_load() {
         Err(nugget_core::Error::Integrity(_))
     ));
 }
+
+#[test]
+fn enabled_flag_persists_and_survives_update() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    let installed = store
+        .install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    assert!(installed.enabled);
+    assert!(!store.set_enabled("dev.nugget.other", false).unwrap());
+
+    assert!(store.set_enabled(ID, false).unwrap());
+    assert!(!store.get(ID).unwrap().unwrap().enabled);
+    // Persisted: a fresh handle on the same directory sees it.
+    let reopened = crate::PluginStore::open_at(store.root().to_path_buf()).unwrap();
+    assert!(!reopened.get(ID).unwrap().unwrap().enabled);
+    assert!(!reopened.list().unwrap()[0].enabled);
+    // Disabled plugins still load (the caller decides).
+    reopened.load(ID).unwrap();
+
+    let updated = store
+        .update(&pkg("1.1.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    assert!(!updated.enabled, "update keeps the enabled flag");
+    assert!(store.set_enabled(ID, true).unwrap());
+    assert!(store.get(ID).unwrap().unwrap().enabled);
+
+    // Reinstalling after removal starts enabled again.
+    store.set_enabled(ID, false).unwrap();
+    store.remove(ID).unwrap();
+    assert!(
+        store
+            .install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+            .unwrap()
+            .enabled
+    );
+}
+
+#[test]
+fn legacy_index_without_enabled_loads_as_enabled() {
+    let (_d, store) = temp_store();
+    store
+        .install(&pkg("1.0.0", "", 1), &[key(1).verifying_key()], &mut yes)
+        .unwrap();
+    let path = store.root().join("index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let rec = index["plugins"][ID].as_object_mut().unwrap();
+    assert!(rec.remove("enabled").is_some());
+    std::fs::write(&path, serde_json::to_vec(&index).unwrap()).unwrap();
+
+    let got = store.get(ID).unwrap().unwrap();
+    assert!(got.enabled);
+    store.load(ID).unwrap();
+    // Writing the index again adds the flag.
+    assert!(store.set_enabled(ID, false).unwrap());
+    assert!(!store.get(ID).unwrap().unwrap().enabled);
+}
+
+#[test]
+fn preview_reports_without_writing() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key(), key(2).verifying_key()];
+    let index = store.root().join("index.json");
+
+    // New install.
+    let p = store
+        .preview(&pkg("1.0.0", "hosts = [\"a.com\"]", 1), &trusted)
+        .unwrap();
+    assert_eq!(p.manifest.id, ID);
+    assert_eq!(p.signer, key(1).verifying_key());
+    assert!(p.installed_version.is_none());
+    assert!(p.previously_approved.is_none());
+    assert!(p.needs_approval);
+    assert!(!index.exists(), "preview writes nothing");
+    assert_eq!(
+        std::fs::read_dir(store.root().join("blobs/sha256"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert!(store.list().unwrap().is_empty());
+
+    store
+        .install(&pkg("1.0.0", "hosts = [\"a.com\"]", 1), &trusted, &mut yes)
+        .unwrap();
+    let before = std::fs::read(&index).unwrap();
+
+    // Update within the approved capabilities.
+    let p = store
+        .preview(&pkg("1.1.0", "hosts = [\"a.com\"]", 1), &trusted)
+        .unwrap();
+    assert_eq!(p.installed_version, Some(semver::Version::new(1, 0, 0)));
+    assert_eq!(p.previously_approved.unwrap().hosts, ["a.com"]);
+    assert!(!p.needs_approval);
+
+    // Update asking for more.
+    let p = store
+        .preview(&pkg("1.1.0", "hosts = [\"a.com\", \"b.com\"]", 1), &trusted)
+        .unwrap();
+    assert!(p.needs_approval);
+    assert_eq!(p.manifest.capabilities.hosts.len(), 2);
+
+    // Same errors as update.
+    assert!(matches!(
+        store.preview(&pkg("1.0.0", "", 1), &trusted),
+        Err(nugget_core::Error::Invalid(_))
+    ));
+    assert!(matches!(
+        store.preview(&pkg("0.9.0", "", 1), &trusted),
+        Err(nugget_core::Error::Invalid(_))
+    ));
+    assert!(matches!(
+        store.preview(&pkg("2.0.0", "", 2), &trusted),
+        Err(nugget_core::Error::Integrity(_))
+    ));
+    // And as install for an untrusted signer or a tampered package.
+    assert!(store.preview(&pkg("2.0.0", "", 3), &trusted).is_err());
+    let mut tampered = pkg("2.0.0", "", 1);
+    tampered.wasm.push(0);
+    assert!(store.preview(&tampered, &trusted).is_err());
+
+    assert_eq!(
+        std::fs::read(&index).unwrap(),
+        before,
+        "preview writes nothing"
+    );
+    assert_eq!(
+        store.get(ID).unwrap().unwrap().manifest.version.to_string(),
+        "1.0.0"
+    );
+}
+
+/// Rewrite the index record of `ID` with `edit`.
+fn edit_record(store: &crate::PluginStore, edit: impl FnOnce(&mut serde_json::Value)) {
+    let path = store.root().join("index.json");
+    let mut index: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    edit(&mut index["plugins"][ID]);
+    std::fs::write(&path, serde_json::to_vec(&index).unwrap()).unwrap();
+}
+
+fn integrity<T: std::fmt::Debug>(r: nugget_core::Result<T>) -> String {
+    match r {
+        Err(nugget_core::Error::Integrity(m)) => m,
+        other => panic!("expected an integrity error, got {other:?}"),
+    }
+}
+
+#[test]
+fn load_trusted_checks_the_trusted_keys() {
+    let (_d, store) = temp_store();
+    let k1 = key(1).verifying_key();
+    let k2 = key(2).verifying_key();
+    store
+        .install(&pkg("1.0.0", "", 1), &[k1, k2], &mut yes)
+        .unwrap();
+    assert_eq!(
+        store.load_trusted(ID, &[k2, k1]).unwrap().wasm,
+        EMPTY_COMPONENT
+    );
+    // The signing key was later removed from the trusted list.
+    integrity(store.load_trusted(ID, &[k2]));
+    integrity(store.load_trusted(ID, &[]));
+    assert!(matches!(
+        store.load_trusted("dev.nugget.other", &[k1]),
+        Err(nugget_core::Error::NotFound(_))
+    ));
+}
+
+#[test]
+fn edited_signer_in_the_index_is_refused() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key(), key(2).verifying_key()];
+    store
+        .install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    // Point the record at another trusted key, with a signature by that key over the same files.
+    let forged = pkg("1.0.0", "", 2);
+    edit_record(&store, |rec| {
+        rec["signer"] = hex::encode(key(2).verifying_key().as_bytes()).into();
+        rec["signature"] = String::from_utf8(forged.signature.clone()).unwrap().into();
+    });
+    integrity(store.load_trusted(ID, &trusted));
+    integrity(store.load(ID));
+    // Nor can it be used to take over updates.
+    integrity(store.update(&pkg("1.1.0", "", 2), &trusted, &mut yes));
+    integrity(store.preview(&pkg("1.1.0", "", 2), &trusted));
+}
+
+#[test]
+fn edited_approved_capabilities_are_refused() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    store
+        .install(&pkg("1.0.0", "hosts = [\"a.com\"]", 1), &trusted, &mut yes)
+        .unwrap();
+    edit_record(&store, |rec| {
+        rec["approved"]["hosts"] = serde_json::json!(["a.com", "evil.com"]);
+    });
+    integrity(store.load_trusted(ID, &trusted));
+    // An update must not skip the prompt on the strength of the edited approval.
+    integrity(store.update(
+        &pkg("1.1.0", "hosts = [\"a.com\", \"evil.com\"]", 1),
+        &trusted,
+        &mut |_| panic!("must not ask on a tampered record"),
+    ));
+    // Removing and installing again re-approves.
+    assert!(store.remove(ID).unwrap());
+    store
+        .install(&pkg("1.0.0", "hosts = [\"a.com\"]", 1), &trusted, &mut yes)
+        .unwrap();
+    store.load_trusted(ID, &trusted).unwrap();
+}
+
+#[test]
+fn records_without_a_seal_fail_closed() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    store
+        .install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    edit_record(&store, |rec| {
+        assert!(
+            rec.as_object_mut()
+                .unwrap()
+                .remove("approval_seal")
+                .is_some()
+        );
+    });
+    let msg = integrity(store.load_trusted(ID, &trusted));
+    assert!(msg.contains("re-approve the plugin"), "{msg}");
+    integrity(store.update(&pkg("1.1.0", "", 1), &trusted, &mut yes));
+    // Still listed, and removable.
+    assert_eq!(store.list().unwrap().len(), 1);
+    assert!(store.remove(ID).unwrap());
+}
+
+#[test]
+fn the_approval_key_is_per_store() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    store
+        .install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    let key_file = store.root().join("approval.key");
+    assert_eq!(std::fs::read(&key_file).unwrap().len(), 32);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&key_file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+    // Reopening reuses the key.
+    let reopened = crate::PluginStore::open_at(store.root().to_path_buf()).unwrap();
+    reopened.load_trusted(ID, &trusted).unwrap();
+    // Another key does not validate the seals.
+    let other = crate::PluginStore::open_with_key(store.root().to_path_buf(), [9; 32]).unwrap();
+    integrity(other.load_trusted(ID, &trusted));
+    // A caller-supplied key works end to end and writes no key file.
+    let dir = tempfile::tempdir().unwrap();
+    let own = crate::PluginStore::open_with_key(dir.path().join("p"), [7; 32]).unwrap();
+    own.install(&pkg("1.0.0", "", 1), &trusted, &mut yes)
+        .unwrap();
+    own.load_trusted(ID, &trusted).unwrap();
+    assert!(!dir.path().join("p/approval.key").exists());
+}

@@ -7,6 +7,7 @@ import type {
   KnowledgeStatus,
   McpClientInfo,
   ModelInfo,
+  PluginInfo,
   ProviderInfo,
   RuntimeInfo,
   SearchHit,
@@ -79,6 +80,25 @@ export const mcpClients: McpClientInfo[] = [
 
 export const hits: SearchHit[] = [{ item: { source: "files-1", key: "a.md" }, title: "Notes", snippet: "Ada wrote the first program", score: 0.92 }];
 
+export const plugins: PluginInfo[] = [
+  {
+    id: "rss",
+    name: "RSS feeds",
+    version: "1.2.0",
+    description: "Reads RSS and Atom feeds.",
+    kinds: ["connector"],
+    enabled: true,
+    loaded: true,
+    error: null,
+    signature: "trusted",
+    signer: "ab".repeat(32),
+    approved: { hosts: ["feeds.example.com", "*.example.org"], secrets: [], kv_max_bytes: 65_536 },
+    installed_at: now,
+    connector_kind: "plugin:rss",
+    tools: [],
+  },
+];
+
 export const RESPONSES: Record<string, unknown> = {
   connection_info: { connected: true, socket: "/tmp/nuggetd.sock", error: null },
   status,
@@ -92,5 +112,6 @@ export const RESPONSES: Record<string, unknown> = {
   knowledge_status: knowledgeStatus,
   knowledge_graph: graph,
   mcp_clients_list: mcpClients,
+  plugins_list: { plugins },
   search: hits,
 };

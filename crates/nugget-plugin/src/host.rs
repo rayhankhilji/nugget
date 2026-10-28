@@ -6,14 +6,17 @@
 //! store has:
 //! - **fuel** (a CPU budget per call; the guest also yields to the async runtime periodically),
 //! - an **epoch deadline** (a wall-clock limit that interrupts even a tight loop),
-//! - a **memory cap** through a [`ResourceLimiter`] (growth beyond it traps),
+//! - a **memory cap** through a [`ResourceLimiter`], counted across every linear memory of the
+//!   instance (growth beyond it traps), with caps on table elements and on the number of
+//!   instances, tables and memories,
 //! - a `tokio` timeout around the whole call.
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use nugget_connector::http::MeteredHttp;
 use nugget_connector::{Change, ChangeSink, Content, Document, KnownItems, SecretStore};
@@ -126,8 +129,15 @@ pub struct HostConfig {
     /// Keychain for tool calls (connectors use their source's store). `None` denies secrets to
     /// tools.
     pub secrets: Option<Arc<dyn SecretStore>>,
-    /// HTTP client override (tests). It must not follow redirects.
+    /// HTTP client override (tests). It must not follow redirects. Without
+    /// `allow_private_network` the destination check before each request still applies, but the
+    /// connection is not pinned to the checked addresses (the override has its own resolver).
     pub http_client: Option<reqwest::Client>,
+    /// Let plugins reach hosts on loopback, private, link-local and other non-public addresses
+    /// (tests against a local server). `false` in production: a request to such an IP literal,
+    /// or to a name that resolves to ANY such address, is denied, and the host's HTTP client
+    /// connects only to the addresses that were checked (no DNS rebinding in between).
+    pub allow_private_network: bool,
 }
 
 impl std::fmt::Debug for HostConfig {
@@ -135,6 +145,7 @@ impl std::fmt::Debug for HostConfig {
         f.debug_struct("HostConfig")
             .field("limits", &self.limits)
             .field("state_dir", &self.state_dir)
+            .field("allow_private_network", &self.allow_private_network)
             .finish_non_exhaustive()
     }
 }
@@ -152,6 +163,8 @@ struct HostInner {
     egress: Arc<dyn EgressSink>,
     secrets: Option<Arc<dyn SecretStore>>,
     client: reqwest::Client,
+    /// Public-network-only guard; `None` when private networks are allowed.
+    net_guard: Option<NetGuard>,
     /// Compiled components by SHA-256, shared by every load of the same bytes.
     compiled: Mutex<HashMap<String, Component>>,
     kv: Mutex<HashMap<PathBuf, Weak<KvNamespace>>>,
@@ -194,15 +207,22 @@ impl PluginHost {
                     }
                 })?;
         }
+        let net_guard = (!config.allow_private_network).then(NetGuard::default);
         let client = match config.http_client {
             Some(c) => c,
-            None => reqwest::Client::builder()
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(Duration::from_secs(15))
-                .timeout(Duration::from_secs(120))
-                .user_agent(concat!("nugget-plugin/", env!("CARGO_PKG_VERSION")))
-                .build()
-                .map_err(|e| Error::Other(format!("http client: {e}")))?,
+            None => {
+                let mut builder = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .connect_timeout(Duration::from_secs(15))
+                    .timeout(Duration::from_secs(120))
+                    .user_agent(concat!("nugget-plugin/", env!("CARGO_PKG_VERSION")));
+                if let Some(guard) = &net_guard {
+                    builder = builder.dns_resolver(guard.clone());
+                }
+                builder
+                    .build()
+                    .map_err(|e| Error::Other(format!("http client: {e}")))?
+            }
         };
         Ok(Self {
             inner: Arc::new(HostInner {
@@ -212,6 +232,7 @@ impl PluginHost {
                 egress: config.egress,
                 secrets: config.secrets,
                 client,
+                net_guard,
                 compiled: Mutex::new(HashMap::new()),
                 kv: Mutex::new(HashMap::new()),
                 stop_ticker,
@@ -587,14 +608,12 @@ impl LoadedPlugin {
         };
         Ok(HostState {
             caps: self.caps.clone(),
-            limiter: Limiter {
-                memory_bytes: limits.memory_bytes,
-                memory_exceeded: false,
-            },
+            limiter: Limiter::new(limits.memory_bytes),
             limits,
             mode,
             http,
             http_budget,
+            net_guard: self.host.net_guard.clone(),
             kv,
             secrets,
             sink: None,
@@ -735,44 +754,84 @@ struct SinkBridge {
     known: Arc<dyn KnownItems>,
 }
 
-struct Limiter {
+/// Most table elements one plugin store may hold, across all its tables.
+const MAX_TABLE_ELEMENTS: usize = 100_000;
+/// Most instances, tables and linear memories in one plugin store.
+const MAX_INSTANCES: usize = 64;
+const MAX_TABLES: usize = 64;
+const MAX_MEMORIES: usize = 16;
+
+/// Per-store resource limits. Memory and table growth are summed over every memory and table of
+/// the store (one store per call), so many small memories cannot add up past
+/// [`Limits::memory_bytes`].
+pub(crate) struct Limiter {
     memory_bytes: usize,
-    memory_exceeded: bool,
+    memory_used: usize,
+    table_elements: usize,
+    pub(crate) memory_exceeded: bool,
+}
+
+impl Limiter {
+    pub(crate) fn new(memory_bytes: usize) -> Self {
+        Self {
+            memory_bytes,
+            memory_used: 0,
+            table_elements: 0,
+            memory_exceeded: false,
+        }
+    }
 }
 
 impl ResourceLimiter for Limiter {
     fn memory_growing(
         &mut self,
-        _current: usize,
+        current: usize,
         desired: usize,
         _maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
-        if desired > self.memory_bytes {
-            self.memory_exceeded = true;
-            return Err(wasmtime::Error::msg("plugin memory limit exceeded"));
+        let total = desired
+            .checked_sub(current)
+            .and_then(|delta| self.memory_used.checked_add(delta));
+        match total {
+            Some(total) if total <= self.memory_bytes => {
+                self.memory_used = total;
+                Ok(true)
+            }
+            _ => {
+                self.memory_exceeded = true;
+                Err(wasmtime::Error::msg("plugin memory limit exceeded"))
+            }
         }
-        Ok(true)
     }
 
     fn table_growing(
         &mut self,
-        _current: usize,
+        current: usize,
         desired: usize,
         _maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
-        Ok(desired <= 100_000)
+        let total = desired
+            .checked_sub(current)
+            .and_then(|delta| self.table_elements.checked_add(delta));
+        match total {
+            Some(total) if total <= MAX_TABLE_ELEMENTS => {
+                self.table_elements = total;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
     }
 
     fn instances(&self) -> usize {
-        64
+        MAX_INSTANCES
     }
 
     fn tables(&self) -> usize {
-        64
+        MAX_TABLES
     }
 
     fn memories(&self) -> usize {
-        16
+        MAX_MEMORIES
     }
 }
 
@@ -784,6 +843,7 @@ pub(crate) struct HostState {
     mode: Mode,
     http: Option<MeteredHttp>,
     http_budget: u32,
+    net_guard: Option<NetGuard>,
     kv: Option<Arc<KvNamespace>>,
     secrets: Option<Arc<dyn SecretStore>>,
     sink: Option<SinkBridge>,
@@ -905,6 +965,15 @@ impl http::Host for HostState {
             Ok(v) => v,
             Err(e) => return Ok(Err(e)),
         };
+        if let Some(guard) = &self.net_guard {
+            // Like an undeclared host, a non-public destination is denied before anything is
+            // sent (so there is no ledger row).
+            match guard.check(&url).await {
+                Ok(()) => {}
+                Err(NetRefusal::Blocked(msg)) => return Ok(Err(self.deny(msg))),
+                Err(NetRefusal::Unresolved(msg)) => return Ok(Err(PluginError::Network(msg))),
+            }
+        }
         self.http_budget -= 1;
         let mut builder = client.request(method, url.as_str());
         for (name, value) in &req.headers {
@@ -1182,4 +1251,199 @@ fn from_guest(id: &str, e: PluginError) -> Error {
         PluginError::Cancelled => Error::Cancelled,
         PluginError::Other(m) => Error::Other(format!("plugin `{id}`: {m}")),
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Public-network-only guard: plugins may not reach loopback, private or other non-public
+// addresses (the user's router, local services, cloud metadata endpoints, ...).
+
+/// How long a destination check pins the addresses it checked for the connection that follows.
+const PIN_TTL: Duration = Duration::from_secs(60);
+/// Bound on remembered pins; expired ones are dropped first.
+const MAX_PINS: usize = 1024;
+
+/// Checks request destinations and, installed as the host client's DNS resolver, makes the
+/// connection use exactly the addresses that were checked. A name that is resolved without a
+/// prior check (for example a proxy given by name) is resolved and checked the same way, so a
+/// proxy must be configured by a public name or by IP address.
+/// When a name was checked, and the addresses it resolved to.
+type Pin = (Instant, Vec<IpAddr>);
+
+#[derive(Clone, Default)]
+pub(crate) struct NetGuard {
+    pins: Arc<Mutex<HashMap<String, Pin>>>,
+}
+
+#[derive(Debug)]
+pub(crate) enum NetRefusal {
+    /// The destination is not on the public internet (a capability denial).
+    Blocked(String),
+    /// The name did not resolve (a network error).
+    Unresolved(String),
+}
+
+impl std::fmt::Display for NetRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NetRefusal::Blocked(m) | NetRefusal::Unresolved(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for NetRefusal {}
+
+impl NetGuard {
+    /// Check the URL's destination: an IP literal directly, a name by resolving it (every
+    /// address must be public). The checked addresses are pinned for the connection.
+    pub(crate) async fn check(&self, url: &Url) -> std::result::Result<(), NetRefusal> {
+        match url.host() {
+            Some(url::Host::Ipv4(ip)) => check_ip(&ip.to_string(), IpAddr::V4(ip)),
+            Some(url::Host::Ipv6(ip)) => check_ip(&format!("[{ip}]"), IpAddr::V6(ip)),
+            Some(url::Host::Domain(name)) => {
+                let ips = resolve_checked(name).await?;
+                self.pin(name, ips);
+                Ok(())
+            }
+            None => Err(NetRefusal::Blocked(format!("`{url}` has no host"))),
+        }
+    }
+
+    fn pin(&self, name: &str, ips: Vec<IpAddr>) {
+        let mut pins = self.pins.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        if pins.len() >= MAX_PINS {
+            pins.retain(|_, (at, _)| now.duration_since(*at) < PIN_TTL);
+            if pins.len() >= MAX_PINS {
+                // Only fresh pins left: the oldest goes (its connection, if any, has started).
+                if let Some(oldest) = pins
+                    .iter()
+                    .min_by_key(|(_, (at, _))| *at)
+                    .map(|(k, _)| k.clone())
+                {
+                    pins.remove(&oldest);
+                }
+            }
+        }
+        pins.insert(name.to_string(), (now, ips));
+    }
+
+    pub(crate) fn pinned(&self, name: &str) -> Option<Vec<IpAddr>> {
+        let pins = self.pins.lock().unwrap_or_else(|e| e.into_inner());
+        pins.get(name)
+            .filter(|(at, _)| at.elapsed() < PIN_TTL)
+            .map(|(_, ips)| ips.clone())
+    }
+}
+
+impl reqwest::dns::Resolve for NetGuard {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let guard = self.clone();
+        let name = name.as_str().to_string();
+        Box::pin(async move {
+            let ips = match guard.pinned(&name) {
+                Some(ips) => ips,
+                None => resolve_checked(&name).await?,
+            };
+            // The connector sets the port.
+            let addrs: reqwest::dns::Addrs =
+                Box::new(ips.into_iter().map(|ip| SocketAddr::new(ip, 0)));
+            Ok(addrs)
+        })
+    }
+}
+
+fn check_ip(shown: &str, ip: IpAddr) -> std::result::Result<(), NetRefusal> {
+    if is_non_public(ip) {
+        Err(NetRefusal::Blocked(format!(
+            "{shown} is a private or local network address"
+        )))
+    } else {
+        Ok(())
+    }
+}
+
+/// Resolve `name` and return its addresses only if every one of them is public.
+async fn resolve_checked(name: &str) -> std::result::Result<Vec<IpAddr>, NetRefusal> {
+    let lookup = name.strip_suffix('.').unwrap_or(name);
+    let addrs = tokio::net::lookup_host((lookup, 0))
+        .await
+        .map_err(|e| NetRefusal::Unresolved(format!("could not resolve `{name}`: {e}")))?;
+    let mut ips: Vec<IpAddr> = Vec::new();
+    for a in addrs {
+        if !ips.contains(&a.ip()) {
+            ips.push(a.ip());
+        }
+    }
+    if ips.is_empty() {
+        return Err(NetRefusal::Unresolved(format!(
+            "`{name}` resolved to no addresses"
+        )));
+    }
+    if let Some(ip) = ips.iter().find(|ip| is_non_public(**ip)) {
+        return Err(NetRefusal::Blocked(format!(
+            "`{name}` resolves to a private or local network address ({ip})"
+        )));
+    }
+    Ok(ips)
+}
+
+/// Whether a plugin must not connect to `ip`: loopback, private, link-local, shared (CGNAT),
+/// unspecified, broadcast, multicast, reserved, benchmarking and documentation ranges, IPv6
+/// unique-local and link-local, and IPv4 addresses embedded in IPv6 (mapped, compatible, NAT64)
+/// that are any of these.
+pub(crate) fn is_non_public(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => is_non_public_v4(v4),
+        IpAddr::V6(v6) => is_non_public_v6(v6),
+    }
+}
+
+fn is_non_public_v4(ip: Ipv4Addr) -> bool {
+    let [a, b, c, _] = ip.octets();
+    // 127/8, 10/8, 172.16/12, 192.168/16, 169.254/16, 255.255.255.255, 224/4, and
+    // 192.0.2/24, 198.51.100/24, 203.0.113/24 (documentation).
+    ip.is_loopback()
+        || ip.is_private()
+        || ip.is_link_local()
+        || ip.is_broadcast()
+        || ip.is_multicast()
+        || ip.is_documentation()
+        // 0/8 "this network", including the unspecified address.
+        || a == 0
+        // 100.64/10 shared address space (CGNAT).
+        || (a == 100 && (b & 0xC0) == 64)
+        // 192.0.0/24 protocol assignments.
+        || (a == 192 && b == 0 && c == 0)
+        // 198.18/15 benchmarking.
+        || (a == 198 && (b & 0xFE) == 18)
+        // 240/4 reserved.
+        || a >= 240
+}
+
+fn is_non_public_v6(ip: Ipv6Addr) -> bool {
+    if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+        return true;
+    }
+    // IPv4-mapped (::ffff:0:0/96).
+    if let Some(v4) = ip.to_ipv4_mapped() {
+        return is_non_public_v4(v4);
+    }
+    let seg = ip.segments();
+    // IPv4-compatible (::/96, deprecated) and the NAT64 well-known prefix (64:ff9b::/96).
+    if seg[..6] == [0; 6] || seg[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        let v4 = Ipv4Addr::from((u32::from(seg[6]) << 16) | u32::from(seg[7]));
+        return is_non_public_v4(v4);
+    }
+    // fc00::/7 unique local.
+    (seg[0] & 0xFE00) == 0xFC00
+        // fe80::/10 link-local and fec0::/10 site-local (deprecated).
+        || (seg[0] & 0xFFC0) == 0xFE80
+        || (seg[0] & 0xFFC0) == 0xFEC0
+        // 2001:db8::/32 and 3fff::/20 documentation.
+        || (seg[0] == 0x2001 && seg[1] == 0x0db8)
+        || (seg[0] == 0x3fff && (seg[1] & 0xF000) == 0)
+        // 64:ff9b:1::/48 local-use NAT64.
+        || (seg[0] == 0x64 && seg[1] == 0xff9b && seg[2] == 1)
+        // 100::/64 discard.
+        || (seg[0] == 0x0100 && seg[1..4] == [0, 0, 0])
 }

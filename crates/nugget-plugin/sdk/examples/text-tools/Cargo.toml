@@ -1,0 +1,13 @@
+[package]
+name = "text-tools"
+description = "Example Nugget plugin: read-only text statistics tools with no capabilities"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+nugget-plugin-sdk.workspace = true

@@ -878,3 +878,142 @@ pub struct VoiceStatus {
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
 }
+
+// ---- Plugins (M6) ----
+
+/// IPC method names of the plugins feature.
+pub mod plugin_method {
+    pub const LIST: &str = "plugins.list";
+    pub const INSPECT: &str = "plugins.inspect";
+    pub const INSTALL: &str = "plugins.install";
+    pub const APPROVE: &str = "plugins.approve";
+    pub const REMOVE: &str = "plugins.remove";
+    pub const ENABLE: &str = "plugins.enable";
+}
+
+/// Capabilities a plugin requests or the user approved.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginCapabilities {
+    /// Hosts reachable over HTTP (`example.com`, `*.example.com`, `http://host:port`, ...).
+    #[serde(default)]
+    pub hosts: Vec<String>,
+    /// Names of the plugin's own keychain secrets.
+    #[serde(default)]
+    pub secrets: Vec<String>,
+    /// Size of the plugin's key-value store in bytes (`0` = none).
+    #[serde(default)]
+    pub kv_max_bytes: u64,
+}
+
+/// Who signed a plugin, as far as this daemon trusts it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSignature {
+    /// A key in `[plugins] trusted_keys`.
+    Trusted,
+    /// The daemon's local dev key (`[plugins] dev_mode = true`).
+    Dev,
+    /// Neither: the plugin is listed but not loaded.
+    #[default]
+    Untrusted,
+}
+
+/// One installed plugin.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// `connector` and/or `tool`.
+    pub kinds: Vec<String>,
+    pub enabled: bool,
+    /// Running in the plugin host right now.
+    pub loaded: bool,
+    /// Why it is not loaded (untrusted signer, load failure, ...).
+    #[serde(default)]
+    pub error: Option<String>,
+    pub signature: PluginSignature,
+    /// Hex ed25519 public key that signed the package.
+    pub signer: String,
+    pub approved: PluginCapabilities,
+    /// RFC 3339.
+    pub installed_at: String,
+    /// `plugin:<id>` for connector plugins.
+    #[serde(default)]
+    pub connector_kind: Option<String>,
+    /// Agent tool names.
+    #[serde(default)]
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginListResult {
+    pub plugins: Vec<PluginInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginIdParams {
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInspectResult {
+    pub plugin: PluginInfo,
+    /// What the installed version's manifest requests.
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub connector_display_name: Option<String>,
+}
+
+/// `plugins.install`: an absolute path to a `.nuggetplugin` file or a package directory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginInstallParams {
+    pub path: String,
+}
+
+/// The verified package, staged under `token` (10 minutes) until `plugins.approve`. When
+/// `needs_approval` is false (an update within the approved capabilities) it was committed at
+/// once and `installed` is true.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginInstallResult {
+    pub token: String,
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub kinds: Vec<String>,
+    pub signature: PluginSignature,
+    pub signer: String,
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub previously_approved: Option<PluginCapabilities>,
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    pub needs_approval: bool,
+    pub installed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginApproveParams {
+    pub token: String,
+    pub approve: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginApproveResult {
+    /// The installed plugin, or `None` when the install was rejected.
+    #[serde(default)]
+    pub plugin: Option<PluginInfo>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginRemoveResult {
+    pub removed: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluginEnableParams {
+    pub id: String,
+    pub enabled: bool,
+}

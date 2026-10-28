@@ -398,7 +398,10 @@ impl Daemon {
             }
             None => Arc::new(KeyringSecrets::new()),
         };
-        let registry = sources::registry();
+        let mut registry = sources::registry();
+        crate::features::plugins::connector_factories(&paths, &config)
+            .into_iter()
+            .for_each(|f| registry.register(f));
         let resolver =
             sources::client_secret_resolver(secrets.clone(), sources::oauth_kinds(&registry));
         let power: Arc<dyn PowerPolicy> = opts.power.unwrap_or_else(|| {
