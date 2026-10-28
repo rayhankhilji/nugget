@@ -93,10 +93,14 @@ pub(crate) fn parse_date(s: &str) -> Option<i64> {
     Some(date.midnight().assume_utc().unix_timestamp())
 }
 
-/// Whether `s` is a plausible opaque id: 1..=max chars of ASCII alphanumerics and `-_.`.
+/// Whether `s` is a plausible opaque id: 1..=max chars of ASCII alphanumerics and `-_.`, and
+/// not `.` or `..` (ids are interpolated into API URL paths, where those are dot-segments that
+/// would walk up the path to another endpoint on the API host).
 pub(crate) fn safe_id(s: &str, max: usize) -> bool {
     !s.is_empty()
         && s.len() <= max
+        && s != "."
+        && s != ".."
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
 }
@@ -131,6 +135,8 @@ mod tests {
         );
         assert!(safe_id("C0123-abc_.", 20));
         assert!(!safe_id("../x", 20));
+        assert!(!safe_id("..", 20) && !safe_id(".", 20));
+        assert!(safe_id("...", 20));
         assert!(!safe_id("", 20));
     }
 }

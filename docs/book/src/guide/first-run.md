@@ -14,8 +14,13 @@ The first time `nuggetd` starts, it does the following, all locally:
    logs a warning.
 4. **Opens the encrypted store** (`nugget.db`), and checks the audit log's hash chain in the
    background.
-5. **Starts listening** on a local socket only: a Unix socket in a private (`0700`) directory, or a
-   per-user named pipe on Windows. There is no network listener.
+5. **Starts listening** on a local socket: a Unix socket in a private (`0700`) directory, or a
+   per-user named pipe on Windows. For [MCP](mcp.md) it also listens on `127.0.0.1` port 7319
+   (loopback only; every request needs a client token). There is no listener reachable from
+   the network.
+6. **Starts the knowledge pipeline.** Once items are indexed, it extracts people, organisations and
+   facts and renders them into the vault folder, `~/Nugget Vault` by default. See
+   [The knowledge graph and vault](knowledge.md).
 
 Nothing leaves your machine at this point. Run `nuggetd status` to check:
 
@@ -39,6 +44,13 @@ providers:
 4. Watch the **Indexing** widget. Items become searchable as they are indexed; you do not have to
    wait for the whole backfill.
 5. Try **Search**, then **Ask with context**. See [Search and Ask](search-ask.md).
+6. Open **Knowledge** to see the people, organisations and facts found so far, and
+   **Connected AI apps** to let Claude Desktop, Claude Code or Cursor read them over
+   [MCP](mcp.md).
+
+Pages being added in wave W: **Double Tap** settings ([Double Tap](double-tap.md)), **Agent**
+([The agent](agent.md)), **Safety** ([Safety](safety.md)), **Today** ([Today](today.md)) and
+**Plugins** ([Plugins](plugins.md)). They are not in the app yet.
 
 ## Time to first value
 

@@ -1,16 +1,18 @@
 # Install
 
-> **Coming with packaging.** There are no installers, signed builds or package-manager entries yet
-> (milestone M6). Until then, Nugget is built from source. The steps below are the same ones CI runs on
-> every change.
+> **No published release yet.** The release pipeline exists: it builds signed installers for every
+> platform and an in-app updater (see
+> [Releases](https://github.com/rayhankhilji/nugget/blob/main/docs/release.md)), but no version has been
+> released. Until one is, build Nugget from source with the steps below (the same ones CI runs on every
+> change), or build the installers yourself ([below](#building-the-installers-yourself)).
 
-| Platform | Installer | Build from source |
+| Platform | Installers (from the release pipeline) | Build from source |
 |---|---|---|
-| macOS (Apple Silicon and Intel) | Coming with packaging (signed, notarised `.dmg`) | Yes |
-| Windows 10 and 11 | Coming with packaging (signed `.msi`) | Yes |
-| Linux (X11 and Wayland) | Coming with packaging (AppImage, `.deb`, `.rpm`) | Yes |
+| macOS (Apple Silicon and Intel) | `.dmg` (signed and notarised when the release has Apple credentials) | Yes |
+| Windows 10 and 11 (x64) | Per-user NSIS `-setup.exe` and `.msi` | Yes |
+| Linux x64 and arm64 (X11 and Wayland) | AppImage, `.deb`, `.rpm` | Yes |
 
-CI builds and tests on all three. Note that the
+Each installer bundles the desktop app and `nuggetd`. CI builds and tests on all three platforms. The
 [M0 follow-ups](https://github.com/rayhankhilji/nugget/blob/main/docs/m0-followups.md) still list
 service install and the keychain backends on real macOS and Windows machines as not yet verified
 outside CI.
@@ -96,6 +98,24 @@ administrator rights:
 
 See [the command line](../reference/cli.md) for details, and [First run](first-run.md) for what happens
 next.
+
+## Building the installers yourself
+
+From the repository root, after the prerequisites above (on Linux, add `rpm` for `.rpm` output):
+
+```sh
+packaging/scripts/stage-sidecar.sh
+cd apps/desktop
+pnpm install --frozen-lockfile
+pnpm tauri build --config src-tauri/tauri.bundle.conf.json
+```
+
+The first script builds `nuggetd` in release mode and puts it where the bundle expects it. The
+installers land under `target/release/bundle/`. A local build has no updater key, so it cannot update
+itself.
+
+With an installed app, the app offers once, on the Status page, to start the background service when
+you log in. It runs the bundled `nuggetd install-service` for you.
 
 ## Uninstall
 

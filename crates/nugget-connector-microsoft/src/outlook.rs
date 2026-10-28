@@ -780,6 +780,7 @@ mod unit {
         assert!(valid_message_id("AQMkADAw-_AAA"));
         assert!(!valid_message_id("../x"));
         assert!(!valid_message_id("a/b"));
+        assert!(!valid_message_id("..") && !valid_message_id("."));
         assert!(!valid_message_id(""));
     }
 }
