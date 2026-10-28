@@ -1,0 +1,156 @@
+{
+  "snapshot_id": "fx.1",
+  "url": "https://shop.example/page",
+  "title": "Checkout",
+  "captured_at_ms": 1700000000000,
+  "viewport": {
+    "width": 1024,
+    "height": 768,
+    "scroll_x": 0,
+    "scroll_y": 0
+  },
+  "elements": [
+    {
+      "id": "n1",
+      "role": "textbox",
+      "name": "Card number",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "payment",
+      "form": "n2"
+    },
+    {
+      "id": "n3",
+      "role": "textbox",
+      "name": "CVC",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "payment",
+      "form": "n2"
+    },
+    {
+      "id": "n4",
+      "role": "textbox",
+      "name": "MM/YY",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "payment",
+      "form": "n2"
+    },
+    {
+      "id": "n5",
+      "role": "textbox",
+      "name": "Name on card",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "payment",
+      "form": "n2"
+    },
+    {
+      "id": "n6",
+      "role": "textbox",
+      "name": "IBAN",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "sensitive": "payment",
+      "form": "n2"
+    },
+    {
+      "id": "n7",
+      "role": "textbox",
+      "name": "Coupon",
+      "tag": "input",
+      "disabled": false,
+      "editable": true,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "input_type": "text",
+      "value": "SAVE10",
+      "form": "n2"
+    },
+    {
+      "id": "n8",
+      "role": "button",
+      "name": "Pay $20.00",
+      "tag": "button",
+      "disabled": false,
+      "editable": false,
+      "focused": false,
+      "visible": true,
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 100,
+        "height": 20
+      },
+      "in_shadow": false,
+      "form": "n2"
+    }
+  ],
+  "elements_truncated": false,
+  "text": "Pay $20.00",
+  "text_truncated": false,
+  "frames": []
+}

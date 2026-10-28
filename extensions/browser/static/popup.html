@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Nugget</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h1>Nugget</h1>
+    <p id="site">—</p>
+    <p id="status" role="status"></p>
+    <div class="row">
+      <button id="grant" type="button">Allow on this site</button>
+      <button id="revoke" type="button" hidden>Remove access</button>
+    </div>
+    <div class="row">
+      <button id="stop" type="button" class="danger">Stop Nugget</button>
+      <button id="resume" type="button" hidden>Let Nugget act again</button>
+    </div>
+    <p class="note">Nugget can only see and act on sites you allow here. Password and payment fields are never read.</p>
+    <script src="popup.js"></script>
+  </body>
+</html>

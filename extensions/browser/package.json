@@ -1,0 +1,29 @@
+{
+  "name": "nugget-browser-extension",
+  "private": true,
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "build": "tsc --noEmit && tsc --noEmit -p test && node scripts/build.mjs",
+    "build:e2e": "node scripts/build.mjs --e2e",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run",
+    "test:e2e": "node scripts/build.mjs --e2e && node e2e/run.mjs"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.3.4",
+    "@types/jsdom": "28.0.3",
+    "@types/node": "22.20.5",
+    "esbuild": "0.28.2",
+    "jsdom": "29.1.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

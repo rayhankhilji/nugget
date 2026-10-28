@@ -1,0 +1,10 @@
+:root { color-scheme: light dark; --bg: #fff; --fg: #1f2328; --muted: #59636e; --danger: #d1242f; }
+@media (prefers-color-scheme: dark) { :root { --bg: #1f2328; --fg: #f0f3f6; --muted: #9198a1; } }
+body { font: 13px/1.4 system-ui, sans-serif; margin: 0; padding: 12px 14px; width: 280px; background: var(--bg); color: var(--fg); }
+h1 { font-size: 15px; margin: 0 0 6px; }
+#site { font-weight: 600; word-break: break-all; margin: 0 0 4px; }
+#status { color: var(--muted); margin: 0 0 10px; }
+.row { display: flex; gap: 8px; margin-bottom: 8px; }
+button { font: inherit; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--muted); background: transparent; color: inherit; cursor: pointer; }
+button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.note { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
