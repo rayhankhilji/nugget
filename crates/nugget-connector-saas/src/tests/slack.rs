@@ -627,3 +627,21 @@ async fn hostile_payloads_are_capped_not_panics() {
     assert!(text.contains(&format!("{}…", "A".repeat(100))));
     assert!(!text.contains("bad"));
 }
+
+/// An `ok:false` error code is server text that lands in error messages (logs, the UI): it is
+/// capped and stripped of control characters.
+#[tokio::test]
+async fn hostile_error_codes_are_capped_and_printable() {
+    let h = Harness::new().await;
+    h.paste("xoxp-1");
+    let code = format!("\u{1b}[2J\nfake_log_line {}", "x".repeat(100_000));
+    Mock::given(method("GET"))
+        .and(path("/slack/auth.test"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": false, "error": code})))
+        .mount(&h.server)
+        .await;
+    let conn = slack(&h, json!({}));
+    let msg = run(&conn, None, &h.sink()).await.unwrap_err().to_string();
+    assert!(msg.len() < 400, "{} bytes", msg.len());
+    assert!(!msg.chars().any(char::is_control), "{msg:?}");
+}

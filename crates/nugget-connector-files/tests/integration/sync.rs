@@ -162,6 +162,42 @@ async fn junk_vcs_dependency_and_cache_dirs_are_always_skipped() {
 }
 
 #[tokio::test]
+async fn credential_files_and_dirs_are_never_indexed() {
+    // A root at the home folder with everything included: keys and credentials stay out of the
+    // index (where any prompt-injected request could search them).
+    let tmp = tempfile::tempdir().unwrap();
+    let root = root_in(&tmp, "home");
+    for rel in [
+        ".ssh/id_ed25519",
+        ".ssh/config",
+        ".gnupg/private-keys-v1.d/x.key",
+        ".aws/credentials",
+        ".kube/config",
+        ".docker/config.json",
+        "proj/.env",
+        "proj/.env.production",
+        "proj/.ENV",
+        "proj/server.pem",
+        "proj/tls.KEY",
+        "proj/id_rsa",
+        ".netrc",
+        ".npmrc",
+        ".git-credentials",
+        "vault.kdbx",
+    ] {
+        write(&root, rel, "SECRET");
+    }
+    write(&root, "proj/README.md", "ok");
+    write(&root, "proj/keys.md", "ok");
+    let mut h =
+        Harness::files(json!({ "roots": [root], "include": ["*"], "include_hidden": true }));
+    assert_eq!(
+        upserts(&h.sync().await),
+        set(["0:proj/README.md", "0:proj/keys.md"])
+    );
+}
+
+#[tokio::test]
 async fn hidden_files_follow_the_setting() {
     let tmp = tempfile::tempdir().unwrap();
     let root = root_in(&tmp, "r");

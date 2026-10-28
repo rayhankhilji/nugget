@@ -2,7 +2,7 @@
 
 import { LIMITS, ProtocolError, type BrowserAction, type ElementInfo, type PageSnapshot, type WaitCondition } from "./protocol";
 import type { ElementRegistry } from "./registry";
-import { accessibleName, roleOf } from "./snapshot";
+import { accessibleName, roleOf, sensitivity } from "./snapshot";
 
 /** URL schemes `navigate` accepts. Everything else (javascript:, data:, file:, chrome:, ...) is refused. */
 export function checkNavigateUrl(raw: string, base?: string): URL {
@@ -64,6 +64,9 @@ export function validateAction(
     case "select": {
       const el = element(latest, action.element);
       usable(el);
+      if (el.sensitive) {
+        throw new ProtocolError("sensitive_field", `element ${el.id} is a ${el.sensitive} field; Nugget never fills those`);
+      }
       if (!el.options) throw new ProtocolError("not_editable", `element ${el.id} is not a select`);
       if (!el.options.some((o) => o.value === action.value || o.label === action.value)) {
         throw new ProtocolError("bad_option", `element ${el.id} has no option ${JSON.stringify(action.value)}`);
@@ -96,6 +99,13 @@ function live(registry: ElementRegistry, id: string): Element {
   const el = registry.get(id);
   if (!el) throw new ProtocolError("unknown_element", `element ${id} is no longer in the page`);
   return el;
+}
+
+/** Re-check the live element: the page may have turned it into a password/payment field since
+ * the snapshot (attributes changed, or a swap that kept the element). */
+function notSensitiveNow(registry: ElementRegistry, el: Element): void {
+  const kind = registry.noteSensitive(el, sensitivity(el));
+  if (kind) throw new ProtocolError("sensitive_field", `the target is now a ${kind} field; Nugget never fills those`);
 }
 
 function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string): void {
@@ -133,6 +143,7 @@ export async function performAction(registry: ElementRegistry, doc: Document, ac
     }
     case "type": {
       const el = live(registry, action.element) as HTMLElement;
+      notSensitiveNow(registry, el);
       scrollIntoViewIfPossible(el);
       el.focus?.();
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
@@ -148,6 +159,7 @@ export async function performAction(registry: ElementRegistry, doc: Document, ac
     }
     case "select": {
       const el = live(registry, action.element) as HTMLSelectElement;
+      notSensitiveNow(registry, el);
       const opt = Array.from(el.options).find((o) => o.value === action.value)
         ?? Array.from(el.options).find((o) => (o.textContent ?? "").trim() === action.value);
       if (!opt) throw new ProtocolError("bad_option", `no option ${JSON.stringify(action.value)}`);
