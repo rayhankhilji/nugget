@@ -12,9 +12,6 @@
 //! never stops the daemon. Methods are matched after the built-in ones in `handler.rs`. On
 //! shutdown, [`Features::shutdown`] runs after the listener closed and before ingest stops.
 
-// The seam lands before its first feature; drop this once one is registered in `build`.
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,6 +23,10 @@ use serde_json::Value;
 
 use crate::config::Config;
 use crate::daemon::State;
+
+mod agent;
+mod browser;
+mod policy;
 
 /// One wired-in subsystem.
 #[async_trait]
@@ -111,10 +112,9 @@ impl Features {
 pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
     let mut list: Vec<Arc<dyn Feature>> = Vec::new();
     // W1 Double Tap:   start(&mut list, "draft", draft::start(cx).await);
-    // W3 agent/safety: start(&mut list, "agent", agent::start(cx).await);
+    agent::register(cx, &mut list).await; // W3: policy, browser, agent
     // W4 proactive:    start(&mut list, "proactive", proactive::start(cx).await);
     // W6 plugins:      start(&mut list, "plugins", plugins::start(cx).await);
-    let _ = cx;
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

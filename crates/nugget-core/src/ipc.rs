@@ -878,3 +878,271 @@ pub struct VoiceStatus {
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_built: Option<time::OffsetDateTime>,
 }
+
+// ---- Agent (M4) ----
+//
+// The agent runtime (`nugget-agent`), the safety policy (`nugget-policy`) and the browser bridge
+// (`nugget-browser`), served by the daemon's `agent`, `policy` and `browser` features. Types
+// owned by those crates travel as JSON values (`serde_json::Value`); each field names the type
+// whose serialized form it carries.
+//
+// | Method | Params | Result |
+// |---|---|---|
+// | `agent.run` | [`AgentRunRequest`] | [`AgentStarted`], then `agent.event` notifications |
+// | `agent.cancel` | [`AgentTaskRef`] | `null` |
+// | `agent.confirm` | [`AgentConfirm`] | `null` |
+// | `agent.answer` | [`AgentAnswer`] | `null` (resumes a run waiting on `ask_user`) |
+// | `agent.list` | [`AgentListRequest`] | `Vec<`[`AgentTaskSummary`]`>`, newest first |
+// | `agent.get` | [`AgentTaskRef`] | [`AgentTaskDetail`] (with `explain`) |
+// | `policy.get` | `{}` | [`PolicyState`] |
+// | `policy.set` | [`PolicySet`] | [`PolicyState`] |
+// | `policy.approvals` | `{}` | [`PolicyApprovals`] |
+// | `policy.kill` | `{}` | [`KillState`] |
+// | `policy.resume` | `{}` | [`KillState`] |
+// | `policy.log.export` | `{}` | [`PolicyLogExport`] |
+// | `browser.status` | `{}` | [`BrowserStatus`] |
+// | `browser.host.attach` | `nugget_browser::bridge::AttachInfo` | `null` when detached; `browser.host.request` notifications meanwhile |
+// | `browser.host.deliver` | `nugget_browser::ExtensionMessage` | `null` |
+
+pub mod agent_method {
+    pub const AGENT_RUN: &str = "agent.run";
+    pub const AGENT_CANCEL: &str = "agent.cancel";
+    pub const AGENT_CONFIRM: &str = "agent.confirm";
+    pub const AGENT_ANSWER: &str = "agent.answer";
+    pub const AGENT_LIST: &str = "agent.list";
+    pub const AGENT_GET: &str = "agent.get";
+    pub const POLICY_GET: &str = "policy.get";
+    pub const POLICY_SET: &str = "policy.set";
+    pub const POLICY_APPROVALS: &str = "policy.approvals";
+    pub const POLICY_KILL: &str = "policy.kill";
+    pub const POLICY_RESUME: &str = "policy.resume";
+    pub const POLICY_LOG_EXPORT: &str = "policy.log.export";
+    pub const BROWSER_STATUS: &str = "browser.status";
+    /// Native host → daemon, long-lived: registers the host; returns when it is detached.
+    pub const BROWSER_HOST_ATTACH: &str = "browser.host.attach";
+    /// Native host → daemon: a reply or event from the extension.
+    pub const BROWSER_HOST_DELIVER: &str = "browser.host.deliver";
+}
+
+pub mod agent_notification {
+    /// [`AgentEventNotice`], broadcast to every connection.
+    pub const AGENT_EVENT: &str = "agent.event";
+    /// [`KillState`], broadcast when the kill switch is engaged or released.
+    pub const POLICY_KILL_CHANGED: &str = "policy.kill.changed";
+    /// Daemon → native host: a `nugget_browser::HostMessage` to forward to the extension.
+    pub const BROWSER_HOST_REQUEST: &str = "browser.host.request";
+}
+
+/// Optional limits for one run; unset fields use the `[agent]` config (or the crate defaults).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentBudgets {
+    #[serde(default)]
+    pub max_steps: Option<u32>,
+    #[serde(default)]
+    pub deadline_secs: Option<u64>,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentRunRequest {
+    pub goal: String,
+    /// Extra trusted context from the user.
+    #[serde(default)]
+    pub context: Option<String>,
+    /// Tool names the run may use (the built-ins `finish`, `ask_user`, `note` are always
+    /// available). `None` means every registered tool.
+    #[serde(default)]
+    pub tools: Option<Vec<String>>,
+    #[serde(default)]
+    pub budgets: AgentBudgets,
+    /// Use this provider instead of the router's agentic tier.
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentStarted {
+    pub task_id: String,
+    /// Tools the run can call.
+    pub tools: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTaskRef {
+    pub task_id: String,
+}
+
+/// The user's answer to a confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfirmChoice {
+    /// Approve this action only.
+    Once,
+    /// Approve this action and the same risk class on the same target for the rest of the task
+    /// (only Send and Destroy can be approved for a task; others behave like `once`).
+    Task,
+    Deny,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentConfirm {
+    pub task_id: String,
+    /// `ConfirmationRequest::request_id` from the `confirmation_needed` event.
+    pub request_id: String,
+    pub choice: ConfirmChoice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentAnswer {
+    pub task_id: String,
+    pub answer: String,
+}
+
+/// One `agent.event` notification.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentEventNotice {
+    pub task_id: String,
+    /// A `nugget_agent::AgentEvent` (tagged by its `event` field).
+    pub event: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentListRequest {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// Lifecycle of a task as the daemon tracks it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentTaskState {
+    Running,
+    /// Waiting for the user to answer a confirmation.
+    Confirming,
+    /// Suspended on `ask_user`; answer with `agent.answer`.
+    NeedsInput,
+    Finished,
+    /// Started before the daemon last restarted and never finished.
+    Interrupted,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentVerificationCounts {
+    pub passed: u32,
+    pub failed: u32,
+    pub unverifiable: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentTaskSummary {
+    pub task_id: String,
+    pub goal: String,
+    pub state: AgentTaskState,
+    /// `nugget_agent::Outcome::label()` once finished (`succeeded`, `unverified`, `failed`, ...).
+    #[serde(default)]
+    pub outcome: Option<String>,
+    /// The outcome's detail or the model's summary.
+    #[serde(default)]
+    pub detail: Option<String>,
+    /// Unix milliseconds.
+    pub started_ms: u64,
+    #[serde(default)]
+    pub finished_ms: Option<u64>,
+    pub steps: u32,
+    #[serde(default)]
+    pub verification: AgentVerificationCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentTaskDetail {
+    pub summary: AgentTaskSummary,
+    /// The task's `nugget_agent::LogEntry`s, in order.
+    pub entries: Vec<serde_json::Value>,
+    /// `nugget_agent::explain` over `entries`: a readable report.
+    pub explain: String,
+    /// Open `nugget_agent::ConfirmationRequest`s.
+    #[serde(default)]
+    pub pending: Vec<serde_json::Value>,
+    /// The `ask_user` question when the state is `needs_input`.
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+/// Status of the tamper-evident action log.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionLogStatus {
+    pub entries: u64,
+    /// `(seq, hash)` of the last entry.
+    #[serde(default)]
+    pub head: Option<(u64, String)>,
+    pub chain_ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyState {
+    /// The user's `nugget_policy::PolicyConfig` (rules, disabled defaults, rate limits, timeout).
+    pub config: serde_json::Value,
+    /// Every built-in `nugget_policy::Rule`, with whether the user turned it off.
+    pub defaults: Vec<DefaultRuleView>,
+    pub halted: bool,
+    pub log: ActionLogStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefaultRuleView {
+    /// A `nugget_policy::Rule`.
+    pub rule: serde_json::Value,
+    pub enabled: bool,
+}
+
+/// Replace the user's policy configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicySet {
+    /// A `nugget_policy::PolicyConfig`.
+    pub config: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskApprovalView {
+    pub task_id: String,
+    /// `nugget_policy::RiskClass` as its snake_case name.
+    pub risk: String,
+    #[serde(default)]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicyApprovals {
+    /// Open `nugget_agent::ConfirmationRequest`s across all tasks.
+    pub pending: Vec<serde_json::Value>,
+    /// Standing per-task approvals.
+    pub task: Vec<TaskApprovalView>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KillState {
+    pub halted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyLogExport {
+    /// The whole hash-chained log, one entry per line.
+    pub jsonl: String,
+    pub status: ActionLogStatus,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserStatus {
+    /// A native host (and so the extension) is attached.
+    pub connected: bool,
+    /// The calling extension's origin.
+    #[serde(default)]
+    pub origin: Option<String>,
+    #[serde(default)]
+    pub host_version: Option<String>,
+    /// Browser tools registered for the agent.
+    pub tools: Vec<String>,
+}
