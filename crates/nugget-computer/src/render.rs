@@ -218,10 +218,10 @@ pub fn node_line(node: &UiNode, focused: bool, opts: &RenderOptions) -> String {
     }
     if node.states.secure {
         line.push_str(" value=hidden");
-    } else if let Some(v) = node.value.as_deref().filter(|s| !s.is_empty()) {
-        if Some(v.trim()) != name.map(str::trim) {
-            line.push_str(&format!(" value=\"{}\"", screen_text(v, opts.max_text)));
-        }
+    } else if let Some(v) = node.value.as_deref().filter(|s| !s.is_empty())
+        && Some(v.trim()) != name.map(str::trim)
+    {
+        line.push_str(&format!(" value=\"{}\"", screen_text(v, opts.max_text)));
     }
     if let Some(p) = node.placeholder.as_deref().filter(|s| !s.trim().is_empty())
         && !has_text(&node.value)

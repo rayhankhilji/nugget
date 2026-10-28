@@ -358,7 +358,7 @@ mod inner {
             .expect("keys");
         assert!(out.verified, "keys not verified: {}", out.detail);
         assert_eq!(app.reported("NAME"), Some("".into()));
-        // Synthesised keys for characters (XTest, including one the keymap lacks).
+        // Synthesised keys for characters (XTest).
         let out = cu.key_input(Some(&name.id), &keys("h i")).expect("keys");
         assert!(out.verified, "{}", out.detail);
         assert_eq!(app.reported("NAME"), Some("hi".into()));

@@ -173,6 +173,7 @@ pub fn terminal() -> UiTree {
 // Fake backend
 
 type Effect = Box<dyn Fn(&mut World) + Send>;
+pub type SnapshotHook = Box<dyn Fn(&mut World, usize) + Send>;
 
 pub struct World {
     pub windows: Vec<UiTree>,
@@ -188,7 +189,7 @@ pub struct World {
     pub wrong_value: Option<String>,
     pub screenshot: Option<Vec<u8>>,
     /// Runs on each snapshot, with the snapshot count.
-    pub on_snapshot: Option<Box<dyn Fn(&mut World, usize) + Send>>,
+    pub on_snapshot: Option<SnapshotHook>,
 }
 
 impl World {
