@@ -9,7 +9,9 @@
 //! and hybrid fusion). `memory --backend real` ([`real`]) runs the real stack in process: an
 //! encrypted `nugget-store`, `nugget-ingest` with the `files` connector watching a temporary
 //! folder, and `nugget-retrieve`.
-//! `draft` and `cua` are registered but not yet implemented; their methodology is in
+//! `proactive` scores proactive cards over a 30-day fixture world (reference engine until the
+//! real `nugget-proactive` crate is wired in). `draft` and `cua` are registered but not yet
+//! implemented; their methodology is in
 //! `bench/README.md`.
 
 pub mod corpus;

@@ -248,7 +248,7 @@ fn check_keys(r: &Value) {
 #[test]
 fn every_suite_report_conforms() {
     let reports = smoke_reports();
-    assert_eq!(reports.len(), 4);
+    assert_eq!(reports.len(), 5);
     for r in &reports {
         let errors = errors_for(r);
         assert!(errors.is_empty(), "{} report: {errors:#?}", r["suite"]);
@@ -263,6 +263,7 @@ fn every_suite_report_conforms() {
     };
     assert_eq!(status("memory"), "ok");
     assert_eq!(status("perf"), "ok");
+    assert_eq!(status("proactive"), "ok");
     assert_eq!(status("draft"), "not_implemented");
     assert_eq!(status("cua"), "not_implemented");
     // The fake memory suite has targets; the planned suites have none and omit the field.
@@ -397,7 +398,7 @@ fn validator_rejects_bad_reports() {
 fn reports_written_to_disk_round_trip() {
     let dir = tempfile::tempdir().unwrap();
     let report = run_benchmark(
-        registry()[3].as_ref(),
+        find("cua").unwrap().as_ref(),
         &RunConfig {
             scale: Scale::Smoke,
             seed: 1,
