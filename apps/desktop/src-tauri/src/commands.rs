@@ -8,7 +8,8 @@ use nugget_core::ipc::{
     EntitySummaryView, GraphRequest, GraphViewIpc, IngestStatus, KnowledgeStatus, McpClientCreate,
     McpClientCreated, McpClientInfo, McpClientRef, MergeRequest, ModelInfo, ModelInstallRequest,
     ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest, SourceInfo, SourceRef,
-    SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, StatusResponse, method,
+    SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate, SplitRequest, StatusResponse,
+    method,
 };
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
@@ -37,6 +38,8 @@ const MAX_TEXT_LEN: usize = 1024;
 const MAX_CLIENT_NAME_LEN: usize = 100;
 /// Entity kinds and MCP tool names are short identifiers.
 const MAX_LIST_LEN: usize = 64;
+/// Facts one split may move.
+const MAX_SPLIT_CLAIMS: usize = 2_000;
 
 #[tauri::command]
 pub async fn connection_info(app: AppHandle, daemon: State<'_, Daemon>) -> Result<ConnectionInfo> {
@@ -320,6 +323,9 @@ fn graph_request(request: GraphRequest) -> Result<GraphRequest> {
     for k in &request.kinds {
         check_text("kind", k)?;
     }
+    if let Some(s) = &request.source {
+        check_text("source", s.as_str())?;
+    }
     Ok(GraphRequest {
         depth: request.depth.clamp(1, MAX_GRAPH_DEPTH),
         limit: request.limit.clamp(1, MAX_GRAPH_LIMIT),
@@ -338,14 +344,45 @@ fn check_merge(request: &MergeRequest) -> Result<()> {
     Ok(())
 }
 
-/// The UI only rejects a fact (`retracted`) or restores it (`active`).
+/// The UI rejects a fact (`rejected`), restores it (`active`), or asserts / withdraws the user's
+/// own fact (`user_asserted` / `unasserted`).
 fn check_claim_status(request: &ClaimStatusRequest) -> Result<()> {
     match request.status.as_str() {
-        "retracted" | "active" => Ok(()),
+        "rejected" | "active" | "user_asserted" | "unasserted" => Ok(()),
         other => Err(CmdError::Other(format!(
-            "a fact can only be rejected or restored, not set to “{other}”"
+            "a fact can only be rejected, restored, asserted or withdrawn, not set to “{other}”"
         ))),
     }
+}
+
+fn check_split(request: &SplitRequest) -> Result<()> {
+    check_entity_id("split", request.entity.as_str())?;
+    if request.name.trim().is_empty() {
+        return Err(CmdError::Other("the new entity needs a name".into()));
+    }
+    check_text("name", &request.name)?;
+    if request.claims.is_empty() {
+        return Err(CmdError::Other(
+            "choose at least one fact to split off".into(),
+        ));
+    }
+    if request.claims.len() > MAX_SPLIT_CLAIMS
+        || request.aliases.len() > MAX_LIST_LEN
+        || request.identifiers.len() > MAX_LIST_LEN
+    {
+        return Err(CmdError::Other("too many items in the split".into()));
+    }
+    if let Some(k) = &request.kind {
+        check_text("kind", k)?;
+    }
+    for a in &request.aliases {
+        check_text("alias", a)?;
+    }
+    for (scheme, value) in &request.identifiers {
+        check_text("identifier", scheme)?;
+        check_text("identifier", value)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -389,7 +426,7 @@ pub async fn knowledge_merge(
     Ok(())
 }
 
-/// Reject (`retracted`) or restore (`active`) a fact.
+/// Reject, restore, assert or withdraw a fact (see `check_claim_status`).
 #[tauri::command]
 pub async fn knowledge_claim_status(
     app: AppHandle,
@@ -401,6 +438,17 @@ pub async fn knowledge_claim_status(
         .call(&app, method::KNOWLEDGE_CLAIM_STATUS, &request)
         .await?;
     Ok(())
+}
+
+/// Split facts off an entity into a new one; returns the new entity.
+#[tauri::command]
+pub async fn knowledge_split(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: SplitRequest,
+) -> Result<EntityRef> {
+    check_split(&request)?;
+    daemon.call(&app, method::KNOWLEDGE_SPLIT, &request).await
 }
 
 #[tauri::command]
@@ -668,6 +716,7 @@ mod tests {
             depth: 99,
             limit: 1_000_000,
             kinds: vec![],
+            source: None,
         })
         .unwrap();
         assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
@@ -679,6 +728,7 @@ mod tests {
                 depth: 1,
                 limit: 10,
                 kinds: vec![],
+                source: None,
             })
             .is_err()
         );
@@ -690,9 +740,11 @@ mod tests {
         assert!(check_merge(&same).is_err());
 
         for (status, ok) in [
-            ("retracted", true),
+            ("rejected", true),
             ("active", true),
-            ("user_asserted", false),
+            ("user_asserted", true),
+            ("unasserted", true),
+            ("retracted", false),
             ("superseded", false),
             ("", false),
         ] {
@@ -702,6 +754,30 @@ mod tests {
             };
             assert_eq!(check_claim_status(&req).is_ok(), ok, "{status}");
         }
+
+        let split = SplitRequest {
+            entity: nugget_core::ids::EntityId::new("ent_1"),
+            claims: vec![3],
+            name: "Sam Lee".into(),
+            kind: None,
+            aliases: vec![],
+            identifiers: vec![("email".into(), "sam@home.net".into())],
+        };
+        assert!(check_split(&split).is_ok());
+        assert!(
+            check_split(&SplitRequest {
+                name: "  ".into(),
+                ..split.clone()
+            })
+            .is_err()
+        );
+        assert!(
+            check_split(&SplitRequest {
+                claims: vec![],
+                ..split.clone()
+            })
+            .is_err()
+        );
     }
 
     #[test]

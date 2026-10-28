@@ -42,6 +42,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `knowledge.graph` | [`GraphRequest`] | [`GraphViewIpc`] |
 /// | `knowledge.merge` | [`MergeRequest`] | `null` |
 /// | `knowledge.claim.status` | [`ClaimStatusRequest`] | `null` |
+/// | `knowledge.split` | [`SplitRequest`] | [`EntityRef`] (the new entity) |
 /// | `knowledge.status` | `{}` | [`KnowledgeStatus`] |
 /// | `mcp.clients.list` | `{}` | `Vec<`[`McpClientInfo`]`>` |
 /// | `mcp.clients.create` | [`McpClientCreate`] | [`McpClientCreated`] (token shown once) |
@@ -76,6 +77,7 @@ pub mod method {
     pub const KNOWLEDGE_GRAPH: &str = "knowledge.graph";
     pub const KNOWLEDGE_MERGE: &str = "knowledge.merge";
     pub const KNOWLEDGE_CLAIM_STATUS: &str = "knowledge.claim.status";
+    pub const KNOWLEDGE_SPLIT: &str = "knowledge.split";
     pub const KNOWLEDGE_STATUS: &str = "knowledge.status";
     pub const MCP_CLIENTS_LIST: &str = "mcp.clients.list";
     pub const MCP_CLIENTS_CREATE: &str = "mcp.clients.create";
@@ -513,8 +515,10 @@ pub struct RuntimeInfo {
 // ---- knowledge graph ----
 //
 // Entity kinds travel as snake_case strings: `person`, `organization`, `project`, `commitment`,
-// `preference`, `event`, `place`, `topic`. Claim statuses: `active`, `superseded`, `retracted`,
-// `user_asserted`.
+// `preference`, `event`, `place`, `topic`. Claim statuses: `active`, `superseded`, `retracted`
+// (lost its evidence), `user_asserted` (written by the user), `rejected` (rejected by the user;
+// sticky: re-extracting its sources never makes it active again). Clients should show unknown
+// statuses as not current.
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntitiesRequest {
@@ -620,6 +624,10 @@ pub struct GraphRequest {
     pub limit: u32,
     #[serde(default)]
     pub kinds: Vec<String>,
+    /// Only nodes and edges supported by items of this source: an edge whose claim has evidence
+    /// from it, a node with a mention or an active claim backed by it (the centre always stays).
+    #[serde(default)]
+    pub source: Option<SourceId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -654,8 +662,34 @@ pub struct MergeRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimStatusRequest {
     pub claim: i64,
-    /// `retracted` (user rejects the fact) or `active` (restore).
+    /// The user's decision:
+    /// - `rejected`: reject the fact. Sticky: re-extracting its sources never revives it.
+    ///   `retracted` is accepted as an older name for the same thing.
+    /// - `active`: restore a rejected, retracted or superseded fact. A fact with no source
+    ///   evidence (one the user wrote) is restored as `user_asserted`.
+    /// - `user_asserted`: assert the fact as the user's own (e.g. redo an undone assertion).
+    /// - `unasserted`: withdraw the user's assertion of a `user_asserted` fact (undo): it becomes
+    ///   `active` when sources support it, else `retracted` (not sticky).
     pub status: String,
+}
+
+/// Split facts off an entity that conflates two things into a new entity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SplitRequest {
+    pub entity: EntityId,
+    /// Claims (with `entity` as subject or object) that move to the new entity.
+    pub claims: Vec<i64>,
+    /// Name of the new entity.
+    pub name: String,
+    /// Kind of the new entity; the split entity's kind when `None`.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// Aliases of `entity` that move to the new entity.
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// `(scheme, value)` identifiers of `entity` that move to the new entity.
+    #[serde(default)]
+    pub identifiers: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

@@ -21,14 +21,19 @@ export function GraphPanel({
   onCenter,
   selected,
   onOpen,
+  sources = [],
 }: {
   center: string | null;
   onCenter: (id: string | null) => void;
   selected: string | null;
   onOpen: (id: string) => void;
+  /** Sources the graph can be filtered by (`{id, name}`, in display order). */
+  sources?: readonly { id: string; name: string }[];
 }) {
   const t = useT();
   const [depth, setDepth] = useState(2);
+  const [source, setSource] = useState<string | null>(null);
+  const sourceId = useId();
   const [kinds, setKinds] = useState<EntityKind[]>([]);
   const [mode, setMode] = useState<"canvas" | "list">("canvas");
   const [focused, setFocused] = useState<string | null>(null);
@@ -36,8 +41,8 @@ export function GraphPanel({
   const kindsKey = kinds.join(",");
 
   const loaded = useAsync<GraphData>(
-    () => api.knowledgeGraph({ center, depth, limit: REQUEST_LIMIT, kinds }),
-    [center, depth, kindsKey],
+    () => api.knowledgeGraph({ center, depth, limit: REQUEST_LIMIT, kinds, source }),
+    [center, depth, kindsKey, source],
   );
   const graph = useMemo<PreparedGraph | null>(
     () => (loaded.data ? prepareGraph(loaded.data, { center, maxNodes: MAX_RENDER_NODES }) : null),
@@ -83,6 +88,19 @@ export function GraphPanel({
             ))}
           </select>
         </label>
+        {sources.length > 0 && (
+          <label className="field-inline" htmlFor={sourceId}>
+            {t("graph.source")}
+            <select id={sourceId} value={source ?? ""} onChange={(e) => setSource(e.target.value || null)}>
+              <option value="">{t("graph.allSources")}</option>
+              {sources.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="segmented" role="group" aria-label={t("graph.displayLabel")}>
           <button type="button" aria-pressed={mode === "canvas"} onClick={() => setMode("canvas")}>
             {t("graph.modeGraph")}
@@ -117,7 +135,7 @@ export function GraphPanel({
       <ErrorNote error={loaded.error} onRetry={loaded.reload} />
       {graph && graph.nodes.length === 0 && (
         <Empty title={t("graph.emptyTitle")}>
-          {kinds.length > 0 ? t("graph.emptyFiltered") : t("graph.emptyNone")}
+          {source ? t("graph.emptySource") : kinds.length > 0 ? t("graph.emptyFiltered") : t("graph.emptyNone")}
         </Empty>
       )}
       {graph && graph.nodes.length > 0 && mode === "canvas" && (

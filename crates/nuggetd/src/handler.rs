@@ -91,6 +91,7 @@ impl Handler for RpcHandler {
                 self.knowledge_claim_status(parse_params(params)?).await
             }
             method::KNOWLEDGE_STATUS => self.knowledge_status().await,
+            method::KNOWLEDGE_SPLIT => self.knowledge_split(parse_params(params)?).await,
             method::MCP_CLIENTS_LIST => self.mcp_clients_list().await,
             method::MCP_CLIENTS_CREATE => self.mcp_clients_create(parse_params(params)?).await,
             method::MCP_CLIENTS_REVOKE => self.mcp_clients_revoke(parse_params(params)?).await,
