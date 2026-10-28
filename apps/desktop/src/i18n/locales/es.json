@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "No se pudo insertar el borrador. Está en tu portapapeles.",
   "doubletap.error.draft_failed": "No se pudo redactar el borrador. Vuelve a intentarlo.",
   "doubletap.hint.atspi": "Double Tap lee los campos de texto mediante AT-SPI, que está desactivado en este escritorio. Actívalo con: gsettings set org.gnome.desktop.interface toolkit-accessibility true — y después cierra sesión y vuelve a entrar.",
+  "doubletap.hint.accessibility": "Nugget necesita acceso de Accesibilidad para leer el campo activo e insertar borradores. Abre Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y activa Nugget.",
   "doubletap.hint.wayland_chord": "En Wayland, las apps no pueden detectar pulsaciones sueltas, así que la doble pulsación no funciona. Usa una combinación de teclas como atajo.",
   "doubletap.hint.macos_permissions": "Double Tap necesita Accesibilidad y Monitorización de entrada. Haz clic en Abrir solicitudes de permisos, activa Nugget en Ajustes del Sistema → Privacidad y seguridad y vuelve aquí."
 }

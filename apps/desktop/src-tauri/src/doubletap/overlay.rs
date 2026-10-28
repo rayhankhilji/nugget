@@ -121,18 +121,27 @@ pub enum Event {
     Error(String),
     /// Refused locally or by the daemon; the message is an i18n key.
     Refused(String),
+    /// The daemon connection dropped: no `chat.done` will come for a running stream.
+    Disconnected,
     /// A [`Effect::HideAfter`] timer ran out.
-    Expire { generation: u64 },
+    Expire {
+        generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
     /// Place the overlay near the caret and show it; `focus` gives it the keyboard (needed for
     /// Enter/Tab/Esc), otherwise it is shown without taking focus where the platform allows.
-    Show { focus: bool },
+    Show {
+        focus: bool,
+    },
     Hide,
     /// Feed [`Event::Expire`] back after `ms`.
-    HideAfter { generation: u64, ms: u64 },
+    HideAfter {
+        generation: u64,
+        ms: u64,
+    },
     /// `draft.cancel`.
     CancelStream(String),
     /// Hand focus back to the target app and insert this text.
@@ -193,12 +202,9 @@ impl Machine {
         &self.view
     }
 
-    pub fn is_active(&self) -> bool {
+    #[cfg(test)]
+    fn is_active(&self) -> bool {
         self.active
-    }
-
-    pub fn stream_id(&self) -> Option<&str> {
-        self.stream_id.as_deref()
     }
 
     /// A draft is in progress: a new trigger is ignored.
@@ -217,7 +223,12 @@ impl Machine {
         }
     }
 
-    fn feedback(&self, outcome: &str, final_text: Option<String>, verified: Option<bool>) -> Option<Effect> {
+    fn feedback(
+        &self,
+        outcome: &str,
+        final_text: Option<String>,
+        verified: Option<bool>,
+    ) -> Option<Effect> {
         self.stream_id.as_ref().map(|id| {
             Effect::Feedback(DraftFeedback {
                 stream_id: id.clone(),
@@ -296,6 +307,11 @@ impl Machine {
                         self.view.phase = Phase::Done;
                         Step::changed(Vec::new())
                     }
+                    // Cancelled by someone else (our own cancels stop `streaming` first).
+                    Some(e) if e.trim() == super::errors::CANCELLED => {
+                        self.active = false;
+                        Step::effects(vec![Effect::Hide])
+                    }
                     Some(e) => {
                         self.view.phase = Phase::Error;
                         self.view.message = Some(super::errors::message_for(&e));
@@ -358,8 +374,10 @@ impl Machine {
                 self.view.verified = Some(verified);
                 self.view.method = Some(method.into());
                 let (outcome, text) = self.accepted.take().unwrap_or_default();
-                let mut effects: Vec<Effect> =
-                    self.feedback(&outcome, Some(text), Some(verified)).into_iter().collect();
+                let mut effects: Vec<Effect> = self
+                    .feedback(&outcome, Some(text), Some(verified))
+                    .into_iter()
+                    .collect();
                 effects.push(self.hide_after(INSERTED_MS));
                 Step::changed(effects)
             }
@@ -401,6 +419,20 @@ impl Machine {
                 Step::changed(vec![
                     Effect::Show { focus: false },
                     self.hide_after(REFUSED_MS),
+                ])
+            }
+            Event::Disconnected => {
+                if !self.active || self.view.phase != Phase::Streaming {
+                    // Reading: the pending `draft.begin` fails on its own. Done: the draft is
+                    // complete and can still be inserted.
+                    return Step::default();
+                }
+                self.streaming = false;
+                self.view.phase = Phase::Error;
+                self.view.message = Some(super::errors::ERROR_OFFLINE.into());
+                Step::changed(vec![
+                    Effect::Show { focus: false },
+                    self.hide_after(ERROR_MS),
                 ])
             }
             Event::Expire { generation } => {
@@ -500,7 +532,11 @@ mod tests {
             vec![Effect::Hide, Effect::Insert("Hi there".into())]
         );
         assert_eq!(m.view().phase, Phase::Inserting);
-        assert_eq!(m.apply(Event::Cancel), Step::default(), "no cancel mid-insert");
+        assert_eq!(
+            m.apply(Event::Cancel),
+            Step::default(),
+            "no cancel mid-insert"
+        );
         let s = m.apply(Event::Inserted {
             verified: true,
             method: InsertMethod::Accessibility,
@@ -560,7 +596,10 @@ mod tests {
             verified: true,
             method: InsertMethod::Accessibility,
         });
-        assert_eq!(s.effects[0], feedback("s3", "accepted", Some("Same"), Some(true)));
+        assert_eq!(
+            s.effects[0],
+            feedback("s3", "accepted", Some("Same"), Some(true))
+        );
     }
 
     #[test]
@@ -627,7 +666,10 @@ mod tests {
         m.apply(Event::Begin);
         let s = m.apply(Event::Refused("doubletap.refused.secure".into()));
         assert_eq!(m.view().phase, Phase::Refused);
-        assert_eq!(m.view().message.as_deref(), Some("doubletap.refused.secure"));
+        assert_eq!(
+            m.view().message.as_deref(),
+            Some("doubletap.refused.secure")
+        );
         let generation = m.generation;
         assert_eq!(
             s.effects,
@@ -649,18 +691,27 @@ mod tests {
         let mut m = streaming("s8");
         let s = m.apply(Event::Done {
             stream_id: "s8".into(),
-            error: Some("invalid input: drafting is refused in password and secure fields".into()),
+            error: Some("no provider could draft".into()),
         });
         assert_eq!(m.view().phase, Phase::Error);
-        assert_eq!(m.view().message.as_deref(), Some("doubletap.refused.secure"));
-        assert!(matches!(s.effects[..], [Effect::HideAfter { ms: ERROR_MS, .. }]));
+        assert_eq!(
+            m.view().message.as_deref(),
+            Some("doubletap.error.no_provider")
+        );
+        assert!(matches!(
+            s.effects[..],
+            [Effect::HideAfter { ms: ERROR_MS, .. }]
+        ));
 
         // An insertion error still reports feedback, unverified.
         let mut m = streaming("s9");
         m.apply(delta("s9", "x"));
         m.apply(Event::Accept(None));
-        let s = m.apply(Event::Error("doubletap.error.focus_lost".into()));
-        assert_eq!(s.effects[0], feedback("s9", "accepted", Some("x"), Some(false)));
+        let s = m.apply(Event::Error("doubletap.error.insert_failed".into()));
+        assert_eq!(
+            s.effects[0],
+            feedback("s9", "accepted", Some("x"), Some(false))
+        );
         assert_eq!(s.effects[1], Effect::Show { focus: false });
         assert_eq!(m.view().verified, Some(false));
 
@@ -670,6 +721,43 @@ mod tests {
         assert_eq!(s.effects[0], Effect::CancelStream("s10".into()));
         // Refusals only apply while reading.
         assert_eq!(m.apply(Event::Refused("x".into())), Step::default());
+    }
+
+    #[test]
+    fn cancelled_elsewhere_and_disconnects() {
+        // A stream cancelled by someone else closes quietly, without feedback.
+        let mut m = streaming("c1");
+        m.apply(delta("c1", "x"));
+        let s = m.apply(Event::Done {
+            stream_id: "c1".into(),
+            error: Some("cancelled".into()),
+        });
+        assert_eq!(s, Step::effects(vec![Effect::Hide]));
+        assert!(!m.is_active());
+
+        // A dropped connection ends a running stream with the offline error.
+        let mut m = streaming("c2");
+        let s = m.apply(Event::Disconnected);
+        assert_eq!(m.view().phase, Phase::Error);
+        assert_eq!(m.view().message.as_deref(), Some("doubletap.error.offline"));
+        assert_eq!(s.effects[0], Effect::Show { focus: false });
+        assert!(
+            !m.apply(done("c2")).changed,
+            "no cancel or done after the drop"
+        );
+        // A finished draft survives a drop and can still be accepted.
+        let mut m = streaming("c3");
+        m.apply(delta("c3", "ok"));
+        m.apply(done("c3"));
+        assert_eq!(m.apply(Event::Disconnected), Step::default());
+        assert_eq!(
+            m.apply(Event::Accept(None)).effects,
+            vec![Effect::Hide, Effect::Insert("ok".into())]
+        );
+        // While reading, the pending call reports the failure itself.
+        let mut m = Machine::new();
+        m.apply(Event::Begin);
+        assert_eq!(m.apply(Event::Disconnected), Step::default());
     }
 
     #[test]
@@ -691,7 +779,10 @@ mod tests {
                 "method": null
             })
         );
-        assert_eq!(serde_json::to_value(Method::Clipboard).unwrap(), "clipboard");
+        assert_eq!(
+            serde_json::to_value(Method::Clipboard).unwrap(),
+            "clipboard"
+        );
         assert_eq!(serde_json::to_value(Phase::Inserted).unwrap(), "inserted");
     }
 
@@ -709,6 +800,7 @@ mod tests {
             },
             Event::Error("e".into()),
             Event::Refused("r".into()),
+            Event::Disconnected,
             Event::Expire { generation: 0 },
         ] {
             assert_eq!(m.apply(ev.clone()), Step::default(), "{ev:?}");

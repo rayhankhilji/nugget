@@ -579,6 +579,37 @@ async fn secure_fields_excluded_apps_and_search_boxes_are_refused_before_anythin
     h.stop().await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn terminals_are_refused_unless_allowed() {
+    let mut h = start("", |_| {}).await;
+    let mut term = chat_context();
+    term["app"] = json!({"id": "com.apple.Terminal", "name": "Terminal"});
+    term["field"] = json!({"role": "text_area", "value": FIELD_SECRET});
+    let e = h
+        .call_err(method::DRAFT_BEGIN, json!({"context": term.clone()}))
+        .await;
+    assert_eq!(e.code, code::INVALID_PARAMS);
+    assert_eq!(e.data, Some(json!({"refused": "terminal"})));
+    let v: Value = h.call("draft.prewarm", term).await;
+    assert_eq!(v, Value::Null);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(h.model.seen().is_empty(), "{:?}", h.model.seen());
+    let refused = h.audit_eventually("draft.refused", 1).await;
+    assert_eq!(refused[0]["reason"], json!("terminal"));
+    assert!(!format!("{:?}", h.audit()).contains(FIELD_SECRET));
+    h.stop().await;
+
+    // Opted in: the terminal is drafted into like any other app.
+    let mut h = start("allow_terminals = true", |_| {}).await;
+    let mut notes = h.client.notifications();
+    let mut term = chat_context();
+    term["app"] = json!({"id": "com.apple.Terminal", "name": "Terminal"});
+    let started: DraftStarted = h.call(method::DRAFT_BEGIN, json!({"context": term})).await;
+    let (_, done) = collect(&mut notes, &started.stream_id).await;
+    assert_eq!(done.error, None);
+    h.stop().await;
+}
+
 fn secure_hint() -> Value {
     json!({"app": {"id": "com.apple.Safari", "name": "Safari"},
            "field": {"role": "text_field", "value": "", "secure": true}})

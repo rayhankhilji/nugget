@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "下書きを挿入できませんでした。代わりにクリップボードにコピーしました。",
   "doubletap.error.draft_failed": "下書きを作成できませんでした。もう一度お試しください。",
   "doubletap.hint.atspi": "Double Tap は AT-SPI を使ってテキスト欄を読み取りますが、このデスクトップでは無効です。次のコマンドで有効にしてください：gsettings set org.gnome.desktop.interface toolkit-accessibility true — その後、ログアウトして再ログインします。",
+  "doubletap.hint.accessibility": "Nugget がフォーカス中の欄を読み取り下書きを挿入するには、アクセシビリティの許可が必要です。システム設定 → プライバシーとセキュリティ → アクセシビリティで Nugget をオンにしてください。",
   "doubletap.hint.wayland_chord": "Wayland ではアプリが単独のキー入力を検出できないため、ダブルタップは使えません。代わりにキーの組み合わせをトリガーにしてください。",
   "doubletap.hint.macos_permissions": "Double Tap にはアクセシビリティと入力監視の権限が必要です。「権限の確認を開く」をクリックし、システム設定 → プライバシーとセキュリティで Nugget をオンにしてから戻ってください。"
 }

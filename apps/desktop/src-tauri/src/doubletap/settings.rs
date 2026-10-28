@@ -174,11 +174,9 @@ pub const DEFAULT_EXCLUDED: &[&str] = &[
     "Enpass",
     "in.sinew.Enpass-Desktop",
     "Enpass.exe",
-    "enpass",
     "NordPass",
     "com.nordsec.nordpass",
     "NordPass.exe",
-    "nordpass",
     "Proton Pass",
     "me.proton.pass.electron",
     "ProtonPass.exe",
@@ -342,8 +340,7 @@ impl DoubleTapSettings {
                 nugget_hotkey::parse_chord(chord).map_err(|e| e.to_string())?;
             }
         }
-        if let Err(nugget_core::Error::Invalid(e)) = nugget_hotkey::check(&(&self.trigger).into())
-        {
+        if let Err(nugget_core::Error::Invalid(e)) = nugget_hotkey::check(&(&self.trigger).into()) {
             return Err(e);
         }
         if self.app_providers.len() > MAX_PROVIDERS {
@@ -468,7 +465,8 @@ pub fn entry_matches(entry: &str, app: &AppInfo) -> bool {
 /// Whether drafting is excluded in `app`, by the user's list or by the accessibility layer's
 /// built-in deny list (which also hides the surroundings of those apps).
 pub fn is_excluded(app: &AppInfo, excluded: &[String]) -> bool {
-    excluded.iter().any(|e| entry_matches(e, app)) || nugget_a11y::DenyList::defaults().is_denied(app)
+    excluded.iter().any(|e| entry_matches(e, app))
+        || nugget_a11y::DenyList::defaults().is_denied(app)
 }
 
 /// The provider configured for `app`: by app id first, then by page host (the most specific
@@ -542,10 +540,7 @@ mod tests {
         );
         let c: TriggerSpec =
             serde_json::from_str(r#"{"kind":"chord","chord":"Ctrl+Alt+Space"}"#).unwrap();
-        assert_eq!(
-            Trigger::from(&c),
-            Trigger::Chord("Ctrl+Alt+Space".into())
-        );
+        assert_eq!(Trigger::from(&c), Trigger::Chord("Ctrl+Alt+Space".into()));
         for m in ModifierId::ALL {
             assert_eq!(serde_json::to_value(m).unwrap(), m.as_str());
             assert_eq!(ModifierId::from(Modifier::from(m)), m);
@@ -577,7 +572,10 @@ mod tests {
                 chord: " Ctrl+Alt+Space ".into(),
             },
             app_providers: [
-                (" Com.Tinyspeck.SlackMacGap ".to_string(), " local ".to_string()),
+                (
+                    " Com.Tinyspeck.SlackMacGap ".to_string(),
+                    " local ".to_string(),
+                ),
                 ("".into(), "x".into()),
             ]
             .into_iter()
@@ -594,7 +592,9 @@ mod tests {
             }
         );
         assert_eq!(
-            ok.app_providers.get("com.tinyspeck.slackmacgap").map(String::as_str),
+            ok.app_providers
+                .get("com.tinyspeck.slackmacgap")
+                .map(String::as_str),
             Some("local")
         );
         assert_eq!(ok.app_providers.len(), 1);
@@ -620,15 +620,29 @@ mod tests {
     #[test]
     fn excluded_matching() {
         let list = default_excluded();
-        assert!(is_excluded(&app(Some("com.bitwarden.desktop"), "Bitwarden", None), &list));
-        assert!(is_excluded(&app(None, "1PASSWORD", None), &list));
-        assert!(is_excluded(&app(Some("KeePassXC.exe"), "KeePassXC", None), &list));
         assert!(is_excluded(
-            &app(Some("firefox"), "Firefox", Some("https://secure.chase.com/x")),
+            &app(Some("com.bitwarden.desktop"), "Bitwarden", None),
+            &list
+        ));
+        assert!(is_excluded(&app(None, "1PASSWORD", None), &list));
+        assert!(is_excluded(
+            &app(Some("KeePassXC.exe"), "KeePassXC", None),
             &list
         ));
         assert!(is_excluded(
-            &app(Some("firefox"), "Firefox", Some("https://my.examplebank.com/")),
+            &app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://secure.chase.com/x")
+            ),
+            &list
+        ));
+        assert!(is_excluded(
+            &app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://my.examplebank.com/")
+            ),
             &list
         ));
         assert!(!is_excluded(
@@ -636,7 +650,11 @@ mod tests {
             &list
         ));
         assert!(!is_excluded(
-            &app(Some("firefox"), "Firefox", Some("https://mail.example.com/chase.com")),
+            &app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://mail.example.com/chase.com")
+            ),
             &list
         ));
         // User entries: id, name, host with subdomains, and rule syntax.
@@ -645,13 +663,19 @@ mod tests {
             "intranet.corp".to_string(),
             "name~secret".to_string(),
         ];
-        assert!(is_excluded(&app(Some("ORG.SIGNAL.SIGNAL"), "Signal", None), &user));
+        assert!(is_excluded(
+            &app(Some("ORG.SIGNAL.SIGNAL"), "Signal", None),
+            &user
+        ));
         assert!(is_excluded(
             &app(None, "Edge", Some("http://wiki.intranet.corp:8080/x")),
             &user
         ));
         assert!(is_excluded(&app(None, "My Secret Notes", None), &user));
-        assert!(!is_excluded(&app(None, "Edge", Some("http://notintranet.corp/")), &user));
+        assert!(!is_excluded(
+            &app(None, "Edge", Some("http://notintranet.corp/")),
+            &user
+        ));
     }
 
     #[test]
@@ -665,8 +689,16 @@ mod tests {
             app(Some("Enpass.exe"), "", None),
             app(Some("com.nordsec.nordpass"), "", None),
             app(Some("nordpass"), "", None),
-            app(Some("firefox"), "Firefox", Some("https://pass.proton.me/u/0")),
-            app(Some("firefox"), "Firefox", Some("https://app.nordpass.com/")),
+            app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://pass.proton.me/u/0"),
+            ),
+            app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://app.nordpass.com/"),
+            ),
         ] {
             assert!(list.iter().any(|e| entry_matches(e, &a)), "{a:?}");
         }
@@ -691,7 +723,11 @@ mod tests {
         ] {
             assert!(is_terminal(&a), "{a:?}");
         }
-        assert!(!is_terminal(&app(Some("com.tinyspeck.slackmacgap"), "Slack", None)));
+        assert!(!is_terminal(&app(
+            Some("com.tinyspeck.slackmacgap"),
+            "Slack",
+            None
+        )));
         // A page whose host happens to be named like a terminal is not a terminal.
         assert!(!is_terminal(&app(
             Some("firefox"),
@@ -721,18 +757,41 @@ mod tests {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect();
         let p = |a: AppInfo| provider_for(&a, &providers);
-        assert_eq!(p(app(Some("com.tinyspeck.slackmacgap"), "Slack", None)).as_deref(), Some("local"));
-        assert_eq!(p(app(Some("OUTLOOK.EXE"), "Outlook", None)).as_deref(), Some("cloud-c"));
         assert_eq!(
-            p(app(Some("firefox"), "Firefox", Some("https://mail.google.com/u/0"))).as_deref(),
+            p(app(Some("com.tinyspeck.slackmacgap"), "Slack", None)).as_deref(),
+            Some("local")
+        );
+        assert_eq!(
+            p(app(Some("OUTLOOK.EXE"), "Outlook", None)).as_deref(),
+            Some("cloud-c")
+        );
+        assert_eq!(
+            p(app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://mail.google.com/u/0")
+            ))
+            .as_deref(),
             Some("cloud-b")
         );
         assert_eq!(
-            p(app(Some("firefox"), "Firefox", Some("https://docs.google.com/"))).as_deref(),
+            p(app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://docs.google.com/")
+            ))
+            .as_deref(),
             Some("cloud-a")
         );
         assert_eq!(p(app(None, "Notes", None)).as_deref(), Some("local-2"));
-        assert_eq!(p(app(Some("firefox"), "Firefox", Some("https://notgoogle.com/"))), None);
+        assert_eq!(
+            p(app(
+                Some("firefox"),
+                "Firefox",
+                Some("https://notgoogle.com/")
+            )),
+            None
+        );
     }
 
     #[test]

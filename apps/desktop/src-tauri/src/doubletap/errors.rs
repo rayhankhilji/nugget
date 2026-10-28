@@ -1,18 +1,27 @@
 //! Mapping daemon and accessibility errors to the overlay's i18n keys.
+//!
+//! The daemon marks refusals with a stable `data.refused` (`secure`, `excluded_app`,
+//! `terminal`, `not_draftable`, `disabled`) on the JSON-RPC error; the UI has exactly the error
+//! keys below, and anything else is shown as raw text.
 
-use crate::daemon::CmdError;
+use nugget_ipc::IpcError;
 
 pub const REFUSED_SECURE: &str = "doubletap.refused.secure";
 pub const REFUSED_EXCLUDED: &str = "doubletap.refused.excluded";
-pub const REFUSED_NOT_DRAFTABLE: &str = "doubletap.refused.not_draftable";
 pub const REFUSED_TERMINAL: &str = "doubletap.refused.terminal";
+pub const REFUSED_NOT_DRAFTABLE: &str = "doubletap.refused.not_draftable";
 pub const REFUSED_NO_FIELD: &str = "doubletap.refused.no_field";
-pub const ERROR_NOT_RUNNING: &str = "doubletap.error.not_running";
-pub const ERROR_DISCONNECTED: &str = "doubletap.error.disconnected";
-pub const ERROR_UNAVAILABLE: &str = "doubletap.error.unavailable";
-pub const ERROR_PERMISSION: &str = "doubletap.error.permission";
-pub const ERROR_FOCUS_LOST: &str = "doubletap.error.focus_lost";
-pub const ERROR_INSERT: &str = "doubletap.error.insert";
+/// The daemon is not running or the connection dropped.
+pub const ERROR_OFFLINE: &str = "doubletap.error.offline";
+pub const ERROR_NO_PROVIDER: &str = "doubletap.error.no_provider";
+/// The focused field could not be read (including a missing permission).
+pub const ERROR_READ_FAILED: &str = "doubletap.error.read_failed";
+/// Insertion failed, or focus did not come back to the target app.
+pub const ERROR_INSERT_FAILED: &str = "doubletap.error.insert_failed";
+pub const ERROR_DRAFT_FAILED: &str = "doubletap.error.draft_failed";
+
+/// The `chat.done` error after `draft.cancel`.
+pub const CANCELLED: &str = "cancelled";
 
 /// How a failure is shown.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,116 +32,133 @@ pub enum Failure {
     Error(String),
 }
 
-/// Recognise the refusals `nugget-draft` and `nugget-a11y` report (their messages may arrive
-/// prefixed by the error kind, e.g. `invalid input: ...`).
-pub fn refusal_key(text: &str) -> Option<&'static str> {
-    let t = text.to_lowercase();
-    if t.contains("secure field") || t.contains("password and secure") {
-        Some(REFUSED_SECURE)
-    } else if t.contains("drafting is disabled in") || t.contains("excluded from drafting") {
-        Some(REFUSED_EXCLUDED)
-    } else if t.contains("nothing to draft") {
-        Some(REFUSED_NOT_DRAFTABLE)
-    } else if t.contains("no focused text field") || t.contains("not in an editable text field") {
-        Some(REFUSED_NO_FIELD)
-    } else {
-        None
+/// The key for a daemon `data.refused` reason.
+pub fn refused_reason(reason: &str) -> Failure {
+    match reason {
+        "secure" => Failure::Refused(REFUSED_SECURE),
+        "excluded_app" => Failure::Refused(REFUSED_EXCLUDED),
+        "terminal" => Failure::Refused(REFUSED_TERMINAL),
+        "not_draftable" => Failure::Refused(REFUSED_NOT_DRAFTABLE),
+        _ => Failure::Error(ERROR_DRAFT_FAILED.into()),
     }
 }
 
-pub fn classify_text(text: &str) -> Failure {
-    match refusal_key(text) {
-        Some(k) => Failure::Refused(k),
-        None => Failure::Error(text.trim().to_owned()),
-    }
+fn mentions_no_provider(text: &str) -> bool {
+    text.to_lowercase().contains("no provider")
 }
 
-/// A message for the overlay from error text (a stream's `chat.done` error).
+/// A message for the overlay from a stream's `chat.done` error text.
 pub fn message_for(text: &str) -> String {
-    match classify_text(text) {
-        Failure::Refused(k) => k.to_owned(),
-        Failure::Error(e) => e,
+    let t = text.trim();
+    if mentions_no_provider(t) {
+        ERROR_NO_PROVIDER.into()
+    } else if t.is_empty() {
+        ERROR_DRAFT_FAILED.into()
+    } else {
+        t.to_owned()
     }
 }
 
-/// JSON-RPC "method not found".
+/// JSON-RPC "method not found": a daemon without the draft feature.
 const METHOD_NOT_FOUND: i64 = -32601;
 
-pub fn classify_cmd(err: &CmdError) -> Failure {
+/// A failed daemon call (`draft.begin`).
+pub fn classify_ipc(err: &IpcError) -> Failure {
     match err {
-        CmdError::NotRunning(_) => Failure::Error(ERROR_NOT_RUNNING.into()),
-        CmdError::Disconnected => Failure::Error(ERROR_DISCONNECTED.into()),
-        CmdError::Rpc { code, .. } if *code == METHOD_NOT_FOUND => {
-            Failure::Error(ERROR_UNAVAILABLE.into())
+        IpcError::Connect(_) | IpcError::Disconnected | IpcError::Io(_) => {
+            Failure::Error(ERROR_OFFLINE.into())
         }
-        CmdError::Rpc { message, .. } => classify_text(message),
+        IpcError::Rpc(e) => {
+            if let Some(reason) = e
+                .data
+                .as_ref()
+                .and_then(|d| d.get("refused"))
+                .and_then(|r| r.as_str())
+            {
+                return refused_reason(reason);
+            }
+            if e.code == METHOD_NOT_FOUND {
+                Failure::Error(ERROR_DRAFT_FAILED.into())
+            } else if mentions_no_provider(&e.message) {
+                Failure::Error(ERROR_NO_PROVIDER.into())
+            } else {
+                Failure::Error(e.message.trim().to_owned())
+            }
+        }
         other => Failure::Error(other.to_string()),
     }
 }
 
-/// An accessibility error while reading the field or inserting.
+/// An accessibility error while reading the field (`inserting == false`) or inserting.
 pub fn classify_a11y(err: &nugget_core::Error, inserting: bool) -> Failure {
     use nugget_core::Error as E;
-    match err {
-        E::Unauthorized(_) => Failure::Error(ERROR_PERMISSION.into()),
-        E::NotFound(_) if !inserting => Failure::Refused(REFUSED_NO_FIELD),
-        E::NotFound(_) => Failure::Error(ERROR_FOCUS_LOST.into()),
-        E::Unsupported(_) if inserting => Failure::Error(ERROR_INSERT.into()),
-        other => match classify_text(&other.to_string()) {
-            Failure::Refused(k) if !inserting => Failure::Refused(k),
-            Failure::Refused(k) => Failure::Error(k.into()),
-            Failure::Error(e) => Failure::Error(e),
-        },
+    match (err, inserting) {
+        (E::NotFound(_), false) => Failure::Refused(REFUSED_NO_FIELD),
+        (_, false) => Failure::Error(ERROR_READ_FAILED.into()),
+        (_, true) => Failure::Error(ERROR_INSERT_FAILED.into()),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nugget_ipc::RpcError;
+    use serde_json::json;
+
+    fn rpc(code: i64, msg: &str, data: Option<serde_json::Value>) -> IpcError {
+        let mut e = RpcError::new(code, msg);
+        e.data = data;
+        IpcError::Rpc(e)
+    }
 
     #[test]
-    fn daemon_refusals_map_to_keys() {
-        let rpc = |m: &str| CmdError::Rpc {
-            code: -32602,
-            message: m.into(),
-        };
+    fn daemon_refusals_map_by_reason() {
+        for (reason, want) in [
+            ("secure", Failure::Refused(REFUSED_SECURE)),
+            ("excluded_app", Failure::Refused(REFUSED_EXCLUDED)),
+            ("terminal", Failure::Refused(REFUSED_TERMINAL)),
+            ("not_draftable", Failure::Refused(REFUSED_NOT_DRAFTABLE)),
+            ("disabled", Failure::Error(ERROR_DRAFT_FAILED.into())),
+        ] {
+            let e = rpc(
+                -32602,
+                "whatever the text says",
+                Some(json!({"refused": reason, "field_kind": "search"})),
+            );
+            assert_eq!(classify_ipc(&e), want, "{reason}");
+        }
+    }
+
+    #[test]
+    fn other_daemon_errors() {
         assert_eq!(
-            classify_cmd(&rpc(
-                "invalid input: drafting is refused in password and secure fields"
-            )),
-            Failure::Refused(REFUSED_SECURE)
-        );
-        assert_eq!(
-            classify_cmd(&rpc("invalid input: drafting is disabled in 1Password")),
-            Failure::Refused(REFUSED_EXCLUDED)
-        );
-        assert_eq!(
-            classify_cmd(&rpc(
-                "capability unsupported: nothing to draft in a search field"
-            )),
-            Failure::Refused(REFUSED_NOT_DRAFTABLE)
-        );
-        assert_eq!(
-            classify_cmd(&rpc("provider error: quota exceeded")),
+            classify_ipc(&rpc(-32000, "provider error: quota exceeded", None)),
             Failure::Error("provider error: quota exceeded".into())
         );
         assert_eq!(
-            classify_cmd(&CmdError::Rpc {
-                code: METHOD_NOT_FOUND,
-                message: "method not found".into()
-            }),
-            Failure::Error(ERROR_UNAVAILABLE.into())
+            classify_ipc(&rpc(
+                -32000,
+                "not found: no provider is available for the Synthesis tier",
+                None
+            )),
+            Failure::Error(ERROR_NO_PROVIDER.into())
         );
         assert_eq!(
-            classify_cmd(&CmdError::NotRunning("refused".into())),
-            Failure::Error(ERROR_NOT_RUNNING.into())
+            classify_ipc(&rpc(METHOD_NOT_FOUND, "method not found", None)),
+            Failure::Error(ERROR_DRAFT_FAILED.into())
+        );
+        let refused = std::io::Error::from(std::io::ErrorKind::ConnectionRefused);
+        assert_eq!(
+            classify_ipc(&IpcError::Connect(refused)),
+            Failure::Error(ERROR_OFFLINE.into())
         );
         assert_eq!(
-            classify_cmd(&CmdError::Disconnected),
-            Failure::Error(ERROR_DISCONNECTED.into())
+            classify_ipc(&IpcError::Disconnected),
+            Failure::Error(ERROR_OFFLINE.into())
         );
-        assert_eq!(message_for("drafting is disabled in Bank"), REFUSED_EXCLUDED);
         assert_eq!(message_for(" timed out "), "timed out");
+        assert_eq!(message_for("no provider could draft"), ERROR_NO_PROVIDER);
+        assert_eq!(message_for(""), ERROR_DRAFT_FAILED);
     }
 
     #[test]
@@ -140,7 +166,7 @@ mod tests {
         use nugget_core::Error as E;
         assert_eq!(
             classify_a11y(&E::Unauthorized("ax".into()), false),
-            Failure::Error(ERROR_PERMISSION.into())
+            Failure::Error(ERROR_READ_FAILED.into())
         );
         assert_eq!(
             classify_a11y(&E::NotFound("no focused text field".into()), false),
@@ -148,18 +174,18 @@ mod tests {
         );
         assert_eq!(
             classify_a11y(&E::NotFound("no focused text field".into()), true),
-            Failure::Error(ERROR_FOCUS_LOST.into())
+            Failure::Error(ERROR_INSERT_FAILED.into())
         );
         assert_eq!(
             classify_a11y(
                 &E::Invalid("refusing to insert into a secure field".into()),
                 true
             ),
-            Failure::Error(REFUSED_SECURE.into())
+            Failure::Error(ERROR_INSERT_FAILED.into())
         );
         assert_eq!(
             classify_a11y(&E::Other("AT-SPI: timeout".into()), false),
-            Failure::Error("AT-SPI: timeout".into())
+            Failure::Error(ERROR_READ_FAILED.into())
         );
     }
 }

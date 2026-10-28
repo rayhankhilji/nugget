@@ -14,7 +14,9 @@ fn only_overlay(window: &WebviewWindow) -> Result<(), CmdError> {
     if window.label() == OVERLAY_LABEL {
         Ok(())
     } else {
-        Err(CmdError::Other("only the Double Tap overlay can do this".into()))
+        Err(CmdError::Other(
+            "only the Double Tap overlay can do this".into(),
+        ))
     }
 }
 

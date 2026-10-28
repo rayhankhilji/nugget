@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "Não foi possível inserir o rascunho. Ele está na sua área de transferência.",
   "doubletap.error.draft_failed": "Não foi possível escrever o rascunho. Tente novamente.",
   "doubletap.hint.atspi": "O Double Tap lê campos de texto pelo AT-SPI, que está desativado nesta área de trabalho. Ative com: gsettings set org.gnome.desktop.interface toolkit-accessibility true — depois saia e entre de novo na sessão.",
+  "doubletap.hint.accessibility": "O Nugget precisa de acesso de Acessibilidade para ler o campo ativo e inserir rascunhos. Abra Ajustes do Sistema → Privacidade e Segurança → Acessibilidade e ative o Nugget.",
   "doubletap.hint.wayland_chord": "No Wayland, os apps não conseguem detectar toques isolados de teclas, então o toque duplo não funciona. Use uma combinação de teclas como atalho.",
   "doubletap.hint.macos_permissions": "O Double Tap precisa de Acessibilidade e Monitoramento de entrada. Clique em Abrir pedidos de permissão, ative o Nugget em Ajustes do Sistema → Privacidade e Segurança e volte."
 }

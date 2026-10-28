@@ -8,7 +8,7 @@
 //!   connection closes.
 //! - **Refusals.** Secure fields, excluded apps and search boxes are refused before anything is
 //!   read or sent, with a stable error: `data.refused` is `"secure"`, `"excluded_app"` or
-//!   `"not_draftable"` (`"disabled"` when `[draft] enabled = false`). See [`refusal_error`].
+//!   `"not_draftable"` or `"terminal"` (`"disabled"` when `[draft] enabled = false`). See [`refusal_error`].
 //! - **Voice.** The profile is loaded from its encrypted snapshot (or built) on a blocking
 //!   thread after startup, then refreshed incrementally after ingest commits and draft
 //!   feedback, debounced ([`voice`]).
@@ -24,6 +24,7 @@
 //! app_providers = { "com.tinyspeck.slackmacgap" = "local-chat", "mail.google.com" = "remote" }
 //! excluded_apps = ["com.example.bank"]   # ADDED to the built-in password-manager list...
 //! replace_default_excluded = false       # ...unless this is true (then the list is used alone)
+//! allow_terminals = false         # terminal emulators are refused ("terminal") unless true
 //! allow_cloud_screenshots = false
 //! temperature = 0.7
 //! retrieval_timeout_ms = 1500
@@ -58,7 +59,7 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_draft::{
     DEFAULT_EXCLUDED_APPS, DraftConfig, DraftStream, Drafter, MAX_BUDGET_TOKENS, ProfileVoice,
-    Refusal, VoiceFeedback, Warmer, gate,
+    Refusal, VoiceFeedback, Warmer, gate_with,
 };
 use nugget_infer::{ChatEvent, Provider, StopReason};
 use nugget_ipc::{Notifier, RpcError, code, parse_params, to_result};
@@ -95,6 +96,8 @@ struct DraftSection {
     /// Added to [`DEFAULT_EXCLUDED_APPS`], unless `replace_default_excluded`.
     excluded_apps: Vec<String>,
     replace_default_excluded: bool,
+    /// Draft into terminal emulators too (refused by default: text there can run as a command).
+    allow_terminals: bool,
     allow_cloud_screenshots: bool,
     temperature: Option<f32>,
     retrieval_timeout_ms: u64,
@@ -114,6 +117,7 @@ impl Default for DraftSection {
             app_providers: HashMap::new(),
             excluded_apps: Vec::new(),
             replace_default_excluded: false,
+            allow_terminals: d.allow_terminals,
             allow_cloud_screenshots: d.allow_cloud_screenshots,
             temperature: d.temperature,
             retrieval_timeout_ms: d.retrieval_timeout_ms,
@@ -174,6 +178,7 @@ impl DraftSection {
             budget_tokens: self.budget_tokens.clamp(1, MAX_BUDGET_TOKENS),
             app_providers: self.app_providers.clone(),
             allow_cloud_screenshots: self.allow_cloud_screenshots,
+            allow_terminals: self.allow_terminals,
             excluded_apps: excluded,
             temperature: self.temperature,
             retrieval_timeout_ms: self.retrieval_timeout_ms,
@@ -306,6 +311,7 @@ fn refusal_kind(r: &Refusal) -> (i64, &'static str) {
     match r {
         Refusal::SecureField => (code::INVALID_PARAMS, "secure"),
         Refusal::ExcludedApp(_) => (code::INVALID_PARAMS, "excluded_app"),
+        Refusal::Terminal(_) => (code::INVALID_PARAMS, "terminal"),
         Refusal::NotDraftable(_) => (code::UNSUPPORTED, "not_draftable"),
     }
 }
@@ -334,7 +340,8 @@ impl DraftFeature {
         }
         // The engine gates again; gating here first keeps the refusal's kind for the client
         // and the audit, and nothing about the field is read past this point when refused.
-        if let Err(r) = gate(&req.context, &self.drafter.config().excluded_apps) {
+        let config = self.drafter.config();
+        if let Err(r) = gate_with(&req.context, &config.excluded_apps, config.allow_terminals) {
             let kind = match &r {
                 Refusal::NotDraftable(k) => Some(k.as_str()),
                 _ => None,
@@ -625,6 +632,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s.draft_config().excluded_apps, ["com.example.bank"]);
+        assert!(!parse("").unwrap().draft_config().allow_terminals);
+        assert!(
+            parse("allow_terminals = true")
+                .unwrap()
+                .draft_config()
+                .allow_terminals
+        );
     }
 
     #[test]
@@ -660,6 +674,9 @@ mod tests {
             e.data,
             Some(json!({"refused": "not_draftable", "field_kind": "search"}))
         );
+        let e = refusal_error(&Refusal::Terminal("Terminal".into()));
+        assert_eq!(e.code, code::INVALID_PARAMS);
+        assert_eq!(e.data, Some(json!({"refused": "terminal"})));
         assert_eq!(disabled_error().data, Some(json!({"refused": "disabled"})));
     }
 }

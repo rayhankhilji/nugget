@@ -23,7 +23,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::FieldKind;
-use crate::classify::{DEFAULT_EXCLUDED_APPS, gate, normalize_app_id, url_host_path};
+use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
 use crate::prompt::{
     LengthBand, PromptInput, PromptLimits, build_request, channel_for, split_value,
@@ -147,6 +147,9 @@ pub struct DraftConfig {
     pub allow_cloud_screenshots: bool,
     /// App ids and hosts where drafting is refused.
     pub excluded_apps: Vec<String>,
+    /// Draft into terminal emulators ([`crate::DEFAULT_TERMINAL_APPS`]); refused by default,
+    /// since inserted text could run as a command.
+    pub allow_terminals: bool,
     pub temperature: Option<f32>,
     /// Retrieval that takes longer is skipped for this draft.
     pub retrieval_timeout_ms: u64,
@@ -169,6 +172,7 @@ impl Default for DraftConfig {
                 .iter()
                 .map(|s| (*s).to_owned())
                 .collect(),
+            allow_terminals: false,
             temperature: None,
             retrieval_timeout_ms: 1_500,
             voice_timeout_ms: 500,
@@ -355,7 +359,12 @@ impl Drafter {
     /// lookup from whatever the hint already has. `begin` reuses the results when its context
     /// gives the same retrieval query. Returns `None` when drafting would be refused.
     pub fn prewarm(&self, hint: &DraftContext) -> Option<Prewarm> {
-        let kind = gate(hint, &self.inner.config.excluded_apps).ok()?;
+        let kind = gate_with(
+            hint,
+            &self.inner.config.excluded_apps,
+            self.inner.config.allow_terminals,
+        )
+        .ok()?;
         let (candidates, _) = self.candidates(hint, None).ok()?;
         let provider = candidates.into_iter().next()?;
         let cloud = provider.meta().locality == Locality::Cloud;
@@ -393,7 +402,7 @@ impl Drafter {
         let t0 = Instant::now();
         let ctx = &req.context;
         let config = &self.inner.config;
-        let kind = gate(ctx, &config.excluded_apps)?;
+        let kind = gate_with(ctx, &config.excluded_apps, config.allow_terminals)?;
         let (candidates, explicit) = self.candidates(ctx, req.provider.as_ref())?;
         let query = retrieval_query(ctx);
         let mut timings = DraftTimings::default();

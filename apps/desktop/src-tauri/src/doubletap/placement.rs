@@ -100,9 +100,11 @@ fn screen_at(screens: &[Screen], x: f64, y: f64) -> Option<&Screen> {
         .iter()
         .find(|s| s.bounds.contains(x, y))
         .or_else(|| {
-            screens
-                .iter()
-                .min_by(|a, b| a.bounds.distance2(x, y).total_cmp(&b.bounds.distance2(x, y)))
+            screens.iter().min_by(|a, b| {
+                a.bounds
+                    .distance2(x, y)
+                    .total_cmp(&b.bounds.distance2(x, y))
+            })
         })
 }
 

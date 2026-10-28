@@ -32,7 +32,10 @@ pub mod post;
 pub mod prompt;
 mod voice;
 
-pub use classify::{DEFAULT_EXCLUDED_APPS, Refusal, classify, gate, is_secure};
+pub use classify::{
+    DEFAULT_EXCLUDED_APPS, DEFAULT_TERMINAL_APPS, Refusal, classify, gate, gate_with, is_secure,
+    is_terminal,
+};
 pub use engine::{
     DraftConfig, DraftStream, DraftTimings, Drafter, FeedbackOutcome, FeedbackRecord, FeedbackSink,
     MAX_BUDGET_TOKENS, NoVoice, Prewarm, VoiceQuery, VoiceSource, Warmer, post_options,

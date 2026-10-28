@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "Impossible d'insérer le brouillon. Il est dans votre presse-papiers.",
   "doubletap.error.draft_failed": "Le brouillon n'a pas pu être rédigé. Réessayez.",
   "doubletap.hint.atspi": "Double Tap lit les champs de texte via AT-SPI, désactivé sur ce bureau. Activez-le avec : gsettings set org.gnome.desktop.interface toolkit-accessibility true — puis fermez la session et rouvrez-la.",
+  "doubletap.hint.accessibility": "Nugget a besoin de l'accès Accessibilité pour lire le champ actif et insérer les brouillons. Ouvrez Réglages Système → Confidentialité et sécurité → Accessibilité et activez Nugget.",
   "doubletap.hint.wayland_chord": "Sous Wayland, les apps ne peuvent pas détecter un appui isolé : le double appui ne fonctionne pas. Utilisez plutôt une combinaison de touches.",
   "doubletap.hint.macos_permissions": "Double Tap a besoin de l'accessibilité et de la surveillance de l'entrée. Cliquez sur Ouvrir les demandes d'autorisation, activez Nugget dans Réglages Système → Confidentialité et sécurité, puis revenez."
 }

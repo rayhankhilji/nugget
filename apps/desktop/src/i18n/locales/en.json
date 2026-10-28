@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "Couldn't insert the draft. It's on your clipboard instead.",
   "doubletap.error.draft_failed": "The draft couldn't be written. Try again.",
   "doubletap.hint.atspi": "Double Tap reads text fields through AT-SPI, which is off on this desktop. Turn it on with: gsettings set org.gnome.desktop.interface toolkit-accessibility true — then log out and back in.",
+  "doubletap.hint.accessibility": "Nugget needs Accessibility access to read the focused field and insert drafts. Open System Settings → Privacy & Security → Accessibility and turn on Nugget.",
   "doubletap.hint.wayland_chord": "On Wayland, apps can't watch single key taps, so a double tap won't work. Use a key combination as your trigger instead.",
   "doubletap.hint.macos_permissions": "Double Tap needs Accessibility and Input Monitoring. Click Open permission prompts, turn Nugget on in System Settings → Privacy & Security, then come back."
 }

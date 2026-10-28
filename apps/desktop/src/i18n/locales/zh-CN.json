@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "无法插入草稿，已将其复制到剪贴板。",
   "doubletap.error.draft_failed": "无法生成草稿，请重试。",
   "doubletap.hint.atspi": "Double Tap 通过 AT-SPI 读取文本框，但当前桌面未启用它。请运行：gsettings set org.gnome.desktop.interface toolkit-accessibility true，然后注销并重新登录。",
+  "doubletap.hint.accessibility": "Nugget 需要辅助功能权限才能读取当前输入框并插入草稿。请打开 系统设置 → 隐私与安全性 → 辅助功能，并开启 Nugget。",
   "doubletap.hint.wayland_chord": "在 Wayland 下，应用无法监听单个按键，因此双击无法使用。请改用组合键作为触发键。",
   "doubletap.hint.macos_permissions": "Double Tap 需要辅助功能和输入监控权限。点击“打开权限请求”，在系统设置 → 隐私与安全性中开启 Nugget，然后返回。"
 }

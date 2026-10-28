@@ -842,6 +842,7 @@
   "doubletap.error.insert_failed": "Der Entwurf konnte nicht eingefügt werden. Er liegt stattdessen in der Zwischenablage.",
   "doubletap.error.draft_failed": "Der Entwurf konnte nicht erstellt werden. Versuche es erneut.",
   "doubletap.hint.atspi": "Double Tap liest Textfelder über AT-SPI, das auf diesem Desktop aus ist. Schalte es ein mit: gsettings set org.gnome.desktop.interface toolkit-accessibility true — dann ab- und wieder anmelden.",
+  "doubletap.hint.accessibility": "Nugget braucht Bedienungshilfen-Zugriff, um das aktive Feld zu lesen und Entwürfe einzufügen. Öffne Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen und aktiviere Nugget.",
   "doubletap.hint.wayland_chord": "Unter Wayland können Apps einzelne Tastenanschläge nicht beobachten, daher funktioniert doppeltes Tippen nicht. Verwende stattdessen eine Tastenkombination.",
   "doubletap.hint.macos_permissions": "Double Tap braucht Bedienungshilfen und Eingabeüberwachung. Klicke auf Berechtigungsabfragen öffnen, aktiviere Nugget unter Systemeinstellungen → Datenschutz & Sicherheit und komm dann zurück."
 }

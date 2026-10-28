@@ -7,7 +7,7 @@
 //! refusals and errors are shown without focus. Before inserting, the overlay is hidden and the
 //! target app is brought back to the front, then [`wait_frontmost`] checks (through the
 //! accessibility API) that the frontmost app is the one the draft was read from; if another app
-//! stays in front, nothing is inserted (`doubletap.error.focus_lost`).
+//! stays in front, nothing is inserted (`doubletap.error.insert_failed`).
 //!
 //! - **macOS:** hiding a window leaves Nugget active, so the target is reactivated with
 //!   `open -b <bundle id>` (Launch Services; no Apple Events permission needed), or by hiding
@@ -87,7 +87,11 @@ impl A11y {
     pub fn frontmost(&self) -> Option<AppInfo> {
         #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
         {
-            self.inner.frontmost_app().ok().flatten().map(|(app, _)| app)
+            self.inner
+                .frontmost_app()
+                .ok()
+                .flatten()
+                .map(|(app, _)| app)
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
         {
@@ -115,10 +119,7 @@ pub fn restart_listener(app: &AppHandle) {
     let mut error = None;
     if s.enabled {
         let handle = app.clone();
-        match nugget_hotkey::start(
-            (&s.trigger).into(),
-            Box::new(move || on_trigger(&handle)),
-        ) {
+        match nugget_hotkey::start((&s.trigger).into(), Box::new(move || on_trigger(&handle))) {
             Ok(l) => *slot = Some(l),
             Err(e) => {
                 tracing::warn!(error = %e, "Double Tap trigger unavailable");
@@ -238,11 +239,7 @@ pub async fn fire(app: AppHandle) {
         provider: provider.map(ProviderId::new),
         max_tokens: None,
     };
-    let daemon = app.state::<Daemon>();
-    match daemon
-        .call::<_, DraftStarted>(&app, method::DRAFT_BEGIN, &request)
-        .await
-    {
+    match begin(&app, &request).await {
         Ok(started) => {
             apply(
                 &app,
@@ -255,8 +252,22 @@ pub async fn fire(app: AppHandle) {
                 }),
             );
         }
-        Err(e) => fail(&app, errors::classify_cmd(&e)),
+        Err(f) => fail(&app, f),
     }
+}
+
+/// `draft.begin` on the raw client, so the refusal reason in the JSON-RPC error's `data`
+/// (dropped by `CmdError`) can be mapped.
+async fn begin(app: &AppHandle, request: &DraftRequest) -> Result<DraftStarted, Failure> {
+    let daemon = app.state::<Daemon>();
+    let client = daemon
+        .client(app)
+        .await
+        .map_err(|_| Failure::Error(errors::ERROR_OFFLINE.into()))?;
+    client
+        .call(method::DRAFT_BEGIN, request)
+        .await
+        .map_err(|e| errors::classify_ipc(&e))
 }
 
 /// Fire and forget: warm the provider for this app while the field is read.
@@ -300,6 +311,21 @@ pub fn follow_streams(app: &AppHandle) {
             );
         }
     });
+    // No `chat.done` arrives when the connection drops.
+    let h = app.clone();
+    app.listen(daemon::event::CONNECTION, move |e| {
+        if is_disconnect(e.payload()) {
+            apply(&h, Event::Disconnected);
+        }
+    });
+}
+
+/// Whether a `nugget:connection` payload reports the connection down.
+fn is_disconnect(payload: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v.get("connected").and_then(serde_json::Value::as_bool))
+        == Some(false)
 }
 
 /// Feed an event to the state machine, emit the view if it changed, run the effects.
@@ -439,7 +465,7 @@ async fn insert(app: AppHandle, text: String) {
         if let Some(t) = &target
             && !wait_frontmost(&a11y, &t.app)
         {
-            return Err(Failure::Error(errors::ERROR_FOCUS_LOST.into()));
+            return Err(Failure::Error(errors::ERROR_INSERT_FAILED.into()));
         }
         a11y.api()
             .insert(&text)
@@ -544,8 +570,22 @@ mod tests {
             &app(Some("com.apple.mail"), "Mail"),
             &app(Some("com.apple.notes"), "Mail")
         ));
-        assert!(same_app(&app(None, "Thunderbird"), &app(Some("x"), "thunderbird")));
+        assert!(same_app(
+            &app(None, "Thunderbird"),
+            &app(Some("x"), "thunderbird")
+        ));
         assert!(!same_app(&app(None, ""), &app(None, "")));
+    }
+
+    #[test]
+    fn connection_payloads() {
+        assert!(is_disconnect(
+            r#"{"connected":false,"socket":"s","error":"connection closed"}"#
+        ));
+        assert!(!is_disconnect(
+            r#"{"connected":true,"socket":"s","error":null}"#
+        ));
+        assert!(!is_disconnect("garbage"));
     }
 
     #[test]
@@ -583,7 +623,10 @@ mod tests {
         );
         // The accessibility layer's built-in deny list applies even with an empty list.
         assert_eq!(
-            local_refusal(&app(Some("com.agilebits.onepassword7"), "1Password 7"), &allow),
+            local_refusal(
+                &app(Some("com.agilebits.onepassword7"), "1Password 7"),
+                &allow
+            ),
             Some(errors::REFUSED_EXCLUDED)
         );
     }
