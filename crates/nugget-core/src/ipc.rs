@@ -46,6 +46,10 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `mcp.clients.list` | `{}` | `Vec<`[`McpClientInfo`]`>` |
 /// | `mcp.clients.create` | [`McpClientCreate`] | [`McpClientCreated`] (token shown once) |
 /// | `mcp.clients.revoke` | [`McpClientRef`] | `null` |
+/// | `draft.begin` | [`DraftRequest`] | [`DraftStarted`], then `chat.delta`/`chat.done` notifications |
+/// | `draft.cancel` | [`ChatCancel`] | `null` |
+/// | `draft.feedback` | [`DraftFeedback`] | `null` |
+/// | `voice.status` | `{}` | [`VoiceStatus`] |
 pub mod method {
     pub const STATUS: &str = "status";
     pub const CHAT: &str = "chat";
@@ -76,6 +80,10 @@ pub mod method {
     pub const MCP_CLIENTS_LIST: &str = "mcp.clients.list";
     pub const MCP_CLIENTS_CREATE: &str = "mcp.clients.create";
     pub const MCP_CLIENTS_REVOKE: &str = "mcp.clients.revoke";
+    pub const DRAFT_BEGIN: &str = "draft.begin";
+    pub const DRAFT_CANCEL: &str = "draft.cancel";
+    pub const DRAFT_FEEDBACK: &str = "draft.feedback";
+    pub const VOICE_STATUS: &str = "voice.status";
 }
 
 pub mod notification {
@@ -748,4 +756,125 @@ impl std::fmt::Debug for McpClientCreated {
             .field("token", &"<redacted>")
             .finish_non_exhaustive()
     }
+}
+
+// ---- Double Tap drafting (M3) ----
+//
+// The desktop app reads the focused field through the OS accessibility APIs (`nugget-a11y`),
+// sends a `DraftContext` to the daemon, streams the draft, inserts it and reports feedback.
+
+/// The application that owns the focused field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppInfo {
+    /// macOS bundle id, Windows executable name or Linux desktop-file id.
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    #[serde(default)]
+    pub window_title: Option<String>,
+    /// Page URL when the app is a browser and it is readable.
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// The focused editable element.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldInfo {
+    /// Normalised accessibility role: `text_area`, `text_field`, `combo_box`, `document`,
+    /// `web_area`, `search_field`, ...
+    pub role: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    /// Current text of the field (empty for a new reply).
+    #[serde(default)]
+    pub value: String,
+    /// Selection as character offsets `(start, end)` into `value`.
+    #[serde(default)]
+    pub selection: Option<(u32, u32)>,
+    /// Password or other protected field. Drafting is refused and the value is never read.
+    #[serde(default)]
+    pub secure: bool,
+}
+
+/// One message of the conversation around the field, oldest first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadMessage {
+    #[serde(default)]
+    pub author: Option<String>,
+    pub text: String,
+    /// Whether the user wrote it, when the app exposes that.
+    #[serde(default)]
+    pub from_me: Option<bool>,
+    #[serde(default)]
+    pub timestamp: Option<String>,
+}
+
+/// Everything known about where the user wants a draft.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftContext {
+    pub app: AppInfo,
+    pub field: FieldInfo,
+    #[serde(default)]
+    pub thread: Vec<ThreadMessage>,
+    #[serde(default)]
+    pub recipients: Vec<String>,
+    #[serde(default)]
+    pub subject: Option<String>,
+    /// PNG screenshot of the focused window, only when accessibility text is unavailable and the
+    /// user allowed screenshots for this app.
+    #[serde(default)]
+    pub screenshot_png_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftRequest {
+    pub context: DraftContext,
+    /// Optional user hint, e.g. "decline politely".
+    #[serde(default)]
+    pub instruction: Option<String>,
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+}
+
+/// Field kinds, decided by rules from the context (never by the model): `email_body`,
+/// `chat_message`, `comment`, `document`, `form_field`, `search`, `unknown`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DraftStarted {
+    pub stream_id: String,
+    pub provider: ProviderId,
+    pub locality: Locality,
+    pub field_kind: String,
+    /// Sources the draft may draw on (`[n]` markers are not inserted into drafts).
+    #[serde(default)]
+    pub citations: Vec<Citation>,
+    /// Sensitive items left out because the provider is a cloud model.
+    #[serde(default)]
+    pub excluded_sensitive: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DraftFeedback {
+    pub stream_id: String,
+    /// `accepted` (inserted as is), `edited` (inserted then changed), `rejected`.
+    pub outcome: String,
+    /// Text the user finally sent, when known (improves the voice profile; stored encrypted).
+    #[serde(default)]
+    pub final_text: Option<String>,
+    /// Whether insertion was verified by reading the field back.
+    #[serde(default)]
+    pub insert_verified: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct VoiceStatus {
+    /// Messages written by the user that the profile was built from.
+    pub samples: u64,
+    /// Channels with enough samples for a channel-specific style (e.g. `email`, `chat`).
+    pub channels: Vec<String>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_built: Option<time::OffsetDateTime>,
 }

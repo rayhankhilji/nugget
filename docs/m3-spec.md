@@ -44,3 +44,11 @@ Accessibility, Input Monitoring) are granted to the app bundle. Drafting lives i
 ## Wave 2
 - **M3-G integration:** `draft.*` IPC (`draft.begin`, `draft.cancel`, `draft.delta`/`draft.done` notifications, `voice.status`), daemon wiring, the desktop end-to-end flow, and a settings page (trigger, provider per app, excluded apps such as password managers and banking, enabled by default).
 - **Review:** security reviewers (field contents treated as untrusted prompt input, excluded apps, never reading password or secure fields, clipboard restore) and correctness reviewers, then fixes.
+
+## Execution (as run)
+- **Contracts on the main branch:**
+  - `nugget_core::ipc` gains `draft.begin/cancel/feedback`, `voice.status`, `DraftContext`, `AppInfo`, `FieldInfo` and `ThreadMessage`.
+  - Contract crates: `nugget-a11y` (`Accessibility`, `Focused`, `insert` with verification), `nugget-hotkey` (`Trigger`, `start`), `nugget-voice` (`VoiceHints`, `StyleStats`) and `nugget-draft` (`FieldKind`, `classify`).
+- **Wave 1 runs as parallel cloud sessions** while M2 runs locally:
+  - Each work package has its own branch, `m3/<wp>`, and owns only its crate.
+  - The orchestrator merges the branches, regenerates `Cargo.lock` and verifies the workspace.
