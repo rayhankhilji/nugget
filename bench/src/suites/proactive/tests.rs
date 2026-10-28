@@ -4,7 +4,7 @@ use std::path::Path;
 use super::engine::{Action, ActionKind, Approval, Card, DryRun, Execution, Feedback};
 use super::generate::generate;
 use super::world::{
-    CardKind, DistractorCategory, Gold, Item, World, day_of, iso_date, load_gold, load_world,
+    self, CardKind, DistractorCategory, Gold, Item, World, day_of, iso_date, load_gold, load_world,
     to_fixture_json, weekday,
 };
 use super::*;
@@ -400,12 +400,254 @@ fn suite_smoke() {
         assert!(r.targets.iter().any(|t| t.metric == name), "{name}");
     }
     assert!(r.metric("baseline.recency_judge.precision@5").is_some());
-    let real = run_benchmark(
-        &ProactiveBench,
-        &RunConfig {
-            backend: crate::runner::Backend::Real,
-            ..cfg
-        },
+    assert!(r.metric("reference.precision@5").is_none());
+}
+
+// ---- the real `nugget-proactive` crate (`--backend real`) on a tiny world ----
+
+const SAM: &str = "sam@example.com";
+
+fn mail(id: &str, day: i32, thread: &str, from: &str, to: &str, subject: &str, body: &str) -> Item {
+    Item::Mail(world::Mail {
+        id: id.into(),
+        day,
+        thread: thread.into(),
+        from: from.into(),
+        to: vec![to.into()],
+        subject: subject.into(),
+        body: body.into(),
+        list_unsubscribe: false,
+        auto_submitted: false,
+    })
+}
+
+/// Six days: an unanswered question, an external meeting, a renewal notice, a newsletter that
+/// asks a question, an automated notification and a meeting that is cancelled.
+fn tiny_world() -> (World, Gold) {
+    let mut newsletter = mail(
+        "m-news",
+        1,
+        "t-news",
+        "editor@weekly.test",
+        SAM,
+        "This week in tools",
+        "Can you believe these deals? Unsubscribe any time.",
     );
-    assert_eq!(real.status, Status::NotImplemented);
+    if let Item::Mail(m) = &mut newsletter {
+        m.list_unsubscribe = true;
+    }
+    let mut notice = mail(
+        "m-ci",
+        1,
+        "t-ci",
+        "builds@ci.test",
+        SAM,
+        "Build failed",
+        "Could you check the build?",
+    );
+    if let Item::Mail(m) = &mut notice {
+        m.auto_submitted = true;
+    }
+    let event = |id: &str, start_day: i32, title: &str| {
+        Item::Event(world::Event {
+            id: id.into(),
+            day: 0,
+            start_day,
+            start_hour: 15,
+            minutes: 45,
+            title: title.into(),
+            organizer: "kim@northwind.test".into(),
+            attendees: vec!["kim@northwind.test".into(), SAM.into()],
+            series: None,
+            location: "Video call".into(),
+            description: "Pilot review.".into(),
+        })
+    };
+    let items = vec![
+        mail(
+            "m-q",
+            1,
+            "t-q",
+            "priya@acme.test",
+            SAM,
+            "Q3 numbers",
+            "Hi Sam, could you send me the final Q3 numbers? Thanks, Priya",
+        ),
+        newsletter,
+        notice,
+        mail(
+            "m-renew",
+            1,
+            "t-renew",
+            "billing@cloudvault.test",
+            SAM,
+            "Your CloudVault plan renews soon",
+            "Your annual CloudVault plan renews on 2026-09-06 for $99.00.",
+        ),
+        event("e-ext", 4, "Northwind pilot review"),
+        event("e-off", 5, "Northwind follow-up"),
+        Item::EventCancelled(world::EventCancelled {
+            id: "c-off".into(),
+            day: 2,
+            event: "e-off".into(),
+            reason: "Moved".into(),
+        }),
+    ];
+    let world = World {
+        user: world::Person {
+            name: "Sam".into(),
+            email: SAM.into(),
+        },
+        start_date: iso_date(1),
+        days: 6,
+        items,
+    };
+    let gold_card =
+        |id: &str, kind, subject: &str, first_day, last_day, source: &str| world::GoldCard {
+            id: id.into(),
+            kind,
+            subject: subject.into(),
+            first_day,
+            last_day,
+            source: source.into(),
+            why: String::new(),
+        };
+    let distractor = |item: &str, category, subject: &str| world::Distractor {
+        item: item.into(),
+        category,
+        subjects: vec![subject.into()],
+    };
+    let gold = Gold {
+        cards: vec![
+            gold_card("g-q", CardKind::UnansweredThread, "thread:t-q", 3, 6, "m-q"),
+            gold_card("g-e", CardKind::MeetingPrep, "event:e-ext", 3, 4, "e-ext"),
+            gold_card(
+                "g-r",
+                CardKind::Renewal,
+                "sub:cloudvault.test",
+                2,
+                5,
+                "m-renew",
+            ),
+        ],
+        distractors: vec![
+            distractor("m-news", DistractorCategory::Newsletter, "thread:t-news"),
+            distractor("m-ci", DistractorCategory::Notification, "thread:t-ci"),
+            distractor("e-off", DistractorCategory::CancelledMeeting, "event:e-off"),
+        ],
+    };
+    (world, gold)
+}
+
+#[test]
+fn real_engine_on_a_tiny_world() {
+    let (w, g) = tiny_world();
+    let mut e = real::RealEngine::new(SAM, true, 1).unwrap();
+    let run = sim::run(&w, &g, &mut e, sim_config(3));
+    assert!(e.errors().is_empty(), "{:?}", e.errors());
+    let s = sim::score(&w, &g, &run, K);
+    assert_eq!(s["recall"], 1.0, "{s:#?}");
+    assert_eq!(s["distractors.fpr"], 0.0);
+    assert_eq!(s["duplicate_shows"], 0.0);
+    assert_eq!(s["dry_run_coverage"], 1.0);
+    assert_eq!(s["diff_fidelity"], 1.0);
+    assert_eq!(s["executed_without_approval"], 0.0);
+    assert_eq!(s["approved_failures"], 0.0);
+    assert!(s["executions"] >= 1.0);
+    assert!(s["approval_probes"] >= 1.0);
+    // The unanswered question shows once its sender has waited a day, mapped to its thread.
+    let q = run
+        .shows
+        .iter()
+        .find(|x| x.card.subject == "thread:t-q")
+        .unwrap();
+    assert_eq!(q.card.kind, CardKind::UnansweredThread);
+    assert_eq!(q.day, 3);
+    let action = q.card.action.as_ref().unwrap();
+    assert_eq!(action.kind, ActionKind::DraftReply);
+    assert!(action.dry_run.as_ref().unwrap().is_effective());
+    // The crate tracked the same feedback.
+    let m = e.crate_metrics().unwrap();
+    assert!(m.shown >= 3, "{m:?}");
+}
+
+#[test]
+fn real_engine_refuses_without_a_matching_approval() {
+    let (w, _) = tiny_world();
+    let mut e = real::RealEngine::new(SAM, true, 2).unwrap();
+    for item in w.items.iter().filter(|i| i.day() < 3) {
+        e.observe(item);
+    }
+    let cards = e.brief(3, K);
+    assert!(cards.len() >= 2, "{cards:?}");
+    let (a, b) = (&cards[0], &cards[1]);
+    // Open cards, before any feedback: only the crate's digest check stands in the way.
+    assert!(e.execute(&a.id, None).is_err());
+    let other = Approval {
+        card_id: b.id.clone(),
+        token: 7,
+    };
+    assert!(e.execute(&a.id, Some(&other)).is_err());
+    assert!(e.audit_log().is_empty());
+    let own = Approval {
+        card_id: a.id.clone(),
+        token: 8,
+    };
+    e.feedback(&a.id, Feedback::Accepted);
+    let exec = e.execute(&a.id, Some(&own)).unwrap();
+    assert_eq!(exec.approval, Some(8));
+    assert_eq!(
+        Some(&exec.applied),
+        a.action.as_ref().unwrap().dry_run.as_ref()
+    );
+    // Replaying the approval is refused: the card is done.
+    assert!(e.execute(&a.id, Some(&own)).is_err());
+    assert_eq!(e.audit_log().len(), 1);
+    assert!(e.errors().is_empty(), "{:?}", e.errors());
+}
+
+#[test]
+fn real_learning_off_keeps_the_prior() {
+    let (w, g) = tiny_world();
+    let frozen = real_arm(&w, &g, &[5], false).unwrap();
+    let on = real_arm(&w, &g, &[5], true).unwrap();
+    // Same world, same seed: the arms differ only in ranking, and here everything fits in k.
+    assert_eq!(frozen["recall"], on["recall"]);
+    assert_eq!(frozen["executed_without_approval"], 0.0);
+}
+
+#[test]
+fn reference_metrics_compare_like_for_like() {
+    let mut a = BTreeMap::new();
+    a.insert(format!("precision@{K}"), 0.5);
+    a.insert("recall".to_owned(), 0.25);
+    let mut b = BTreeMap::new();
+    b.insert(format!("precision@{K}"), 0.75);
+    b.insert("recall".to_owned(), 1.0);
+    let m = reference_metrics(&a, &b);
+    let get = |n: &str| m.iter().find(|x| x.name == n).unwrap().value;
+    assert_eq!(get("reference.precision@5"), 0.75);
+    assert_eq!(get("comparison.precision@5_vs_reference"), -0.25);
+    assert_eq!(get("comparison.recall_vs_reference"), -0.75);
+    assert!(m.iter().all(|x| x.target.is_none()));
+}
+
+/// Diagnostic: what the real crate shows on the fixture world, and why it misses.
+#[test]
+#[ignore = "diagnostic; prints the real crate's shows on the fixture world"]
+fn real_engine_diagnostic() {
+    let (w, g) = fixture();
+    let mut e = real::RealEngine::new(SAM, true, 0).unwrap();
+    let run = sim::run(&w, &g, &mut e, sim_config(0));
+    for s in &run.shows {
+        println!(
+            "day {:2} {:?} {:5} {:18} {} | {}",
+            s.day,
+            s.gold.is_some(),
+            s.accepted,
+            s.card.kind.as_str(),
+            s.card.subject,
+            s.card.title
+        );
+    }
 }

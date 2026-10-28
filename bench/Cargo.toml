@@ -47,6 +47,8 @@ async-trait.workspace = true
 nugget-knowledge = { workspace = true, optional = true }
 nugget-vault = { workspace = true, optional = true }
 nugget-mcp = { workspace = true, optional = true }
+# `proactive --backend real`: the proactive engine under test.
+nugget-proactive.workspace = true
 
 [dev-dependencies]
 # `draft` against a mocked OpenAI-compatible provider.
