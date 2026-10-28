@@ -100,6 +100,14 @@ pub trait Session {
 pub trait CuaAgent: Send {
     fn name(&self) -> &str;
     fn run(&mut self, task: &TaskBrief, session: &mut dyn Session) -> Outcome;
+    /// Extra report parameters (the model under test, say).
+    fn params(&self) -> Vec<(String, serde_json::Value)> {
+        Vec::new()
+    }
+    /// Extra metrics over the tasks run so far, reported without targets.
+    fn metrics(&self) -> Vec<crate::report::Metric> {
+        Vec::new()
+    }
 }
 
 /// Build the descriptor for an action key such as `shop.pay`.

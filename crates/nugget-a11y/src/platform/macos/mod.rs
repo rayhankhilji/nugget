@@ -9,8 +9,10 @@
 //! - Insertion sets `AXSelectedTextRange` to the selection and then `AXSelectedText`, which
 //!   replaces the selection like typing. Offsets are converted between characters and the
 //!   UTF-16 units AX uses.
+//! - Computer use (M4) is in `computer`: apps and windows, element actions, key input, launch.
 
 mod ax;
+mod computer;
 mod pasteboard;
 
 use nugget_core::ipc::AppInfo;
@@ -21,7 +23,8 @@ use objc2_core_foundation::{CFBoolean, CFRetained, CFString, CFType, CFURL};
 use objc2_core_graphics::{CGEvent, CGEventFlags, CGEventTapLocation};
 
 use crate::clipboard::Clipboard;
-use crate::engine::{FieldRead, Platform, Target};
+use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
+use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
 use crate::role::{Role, role_from_ax};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -95,6 +98,8 @@ const BASE_ATTRS: &[&str] = &[
     "AXDOMClassList",
     "AXIdentifier",
     "AXSelected",
+    "AXExpanded",
+    "AXDisclosing",
 ];
 
 impl AxEl {
@@ -150,6 +155,11 @@ impl AxEl {
                 multiline,
                 selected: get("AXSelected").and_then(cf_bool).unwrap_or(false),
                 offscreen: false,
+                disabled: !enabled,
+                checked: None,
+                expanded: get("AXExpanded")
+                    .or_else(|| get("AXDisclosing"))
+                    .and_then(cf_bool),
             },
             ..Default::default()
         };
@@ -166,8 +176,12 @@ impl AxEl {
                 height: s.height,
             });
         }
-        if !secure {
-            node.value = get("AXValue").and_then(cf_string);
+        if !secure && let Some(v) = get("AXValue") {
+            node.value = cf_string(v);
+            node.states.checked = computer::checked_from_ax(&raw, sub.as_deref(), v);
+            if node.states.expanded.is_none() && raw == "AXDisclosureTriangle" {
+                node.states.expanded = computer::checked_from_ax("AXCheckBox", None, v);
+            }
         }
         if let Some(u) = get("AXURL").and_then(cf_url) {
             node.attrs.insert("url".into(), u);
@@ -232,6 +246,14 @@ impl Element for AxEl {
     fn same(&self, other: &Self) -> bool {
         *self.0 == *other.0
     }
+
+    fn actions(&self) -> Vec<UiActionKind> {
+        computer::actions(self)
+    }
+
+    fn perform(&self, action: &UiAction) -> Result<()> {
+        computer::perform(self, action)
+    }
 }
 
 impl Platform for AxPlatform {
@@ -252,11 +274,7 @@ impl Platform for AxPlatform {
     }
 
     fn focus(&self) -> Result<Option<Target<AxEl>>> {
-        if !ax::is_trusted(false) {
-            return Err(Error::Unauthorized(
-                "Accessibility permission is not granted".into(),
-            ));
-        }
+        computer::require_trust()?;
         let sys = ax::system_wide();
         let Some(app) = ax::attr(&sys, "AXFocusedApplication").and_then(AxEl::element) else {
             return Ok(None);
@@ -391,6 +409,22 @@ impl Platform for AxPlatform {
             CGEvent::post(CGEventTapLocation::HIDEventTap, Some(&ev));
         }
         Ok(())
+    }
+
+    fn apps(&self) -> Result<Vec<AppEntry>> {
+        computer::apps()
+    }
+
+    fn windows(&self) -> Result<Vec<PlatformWindow<AxEl>>> {
+        computer::windows()
+    }
+
+    fn key_input(&self, input: &KeyInput) -> Result<()> {
+        computer::key_input(input)
+    }
+
+    fn open_app(&self, name: &str) -> Result<()> {
+        computer::open_app(name)
     }
 }
 

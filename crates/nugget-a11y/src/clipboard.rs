@@ -59,6 +59,9 @@ pub struct PasteTiming {
     /// Wait after a successful verification before restoring, for apps that read the
     /// clipboard lazily.
     pub before_restore: Duration,
+    /// When the paste was sent but never showed up, wait this long (and check once more) before
+    /// restoring, so a slow app does not read the restored old contents and paste those.
+    pub unverified_grace: Duration,
 }
 
 impl Default for PasteTiming {
@@ -68,6 +71,7 @@ impl Default for PasteTiming {
             poll: Duration::from_millis(40),
             verify_timeout: Duration::from_millis(1200),
             before_restore: Duration::from_millis(80),
+            unverified_grace: Duration::from_millis(1500),
         }
     }
 }
@@ -111,7 +115,10 @@ pub fn paste_with_restore(
                 return Ok(true);
             }
             if Instant::now() >= deadline {
-                return Ok(false);
+                // The paste may still be in flight: restoring now could make the app paste
+                // the old clipboard instead. Wait out the grace period, then look once more.
+                sleep(timing.unverified_grace);
+                return verify();
             }
         }
     })();
@@ -174,6 +181,7 @@ mod tests {
             poll: Duration::from_millis(1),
             verify_timeout: Duration::from_millis(30),
             before_restore: Duration::ZERO,
+            unverified_grace: Duration::from_millis(5),
         }
     }
 
@@ -246,6 +254,45 @@ mod tests {
         );
         assert_eq!(state.borrow().contents, rich());
         assert_eq!(state.borrow().restores, 1);
+    }
+
+    #[test]
+    fn slow_paste_is_not_cut_off_by_the_restore() {
+        let state = std::rc::Rc::new(std::cell::RefCell::new(MemoryClipboard {
+            contents: rich(),
+            ..Default::default()
+        }));
+        let mut cb = Shared(state.clone());
+        let started = std::cell::Cell::new(None::<Instant>);
+        let landed = std::cell::Cell::new(false);
+        let mut timing = fast();
+        timing.unverified_grace = Duration::from_millis(60);
+        let r = paste_with_restore(
+            &mut cb,
+            "there",
+            &mut || {
+                started.set(Some(Instant::now()));
+                Ok(())
+            },
+            &mut || {
+                // The app reads the clipboard 45 ms after the paste: after the verify timeout,
+                // inside the grace period. The restore must not have happened yet.
+                let late = started.get().unwrap().elapsed() >= Duration::from_millis(45);
+                if late && !landed.get() {
+                    assert_eq!(
+                        state.borrow().restores,
+                        0,
+                        "restored before the paste landed"
+                    );
+                    landed.set(true);
+                }
+                Ok(landed.get())
+            },
+            timing,
+        )
+        .unwrap();
+        assert!(r.verified && r.restored);
+        assert_eq!(state.borrow().contents, rich());
     }
 
     #[test]
