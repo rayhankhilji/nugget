@@ -2768,7 +2768,6 @@ dependencies = [
  "defmt",
  "jiff-core",
  "jiff-static",
- "jiff-tzdb",
  "jiff-tzdb-platform",
  "log",
  "portable-atomic",
@@ -3551,9 +3550,14 @@ dependencies = [
 name = "nugget-connector-microsoft"
 version = "0.0.1"
 dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-connector-saas"
+version = "0.0.1"
+dependencies = [
  "async-trait",
- "futures",
- "jiff",
  "nugget-connector",
  "nugget-core",
  "nugget-oauth",
@@ -3565,13 +3569,6 @@ dependencies = [
  "tracing",
  "url",
  "wiremock",
-]
-
-[[package]]
-name = "nugget-connector-saas"
-version = "0.0.1"
-dependencies = [
- "nugget-core",
 ]
 
 [[package]]
