@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, errorMessage, events, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
-import { Badge, Empty, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
 import { t as translate, useT, type MessageKey } from "../i18n";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
@@ -39,31 +39,49 @@ export function ModelsPage() {
     (a, b) => Number(b.recommended) - Number(a.recommended) || Number(b.installed) - Number(a.installed) || a.id.localeCompare(b.id),
   );
 
+  const anyInstalled = list.some((m) => m.installed || progress[m.id]?.phase === "installed");
+
   return (
     <div className="page">
       <PageHeader
         title={t("models.title")}
         description={t("models.description")}
         actions={
-          <button type="button" className="btn btn-ghost" onClick={models.reload} disabled={models.loading}>
+          <button type="button" className="btn btn-ghost" onClick={models.reload}>
             {t("common.refresh")}
           </button>
         }
       />
       <ErrorNote error={models.error} onRetry={models.reload} />
-      {models.loading && !models.data && <Spinner />}
-      {models.data && list.length === 0 && <Empty title={t("models.emptyTitle")}>{t("models.emptyBody")}</Empty>}
-      <ul className="cards">
-        {list.map((m) => (
-          <ModelCard
-            key={m.id}
-            model={m}
-            progress={progress[m.id]}
-            error={requestError[m.id]}
-            onInstall={() => void install(m.id)}
-          />
-        ))}
-      </ul>
+      {models.loading && !models.data && <Loading label={t("models.loading")} />}
+      {models.data && list.length === 0 && (
+        <EmptyState
+          title={t("models.emptyTitle")}
+          action={
+            <button type="button" className="btn" onClick={models.reload}>
+              {t("common.refresh")}
+            </button>
+          }
+        >
+          {t("models.emptyBody")}
+        </EmptyState>
+      )}
+      {list.length > 0 && !anyInstalled && (
+        <EmptyState title={t("models.noneInstalledTitle")}>{t("models.noneInstalledBody")}</EmptyState>
+      )}
+      {list.length > 0 && (
+        <ul className={models.loading ? "cards pg-stale" : "cards"} aria-label={t("models.listLabel")} aria-busy={models.loading}>
+          {list.map((m) => (
+            <ModelCard
+              key={m.id}
+              model={m}
+              progress={progress[m.id]}
+              error={requestError[m.id]}
+              onInstall={() => void install(m.id)}
+            />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

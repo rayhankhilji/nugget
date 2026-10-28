@@ -8,9 +8,16 @@ What it checks:
   1. Tables preceded by `<!-- check-refs: GROUP -->`: the first backticked token of each row is
      compared, both ways, with the names extracted from the source for GROUP. Config tables with a
      Default column also have plain numeric and boolean defaults compared with `impl Default`.
-     IPC method tables have their Daemon column (`yes` / `not yet`) compared with nuggetd's handler.
-  2. Whole-book scans: backticked IPC method names and dotted config keys, `nuggetd` commands and
-     flags in code, `NUGGET_*` variables, ```toml blocks, and relative links with anchors.
+     IPC method tables have their Daemon column (`yes` / `not yet` / `in progress`) compared with
+     the methods nuggetd serves: `method::X =>` match arms anywhere in crates/nuggetd/src, plus the
+     methods each daemon feature (crates/nuggetd/src/features/*.rs) lists in its `fn methods`.
+     `in progress` marks a method being wired in on another branch: it may be missing from
+     `nugget_core::ipc` and may or may not be served (a note on stderr says when it is served, so
+     the row can be flipped to `yes`). Notification tables may end with a Daemon column too; there
+     only `in progress` is special (the name need not exist yet).
+  2. Whole-book scans: backticked IPC method names (including names marked `in progress`) and
+     dotted config keys, `nuggetd` commands and flags in code, `NUGGET_*` variables, ```toml
+     blocks, and relative links with anchors.
 
 The Rust is parsed with regular expressions, so this is tied to the current code layout. If a struct
 moves, update SOURCES below.
@@ -26,8 +33,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 BOOK = Path(__file__).resolve().parent / "src"
 
-# Rust structs whose fields a marker documents: group -> (file, struct name).
-SOURCES: dict[str, tuple[str, str]] = {
+# Rust structs whose fields a marker documents: group -> (file, struct name), or a list of them
+# when a struct `#[serde(flatten)]`s another (flattened fields are skipped; list the inner struct).
+SOURCES: dict[str, tuple[str, str] | list[tuple[str, str]]] = {
     "config.sections": ("crates/nuggetd/src/config.rs", "Config"),
     "config.models": ("crates/nuggetd/src/config.rs", "ModelsConfig"),
     "config.models.selected": ("crates/nuggetd/src/config.rs", "TierSelection"),
@@ -35,6 +43,18 @@ SOURCES: dict[str, tuple[str, str]] = {
     "config.ingest": ("crates/nugget-ingest/src/config.rs", "IngestConfig"),
     "config.retrieve": ("crates/nugget-retrieve/src/config.rs", "RetrieveConfig"),
     "config.retrieve.recency": ("crates/nugget-retrieve/src/config.rs", "RecencyBoost"),
+    "config.knowledge": [
+        ("crates/nuggetd/src/config.rs", "KnowledgeSection"),
+        ("crates/nugget-knowledge/src/config.rs", "KnowledgeConfig"),
+    ],
+    "config.knowledge.me": ("crates/nugget-knowledge/src/config.rs", "MeConfig"),
+    "config.knowledge.llm": ("crates/nugget-knowledge/src/config.rs", "LlmConfig"),
+    "config.knowledge.resolution": ("crates/nugget-knowledge/src/config.rs", "ResolutionConfig"),
+    "config.vault": [
+        ("crates/nuggetd/src/config.rs", "VaultSection"),
+        ("crates/nugget-vault/src/config.rs", "VaultConfig"),
+    ],
+    "config.mcp": ("crates/nuggetd/src/config.rs", "McpSection"),
     "config.providers": ("crates/nugget-infer/src/config.rs", "ProviderConfig"),
     "mcp.scopes": ("crates/nugget-core/src/ipc.rs", "McpScopes"),
     "connector.files": ("crates/nugget-connector-files/src/config.rs", "FilesSettings"),
@@ -43,6 +63,13 @@ SOURCES: dict[str, tuple[str, str]] = {
     "connector.gcal": ("crates/nugget-connector-google/src/settings.rs", "CalendarSettings"),
     "connector.imap": ("crates/nugget-connector-imap/src/settings.rs", "ImapSettings"),
     "connector.caldav": ("crates/nugget-connector-caldav/src/lib.rs", "CalDavSettings"),
+    "connector.outlook": ("crates/nugget-connector-microsoft/src/settings.rs", "OutlookSettings"),
+    "connector.outlook_calendar": ("crates/nugget-connector-microsoft/src/settings.rs", "CalendarSettings"),
+    "connector.onedrive": ("crates/nugget-connector-microsoft/src/settings.rs", "OneDriveSettings"),
+    "connector.slack": ("crates/nugget-connector-saas/src/slack.rs", "SlackSettings"),
+    "connector.notion": ("crates/nugget-connector-saas/src/notion.rs", "NotionSettings"),
+    "connector.github": ("crates/nugget-connector-saas/src/github.rs", "GitHubSettings"),
+    "connector.linear": ("crates/nugget-connector-saas/src/linear.rs", "LinearSettings"),
 }
 
 # Config table path (dotted) -> group, for TOML validation and dotted-key references.
@@ -54,6 +81,12 @@ CONFIG_TABLES = {
     "ingest": "config.ingest",
     "retrieve": "config.retrieve",
     "retrieve.recency": "config.retrieve.recency",
+    "knowledge": "config.knowledge",
+    "knowledge.me": "config.knowledge.me",
+    "knowledge.llm": "config.knowledge.llm",
+    "knowledge.resolution": "config.knowledge.resolution",
+    "vault": "config.vault",
+    "mcp": "config.mcp",
     "providers": "config.providers",
 }
 
@@ -63,19 +96,31 @@ CONNECTOR_FILES = [
     "crates/nugget-connector-google/src/gcal.rs",
     "crates/nugget-connector-imap/src/lib.rs",
     "crates/nugget-connector-caldav/src/lib.rs",
+    "crates/nugget-connector-microsoft/src/outlook.rs",
+    "crates/nugget-connector-microsoft/src/calendar.rs",
+    "crates/nugget-connector-microsoft/src/onedrive.rs",
+    "crates/nugget-connector-saas/src/slack.rs",
+    "crates/nugget-connector-saas/src/notion.rs",
+    "crates/nugget-connector-saas/src/github.rs",
+    "crates/nugget-connector-saas/src/linear.rs",
 ]
 
+# Kind constants defined in a crate's lib.rs rather than next to the connector.
+CONNECTOR_CONSTS = ["crates/nugget-connector-saas/src/lib.rs"]
+
 # Documented as planned; they must NOT exist yet. When one lands, remove it here and update the
-# "planned" notes in the book.
-PLANNED = {
-    "commands": {"mcp": "MCP stdio bridge (guide/mcp.md, reference/cli.md)"},
-    "flags": {"--client": "flag of the planned `nuggetd mcp`"},
+# "planned" notes in the book. Example: "commands": {"mcp": "MCP stdio bridge (guide/mcp.md)"}.
+PLANNED: dict[str, dict[str, str]] = {
+    "commands": {},
+    "flags": {},
 }
 
 METHOD_PREFIXES = (
     "status", "chat", "search", "providers", "models", "egress", "sources", "ingest",
-    "retrieve", "runtime", "knowledge", "mcp", "draft", "voice",
+    "retrieve", "runtime", "knowledge", "mcp", "draft", "voice", "agent", "policy", "cards",
+    "brief", "plugins", "proactive", "browser",
 )
+IN_PROGRESS = "in progress"
 FILE_SUFFIXES = (".toml", ".json", ".md", ".rs", ".log", ".db", ".sock", ".lock", ".key",
                  ".plist", ".service", ".pid", ".rten")
 PROSE_AFTER_NUGGETD = {"is", "was", "has", "exits", "started", "now", "running"}
@@ -95,25 +140,35 @@ def read(rel: str) -> str:
 
 
 def struct_body(text: str, name: str) -> str:
-    m = re.search(r"pub(?:\([a-z]+\))? struct " + name + r"\b[^{;]*\{(.*?)\n\}", text, re.S)
+    m = re.search(r"(?:pub(?:\([a-z]+\))? )?struct " + name + r"\b[^{;]*\{(.*?)\n\}", text, re.S)
     if not m:
         raise SystemExit(f"check-refs: cannot find struct {name}; update SOURCES")
     return m.group(1)
 
 
+def sources_of(group: str) -> list[tuple[str, str]]:
+    src = SOURCES[group]
+    return src if isinstance(src, list) else [src]
+
+
 def struct_fields(rel: str, name: str) -> list[str]:
     body = struct_body(read(rel), name)
-    fields, rename = [], None
+    fields, rename, flatten = [], None, False
     for line in body.splitlines():
         line = line.strip()
-        r = re.search(r'rename\s*=\s*"([^"]+)"', line)
-        if line.startswith("#[") and r:
-            rename = r.group(1)
+        if line.startswith("#["):
+            r = re.search(r'rename\s*=\s*"([^"]+)"', line)
+            if r:
+                rename = r.group(1)
+            if re.search(r"\bflatten\b", line):
+                flatten = True
             continue
-        m = re.match(r"pub(?:\([a-z]+\))?\s+(?:r#)?(\w+)\s*:", line)
+        # Private fields count too: settings structs are often deserialise-only.
+        m = re.match(r"(?:pub(?:\([a-z]+\))?\s+)?(?:r#)?(\w+)\s*:", line)
         if m:
-            fields.append(rename or m.group(1))
-            rename = None
+            if not flatten:
+                fields.append(rename or m.group(1))
+            rename, flatten = None, False
     return fields
 
 
@@ -154,9 +209,42 @@ def error_codes() -> dict[str, int]:
     return {k: int(v) for k, v in re.findall(r"pub const (\w+): i64 = (-?\d+);", text)}
 
 
+def braced(text: str, start: int) -> str:
+    """The text between the first `{` at or after `start` and its matching `}`."""
+    i = text.index("{", start)
+    depth = 0
+    for j in range(i, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[j], 0)
+        if depth == 0:
+            return text[i + 1 : j]
+    return text[i + 1 :]
+
+
 def handled_methods(methods: dict[str, str]) -> set[str]:
-    arms = re.findall(r"method::(\w+)\s*=>", read("crates/nuggetd/src/handler.rs"))
-    return {methods[a] for a in arms if a in methods}
+    """Methods nuggetd serves: `method::X =>` (or `method::X |`) match arms in any file under
+    crates/nuggetd/src except the features, plus each feature's `fn methods` list (constant names
+    resolved against `nugget_core::ipc::method`, and string literals taken as they are)."""
+    src = ROOT / "crates/nuggetd/src"
+    features = src / "features"
+    out: set[str] = set()
+    for p in sorted(src.rglob("*.rs")):
+        text = p.read_text(encoding="utf-8")
+        if p.parent == features:
+            if p.name == "mod.rs":
+                continue
+            for m in re.finditer(r"\bfn methods\s*\(", text):
+                body = braced(text, m.end())
+                # One level of indirection: `fn methods(..) { METHODS }` with a const list.
+                for c in set(re.findall(r"\b([A-Z][A-Z0-9_]*)\b", body)) - set(methods):
+                    lst = re.search(r"\bconst " + c + r"\b[^=]*=\s*&?\[(.*?)\];", text, re.S)
+                    if lst:
+                        body += "\n" + lst.group(1)
+                out.update(methods[c] for c in re.findall(r"\b([A-Z][A-Z0-9_]*)\b", body) if c in methods)
+                out.update(re.findall(r'"([a-z_]+(?:\.[a-z_]+)*)"', body))
+        elif features not in p.parents:
+            arms = re.findall(r"\bmethod::(\w+)\s*(?==>|\|)", text)
+            out.update(methods[a] for a in arms if a in methods)
+    return out
 
 
 def mcp_tools() -> list[str]:
@@ -168,9 +256,10 @@ def mcp_tools() -> list[str]:
 
 def connector_kinds() -> dict[str, str]:
     out = {}
+    shared = {k: v for rel in CONNECTOR_CONSTS for k, v in str_consts(read(rel)).items()}
     for rel in CONNECTOR_FILES:
         text = read(rel)
-        consts = str_consts(text)
+        consts = shared | str_consts(text)
         for ident, display in re.findall(r'kind: (\w+),\s*display_name: "([^"]+)"', text):
             out[consts[ident]] = display
     return out
@@ -273,15 +362,33 @@ def anchors(md: str) -> set[str]:
 # ---------------------------------------------------------------- checks
 
 
+def in_progress_names(pages) -> dict[str, set[str]]:
+    """Per group (`ipc.methods`, `ipc.notifications`): names whose last (Daemon) cell is
+    `in progress`."""
+    out: dict[str, set[str]] = {"ipc.methods": set(), "ipc.notifications": set()}
+    for md in pages.values():
+        for group, rows in marked_tables(md):
+            if group in out:
+                for cells in rows:
+                    name = first_code(cells[0])
+                    if name and cells[-1].strip().lower() == IN_PROGRESS:
+                        out[group].add(name)
+    return out
+
+
 def main() -> int:
     pages = {p: p.read_text(encoding="utf-8") for p in sorted(BOOK.rglob("*.md"))}
     methods, notes = ipc_consts()
     handled = handled_methods(methods)
     commands, flags = cli()
+    in_progress = in_progress_names(pages)
 
-    expected: dict[str, set[str]] = {g: set(struct_fields(*s)) for g, s in SOURCES.items()}
-    expected["ipc.methods"] = set(methods.values())
-    expected["ipc.notifications"] = set(notes.values())
+    expected: dict[str, set[str]] = {
+        g: {f for s in sources_of(g) for f in struct_fields(*s)} for g in SOURCES
+    }
+    # A name marked `in progress` may not exist in `nugget_core::ipc` yet.
+    expected["ipc.methods"] = set(methods.values()) | in_progress["ipc.methods"]
+    expected["ipc.notifications"] = set(notes.values()) | in_progress["ipc.notifications"]
     codes = error_codes()
     expected["ipc.errors"] = set(codes)
     expected["mcp.tools"] = set(mcp_tools())
@@ -334,7 +441,9 @@ def main() -> int:
     }
     for page, md in pages.items():
         rel = page.relative_to(BOOK)
-        scan_tokens(rel, md, set(methods.values()) | set(notes.values()) | set(expected), config_paths)
+        ipc_names = set(methods.values()) | set(notes.values()) | set(expected)
+        ipc_names |= in_progress["ipc.methods"] | in_progress["ipc.notifications"]
+        scan_tokens(rel, md, ipc_names, config_paths)
         scan_cli(rel, md, commands, flags)
         for v in sorted(set(re.findall(r"\bNUGGET_[A-Z0-9_]*[A-Z0-9]\b", md)) - env_in_source):
             fail(f"{rel}: `{v}` does not appear in the source")
@@ -368,8 +477,13 @@ def check_row(rel, group, name, cells, codes, kinds, handled) -> None:
             fail(f"{rel}: kind `{name}` display name {cells[1:2]} != {kinds[name]!r}")
     if group == "ipc.methods":
         daemon = cells[-1].strip().lower()
-        if daemon not in ("yes", "not yet"):
-            fail(f"{rel}: method `{name}` Daemon column must be `yes` or `not yet`, not {daemon!r}")
+        if daemon not in ("yes", "not yet", IN_PROGRESS):
+            fail(f"{rel}: method `{name}` Daemon column must be `yes`, `not yet` or `{IN_PROGRESS}`, "
+                 f"not {daemon!r}")
+        elif daemon == IN_PROGRESS:
+            if name in handled:
+                print(f"check-refs: note: {rel}: `{name}` is marked '{IN_PROGRESS}' and nuggetd now "
+                      "serves it; change it to `yes`", file=sys.stderr)
         elif (daemon == "yes") != (name in handled):
             actual = "implements" if name in handled else "does not implement"
             fail(f"{rel}: method `{name}` is marked {daemon!r} but nuggetd {actual} it")
@@ -380,7 +494,7 @@ def check_defaults(pages) -> None:
         for group, rows in marked_tables(md):
             if group not in SOURCES or not group.startswith("config."):
                 continue
-            defaults = struct_defaults(*SOURCES[group])
+            defaults = {k: v for s in sources_of(group) for k, v in struct_defaults(*s).items()}
             for cells in rows:
                 name = first_code(cells[0])
                 if name not in defaults or len(cells) < 3:

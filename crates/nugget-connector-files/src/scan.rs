@@ -17,7 +17,7 @@ use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 use time::OffsetDateTime;
 
-use crate::config::{Config, Flavor, IGNORE_FILES, is_junk_file};
+use crate::config::{Config, Flavor, IGNORE_FILES, is_junk_file, is_secret_file};
 use crate::key::{file_url, item_key, join_rel, obsidian_url, rel_key};
 
 /// Item key → last known connector version (`None` = unknown, always re-sent).
@@ -412,7 +412,8 @@ fn keep_entry(
         if cfg.skip_dir_name(&name) {
             return false;
         }
-    } else if is_junk_file(&name) || IGNORE_FILES.contains(&name.as_ref()) {
+    } else if is_junk_file(&name) || is_secret_file(&name) || IGNORE_FILES.contains(&name.as_ref())
+    {
         return false;
     }
     if !cfg.exclude.is_empty()

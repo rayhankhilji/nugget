@@ -62,6 +62,11 @@ into the product, such as mdBook (MPL-2.0) for these docs, are fine.
 - Every request that leaves the device records an `EgressEvent`. Never log secrets, and never log user
   content at `info` level or above.
 - Convert errors to `nugget_core::Error` at public crate boundaries.
+- New crates go under `crates/`, join the workspace `members`, inherit the workspace package fields
+  and `[lints] workspace = true`, and get a row in the [crate map](../architecture/crates.md).
+- A subsystem wired into the daemon is a feature module under `crates/nuggetd/src/features/` that
+  owns its IPC methods, tasks and config section; it does not add fields to the daemon's shared state
+  or arms to its IPC handler.
 
 ## Commits and pull requests
 

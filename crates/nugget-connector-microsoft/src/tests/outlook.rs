@@ -645,6 +645,9 @@ async fn hostile_payloads_are_contained() {
         json!("not an object"),
         json!({"id": 42}),
         json!({"id": "../../me/drive", "receivedDateTime": RECEIVED}),
+        // A dot-segment id: `url` drops it, so `/me/messages/../$value` would be requested.
+        json!({"id": "..", "receivedDateTime": RECEIVED}),
+        json!({"id": ".", "receivedDateTime": RECEIVED}),
         json!({"id": "nodate"}),
         json!({"id": "baddate", "receivedDateTime": "yesterday"}),
         json!({"id": "big", "receivedDateTime": RECEIVED}),
@@ -664,6 +667,15 @@ async fn hostile_payloads_are_contained() {
     let sink = RecSink::default();
     run(&conn, None, &sink).await.unwrap();
     assert_eq!(sink.summary(), vec!["+inbox/ok"]);
+    for r in h.server.received_requests().await.unwrap() {
+        let p = r.url.path();
+        assert!(
+            p == delta_path("inbox")
+                || p == format!("{API}/me/messages/ok/$value")
+                || p == format!("{API}/me/messages/big/$value"),
+            "unexpected request to {p}"
+        );
+    }
     let d = &sink.upserts()[0];
     assert_eq!(d.title.as_ref().unwrap().chars().count(), 500);
     assert!(d.url.is_none());

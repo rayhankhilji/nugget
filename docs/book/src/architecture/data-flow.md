@@ -67,25 +67,50 @@ request (tier) ──▶ Router ──▶ [configured on-device and LAN provider
 The managed runtime starts `llama-server` on demand and stops it after idle minutes. Every request to
 a non-on-device provider records an egress event with its feature and item references.
 
-## Knowledge (built, not wired in yet)
+## Knowledge
 
 ```text
-store items ──▶ nugget-knowledge: deterministic extractors + optional LLM extractor (quotes verified)
-            ──▶ entity resolution ──▶ claims with evidence, mentions ──▶ graph tables (store schema v4)
-            ──▶ change feed ──▶ nugget-vault (render, three-way merge, user edits back into claims)
-                            ──▶ nugget-mcp (tools and resources, scoped per client)
+ingest commits ──▶ knowledge task (debounced; also periodic and at startup)
+   ──▶ nugget-knowledge: deterministic extractors + optional LLM extractor (quotes verified)
+   ──▶ entity resolution ──▶ claims with evidence, mentions ──▶ graph tables in the store
+   ──▶ knowledge.changed notification
+   ──▶ graph change feed ──▶ nugget-vault: re-render changed pages; watcher merges your edits back
 ```
 
-Extraction is incremental: each source's item versions are diffed against a ledger, re-extraction of
-an item first retracts its old evidence, and items that disappear are retracted.
+The daemon runs extraction on its own task: at startup, shortly after ingest commits changes, and
+every `interval_minutes`. Extraction is incremental: each source's item versions are diffed against a
+ledger, re-extraction of an item first retracts its old evidence, and items that disappear are
+retracted. The LLM extractor uses local providers unless you allow otherwise, and every claim it
+returns must quote the source verbatim. While the power policy is constrained, runs make no model
+requests; the deterministic extractors still keep the graph fresh.
+
+## MCP
+
+```text
+AI app ──stdio──▶ nuggetd mcp --client <id> ──IPC socket──▶ nuggetd MCP server
+AI app ──HTTP (127.0.0.1, bearer token)────────────────────▶ nuggetd MCP server
+   token check ─▶ client scopes (sources, tools, include_sensitive) ─▶ rate limit
+   ─▶ read-only tool over the store, graph and retriever ─▶ audit entry (no content)
+```
+
+The stdio bridge holds no state: it relays MCP lines over the daemon's IPC socket, and every check
+happens in the daemon. See [MCP tools and scopes](../reference/mcp.md).
+
+## Wave W features
+
+> **Status:** being wired in (wave W). Double Tap, the agent and policy engine, proactive cards and
+> plugins will plug into the daemon's features seam (`crates/nuggetd/src/features/`); none is
+> registered yet. See the [architecture overview](overview.md).
 
 ## Startup and shutdown
 
 **Startup:** resolve paths; take the single-daemon lock and bind the socket; load or create
 `config.toml`; load the store key and open the store; open the model store; build providers and the
-router (the runtime's slots included); start ingest over `sources.toml`; serve IPC. The audit chain is
+router (the runtime's slots included); start ingest over `sources.toml`; build the knowledge
+service and vault, and the MCP server (with its loopback HTTP listener when enabled); start the
+knowledge task and installed local models; start the registered features; serve IPC. The audit chain is
 verified in the background; until it finishes, `status` reports it as not checked yet.
 
 **Shutdown** (SIGINT, SIGTERM, or Ctrl+C on Windows): stop accepting connections and close them (open
-chat streams get `chat.done` first); shut down ingest; shut down the runtime's servers; flush the egress
-writer.
+chat streams get `chat.done` first) and stop background tasks; shut down the features, then the MCP
+server; shut down ingest; shut down the runtime's servers; flush the egress writer.

@@ -263,6 +263,8 @@ pub enum InstallError {
     MissingLocalAppData,
     #[error("the host path must be absolute: {0}")]
     RelativeHostPath(String),
+    #[error("not a valid extension id: {0:?}")]
+    BadExtensionId(String),
     #[error("registry changes are only possible on Windows")]
     RegistryUnsupported,
     #[error("reg.exe failed for {key}: {detail}")]
@@ -285,11 +287,67 @@ fn is_absolute(os: Os, p: &str) -> bool {
     }
 }
 
+/// A Chromium extension id: 32 characters `a`-`p` (no wildcards: `allowed_origins` must name
+/// exactly the extensions that may start the host).
+fn valid_chromium_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| (b'a'..=b'p').contains(&b))
+}
+
+/// A Firefox add-on id: `name@domain` or `{GUID}`, with no wildcard or path characters.
+fn valid_firefox_id(id: &str) -> bool {
+    let ok_chars = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'+'))
+    };
+    let guid = id.len() == 38
+        && id.starts_with('{')
+        && id.ends_with('}')
+        && id[1..37]
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b'-');
+    let email = id.len() <= 255
+        && id
+            .split_once('@')
+            .is_some_and(|(a, b)| ok_chars(a) && ok_chars(b) && !b.contains('@'));
+    guid || email
+}
+
+/// Refuse wildcard, empty or malformed extension ids before they reach a manifest.
+fn check_ids(browsers: &[Browser], cfg: &InstallConfig) -> Result<(), InstallError> {
+    if browsers.iter().any(|b| b.is_chromium_family()) {
+        if cfg.chromium_extension_ids.is_empty() {
+            return Err(InstallError::BadExtensionId(String::new()));
+        }
+        if let Some(bad) = cfg
+            .chromium_extension_ids
+            .iter()
+            .find(|i| !valid_chromium_id(i))
+        {
+            return Err(InstallError::BadExtensionId(bad.clone()));
+        }
+    }
+    if browsers.contains(&Browser::Firefox) {
+        if cfg.firefox_extension_ids.is_empty() {
+            return Err(InstallError::BadExtensionId(String::new()));
+        }
+        if let Some(bad) = cfg
+            .firefox_extension_ids
+            .iter()
+            .find(|i| !valid_firefox_id(i))
+        {
+            return Err(InstallError::BadExtensionId(bad.clone()));
+        }
+    }
+    Ok(())
+}
+
 /// Steps to register the host with `browsers`.
 pub fn plan(browsers: &[Browser], cfg: &InstallConfig) -> Result<Vec<Step>, InstallError> {
     if !is_absolute(cfg.os, &cfg.host_path) {
         return Err(InstallError::RelativeHostPath(cfg.host_path.clone()));
     }
+    check_ids(browsers, cfg)?;
     let mut steps = Vec::new();
     for &b in browsers {
         let path = manifest_path(b, cfg)?;

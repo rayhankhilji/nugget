@@ -2,7 +2,6 @@ import { useState } from "react";
 import { api, errorMessage, inTauri, type ConnectionInfo } from "../api";
 import { Trans, useT } from "../i18n";
 import { Logo } from "./Logo";
-import { Spinner } from "./ui";
 
 export function Offline({
   conn,
@@ -32,7 +31,7 @@ export function Offline({
   };
 
   return (
-    <section className="offline" aria-labelledby="offline-title">
+    <section className="offline" aria-labelledby="offline-title" aria-busy={starting}>
       <Logo size={48} />
       <h1 id="offline-title">{t("offline.title")}</h1>
       <p className="muted">{t("offline.body")}</p>
@@ -41,7 +40,8 @@ export function Offline({
           <button type="button" className="btn btn-primary" onClick={start} disabled={starting} autoFocus>
             {starting ? (
               <>
-                <Spinner label={t("offline.startingLabel")} /> {t("offline.starting")}
+                {/* The visible text names the state; the spinner is decoration. */}
+                <span className="spinner" aria-hidden="true" /> {t("offline.starting")}
               </>
             ) : (
               t("offline.start")
@@ -54,7 +54,8 @@ export function Offline({
       ) : (
         <p className="note">{t("offline.openFromApp")}</p>
       )}
-      <div aria-live="polite">
+      {/* role=alert announces on insertion; no extra live region, so it is read once. */}
+      <div>
         {error && (
           <p className="note note-error" role="alert">
             {error}

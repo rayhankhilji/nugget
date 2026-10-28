@@ -471,3 +471,53 @@ async fn malformed_search_is_an_error_and_bad_blocks_are_skipped() {
     let err = run(&conn, None, &h.sink()).await.unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "{err}");
 }
+
+/// Ids come from API responses and are interpolated into URL paths: a `..` id must not walk up
+/// to another endpoint (`blocks/../children` → `/v1/children`, `users/..` → `/v1/`).
+#[tokio::test]
+async fn dot_segment_ids_never_reach_the_url_path() {
+    let h = Harness::new().await;
+    h.paste("ntn_1");
+    mount_me(&h.server).await;
+    let edited = ago(3600);
+    let mut p = page("p1", &edited, "Plan", "..");
+    p["last_edited_by"] = json!({"object": "user", "id": ".."});
+    mount_search(
+        &h.server,
+        None,
+        json!([p, page("..", &edited, "Up", ME)]),
+        None,
+    )
+    .await;
+    mount_children(
+        &h.server,
+        "p1",
+        json!([
+            text_block("..", "bulleted_list_item", "outer", true),
+            text_block(".", "bulleted_list_item", "dot", true),
+        ]),
+    )
+    .await;
+
+    let conn = notion(&h, json!({}));
+    let sink = h.sink();
+    run(&conn, None, &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["+page/p1"]);
+    assert!(sink.text("page/p1").contains("outer"));
+    let paths: Vec<String> = h
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    for p in &paths {
+        assert!(
+            p == "/notion/v1/users/me"
+                || p == "/notion/v1/search"
+                || p == "/notion/v1/blocks/p1/children",
+            "unexpected request to {p} (all: {paths:?})"
+        );
+    }
+}
