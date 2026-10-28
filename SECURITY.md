@@ -106,7 +106,6 @@ scope. We still try to limit the damage it can do, for example through keychain-
   input must never crash the daemon.
 - Risks: other users connecting to the socket; confused-deputy calls from local apps; resource
   exhaustion.
-- Planned: per-client tokens for the local MCP server, plus scoped capabilities per client.
 
 #### Encrypted store
 
