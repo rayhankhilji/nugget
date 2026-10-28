@@ -133,6 +133,7 @@ impl GraphApi {
         let done = flow.done;
         Ok(AuthFlow {
             url: flow.url,
+            user_code: flow.user_code,
             done: Box::pin(async move {
                 done.await?;
                 tokens.clear_cache().await;

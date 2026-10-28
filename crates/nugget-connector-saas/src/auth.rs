@@ -290,6 +290,7 @@ pub(crate) fn clearing(
     let done = flow.done;
     AuthFlow {
         url: flow.url,
+        user_code: flow.user_code,
         done: Box::pin(async move {
             done.await?;
             cred.reset();
@@ -341,9 +342,9 @@ pub(crate) struct DeviceFlow {
     pub timeout: Duration,
 }
 
-/// Start GitHub's device flow (RFC 8628). The returned URL is GitHub's verification page with
-/// the user code appended (`?user_code=...`), the only channel `AuthFlow` has to show it; `done`
-/// polls the token endpoint and stores the token set under `oauth:<source>`.
+/// Start GitHub's device flow (RFC 8628). The returned flow carries the user code in
+/// [`AuthFlow::user_code`]; the URL is GitHub's verification page with the code also appended
+/// (`?user_code=...`) so it is pre-filled where supported. `done` polls the token endpoint and stores the token set under `oauth:<source>`.
 pub(crate) async fn github_device_flow(
     http: &MeteredHttp,
     opts: DeviceFlow,
@@ -375,6 +376,7 @@ pub(crate) async fn github_device_flow(
     }
     url.query_pairs_mut()
         .append_pair("user_code", &code.user_code);
+    let user_code = code.user_code;
     let http = http.clone();
     let account = oauth_account(source);
     let expires =
@@ -465,6 +467,7 @@ pub(crate) async fn github_device_flow(
     };
     Ok(AuthFlow {
         url: url.into(),
+        user_code: Some(user_code),
         done: Box::pin(done),
     })
 }
