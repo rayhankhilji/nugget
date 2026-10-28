@@ -6,7 +6,13 @@ inspectable and owned by you.
 
 Grounding: [Sentient OS teardown](research/sentient-os-teardown.md) and [shipped-artifact findings](research/shipped-artifact-findings.md).
 
-Status: **plan approved; M0 next.**
+Status (2026-10-28):
+- **M0 (Foundations): done.** Workspace, CI on three OSes, Tauri shell, `nugget-store`, providers, signed model manifest, bench harness; `nuggetd` runs them.
+- **M1 (Memory): done.** Ingest runtime, files, Obsidian, Gmail, Google Calendar, IMAP and CalDAV connectors, hybrid cited retrieval and the local runtime are wired into `nuggetd`.
+- **M2 (Knowledge graph): done.** Extraction, the vault and the local MCP server (`nuggetd mcp`, `nuggetd mcp install`) are wired into `nuggetd` and the app.
+- **M3 (Double Tap), M4 (Agent and computer use), M5 (Proactive): crates built and tested; being wired into the daemon and app in [wave W](waves/wave-w/README.md).**
+- **M6 (Hardening and v1.0): partly done.** Packaging, the release workflow and signed updates, i18n, onboarding and the user guide have landed; the Microsoft 365 and SaaS connectors and the WASM plugin host are built and being wired in wave W. The E2E relay is not started.
+- There is no `nugget-privacy` crate: egress accounting lives in `nugget-core` and `nugget-store`, and the PII scan in `nugget-ingest`.
 
 ---
 
