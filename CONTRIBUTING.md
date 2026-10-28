@@ -101,42 +101,77 @@ cargo test --workspace --exclude nugget-desktop
 cd apps/desktop && pnpm install --frozen-lockfile && pnpm build && cd ../..
 cargo clippy -p nugget-desktop --all-targets -- -D warnings
 cargo build -p nugget-desktop
+cargo test -p nugget-desktop
+cd apps/desktop && pnpm test && cd ../..        # frontend unit tests (vitest)
 
 # Benchmarks (use --release for numbers you intend to quote)
-cargo run --release -p nugget-bench -- perf memory
+cargo run -p nugget-bench -- --list
+cargo run -p nugget-bench -- all --scale smoke --no-write
+cargo run --release -p nugget-bench -- memory --backend real
+
+# The book against the code (needs only Python 3)
+python3 docs/book/check-refs.py
 ```
 
 Note that `--workspace` includes `nugget-desktop`. Pass `--exclude nugget-desktop` unless its
 system libraries are installed and the frontend has been built.
 
-CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on Linux, macOS and Windows:
+CI runs these workflows:
 
-- fmt, clippy with `-D warnings`, the tests, and a bench smoke run
-- the desktop build on all three OSes
-- `cargo deny`
-- the DCO check
+- [`ci.yml`](.github/workflows/ci.yml), on Linux, macOS and Windows: `cargo fmt`, clippy with
+  `-D warnings`, the tests, and a bench smoke run (`all --scale smoke`); on Linux also the
+  real-stack `memory` smoke run and a check of every report against
+  `bench/schema/report.schema.json`. Then the desktop frontend build, clippy, build and tests on
+  all three OSes, `cargo deny` (advisories; bans, licenses and sources), and the DCO check on pull
+  requests.
+- [`docs.yml`](.github/workflows/docs.yml): `python3 docs/book/check-refs.py`, then builds the
+  mdBook in `docs/book` and checks its links. It runs on every change, because renaming a config
+  key, CLI flag, IPC method, MCP tool or connector setting must update the book.
+- [`release.yml`](.github/workflows/release.yml): installers and signed updates, on version tags
+  only; see [`docs/release.md`](docs/release.md).
 
 ## Repository layout
 
 | Path | What lives there |
 |---|---|
 | `crates/nugget-core` | Shared contracts: ids, errors, capability tiers, egress events, paths, the IPC protocol. Changes need agreement from every crate owner. |
-| `crates/nugget-store` | Encrypted local store: SQLCipher, FTS5, `sqlite-vec`, cursors, egress ledger, audit chain |
+| `crates/nugget-store` | Encrypted local store: SQLCipher, FTS5, `sqlite-vec`, cursors, egress ledger, audit chain, knowledge-graph tables |
 | `crates/nugget-infer` | One `Provider` trait over local and cloud models; capability probe; tier router |
 | `crates/nugget-models` | Signed model manifest, verified downloads, hardware-aware recommendation |
+| `crates/nugget-runtime` | Supervised local `llama-server` processes |
 | `crates/nugget-ipc` | JSON-RPC 2.0 over local sockets and named pipes |
-| `crates/nuggetd` | The daemon |
+| `crates/nugget-connector`, `nugget-extract`, `nugget-ingest`, `nugget-oauth` | The connector API, text extraction and chunking, the ingest pipeline (including the PII scan), OAuth |
+| `crates/nugget-connector-*` | Connectors: `files` (and Obsidian), `google`, `imap`, `caldav`, `microsoft`, `saas` (Slack, Notion, GitHub, Linear) |
+| `crates/nugget-retrieve` | Hybrid search and cited, token-budgeted context |
+| `crates/nugget-graph`, `nugget-knowledge`, `nugget-vault`, `nugget-mcp` | The knowledge graph, extraction, the Markdown vault, the local MCP server |
+| `crates/nugget-a11y`, `nugget-hotkey`, `nugget-draft`, `nugget-voice` | Double Tap: accessibility, the global trigger, drafting, the writing-voice profile |
+| `crates/nugget-policy`, `nugget-agent`, `nugget-browser` | Safety policy, the agent loop, browser control (native-messaging host) |
+| `crates/nugget-proactive` | Proactive cards and the morning brief |
+| `crates/nugget-plugin` | WASM component plugins; the guest SDK is a separate cargo workspace in `crates/nugget-plugin/sdk` |
+| `crates/nuggetd` | The daemon; post-M2 subsystems plug in through `src/features/` |
 | `apps/desktop` | Tauri 2 shell (`nugget-desktop`): React, TypeScript, Vite |
-| `bench` | `nugget-bench`: benchmark harness and report schema; see [`bench/README.md`](bench/README.md) |
-| `manifests` | Signed model manifests |
-| `docs` | [`PLAN.md`](docs/PLAN.md), milestone specs, and clean-room research |
+| `extensions/browser` | The browser extension that talks to `nugget-browser` |
+| `bench` | `nugget-bench`: benchmark harness, suites and report schema; see [`bench/README.md`](bench/README.md) |
+| `manifests` | The signed model and runtime manifest |
+| `packaging` | Installer, sidecar and update-manifest scripts; see [`docs/release.md`](docs/release.md) |
+| `docs` | [`PLAN.md`](docs/PLAN.md), milestone specs, clean-room research, wave briefs and the mdBook (`docs/book`) |
 
-More crates arrive with later milestones (`nugget-ingest`, `nugget-knowledge`, `nugget-retrieve`,
-`nugget-draft`, `nugget-agent`, `nugget-a11y`, `nugget-policy`, `nugget-privacy`, `nugget-mcp`,
-`nugget-plugin`); see [docs/PLAN.md §3.1](docs/PLAN.md#31-crates-cargo-workspace). New crates go
-under `crates/`, use `version.workspace = true` (and the other inherited package fields), and
-include `[lints] workspace = true`. Add dependencies to your crate's `Cargo.toml`. Only add them to
-the root `[workspace.dependencies]` when several crates share them.
+The [crate map](docs/book/src/architecture/crates.md) says what each crate does and whether the
+daemon runs it yet. New crates go under `crates/`, are added to `members` (and usually
+`default-members`) in the root `Cargo.toml`, use `version.workspace = true` (and the other
+inherited package fields), and include `[lints] workspace = true`. Add dependencies to your crate's
+`Cargo.toml`. Only add them to the root `[workspace.dependencies]` when several crates share them.
+A new crate also needs a row in the crate map, or the docs check fails.
+
+### Daemon features
+
+Subsystems wired into the daemon after M2 (Double Tap, the agent and safety policy, the browser
+bridge, proactive cards, plugins) each live in one module under
+[`crates/nuggetd/src/features/`](crates/nuggetd/src/features/mod.rs). A feature owns its state,
+its IPC methods, its background tasks and its `[section]` of `config.toml`. To add one, implement
+the `Feature` trait in `features/<name>.rs`, declare the module in `features/mod.rs` and add one
+line to `build` there. Do not edit `State` or `handler.rs` for it. A feature that fails to start
+is logged and left out; its methods then answer "method not found".
 
 ## Code expectations
 

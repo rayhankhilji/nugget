@@ -21,8 +21,9 @@ use std::task::{Context, Poll, ready};
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-/// Longest digit run accepted inside `{...}` (u64 range, without overflow games).
-const MAX_DIGITS: u8 = 19;
+/// Digit runs inside `{...}` are counted up to this length; longer runs only matter for their
+/// value, which then saturates.
+const MAX_DIGITS: u8 = 32;
 
 /// Limits shared between a [`Guarded`] stream and the command layer.
 #[derive(Debug)]
@@ -95,9 +96,12 @@ impl Scan {
             }
             let b = data[i];
             *self = match (*self, b) {
-                (Scan::Brace { n, digits }, b'0'..=b'9') if digits < MAX_DIGITS => Scan::Brace {
-                    n: n * 10 + u64::from(b - b'0'),
-                    digits: digits + 1,
+                // Saturating, and leading zeros never stop the scan: `imap-proto` accepts any
+                // digit run whose value fits a u32 (`{000…0001000000}` is a 1 MB literal), so
+                // the scanner must see the same value rather than give up on a long run.
+                (Scan::Brace { n, digits }, b'0'..=b'9') => Scan::Brace {
+                    n: n.saturating_mul(10).saturating_add(u64::from(b - b'0')),
+                    digits: digits.saturating_add(1).min(MAX_DIGITS),
                 },
                 (Scan::Brace { n, digits }, b'}') if digits > 0 => Scan::Close(n),
                 (Scan::Close(n), b'\r') => Scan::Cr(n),
@@ -261,12 +265,28 @@ mod tests {
         assert_eq!(scan_chunks(&[msg2], 100), Err(500));
         // `{N}` not followed by CRLF, empty braces and overlong digit runs are not headers.
         assert_eq!(scan_chunks(&[b"* OK {99999} x\r\n{}\r\n"], 10), Ok(()));
+        // An absurdly long digit run saturates and is refused (imap-proto rejects it anyway).
         assert_eq!(
             scan_chunks(&[b"{99999999999999999999999999}\r\n"], 10),
-            Ok(())
+            Err(u64::MAX)
         );
         // A brace restarts the scan.
         assert_eq!(scan_chunks(&[b"{{12}\r\n"], 10), Err(12));
+    }
+
+    #[test]
+    fn leading_zeros_do_not_hide_a_literal_size() {
+        // imap-proto parses this as a 100 MB literal and async-imap sizes its buffer from it;
+        // the scanner must not give up after 19 digits.
+        let msg: &[u8] = b"* 1 FETCH (UID 1 BODY[] {0000000000000000000000000100000000}\r\n";
+        assert_eq!(scan_chunks(&[msg], 1000), Err(100_000_000));
+        let bytes: Vec<&[u8]> = msg.chunks(3).collect();
+        assert_eq!(scan_chunks(&bytes, 1000), Err(100_000_000));
+        // Small, zero-padded literals are still fine.
+        assert_eq!(
+            scan_chunks(&[b"{0000000000000000000000005}\r\n"], 10),
+            Ok(())
+        );
     }
 
     #[tokio::test]

@@ -4,8 +4,8 @@ A connector turns one configured source into a stream of changes. The ingest pip
 after that: extraction, chunking, embedding, storage, scheduling and cursor persistence. Connectors
 never touch the store.
 
-Today connectors are **native Rust crates** compiled into the daemon. **WASM connectors** are planned
-for M6 (below).
+Connectors are **native Rust crates** compiled into the daemon, or **WebAssembly plugins** loaded by
+`nugget-plugin` (below).
 
 ## The API (`nugget-connector`)
 
@@ -71,12 +71,16 @@ Settings are a JSON object stored in `sources.toml`. Deserialize them into a str
 `#[serde(deny_unknown_fields)]`, validate ranges in `validate`, and publish a JSON Schema in
 `KindInfo::settings_schema` (the desktop app builds forms from it). Never accept secrets in settings.
 
-Document every key in [Connector settings](../reference/connectors.md). The docs check compares that
-page with your settings struct.
+Document every key in [Connector settings](../reference/connectors.md). The docs check
+(`docs/book/check-refs.py`) compares that page with your settings struct: add the struct to its
+`SOURCES`, the file with your `KindInfo` to `CONNECTOR_FILES`, and mark the tables with
+`<!-- check-refs: ... -->` (group names use `_` for `-`). It reads every field of the struct, public
+or not, and resolves the `kind` constant in the same file or in a file listed in `CONNECTOR_CONSTS`.
 
 ## Registering the kind
 
-Expose a factory and register it in `nuggetd`'s registry (`crates/nuggetd/src/sources.rs`):
+Expose a factory (or a `register` function for a crate with several kinds) and register it in
+`nuggetd`'s registry (`crates/nuggetd/src/sources.rs`). On this base:
 
 ```rust,ignore
 pub fn registry() -> Registry {
@@ -89,22 +93,55 @@ pub fn registry() -> Registry {
 }
 ```
 
-Then add the kind to the desktop's add-source wizard if it needs a custom form.
+Wave W adds `nugget_connector_microsoft::register` and `nugget_connector_saas::register` here, and
+one line for plugin connector kinds. Then add the kind to the desktop's add-source wizard if it needs a
+custom form.
+
+Three credential patterns exist; pick the one that fits:
+
+- **`AuthKind::OAuth`** (`gmail`, `gcal`, the Microsoft kinds): `begin_auth` runs the
+  authorization-code flow with PKCE from `nugget-oauth` (a loopback listener on `127.0.0.1`) and stores
+  the tokens under `oauth:<source>`. A client secret, if the provider needs one, is set with
+  `sources.secret.set`; the daemon stores it under `oauth_client_secret:<source>` and injects it into
+  the settings as `client_secret` at build time, so it never reaches `sources.toml`.
+- **`AuthKind::Password`** (`imap`, `caldav`, the SaaS kinds): the user pastes a password or token,
+  stored under `password:<source>`. A Password kind may still implement `begin_auth` for an optional
+  interactive sign-in: `github` runs the device flow (RFC 8628) and `linear` the PKCE flow, both
+  storing tokens under `oauth:<source>`.
+- **`AuthKind::None`** (`files`, `obsidian`).
+
+`AuthFlow` carries the URL to open. For the device flow the user code is appended to that URL; wave W
+adds a `user_code` field so the app can show it separately.
 
 ## Testing
 
 Follow the existing connectors (`nugget-connector-imap`, `nugget-connector-caldav`,
-`nugget-connector-google`):
+`nugget-connector-google`, `nugget-connector-microsoft`, `nugget-connector-saas`). The HTTP
+connectors take injectable endpoints (`with_endpoints`, `with_base`) so tests point them at a mock
+server:
 
 - a fake server (wiremock, or a scripted protocol server) with **recorded fixtures**;
 - tests for the first sync, an incremental sync, deletes, a reset cursor (reconciliation), an invalid
   sync token (full resync), cancellation, `Unauthorized` on bad credentials, and egress being recorded;
 - malformed-input tests for every parser.
 
-## WASM connectors (planned, M6)
+## Plugin connectors (WebAssembly)
 
-Third-party connectors will be **WebAssembly components** loaded by `nugget-plugin` (wasmtime, with
-WIT interfaces mirroring the `Connector` contract above). A component has no ambient file, network or
-process access: it declares the capabilities it needs (network hosts, scopes), the user approves them,
-and the host performs network requests for it, so they land in the egress ledger like any other. The
-WIT interface and SDK are not published yet; until they are, contribute connectors as native crates.
+> **Status: being wired in (wave W).** `nugget-plugin` is a working WebAssembly component host with a
+> guest SDK (`crates/nugget-plugin/sdk`), but this build of the daemon loads no plugins yet.
+
+A plugin connector is a WebAssembly component built against the SDK. `PluginConnectorFactory` wraps it
+as an ordinary `ConnectorFactory` under the kind `plugin:<plugin id>`, so the ingest pipeline runs it
+unchanged. The manifest's `[connector]` section gives its `display_name`, `auth` (`none` or
+`password`; plugins have no interactive OAuth), `poll_interval_secs` (default 1800, at least 60) and
+`settings_schema`.
+
+A component has no ambient file, network or process access. It declares capabilities (HTTP `hosts`,
+named `secrets`, a key-value store size); the user approves them on install, and the host denies
+everything else. The host makes the HTTP requests, under the feature `sync:plugin:<plugin id>`, so they
+land in the egress ledger like any other. Secrets live in the keychain under
+`plugin:<plugin id>:<name>`.
+
+The example in `crates/nugget-plugin/sdk/examples/feed-reader` is an RSS and Atom feed connector. For
+installing and approving plugins, see [Plugins](../guide/plugins.md); a plugin author guide
+(`docs/plugins.md` in the repository) is being written in wave W.

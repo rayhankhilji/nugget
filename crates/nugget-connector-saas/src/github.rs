@@ -75,7 +75,7 @@ fn yes() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GitHubSettings {
     #[serde(default)]

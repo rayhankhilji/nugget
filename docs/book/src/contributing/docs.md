@@ -34,10 +34,12 @@ may share one marker (the IPC method tables do); their rows are combined.
 |---|---|
 | `config.sections`, `config.models`, `config.models.selected`, `config.runtime` | The `Config`, `ModelsConfig`, `TierSelection` and `RuntimeConfig` structs in `crates/nuggetd/src/config.rs` |
 | `config.ingest`, `config.retrieve`, `config.retrieve.recency` | `IngestConfig` (`nugget-ingest`), `RetrieveConfig` and `RecencyBoost` (`nugget-retrieve`) |
+| `config.knowledge`, `config.knowledge.me`, `config.knowledge.llm`, `config.knowledge.resolution` | `KnowledgeSection` (`nuggetd`) with the `KnowledgeConfig` it flattens, and `MeConfig`, `LlmConfig`, `ResolutionConfig` (`nugget-knowledge`) |
+| `config.vault`, `config.mcp` | `VaultSection` (`nuggetd`) with the `VaultConfig` it flattens (`nugget-vault`), and `McpSection` (`nuggetd`) |
 | `config.providers` | `ProviderConfig` (`nugget-infer`) |
 | `cli.commands`, `cli.flags` | The clap definitions in `crates/nuggetd/src/main.rs` |
-| `env.daemon`, `env.mcp`, `env.dev` | String literals `"NUGGET_…"` in the source (one way: documented names must exist) |
-| `ipc.methods`, `ipc.notifications` | The `method` and `notification` constants in `nugget_core::ipc` |
+| `env.daemon`, `env.mcp`, `env.desktop`, `env.dev` (any `env.` marker) | String literals `"NUGGET_…"` in the source (one way: documented names must exist) |
+| `ipc.methods`, `ipc.notifications` | The `method` and `notification` constants in `nugget_core::ipc`, plus the names marked `in progress` (below) |
 | `ipc.errors` | The `code` constants in `nugget-ipc`, names **and** values |
 | `mcp.tools`, `mcp.scopes` | The tool constants in `nugget-mcp` and the `McpScopes` struct |
 | `connector.kinds` | Each connector's kind constant and display name |
@@ -48,25 +50,43 @@ may share one marker (the IPC method tables do); their rows are combined.
 
 - **Defaults.** In config tables with a Default column, a default that is a plain number or boolean is
   compared with the literal in the struct's `impl Default`.
-- **Daemon support.** The IPC method tables have a Daemon column. `yes` must match a handler arm in
-  `crates/nuggetd/src/handler.rs`, and `not yet` must not. When the knowledge-graph or MCP methods are
-  wired in, the check fails until this book is updated, which is the point.
+- **Daemon support.** The IPC method tables have a Daemon column, whose value is one of:
+  - `yes`: the daemon must serve the method;
+  - `not yet`: the daemon must not serve it (when it starts to, the check fails until this book is
+    updated, which is the point);
+  - `in progress`: the method is being wired in on another branch during the current wave. It may be
+    missing from `nugget_core::ipc`, and the daemon may or may not serve it; neither fails. When the
+    daemon serves it, the script prints a note (not an error) asking for the row to become `yes`.
+
+  "Served" means either a `method::X =>` match arm in any file under `crates/nuggetd/src` (outside
+  `features/`), or a method listed by a daemon feature: for each `crates/nuggetd/src/features/*.rs`
+  except `mod.rs`, the body of its `fn methods` (constant names resolved against
+  `nugget_core::ipc::method`, string literals taken as they are, and one level of `const` list).
+  Notification tables may also end with a Daemon column; there only `in progress` matters, and such a
+  name need not exist in the code yet. Names marked `in progress` count as valid IPC names in the
+  whole-book scan below, so guides can mention them. When a wave lands, flip its rows to `yes` and
+  remove the "being wired in" notes.
 
 **Whole-book scans:**
 
 - Any backticked token that looks like an IPC method or a dotted config key (`sources.add`,
-  `ingest.allow_cloud_embeddings`) must be a real method, notification or config key.
+  `ingest.allow_cloud_embeddings`) must be a real method, notification or config key, or a name
+  marked `in progress`. "Looks like" means a dotted lowercase token whose first part is one of the
+  script's `METHOD_PREFIXES`.
 - Any `nuggetd <command>` or `--flag` in a shell example must be a real command or flag, or be listed
-  in the script's `PLANNED` table (today: `nuggetd mcp --client`). A planned entry that appears in the
-  code fails the check, so the "planned" notes get removed when the feature lands.
+  in the script's `PLANNED` table (empty today). A planned entry that appears in the code fails the
+  check, so the "planned" notes get removed when the feature lands.
 - Every `NUGGET_…` variable mentioned must exist in the source.
 - Every ```` ```toml ```` block is parsed and its sections and keys are validated against the config
-  structs.
+  structs. The feature sections (`[draft]`, `[agent]`, `[policy]`, `[browser]`, `[proactive]`,
+  `[plugins]`) are raw tables parsed by each feature, so their keys cannot be checked: describe them
+  in prose or tables, not in ```` ```toml ```` examples, until they get a `SOURCES` entry.
 - Every relative link must point at an existing page, and its `#anchor` at an existing heading.
 
 The script parses Rust with regular expressions, not a Rust parser. It is deliberately simple and tied
 to the current code layout; if you move a struct, update the `SOURCES` table at the top of the
-script.
+script. A `SOURCES` entry can list several structs when one `#[serde(flatten)]`s another; flattened
+fields are skipped, so list the inner struct too.
 
 ## Style
 

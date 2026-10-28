@@ -24,7 +24,7 @@ fn default_max_file_mb() -> u32 {
 }
 
 /// The OAuth part shared by every kind.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct Common {
     pub client_id: String,
     pub client_secret: Option<String>,
@@ -32,7 +32,7 @@ pub(crate) struct Common {
     pub account_hint: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OutlookSettings {
     pub client_id: String,
@@ -50,7 +50,7 @@ pub(crate) struct OutlookSettings {
     pub window_days: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CalendarSettings {
     pub client_id: String,
@@ -66,7 +66,7 @@ pub(crate) struct CalendarSettings {
     pub future_days: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OneDriveSettings {
     pub client_id: String,
@@ -123,6 +123,9 @@ fn check_days(name: &str, v: u32, min: u32) -> Result<()> {
 pub(crate) fn valid_folder_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 512
+        // Dot-segments: the URL builder drops them, so `..` would address another endpoint.
+        && id != "."
+        && id != ".."
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'=' | b'+' | b'.'))
@@ -391,5 +394,32 @@ mod unit {
         assert!(!s.in_scope("/documentsx/a.txt"));
         assert!(!s.in_scope("/documents/private/a.txt"));
         assert!(!s.in_scope("/a.txt"));
+    }
+
+    /// `true` when `T: Debug` (inherent method wins), `false` otherwise (trait fallback).
+    struct Probe<T>(std::marker::PhantomData<T>);
+    trait NotDebug {
+        fn is_debug(&self) -> bool {
+            false
+        }
+    }
+    impl<T> NotDebug for Probe<T> {}
+    impl<T: std::fmt::Debug> Probe<T> {
+        #[allow(dead_code)]
+        fn is_debug(&self) -> bool {
+            true
+        }
+    }
+
+    /// Settings carry the OAuth `client_secret`: they must not be `Debug`, so no `{:?}` or
+    /// `tracing` field can print it.
+    #[test]
+    fn settings_holding_secrets_are_not_debug() {
+        use std::marker::PhantomData;
+        assert!(!Probe::<Common>(PhantomData).is_debug());
+        assert!(!Probe::<OutlookSettings>(PhantomData).is_debug());
+        assert!(!Probe::<CalendarSettings>(PhantomData).is_debug());
+        assert!(!Probe::<OneDriveSettings>(PhantomData).is_debug());
+        assert!(Probe::<String>(PhantomData).is_debug());
     }
 }
