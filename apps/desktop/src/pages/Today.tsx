@@ -23,7 +23,7 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { formatRelative, formatTime } from "../format";
-import { Badge, Empty, ErrorNote, PageHeader, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
 import {
@@ -120,7 +120,7 @@ export function TodayPage() {
       </p>
 
       {disabled ? (
-        <Empty title={t("today.disabledTitle")}>{t("today.disabledBody")}</Empty>
+        <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
       ) : (
         <>
           <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} />
@@ -139,8 +139,8 @@ export function TodayPage() {
             </p>
           )}
           <ErrorNote error={cards.error} onRetry={cards.reload} />
-          {cards.loading && !list && <Spinner label={t("today.loading")} />}
-          {list && visible.length === 0 && <Empty title={t("today.emptyTitle")}>{t("today.emptyBody")}</Empty>}
+          {cards.loading && !list && <Loading label={t("today.loading")} />}
+          {list && visible.length === 0 && <EmptyState title={t("today.emptyTitle")}>{t("today.emptyBody")}</EmptyState>}
           {visible.length > 0 && (
             <ul className="today-cards" aria-labelledby="today-inbox">
               {visible.map((c) => (
@@ -187,7 +187,7 @@ function BriefSection({ brief, error, loading, onRetry }: { brief: BriefView | u
       <section aria-labelledby={headingId} className="today-brief">
         <h2 id={headingId}>{t("today.brief.title")}</h2>
         <ErrorNote error={error} onRetry={onRetry} />
-        {loading && <Spinner label={t("today.brief.loading")} />}
+        {loading && <Loading label={t("today.brief.loading")} lines={2} />}
       </section>
     );
   }
