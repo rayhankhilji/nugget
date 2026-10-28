@@ -1,5 +1,15 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { api, changeAffects, errorMessage, events, type ClaimStatus, type ClaimView, type EntityDetail, type MentionView } from "../api";
+import {
+  api,
+  changeAffects,
+  errorMessage,
+  events,
+  type ClaimDecision,
+  type ClaimStatus,
+  type ClaimView,
+  type EntityDetail,
+  type MentionView,
+} from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { Trans, useT } from "../i18n";
 import {
@@ -8,13 +18,20 @@ import {
   claimStatusLabel,
   confidenceTone,
   evidenceSummary,
+  factAction,
   formatConfidence,
   formatEvidence,
   groupClaims,
+  isCurrentStatus,
+  isDroppedStatus,
   kindLabel,
+  undoStatus,
   vaultLinks,
+  type FactActionPlan,
 } from "../knowledge";
+import type { MessageKey } from "../i18n";
 import { MergeDialog } from "./MergeDialog";
+import { SplitDialog } from "./SplitDialog";
 import { Badge, ErrorNote, Spinner } from "./ui";
 
 const MENTIONS_SHOWN = 20;
@@ -45,7 +62,9 @@ export function EntityDetailPanel({
   const detail = useAsync(() => api.knowledgeEntity(id), [id]);
   const [overrides, setOverrides] = useState<Record<number, ClaimStatus>>({});
   const [busyClaim, setBusyClaim] = useState<number | null>(null);
-  const [undo, setUndo] = useState<{ claim: ClaimView; text: string } | null>(null);
+  const [undo, setUndo] = useState<{ claim: ClaimView; text: string; plan: FactActionPlan } | null>(null);
+  const [splitting, setSplitting] = useState(false);
+  const [splitOff, setSplitOff] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [announce, setAnnounce] = useState("");
   const [merging, setMerging] = useState(false);
@@ -55,6 +74,7 @@ export function EntityDetailPanel({
   // A new entity starts clean.
   useEffect(() => {
     setUndo(null);
+    setSplitOff(null);
     setActionError(null);
     setAnnounce("");
   }, [id]);
@@ -70,25 +90,43 @@ export function EntityDetailPanel({
     timer.current = window.setTimeout(reload, 500);
   });
 
-  const setClaimStatus = async (claim: ClaimView, next: "retracted" | "active", prev: ClaimStatus) => {
+  /** Send a decision with an optimistic status; `false` (and the error shown) if it failed. */
+  const send = async (claim: ClaimView, decision: ClaimDecision, next: ClaimStatus, prev: ClaimStatus, failed: MessageKey) => {
     setBusyClaim(claim.id);
     setActionError(null);
     setOverrides((o) => ({ ...o, [claim.id]: next }));
-    const text = claimText(claim);
     try {
-      await api.knowledgeClaimStatus({ claim: claim.id, status: next });
-      if (next === "retracted") {
-        setUndo({ claim, text });
-        setAnnounce(t("entity.rejected", { text }));
-      } else {
-        setUndo((u) => (u?.claim.id === claim.id ? null : u));
-        setAnnounce(t("entity.restored", { text }));
-      }
+      await api.knowledgeClaimStatus({ claim: claim.id, status: decision });
+      return true;
     } catch (e) {
       setOverrides((o) => ({ ...o, [claim.id]: prev }));
-      setActionError(t(next === "retracted" ? "entity.rejectFailed" : "entity.restoreFailed", { error: errorMessage(e) }));
+      setActionError(t(failed, { error: errorMessage(e) }));
+      return false;
     } finally {
       setBusyClaim(null);
+    }
+  };
+
+  const act = async (claim: ClaimView, plan: FactActionPlan, prev: ClaimStatus) => {
+    const text = claimText(claim);
+    const failed: MessageKey =
+      plan.action === "reject" ? "entity.rejectFailed" : plan.action === "unassert" ? "entity.unassertFailed" : "entity.restoreFailed";
+    if (!(await send(claim, plan.decision, plan.next, prev, failed))) return;
+    if (plan.undo) {
+      setUndo({ claim, text, plan });
+      setAnnounce(t(plan.action === "reject" ? "entity.rejected" : "entity.unasserted", { text }));
+    } else {
+      setUndo((u) => (u?.claim.id === claim.id ? null : u));
+      setAnnounce(t("entity.restored", { text }));
+    }
+  };
+
+  const undoLast = async () => {
+    if (!undo?.plan.undo) return;
+    const { claim, text, plan } = undo;
+    if (await send(claim, plan.undo!, undoStatus(plan.undo!, claim), plan.next, "entity.restoreFailed")) {
+      setUndo(null);
+      setAnnounce(t("entity.restored", { text }));
     }
   };
 
@@ -119,6 +157,9 @@ export function EntityDetailPanel({
             <button type="button" className="btn btn-small" onClick={() => setMerging(true)}>
               {t("entity.merge")}
             </button>
+            <button type="button" className="btn btn-small" onClick={() => setSplitting(true)} disabled={d.claims.length === 0}>
+              {t("entity.split")}
+            </button>
           </div>
           <div aria-live="polite" className="entity-live">
             {opener.status && (
@@ -126,14 +167,19 @@ export function EntityDetailPanel({
             )}
             {undo && (
               <p className="note small undo-note">
-                <span>{t("entity.rejectedNote", { text: undo.text })}</span>
-                <button
-                  type="button"
-                  className="btn btn-small"
-                  disabled={busyClaim !== null}
-                  onClick={() => void setClaimStatus(undo.claim, "active", "retracted")}
-                >
+                <span>
+                  {t(undo.plan.action === "reject" ? "entity.rejectedNote" : "entity.unassertedNote", { text: undo.text })}
+                </span>
+                <button type="button" className="btn btn-small" disabled={busyClaim !== null} onClick={() => void undoLast()}>
                   {t("entity.undo")}
+                </button>
+              </p>
+            )}
+            {splitOff && (
+              <p className="note small undo-note">
+                <span>{t("entity.splitNote")}</span>
+                <button type="button" className="btn btn-small" onClick={() => onSelect(splitOff)}>
+                  {t("entity.openSplit")}
                 </button>
               </p>
             )}
@@ -152,8 +198,7 @@ export function EntityDetailPanel({
             sourceNames={sourceNames}
             onSelect={onSelect}
             onOpen={opener.open}
-            onReject={(c, prev) => void setClaimStatus(c, "retracted", prev)}
-            onRestore={(c) => void setClaimStatus(c, "active", "retracted")}
+            onAct={(c, plan, prev) => void act(c, plan, prev)}
           />
           <Mentions mentions={d.mentions} sourceNames={sourceNames} onOpen={opener.open} />
           {merging && (
@@ -164,6 +209,19 @@ export function EntityDetailPanel({
                 setMerging(false);
                 onMerged(into);
                 if (into === d.id) reload();
+              }}
+            />
+          )}
+          {splitting && (
+            <SplitDialog
+              target={d}
+              onClose={() => setSplitting(false)}
+              onSplit={(newId) => {
+                setSplitting(false);
+                setUndo(null);
+                setSplitOff(newId);
+                setAnnounce(t("entity.splitNote"));
+                reload();
               }}
             />
           )}
@@ -269,8 +327,7 @@ function Facts({
   sourceNames,
   onSelect,
   onOpen,
-  onReject,
-  onRestore,
+  onAct,
 }: {
   detail: EntityDetail;
   overrides: Record<number, ClaimStatus>;
@@ -278,8 +335,7 @@ function Facts({
   sourceNames: ReadonlyMap<string, string>;
   onSelect: (id: string) => void;
   onOpen: (url: string, label: string) => Promise<void>;
-  onReject: (c: ClaimView, prev: ClaimStatus) => void;
-  onRestore: (c: ClaimView) => void;
+  onAct: (c: ClaimView, plan: FactActionPlan, prev: ClaimStatus) => void;
 }) {
   const t = useT();
   const claims = detail.claims.map((c) => (overrides[c.id] ? { ...c, status: overrides[c.id]! } : c));
@@ -290,7 +346,7 @@ function Facts({
       <h3 id={headingId} className="entity-section">
         <Trans
           k="entity.factsHeading"
-          args={{ n: claims.filter((c) => c.status !== "retracted").length }}
+          args={{ n: claims.filter((c) => !isDroppedStatus(c.status)).length }}
           tags={{ count: (x) => <span className="muted small">{x}</span> }}
         />
       </h3>
@@ -309,8 +365,7 @@ function Facts({
                 selfId={detail.id}
                 onSelect={onSelect}
                 onOpen={onOpen}
-                onReject={onReject}
-                onRestore={onRestore}
+                onAct={onAct}
               />
             ))}
           </ul>
@@ -328,8 +383,7 @@ function Fact({
   selfId,
   onSelect,
   onOpen,
-  onReject,
-  onRestore,
+  onAct,
 }: {
   claim: ClaimView;
   /** Status before any optimistic change, so a failed reject restores it. */
@@ -339,14 +393,20 @@ function Fact({
   selfId: string;
   onSelect: (id: string) => void;
   onOpen: (url: string, label: string) => Promise<void>;
-  onReject: (c: ClaimView, prev: ClaimStatus) => void;
-  onRestore: (c: ClaimView) => void;
+  onAct: (c: ClaimView, plan: FactActionPlan, prev: ClaimStatus) => void;
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const evidenceId = useId();
   const text = claimText(c);
-  const retracted = c.status === "retracted";
+  const retracted = isDroppedStatus(c.status);
+  const plan = factAction(c);
+  const [label, aria] =
+    plan.action === "restore"
+      ? [t("entity.restore"), t("entity.restoreLabel", { text })]
+      : plan.action === "unassert"
+        ? [t("entity.unassert"), t("entity.unassertLabel", { text })]
+        : [t("entity.reject"), t("entity.rejectLabel", { text })];
   const other = c.object.entity && c.object.entity.id !== selfId ? c.object.entity : null;
   return (
     <li className={`fact${retracted ? " fact-retracted" : ""}${c.status === "superseded" ? " fact-superseded" : ""}`}>
@@ -364,7 +424,7 @@ function Fact({
           <span className="visually-hidden">{t("entity.confidence")} </span>
           {formatConfidence(c.confidence)}
         </Badge>
-        {c.status !== "active" && c.status !== "user_asserted" && (
+        {!isCurrentStatus(c.status) && (
           <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
         )}
         {other && (
@@ -383,10 +443,10 @@ function Fact({
           type="button"
           className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost"}
           disabled={busy}
-          aria-label={retracted ? t("entity.restoreLabel", { text }) : t("entity.rejectLabel", { text })}
-          onClick={() => (retracted ? onRestore(c) : onReject(c, original))}
+          aria-label={aria}
+          onClick={() => onAct(c, plan, original)}
         >
-          {busy ? <Spinner label={t("entity.saving")} /> : retracted ? t("entity.restore") : t("entity.reject")}
+          {busy ? <Spinner label={t("entity.saving")} /> : label}
         </button>
       </div>
       <div id={evidenceId} hidden={!open}>

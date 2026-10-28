@@ -107,7 +107,8 @@ or add the same JSON as for Claude Desktop to that file by hand.
   environment.
 - **Streamable HTTP**: `http://127.0.0.1:7319/mcp` with the header `Authorization: Bearer <token>`.
   The listener is on by default (`[mcp] http`, port `[mcp] port`), and binds `127.0.0.1` only. If
-  the port is taken, the daemon logs a warning and serves stdio only. Browsers are refused (any
+  the port is taken, the daemon logs an error, serves stdio only and offers no HTTP snippet (it
+  never points a client at a port it does not hold). Browsers are refused (any
   request with an `Origin` header is rejected unless that origin is listed in
   `[mcp] allowed_origins`), and the token is never accepted in the URL. The desktop's
   **Connect an app** shows a ready HTTP snippet with the actual port.

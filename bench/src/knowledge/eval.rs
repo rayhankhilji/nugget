@@ -877,10 +877,14 @@ pub fn score_resolution(gold: &GoldIndex<'_>, snap: &Snapshot, ing: &Ingested) -
                 *votes.entry(e.clone()).or_default() += 1;
             }
         }
-        if let Some((e, _)) = votes
-            .into_iter()
-            .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
-        {
+        // Ties go to the entity whose name sorts first: entity ids are random per run, so
+        // breaking ties on them would make the score vary between identical runs.
+        let name = |e: &EntityId| snap.entity(e).map(|x| x.name.clone()).unwrap_or_default();
+        if let Some((e, _)) = votes.into_iter().max_by(|a, b| {
+            a.1.cmp(&b.1)
+                .then_with(|| name(&b.0).cmp(&name(&a.0)))
+                .then(b.0.cmp(&a.0))
+        }) {
             r.assignment.insert(*i, e);
         }
     }

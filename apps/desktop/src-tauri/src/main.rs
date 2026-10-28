@@ -68,6 +68,7 @@ fn main() {
             commands::knowledge_graph,
             commands::knowledge_merge,
             commands::knowledge_claim_status,
+            commands::knowledge_split,
             commands::knowledge_status,
             commands::mcp_clients_list,
             commands::mcp_clients_create,

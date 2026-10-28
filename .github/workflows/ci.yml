@@ -146,10 +146,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # `all` includes `knowledge` (the real M2 pipeline on the fixture corpus, about 2 s).
-      # TODO(wave 2): add `knowledge --strict` once nugget-knowledge meets the M2 targets.
       - name: Bench smoke run
         shell: bash
         run: cargo run --locked -p nugget-bench -- all --scale smoke --out-dir "$RUNNER_TEMP/bench-results"
+
+      # The M2 knowledge targets are gates: a missed target fails the job.
+      - name: Bench knowledge (strict)
+        shell: bash
+        run: cargo run --locked -p nugget-bench -- knowledge --strict --out-dir "$RUNNER_TEMP/bench-results"
 
       # The real stack in process (encrypted store, ingest, files watcher, retriever): about 15 s
       # at smoke scale on a debug build. A failed run fails the job; target verdicts are in the

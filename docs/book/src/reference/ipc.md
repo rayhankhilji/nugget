@@ -107,16 +107,17 @@ OAuth client secret (then rebuilds the source). It is write-only, at most 4096 b
 ### Knowledge graph
 
 Entity kinds: `person`, `organization`, `project`, `commitment`, `preference`, `event`, `place`,
-`topic`. Claim statuses: `active`, `superseded`, `retracted`, `user_asserted`.
+`topic`. Claim statuses: `active`, `superseded`, `retracted` (lost its evidence), `rejected` (the user rejected it; sticky across re-extraction), `user_asserted`.
 
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `knowledge.entities` | `EntitiesRequest`: `text`, `kind`, `limit`, `offset` | list of `EntitySummaryView`: `id`, `kind`, `name`, `claims`, `mentions`, `updated_at` | yes |
 | `knowledge.entity` | `EntityRef`: `{id}` | `EntityDetail`: `id`, `kind`, `name`, `aliases`, `identifiers`, `attributes`, `claims`, `mentions`, `vault_path` | yes |
-| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds` | `GraphViewIpc`: `nodes`, `edges`, `truncated` | yes |
+| `knowledge.graph` | `GraphRequest`: `center` (or `null` for an overview), `depth`, `limit`, `kinds`, `source` (optional source filter) | `GraphViewIpc`: `nodes`, `edges`, `truncated` | yes |
 | `knowledge.merge` | `MergeRequest`: `{into, from}` | `null` | yes |
-| `knowledge.claim.status` | `ClaimStatusRequest`: `{claim, status}`, status `retracted` (reject) or `active` (restore) | `null` | yes |
+| `knowledge.split` | `SplitRequest`: `{entity, claims, name, kind?, aliases?, identifiers?}` (moves the listed facts, aliases and identifiers to a new entity) | `EntityRef` of the new entity | yes |
+| `knowledge.claim.status` | `ClaimStatusRequest`: `{claim, status}`, status `rejected` (sticky reject; `retracted` is an older spelling), `active` (restore), `user_asserted` or `unasserted` (undo the user's assertion) | `null` | yes |
 | `knowledge.status` | `{}` | `KnowledgeStatus`: `entities`, `claims`, `mentions`, `pending_items`, `last_run`, `extractor_provider`, `vault` | yes |
 
 ### MCP clients

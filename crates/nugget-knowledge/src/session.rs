@@ -7,7 +7,7 @@ use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
 use nugget_core::{Error, Result};
 use nugget_graph::{
     Claim, ClaimId, ClaimObject, ClaimPatch, ClaimStatus, EntityDetail, EntityKind, EntityPatch,
-    Evidence, GraphBatch, GraphOp, Identifier, Mention, NewClaim, NewEntity,
+    Evidence, GraphBatch, GraphOp, Identifier, Mention, NewClaim, NewEntity, normalize_name,
 };
 use nugget_store::{Item, ItemChange};
 use serde_json::{Value, json};
@@ -775,6 +775,7 @@ impl<'a> Session<'a> {
             };
             crate::extract::deterministic(&ctx)
         };
+        trust_note_identifiers(&mut ex);
         if !ex.me_emails.is_empty() || ex.me_name.is_some() {
             let emails = std::mem::take(&mut ex.me_emails);
             let name = ex.me_name.take();
@@ -844,7 +845,9 @@ impl<'a> Session<'a> {
         self.stats.llm_quotes_rejected += run.gate.quotes_rejected;
         self.stats.llm_entities_dropped += run.gate.entities_dropped;
         let ok = run.requests > run.failed_requests;
-        ex.absorb(run.extraction);
+        let mut extra = run.extraction;
+        fold_first_names(ex, &mut extra);
+        ex.absorb(extra);
         if !ok && run.requests > 0 {
             LLM_PENDING + attempts + 1
         } else if run.deferred {
@@ -880,6 +883,9 @@ impl<'a> Session<'a> {
             self.stats.entities_merged += r.merged.len() as u64;
             for t in &r.touched {
                 self.touch(t);
+            }
+            if !r.merged.is_empty() {
+                self.reconcile_single_valued(&r.id)?;
             }
             for m in &spec.mentions {
                 self.batch.push(GraphOp::AddMention {
@@ -1305,6 +1311,60 @@ impl<'a> Session<'a> {
         Ok(target)
     }
 
+    /// After a merge, the entity (and the subjects of claims about it) may hold several live
+    /// values of a single-valued predicate that lived on different entities before: keep the
+    /// freshest (a user-asserted one first) and supersede the older ones.
+    fn reconcile_single_valued(&mut self, id: &EntityId) -> Result<()> {
+        let mut subjects: Vec<EntityId> = vec![id.clone()];
+        for c in self.graph().claims_for(id, false)? {
+            if !subjects.contains(&c.subject) {
+                subjects.push(c.subject.clone());
+            }
+        }
+        for subject in subjects {
+            let mut by_pred: HashMap<String, Vec<Claim>> = HashMap::new();
+            for c in self.graph().claims_for(&subject, false)? {
+                if c.subject == subject
+                    && c.status.is_active()
+                    && self.single_valued.contains(&c.predicate)
+                {
+                    by_pred.entry(c.predicate.clone()).or_default().push(c);
+                }
+            }
+            for (_, claims) in by_pred {
+                if claims.iter().all(|c| c.object == claims[0].object) {
+                    continue;
+                }
+                let mut scored = Vec::with_capacity(claims.len());
+                for c in claims {
+                    let f = self.freshness(&c)?;
+                    scored.push((c.status == ClaimStatus::UserAsserted, f, c));
+                }
+                scored.sort_by_key(|x| std::cmp::Reverse((x.0, x.1)));
+                let (best_user, best_f, best) = (scored[0].0, scored[0].1, scored[0].2.clone());
+                for (_, f, c) in scored.into_iter().skip(1) {
+                    if c.status == ClaimStatus::Active
+                        && c.object != best.object
+                        && (best_user || f < best_f)
+                    {
+                        self.graph()
+                            .set_claim_status(c.id, ClaimStatus::Superseded)?;
+                        self.graph().update_claim(
+                            c.id,
+                            &ClaimPatch {
+                                valid_to: Some(best_f),
+                                ..Default::default()
+                            },
+                        )?;
+                        self.stats.claims_superseded += 1;
+                        self.touch_claim(&c);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// The patch raising a claim's confidence to the noisy-OR of its distinct evidence items,
     /// if that is higher.
     fn aggregated(&self, id: ClaimId, base: f32) -> Result<Option<ClaimPatch>> {
@@ -1330,9 +1390,142 @@ impl<'a> Session<'a> {
     }
 }
 
+/// A typed note is its entity's own record, written by the user: the identifiers it lists
+/// (several addresses of one person, say) belong together, like a contact card's.
+fn trust_note_identifiers(ex: &mut Extraction) {
+    if ex.note_names.is_empty() {
+        return;
+    }
+    for r in &ex.note_subjects {
+        if let ERef::Local(i) = *r
+            && let Some(e) = ex.entities.get_mut(i)
+            && matches!(e.kind, EntityKind::Person | EntityKind::Organization)
+        {
+            e.trusted_identifiers = true;
+        }
+    }
+}
+
+/// A person the model named by one word only ("Maggie") is the one person on the same item
+/// whose name starts with that word ("Maggie T" in the headers), when there is exactly one:
+/// the occurrence takes that person's name and identifiers, so both resolve together.
+fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
+    let first_word = |n: &str| normalize_name(n).split(' ').next().map(str::to_owned);
+    let words = |n: &str| normalize_name(n).split(' ').count();
+    for i in 0..extra.entities.len() {
+        let e = &extra.entities[i];
+        if e.kind != EntityKind::Person
+            || e.weak_name
+            || !e.identifiers.is_empty()
+            || words(&e.name) != 1
+        {
+            continue;
+        }
+        let Some(word) = first_word(&e.name).filter(|w| w.chars().count() >= 2) else {
+            continue;
+        };
+        // Candidates by display name, de-duplicated by normalised name.
+        let mut cands: Vec<(String, &crate::spec::EntitySpec)> = Vec::new();
+        let others = base.entities.iter().chain(
+            extra
+                .entities
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .map(|(_, x)| x),
+        );
+        for c in others {
+            if c.kind != EntityKind::Person || c.weak_name || words(&c.name) < 2 {
+                continue;
+            }
+            let matches = std::iter::once(&c.name)
+                .chain(&c.aliases)
+                .any(|n| words(n) >= 2 && first_word(n).as_deref() == Some(word.as_str()));
+            let key = normalize_name(&c.name);
+            if matches && !cands.iter().any(|(k, _)| *k == key) {
+                cands.push((key, c));
+            }
+        }
+        if cands.len() != 1 {
+            continue;
+        }
+        let (name, identifiers) = (cands[0].1.name.clone(), cands[0].1.identifiers.clone());
+        let e = &mut extra.entities[i];
+        let short = std::mem::replace(&mut e.name, name);
+        if !e.aliases.contains(&short) {
+            e.aliases.push(short);
+        }
+        e.identifiers = identifiers;
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::aggregate;
+    use super::{aggregate, fold_first_names, trust_note_identifiers};
+    use crate::spec::{EntitySpec, Extraction};
+    use nugget_graph::{EntityKind, Identifier};
+
+    fn header(name: &str, email: &str) -> EntitySpec {
+        EntitySpec::new(EntityKind::Person, name).ident("email", email)
+    }
+
+    #[test]
+    fn a_first_name_is_the_one_person_on_the_item_it_starts() {
+        let mut base = Extraction::default();
+        base.entity(header("Maggie T", "maggie.t@mail.test"));
+        base.entity(header("Robin Ashgrove", "robin@ashgrove.test"));
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie"));
+        extra.entity(EntitySpec::new(EntityKind::Person, "Unknown"));
+        fold_first_names(&base, &mut extra);
+        let m = &extra.entities[0];
+        assert_eq!(m.name, "Maggie T");
+        assert_eq!(m.aliases, vec!["Maggie".to_string()]);
+        assert_eq!(
+            m.identifiers,
+            vec![Identifier::new("email", "maggie.t@mail.test")]
+        );
+        assert_eq!(extra.entities[1].name, "Unknown");
+        // Absorbed, both are one occurrence.
+        base.absorb(extra);
+        assert_eq!(
+            base.entities
+                .iter()
+                .filter(|e| e.name == "Maggie T")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_shared_first_name_stays_apart() {
+        let mut base = Extraction::default();
+        base.entity(header("Sam Okafor", "sam.okafor@ostrander.test"));
+        base.entity(header("Sam Whitlock", "sam@marrowbank.test"));
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Sam"));
+        fold_first_names(&base, &mut extra);
+        assert_eq!(extra.entities[0].name, "Sam");
+        assert!(extra.entities[0].identifiers.is_empty());
+    }
+
+    #[test]
+    fn a_typed_notes_own_identifiers_are_trusted() {
+        let mut ex = Extraction::default();
+        let me = ex
+            .entity(header("Priya Castellane", "priya@old.test").ident("email", "priya@new.test"));
+        let topic = ex.entity(EntitySpec::new(EntityKind::Topic, "data").ident("tag", "data"));
+        ex.note_subjects = vec![me, topic];
+        trust_note_identifiers(&mut ex);
+        assert!(!ex.entities[0].trusted_identifiers, "not a note");
+        ex.note_names = vec!["Priya Castellane".into()];
+        trust_note_identifiers(&mut ex);
+        assert!(ex.entities[0].trusted_identifiers);
+        assert!(
+            !ex.entities[1].trusted_identifiers,
+            "only people and organisations"
+        );
+    }
 
     #[test]
     fn noisy_or() {

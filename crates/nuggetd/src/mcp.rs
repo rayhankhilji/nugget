@@ -21,15 +21,16 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use nugget_core::ids::{EntityId, ItemRef, SourceId};
-use nugget_core::ipc::{McpClientCreated, McpSetupSnippet};
+use nugget_core::ipc::McpClientCreated;
 use nugget_core::{Error, Result};
 use nugget_graph::GraphStore;
+use nugget_mcp::scope::distinct_origins;
 use nugget_mcp::{
-    ClientRecord, ClientRegistry, ClientStore, ContextPack, ContextPassage, EdgeRecord,
-    EntityRecord, EntitySummaryRecord, EvidenceRecord, FactRecord, HttpConfig, HttpHandle,
-    ItemRecord, ItemSummaryRecord, KnowledgeBackend, McpServer, MentionRecord, NeighbourhoodRecord,
-    NodeRecord, RecentChanges, ScopeFilter, SearchRecord, ServerKey, SnippetOptions, TOKEN_ENV,
-    Transport,
+    ClientRecord, ClientRegistry, ClientStore, ContextPack, ContextPassage, DetailOrigins,
+    EdgeRecord, EntityRecord, EntitySummaryRecord, EvidenceRecord, FactRecord, HttpConfig,
+    HttpHandle, ItemRecord, ItemSummaryRecord, KnowledgeBackend, McpServer, MentionRecord,
+    NeighbourhoodRecord, NodeRecord, Origin, RecentChanges, ScopeFilter, SearchRecord, ServerKey,
+    SnippetOptions, Transport,
 };
 use nugget_retrieve::{ContextOptions, Retriever};
 use nugget_store::{AuditEntry, Store};
@@ -49,6 +50,9 @@ use crate::graphview::{self, Lookups, status_str};
 pub const CLIENTS_KEY: &str = "mcp/clients";
 /// Store cursor key holding the MCP server key.
 pub const SERVER_KEY_KEY: &str = "mcp/server_key";
+
+/// Environment variable naming the data root; setup snippets pass it on a non-default home.
+pub const HOME_ENV: &str = "NUGGET_HOME";
 
 /// Bridge IPC methods (daemon-private; used only by `nuggetd mcp --client`).
 pub const BRIDGE_OPEN: &str = "mcp.bridge.open";
@@ -632,6 +636,43 @@ impl KnowledgeBackend for DaemonBackend {
         })
         .await
     }
+
+    /// `GraphStore::entity_provenance` with each supplying item mapped to its [`Origin`]
+    /// (source plus the item's sensitivity from the store; a missing item counts as sensitive).
+    /// The MCP layer applies the client's scope to these, so nothing is filtered here.
+    async fn entity_detail_origins(
+        &self,
+        id: &EntityId,
+        _filter: &ScopeFilter,
+    ) -> Result<Option<DetailOrigins>> {
+        let id = id.clone();
+        with_lookups(&self.store, &self.graph, move |lk| {
+            let Some(p) = lk.graph.entity_provenance(&id)? else {
+                return Ok(None);
+            };
+            let mut origins = |items: &[ItemRef]| -> Result<Vec<Origin>> {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items {
+                    out.push(Origin {
+                        source: item.source.clone(),
+                        sensitive: lk.item(item)?.sensitive,
+                    });
+                }
+                Ok(distinct_origins(out))
+            };
+            let mut details = DetailOrigins::default();
+            for (alias, items) in &p.aliases {
+                details.aliases.push((alias.clone(), origins(items)?));
+            }
+            for (ident, items) in &p.identifiers {
+                details
+                    .identifiers
+                    .push(((ident.scheme.clone(), ident.value.clone()), origins(items)?));
+            }
+            Ok(Some(details))
+        })
+        .await
+    }
 }
 
 // ---- service ----
@@ -682,12 +723,16 @@ impl McpService {
                 });
             })
             .build();
+        // Fail closed: bind the configured port or nothing. Setup snippets (and every other
+        // pointer at the listener) use the port actually held, so when the bind fails (say the
+        // port is taken by another program) no client is ever pointed at it; stdio still works.
         let mut http = None;
         if cfg.http {
             match server
                 .serve_http(HttpConfig {
                     port: cfg.port,
                     allowed_origins: cfg.allowed_origins.clone(),
+                    ..HttpConfig::default()
                 })
                 .await
             {
@@ -695,16 +740,18 @@ impl McpService {
                     tracing::info!(url = %h.url(), "mcp http listening");
                     http = Some(h);
                 }
-                Err(e) => tracing::warn!(
+                Err(e) => tracing::error!(
                     port = cfg.port,
                     error = %e,
-                    "mcp http listener not started; stdio clients still work"
+                    "mcp http listener not started (is the port taken?); HTTP setup is not \
+                     offered, stdio clients still work"
                 ),
             }
         }
         Ok(Self {
             server,
             registry,
+            // Only ever a port this daemon holds.
             http_port: http.as_ref().map(|h| h.local_addr().port()),
             http: Mutex::new(http),
             nuggetd,
@@ -742,18 +789,13 @@ impl McpService {
         info: nugget_core::ipc::McpClientInfo,
         token: &nugget_mcp::ClientToken,
     ) -> McpClientCreated {
-        let opts = SnippetOptions {
-            nuggetd: self.nuggetd.clone(),
-            http_port: self.http_port,
-            ..SnippetOptions::default()
-        };
-        let mut out = nugget_mcp::client_created(info, token, &opts);
-        if let Some(home) = &self.home {
-            for s in &mut out.setup {
-                add_home(s, &home.display().to_string());
-            }
-        }
-        out
+        nugget_mcp::client_created(info, token, &self.snippet_options())
+    }
+
+    /// Snippet options for this daemon: its `nuggetd`, its HTTP port and, on a non-default
+    /// home, `NUGGET_HOME` so the launched bridge finds this daemon.
+    pub fn snippet_options(&self) -> SnippetOptions {
+        snippet_options(self.nuggetd.clone(), self.http_port, self.home.as_ref())
     }
 
     /// Open a bridge session for an authenticated client; MCP output goes to `notify`.
@@ -878,46 +920,21 @@ impl McpService {
     }
 }
 
-/// Make a stdio snippet pass `NUGGET_HOME`, so the launched bridge finds this daemon.
-fn add_home(s: &mut McpSetupSnippet, home: &str) {
-    match s.app.as_str() {
-        "claude-desktop" | "cursor" => {
-            if let Ok(mut v) = serde_json::from_str::<Value>(&s.text) {
-                if let Some(env) = v
-                    .pointer_mut(&format!(
-                        "/mcpServers/{}/env",
-                        nugget_mcp::snippets::SERVER_KEY
-                    ))
-                    .and_then(Value::as_object_mut)
-                {
-                    env.insert("NUGGET_HOME".into(), Value::String(home.into()));
-                }
-                if let Ok(t) = serde_json::to_string_pretty(&v) {
-                    s.text = t;
-                }
-            }
-        }
-        "claude-code" => {
-            let flag = format!(" --env {TOKEN_ENV}=");
-            if let Some(at) = s.text.find(&flag) {
-                s.text
-                    .insert_str(at, &format!(" --env NUGGET_HOME={}", sh_quote(home)));
-            }
-        }
-        "generic-stdio" => s.text.push_str(&format!("\nenv: NUGGET_HOME={home}")),
-        _ => {}
-    }
-}
-
-/// POSIX-shell single-quoting, when needed.
-pub(crate) fn sh_quote(s: &str) -> String {
-    if !s.is_empty()
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || "-_./:=@%+,".contains(c))
-    {
-        s.to_owned()
-    } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
+/// Setup snippet options: launch `nuggetd`, point HTTP clients at `http_port`, and pass
+/// [`HOME_ENV`] when the daemon runs on a non-default `home`.
+fn snippet_options(
+    nuggetd: String,
+    http_port: Option<u16>,
+    home: Option<&PathBuf>,
+) -> SnippetOptions {
+    SnippetOptions {
+        nuggetd,
+        http_port,
+        env: home
+            .map(|h| (HOME_ENV.to_owned(), h.display().to_string()))
+            .into_iter()
+            .collect(),
+        ..SnippetOptions::default()
     }
 }
 
@@ -1023,26 +1040,164 @@ mod tests {
 
     #[test]
     fn snippets_get_the_home() {
-        let mut s = McpSetupSnippet {
-            app: "claude-desktop".into(),
-            config_path: None,
-            text: r#"{"mcpServers":{"nugget":{"command":"nuggetd","args":["mcp","--client","c"],"env":{"NUGGET_MCP_TOKEN":"t"}}}}"#.into(),
-        };
-        add_home(&mut s, "/h");
-        let v: Value = serde_json::from_str(&s.text).unwrap();
-        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_HOME"], "/h");
-        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_MCP_TOKEN"], "t");
-        let mut c = McpSetupSnippet {
-            app: "claude-code".into(),
-            config_path: None,
-            text: "claude mcp add --transport stdio --scope user --env NUGGET_MCP_TOKEN=t nugget -- nuggetd mcp --client c".into(),
-        };
-        add_home(&mut c, "/my home");
+        let opts = snippet_options("nuggetd".into(), None, Some(&PathBuf::from("/my home")));
+        assert_eq!(opts.env, vec![(HOME_ENV.to_owned(), "/my home".to_owned())]);
         assert!(
-            c.text
+            snippet_options("nuggetd".into(), Some(1), None)
+                .env
+                .is_empty()
+        );
+        let info = nugget_core::ipc::McpClientInfo {
+            id: "mcp_c".into(),
+            name: "C".into(),
+            scopes: nugget_core::ipc::McpScopes {
+                sources: None,
+                tools: vec![],
+                include_sensitive: false,
+            },
+            created_at: OffsetDateTime::UNIX_EPOCH,
+            last_used: None,
+        };
+        let s = nugget_mcp::setup_snippets(&info, "t", &opts);
+        let v: Value = serde_json::from_str(&s[0].text).unwrap();
+        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_HOME"], "/my home");
+        assert_eq!(v["mcpServers"]["nugget"]["env"]["NUGGET_MCP_TOKEN"], "t");
+        assert!(
+            s[1].text
                 .contains("--env NUGGET_HOME='/my home' --env NUGGET_MCP_TOKEN=t"),
             "{}",
-            c.text
+            s[1].text
         );
+    }
+
+    /// A client scoped away from a source (or from sensitive items) sees an entity's aliases
+    /// and identifiers only when an item it may read supplied them.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn detail_origins_give_scoped_clients_per_identifier_visibility() {
+        use nugget_core::ipc::McpScopes;
+        use nugget_graph::{EntityDetail, EntityKind, Identifier, Mention, NewEntity};
+        use nugget_mcp::{Origin, Scope};
+        use nugget_store::NewItem;
+
+        let store = Store::open_in_memory().unwrap();
+        let put = |source: &str, key: &str, sensitive: bool| {
+            let mut it = NewItem::new(source, key, format!("h-{source}-{key}"));
+            it.metadata = json!({ "sensitive": sensitive });
+            store.upsert_item(&it).unwrap();
+            ItemRef {
+                source: SourceId::new(source),
+                key: nugget_core::ids::ItemKey::new(key),
+            }
+        };
+        let note = put("notes", "sam.md", false);
+        let secret = put("notes", "secret.md", true);
+        let mail = put("mail", "m1", false);
+
+        let graph: Arc<dyn GraphStore> = Arc::new(nugget_graph::MemGraph::new());
+        let mut new = NewEntity::new(EntityKind::Person, "Sam Lee");
+        new.aliases = vec!["Sammy".into(), "S.L.".into(), "Boss".into()];
+        new.identifiers = vec![
+            Identifier::new("email", "sam@work.test"),
+            Identifier::new("phone", "+15550100"),
+            Identifier::new("handle:chat", "samlee"),
+        ];
+        let sam = graph.create_entity(&new).unwrap();
+        for item in [&note, &secret, &mail] {
+            graph
+                .add_mention(&Mention {
+                    entity: sam.clone(),
+                    item: item.clone(),
+                    chunk_id: None,
+                    surface: "Sam".into(),
+                    confidence: 0.9,
+                })
+                .unwrap();
+        }
+        let alias = |a: &str| EntityDetail::Alias(a.into());
+        let ident = |s: &str, v: &str| EntityDetail::Identifier(Identifier::new(s, v));
+        for (detail, item) in [
+            (alias("Sammy"), &note),
+            (alias("S.L."), &secret),
+            (alias("Boss"), &mail),
+            (ident("email", "sam@work.test"), &mail),
+            (ident("email", "sam@work.test"), &note),
+            (ident("phone", "+15550100"), &secret),
+            (ident("handle:chat", "samlee"), &mail),
+        ] {
+            graph.add_detail_source(&sam, &detail, item).unwrap();
+        }
+
+        let backend = DaemonBackend {
+            store: store.clone(),
+            graph: graph.clone(),
+            retriever: Retriever::new(store.clone(), None, Default::default()),
+        };
+        let all = ScopeFilter {
+            sources: None,
+            include_sensitive: true,
+        };
+        let d = backend
+            .entity_detail_origins(&sam, &all)
+            .await
+            .unwrap()
+            .unwrap();
+        let origins_of = |scheme: &str| {
+            d.identifiers
+                .iter()
+                .find(|(i, _)| i.0 == scheme)
+                .map(|(_, o)| o.clone())
+                .unwrap()
+        };
+        assert_eq!(
+            origins_of("email"),
+            vec![Origin::new("mail", false), Origin::new("notes", false)]
+        );
+        assert_eq!(origins_of("phone"), vec![Origin::new("notes", true)]);
+        assert!(
+            backend
+                .entity_detail_origins(&EntityId::new("ent_nope"), &all)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let view = async |sources: Option<&[&str]>, include_sensitive: bool| {
+            let scope = Scope::new(&McpScopes {
+                sources: sources.map(|l| l.iter().map(|s| SourceId::new(*s)).collect()),
+                tools: vec![],
+                include_sensitive,
+            });
+            let e = backend
+                .get_entity(&sam, scope.filter())
+                .await
+                .unwrap()
+                .unwrap();
+            let details = backend
+                .entity_detail_origins(&sam, scope.filter())
+                .await
+                .unwrap();
+            let se = scope.entity_with_details(e, details.as_ref()).unwrap();
+            let mut aliases = se.entity.aliases.clone();
+            aliases.sort();
+            let mut ids: Vec<_> = se.entity.identifiers.iter().map(|i| i.0.clone()).collect();
+            ids.sort();
+            (aliases, ids, se.details_withheld)
+        };
+        // Notes only, no sensitive items: mail-only and sensitive-only details are withheld.
+        let (aliases, ids, withheld) = view(Some(&["notes"]), false).await;
+        assert_eq!(aliases, ["Sammy"]);
+        assert_eq!(ids, ["email"]);
+        assert!(withheld);
+        // Notes with sensitive items: the secret note's details too, never mail's.
+        let (aliases, ids, _) = view(Some(&["notes"]), true).await;
+        assert_eq!(aliases, ["S.L.", "Sammy"]);
+        assert_eq!(ids, ["email", "phone"]);
+        // Mail only: its own alias and identifiers.
+        let (aliases, ids, _) = view(Some(&["mail"]), false).await;
+        assert_eq!(aliases, ["Boss"]);
+        assert_eq!(ids, ["email", "handle:chat"]);
+        // Everything allowed: everything shown.
+        let (aliases, ids, withheld) = view(None, true).await;
+        assert_eq!((aliases.len(), ids.len(), withheld), (3, 3, false));
     }
 }
