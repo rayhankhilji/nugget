@@ -1,9 +1,12 @@
 //! Shared HTTP plumbing: client construction, egress metering, retries and error mapping.
 
 use std::collections::hash_map::RandomState;
+use std::future::Future;
 use std::hash::{BuildHasher, Hasher};
-use std::sync::Arc;
-use std::time::Duration;
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures::StreamExt;
@@ -18,12 +21,100 @@ use time::OffsetDateTime;
 use url::Url;
 
 use crate::sse::SseParser;
-use crate::types::{ChatEvent, ChatStream};
+use crate::types::{ChatEvent, ChatStats, ChatStream, Timings};
 
 /// Largest error body we read into memory.
 const MAX_ERROR_BODY: usize = 64 * 1024;
 /// Largest non-streaming JSON body we accept (embeddings can be big).
 const MAX_JSON_BODY: usize = 256 * 1024 * 1024;
+/// How long an idle pooled connection is kept for reuse. Long enough that a prewarm on trigger
+/// press (or a previous draft) still has a live TLS session when the request is sent.
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+/// HTTP/2 PING interval on pooled connections, so middleboxes and servers do not silently drop
+/// them while idle (a dead pooled connection costs a full reconnect on the next request).
+const H2_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+const H2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(10);
+const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
+
+tokio::task_local! {
+    /// Where the connector records how long opening a connection took, for the request being
+    /// sent on this task (see [`ConnectTiming`]).
+    static CONNECT_SLOT: Arc<Mutex<Option<Duration>>>;
+}
+
+/// Tower layer around reqwest's connector (DNS + TCP + TLS) that times each new connection and
+/// reports it to the request whose task started it. A connection opened in the background (the
+/// pool handed the request another one first) reports nothing, which is right: that request did
+/// not wait for it.
+#[derive(Clone, Copy)]
+struct ConnectTiming;
+
+impl<S> tower_layer::Layer<S> for ConnectTiming {
+    type Service = ConnectTimed<S>;
+    fn layer(&self, inner: S) -> Self::Service {
+        ConnectTimed(inner)
+    }
+}
+
+#[derive(Clone)]
+struct ConnectTimed<S>(S);
+
+impl<S, R> tower_service::Service<R> for ConnectTimed<S>
+where
+    S: tower_service::Service<R>,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = Pin<Box<dyn Future<Output = std::result::Result<S::Response, S::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<std::result::Result<(), S::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: R) -> Self::Future {
+        let slot = CONNECT_SLOT.try_with(Arc::clone).ok();
+        let started = Instant::now();
+        let fut = self.0.call(req);
+        Box::pin(async move {
+            let out = fut.await;
+            if out.is_ok()
+                && let Some(slot) = slot
+            {
+                *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(started.elapsed());
+            }
+            out
+        })
+    }
+}
+
+/// When a request started and what its connection cost; turned into [`Timings`] by the stream.
+#[derive(Debug, Clone)]
+pub(crate) struct RequestClock {
+    pub started: Instant,
+    pub connect: Option<Duration>,
+    pub headers: Duration,
+    pub attempts: u32,
+}
+
+impl RequestClock {
+    pub(crate) fn timings(
+        &self,
+        first_byte: Option<Instant>,
+        first_token: Option<Instant>,
+        end: Instant,
+    ) -> Timings {
+        let since = |t: Instant| t.saturating_duration_since(self.started);
+        Timings {
+            connect: self.connect,
+            headers: self.headers,
+            first_byte: first_byte.map(since),
+            first_token: first_token.map(since),
+            total: since(end),
+            attempts: self.attempts,
+        }
+    }
+}
 
 /// Records one HTTP exchange in the egress ledger when dropped (exactly once), unless the
 /// provider is on-device.
@@ -107,6 +198,16 @@ impl Http {
             .default_headers(default_headers)
             .connect_timeout(settings.connect_timeout)
             .read_timeout(settings.idle_timeout)
+            // Connection reuse (M3 latency): keep TLS sessions warm between requests and after a
+            // prewarm. HTTP/2 is negotiated by ALPN on https; plain-http local servers use
+            // HTTP/1.1 keep-alive from the same pool.
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .tcp_nodelay(true)
+            .tcp_keepalive(TCP_KEEPALIVE)
+            .http2_keep_alive_interval(H2_KEEPALIVE_INTERVAL)
+            .http2_keep_alive_timeout(H2_KEEPALIVE_TIMEOUT)
+            .http2_keep_alive_while_idle(true)
+            .connector_layer(ConnectTiming)
             // Never follow redirects: a redirect would carry the key, headers and body to a host
             // the egress ledger and locality checks never saw. A 3xx is an error instead.
             .redirect(reqwest::redirect::Policy::none());
@@ -171,26 +272,66 @@ impl Http {
         feature: &str,
         items: &[ItemRef],
         accept_sse: bool,
-    ) -> Result<(reqwest::Response, EgressMeter)> {
-        let url = self.endpoint(path);
+    ) -> Result<(reqwest::Response, EgressMeter, RequestClock)> {
         let bytes = Bytes::from(serde_json::to_vec(body)?);
+        self.send(Method::POST, path, Some(bytes), feature, items, accept_sse)
+            .await
+    }
+
+    /// GET with no body (prewarm). Same retry, metering and error rules as [`Self::post_json`].
+    pub(crate) async fn get(
+        &self,
+        path: &str,
+        feature: &str,
+    ) -> Result<(reqwest::Response, EgressMeter, RequestClock)> {
+        self.send(Method::GET, path, None, feature, &[], false)
+            .await
+    }
+
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        bytes: Option<Bytes>,
+        feature: &str,
+        items: &[ItemRef],
+        accept_sse: bool,
+    ) -> Result<(reqwest::Response, EgressMeter, RequestClock)> {
+        let url = self.endpoint(path);
+        let started = Instant::now();
+        let mut connect: Option<Duration> = None;
         let mut attempt: u32 = 0;
         loop {
-            let mut req = self
-                .client
-                .request(Method::POST, url.clone())
-                .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(bytes.clone());
+            let mut req = self.client.request(method.clone(), url.clone());
+            if let Some(bytes) = &bytes {
+                req = req
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(bytes.clone());
+            }
             if accept_sse {
                 req = req.header(reqwest::header::ACCEPT, "text/event-stream");
             }
             for (k, v) in &self.auth {
                 req = req.header(k.clone(), v.clone());
             }
-            let mut meter = self.meter(feature, items, bytes.len() as u64);
+            let sent = bytes.as_ref().map_or(0, |b| b.len() as u64);
+            let mut meter = self.meter(feature, items, sent);
             let can_retry = attempt < self.settings.max_retries;
-            match req.send().await {
-                Ok(resp) if resp.status().is_success() => return Ok((resp, meter)),
+            let slot = Arc::new(Mutex::new(None));
+            let result = CONNECT_SLOT.scope(slot.clone(), req.send()).await;
+            if let Some(c) = *slot.lock().unwrap_or_else(|e| e.into_inner()) {
+                connect = Some(connect.unwrap_or_default() + c);
+            }
+            match result {
+                Ok(resp) if resp.status().is_success() => {
+                    let clock = RequestClock {
+                        started,
+                        connect,
+                        headers: started.elapsed(),
+                        attempts: attempt + 1,
+                    };
+                    return Ok((resp, meter, clock));
+                }
                 Ok(resp) if resp.status().is_redirection() => {
                     let target = redirect_target(&url, resp.headers());
                     let body = read_limited(resp, MAX_ERROR_BODY).await;
@@ -247,7 +388,7 @@ impl Http {
         feature: &str,
         items: &[ItemRef],
     ) -> Result<Value> {
-        let (resp, mut meter) = self.post_json(path, body, feature, items, false).await?;
+        let (resp, mut meter, _) = self.post_json(path, body, feature, items, false).await?;
         let mut stream = resp.bytes_stream();
         let mut buf: Vec<u8> = Vec::new();
         while let Some(chunk) = stream.next().await {
@@ -284,14 +425,53 @@ pub(crate) trait SseDecoder: Send + 'static {
     fn on_event(&mut self, event: crate::sse::SseEvent) -> Result<Vec<ChatEvent>>;
     /// The body ended. Return trailing events (usually `Done`) or an error if incomplete.
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>>;
+    /// Prompt-cache usage seen so far: (tokens read from cache, tokens written to cache).
+    fn cache_usage(&self) -> (Option<u32>, Option<u32>) {
+        (None, None)
+    }
+}
+
+/// The [`ChatEvent::Stats`] sent just before `done`.
+fn stats_for(
+    done: &ChatEvent,
+    cache: (Option<u32>, Option<u32>),
+    clock: &RequestClock,
+    first_byte: Option<Instant>,
+    first_token: Option<Instant>,
+) -> ChatEvent {
+    let (input_tokens, output_tokens) = match done {
+        ChatEvent::Done {
+            input_tokens,
+            output_tokens,
+            ..
+        } => (*input_tokens, *output_tokens),
+        _ => (None, None),
+    };
+    ChatEvent::Stats(ChatStats {
+        input_tokens,
+        output_tokens,
+        cached_input_tokens: cache.0,
+        cache_write_tokens: cache.1,
+        timings: Some(clock.timings(first_byte, first_token, Instant::now())),
+    })
+}
+
+fn is_token(e: &ChatEvent) -> bool {
+    match e {
+        ChatEvent::TextDelta(t) => !t.is_empty(),
+        ChatEvent::ToolCall { .. } => true,
+        _ => false,
+    }
 }
 
 /// Turn a successful streaming response into a [`ChatStream`]. The stream ends after the first
-/// `Done` or error. The egress meter records when the stream finishes or is dropped.
+/// `Done` or error; `Done` is preceded by a [`ChatEvent::Stats`] with cache usage and timings.
+/// The egress meter records when the stream finishes or is dropped.
 pub(crate) fn sse_chat_stream<D: SseDecoder>(
     provider: ProviderId,
     resp: reqwest::Response,
     meter: EgressMeter,
+    clock: RequestClock,
     mut decoder: D,
 ) -> ChatStream {
     let content_type = resp
@@ -302,6 +482,8 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
         .to_ascii_lowercase();
     Box::pin(async_stream::stream! {
         let mut meter = meter;
+        let mut first_byte: Option<Instant> = None;
+        let mut first_token: Option<Instant> = None;
         if content_type.contains("application/json") {
             // Server ignored `stream: true` or answered 200 with an error envelope.
             let body = read_limited(resp, MAX_ERROR_BODY).await;
@@ -318,6 +500,9 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
             let (events, eof) = match body.next().await {
                 Some(Ok(chunk)) => {
                     meter.add_received(chunk.len());
+                    if !chunk.is_empty() {
+                        first_byte.get_or_insert_with(Instant::now);
+                    }
                     match parser.push(&chunk) {
                         Ok(evs) => (evs, false),
                         Err(_) => {
@@ -336,7 +521,13 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
                 match decoder.on_event(ev) {
                     Ok(out) => {
                         for e in out {
+                            if is_token(&e) {
+                                first_token.get_or_insert_with(Instant::now);
+                            }
                             let done = matches!(e, ChatEvent::Done { .. });
+                            if done {
+                                yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
+                            }
                             yield Ok(e);
                             if done {
                                 return;
@@ -354,7 +545,13 @@ pub(crate) fn sse_chat_stream<D: SseDecoder>(
                     Ok(out) => {
                         let mut done = false;
                         for e in out {
-                            done |= matches!(e, ChatEvent::Done { .. });
+                            if is_token(&e) {
+                                first_token.get_or_insert_with(Instant::now);
+                            }
+                            if matches!(e, ChatEvent::Done { .. }) {
+                                done = true;
+                                yield Ok(stats_for(&e, decoder.cache_usage(), &clock, first_byte, first_token));
+                            }
                             yield Ok(e);
                         }
                         if !done {

@@ -8,6 +8,19 @@
 //!   choice finishes. `usage` is requested via `stream_options.include_usage` (configurable).
 //! - Mid-stream `{"error": ...}` payloads (OpenRouter, vLLM, llama-server) end the stream with an
 //!   error.
+//! - Prompt caching: `usage.prompt_tokens_details.cached_tokens` (OpenAI, llama-server) or
+//!   llama-server's `timings.cache_n` is reported in [`crate::ChatStats`].
+//!   [`crate::Part::CacheBreakpoint`]s are dropped (every message is sent as before).
+//! - llama-server extensions (config `llama_cpp`, on by default for on-device endpoints; checked
+//!   against llama.cpp b11940's `tools/server`, which copies unknown body fields into its
+//!   completion parameters): `cache_prompt: true` on every chat request; with `slot_affinity`
+//!   and a [`crate::CacheHint`] key, `id_slot` = a stable hash of the key (the server takes it
+//!   modulo its slot count; a busy pinned slot defers the request rather than using another).
+//! - [`Provider::prewarm`] is `GET {base}/models`. With `llama_cpp`, [`Provider::prewarm_prefix`]
+//!   sends the stable prefix to `chat/completions` with `n_predict: 0` (the server evaluates the
+//!   prompt into the slot's KV cache and generates at most one token), `cache_prompt: true`,
+//!   `stream: false` and the output cap set to 1 for servers that ignore `n_predict`. Otherwise it
+//!   only prewarms the connection.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -28,11 +41,40 @@ use crate::types::{
     ChatEvent, ChatRequest, ChatStream, FEATURE_EMBED, Message, Part, ProviderMeta, Role,
     StopReason,
 };
+use nugget_core::capability::Locality;
 
 const DEFAULT_EMBED_BATCH: usize = 64;
 
 pub struct OpenAiCompatibleProvider {
     common: Common,
+    ext: LlamaExt,
+}
+
+/// llama-server request extensions in effect for one provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct LlamaExt {
+    pub cache_prompt: bool,
+    pub slot_affinity: bool,
+}
+
+impl LlamaExt {
+    pub(crate) fn for_config(cfg: &ProviderConfig, locality: Locality) -> Self {
+        let cache_prompt = cfg.llama_cpp.unwrap_or(locality == Locality::OnDevice);
+        Self {
+            cache_prompt,
+            slot_affinity: cache_prompt && cfg.slot_affinity.unwrap_or(false),
+        }
+    }
+}
+
+/// Stable (FNV-1a) slot number for a cache key; llama-server reduces it modulo its slot count.
+pub(crate) fn slot_for_key(key: &str) -> u32 {
+    let mut h: u32 = 0x811c_9dc5;
+    for b in key.bytes() {
+        h ^= u32::from(b);
+        h = h.wrapping_mul(0x0100_0193);
+    }
+    h & 0x7fff_ffff
 }
 
 impl OpenAiCompatibleProvider {
@@ -43,13 +85,48 @@ impl OpenAiCompatibleProvider {
         prepared: Prepared,
     ) -> Result<Self> {
         let auth = auth_header("authorization", key, |k| format!("Bearer {k}"))?;
+        let ext = LlamaExt::for_config(cfg, prepared.locality);
         Ok(Self {
             common: Common::new(cfg, egress, auth, prepared)?,
+            ext,
         })
     }
 }
 
-pub(crate) fn build_body(cfg: &ProviderConfig, req: &ChatRequest) -> Result<Value> {
+/// The `n_predict: 0` KV-cache warm-up for `req`'s stable prefix (llama-server), or `None` if
+/// there is no prefix.
+pub(crate) fn build_prewarm_body(
+    cfg: &ProviderConfig,
+    ext: LlamaExt,
+    req: &ChatRequest,
+) -> Result<Option<Value>> {
+    let Some(prefix) = req.cache_prefix() else {
+        return Ok(None);
+    };
+    let mut body = build_body(cfg, ext, &prefix)?;
+    let obj = body
+        .as_object_mut()
+        .ok_or_else(|| Error::Other("chat body is not an object".into()))?;
+    obj.insert("stream".into(), json!(false));
+    obj.remove("stream_options");
+    obj.insert("n_predict".into(), json!(0));
+    obj.insert("cache_prompt".into(), json!(true));
+    let cap = match cfg.max_tokens_param.unwrap_or_default() {
+        MaxTokensParam::MaxTokens => "max_tokens",
+        MaxTokensParam::MaxCompletionTokens => "max_completion_tokens",
+    };
+    obj.insert(cap.into(), json!(1));
+    if let Some(Value::Array(messages)) = obj.get_mut("messages")
+        && messages.last().and_then(|m| m["role"].as_str()) != Some("user")
+    {
+        // Many chat templates refuse a conversation without a user turn; this one sits after the
+        // prefix, so it does not change the cached tokens.
+        messages.push(json!({"role": "user", "content": "warmup"}));
+    }
+    Ok(Some(body))
+}
+
+pub(crate) fn build_body(cfg: &ProviderConfig, ext: LlamaExt, req: &ChatRequest) -> Result<Value> {
     let mut body = Map::new();
     body.insert("model".into(), json!(cfg.model));
     body.insert("stream".into(), json!(true));
@@ -95,6 +172,14 @@ pub(crate) fn build_body(cfg: &ProviderConfig, req: &ChatRequest) -> Result<Valu
     }
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
+    }
+    if ext.cache_prompt {
+        body.insert("cache_prompt".into(), json!(true));
+    }
+    if ext.slot_affinity
+        && let Some(key) = req.cache.as_ref().and_then(|c| c.key.as_deref())
+    {
+        body.insert("id_slot".into(), json!(slot_for_key(key)));
     }
     let mut body = Value::Object(body);
     merge_extra_body(&mut body, cfg.extra_body.as_ref());
@@ -182,7 +267,7 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                                 "images and tool results belong in user messages".into(),
                             ));
                         }
-                        Part::Opaque { .. } => {}
+                        Part::Opaque { .. } | Part::CacheBreakpoint => {}
                     }
                 }
                 if text.is_empty() && calls.is_empty() {
@@ -217,6 +302,7 @@ pub(crate) struct Decoder {
     finish_reason: Option<String>,
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
+    cached_tokens: Option<u32>,
     flushed: bool,
     finished: bool,
 }
@@ -229,6 +315,7 @@ impl Decoder {
             finish_reason: None,
             input_tokens: None,
             output_tokens: None,
+            cached_tokens: None,
             flushed: false,
             finished: false,
         }
@@ -304,6 +391,11 @@ impl SseDecoder for Decoder {
         if let Some(u) = v.get("usage").filter(|u| u.is_object()) {
             self.input_tokens = as_u32(u.get("prompt_tokens")).or(self.input_tokens);
             self.output_tokens = as_u32(u.get("completion_tokens")).or(self.output_tokens);
+            self.cached_tokens =
+                as_u32(u.pointer("/prompt_tokens_details/cached_tokens")).or(self.cached_tokens);
+        }
+        if self.cached_tokens.is_none() {
+            self.cached_tokens = as_u32(v.pointer("/timings/cache_n"));
         }
         let mut out = Vec::new();
         let choices = v.get("choices").and_then(Value::as_array);
@@ -367,6 +459,10 @@ impl SseDecoder for Decoder {
         Ok(out)
     }
 
+    fn cache_usage(&self) -> (Option<u32>, Option<u32>) {
+        (self.cached_tokens, None)
+    }
+
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>> {
         // Some servers omit `[DONE]`; a finished choice is enough.
         if self.finish_reason.is_some() {
@@ -388,8 +484,8 @@ impl Provider for OpenAiCompatibleProvider {
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
-        let body = build_body(&self.common.cfg, &req)?;
-        let (resp, meter) = self
+        let body = build_body(&self.common.cfg, self.ext, &req)?;
+        let (resp, meter, clock) = self
             .common
             .http
             .post_json("chat/completions", &body, &req.feature, &req.items, true)
@@ -398,8 +494,27 @@ impl Provider for OpenAiCompatibleProvider {
             self.common.id.clone(),
             resp,
             meter,
+            clock,
             Decoder::new(self.common.id.clone()),
         ))
+    }
+
+    async fn prewarm(&self) -> Result<()> {
+        self.common.prewarm_get("models").await
+    }
+
+    async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+        if !self.ext.cache_prompt {
+            return self.prewarm().await;
+        }
+        let Some(body) = build_prewarm_body(&self.common.cfg, self.ext, req)? else {
+            return self.prewarm().await;
+        };
+        self.common
+            .http
+            .post_for_json("chat/completions", &body, &req.feature, &req.items)
+            .await?;
+        Ok(())
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -523,7 +638,7 @@ mod tests {
         }])
         .with_json_schema(json!({"type": "object"}))
         .with_max_tokens(50);
-        let b = build_body(&cfg(), &req).unwrap();
+        let b = build_body(&cfg(), LlamaExt::default(), &req).unwrap();
         let m = b["messages"].as_array().unwrap();
         assert_eq!(m[0], json!({"role": "system", "content": "sys"}));
         assert_eq!(m[1], json!({"role": "user", "content": "hi"}));
@@ -545,7 +660,7 @@ mod tests {
         let mut c = cfg();
         c.max_tokens_param = Some(MaxTokensParam::MaxCompletionTokens);
         c.stream_usage = Some(false);
-        let b = build_body(&c, &req).unwrap();
+        let b = build_body(&c, LlamaExt::default(), &req).unwrap();
         assert_eq!(b["max_completion_tokens"], 50);
         assert!(b.get("max_tokens").is_none());
         assert!(b.get("stream_options").is_none());
@@ -605,6 +720,19 @@ mod tests {
                 .unwrap()
                 .iter()
                 .all(|e| !matches!(e, ChatEvent::Done { .. }))
+        );
+    }
+
+    #[test]
+    fn slot_hash_is_stable_and_non_negative() {
+        assert_eq!(slot_for_key("draft"), slot_for_key("draft"));
+        assert_ne!(slot_for_key("draft"), slot_for_key("chat"));
+        assert!(slot_for_key("x") <= i32::MAX as u32);
+        let local = LlamaExt::for_config(&cfg(), Locality::OnDevice);
+        assert!(local.cache_prompt && !local.slot_affinity);
+        assert_eq!(
+            LlamaExt::for_config(&cfg(), Locality::LocalNetwork),
+            LlamaExt::default()
         );
     }
 

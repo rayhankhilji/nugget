@@ -257,6 +257,19 @@ pub struct ProviderConfig {
     /// OpenAI-compatible only: texts per embeddings request (default 64).
     #[serde(default)]
     pub embed_batch_size: Option<usize>,
+    /// OpenAI-compatible only: the server is llama.cpp's `llama-server`. Requests then carry
+    /// `cache_prompt: true` (reuse the KV cache for the common prompt prefix), and
+    /// [`crate::Provider::prewarm_prefix`] evaluates the stable prefix into the KV cache
+    /// (`n_predict: 0`). Default: true for on-device endpoints (Ollama, LM Studio and vLLM ignore
+    /// the extra fields), false otherwise.
+    #[serde(default)]
+    pub llama_cpp: Option<bool>,
+    /// OpenAI-compatible llama-server only: send requests whose [`crate::CacheHint`] has a `key`
+    /// to a fixed slot (`id_slot`, derived from the key; llama-server wraps it to its slot
+    /// count). Default false: llama-server already picks the idle slot with the longest cached
+    /// prefix match, whereas a pinned request waits whenever its slot is busy.
+    #[serde(default)]
+    pub slot_affinity: Option<bool>,
 }
 
 /// A TOML file holding `[[providers]]` tables.
@@ -447,6 +460,12 @@ impl ProviderConfig {
             }
             if self.embed_batch_size.is_some() {
                 wrong_kind("embed_batch_size", ProviderKind::OpenaiCompatible)?;
+            }
+            if self.llama_cpp.is_some() {
+                wrong_kind("llama_cpp", ProviderKind::OpenaiCompatible)?;
+            }
+            if self.slot_affinity.is_some() {
+                wrong_kind("slot_affinity", ProviderKind::OpenaiCompatible)?;
             }
         }
         Ok(())

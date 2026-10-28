@@ -11,6 +11,16 @@
 //!   replayed.
 //! - `temperature` is rejected by API version `2026-10-21` and later, so it is only sent when an
 //!   older `anthropic_version` is configured.
+//! - Prompt caching: a [`CacheHint`] with `system: true` puts `cache_control` on the system
+//!   prompt (sent as one text block), or on the last tool when there is no system prompt; each
+//!   [`Part::CacheBreakpoint`] puts it on the content block just before the marker (never on a
+//!   thinking block). The API allows four breakpoints: the system/tool one and the last three
+//!   message breakpoints are kept. `cache_read_input_tokens` and `cache_creation_input_tokens`
+//!   are reported in [`crate::ChatStats`] (both are also counted in `input_tokens`). Prefixes
+//!   shorter than the model's minimum (512–4096 tokens) are silently not cached.
+//! - [`Provider::prewarm`] is `GET /v1/models` (no content). [`Provider::prewarm_prefix`] sends
+//!   the cacheable prefix with `max_tokens: 0` and `stream: false` (prefill only: the cache is
+//!   written, nothing is generated or billed as output).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,8 +37,10 @@ use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat
 use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema;
 use crate::sse::SseEvent;
+#[cfg(doc)]
+use crate::types::CacheHint;
 use crate::types::{
-    ChatEvent, ChatRequest, ChatStream, Message, Part, ProviderKind, ProviderMeta, Role,
+    CacheTtl, ChatEvent, ChatRequest, ChatStream, Message, Part, ProviderKind, ProviderMeta, Role,
     StopReason, is_fallback_marker,
 };
 
@@ -36,6 +48,11 @@ use crate::types::{
 pub const DEFAULT_MAX_TOKENS: u32 = 16_000;
 /// First API version that rejects sampling parameters.
 const SAMPLING_REMOVED_IN: &str = "2026-10-21";
+/// The API rejects requests with more `cache_control` breakpoints than this.
+pub const MAX_CACHE_BREAKPOINTS: usize = 4;
+/// Placeholder user turn for a prefix prewarm whose prefix does not end in a user message. It is
+/// read during prefill but never answered, and sits after every breakpoint.
+const PREWARM_PLACEHOLDER: &str = "warmup";
 
 pub struct AnthropicProvider {
     common: Common,
@@ -73,6 +90,63 @@ impl AnthropicProvider {
             req,
         )
     }
+
+    fn prewarm_body(&self, req: &ChatRequest) -> Result<Option<Value>> {
+        build_prewarm_body(
+            &self.common.cfg,
+            &self.api_version,
+            self.eager_input_streaming,
+            req,
+        )
+    }
+}
+
+/// The `max_tokens: 0` cache-warming request for `req`'s stable prefix, or `None` when nothing
+/// in it is marked cacheable (then there is no cache entry to write).
+pub(crate) fn build_prewarm_body(
+    cfg: &ProviderConfig,
+    api_version: &str,
+    eager_input_streaming: bool,
+    req: &ChatRequest,
+) -> Result<Option<Value>> {
+    let Some(prefix) = req.cache_prefix() else {
+        return Ok(None);
+    };
+    let cache_system = prefix.cache.as_ref().is_some_and(|c| c.system)
+        && (prefix
+            .system
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+            || !prefix.tools.is_empty());
+    if !cache_system && !prefix.has_cache_breakpoints() {
+        return Ok(None);
+    }
+    let mut body = build_body(cfg, api_version, eager_input_streaming, &prefix)?;
+    body["max_tokens"] = json!(0);
+    body["stream"] = json!(false);
+    // Rejected together with `max_tokens: 0`.
+    if let Some(oc) = body.get_mut("output_config").and_then(Value::as_object_mut) {
+        oc.remove("format");
+        if oc.is_empty() {
+            body.as_object_mut().map(|b| b.remove("output_config"));
+        }
+    }
+    if body
+        .pointer("/tool_choice/type")
+        .and_then(Value::as_str)
+        .is_some_and(|t| t == "any" || t == "tool")
+    {
+        body.as_object_mut().map(|b| b.remove("tool_choice"));
+    }
+    let messages = body["messages"]
+        .as_array_mut()
+        .ok_or_else(|| Error::Other("anthropic body has no messages".into()))?;
+    if messages.last().and_then(|m| m["role"].as_str()) != Some("user") {
+        messages.push(
+            json!({"role": "user", "content": [{"type": "text", "text": PREWARM_PLACEHOLDER}]}),
+        );
+    }
+    Ok(Some(body))
 }
 
 pub(crate) fn build_body(
@@ -92,13 +166,25 @@ pub(crate) fn build_body(
         ),
     );
     body.insert("stream".into(), json!(true));
-    if let Some(system) = req.system.as_deref().filter(|s| !s.trim().is_empty()) {
-        body.insert("system".into(), json!(system));
+    let cc = cache_control(req);
+    let cache_system = req.cache.as_ref().is_some_and(|c| c.system);
+    let system = req.system.as_deref().filter(|s| !s.trim().is_empty());
+    if let Some(system) = system {
+        if cache_system {
+            body.insert(
+                "system".into(),
+                json!([{"type": "text", "text": system, "cache_control": cc}]),
+            );
+        } else {
+            body.insert("system".into(), json!(system));
+        }
     }
-    body.insert(
-        "messages".into(),
-        Value::Array(convert_messages(&req.messages)?),
+    let mut messages = convert_messages(&req.messages, &cc)?;
+    limit_message_breakpoints(
+        &mut messages,
+        MAX_CACHE_BREAKPOINTS - usize::from(cache_system),
     );
+    body.insert("messages".into(), Value::Array(messages));
     if !req.tools.is_empty() {
         let tools: Vec<Value> = req
             .tools
@@ -115,6 +201,13 @@ pub(crate) fn build_body(
                 tool
             })
             .collect();
+        let mut tools = tools;
+        if cache_system
+            && system.is_none()
+            && let Some(last) = tools.last_mut()
+        {
+            last["cache_control"] = cc.clone();
+        }
         body.insert("tools".into(), Value::Array(tools));
     }
     if let Some(s) = &req.json_schema {
@@ -135,7 +228,62 @@ pub(crate) fn build_body(
     Ok(body)
 }
 
-fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
+/// The `cache_control` object for this request's TTL.
+fn cache_control(req: &ChatRequest) -> Value {
+    match req.cache.as_ref().map(|c| c.ttl).unwrap_or_default() {
+        CacheTtl::Default => json!({"type": "ephemeral"}),
+        CacheTtl::OneHour => json!({"type": "ephemeral", "ttl": "1h"}),
+    }
+}
+
+/// Blocks that may not carry `cache_control`.
+fn uncacheable(block: &Value) -> bool {
+    matches!(
+        block.get("type").and_then(Value::as_str),
+        Some("thinking" | "redacted_thinking")
+    )
+}
+
+/// Put `cache_control` on the last cacheable block emitted so far: in the current message, else
+/// in earlier messages. Nothing before the marker: ignored.
+fn mark_breakpoint(blocks: &mut [Value], out: &mut [Value], cc: &Value) {
+    if let Some(b) = blocks.iter_mut().rev().find(|b| !uncacheable(b)) {
+        b["cache_control"] = cc.clone();
+        return;
+    }
+    for m in out.iter_mut().rev() {
+        if let Some(b) = m["content"]
+            .as_array_mut()
+            .and_then(|c| c.iter_mut().rev().find(|b| !uncacheable(b)))
+        {
+            b["cache_control"] = cc.clone();
+            return;
+        }
+    }
+}
+
+/// Keep at most `max` message breakpoints, the latest ones (each later breakpoint also covers
+/// the prefix before it, within the API's 20-block lookback).
+fn limit_message_breakpoints(messages: &mut [Value], max: usize) {
+    let mut seen = 0;
+    for m in messages.iter_mut().rev() {
+        let Some(content) = m["content"].as_array_mut() else {
+            continue;
+        };
+        for b in content.iter_mut().rev() {
+            if let Some(obj) = b.as_object_mut()
+                && obj.contains_key("cache_control")
+            {
+                seen += 1;
+                if seen > max {
+                    obj.remove("cache_control");
+                }
+            }
+        }
+    }
+}
+
+fn convert_messages(messages: &[Message], cc: &Value) -> Result<Vec<Value>> {
     let mut out = Vec::with_capacity(messages.len());
     for m in messages {
         let mut blocks: Vec<Value> = Vec::new();
@@ -173,6 +321,7 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                                 "tool calls belong in assistant messages".into(),
                             ));
                         }
+                        Part::CacheBreakpoint => mark_breakpoint(&mut blocks, &mut out, cc),
                         _ => {}
                     }
                 }
@@ -214,6 +363,7 @@ fn convert_messages(messages: &[Message]) -> Result<Vec<Value>> {
                                 "images and tool results belong in user messages".into(),
                             ));
                         }
+                        Part::CacheBreakpoint => mark_breakpoint(&mut blocks, &mut out, cc),
                         _ => {}
                     }
                 }
@@ -252,6 +402,8 @@ pub(crate) struct Decoder {
     blocks: HashMap<u64, Block>,
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
+    cache_read: Option<u32>,
+    cache_write: Option<u32>,
     stop_reason: Option<String>,
     /// Tool calls whose arguments were not valid JSON; emitted at the end unless the output was
     /// truncated by `max_tokens` (then they are incomplete and dropped).
@@ -266,6 +418,8 @@ impl Decoder {
             blocks: HashMap::new(),
             input_tokens: None,
             output_tokens: None,
+            cache_read: None,
+            cache_write: None,
             stop_reason: None,
             deferred: Vec::new(),
             finished: false,
@@ -308,6 +462,13 @@ impl Decoder {
         }
         if let Some(o) = n("output_tokens") {
             self.output_tokens = Some(o.min(u32::MAX as u64) as u32);
+        }
+        let clamp = |v: u64| v.min(u32::MAX as u64) as u32;
+        if let Some(r) = n("cache_read_input_tokens") {
+            self.cache_read = Some(clamp(r));
+        }
+        if let Some(w) = n("cache_creation_input_tokens") {
+            self.cache_write = Some(clamp(w));
         }
     }
 }
@@ -455,6 +616,10 @@ impl SseDecoder for Decoder {
         Ok(out)
     }
 
+    fn cache_usage(&self) -> (Option<u32>, Option<u32>) {
+        (self.cache_read, self.cache_write)
+    }
+
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>> {
         // Tolerate a missing `message_stop` once the stop reason is known.
         if self.stop_reason.is_some() {
@@ -477,7 +642,7 @@ impl Provider for AnthropicProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let body = self.body(&req)?;
-        let (resp, meter) = self
+        let (resp, meter, clock) = self
             .common
             .http
             .post_json("v1/messages", &body, &req.feature, &req.items, true)
@@ -486,8 +651,24 @@ impl Provider for AnthropicProvider {
             self.common.id.clone(),
             resp,
             meter,
+            clock,
             Decoder::new(self.common.id.clone()),
         ))
+    }
+
+    async fn prewarm(&self) -> Result<()> {
+        self.common.prewarm_get("v1/models").await
+    }
+
+    async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+        let Some(body) = self.prewarm_body(req)? else {
+            return self.prewarm().await;
+        };
+        self.common
+            .http
+            .post_for_json("v1/messages", &body, &req.feature, &req.items)
+            .await?;
+        Ok(())
     }
 
     async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
@@ -582,6 +763,46 @@ mod tests {
         let b = build_body(&cfg(), "2023-06-01", false, &req).unwrap();
         assert!((b["temperature"].as_f64().unwrap() - 0.2).abs() < 1e-6);
         assert!(b["tools"][0].get("eager_input_streaming").is_none());
+    }
+
+    #[test]
+    fn cache_breakpoints_are_capped_and_skip_thinking() {
+        use crate::types::CacheHint;
+        let mut content = Vec::new();
+        for i in 0..5 {
+            content.push(Part::text(format!("t{i}")));
+            content.push(Part::CacheBreakpoint);
+        }
+        let req = ChatRequest::new(vec![
+            Message::user(content),
+            Message::new(
+                Role::Assistant,
+                vec![
+                    Part::text("before"),
+                    Part::Opaque {
+                        kind: ProviderKind::Anthropic,
+                        data: json!({"type": "thinking", "thinking": "", "signature": "s"}),
+                    },
+                    Part::CacheBreakpoint,
+                ],
+            ),
+        ])
+        .with_system("sys")
+        .with_cache(CacheHint::default());
+        let b = build_body(&cfg(), "2026-10-21", true, &req).unwrap();
+        let marked = |v: &Value| v.get("cache_control").is_some();
+        assert!(marked(&b["system"][0]));
+        let user = b["messages"][0]["content"].as_array().unwrap();
+        let asst = b["messages"][1]["content"].as_array().unwrap();
+        // System + the latest three message breakpoints = the API's limit of four.
+        assert_eq!(
+            user.iter().map(marked).collect::<Vec<_>>(),
+            vec![false, false, false, true, true]
+        );
+        assert!(marked(&asst[0]), "skips back past the thinking block");
+        assert!(!marked(&asst[1]));
+        let total = 1 + user.iter().chain(asst).filter(|v| marked(v)).count();
+        assert_eq!(total, MAX_CACHE_BREAKPOINTS);
     }
 
     #[test]

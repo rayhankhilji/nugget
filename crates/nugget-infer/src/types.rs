@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::pin::Pin;
+use std::time::Duration;
 
 use futures::{Stream, StreamExt};
 use nugget_core::capability::{Capabilities, Locality};
@@ -90,6 +91,14 @@ pub enum Part {
         kind: ProviderKind,
         data: Value,
     },
+    /// Prompt-cache boundary: everything before this marker (tools, system, earlier messages and
+    /// the parts before it in this message) is a stable prefix worth caching. Carries no content.
+    ///
+    /// - Anthropic: `cache_control` on the content block just before the marker (at most four
+    ///   breakpoints per request; see [`crate::adapters::anthropic`]).
+    /// - OpenAI Responses / OpenAI-compatible: dropped (their caches are automatic prefix
+    ///   matches); [`ChatRequest::cache_prefix`] still uses it to know what to prewarm.
+    CacheBreakpoint,
 }
 
 impl Part {
@@ -152,6 +161,62 @@ pub const FEATURE_CHAT: &str = "chat";
 pub const FEATURE_EMBED: &str = "embed";
 /// Egress-ledger feature tag for capability probes.
 pub const FEATURE_PROBE: &str = "probe";
+/// Egress-ledger feature tag for [`crate::Provider::prewarm`] connection warm-ups (which carry
+/// no content).
+pub const FEATURE_PREWARM: &str = "prewarm";
+
+/// How long a provider should keep a cached prefix (Anthropic `cache_control.ttl`; ignored by
+/// providers without a choice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CacheTtl {
+    /// The provider default (Anthropic: 5 minutes, refreshed by every hit).
+    #[default]
+    Default,
+    /// One hour (Anthropic `ttl: "1h"`; writes cost more, see the Anthropic caching docs).
+    OneHour,
+}
+
+/// Prompt-caching hints for a [`ChatRequest`]. Mark finer boundaries in the messages with
+/// [`Part::CacheBreakpoint`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CacheHint {
+    /// Cache the tools + system prompt prefix (Anthropic: `cache_control` on the last system
+    /// block, or the last tool when there is no system prompt). Default true.
+    #[serde(default = "default_true")]
+    pub system: bool,
+    /// A stable routing key for requests that share a prefix, e.g. `draft:email` or a session
+    /// id. Never put user content here: it is sent as-is. Used as OpenAI's `prompt_cache_key`
+    /// and, when the provider enables `slot_affinity`, to pick a llama-server slot (`id_slot`).
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub ttl: CacheTtl,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for CacheHint {
+    fn default() -> Self {
+        Self {
+            system: true,
+            key: None,
+            ttl: CacheTtl::Default,
+        }
+    }
+}
+
+impl CacheHint {
+    /// Cache the system prefix, routed by `key`.
+    pub fn keyed(key: impl Into<String>) -> Self {
+        Self {
+            key: Some(key.into()),
+            ..Self::default()
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatRequest {
@@ -174,6 +239,10 @@ pub struct ChatRequest {
     /// Items whose content is included in this request (egress-ledger provenance).
     #[serde(default)]
     pub items: Vec<ItemRef>,
+    /// Prompt-caching hints. `None` sends no explicit cache markers for the system prompt
+    /// ([`Part::CacheBreakpoint`]s in messages still apply).
+    #[serde(default)]
+    pub cache: Option<CacheHint>,
 }
 
 fn default_feature() -> String {
@@ -191,6 +260,7 @@ impl Default for ChatRequest {
             temperature: None,
             feature: default_feature(),
             items: Vec::new(),
+            cache: None,
         }
     }
 }
@@ -226,6 +296,55 @@ impl ChatRequest {
     pub fn with_feature(mut self, feature: impl Into<String>) -> Self {
         self.feature = feature.into();
         self
+    }
+
+    pub fn with_cache(mut self, cache: CacheHint) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    /// Does any message carry a [`Part::CacheBreakpoint`]?
+    pub fn has_cache_breakpoints(&self) -> bool {
+        self.messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .any(|p| matches!(p, Part::CacheBreakpoint))
+    }
+
+    /// The stable prefix of this request, for prewarming a provider's prompt cache before the
+    /// final context is known: tools, system prompt and the messages up to (and including the
+    /// marker of) the last [`Part::CacheBreakpoint`]. Without a breakpoint only tools and system
+    /// remain. `None` if there is nothing to cache (no system prompt, tools or breakpoint).
+    ///
+    /// `json_schema`, `max_tokens` and `temperature` are dropped; `feature`, `items` and `cache`
+    /// are kept so the egress ledger and routing key stay the same as the real request's.
+    pub fn cache_prefix(&self) -> Option<ChatRequest> {
+        let mut messages = Vec::new();
+        if let Some((mi, pi)) = self.messages.iter().enumerate().rev().find_map(|(mi, m)| {
+            m.content
+                .iter()
+                .rposition(|p| matches!(p, Part::CacheBreakpoint))
+                .map(|pi| (mi, pi))
+        }) {
+            messages.extend(self.messages[..mi].iter().cloned());
+            let m = &self.messages[mi];
+            messages.push(Message::new(m.role, m.content[..=pi].to_vec()));
+        }
+        let has_system = self.system.as_deref().is_some_and(|s| !s.trim().is_empty());
+        if messages.is_empty() && !has_system && self.tools.is_empty() {
+            return None;
+        }
+        Some(ChatRequest {
+            system: self.system.clone(),
+            messages,
+            tools: self.tools.clone(),
+            json_schema: None,
+            max_tokens: None,
+            temperature: None,
+            feature: self.feature.clone(),
+            items: self.items.clone(),
+            cache: self.cache.clone(),
+        })
     }
 
     /// Capabilities a provider must have to serve this request.
@@ -297,11 +416,59 @@ pub enum ChatEvent {
         kind: ProviderKind,
         data: Value,
     },
+    /// Usage detail and timings, sent by the built-in adapters immediately before `Done`. A
+    /// separate event (rather than new `Done` fields) so existing `Done` patterns keep compiling;
+    /// consumers that do not care can ignore it.
+    Stats(ChatStats),
     Done {
         stop_reason: StopReason,
         input_tokens: Option<u32>,
         output_tokens: Option<u32>,
     },
+}
+
+/// Token usage including prompt-cache detail, plus request timings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatStats {
+    /// Same as `Done::input_tokens`: every prompt token, cached or not.
+    #[serde(default)]
+    pub input_tokens: Option<u32>,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
+    /// Prompt tokens served from the provider's cache (included in `input_tokens`): Anthropic
+    /// `cache_read_input_tokens`, OpenAI `cached_tokens`, llama-server `cached_tokens` /
+    /// `timings.cache_n`. `None` if the provider did not say.
+    #[serde(default)]
+    pub cached_input_tokens: Option<u32>,
+    /// Prompt tokens written to the cache by this request (Anthropic
+    /// `cache_creation_input_tokens`; included in `input_tokens`).
+    #[serde(default)]
+    pub cache_write_tokens: Option<u32>,
+    #[serde(default)]
+    pub timings: Option<Timings>,
+}
+
+/// Wall-clock timings of one chat request, each measured from when the provider started sending
+/// it (including retries). For a successful stream they are monotonic:
+/// `headers <= first_byte <= first_token <= total`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Timings {
+    /// Time spent opening a new connection (DNS, TCP, TLS) for this request. `None` when a
+    /// pooled connection was reused (or the client could not tell).
+    #[serde(default)]
+    pub connect: Option<Duration>,
+    /// Until the response status and headers arrived (time to first byte of the response).
+    pub headers: Duration,
+    /// Until the first body bytes arrived.
+    #[serde(default)]
+    pub first_byte: Option<Duration>,
+    /// Until the first text delta or tool call was decoded.
+    #[serde(default)]
+    pub first_token: Option<Duration>,
+    /// Until the stream completed (`Done`).
+    pub total: Duration,
+    /// HTTP attempts made (1 = no retries).
+    pub attempts: u32,
 }
 
 /// The streamed reply to a [`ChatRequest`].
@@ -323,14 +490,19 @@ pub struct ChatResponse {
     pub stop_reason: StopReason,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// Cache detail and timings, when the provider sent [`ChatEvent::Stats`].
+    #[serde(default)]
+    pub stats: Option<ChatStats>,
 }
 
 impl ChatResponse {
     /// Drain a stream into a response. Fails if the stream errors or ends without `Done`.
     pub async fn collect(mut stream: ChatStream) -> Result<Self> {
         let mut parts: Vec<Part> = Vec::new();
+        let mut stats = None;
         while let Some(event) = stream.next().await {
             match event? {
+                ChatEvent::Stats(s) => stats = Some(s),
                 ChatEvent::TextDelta(text) => {
                     if let Some(Part::Text { text: last }) = parts.last_mut() {
                         last.push_str(&text);
@@ -365,6 +537,7 @@ impl ChatResponse {
                         stop_reason,
                         input_tokens,
                         output_tokens,
+                        stats,
                     });
                 }
             }

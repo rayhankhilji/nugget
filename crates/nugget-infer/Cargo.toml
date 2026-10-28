@@ -22,6 +22,9 @@ bytes = "1"
 png = "0.18"
 toml = "1"
 url = "2"
+# Wraps reqwest's connector to time connection setup (same versions reqwest already uses).
+tower-layer = "0.3"
+tower-service = "0.3"
 # TLS stack and features come from the workspace (rustls + aws-lc-rs, OS certificate verifier).
 reqwest = { workspace = true, features = ["stream"] }
 

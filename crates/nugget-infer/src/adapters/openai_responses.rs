@@ -7,6 +7,13 @@
 //!   strict-mode rules (all properties required, `additionalProperties: false`).
 //! - Embeddings are not part of this API; configure an `openai_compatible` provider against the
 //!   same base URL for `/embeddings`.
+//! - Prompt caching is automatic for long prefixes; requests keep a stable prefix (tools and
+//!   `instructions` first, then the conversation). With a [`crate::CacheHint`] the request sets
+//!   `prompt_cache_key` (the hint's `key`, else `nugget:{feature}`) so requests sharing a prefix
+//!   are routed to the same cache. `input_tokens_details.cached_tokens` is reported in
+//!   [`crate::ChatStats`]. [`crate::Part::CacheBreakpoint`]s are dropped.
+//! - [`Provider::prewarm`] is `GET {base}/models` (no content). The API has no prefill-only
+//!   request, so [`Provider::prewarm_prefix`] only prewarms the connection.
 
 use std::sync::Arc;
 
@@ -91,6 +98,13 @@ pub(crate) fn build_body(cfg: &ProviderConfig, store: bool, req: &ChatRequest) -
     if let Some(t) = req.temperature {
         body.insert("temperature".into(), json!(t));
     }
+    if let Some(hint) = &req.cache {
+        let key = hint
+            .key
+            .clone()
+            .unwrap_or_else(|| format!("nugget:{}", req.feature));
+        body.insert("prompt_cache_key".into(), json!(key));
+    }
     let mut body = Value::Object(body);
     merge_extra_body(&mut body, cfg.extra_body.as_ref());
     Ok(body)
@@ -174,7 +188,7 @@ fn convert_input(messages: &[Message]) -> Result<Vec<Value>> {
                                 "images and tool results belong in user messages".into(),
                             ));
                         }
-                        Part::Opaque { .. } => {}
+                        Part::Opaque { .. } | Part::CacheBreakpoint => {}
                     }
                 }
                 flush(&mut text, &mut items);
@@ -190,6 +204,7 @@ pub(crate) struct Decoder {
     saw_tool_call: bool,
     saw_refusal: bool,
     deferred: Vec<ChatEvent>,
+    cached_tokens: Option<u32>,
 }
 
 impl Decoder {
@@ -200,6 +215,7 @@ impl Decoder {
             saw_tool_call: false,
             saw_refusal: false,
             deferred: Vec::new(),
+            cached_tokens: None,
         }
     }
 
@@ -218,6 +234,7 @@ impl Decoder {
                 .and_then(Value::as_u64)
                 .map(|v| v.min(u32::MAX as u64) as u32)
         };
+        self.cached_tokens = n("input_tokens_details/cached_tokens");
         out.push(ChatEvent::Done {
             stop_reason: stop,
             input_tokens: n("input_tokens"),
@@ -335,6 +352,10 @@ impl SseDecoder for Decoder {
     fn on_eof(&mut self) -> Result<Vec<ChatEvent>> {
         Ok(Vec::new())
     }
+
+    fn cache_usage(&self) -> (Option<u32>, Option<u32>) {
+        (self.cached_tokens, None)
+    }
 }
 
 fn error_detail_value_or_self(v: &Value) -> Option<String> {
@@ -357,7 +378,7 @@ impl Provider for OpenAiResponsesProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let body = build_body(&self.common.cfg, self.store, &req)?;
-        let (resp, meter) = self
+        let (resp, meter, clock) = self
             .common
             .http
             .post_json("responses", &body, &req.feature, &req.items, true)
@@ -366,8 +387,13 @@ impl Provider for OpenAiResponsesProvider {
             self.common.id.clone(),
             resp,
             meter,
+            clock,
             Decoder::new(self.common.id.clone(), self.store),
         ))
+    }
+
+    async fn prewarm(&self) -> Result<()> {
+        self.common.prewarm_get("models").await
     }
 
     async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
