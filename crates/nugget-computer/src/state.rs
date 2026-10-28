@@ -76,10 +76,6 @@ impl Shared {
         self.cache().front().map(|t| t.window.clone())
     }
 
-    pub fn latest_tree(&self, window: &WindowId) -> Option<UiTree> {
-        self.cache().iter().find(|t| &t.window.id == window).cloned()
-    }
-
     /// A fresh, bounded snapshot (blocking; call from a blocking task). Kept in the cache.
     pub fn snapshot(&self, sel: &WindowSel) -> Result<UiTree> {
         let tree = self.cu.snapshot(sel, &self.config.tree_limits())?;
@@ -123,12 +119,7 @@ fn found_in(tree: &UiTree, id: &ElementId) -> Option<Found> {
         context.extend(
             dialog
                 .iter()
-                .filter(|n| {
-                    matches!(
-                        n.role,
-                        Role::StaticText | Role::Paragraph | Role::Heading
-                    )
-                })
+                .filter(|n| matches!(n.role, Role::StaticText | Role::Paragraph | Role::Heading))
                 .filter_map(|n| n.name.clone().or_else(|| n.value.clone()))
                 .take(CONTEXT_ITEMS_MAX),
         );

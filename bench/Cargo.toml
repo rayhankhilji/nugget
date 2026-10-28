@@ -23,6 +23,7 @@ nugget-policy.workspace = true
 # bench session implements for them.
 nugget-agent.workspace = true
 nugget-a11y.workspace = true
+nugget-computer.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -15,8 +15,8 @@ use x11rb::connection::{Connection as _, RequestConnection as _};
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{
     Atom, AtomEnum, ChangeWindowAttributesAux, ClientMessageEvent, ConnectionExt as _,
-    CreateWindowAux, EventMask, ImageFormat, ImageOrder, VisualClass,
-    PropMode, Property, SELECTION_NOTIFY_EVENT, SelectionNotifyEvent, Window, WindowClass,
+    CreateWindowAux, EventMask, ImageFormat, ImageOrder, PropMode, Property,
+    SELECTION_NOTIFY_EVENT, SelectionNotifyEvent, VisualClass, Window, WindowClass,
 };
 use x11rb::protocol::xtest::ConnectionExt as _;
 use x11rb::rust_connection::RustConnection;
@@ -653,7 +653,11 @@ fn png_rgb(w: u32, h: u32, scanlines: &[u8]) -> Vec<u8> {
         for b in parts.iter().flat_map(|p| p.iter()) {
             c ^= u32::from(*b);
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xedb8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
         }
         !c
@@ -700,7 +704,10 @@ mod tests {
     #[test]
     fn pasted_text_carries_the_password_manager_hint() {
         let f = text_formats("draft");
-        assert!(f.iter().any(|f| f.format == "UTF8_STRING" && f.data == b"draft"));
+        assert!(
+            f.iter()
+                .any(|f| f.format == "UTF8_STRING" && f.data == b"draft")
+        );
         assert!(
             f.iter()
                 .any(|f| f.format == "x-kde-passwordManagerHint" && f.data == b"secret")

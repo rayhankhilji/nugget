@@ -37,6 +37,12 @@ pub const DESTROY_WORDS: &[&str] = &[
     "empty bin",
     "unsubscribe",
     "cancel subscription",
+    "cancel event",
+    "cancel meeting",
+    "cancel appointment",
+    "cancel booking",
+    "cancel reservation",
+    "cancel order",
     "wipe",
     "overwrite",
     "replace all",
@@ -228,7 +234,11 @@ pub(crate) fn label_text(node: &UiNode) -> String {
 
 /// Is `node` a field whose contents are secret (secure, or labelled like a password)?
 pub fn is_secret_field(node: &UiNode) -> bool {
-    node.states.secure || any_phrase(&words(&label_text(node)), SECRET_FIELD_WORDS.iter().copied())
+    node.states.secure
+        || any_phrase(
+            &words(&label_text(node)),
+            SECRET_FIELD_WORDS.iter().copied(),
+        )
 }
 
 fn is_affirmative(node: &UiNode) -> bool {
@@ -336,10 +346,7 @@ mod tests {
         assert_eq!(classify_text("Send", &k), Some(RiskClass::Send));
         assert_eq!(classify_text("Reply All", &k), Some(RiskClass::Send));
         assert_eq!(classify_text("Delete draft", &k), Some(RiskClass::Destroy));
-        assert_eq!(
-            classify_text("Empty Trash…", &k),
-            Some(RiskClass::Destroy)
-        );
+        assert_eq!(classify_text("Empty Trash…", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Place order", &k), Some(RiskClass::Spend));
         assert_eq!(classify_text("Sign document", &k), Some(RiskClass::Spend));
         assert_eq!(classify_text("Sign in", &k), None);
@@ -349,10 +356,7 @@ mod tests {
             classify_text("Change password", &k),
             Some(RiskClass::Security)
         );
-        assert_eq!(
-            classify_text("Unsubscribe", &k),
-            Some(RiskClass::Destroy)
-        );
+        assert_eq!(classify_text("Unsubscribe", &k), Some(RiskClass::Destroy));
         assert_eq!(classify_text("Subscribe", &k), Some(RiskClass::Spend));
         assert_eq!(classify_text("Permissions", &k), Some(RiskClass::Security));
         // The highest class wins.
@@ -406,13 +410,31 @@ mod tests {
             ..field.clone()
         };
         let k = kw();
-        assert_eq!(keys_risk(&p("enter"), Some(&field), &[], &k), RiskClass::Send);
-        assert_eq!(keys_risk(&p("enter"), Some(&area), &[], &k), RiskClass::Edit);
-        assert_eq!(keys_risk(&p("ctrl+enter"), Some(&area), &[], &k), RiskClass::Send);
-        assert_eq!(keys_risk(&p("cmd+enter"), Some(&area), &[], &k), RiskClass::Send);
+        assert_eq!(
+            keys_risk(&p("enter"), Some(&field), &[], &k),
+            RiskClass::Send
+        );
+        assert_eq!(
+            keys_risk(&p("enter"), Some(&area), &[], &k),
+            RiskClass::Edit
+        );
+        assert_eq!(
+            keys_risk(&p("ctrl+enter"), Some(&area), &[], &k),
+            RiskClass::Send
+        );
+        assert_eq!(
+            keys_risk(&p("cmd+enter"), Some(&area), &[], &k),
+            RiskClass::Send
+        );
         assert_eq!(keys_risk(&p("enter"), None, &[], &k), RiskClass::Send);
-        assert_eq!(keys_risk(&p("ctrl+a"), Some(&field), &[], &k), RiskClass::Edit);
-        assert_eq!(keys_risk(&p("backspace"), Some(&field), &[], &k), RiskClass::Edit);
+        assert_eq!(
+            keys_risk(&p("ctrl+a"), Some(&field), &[], &k),
+            RiskClass::Edit
+        );
+        assert_eq!(
+            keys_risk(&p("backspace"), Some(&field), &[], &k),
+            RiskClass::Edit
+        );
         assert_eq!(
             keys_risk(&p("shift+delete"), Some(&field), &[], &k),
             RiskClass::Destroy
@@ -449,7 +471,13 @@ mod tests {
         ] {
             assert!(is_terminal_app(t, &[]), "{t}");
         }
-        for t in ["Mail", "Football Manager", "Notes", "com.apple.mail", "Hyperlink Tool 2"] {
+        for t in [
+            "Mail",
+            "Football Manager",
+            "Notes",
+            "com.apple.mail",
+            "Hyperlink Tool 2",
+        ] {
             // Whole words only: "Hyperlink" is not "hyper", "Football" is not "foot".
             assert!(!is_terminal_app(t, &[]), "{t}");
         }

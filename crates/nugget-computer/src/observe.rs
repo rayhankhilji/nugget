@@ -22,8 +22,8 @@ pub(crate) enum Target {
     Element(ElementId),
     /// Whatever has keyboard focus in the front window.
     Focused,
-    /// The frontmost app, compared with this name.
-    App(String),
+    /// The frontmost app.
+    App,
 }
 
 /// What to check on the target's value.
@@ -126,12 +126,16 @@ pub(crate) fn find_option<'a>(root: &'a UiNode, value: &str) -> Option<&'a UiNod
             matches!(
                 n.role,
                 Role::ListItem | Role::MenuItem | Role::Cell | Role::Row | Role::Tab
-            ) || n
-                .actions
-                .contains(&nugget_a11y::UiActionKind::Select)
+            ) || n.actions.contains(&nugget_a11y::UiActionKind::Select)
         })
     };
-    let name = |n: &&UiNode| n.name.as_deref().map(str::trim).unwrap_or_default().to_string();
+    let name = |n: &&UiNode| {
+        n.name
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string()
+    };
     candidates()
         .find(|n| name(n) == want)
         .or_else(|| candidates().find(|n| name(n).eq_ignore_ascii_case(want)))
@@ -140,7 +144,7 @@ pub(crate) fn find_option<'a>(root: &'a UiNode, value: &str) -> Option<&'a UiNod
 /// Observe `target` in a fresh snapshot of its window (blocking).
 fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
     let mut obs = Obs::default();
-    if let Target::App(_) = target {
+    if let Target::App = target {
         match s.cu.windows() {
             Ok(ws) => {
                 obs.frontmost_app = ws
@@ -156,13 +160,15 @@ fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
         }
         return obs;
     }
+    // The element's window; for keyboard focus, the window last observed (so a window that
+    // closes on Enter reads as gone, not as an error).
     let window = match target {
         Target::Element(id) => s.find(id).map(|f| f.window.id),
-        _ => None,
+        _ => s.latest_window().map(|w| w.id),
     };
-    let sel = match (&window, target) {
-        (Some(w), _) => WindowSel::Id(w.clone()),
-        (None, _) => WindowSel::Focused,
+    let sel = match &window {
+        Some(w) => WindowSel::Id(w.clone()),
+        None => WindowSel::Focused,
     };
     let tree = match s.snapshot(&sel) {
         Ok(t) => t,
@@ -193,7 +199,9 @@ fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
     let mut h = Fnv::new();
     node_sig(node, &mut h);
     obs.element_sig = Some(h.hex());
-    let value = (!node.states.secure).then_some(node.value.as_deref()).flatten();
+    let value = (!node.states.secure)
+        .then_some(node.value.as_deref())
+        .flatten();
     if let Some(v) = value {
         let mut vh = Fnv::new();
         vh.add(v.as_bytes());
@@ -204,7 +212,8 @@ fn observe_blocking(s: &Shared, target: &Target, probe: &Probe) -> Obs {
     }
     if let Some(want) = &probe.equals {
         obs.value_matches = value.map(|v| {
-            v.trim() == want.trim() || (is_choice(node) && v.trim().eq_ignore_ascii_case(want.trim()))
+            v.trim() == want.trim()
+                || (is_choice(node) && v.trim().eq_ignore_ascii_case(want.trim()))
         });
         obs.option = find_option(node, want).map(shallow);
     }
@@ -228,7 +237,12 @@ pub(crate) fn parse(s: &Snapshot) -> Option<Obs> {
 
 /// What the backend said after re-reading: `None` when the call did not reach it.
 pub(crate) fn backend_verified(result: &ToolResult) -> Option<bool> {
-    result.data.as_ref()?.get("outcome")?.get("verified")?.as_bool()
+    result
+        .data
+        .as_ref()?
+        .get("outcome")?
+        .get("verified")?
+        .as_bool()
 }
 
 pub(crate) fn result_str<'a>(result: &'a ToolResult, key: &str) -> Option<&'a str> {
@@ -241,13 +255,11 @@ pub(crate) fn visible_change(b: &Obs, a: &Obs) -> Option<&'static str> {
         Some("the window closed")
     } else if b.element.is_some() && a.element.is_none() && !a.window_gone {
         Some("the element went away")
-    } else if b.element_sig.is_some() && a.element_sig.is_some() && b.element_sig != a.element_sig
-    {
+    } else if b.element_sig.is_some() && a.element_sig.is_some() && b.element_sig != a.element_sig {
         Some("the element changed")
     } else if b.focused != a.focused && a.fingerprint.is_some() {
         Some("focus moved")
-    } else if b.fingerprint.is_some() && a.fingerprint.is_some() && b.fingerprint != a.fingerprint
-    {
+    } else if b.fingerprint.is_some() && a.fingerprint.is_some() && b.fingerprint != a.fingerprint {
         Some("the window changed")
     } else {
         None

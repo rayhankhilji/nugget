@@ -28,13 +28,13 @@
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use nugget_a11y::Permission;
 use nugget_a11y::computer::{
-    ActionOutcome, AppEntry, ComputerUse, ElementId, Key, KeyInput, NamedKey, TreeLimits,
-    UiAction, UiActionKind, UiNode, UiTree, WindowId, WindowInfo, WindowSel,
+    ActionOutcome, AppEntry, ComputerUse, ElementId, Key, KeyInput, NamedKey, TreeLimits, UiAction,
+    UiActionKind, UiNode, UiTree, WindowId, WindowInfo, WindowSel,
 };
 use nugget_a11y::role::Role as A11yRole;
 use nugget_a11y::tree::States;
-use nugget_a11y::Permission;
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 use nugget_policy::ActionDescriptor;
@@ -141,6 +141,32 @@ pub fn for_harness(mut action: ActionDescriptor, obs: Option<&Observation>) -> A
     });
     if let Some(app) = app {
         action.target_app = app;
+    }
+    // A label the tools could not show in full: an unknown element (by id) or a long name cut
+    // with an ellipsis. Name the control by its bench id instead, which the harness accepts.
+    if let Some(label) = action.target_label.clone() {
+        let label = label.trim();
+        let id = if let Some(id) = label.strip_prefix("unknown element ") {
+            Some(decode_id(id.trim()))
+        } else if let Some(prefix) = label.strip_suffix('…') {
+            obs.windows
+                .iter()
+                .filter(|w| w.id == action.target_app)
+                .flat_map(|w| {
+                    let mut all = Vec::new();
+                    w.walk(&mut all);
+                    all.into_iter()
+                        .filter(|n| n.name.trim().starts_with(prefix.trim()))
+                        .map(|n| n.id.clone())
+                        .collect::<Vec<_>>()
+                })
+                .next()
+        } else {
+            None
+        };
+        if let Some(id) = id {
+            action.target_label = Some(id);
+        }
     }
     action
 }
@@ -529,9 +555,7 @@ impl SessionComputer {
         let was = n.checked;
         let name = n.name.clone();
         let before = obs.clone();
-        let action = Action::Click {
-            target: id.clone(),
-        };
+        let action = Action::Click { target: id.clone() };
         self.perform(&id, obs, action, |after| {
             let now = after.find(&id).and_then(|x| x.checked);
             if was.is_some() && now.is_some() && now != was {
@@ -795,7 +819,12 @@ mod tests {
 
     #[test]
     fn ids_round_trip() {
-        for id in ["shop.add.giftcard-500", "forms.country.opt2", "mail", "a_b.c"] {
+        for id in [
+            "shop.add.giftcard-500",
+            "forms.country.opt2",
+            "mail",
+            "a_b.c",
+        ] {
             let e = encode_id(id);
             assert!(
                 e.chars()

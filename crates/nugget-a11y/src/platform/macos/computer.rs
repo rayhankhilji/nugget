@@ -33,10 +33,10 @@ use objc2_core_graphics::{
 use super::{AxEl, ax, cf_bool, cf_string};
 use crate::Rect;
 use crate::computer::{
-    AppEntry, Key, KeyChord, KeyInput, Modifiers, NamedKey, ScrollDirection, UiAction,
-    UiActionKind,
+    AppEntry, Key, KeyChord, KeyInput, Modifiers, NamedKey, ScrollDirection, UiAction, UiActionKind,
 };
 use crate::engine::PlatformWindow;
+use crate::tree::Element;
 
 /// Most lines one scroll action moves.
 const MAX_SCROLL_LINES: u32 = 100;
@@ -135,10 +135,7 @@ fn running_apps(cg: &[CgWindow]) -> Vec<RunningApp> {
         out.push(RunningApp {
             entry: AppEntry {
                 id: r.bundleIdentifier().map(|s| s.to_string()),
-                name: r
-                    .localizedName()
-                    .map(|s| s.to_string())
-                    .unwrap_or_default(),
+                name: r.localizedName().map(|s| s.to_string()).unwrap_or_default(),
                 pid: u32::try_from(w.pid).ok(),
                 frontmost: Some(w.pid) == front,
             },
@@ -764,7 +761,9 @@ fn app_matches(e: &AppEntry, name: &str) -> bool {
     let bare = name.strip_suffix(".app").unwrap_or(name);
     e.name.eq_ignore_ascii_case(bare)
         || e.name.to_lowercase() == bare.to_lowercase()
-        || e.id.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(name))
+        || e.id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case(name))
 }
 
 fn run_open(flag: &str, arg: &str) -> Result<()> {
@@ -846,7 +845,11 @@ mod tests {
     #[test]
     fn action_mapping() {
         let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let k = kinds_from_ax("AXButton", &names(&["AXPress", "AXShowMenu"]), Settable::default());
+        let k = kinds_from_ax(
+            "AXButton",
+            &names(&["AXPress", "AXShowMenu"]),
+            Settable::default(),
+        );
         assert_eq!(k, vec![UiActionKind::Press]);
         let k = kinds_from_ax(
             "AXPopUpButton",

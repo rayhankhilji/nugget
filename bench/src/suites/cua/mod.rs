@@ -485,9 +485,9 @@ impl Benchmark for CuaBench {
         }
         let mut agent: Box<dyn CuaAgent> = match self.options.agent {
             // A real provider when `NUGGET_BENCH_CUA_MODEL` is set.
-            CuaAgentKind::Nugget => Box::new(
-                nugget::NuggetAgent::from_env(&tasks).map_err(BenchError::Failed)?,
-            ),
+            CuaAgentKind::Nugget => {
+                Box::new(nugget::NuggetAgent::from_env(&tasks).map_err(BenchError::Failed)?)
+            }
             kind => make_agent(kind, &tasks),
         };
         ctx.param("agent", agent.name());

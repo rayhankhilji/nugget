@@ -24,9 +24,7 @@ fn text_sources(text: &str) -> Vec<MimeSource> {
         },
         MimeSource {
             source: Source::Bytes(super::x11::PASSWORD_HINT_DATA.into()),
-            mime_type: copy::MimeType::Specific(
-                super::x11::PASSWORD_HINT_TARGET.into(),
-            ),
+            mime_type: copy::MimeType::Specific(super::x11::PASSWORD_HINT_TARGET.into()),
         },
     ]
 }

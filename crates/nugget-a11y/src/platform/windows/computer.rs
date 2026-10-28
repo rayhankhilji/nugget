@@ -35,18 +35,17 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     BringWindowToTop, EnumWindows, GW_OWNER, GWL_EXSTYLE, GetForegroundWindow, GetWindow,
-    GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow,
-    ShowWindow, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+    GetWindowLongW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow, WS_EX_APPWINDOW,
+    WS_EX_TOOLWINDOW,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR};
 
-use super::uia::{self, Caps, UiaEl};
 use super::scale_rect;
+use super::uia::{self, Caps, UiaEl};
 use crate::Rect;
 use crate::computer::{
-    AppEntry, Key, KeyChord, KeyInput, Modifiers, NamedKey, ScrollDirection, UiAction,
-    UiActionKind,
+    AppEntry, Key, KeyChord, KeyInput, Modifiers, NamedKey, ScrollDirection, UiAction, UiActionKind,
 };
 use crate::engine::PlatformWindow;
 use crate::tree::States;
@@ -556,14 +555,16 @@ fn valid_app_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 256
         && !name.starts_with('-')
-        && !name
-            .chars()
-            .any(|c| c.is_control() || matches!(c, '\\' | '/' | ':' | '"' | '<' | '>' | '|' | '*' | '?'))
+        && !name.chars().any(|c| {
+            c.is_control() || matches!(c, '\\' | '/' | ':' | '"' | '<' | '>' | '|' | '*' | '?')
+        })
 }
 
 fn app_matches(e: &AppEntry, name: &str) -> bool {
     e.name.eq_ignore_ascii_case(name)
-        || e.id.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(name))
+        || e.id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case(name))
 }
 
 /// Bring `hwnd` to the front. Windows only lets the foreground process move the foreground
@@ -716,10 +717,10 @@ mod tests {
             invoke: true,
             ..Default::default()
         };
-        assert_eq!(kinds_from_caps(&caps, true, false), vec![
-            UiActionKind::Press,
-            UiActionKind::Focus
-        ]);
+        assert_eq!(
+            kinds_from_caps(&caps, true, false),
+            vec![UiActionKind::Press, UiActionKind::Focus]
+        );
         let caps = Caps {
             value: true,
             scroll_item: true,
@@ -727,15 +728,20 @@ mod tests {
             expand_state: Some(0),
             ..Default::default()
         };
-        assert_eq!(kinds_from_caps(&caps, false, false), vec![
-            UiActionKind::SetValue,
-            UiActionKind::Scroll,
-            UiActionKind::Expand
-        ]);
+        assert_eq!(
+            kinds_from_caps(&caps, false, false),
+            vec![
+                UiActionKind::SetValue,
+                UiActionKind::Scroll,
+                UiActionKind::Expand
+            ]
+        );
         // Secure fields never advertise SetValue; read-only values and leaf nodes neither.
-        assert!(kinds_from_caps(&caps, false, true)
-            .iter()
-            .all(|k| *k != UiActionKind::SetValue));
+        assert!(
+            kinds_from_caps(&caps, false, true)
+                .iter()
+                .all(|k| *k != UiActionKind::SetValue)
+        );
         let caps = Caps {
             value: true,
             value_read_only: true,
@@ -744,7 +750,10 @@ mod tests {
             selection_item: true,
             ..Default::default()
         };
-        assert_eq!(kinds_from_caps(&caps, false, false), vec![UiActionKind::Select]);
+        assert_eq!(
+            kinds_from_caps(&caps, false, false),
+            vec![UiActionKind::Select]
+        );
     }
 
     #[test]
@@ -773,10 +782,15 @@ mod tests {
     fn names() {
         assert_eq!(app_name("chrome.exe"), "chrome");
         assert_eq!(app_name("Code.EXE"), "Code");
-        assert!(valid_app_name("Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"));
+        assert!(valid_app_name(
+            "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"
+        ));
         assert!(valid_app_name("notepad"));
         assert!(!valid_app_name("C:\\Windows\\notepad.exe"));
         assert!(!valid_app_name("-x"));
-        assert_eq!(scroll_step(ScrollDirection::Down).1, ScrollAmount_SmallIncrement);
+        assert_eq!(
+            scroll_step(ScrollDirection::Down).1,
+            ScrollAmount_SmallIncrement
+        );
     }
 }

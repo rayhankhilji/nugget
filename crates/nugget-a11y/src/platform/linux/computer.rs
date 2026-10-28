@@ -18,7 +18,7 @@ use zbus::proxy::CacheProperties;
 use super::input::{XKeyboard, chord_keysym};
 use super::{AtspiEl, AtspiPlatform, REGISTRY, ROOT_PATH, x11, zerr};
 use crate::computer::{AppEntry, KeyChord, KeyInput, ScrollDirection, UiAction, UiActionKind};
-use crate::engine::PlatformWindow;
+use crate::engine::{Platform as _, PlatformWindow};
 use crate::tree::Element as _;
 
 /// Top-level roles listed as windows.
@@ -26,7 +26,12 @@ const WINDOW_ROLES: &[&str] = &["frame", "window", "dialog", "alert", "file choo
 /// Action names that press, click or activate.
 const PRESS_NAMES: &[&str] = &["click", "press", "activate", "toggle", "jump", "open"];
 /// Action names that expand or collapse.
-const EXPAND_NAMES: &[&str] = &["expand or contract", "expand or collapse", "expand", "collapse"];
+const EXPAND_NAMES: &[&str] = &[
+    "expand or contract",
+    "expand or collapse",
+    "expand",
+    "collapse",
+];
 /// Roles whose `Value` is user-settable.
 const VALUE_ROLES: &[&str] = &["slider", "spin button", "scroll bar", "dial"];
 /// Roles that scroll their content.
@@ -68,8 +73,7 @@ pub(super) fn extra_states(role: &str, st: &StateSet) -> (bool, Option<bool>, Op
         || st.contains(State::Editable)
         || CHECK_ROLES.contains(&role)
         || matches!(role, "push button" | "combo box" | "menu item" | "link");
-    let disabled =
-        interactive && !st.contains(State::Enabled) && !st.contains(State::Sensitive);
+    let disabled = interactive && !st.contains(State::Enabled) && !st.contains(State::Sensitive);
     let checked = (CHECK_ROLES.contains(&role) || st.contains(State::Checkable)).then(|| {
         st.contains(State::Checked) || (role == "toggle button" && st.contains(State::Pressed))
     });
@@ -183,7 +187,9 @@ impl AtspiEl {
 
     pub(super) fn ui_perform(&self, action: &UiAction) -> Result<()> {
         let role = self.role_name();
-        let st = self.states().map_err(|_| Error::NotFound("element is gone".into()))?;
+        let st = self
+            .states()
+            .map_err(|_| Error::NotFound("element is gone".into()))?;
         let ifaces = self.interfaces();
         let names = self.action_names(&ifaces);
         match action {
@@ -381,7 +387,8 @@ impl AtspiEl {
             }
             queue.extend(el.children(256));
         }
-        let el = first.ok_or_else(|| Error::Unsupported("nothing to focus in the window".into()))?;
+        let el =
+            first.ok_or_else(|| Error::Unsupported("nothing to focus in the window".into()))?;
         match el.component().map(|c| c.grab_focus()) {
             Some(Ok(true)) => Ok(()),
             Some(Err(e)) => Err(zerr(e)),
@@ -507,9 +514,7 @@ impl AtspiPlatform {
                         && ifaces.contains(Interface::EditableText)
                     {
                         let before = Self::read_state(&t.element, 1 << 20, false);
-                        if crate::engine::Platform::insert_text(self, &t.element, &text, &before)
-                            .is_ok()
-                        {
+                        if self.insert_text(&t.element, &text, &before).is_ok() {
                             return Ok(());
                         }
                     }
@@ -749,7 +754,12 @@ mod tests {
 
     #[test]
     fn states_for_check_boxes_and_expanders() {
-        let st = set(&[State::Enabled, State::Sensitive, State::Focusable, State::Checked]);
+        let st = set(&[
+            State::Enabled,
+            State::Sensitive,
+            State::Focusable,
+            State::Checked,
+        ]);
         assert_eq!(extra_states("check box", &st), (false, Some(true), None));
         let st = set(&[State::Focusable]);
         assert_eq!(extra_states("check box", &st), (true, Some(false), None));
@@ -765,14 +775,14 @@ mod tests {
 
     #[test]
     fn actions_from_names_states_and_interfaces() {
-        let comp = InterfaceSet::new(Interface::Component) | Interface::Action;
+        let comp = InterfaceSet::new(Interface::Component) | InterfaceSet::new(Interface::Action);
         let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         let st = set(&[State::Focusable, State::Showing]);
         assert_eq!(
             action_kinds("push button", &st, &comp, &names(&["click"])),
             vec![UiActionKind::Press, UiActionKind::Focus]
         );
-        let ed = comp | Interface::EditableText;
+        let ed = comp | InterfaceSet::new(Interface::EditableText);
         let st = set(&[State::Focusable, State::Showing, State::Editable]);
         assert_eq!(
             action_kinds("text", &st, &ed, &names(&["activate"])),

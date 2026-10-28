@@ -14,7 +14,7 @@
 //! - **Gate.** A fresh [`PolicyEngine`] with the default policy (`Send` and above → confirm) and
 //!   its own kill switch per task. A confirmation request from the loop
 //!   ([`AgentEvent::ConfirmationNeeded`]) goes to [`Session::confirm`] as the harness expects
-//!   ([`for_harness`]), and the simulated user's answer back through
+//!   ([`for_harness`](super::nugget_env::for_harness)), and the simulated user's answer back through
 //!   `Confirmations::answer`.
 //! - **Threads.** The session is `&mut dyn Session` and not `Send`: the agent runs on a scoped
 //!   thread with its own runtime, and the calling thread serves its requests ([`serve`]) until
@@ -31,8 +31,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_a11y::computer::ComputerUse;
 use nugget_agent::{
-    Agent, AgentConfig, AgentEvent, AgentRun, Budgets, EventSink, GateOutcome, Model,
-    ToolRegistry, Verification,
+    Agent, AgentConfig, AgentEvent, AgentRun, Budgets, EventSink, GateOutcome, Model, ToolRegistry,
+    Verification,
 };
 use nugget_core::capability::Locality;
 use nugget_core::egress::NullEgress;
@@ -45,7 +45,7 @@ use nugget_policy::{KillSwitch, PolicyEngine};
 use serde_json::{Value, json};
 
 use super::agent::{CuaAgent, Outcome, Session, TaskBrief};
-use super::nugget_env::{ChannelPort, Req, SessionComputer, encode_id, for_harness, serve};
+use super::nugget_env::{ChannelPort, Req, SessionComputer, encode_id, serve};
 use super::task::{Finish, Step, Task};
 use super::ui::app_of;
 use crate::report::{Direction, Metric};
@@ -215,10 +215,9 @@ impl CuaAgent for NuggetAgent {
     fn run(&mut self, task: &TaskBrief, session: &mut dyn Session) -> Outcome {
         let script = self.scripts.get(&task.id).cloned().unwrap_or_default();
         let model = match &self.model {
-            ModelChoice::Scripted => Model::Provider(Arc::new(ScriptedModel::new(
-                &script,
-                &task.apps,
-            ))),
+            ModelChoice::Scripted => {
+                Model::Provider(Arc::new(ScriptedModel::new(&script, &task.apps)))
+            }
             ModelChoice::Real { provider, .. } => Model::Provider(provider.clone()),
         };
         let (tx, rx) = mpsc::channel();
@@ -228,7 +227,11 @@ impl CuaAgent for NuggetAgent {
         for t in computer_tools(cu) {
             tools.register(t);
         }
-        let gate = Arc::new(PolicyEngine::builder().kill_switch(KillSwitch::new()).build());
+        let gate = Arc::new(
+            PolicyEngine::builder()
+                .kill_switch(KillSwitch::new())
+                .build(),
+        );
         let flags = Arc::new(AtomicU32::new(0));
         let sink = Arc::new(Bridge {
             tx: Mutex::new(tx),

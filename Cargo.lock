@@ -3800,6 +3800,9 @@ dependencies = [
  "async-trait",
  "clap",
  "futures",
+ "nugget-a11y",
+ "nugget-agent",
+ "nugget-computer",
  "nugget-connector",
  "nugget-connector-files",
  "nugget-core",
@@ -3840,6 +3843,24 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "nugget-computer"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "futures",
+ "nugget-a11y",
+ "nugget-agent",
+ "nugget-core",
+ "nugget-infer",
+ "nugget-policy",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

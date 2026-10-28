@@ -9,14 +9,17 @@
 //! - Insertion: `ValuePattern.SetValue` with the selection replaced, for plain edit controls
 //!   whose whole value was read; rich documents and web content use the clipboard fallback.
 //! - Bounds are converted from physical pixels to logical points with the window's DPI.
+//! - Computer use (M4) is in `computer`: windows, pattern-based actions, key input, launch.
 
 mod clipboard;
+mod computer;
 mod uia;
 
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 
-use crate::engine::{FieldRead, Platform, Target};
+use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
+use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
 use crate::role::{Role, role_from_uia, uia as ct};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -91,6 +94,7 @@ impl UiaEl {
             bounds,
             ..Default::default()
         };
+        computer::apply_caps(&mut node.states, &self.caps());
         // Chromium and Firefox put the placeholder in HelpText for inputs.
         if !info.help_text.is_empty() {
             if role.is_text_input() {
@@ -150,6 +154,14 @@ impl Element for UiaEl {
 
     fn same(&self, other: &Self) -> bool {
         self.is_same(other)
+    }
+
+    fn actions(&self) -> Vec<UiActionKind> {
+        computer::actions(self)
+    }
+
+    fn perform(&self, action: &UiAction) -> Result<()> {
+        computer::perform(self, action)
     }
 }
 
@@ -252,5 +264,21 @@ impl Platform for UiaPlatform {
 
     fn paste(&self, _el: &UiaEl) -> Result<()> {
         uia::send_ctrl_v()
+    }
+
+    fn apps(&self) -> Result<Vec<AppEntry>> {
+        computer::apps()
+    }
+
+    fn windows(&self) -> Result<Vec<PlatformWindow<UiaEl>>> {
+        computer::windows()
+    }
+
+    fn key_input(&self, input: &KeyInput) -> Result<()> {
+        computer::key_input(input)
+    }
+
+    fn open_app(&self, name: &str) -> Result<()> {
+        computer::open_app(name)
     }
 }

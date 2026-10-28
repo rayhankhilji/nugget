@@ -20,13 +20,13 @@ use windows::Win32::System::Threading::{
 use windows::Win32::System::Variant::{VARIANT, VT_BOOL, VT_I4, VariantClear};
 use windows::Win32::UI::Accessibility::{
     CUIAutomation, IUIAutomation, IUIAutomationCacheRequest, IUIAutomationElement,
-    IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern,
-    IUIAutomationRangeValuePattern, IUIAutomationScrollItemPattern, IUIAutomationScrollPattern,
-    IUIAutomationSelectionItemPattern, IUIAutomationTextPattern, IUIAutomationTextRange,
-    IUIAutomationTogglePattern, IUIAutomationValuePattern, ScrollAmount,
-    TextPatternRangeEndpoint_End, TextPatternRangeEndpoint_Start, TextUnit_Character,
-    UIA_AriaPropertiesPropertyId, UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId,
-    UIA_BoundingRectanglePropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
+    IUIAutomationExpandCollapsePattern, IUIAutomationInvokePattern, IUIAutomationRangeValuePattern,
+    IUIAutomationScrollItemPattern, IUIAutomationScrollPattern, IUIAutomationSelectionItemPattern,
+    IUIAutomationTextPattern, IUIAutomationTextRange, IUIAutomationTogglePattern,
+    IUIAutomationValuePattern, ScrollAmount, TextPatternRangeEndpoint_End,
+    TextPatternRangeEndpoint_Start, TextUnit_Character, UIA_AriaPropertiesPropertyId,
+    UIA_AriaRolePropertyId, UIA_AutomationIdPropertyId, UIA_BoundingRectanglePropertyId,
+    UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
     UIA_ExpandCollapseExpandCollapseStatePropertyId, UIA_ExpandCollapsePatternId,
     UIA_HasKeyboardFocusPropertyId, UIA_HelpTextPropertyId, UIA_InvokePatternId,
     UIA_IsEnabledPropertyId, UIA_IsExpandCollapsePatternAvailablePropertyId,
@@ -38,7 +38,7 @@ use windows::Win32::UI::Accessibility::{
     UIA_NamePropertyId, UIA_PATTERN_ID, UIA_PROPERTY_ID, UIA_ProcessIdPropertyId,
     UIA_RangeValueIsReadOnlyPropertyId, UIA_RangeValuePatternId, UIA_ScrollItemPatternId,
     UIA_ScrollPatternId, UIA_SelectionItemIsSelectedPropertyId, UIA_SelectionItemPatternId,
-    UIA_TextPatternId, UIA_ToggleToggleStatePropertyId, UIA_TogglePatternId,
+    UIA_TextPatternId, UIA_TogglePatternId, UIA_ToggleToggleStatePropertyId,
     UIA_ValueIsReadOnlyPropertyId, UIA_ValuePatternId,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
@@ -421,10 +421,7 @@ impl UiaEl {
     pub fn expand_collapse(&self, expand: bool) -> Result<()> {
         let p: IUIAutomationExpandCollapsePattern = self.pattern(UIA_ExpandCollapsePatternId)?;
         // SAFETY: valid pattern interface.
-        unsafe {
-            if expand { p.Expand() } else { p.Collapse() }
-        }
-        .map_err(werr)
+        unsafe { if expand { p.Expand() } else { p.Collapse() } }.map_err(werr)
     }
 
     pub fn focused() -> Result<Option<UiaEl>> {

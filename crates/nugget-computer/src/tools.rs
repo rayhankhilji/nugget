@@ -113,7 +113,8 @@ impl Kind {
     fn schema(self) -> Value {
         let element = json!({"type": "string", "minLength": 1, "maxLength": 64,
             "description": "Element id from observe, e.g. e1a2b3c"});
-        let window = json!({"type": "string", "maxLength": 64, "description": "Window id from observe"});
+        let window =
+            json!({"type": "string", "maxLength": 64, "description": "Window id from observe"});
         let app = json!({"type": "string", "maxLength": 200, "description": "App name"});
         match self {
             Kind::Observe => json!({
@@ -235,7 +236,11 @@ impl ComputerTool {
         };
         is_terminal_app(&f.app, extra)
             || is_terminal_app(&f.window.app.name, extra)
-            || f.window.app.id.as_deref().is_some_and(|id| is_terminal_app(id, extra))
+            || f.window
+                .app
+                .id
+                .as_deref()
+                .is_some_and(|id| is_terminal_app(id, extra))
             || is_terminal_role(&f.node.raw_role)
     }
 }
@@ -268,7 +273,9 @@ fn str_arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 
 fn window_sel(args: &Value) -> WindowSel {
     if let Some(w) = str_arg(args, "window") {
-        WindowSel::Id(WindowId(safe_id(w.trim_start_matches('[').trim_end_matches(']'))))
+        WindowSel::Id(WindowId(safe_id(
+            w.trim_start_matches('[').trim_end_matches(']'),
+        )))
     } else if let Some(a) = str_arg(args, "app") {
         WindowSel::App(a.to_string())
     } else {
@@ -344,7 +351,11 @@ fn base64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
-        let b = [chunk[0], *chunk.get(1).unwrap_or(&0), *chunk.get(2).unwrap_or(&0)];
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         for i in 0..4 {
             if i <= chunk.len() {
@@ -411,7 +422,9 @@ impl ComputerTool {
                     (_, nugget_a11y::Permission::Denied) => {
                         " Accessibility permission is not granted; ask the user to grant it."
                     }
-                    (Error::NotFound(_), _) => " Call observe without arguments for the front window.",
+                    (Error::NotFound(_), _) => {
+                        " Call observe without arguments for the front window."
+                    }
                     _ => "",
                 };
                 return fail(format!("could not read the window: {e}.{hint}"));
@@ -607,7 +620,10 @@ impl ComputerTool {
                 o,
                 json!({"element": id, "method": method, "option": option}),
             ),
-            Err(e) => fail(format!("set_value on [{}] failed: {e}", safe_id(id.as_str()))),
+            Err(e) => fail(format!(
+                "set_value on [{}] failed: {e}",
+                safe_id(id.as_str())
+            )),
         }
     }
 
@@ -906,7 +922,11 @@ impl Tool for ComputerTool {
             Kind::TypeText => preview("text"),
             Kind::SetValue => preview("value"),
             Kind::PressKey => Some(match parse_keys(args) {
-                Ok(c) => c.iter().map(ToString::to_string).collect::<Vec<_>>().join(" "),
+                Ok(c) => c
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" "),
                 Err(_) => truncate(args["keys"].as_str().unwrap_or_default(), 60),
             }),
             Kind::Scroll => args["direction"].as_str().map(String::from),
@@ -989,10 +1009,7 @@ impl Tool for ComputerTool {
                     ..Probe::default()
                 },
             ),
-            Kind::OpenApp => (
-                Target::App(str_arg(args, "name").unwrap_or_default().to_string()),
-                Probe::default(),
-            ),
+            Kind::OpenApp => (Target::App, Probe::default()),
             Kind::Observe | Kind::Scroll | Kind::WaitFor => return None,
         };
         observe::observe(&self.shared, target, probe).await
@@ -1027,9 +1044,7 @@ impl Tool for ComputerTool {
                 if observe::result_str(result, "action") == Some("select") {
                     return match (a.element.as_ref().map(|e| e.states.selected), verified) {
                         (Some(true), true) => Verification::Passed("the item is selected".into()),
-                        (Some(false), _) => {
-                            Verification::Failed("the item is not selected".into())
-                        }
+                        (Some(false), _) => Verification::Failed("the item is not selected".into()),
                         _ => Verification::Unverifiable,
                     };
                 }
@@ -1045,9 +1060,9 @@ impl Tool for ComputerTool {
                     (Some(true), true) if changed => {
                         Verification::Passed("the field now contains the typed text".into())
                     }
-                    (Some(false), _) => Verification::Failed(
-                        "the field does not contain the typed text".into(),
-                    ),
+                    (Some(false), _) => {
+                        Verification::Failed("the field does not contain the typed text".into())
+                    }
                     (Some(true), _) if !changed => Verification::Failed(
                         "the field did not change (the text was already there)".into(),
                     ),
@@ -1086,14 +1101,12 @@ impl Tool for ComputerTool {
                     return Verification::Unverifiable;
                 };
                 let front_l = front.to_lowercase();
-                let matches = !want.is_empty() && (front_l.contains(&want) || want.contains(
-                    front_l.split(" (").next().unwrap_or_default(),
-                ));
+                let matches = !want.is_empty()
+                    && (front_l.contains(&want)
+                        || want.contains(front_l.split(" (").next().unwrap_or_default()));
                 match (matches, verified) {
                     (true, true) => Verification::Passed(format!("{front} is frontmost")),
-                    (false, false) => {
-                        Verification::Failed(format!("{front} is frontmost instead"))
-                    }
+                    (false, false) => Verification::Failed(format!("{front} is frontmost instead")),
                     _ => Verification::Unverifiable,
                 }
             }

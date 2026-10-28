@@ -263,7 +263,12 @@ pub fn node_line(node: &UiNode, focused: bool, opts: &RenderOptions) -> String {
     if s.multiline == Some(true) && node.role != Role::TextArea {
         flags.push("multiline");
     }
-    if s.editable && !matches!(node.role, Role::TextField | Role::TextArea | Role::SearchField) {
+    if s.editable
+        && !matches!(
+            node.role,
+            Role::TextField | Role::TextArea | Role::SearchField
+        )
+    {
         flags.push("editable");
     }
     if !is_control_role(node.role)
@@ -340,7 +345,12 @@ impl Walk<'_> {
 /// The window header line: id, title and app.
 pub fn header(tree: &UiTree, opts: &RenderOptions) -> String {
     let mut h = format!("window [{}]", safe_id(tree.window.id.as_str()));
-    if let Some(t) = tree.window.title.as_deref().filter(|t| !t.trim().is_empty()) {
+    if let Some(t) = tree
+        .window
+        .title
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+    {
         h.push_str(&format!(" \"{}\"", screen_text(t, opts.max_text)));
     }
     let app = if tree.app.name.is_empty() {
@@ -365,7 +375,8 @@ pub fn render(tree: &UiTree, opts: &RenderOptions) -> String {
     walk.out.push_str(&header(tree, opts));
     walk.out.push('\n');
     if let Some(f) = &tree.focused {
-        walk.out.push_str(&format!("focused [{}]\n", safe_id(f.as_str())));
+        walk.out
+            .push_str(&format!("focused [{}]\n", safe_id(f.as_str())));
     }
     // The root is the window itself; the header stands for it.
     for c in &tree.root.children {
@@ -376,10 +387,7 @@ pub fn render(tree: &UiTree, opts: &RenderOptions) -> String {
         out.push_str("(no accessible elements)\n");
     }
     if walk.dropped > 0 {
-        out.push_str(&format!(
-            "… {} more elements (truncated)\n",
-            walk.dropped
-        ));
+        out.push_str(&format!("… {} more elements (truncated)\n", walk.dropped));
     }
     if walk.hidden_offscreen > 0 {
         out.push_str(&format!(
