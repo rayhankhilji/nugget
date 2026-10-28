@@ -6,7 +6,7 @@ inspectable and owned by you.
 
 Grounding: [Sentient OS teardown](research/sentient-os-teardown.md) and [shipped-artifact findings](research/shipped-artifact-findings.md).
 
-Status: **draft, pending the decisions in §9.**
+Status: **plan approved; M0 next.**
 
 ---
 
@@ -17,7 +17,10 @@ Status: **draft, pending the decisions in §9.**
 | Areas to beat Sentient on | **All of them**: real-time memory, open connectors and plugins, reliable computer use, privacy and speed | User |
 | v1 scope | **Everything**: memory, Double Tap, proactive cards, computer use, MCP | User |
 | Clean room | No AGPL code, prompts or distinctive expression copied. The teardown docs are the only bridge. | Required by Apache-2.0 |
-| Platform and stack | **Rust core plus Tauri 2 shell** (recommended; pending, see §9) | — |
+| Platform and stack | **Rust core plus Tauri 2 shell; macOS, Windows and Linux ship together** | User |
+| Default AI | **Asked during onboarding, local recommended.** Small local models always do triage and embeddings | User |
+| Hosted services | **None at v1.** No first-party servers in the data path; a self-hostable E2E relay comes later | User |
+| Team | **One or two humans directing Claude agents.** Milestones run in order, with parallel work done by agents | User |
 
 ## 2. What "10x better" means, measured
 Every claim below gets a benchmark in `bench/` and a number in the README. If we can't measure it, we don't claim it.
@@ -139,10 +142,8 @@ v1.0 ships all pillars. Milestones are internal checkpoints, each ending in a us
 | Local models are too weak for agentic work | Tiered routing; local by default for triage, embedding and drafting; BYO frontier key for the agent; publish per-tier numbers |
 | OAuth app verification (Google restricted scopes) | Start the verification process early; allow users to bring their own OAuth client in the meantime |
 
-## 9. Open questions (need answers before M0)
-1. **Platform and stack.** Confirm Rust core plus Tauri 2, shipping Mac, Windows and Linux together, or choose Mac-first.
-2. **Default model setup.** Fully local by default (slower, private), or ask during onboarding, with local recommended?
-3. **Hosted services.** Should we run *any* first-party cloud (an optional free drafting relay, the E2E sync relay), or ship purely BYO keys at v1?
-4. **Team and timeline.** How many engineers, and is there a target date? This decides how milestones run in parallel.
-5. **Name and brand.** Keep "Nugget"?
-6. **Business model.** Apache core plus a paid hosted team tier (shared knowledge, admin policy, SSO)?
+## 9. Open questions
+1. **Name and brand.** Keep "Nugget"?
+2. **Business model.** Apache core plus a paid hosted team tier later (shared knowledge, admin policy, SSO)?
+
+Resolved: platform (all three OSes), default AI (ask, local recommended), hosted services (none at v1), team (humans plus agents).
