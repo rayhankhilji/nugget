@@ -192,7 +192,9 @@ impl Store {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.with_read_conn(|conn| {
+        // On the writer connection, like vector search (see `vector.rs`): `vec0` point lookups
+        // walk large blobs, and a reader's page cache is discarded after every write.
+        self.with_conn(|conn| {
             let Some(dim) = embedding_dim(conn)? else {
                 return Ok(HashMap::new());
             };
