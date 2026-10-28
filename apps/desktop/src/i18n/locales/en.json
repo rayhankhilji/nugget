@@ -69,5 +69,7 @@
   "format.sourceState.watching": "Watching",
   "format.sourceState.needs_auth": "Needs sign-in",
   "format.sourceState.disabled": "Disabled",
-  "format.sourceState.error": "Error"
+  "format.sourceState.error": "Error",
+  "format.latency.ms": "{n} ms",
+  "format.latency.s": "{n} s"
 }

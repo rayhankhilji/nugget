@@ -102,16 +102,10 @@ export function formatRelative(
 /** Latency in ms as "850 ms", "4.2 s", "3m 5s"; `null` as "–". */
 export function formatLatency(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms) || ms < 0) return "–";
-  const unit = (v: number, u: "millisecond" | "second", digits: number) =>
-    numberFormat(currentLocale(), {
-      style: "unit",
-      unit: u,
-      unitDisplay: "short",
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits,
-    }).format(v);
-  if (ms < 1000) return unit(Math.round(ms), "millisecond", 0);
-  if (ms < 60_000) return unit(ms / 1000, "second", ms < 10_000 ? 1 : 0);
+  const num = (v: number, digits: number) =>
+    numberFormat(currentLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v);
+  if (ms < 1000) return t("format.latency.ms", { n: num(Math.round(ms), 0) });
+  if (ms < 60_000) return t("format.latency.s", { n: num(ms / 1000, ms < 10_000 ? 1 : 0) });
   return formatDuration(ms / 1000);
 }
 
