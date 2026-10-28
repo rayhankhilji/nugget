@@ -52,12 +52,15 @@ describe("sources flow", () => {
     expect(d.count("sources_add")).toBe(0);
   });
 
-  it("closes the wizard with Escape", async () => {
+  it("closes the wizard with Escape and returns focus to the button that opened it", async () => {
     daemon();
     await renderApp({ page: "sources" });
-    await click(getByRole("button", { name: t("sources.add") }));
+    const add = getByRole("button", { name: t("sources.add") });
+    add.focus();
+    await click(add);
     await press(document.activeElement, "Escape");
     expect(queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(add);
   });
 
   it("adds a folder through the wizard and shows it in the list", async () => {
