@@ -3578,6 +3578,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-graph"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+ "serde",
+ "serde_json",
+ "time",
+]
+
+[[package]]
 name = "nugget-infer"
 version = "0.0.1"
 dependencies = [
@@ -3641,6 +3651,20 @@ dependencies = [
  "tracing",
  "widestring",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "nugget-knowledge"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
+]
+
+[[package]]
+name = "nugget-mcp"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
 ]
 
 [[package]]
@@ -3749,6 +3773,13 @@ dependencies = [
  "time",
  "tracing",
  "zeroize",
+]
+
+[[package]]
+name = "nugget-vault"
+version = "0.0.1"
+dependencies = [
+ "nugget-core",
 ]
 
 [[package]]

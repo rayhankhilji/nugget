@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capability::{Capabilities, Locality, Tier};
 use crate::egress::EgressEvent;
-use crate::ids::{ItemRef, ProviderId, SourceId};
+use crate::ids::{EntityId, ItemRef, ProviderId, SourceId};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 
@@ -37,6 +37,15 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
 /// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
+/// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
+/// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
+/// | `knowledge.graph` | [`GraphRequest`] | [`GraphViewIpc`] |
+/// | `knowledge.merge` | [`MergeRequest`] | `null` |
+/// | `knowledge.claim.status` | [`ClaimStatusRequest`] | `null` |
+/// | `knowledge.status` | `{}` | [`KnowledgeStatus`] |
+/// | `mcp.clients.list` | `{}` | `Vec<`[`McpClientInfo`]`>` |
+/// | `mcp.clients.create` | [`McpClientCreate`] | [`McpClientCreated`] (token shown once) |
+/// | `mcp.clients.revoke` | [`McpClientRef`] | `null` |
 pub mod method {
     pub const STATUS: &str = "status";
     pub const CHAT: &str = "chat";
@@ -58,6 +67,15 @@ pub mod method {
     pub const RETRIEVE_CONTEXT: &str = "retrieve.context";
     pub const RETRIEVE_ASK: &str = "retrieve.ask";
     pub const RUNTIME_STATUS: &str = "runtime.status";
+    pub const KNOWLEDGE_ENTITIES: &str = "knowledge.entities";
+    pub const KNOWLEDGE_ENTITY: &str = "knowledge.entity";
+    pub const KNOWLEDGE_GRAPH: &str = "knowledge.graph";
+    pub const KNOWLEDGE_MERGE: &str = "knowledge.merge";
+    pub const KNOWLEDGE_CLAIM_STATUS: &str = "knowledge.claim.status";
+    pub const KNOWLEDGE_STATUS: &str = "knowledge.status";
+    pub const MCP_CLIENTS_LIST: &str = "mcp.clients.list";
+    pub const MCP_CLIENTS_CREATE: &str = "mcp.clients.create";
+    pub const MCP_CLIENTS_REVOKE: &str = "mcp.clients.revoke";
 }
 
 pub mod notification {
@@ -66,6 +84,8 @@ pub mod notification {
     pub const MODELS_PROGRESS: &str = "models.progress";
     pub const INGEST_PROGRESS: &str = "ingest.progress";
     pub const SOURCES_CHANGED: &str = "sources.changed";
+    /// [`KnowledgeChanged`].
+    pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
 }
 
 // ---- status ----
@@ -480,4 +500,252 @@ pub struct RuntimeInfo {
     pub provider: ProviderId,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+// ---- knowledge graph ----
+//
+// Entity kinds travel as snake_case strings: `person`, `organization`, `project`, `commitment`,
+// `preference`, `event`, `place`, `topic`. Claim statuses: `active`, `superseded`, `retracted`,
+// `user_asserted`.
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntitiesRequest {
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntitySummaryView {
+    pub id: EntityId,
+    pub kind: String,
+    pub name: String,
+    pub claims: u64,
+    pub mentions: u64,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: time::OffsetDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityRef {
+    pub id: EntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceView {
+    pub item: ItemRef,
+    #[serde(default)]
+    pub chunk_id: Option<i64>,
+    #[serde(default)]
+    pub quote: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+/// Exactly one of `entity` / `literal` is set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimObjectView {
+    #[serde(default)]
+    pub entity: Option<EntityLink>,
+    #[serde(default)]
+    pub literal: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityLink {
+    pub id: EntityId,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ClaimView {
+    pub id: i64,
+    pub subject: EntityLink,
+    pub predicate: String,
+    pub object: ClaimObjectView,
+    pub text: String,
+    pub confidence: f32,
+    pub status: String,
+    pub evidence: Vec<EvidenceView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MentionView {
+    pub item: ItemRef,
+    #[serde(default)]
+    pub chunk_id: Option<i64>,
+    pub surface: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct EntityDetail {
+    pub id: EntityId,
+    pub kind: String,
+    pub name: String,
+    pub aliases: Vec<String>,
+    /// `(scheme, value)` pairs, e.g. `("email", "sam@example.com")`.
+    pub identifiers: Vec<(String, String)>,
+    pub attributes: serde_json::Value,
+    pub claims: Vec<ClaimView>,
+    pub mentions: Vec<MentionView>,
+    /// The entity's vault page, relative to the vault root.
+    #[serde(default)]
+    pub vault_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphRequest {
+    /// Neighbourhood of this entity, or an overview of the most connected entities when `None`.
+    #[serde(default)]
+    pub center: Option<EntityId>,
+    pub depth: u32,
+    pub limit: u32,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphNodeView {
+    pub id: EntityId,
+    pub kind: String,
+    pub name: String,
+    pub depth: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphEdgeView {
+    pub claim: i64,
+    pub from: EntityId,
+    pub to: EntityId,
+    pub predicate: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GraphViewIpc {
+    pub nodes: Vec<GraphNodeView>,
+    pub edges: Vec<GraphEdgeView>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergeRequest {
+    pub into: EntityId,
+    pub from: EntityId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClaimStatusRequest {
+    pub claim: i64,
+    /// `retracted` (user rejects the fact) or `active` (restore).
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct VaultStatus {
+    pub path: Option<String>,
+    pub pages: u64,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_render: Option<time::OffsetDateTime>,
+    /// Pages whose user edits could not be merged automatically.
+    #[serde(default)]
+    pub conflicts: Vec<String>,
+    /// Pages failing validation (broken links, missing citations, bad frontmatter).
+    #[serde(default)]
+    pub invalid: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct KnowledgeStatus {
+    pub entities: u64,
+    pub claims: u64,
+    pub mentions: u64,
+    /// Items changed but not yet processed by extraction.
+    pub pending_items: u64,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_run: Option<time::OffsetDateTime>,
+    /// Provider used for LLM extraction, if any (deterministic extractors always run).
+    #[serde(default)]
+    pub extractor_provider: Option<ProviderId>,
+    pub vault: VaultStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeChanged {
+    pub entities: Vec<EntityId>,
+}
+
+// ---- MCP clients ----
+
+/// What an MCP client may see and call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpScopes {
+    /// Sources whose content the client may read; `None` means all.
+    #[serde(default)]
+    pub sources: Option<Vec<SourceId>>,
+    /// Tool names the client may call; empty means all read-only tools.
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// Whether items flagged sensitive may be returned (default false).
+    #[serde(default)]
+    pub include_sensitive: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpClientInfo {
+    pub id: String,
+    pub name: String,
+    pub scopes: McpScopes,
+    #[serde(with = "time::serde::rfc3339")]
+    pub created_at: time::OffsetDateTime,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub last_used: Option<time::OffsetDateTime>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpClientCreate {
+    pub name: String,
+    pub scopes: McpScopes,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpClientRef {
+    pub id: String,
+}
+
+/// Copy-paste setup for one MCP-capable app.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpSetupSnippet {
+    /// `claude-desktop`, `claude-code`, `cursor`, `generic-http`, `generic-stdio`.
+    pub app: String,
+    /// Config file path hint, if the app uses one.
+    #[serde(default)]
+    pub config_path: Option<String>,
+    pub text: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct McpClientCreated {
+    pub client: McpClientInfo,
+    /// Bearer token; returned only once and never stored in plain text by the daemon.
+    pub token: String,
+    pub setup: Vec<McpSetupSnippet>,
+}
+
+impl std::fmt::Debug for McpClientCreated {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpClientCreated")
+            .field("client", &self.client)
+            .field("token", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
