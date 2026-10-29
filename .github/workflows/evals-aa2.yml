@@ -58,15 +58,18 @@ jobs:
           path: bench/.local-models/data/models
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
 
+      # A debug build: release builds trust no manifest key without the release key, and the
+      # committed manifest carries only the development signature (docs/security/manifest-trust.md).
+      # The model runs in llama-server, so the bench's own profile barely matters for timings.
       - name: Build the bench
         run: |
-          cargo build --release --locked -p nugget-bench
-          cp target/release/nugget-bench "$RUNNER_TEMP/bench-head"
+          cargo build --locked -p nugget-bench
+          cp target/debug/nugget-bench "$RUNNER_TEMP/bench-head"
           if [ -n "$BASELINE" ]; then
             git worktree add "$RUNNER_TEMP/base" "$BASELINE"
             (cd "$RUNNER_TEMP/base" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" \
-              cargo build --release --locked -p nugget-bench)
-            cp target/release/nugget-bench "$RUNNER_TEMP/bench-base"
+              cargo build --locked -p nugget-bench)
+            cp target/debug/nugget-bench "$RUNNER_TEMP/bench-base"
           fi
 
       - name: Record hardware
