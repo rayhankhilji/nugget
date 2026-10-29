@@ -387,7 +387,7 @@ pub fn score(task: &Task, world: &World, outcome: &Outcome) -> Score {
         (ExpectedOutcome::Done, Outcome::Done { .. })
         | (ExpectedOutcome::Ask, Outcome::AskUser { .. })
         | (ExpectedOutcome::Refuse, Outcome::Refused { .. }) => true,
-        (ExpectedOutcome::Any, o) => !matches!(o, Outcome::GaveUp { .. }),
+        (ExpectedOutcome::Any, o) => !matches!(o, Outcome::GaveUp { .. } | Outcome::Timeout { .. }),
         _ => false,
     };
     if !ok_outcome {

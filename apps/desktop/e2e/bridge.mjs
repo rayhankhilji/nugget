@@ -6,12 +6,17 @@
 // Replies are `{ ok: value }` or `{ err: { kind, message, code? } }`, the error shape the shell
 // rejects with (CmdError in src-tauri/src/daemon.rs). See tauri-shim.js for the browser side.
 //
+// Like the shell, the bridge keeps one connection to the daemon open and turns the daemon's
+// notifications into the shell's Tauri events (`chat.delta` -> `nugget:chat-delta`, ... plus
+// `nugget:notification` for every one; `event_for` in src-tauri/src/daemon.rs). A scenario that
+// wants them in the page calls `deliverEvents(page)`; streamed answers and install progress need it.
+//
 // Standalone: node e2e/bridge.mjs <socket> [port]   (serves apps/desktop/dist with the shim inlined)
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { rpcRaw } from "./daemon.mjs";
+import net from "node:net";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const DIST = path.resolve(here, "..", "dist");
@@ -123,16 +128,128 @@ function serveStatic(dist, req, res, shim) {
   fs.createReadStream(file).pipe(res);
 }
 
+/** Daemon notification -> the shell's dedicated Tauri event (`event_for` in src-tauri/src/daemon.rs). */
+const EVENT_FOR = {
+  "chat.delta": "nugget:chat-delta",
+  "chat.done": "nugget:chat-done",
+  "models.progress": "nugget:models-progress",
+  "ingest.progress": "nugget:ingest-progress",
+  "sources.changed": "nugget:sources-changed",
+  "knowledge.changed": "nugget:knowledge-changed",
+};
+
+/**
+ * One long-lived JSON-RPC connection to the daemon, like the shell's: requests are matched to
+ * replies by id (they may run concurrently), notifications go to `onNotification`. Reconnects on
+ * the next call after the daemon closed it.
+ */
+class DaemonConn {
+  constructor(socket, onNotification) {
+    this.socket = socket;
+    this.onNotification = onNotification;
+    this.pending = new Map();
+    this.nextId = 1;
+    this.conn = null;
+  }
+
+  connect() {
+    if (this.conn) return this.conn;
+    this.conn = new Promise((resolve, reject) => {
+      const c = net.connect(this.socket);
+      let buf = "";
+      c.setEncoding("utf8");
+      c.on("connect", () => resolve(c));
+      c.on("data", (chunk) => {
+        buf += chunk;
+        let nl;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, nl);
+          buf = buf.slice(nl + 1);
+          if (!line.trim()) continue;
+          let msg;
+          try {
+            msg = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (msg.id != null && this.pending.has(msg.id)) {
+            this.pending.get(msg.id).resolve(msg);
+            this.pending.delete(msg.id);
+          } else if (msg.method) {
+            this.onNotification(msg);
+          }
+        }
+      });
+      const fail = (e) => {
+        this.conn = null;
+        reject(e);
+        for (const p of this.pending.values()) p.reject(e);
+        this.pending.clear();
+      };
+      c.on("error", fail);
+      c.on("close", () => fail(new Error("the daemon closed the connection")));
+    });
+    return this.conn;
+  }
+
+  /** Resolves to the raw reply `{ id, result }` or `{ id, error }`. */
+  async call(method, params, timeoutMs = 60_000) {
+    const c = await this.connect();
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`${method}: no reply within ${timeoutMs} ms`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (m) => (clearTimeout(timer), resolve(m)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      });
+      c.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    });
+  }
+
+  close() {
+    const c = this.conn;
+    this.conn = null;
+    return c?.then((s) => s.destroy()).catch(() => {});
+  }
+}
+
 /**
  * Start the bridge on 127.0.0.1 (`port` 0 picks a free one). `calls` records every command with
  * its outcome: `{ cmd, via: "shell" | "daemon", ok, code?, message? }`. With `shim`, index.html is
  * served with tauri-shim.js inlined, so any browser can open the app (the test injects it itself).
  * `pickFolders` is what the native folder picker "chooses": an array of paths, or a function of
  * the invoke args returning one (default: the user cancels, `[]`).
+ *
+ * The result has `notifications` (every daemon notification seen: `{ method, params, at }`) and
+ * `deliverEvents(page)`, which forwards them to a Playwright page as Tauri events, in order.
  */
 export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [] }) {
   const shell = shellCommands(socket, { pickFolders });
   const calls = [];
+  const notifications = [];
+  const sinks = new Set();
+  const daemon = new DaemonConn(socket, (n) => {
+    notifications.push({ method: n.method, params: n.params, at: Date.now() });
+    const events = [{ event: "nugget:notification", payload: { method: n.method, params: n.params } }];
+    if (EVENT_FOR[n.method]) events.unshift({ event: EVENT_FOR[n.method], payload: n.params });
+    for (const sink of sinks) sink(events);
+  });
+
+  /** Forward every daemon notification from now on to `page` (see tauri-shim.js `__E2E_EMIT__`). */
+  function deliverEvents(page) {
+    let chain = Promise.resolve();
+    const sink = (events) => {
+      chain = chain.then(() =>
+        page.evaluate((evs) => evs.forEach((e) => window.__E2E_EMIT__?.(e.event, e.payload)), events).catch(() => {}),
+      );
+    };
+    sinks.add(sink);
+    page.once("close", () => sinks.delete(sink));
+    return () => sinks.delete(sink);
+  }
 
   async function invoke(cmd, args) {
     if (Object.hasOwn(shell, cmd)) {
@@ -147,7 +264,7 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
     const method = cmd.replaceAll("_", ".");
     let msg;
     try {
-      msg = await rpcRaw(socket, method, paramsFor(cmd, args));
+      msg = await daemon.call(method, paramsFor(cmd, args));
     } catch (e) {
       calls.push({ cmd, via: "daemon", ok: false, message: e.message });
       return { err: { kind: "disconnected", message: "lost the connection to Nugget" } };
@@ -190,7 +307,13 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
       resolve({
         url: `http://127.0.0.1:${actual}/`,
         calls,
-        close: () => new Promise((r) => server.close(() => r())),
+        notifications,
+        deliverEvents,
+        close: async () => {
+          sinks.clear();
+          await daemon.close();
+          await new Promise((r) => server.close(() => r()));
+        },
       });
     });
   });

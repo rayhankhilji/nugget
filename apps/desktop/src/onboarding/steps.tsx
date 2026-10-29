@@ -2,7 +2,6 @@ import { useEffect, useState, type Dispatch, type ReactNode, type RefObject } fr
 import { api, events, type ConnectorKind, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { Trans, useT, type MessageKey } from "../i18n";
-import { LanguagePicker } from "../i18n/LanguagePicker";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
@@ -62,7 +61,6 @@ export function WelcomeStep({ headingRef }: StepProps) {
       </div>
       <p>{t("onboarding.welcome.ledger")}</p>
       <p className="muted">{t("onboarding.welcome.time")}</p>
-      <LanguagePicker className="field-inline ob-language" />
     </>
   );
 }

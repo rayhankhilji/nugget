@@ -143,7 +143,7 @@ export function EntityDetailPanel({
     <section className="entity-detail" aria-labelledby={headingId} aria-busy={detail.loading || undefined}>
       {!d && (
         <div className="entity-detail-head">
-          <h2 id={headingId} className="entity-name">
+          <h2 id={headingId} className="entity-name" dir="auto">
             {detail.loading ? t("entity.loading") : t("entity.placeholder")}
           </h2>
           {onClose && <CloseButton onClose={onClose} />}
@@ -258,7 +258,7 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
     <>
       <div className="entity-detail-head">
         <div>
-          <h2 id={headingId} className="entity-name">
+          <h2 id={headingId} className="entity-name" dir="auto">
             {d.name}
           </h2>
           <p className="entity-sub">
@@ -272,7 +272,7 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           {aliases.length > 0 && (
             <div>
               <dt>{t("entity.aliases")}</dt>
-              <dd>{aliases.join(t("common.listSeparator"))}</dd>
+              <dd dir="auto">{aliases.join(t("common.listSeparator"))}</dd>
             </div>
           )}
           {d.identifiers.map(([scheme, value]) => (
@@ -286,7 +286,7 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           {attrs.map(([k, v]) => (
             <div key={k}>
               <dt>{k}</dt>
-              <dd>{v}</dd>
+              <dd dir="auto">{v}</dd>
             </div>
           ))}
         </dl>
@@ -432,7 +432,7 @@ function Fact({
   const seen = claimTime(c);
   return (
     <li className={`fact${retracted ? " fact-retracted" : ""}${c.status === "superseded" ? " fact-superseded" : ""}`}>
-      <p className="fact-text">
+      <p className="fact-text" dir="auto">
         {retracted ? <s>{text}</s> : text}
         {c.status === "user_asserted" && (
           <span className="fact-you" title={t("entity.youTitle")}>
@@ -486,7 +486,7 @@ function Fact({
               return (
                 <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${ev.chunk_id ?? i}`}>
                   {e.quote ? (
-                    <blockquote className="evidence-quote" title={e.truncated ? ev.quote ?? undefined : undefined}>
+                    <blockquote className="evidence-quote" dir="auto" title={e.truncated ? ev.quote ?? undefined : undefined}>
                       {e.quote}
                     </blockquote>
                   ) : (
@@ -494,7 +494,9 @@ function Fact({
                   )}
                   <div className="evidence-source">
                     <SourceIcon kind={sourceKindOf(ev.item.source, sourceKinds)} size={16} />
-                    <span className="evidence-title">{e.title}</span>
+                    <span className="evidence-title" dir="auto">
+                      {e.title}
+                    </span>
                     <span className="muted small">{e.source}</span>
                     {at && <RelativeTime ts={at} now={now} className="muted small" />}
                     {e.openUrl && (
@@ -545,7 +547,9 @@ function Mentions({
             <li key={`${m.item.source}\u0000${m.item.key}\u0000${m.chunk_id ?? ""}\u0000${i}`}>
               <SourceIcon kind={sourceKindOf(m.item.source, sourceKinds)} size={14} />
               <span className="mention-surface">{t("entity.mentionSurface", { surface: m.surface })}</span>
-              <span className="mention-title">{e.title}</span>
+              <span className="mention-title" dir="auto">
+                {e.title}
+              </span>
               <span className="muted small">{e.source}</span>
               {e.openUrl && (
                 <button type="button" className="btn btn-small btn-ghost" onClick={() => void onOpen(e.openUrl!, e.title)}>

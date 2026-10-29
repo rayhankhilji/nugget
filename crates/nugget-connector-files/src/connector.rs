@@ -405,7 +405,10 @@ impl Connector for FsConnector {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<DebounceEventResult>();
         let mut debouncer = new_debouncer_opt::<_, RecommendedWatcher, NoCache>(
             self.cfg.debounce,
-            None,
+            // The debouncer thread wakes every tick even when nothing changes; the default tick
+            // (a quarter of the timeout) costs several wakeups a second in an idle daemon. One
+            // tick per timeout delivers an event at most one timeout later than the default.
+            Some(self.cfg.debounce),
             move |r: DebounceEventResult| {
                 let _ = tx.send(r);
             },

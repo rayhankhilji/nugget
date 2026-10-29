@@ -15,6 +15,14 @@
 //! ```
 //!
 //! Server side: [`bind`] a listener and [`serve`] it with an `Arc<dyn` [`Handler`]`>`.
+//!
+//! In-flight semantics: each connection runs at most [`ServerOptions::max_in_flight`]
+//! requests at once (default [`DEFAULT_MAX_IN_FLIGHT`]). Further requests are answered right
+//! away with [`code::SERVER_BUSY`] (they did not run; [`IpcError::is_busy`]) instead of
+//! waiting unread, so no call can deadlock by waiting for a later request on its own
+//! connection. Control requests ([`DEFAULT_CONTROL_METHODS`]: cancellations, confirmations,
+//! answers, the kill switch) may use [`CONTROL_RESERVE`] extra slots. [`Client`] does not
+//! retry busy calls; callers that issue many concurrent long calls on one connection should.
 
 mod client;
 mod error;
@@ -25,10 +33,13 @@ mod wire;
 pub use client::Client;
 pub use error::{IpcError, RpcError, code, parse_params, to_result};
 pub use server::{
-    DEFAULT_MAX_IN_FLIGHT, Handler, Notifier, ServerOptions, serve, serve_until, serve_with,
+    CONTROL_RESERVE, DEFAULT_CONTROL_METHODS, DEFAULT_MAX_IN_FLIGHT, Handler, Notifier,
+    ServerOptions, serve, serve_until, serve_with,
 };
 pub use transport::{LOCK_FILE, bind, connect_stream, lock_path, socket_display, socket_name};
 pub use wire::Notification;
+#[doc(hidden)]
+pub use wire::fuzz_frames;
 
 /// Re-exported so dependents name the same listener/stream types without depending on
 /// `interprocess` directly.

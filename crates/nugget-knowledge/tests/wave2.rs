@@ -192,6 +192,45 @@ async fn runs_after_the_first_only_look_at_changed_and_deleted_items() {
 }
 
 #[tokio::test]
+async fn budget_cut_runs_continue_their_plan_and_then_see_what_changed_meanwhile() {
+    let env = Env::new();
+    for i in 0..6 {
+        env.put(plain(&format!("n{i}"), &format!("body {i}")), &["text"]);
+    }
+    let k = env.knowledge(cfg(), None);
+    let budget = RunBudget {
+        max_items: 2,
+        ..RunBudget::unlimited()
+    };
+    let first = k.run_once(budget).await.unwrap();
+    assert_eq!((first.planned, first.remaining), (6, 4));
+    // Meanwhile: a processed item is edited, a planned one deleted, a new one added.
+    env.put(plain("n0", "body 0, edited"), &["text"]);
+    env.store.delete_item(&item_ref("notes", "n5")).unwrap();
+    env.put(plain("n9", "new"), &["text"]);
+    let second = k.run_once(budget).await.unwrap();
+    assert_eq!((second.planned, second.remaining), (4, 2));
+    let third = k.run_once(budget).await.unwrap();
+    assert_eq!(third.remaining, 0);
+    assert_eq!(third.items_processed + third.items_deleted, 2);
+    // The changes made during the drain are planned next.
+    let next = run(&k).await;
+    assert_eq!(next.items_processed, 2, "n0 and n9");
+    assert_eq!(run(&k).await.planned, 0);
+
+    // A reset drops what a cut run left behind.
+    for i in 0..4 {
+        env.put(plain(&format!("n{i}"), &format!("again {i}")), &["text"]);
+    }
+    let cut = k.run_once(budget).await.unwrap();
+    assert!(cut.remaining > 0);
+    k.reset().await.unwrap();
+    let all = run(&k).await;
+    assert_eq!(all.planned, 6, "every item after a reset");
+    assert_eq!(all.remaining, 0);
+}
+
+#[tokio::test]
 async fn identifiers_record_the_items_that_supplied_them() {
     let env = Env::new();
     Mail {

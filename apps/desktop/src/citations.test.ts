@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitCitations, stripCitationMarkers, withheldNotice } from "./citations";
+import { citedNumbers, groupSources, splitCitations, stripCitationMarkers, withheldNotice } from "./citations";
 
 describe("splitCitations", () => {
   const valid = new Set([1, 2, 3]);
@@ -51,5 +51,33 @@ describe("stripCitationMarkers", () => {
       "",
     ];
     for (const s of keep) expect(stripCitationMarkers(s)).toBe(s);
+  });
+});
+
+describe("citedNumbers", () => {
+  const valid = new Set([1, 2, 3, 4]);
+  it("finds the markers the text cites, ignoring code, links and unknown numbers", () => {
+    expect([...citedNumbers("A [1], B [2][4]. `x[3]` [3](https://x) [9]", valid)].sort()).toEqual([1, 2, 4]);
+    expect(citedNumbers("```\nlist[1]\n```\nnothing cited", valid).size).toBe(0);
+  });
+});
+
+describe("groupSources", () => {
+  const c = (n: number, key: string) => ({ n, item: { source: "s", key } });
+  it("puts cited items first, once each with their cited markers, and the rest after", () => {
+    const g = groupSources([c(1, "a"), c(2, "b"), c(3, "c"), c(4, "a"), c(5, "d"), c(6, "d"), c(7, "b")], new Set([4, 2, 1]));
+    expect(g.cited.map((e) => [e.key.split("\u0000")[1], e.ns])).toEqual([
+      ["a", [1, 4]],
+      ["b", [2]],
+    ]);
+    expect(g.cited[1]!.citations.map((x) => x.n)).toEqual([2, 7]);
+    expect(g.uncited.map((e) => [e.key.split("\u0000")[1], e.ns])).toEqual([
+      ["c", [3]],
+      ["d", [5, 6]],
+    ]);
+  });
+  it("tells items apart by source as well as key", () => {
+    const g = groupSources([{ n: 1, item: { source: "x", key: "k" } }, { n: 2, item: { source: "y", key: "k" } }], new Set([1, 2]));
+    expect(g.cited).toHaveLength(2);
   });
 });

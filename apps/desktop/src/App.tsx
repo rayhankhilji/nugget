@@ -293,7 +293,9 @@ export function App() {
         </div>
         <button type="button" className="palette-trigger" onClick={() => setPalette(true)} aria-keyshortcuts={comboAria(PALETTE)} aria-haspopup="dialog">
           <span>{t("app.openPalette")}</span>
-          <kbd aria-hidden="true">{comboLabel(PALETTE)}</kbd>
+          <kbd aria-hidden="true" dir="ltr">
+            {comboLabel(PALETTE)}
+          </kbd>
         </button>
         <nav aria-label={t("app.navLabel")} onKeyDown={onNavKey}>
           <ul>

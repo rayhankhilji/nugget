@@ -254,6 +254,7 @@ on `code`.
 | `IO` | `-32007` | A file or network I/O error |
 | `MESSAGE_TOO_LARGE` | `-32008` | A message exceeded 16 MiB |
 | `UNAUTHORIZED` | `-32009` | A source or provider needs sign-in or a credential |
+| `SERVER_BUSY` | `-32010` | The connection already has its maximum number of requests in flight (`data`: `{"max_in_flight": n}`); retry once an earlier call on the connection has finished. Control methods such as cancel and the kill switch have reserved slots and never get this. |
 
 ## Examples
 

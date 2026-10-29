@@ -59,7 +59,7 @@ Briefs in `docs/waves/wave-x/`.
 | X2 | `x/knowledge-ux` | session_01CTjRSuTbenvZTQvGqobCoo | graph view and entity page polish, W7 follow-ups (merged) |
 | X3 | `x/release` | session_01CTjRSuHipddEqZu3cBA7Wr | unsigned installer dry run on three OSes, AppImage smoke (merged) |
 | X4 | `x/wiring` | session_01CTjRSqHjCrA9Qxn9PCyqHN | reranker, conversational search, chat citations, W1/W4 gaps (merged) |
-| X5 | `x/perf` | session_01CTjRSsrJLKVRYFyVjzqDnH | daemon CPU/RSS/startup at 100k items, W9/W12 follow-ups |
+| X5 | `x/perf` | session_01CTjRSsrJLKVRYFyVjzqDnH | daemon CPU/RSS/startup at 100k items, W9/W12 follow-ups (merged) |
 
 ## Wave Y (v1 evidence): cloud sessions from 308f775
 Briefs in `docs/waves/wave-y/`.
@@ -67,7 +67,26 @@ Briefs in `docs/waves/wave-y/`.
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | Y1 | `y/real-os` | session_01CTjRSrWcPgzD1WCLwMPhhi | installer smoke, accessibility, Double Tap and computer use on real macOS/Windows runners (merged) |
-| Y2 | `y/real-models` | session_01CTjRSswimZrnz747s9AdLp | benches with real local models; latency, drafting, computer use, extraction |
+| Y2 | `y/real-models` | session_01CTjRSswimZrnz747s9AdLp | benches with real local models; latency, drafting, computer use, extraction (merged) |
 | Y3 | `y/trust` | session_01CTjRSrvKuQh87zTMFfWoXZ | manifest rollback protection, release key, signed update feed, reproducible builds (merged) |
 | Y4 | `y/first-run` | session_01CTjRSr8rCA1mYQCUBBFN8z | measured time to first value, empty/error states, X4 gaps, screenshots (merged) |
 | Y5 | `y/dashboards` | session_01CTjRSuGsEKLz91CWSGSx6H | nightly benches, dashboard, generated README numbers, PLAN status (merged) |
+
+## Wave Z (last untested paths, translations, AI setup, hardening): cloud sessions from 6f54817
+Briefs in `docs/waves/wave-z/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| Z1 | `z/desktop-coverage` | session_01CTjRSpodmRHxnXjWF2CDXH | Wayland, the Double Tap overlay on three OSes, computer use on macOS |
+| Z2 | `z/i18n` | session_01CTjRSspNzvkrF5GkeK22rE | complete all catalogs, Arabic and RTL, overflow checks (merged) |
+| Z3 | `z/ai-setup` | session_01CTjRSrXicS94EepP69WwKH | onboarding model install to cited answer, key validation, ask fallback (merged) |
+| Z4 | `z/hardening` | session_01CTjRStVNmwX45S5GjXvhm3 | open security-review rows, fuzzing, context gaps, strict reproducibility (merged) |
+
+## Wave AA (real-model quality): cloud sessions from 31ec850
+Briefs in `docs/waves/wave-aa/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| AA1 | `aa/doubletap-latency` | session_01CTjRSuDx768RtwbJTaiHvE | local Double Tap under 3 s: prompt budget, prefix cache, Apple Silicon numbers |
+| AA2 | `aa/agent-quality` | session_01CTjRSpmAvmjUGCE3Js3Ytu | computer use with small local models: success ≥ 0.8, false confirmations ≤ 0.10 |
+| AA3 | `aa/grounding` | session_01CTjRSseja8BUetk34ePA1G | drafts without hallucinations, extraction F1 ≥ 0.8 with real models |

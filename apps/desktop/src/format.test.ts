@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseName, formatLatency, formatRelative, splitList } from "./format";
+import { baseName, formatDatesInText, formatLatency, formatRelative, splitList } from "./format";
 
 describe("formatRelative", () => {
   const now = Date.parse("2026-10-28T12:00:00Z");
@@ -57,5 +57,28 @@ describe("baseName", () => {
     expect(baseName("/home/me/Notes/")).toBe("Notes");
     expect(baseName("C:\\Users\\me\\Vault")).toBe("Vault");
     expect(baseName("/")).toBe("/");
+  });
+});
+
+describe("formatDatesInText", () => {
+  const fmt = (text: string, locale = "en-US") => formatDatesInText(text, locale, "UTC");
+
+  it("writes date-times as date and time, and midnight-UTC or bare dates as dates", () => {
+    expect(fmt("attended Wren Mobile usability test on 2026-11-10T13:00:00Z")).toBe(
+      "attended Wren Mobile usability test on Nov 10, 2026, 1:00 PM",
+    );
+    expect(fmt("due 2026-11-10T00:00:00Z.")).toBe("due Nov 10, 2026.");
+    expect(fmt("born 1815-12-10, died 1852-11-27")).toBe("born Dec 10, 1815, died Nov 27, 1852");
+    expect(fmt("at 2026-11-10T13:00:00.250+02:00")).toBe("at Nov 10, 2026, 11:00 AM");
+  });
+
+  it("follows the locale", () => {
+    expect(fmt("am 2026-11-10", "de-DE")).toBe("am 10.11.2026");
+  });
+
+  it("leaves other numbers and impossible dates alone", () => {
+    for (const s of ["v2026-11-10", "id 2026-11-10-abc", "2026-02-31", "2026-13-01", "call 555-1234", "12026-11-10", "no dates"]) {
+      expect(fmt(s)).toBe(s);
+    }
   });
 });

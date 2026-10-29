@@ -111,6 +111,30 @@ impl Serialize for CmdError {
     }
 }
 
+/// Waits before each retry of a call the daemon turned away as busy (`SERVER_BUSY`: the
+/// connection is at its in-flight cap and the call did not run), about a second in all.
+pub const BUSY_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(100),
+    Duration::from_millis(300),
+    Duration::from_millis(600),
+];
+
+/// Run `call`, retrying with [`BUSY_BACKOFF`] while the daemon answers `SERVER_BUSY`. Any other
+/// outcome (and the last busy answer) is returned as is.
+pub async fn retry_busy<T, F, Fut>(mut call: F) -> Result<T, IpcError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, IpcError>>,
+{
+    for wait in BUSY_BACKOFF {
+        match call().await {
+            Err(e) if e.is_busy() => tokio::time::sleep(wait).await,
+            other => return other,
+        }
+    }
+    call().await
+}
+
 pub struct Daemon {
     paths: Result<Paths, String>,
     client: Mutex<Option<Client>>,
@@ -194,8 +218,7 @@ impl Daemon {
         R: DeserializeOwned,
     {
         let client = self.client(app).await?;
-        client
-            .call(method, params)
+        retry_busy(|| client.call(method, params))
             .await
             .map_err(|e| CmdError::from_ipc(e, method))
     }
@@ -350,6 +373,52 @@ fn spawn_detached(exe: &Path) -> std::io::Result<Child> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn busy() -> IpcError {
+        IpcError::Rpc(nugget_ipc::RpcError::new(
+            nugget_ipc::code::SERVER_BUSY,
+            "busy",
+        ))
+    }
+
+    #[tokio::test]
+    async fn busy_calls_are_retried_with_a_bounded_backoff() {
+        use std::sync::atomic::AtomicU32;
+        // Busy twice, then answered.
+        let n = AtomicU32::new(0);
+        let r = retry_busy(|| async {
+            if n.fetch_add(1, Ordering::SeqCst) < 2 {
+                Err(busy())
+            } else {
+                Ok(7)
+            }
+        })
+        .await;
+        assert_eq!(r.unwrap(), 7);
+        assert_eq!(n.load(Ordering::SeqCst), 3);
+
+        // Always busy: four tries, then the busy error itself.
+        let n = AtomicU32::new(0);
+        let started = Instant::now();
+        let r: Result<(), _> = retry_busy(|| async {
+            n.fetch_add(1, Ordering::SeqCst);
+            Err(busy())
+        })
+        .await;
+        assert!(r.unwrap_err().is_busy());
+        assert_eq!(n.load(Ordering::SeqCst), 4);
+        assert!(started.elapsed() >= BUSY_BACKOFF.iter().sum::<Duration>());
+
+        // Other errors are not retried.
+        let n = AtomicU32::new(0);
+        let r: Result<(), _> = retry_busy(|| async {
+            n.fetch_add(1, Ordering::SeqCst);
+            Err(IpcError::Disconnected)
+        })
+        .await;
+        assert!(matches!(r, Err(IpcError::Disconnected)));
+        assert_eq!(n.load(Ordering::SeqCst), 1);
+    }
 
     #[test]
     fn errors_serialize_for_the_frontend() {

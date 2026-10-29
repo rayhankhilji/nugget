@@ -48,6 +48,8 @@ pub enum Outcome {
     Refused { reason: String },
     /// It could not finish (error, budget, no idea).
     GaveUp { reason: String },
+    /// It ran out of wall-clock time (the task timeout). A failure, listed separately.
+    Timeout { reason: String },
 }
 
 impl Outcome {
@@ -57,6 +59,7 @@ impl Outcome {
             Outcome::AskUser { .. } => "ask",
             Outcome::Refused { .. } => "refuse",
             Outcome::GaveUp { .. } => "gave_up",
+            Outcome::Timeout { .. } => "timeout",
         }
     }
 }

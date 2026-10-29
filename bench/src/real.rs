@@ -51,7 +51,10 @@ use crate::index::FakeIndex;
 use crate::report::{Direction, Metric};
 use crate::runner::{BenchError, RunConfig, RunContext, Scale};
 use crate::stats::summarize;
-use crate::suites::memory::{FRESHNESS_TARGET_S, MemoryParams, retrieval as fake_retrieval};
+use crate::suites::memory::{
+    FRESHNESS_TARGET_S, MemoryParams, RANK_DUMP_DEEP, RankDump, rank_dump_path,
+    retrieval as fake_retrieval,
+};
 use crate::suites::{doc_text, item_ref};
 
 /// Results considered per known-item query (as in the fake backend).
@@ -594,6 +597,12 @@ async fn synthetic_phase(
         .into_iter()
         .map(|m| (m.name, m.value))
         .collect();
+    // Diagnostic only (`NUGGET_BENCH_DUMP_MISSES`): the fake arms' per-query ranks.
+    let dump = rank_dump_path().map(|path| {
+        let mut d = RankDump::default();
+        d.add_fake_arms(&ix, &queries);
+        (path, d)
+    });
     drop(ix);
 
     // Phase 2: initial ingest.
@@ -680,7 +689,7 @@ async fn synthetic_phase(
         .iter()
         .map(|d| Stack::key(&rel_path(d.id, p.files_per_dir, 0)))
         .collect();
-    out.extend(known_item(&stack, &queries, &keys, &baseline).await?);
+    out.extend(known_item(&stack, &queries, &keys, &baseline, dump).await?);
 
     // Phase 4: freshness and propagation.
     stack.wait_watching(Duration::from_secs(120)).await?;
@@ -714,15 +723,22 @@ async fn known_item(
     queries: &[Query],
     keys: &[ItemKey],
     baseline: &HashMap<String, f64>,
+    mut dump: Option<(PathBuf, RankDump)>,
 ) -> Result<Vec<Metric>, BenchError> {
     const KS: [usize; 3] = [1, 5, 10];
     let mut out = Vec::new();
     let mut latencies_ms = Vec::with_capacity(queries.len());
     let fake_hybrid = baseline.get("retrieval.hybrid.recall@10").copied();
+    let key_ids: HashMap<&ItemKey, usize> = if dump.is_some() {
+        keys.iter().enumerate().map(|(i, k)| (k, i)).collect()
+    } else {
+        HashMap::new()
+    };
     for (mode, strategy, mmr) in MODES {
         let mut hits_at = [0usize; KS.len()];
         let mut rr = 0.0;
         let mut fallbacks = 0usize;
+        let mut ranks = Vec::new();
         for q in queries {
             let t = Instant::now();
             let res = stack
@@ -736,6 +752,9 @@ async fn known_item(
                 fallbacks += 1;
             }
             let target = &keys[q.relevant];
+            if dump.is_some() {
+                ranks.push(doc_ids(stack, &key_ids, &res.items));
+            }
             if let Some(rank) = res
                 .items
                 .iter()
@@ -748,6 +767,9 @@ async fn known_item(
                     }
                 }
             }
+        }
+        if let Some((_, d)) = &mut dump {
+            d.push(format!("real.{mode}@{DEPTH}"), ranks);
         }
         let n = queries.len() as f64;
         for (i, k) in KS.iter().enumerate() {
@@ -805,6 +827,24 @@ async fn known_item(
             }
         }
     }
+    if let Some((path, mut d)) = dump {
+        // Each single leg again at depth, to see how far a missed target fell.
+        for (mode, strategy) in [
+            ("bm25", Strategy::TextOnly),
+            ("vector", Strategy::VectorOnly),
+        ] {
+            let mut ranks = Vec::with_capacity(queries.len());
+            for q in queries {
+                let res = stack
+                    .retriever
+                    .search_with(&q.text, RANK_DUMP_DEEP, opts(strategy, false))
+                    .await?;
+                ranks.push(doc_ids(stack, &key_ids, &res.items));
+            }
+            d.push(format!("real.{mode}"), ranks);
+        }
+        d.write(&path, queries)?;
+    }
     if let Some(s) = summarize(&latencies_ms) {
         out.push(Metric::new(
             "query.latency.p50_ms",
@@ -822,6 +862,19 @@ async fn known_item(
         ));
     }
     Ok(out)
+}
+
+/// Corpus document ids of `items`, best first (items of other sources are skipped).
+fn doc_ids(
+    stack: &Stack,
+    ids: &HashMap<&ItemKey, usize>,
+    items: &[nugget_retrieve::RetrievedItem],
+) -> Vec<usize> {
+    items
+        .iter()
+        .filter(|i| i.item.source == stack.source)
+        .filter_map(|i| ids.get(&i.item.key).copied())
+        .collect()
 }
 
 // ---------------------------------------------------------------- freshness

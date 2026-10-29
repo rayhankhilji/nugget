@@ -1,8 +1,7 @@
 //! Knowledge extraction and the Markdown vault, wired into the daemon.
 //!
 //! - **Extraction** ([`Knowledge::run_once`]) runs on its own task: at startup, after ingest
-//!   commits changes (debounced; woken by ingest events, decided by
-//!   [`Ingest::committed`]), periodically (`interval_minutes`, which also retries pending LLM
+//!   commits changes (debounced; woken by [`Ingest::subscribe_committed`]), periodically (`interval_minutes`, which also retries pending LLM
 //!   extraction), and again right away while a run leaves planned items behind. While the power
 //!   policy is constrained, runs make no LLM requests (deterministic extractors still keep the
 //!   graph fresh) and periodic runs are skipped.
@@ -12,7 +11,10 @@
 //! - **Vault.** After every run (and after merges and claim-status changes), pages of entities
 //!   changed in the graph's change feed are re-rendered with `Vault::render_changed`; the
 //!   high-water mark is persisted in the store (cursor key [`VAULT_MARK_KEY`], with the vault
-//!   root, so moving the vault re-renders everything). `Vault::watch` applies user edits.
+//!   root, so moving the vault re-renders everything). `Vault::watch` applies user edits and
+//!   signals them (`Vault::subscribe_edits`), which triggers that pass.
+//! - **No polling.** The worker sleeps until one of those events or a deadline (debounce,
+//!   `interval_minutes`), so an idle daemon spends no wakeups here.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -32,6 +34,7 @@ use nugget_vault::{ItemLookup, Vault};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
 use tokio::sync::broadcast;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
 
@@ -41,8 +44,6 @@ use crate::hub::Hub;
 
 /// Store cursor key holding the vault's render high-water mark `{"root": ..., "seq": n}`.
 pub const VAULT_MARK_KEY: &str = "vault/render";
-/// How often the worker checks for committed changes, vault edits and power state.
-const TICK: Duration = Duration::from_millis(500);
 /// Entity ids sent in one `knowledge.changed` notification at most (clients refetch anyway).
 const MAX_NOTIFIED_IDS: usize = 1000;
 
@@ -178,46 +179,58 @@ impl KnowledgeService {
         self.wake.notify_one();
     }
 
+    /// The extraction loop. It sleeps until something happens: an ingest commit (watched via
+    /// [`Ingest::subscribe_committed`]), a [`wake`](Self::wake), a batch of vault edits, the
+    /// debounce or periodic deadline, or shutdown. Nothing polls, so an idle daemon does not
+    /// wake up here at all.
     async fn worker(self: Arc<Self>, ingest: Ingest, stop: CancellationToken) {
-        let mut events = ingest.subscribe();
-        let mut events_open = true;
-        let mut seen = ingest.committed();
+        let mut committed = ingest.subscribe_committed();
+        let mut seen = *committed.borrow_and_update();
+        let mut commits_open = true;
+        let mut edits = self.vault.as_ref().map(|v| v.subscribe_edits());
         let debounce = Duration::from_millis(self.cfg.debounce_ms);
         let interval = (self.cfg.interval_minutes > 0)
             .then(|| Duration::from_secs(self.cfg.interval_minutes * 60));
         // Startup run: pick up whatever was indexed while extraction was not running.
-        let mut due: Option<tokio::time::Instant> =
-            self.cfg.enabled.then(tokio::time::Instant::now);
-        let mut periodic = interval.map(|i| tokio::time::Instant::now() + i);
-        let mut ticker = tokio::time::interval(TICK);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut due: Option<Instant> = self.cfg.enabled.then(Instant::now);
+        let mut periodic = interval.map(|i| Instant::now() + i);
         loop {
+            let deadline = if self.cfg.enabled {
+                [due, periodic].into_iter().flatten().min()
+            } else {
+                None
+            };
+            let mut vault_dirty = false;
             tokio::select! {
                 () = stop.cancelled() => return,
-                // Ingest events only wake the loop; `committed()` decides whether to run.
-                ev = events.recv(), if events_open => {
-                    if let Err(broadcast::error::RecvError::Closed) = ev {
-                        events_open = false;
+                // While a run is already scheduled, commits are only looked at when it is due
+                // (below), so a burst of commits does not wake this loop once per item.
+                r = committed.changed(), if self.cfg.enabled && commits_open && due.is_none() => {
+                    if r.is_err() {
+                        commits_open = false;
                     }
                 }
                 () = self.wake.notified() => {
-                    due.get_or_insert_with(tokio::time::Instant::now);
+                    vault_dirty = true;
+                    due.get_or_insert_with(Instant::now);
                 }
-                _ = ticker.tick() => {}
+                () = edits_changed(&mut edits) => vault_dirty = true,
+                () = sleep_until(deadline) => {}
             }
             if !self.cfg.enabled {
-                self.sync_vault_and_notify().await;
+                if vault_dirty {
+                    self.sync_vault_and_notify().await;
+                }
                 continue;
             }
-            let now = tokio::time::Instant::now();
-            let committed = ingest.committed();
-            if committed != seen {
+            let now = Instant::now();
+            let latest = *committed.borrow_and_update();
+            if latest != seen {
                 // More changes: (re)start the quiet period.
-                seen = committed;
+                seen = latest;
                 due = Some(now + debounce);
             }
-            let periodic_due = periodic.is_some_and(|p| now >= p);
-            if periodic_due {
+            if periodic.is_some_and(|p| now >= p) {
                 periodic = interval.map(|i| now + i);
                 if self.power.constrained() {
                     tracing::debug!("knowledge: periodic run skipped (power constrained)");
@@ -229,38 +242,46 @@ impl KnowledgeService {
                 Some(at) if now >= at => {
                     due = None;
                     match self.run_now().await {
-                        Ok(stats) if stats.remaining > 0 => due = Some(now),
+                        Ok(stats) if stats.remaining > 0 => due = Some(Instant::now()),
                         Ok(_) => {}
                         Err(e) => tracing::warn!(error = %e, "knowledge run failed"),
                     }
                 }
-                _ => {
-                    // Vault edits applied by the watcher change the graph too.
-                    self.sync_vault_and_notify().await;
-                }
+                // Vault edits applied by the watcher change the graph too (a run syncs the
+                // vault itself).
+                _ if vault_dirty => self.sync_vault_and_notify().await,
+                _ => {}
             }
         }
     }
 
     /// One extraction run (respecting the power policy), then a vault pass.
     pub async fn run_now(&self) -> Result<RunStats> {
-        let constrained = self.power.constrained();
-        let budget = RunBudget {
-            max_items: self.cfg.max_items_per_run.max(1),
-            max_llm_requests: if constrained {
-                0
-            } else {
-                self.cfg.max_llm_requests_per_run
-            },
-            max_millis: (self.cfg.max_run_seconds > 0).then(|| self.cfg.max_run_seconds * 1000),
-        };
-        // `run_once` makes synchronous store calls between its awaits: keep it off the workers.
+        let started = std::time::Instant::now();
+        let power = self.power.clone();
+        let (max_items, max_llm, max_secs) = (
+            self.cfg.max_items_per_run.max(1),
+            self.cfg.max_llm_requests_per_run,
+            self.cfg.max_run_seconds,
+        );
         let k = self.knowledge.clone();
         let handle = tokio::runtime::Handle::current();
-        let stats = blocking(move || handle.block_on(k.run_once(budget))).await;
+        // `run_once` makes synchronous store calls between its awaits, and the power probe may
+        // read the OS: keep both off the workers.
+        let (constrained, stats) = blocking(move || {
+            let constrained = power.constrained();
+            let budget = RunBudget {
+                max_items,
+                max_llm_requests: if constrained { 0 } else { max_llm },
+                max_millis: (max_secs > 0).then(|| max_secs * 1000),
+            };
+            Ok((constrained, handle.block_on(k.run_once(budget))))
+        })
+        .await?;
         *self.last_run.lock().unwrap_or_else(PoisonError::into_inner) =
             Some(OffsetDateTime::now_utc());
         let stats = stats?;
+        let took_ms = started.elapsed().as_millis() as u64;
         if stats.planned > 0 {
             tracing::info!(
                 processed = stats.items_processed,
@@ -269,8 +290,11 @@ impl KnowledgeService {
                 remaining = stats.remaining,
                 entities = stats.changed_entities,
                 constrained,
+                took_ms,
                 "knowledge run"
             );
+        } else {
+            tracing::debug!(took_ms, "knowledge run: nothing to do");
         }
         if let Err(e) = self.sync_vault().await {
             tracing::warn!(error = %e, "vault render failed");
@@ -354,6 +378,28 @@ impl KnowledgeService {
             .into_iter()
             .find(|p| p.meta().locality != nugget_core::capability::Locality::Cloud)
             .map(|p| p.id().clone())
+    }
+}
+
+/// Sleep until `deadline`, or forever without one.
+async fn sleep_until(deadline: Option<Instant>) {
+    match deadline {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Resolves when the vault has applied user edits; never without a vault (or once its watcher
+/// is gone).
+async fn edits_changed(edits: &mut Option<tokio::sync::watch::Receiver<u64>>) {
+    match edits {
+        Some(rx) => {
+            if rx.changed().await.is_err() {
+                *edits = None;
+                std::future::pending::<()>().await;
+            }
+        }
+        None => std::future::pending().await,
     }
 }
 

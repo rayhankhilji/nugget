@@ -1,0 +1,139 @@
+name: Evals (real models)
+
+# Real-model evaluations (bench/README.md, "Real-model results"). Every suite runs against the
+# signed manifest's smallest chat and embedding models, installed and served by nugget-runtime's
+# llama-server exactly as the app does (`nugget-bench --local-models`), on a CPU-only runner.
+# Each suite gets its own runner so a slow one does not hold up the others; the JSON reports and
+# the runner's hardware description are uploaded as artifacts. Failures and timeouts are part of
+# the reports: a suite that misses a target still uploads its report.
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: "Workload size (smoke, quick, standard, full)"
+        default: quick
+        type: choice
+        options: [smoke, quick, standard, full]
+      chat_model:
+        description: "Manifest id of the chat model (empty: the smallest)"
+        default: ""
+        type: string
+  schedule:
+    # Weekly, Monday 03:17 UTC.
+    - cron: "17 3 * * 1"
+
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  SCALE: ${{ inputs.scale || 'quick' }}
+  CHAT_MODEL: ${{ inputs.chat_model || '' }}
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/eval-results
+
+jobs:
+  eval:
+    name: ${{ matrix.suite }} (real model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: doubletap
+            args: doubletap
+          # A/B on one runner: llama-server's default threads (the physical cores), then every
+          # logical core.
+          - suite: doubletap-threads
+            args: doubletap
+            args2: doubletap --local-threads 4
+          - suite: draft
+            args: draft --draft-judge model --draft-dump eval-results/draft-drafts.jsonl
+          - suite: cua
+            args: cua --cua-agent nugget --cua-env inproc
+          # The manifest's agentic-tier model, which the app routes the agent to on 16 GB.
+          - suite: cua-8b
+            args: cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
+          - suite: knowledge
+            args: knowledge
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      # Models and llama-server builds, keyed by the signed manifest that pins them. The store
+      # re-verifies SHA-256 on install, so a stale or corrupt cache entry is re-downloaded.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: ${{ matrix.suite }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
+
+      - name: Run ${{ matrix.suite }}
+        run: |
+          extra=()
+          if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
+            extra+=(--local-chat-model "$CHAT_MODEL")
+          fi
+          ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
+            "${extra[@]}" --out-dir "$RESULTS"
+          if [ -n "${{ matrix.args2 }}" ]; then
+            ./target/release/nugget-bench ${{ matrix.args2 }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS"
+          fi
+
+      # The metrics and the local-model parameters of every report, in the log.
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|model|judge|tasks|items)")))),
+                    metrics: [.metrics[] | {name, value, unit, target, target_met}]}' "$f"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90

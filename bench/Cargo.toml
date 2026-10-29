@@ -37,6 +37,8 @@ nugget-connector.workspace = true
 nugget-connector-files.workspace = true
 nugget-infer.workspace = true
 tokio.workspace = true
+# `perf --backend real`: drives the `nuggetd` binary over its IPC (see src/suites/perf_daemon.rs).
+nugget-ipc.workspace = true
 # Temporary NUGGET_HOME and watched folder for the real backend.
 tempfile = "3"
 # `draft`: contract types of the drafting and voice crates, token estimates, provider streams.
@@ -54,6 +56,9 @@ nugget-vault = { workspace = true, optional = true }
 nugget-mcp = { workspace = true, optional = true }
 # `proactive --backend real`: the proactive engine under test.
 nugget-proactive.workspace = true
+# `--local-models`: the signed manifest, model store and llama-server supervisor the app uses.
+nugget-models.workspace = true
+nugget-runtime.workspace = true
 
 [dev-dependencies]
 # `draft` against a mocked OpenAI-compatible provider.

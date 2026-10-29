@@ -212,7 +212,7 @@ pub fn target_candidates(action: &ActionDescriptor, ctx: &ActionContext) -> Vec<
 /// - `primary`: what the action is performed on: `target_app` and the page URL from the
 ///   context (each with its host, scheme and pane), plus links in the label or preview when the
 ///   action navigates to them (`open x-apple.systempreferences:...`, a domain typed into an
-///   address bar).
+///   address bar: a typing verb, outside a web page, on a field labelled as one).
 /// - `mentioned`: links found in the label or the typed text of an action that does not
 ///   navigate. A page or a model controls those, so only Deny rules look at them.
 pub fn target_sets(action: &ActionDescriptor, ctx: &ActionContext) -> (Vec<String>, Vec<String>) {
@@ -253,17 +253,25 @@ pub fn target_sets(action: &ActionDescriptor, ctx: &ActionContext) -> (Vec<Strin
         add_link(url, &mut primary);
     }
     let navigating = navigates(action);
-    for text in [
-        action.target_label.as_deref(),
-        action.text_preview.as_deref(),
+    // Which texts name the destination (and so are primary). A navigation verb navigates to its
+    // label or text. A label that only *looks* like an address bar ("URL", "Address") is page-
+    // or app-controlled: it makes the typed text the destination only for a typing verb outside
+    // a web page (the browser chrome's own address bar), never a click on a button so named.
+    let verb_navigates = verb_navigates(action);
+    let typed_into_address_bar =
+        !verb_navigates && navigating && ctx.url.is_none() && types_text(action);
+    for (text, is_label) in [
+        (action.target_label.as_deref(), true),
+        (action.text_preview.as_deref(), false),
     ]
     .into_iter()
-    .flatten()
+    .filter_map(|(t, l)| t.map(|t| (t, l)))
     {
+        let names_destination = verb_navigates || (typed_into_address_bar && !is_label);
         for token in text.split(char::is_whitespace) {
             let token =
                 token.trim_matches(|c: char| matches!(c, '"' | '\'' | '<' | '>' | '(' | ')'));
-            let out = if navigating {
+            let out = if names_destination {
                 &mut primary
             } else {
                 &mut mentioned
@@ -319,16 +327,31 @@ fn is_bare_domain(token: &str) -> bool {
 
 /// Typing a bare domain only navigates in an address bar or with a navigation verb.
 fn navigates(action: &ActionDescriptor) -> bool {
-    let verb = action.verb.to_lowercase();
     let label = action.target_label.as_deref().unwrap_or("").to_lowercase();
+    verb_navigates(action)
+        || ["address", "url", "location", "search or", "omnibox"]
+            .iter()
+            .any(|l| label.contains(l))
+}
+
+/// The verb itself navigates (`open`, `navigate`, ...), whatever the label says.
+fn verb_navigates(action: &ActionDescriptor) -> bool {
+    let verb = action.verb.to_lowercase();
     [
         "open", "navigate", "goto", "go_to", "visit", "launch", "load", "browse",
     ]
     .iter()
     .any(|v| verb.contains(v))
-        || ["address", "url", "location", "search or", "omnibox"]
-            .iter()
-            .any(|l| label.contains(l))
+}
+
+/// The verb types or sets text (as into an address bar), rather than clicking or pressing.
+fn types_text(action: &ActionDescriptor) -> bool {
+    let verb = action.verb.to_lowercase().replace([' ', '_', '-'], "");
+    [
+        "type", "setvalue", "settext", "fill", "input", "enter", "paste", "insert", "write",
+    ]
+    .iter()
+    .any(|v| verb.starts_with(v))
 }
 
 // ---------------------------------------------------------------------------------------------

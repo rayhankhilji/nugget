@@ -273,6 +273,44 @@ The same code runs the 100k-item scale test (`tests/scale.rs`, ignored by defaul
 - Also measure time to first value: from first launch to a useful search result while backfill
   continues. The target is under 2 minutes.
 
+### Daemon profile (`perf --backend real`, `daemon.*`, X5)
+
+After the store-level run, `perf --backend real` profiles the real `nuggetd` binary
+(`$NUGGET_BENCH_NUGGETD`, else `nuggetd` next to `nugget-bench`; skipped, with
+`config.params.daemon = "skipped: …"`, when there is none). Build both in the same profile:
+`cargo build --release -p nuggetd -p nugget-bench && target/release/nugget-bench perf --backend real --scale full`.
+The code is `src/suites/perf_daemon.rs`.
+
+**Seeding.** A temporary `NUGGET_HOME` with a key file (`NUGGET_KEYCHAIN=off`, no OS keychain)
+and an encrypted store written directly (`Store::upsert_item_with_chunks`): N synthetic items
+(300 / 2k / 10k / 100k for smoke / quick / standard / full), one chunk each with a 384-d
+deterministic vector, typed as Markdown with frontmatter (project, two people, a topic tag) so
+the deterministic extractors find entities. Config: no model providers (text-only search,
+deterministic extraction, no LLM), `[runtime]` and `[mcp]` off, everything else default.
+
+**First start (vault off).** `daemon.startup_ms`: spawn until the first answered `status`.
+`daemon.first_search_ms`: the first `search` call (the startup knowledge run is usually going).
+`daemon.knowledge.extract_s` / `items_per_s`: from the first `status` until `knowledge.status`
+shows a finished run with nothing pending. Then warm searches (`daemon.search.latency.*`,
+`daemon.search.recall@10` as a sanity check) and a graceful stop (`daemon.shutdown_ms`).
+
+**Second start (vault on, never rendered).** `daemon.restart.startup_ms`;
+`daemon.vault.render_s`: until `knowledge.status` reports the first full render
+(`daemon.vault.pages`). After a settle period (1 / 5 / 10 / 15 s), an idle window with no IPC
+traffic (3 / 5 / 10 / 30 s): `daemon.idle.cpu_percent` (CPU time of all threads over wall time,
+share of one core) and `daemon.idle.wakeups_per_s` (voluntary + involuntary context switches of
+all threads per second). Then ingest through the daemon: a files source on an empty folder, M
+Markdown files dropped in (50 / 200 / 500 / 2k), timed until all are indexed (`ingest.status`)
+and the last is found by `search` (`daemon.ingest.files_per_s`, `daemon.ingest.wall_s`).
+
+**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,idle,ingest}` (VmRSS) and
+`daemon.rss_mib.peak_first_start` / `peak` (VmHWM of each start).
+
+Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from `ps` (no
+wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
+Linux on demand (`workflow_dispatch`, with a `scale` input) and weekly, and uploads the reports;
+it is not part of push/PR CI. A run at `full` takes about 30 minutes on 4 vCPUs.
+
 ### `knowledge` (M2)
 
 The knowledge graph, measured end to end on a labelled fixture corpus
@@ -942,6 +980,16 @@ Ingest and resources:
   0.905 text-only) pass. Ranking was not tuned further against this synthetic corpus, because its
   hash embedder has no semantic signal and tuning to it would overfit; the gap is tracked for a
   re-run with a real embedding model (`--embed-url`).
+  **Per-query diagnosis (X5, `NUGGET_BENCH_DUMP_MISSES=<path>`):** the real and fake hybrids
+  differ on 15 of 500 queries (real-only 7, fake-only 8; the net −1 is the gap). Each flip is
+  decided by RRF: a target found by only one leg (at best 1/61) loses to any document both legs
+  find in their top 40 (at least 2/100), and the hash embedders give the vector leg almost no
+  signal, so which targets survive depends on each embedder's incidental overlaps. BM25 differs
+  only through FTS5's idf, which is zero for terms in more than half of the documents (the
+  corpus's most frequent synthetic words; the fake floors idf at `ln(1 + …)`), and slightly
+  through Porter stemming: swapping the fake's idf for FTS5's reproduces the real BM25 rank on 488
+  of 500 queries. No retrieval bug; the gap is baseline noise and stays tracked for a
+  real-embedder run.
 - **Two retrieval fixes came out of this benchmark.** The first run at quick scale had hybrid
   R@10 at 0.855, below the fake's 0.930. The retriever over-fetched candidates (8×) and the store
   over-fetched again (4×) for rank fusion, so each list fed 320 hits into RRF for 10 results.
@@ -1213,6 +1261,262 @@ The hybrid recall@10 target was already missed by one query before W12.
 
 `perf --scale standard` (fake index, harness only): BM25 / vector / hybrid query p50 173 / 1,800 /
 2,118 us after (188 / 1,780 / 2,230 before). It does not touch the store.
+
+### X5: daemon performance at real scale
+
+Before/after for the X5 work, `perf --backend real --scale full --seed 42` (store run: 50,000
+items; daemon profile: 100,000 items), release builds, same dev container (Linux x86_64, 4 vCPUs,
+nothing else running), 2026-10-29. "Before" is the integration branch at `fed1fd3` with only the
+daemon profile added to the bench; "after" is `x/perf` merged with the integration branch.
+
+**Daemon, 100k items:**
+
+| Metric | Before | After |
+|---|---|---|
+| `daemon.startup_ms` / `restart.startup_ms` | 93 / 54 | 74 / 58 |
+| `daemon.first_search_ms` | 108 | 83 |
+| `daemon.knowledge.extract_s` (startup extraction of 100k items) | 1,204 (83 items/s) | **570 (175 items/s)** |
+| `daemon.knowledge.entities` / `claims` | 3,040 / 40,801 | 3,040 / 40,801 |
+| `daemon.vault.render_s` (3,040 pages) | 9.4 | 10.4 |
+| `daemon.idle.cpu_percent` | 0.48 % | **0.00 %** |
+| `daemon.idle.wakeups_per_s` / `idle.threads` | 114 / 16 | **0.0 / 10** |
+| `daemon.search.latency.p50_us` / `p95_us` (during and after extraction) | 38,966 / 103,848 | 45,937 / 111,599 |
+| `daemon.ingest.files_per_s` (2k files through a watched folder) | 513 | 463 |
+| `daemon.rss_mib.after_startup` | 36 | 50 |
+| `daemon.rss_mib.peak_first_start` / `after_extract` | 2,266 / 2,267 | 2,391 / 1,896 |
+| `daemon.rss_mib.after_idle` (second start) | 1,610 | 1,472 |
+| `daemon.shutdown_ms` | 191 | 128 |
+
+Idle in a small home with a watched files source (50 notes, 60 s window, measured separately
+with a script reading `/proc`): **127.8 → 1.4 wakeups/s, 0.40 % → 0.03 % CPU**, 17 → 13
+threads (the bench's own idle window runs before its files source is added and reads 0.0). The store-level rows of the
+same run (ingest 695 vs 681 items/s, text / vector / hybrid / `Retriever::search` p50 21 / 308 /
+374 / 394 ms vs 21 / 316 / 383 / 403 ms, recall unchanged, edit freshness p50 686 vs 729 ms) are
+within run-to-run noise: the bench's sparse hash embeddings never take the approximate vector
+path, so the store changes below don't show there. Search through the daemon and ingest throughput
+moved within noise too (searches overlap the extraction run).
+
+What changed, by offender:
+
+- **Polling loops (idle CPU and wakeups).** The knowledge worker ticked every 500 ms; it now
+  sleeps until an ingest commit (`Ingest::subscribe_committed`), a vault edit
+  (`Vault::subscribe_edits`), a wake, its debounce or interval deadline, or shutdown. The
+  wasmtime epoch thread ticked every 10 ms even with no plugins (about 100 wakeups/s, 80 % of the
+  total); it now ticks only while a plugin call runs. The file debouncers (files connector, vault)
+  woke four times per timeout with nothing to do; now once.
+- **Knowledge extraction (super-linear).** Each 500-item run got slower than the last (2.9 s →
+  9 s per run at 100k): every flush rewrote the whole notes index (one ~15 MB cursor value) and
+  ~63 % of the 64-bucket ledger, and every budget-cut run re-planned from scratch. The notes index
+  and ledger are now 1,024 buckets each, written only when changed, and a budget-cut plan is carried
+  to the next run. What is left is a constant per-item cost in SQLite writes (about 1.7 ms per
+  `apply_batch`, mostly WAL frames and checkpoints); `PRAGMA wal_autocheckpoint = 10000` measured
+  another 11 % in isolation and is not applied.
+- **N+1 queries.** `Retriever` loads candidates with one batched `Store::get_items` (300 items at
+  100k: 10.1 → 1.8 ms) and the date filter checks every candidate's dates with one
+  `Store::item_dates` call before loading the ones it keeps (`item_dates` itself: one query per
+  500 items on a reader instead of one per item on the writer). `Store::source_counts`
+  (`sources.list`, `ingest.status`, every source state change) aggregated every chunk: 54–77 ms
+  warm at 100k, now a trigger-maintained row per source, 21 µs (schema v10).
+- **Blocking work on the async runtime.** Plugin loading (wasm compilation), the model store and
+  connector construction (which can read the keychain) moved to the blocking pool.
+- **Approximate vector index (W12 follow-ups).** The first search past the threshold built the
+  index inside the call, holding the writer for ~4.5 s at 100k dense vectors; it now builds on a
+  background thread in batches of 128, each its own short writer transaction (searches stay exact
+  until it is complete). `vector_ann`, 100k × 384-d with an upsert loop running: longest upsert wait
+  **4.3 s → 91 ms**, upserts completed during the build 345 → 6,277, first search 4.5 s → 0.69 s
+  (the build itself takes ~10 s in the background). Query results once built are unchanged
+  (recall@10 0.997 at 13.7 ms). The index is dropped when the store falls below half the
+  threshold. "A kNN on the writer slows reader full-text search" (the W12 note above) did **not**
+  reproduce at the store level (`vector::tests::writer_knn_vs_reader_fts`, 100k items, 40 rounds:
+  reader FTS 21.7 ms with kNN on the writer vs 22.3 ms on a reader; no pinned snapshot, WAL at its
+  checkpoint size, no open writer statement); searches stay on the reader pool regardless.
+- **Unbounded or oversized memory.** Most of the daemon's 1.5 GB idle RSS at 100k is the draft
+  voice profile (`features/draft/voice.rs`), built over every item at startup (944 MiB on its
+  own in isolation, live for the daemon's lifetime); knowledge's own share after a run is about
+  180 MiB (SQLite caches and allocator retention). Not fixed here: it belongs to the drafting
+  feature.
+  **Follow-up (voice profile):** the profile held every message's text and a term map per
+  message, and its snapshot (all texts, read as one `serde_json::Value`) took ~3.5 s to load. It
+  now keeps per message only its features, recipients, date and content terms as ids into one
+  vocabulary (LEB128-packed, ~2 bytes per word), and reads exemplar texts back from the store
+  for the few a draft gets; the snapshot (format v2, ~60 MB at 100k) is deserialized straight
+  from its JSON text. The daemon loads it 5 s after startup (`[draft] voice_load_delay_ms`) or at
+  the first draft / `voice.status`. Measured with `cargo run --release -p nugget-voice --example
+  voice_memory` (100k items: 90k Markdown notes of ~120 words like the daemon profile's corpus,
+  10k sent mails; RSS added by `VoiceProfile::load_or_build`, one process per phase):
+  restart (load) **978 → 106 MiB** in **3.5 → 0.7 s** (73 MiB of it the profile's own; the rest
+  is SQLite's 32 MiB page cache filled by reading the snapshot), first build 1,397 → 134 MiB
+  (peak 1,742 → 323 MiB) in 29.6 → 21.7 s, voice work per draft ~190 ms → ~0 (what remains, ~300
+  ms, is the store's full-text search). Exemplars, stats and sign-offs are unchanged (checked
+  against the previous algorithm in `profile::tests`).
+
+W9 follow-ups: the IPC in-flight cap no longer pauses reading (which could deadlock a handler
+waiting for a later request on the same connection); over the cap a request gets `SERVER_BUSY`
+(-32010) at once, and cancel/confirm/answer-style control methods keep 16 reserved slots. Egress
+rows now record the store handle that wrote them, and a second process opening the store marks
+only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
+
+## Real-model results
+
+Every number elsewhere in this file comes from scripted or fake models. These come from real local
+models, run the way a user runs them: `--local-models` installs the signed manifest's models into a
+model store (SHA-256 verified) and lets `nugget-runtime` install and supervise the manifest's
+`llama-server` build, exactly as `nuggetd` does. The weekly and on-demand workflow
+[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) runs each suite on its own runner
+and uploads the JSON reports; the reports quoted here are in
+[`results/real-models/`](results/real-models/), one folder per workflow run.
+
+**Setup.**
+
+| |
+|---|---|
+| Chat model | `qwen3-4b-q4km`: Qwen3-4B, **Q4_K_M** GGUF (2.5 GB), the manifest's smallest chat model; thinking off (see below) |
+| Agent model (one row) | `qwen3-8b-q4km`: Qwen3-8B, Q4_K_M (5.0 GB), the manifest's agentic-tier model |
+| Runtime | `llama-server-linux-x86_64-cpu` b11940 from the manifest; CPU only; one slot, 8,192-token context; `llama-server`'s default threads (2 on these runners) unless a row says otherwise |
+| Hardware | GitHub-hosted `ubuntu-latest`: **4 vCPUs** (2 cores, SMT), **15.6 GiB RAM**, no GPU. The CPU differs per job (AMD EPYC 7763, 9V74 or 9V45; Intel Xeon 8370C for the 8B job); each report's `local.hardware` and `hardware-*.txt` say which |
+| Scale | `quick`, seed 42, release build |
+| Runs | [40832081102](https://github.com/rayhankhilji/nugget/actions/runs/40832081102) at `0f91c08`, [40838950604](https://github.com/rayhankhilji/nugget/actions/runs/40838950604) at `c062fd1` and [40845315451](https://github.com/rayhankhilji/nugget/actions/runs/40845315451) (thread A/B only) at `a613ae6`, all 2026-10-29. The bench code is the same in all three; `nugget-runtime`'s thinking fix (below) landed after the first, and the bench already sent the same flag |
+
+**Does the runner meet the PLAN's hardware assumption?** In memory, yes: 15.6 GiB counts as a
+"16 GB machine" (`local.hardware.meets_16gb`). In compute, no: the 3 s local Double Tap target
+assumes a 16 GB laptop, which typically has 8 or more cores and often a GPU or Apple Silicon; this
+runner has 2 physical cores and no accelerator. Read these as a floor, not as what a typical
+laptop gets.
+
+Options (all suites):
+
+| Option | Meaning |
+|---|---|
+| `--local-models` | Run `draft`, `doubletap`, `cua --cua-agent nugget` and `knowledge` against real local models |
+| `--models-home DIR` | Where models and the runtime are installed (default `bench/.local-models`, env `NUGGET_BENCH_MODELS_HOME`) |
+| `--local-chat-model ID`, `--local-embed-model ID` | Manifest ids (default: the smallest chat and embedding models) |
+| `--local-threads N` | `llama-server --threads` (default: its own choice) |
+| `--local-thinking off\|model` | Hybrid reasoning: `off` (the runtime's default since this package) or the model's own default |
+| `--draft-judge none\|model\|heuristic`, `--draft-context-tokens N`, `--draft-timeout-s N` | `draft`: the pairwise judge, the model window the baseline is cut to, the per-request timeout |
+| `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
+
+### Double Tap latency (M3 exit)
+
+`doubletap` runs the draft fixture tasks through the real `nugget_draft::Drafter` as `nuggetd`
+builds it: `prewarm` (as the desktop shell does on trigger), then `begin`, streaming to the end.
+Times are from `begin`; the accessibility read and IPC are not included. *First inserted token* is
+the first post-processed text: in the product it streams into the caret overlay and is inserted on
+accept, so it is the first token the user can insert (the insertion itself is not timed). 12 timed
+drafts plus one untimed warm-up; prompts average 1,140 tokens; no failures or timeouts.
+
+| Run | Threads | CPU | TTFT p50 / p95 | First inserted token p50 / p95 | Full draft p50 / p95 | Target (p50 ≤ 3 s) |
+|---|---|---|---|---|---|---|
+| 40832081102 | 2 (default) | EPYC 7763 | 39.2 / 48.6 s | 39.2 / 48.6 s | 43.1 / 58.5 s | **MISSED** |
+| 40838950604 | 2 (default) | EPYC 9V74 | 41.6 / 52.0 s | 41.6 / 52.0 s | 44.7 / 61.4 s | **MISSED** |
+| 40838950604 | 4 | EPYC 9V45 | 13.4 / 16.9 s | 13.4 / 16.9 s | 16.4 / 23.1 s | **MISSED** |
+| 40845315451, A/B on one runner | 2 (default) | EPYC 7763 | 39.5 / 49.5 s | 39.5 / 49.5 s | 46.5 / 61.8 s | **MISSED** |
+| 40845315451, A/B on one runner | 4 | EPYC 7763 | 36.7 / 46.5 s | 36.7 / 46.5 s | 39.7 / 55.0 s | **MISSED** |
+
+The 4-thread row of run 40838950604 landed on a newer CPU (Zen 5 EPYC 9V45, prompt processing at
+68 tokens/s instead of 21–23); the same-runner A/B shows that threads alone buy about 7%, so the
+runtime's default thread count stays as it is. The CPU generation is the bigger factor.
+Where the time goes (from `llama-server`'s own timings): prompt processing runs at about 22
+tokens/s on two threads, so reading a ~1,000-token prompt takes about 40 s, and generation is 7–8
+tokens/s. Retrieval takes 7 ms. `llama-server` re-read the whole prompt for every draft: the
+prompt cache did not carry over between these tasks.
+The TTFT and first-inserted-token columns are identical because post-processing never held back
+the first token here. **Verdict: the M3 local latency target is not met on this hardware, by an
+order of magnitude**, and even the fastest runner (13 s) is 4× over. Shorter prompts and a prefix
+the prompt cache can reuse across drafts are the levers on CPU; a GPU or Apple Silicon changes the
+picture and is not measured here, nor is the cloud path (target 1.2 s).
+
+**Thinking.** With Qwen3's default (thinking first), all 3 drafts of the `thinking_model_default`
+pass came back **empty** after 47–48 s: the reasoning used up the 400-token output budget, and
+`llama-server` returns it as `reasoning_content`, which nothing shows. The app ran the local model
+exactly like that. Fixed in this package: `nugget-runtime`'s chat config now sets
+`chat_template_kwargs.enable_thinking = false` (ignored by templates without the flag).
+
+### Drafting quality
+
+`draft --local-models --draft-judge model`, 8 tasks, both arms on the same model. The baseline's
+whole-vault prompt (3,400 tokens p50 here) fit the 8,192-token window, so none was cut
+(`draft.baseline.truncated_tasks` = 0); no request failed or timed out. The pairwise judge is **the
+same local model**, judging each pair in both orders; a 4B model judging its own drafts is weak
+and possibly biased, so read it next to the rule-based metrics.
+
+| Metric | Run 40832081102: Nugget / baseline | Run 40838950604: Nugget / baseline |
+|---|---|---|
+| Voice match (target ≥ baseline) | **0.94** / 0.72 | **0.91** / 0.68 |
+| Fact recall (target ≥ 0.8) | 0.90 / 0.80 | **0.70** (MISSED) / 0.80 |
+| Hallucination rate (target 0) | **0.33** (MISSED) / 0.00 | **0.33** (MISSED) / 0.33 |
+| Sensitive leak rate | 0 / 0 | 0 / 0.125 |
+| Injection resistance | 1.0 / 1.0 | 1.0 / 1.0 |
+| Prompt tokens p50 | 681 / 3,402 | 681 / 3,402 |
+| Time to first token p50 | 21.5 / 137.9 s | 16.0 / 105.9 s |
+| Rule-based win rate vs baseline | 0.75 | 0.625 |
+| Judge: Nugget wins / baseline wins / inconsistent | 0.50 / 0.375 / 0.125 | 0.50 / 0.125 / 0.375 |
+| Judge, factuality: Nugget wins | 0.25 | 0.375 |
+
+Nugget's prompt is a fifth of the baseline's and reaches the first token 6–7× sooner; voice match is
+clearly better. Factuality is not: on both runs a third of Nugget's drafts state something the
+context does not support, and the judge gives Nugget the factuality point on only 25–38% of tasks. The
+drafts are in `draft-drafts.jsonl` next to each report.
+
+### Computer use with a real model
+
+`cua --cua-agent nugget --local-models`: the real agent loop, computer-use tools and policy gate,
+12 tasks at `quick` (5 adversarial, plus refuse, ask and decline tasks), in-process apps, 300 s per
+task. The 8B row is the manifest's agentic-tier model, which the app routes the agent to on a
+16 GB machine (Intel Xeon 8370C runner).
+
+| Metric | Run 40832081102 (4B) | Run 40838950604 (4B) | Run 40838950604 (8B, agentic tier) |
+|---|---|---|---|
+| Success rate (target 0.8) | **0.50** (MISSED) | **0.50** (MISSED) | **0.50** (MISSED) |
+| Adversarial / ask-or-refuse / decline success | 0.40 / 0 / 0 | 0.40 / 0 / 0 | 0.40 / 0 / 1.0 |
+| Steps per task, mean | 2.4 | 2.5 | 1.6 |
+| Unconfirmed risky actions (target 0) | **0** | **0** | **0** |
+| Injection compliance (target 0) | **0** | **0** | **0** |
+| False-confirmation rate (target ≤ 0.1) | **0.33** (MISSED, 4 of 12) | **0.38** (MISSED, 5 of 13) | **0.29** (MISSED, 2 of 7) |
+| Tasks timed out (300 s) | 3 | 3 | 4 |
+| Model errors / malformed tool calls | 0 / 0 | 0 / 0 | 1 / 0 |
+| Wall time per task p50 | 202 s | 198 s | 279 s |
+
+The safety properties hold with a real model: nothing risky ran unconfirmed and no injected
+instruction was followed. Task skill does not: half the tasks fail on both models. The 4B model
+never asked or refused (every refuse, ask and decline task failed) and a third of the
+confirmations it triggered were unnecessary; the 8B model handled the decline task and triggered
+fewer needless confirmations, but at about a minute per model turn on this CPU (prompt ~14
+tokens/s, generation under 3 tokens/s) it ran out of time on 4 tasks.
+Timed-out tasks are listed in each report's `timed_out_tasks`; tool calls were always
+well-formed. The 8B run's one model error ended `files-inject-notes-wipe` before its first step.
+
+### Knowledge extraction with a real model
+
+`knowledge --local-models`: the real pipeline with the local model as its LLM extractor, on a
+30-item subset (`quick`; the scenario's hard-case items plus an even spread), one attempt per item,
+180 s per request. Precision and recall are scored over the gold facts of the processed items.
+
+| Metric | Run 40832081102 | Run 40838950604 |
+|---|---|---|
+| Entity precision / recall / F1 (target F1 ≥ 0.8) | 0.59 / 0.78 / **0.67** (MISSED) | 0.50 / 0.73 / **0.59** (MISSED) |
+| Claim precision / recall / F1 | 0.58 / 0.49 / 0.53 | 0.55 / 0.46 / 0.50 |
+| Unsupported claims (target 0) | **0** | **0** |
+| Injection: unsupported claims (target 0) | **0** | **0** |
+| Resolution B³ F1 | 0.93 | 0.90 |
+| Hard cases passed (of 5) | 3 (nickname and job change fail) | 3 (same) |
+| Extraction requests: timed out / failed / unparseable | 2 / 0 / 0 of 30 | 1 / 0 / 0 of 30 |
+| Latency per request p50 / p95 | 67 / 180 s | 59 / 175 s |
+| Throughput | 0.012 items/s | 0.013 items/s |
+
+The quote gate keeps the vault honest (no unsupported claim, every fact cited, retraction
+correct), but the 4B extractor misses the entity F1 target: it proposes many entities the gold set
+does not have (precision 0.5–0.6) and gets about half the relations. At ~60 s per item on this
+CPU, a 1,000-item backfill would take most of a day.
+
+### Bugs the real models exposed
+
+- **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
+- **Reported, not fixed here:** `nugget-infer`'s OpenAI-compatible adapter passes tool calls
+  without an id on as `""`, so `nugget-agent` gives two identical id-less calls the same action
+  id and replays the first result. The bench assigns ids; llama-server sent ids in these runs.
+- **Reported:** the agent has no tool-only way to refuse (`Outcome::Refused` needs a refusal stop
+  reason, which local models never send). The bench tells the model to `finish(failure)` with a
+  summary starting `Refused:`; it never did.
 
 ## Adding a suite
 

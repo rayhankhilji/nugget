@@ -14,8 +14,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use nugget_connector::http::MeteredHttp;
@@ -35,14 +34,8 @@ use crate::kv::KvNamespace;
 use crate::manifest::{Capabilities, HostRule, Manifest, PluginKind};
 use crate::store::VerifiedPlugin;
 
-mod bindings {
-    wasmtime::component::bindgen!({
-        path: "wit",
-        world: "plugin",
-        imports: { default: async | trappable },
-        exports: { default: async },
-    });
-}
+/// Generated from the inline copy of `wit/plugin.wit` (see that module for why it is inline).
+mod bindings;
 
 use bindings::nugget::plugin::{clock, http, kv, log, secrets, sink, types};
 use bindings::{Plugin, PluginPre};
@@ -168,12 +161,72 @@ struct HostInner {
     /// Compiled components by SHA-256, shared by every load of the same bytes.
     compiled: Mutex<HashMap<String, Component>>,
     kv: Mutex<HashMap<PathBuf, Weak<KvNamespace>>>,
-    stop_ticker: Arc<AtomicBool>,
+    ticker: Arc<EpochTicker>,
+}
+
+/// Advances the engine's epoch every [`EPOCH_TICK`] while at least one plugin call is running,
+/// and parks otherwise, so an idle host costs no wakeups. Deadlines are relative to the epoch
+/// when a call starts, so pausing between calls does not change them.
+#[derive(Default)]
+struct EpochTicker {
+    state: Mutex<TickerState>,
+    cv: Condvar,
+}
+
+#[derive(Default)]
+struct TickerState {
+    active: usize,
+    stop: bool,
+}
+
+/// One running call; the ticker runs while any exists.
+struct Ticking<'a>(&'a EpochTicker);
+
+impl Drop for Ticking<'_> {
+    fn drop(&mut self) {
+        let mut st = self.0.lock();
+        st.active = st.active.saturating_sub(1);
+    }
+}
+
+impl EpochTicker {
+    fn lock(&self) -> std::sync::MutexGuard<'_, TickerState> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn begin(&self) -> Ticking<'_> {
+        self.lock().active += 1;
+        self.cv.notify_all();
+        Ticking(self)
+    }
+
+    fn stop(&self) {
+        self.lock().stop = true;
+        self.cv.notify_all();
+    }
+
+    /// The ticker thread's loop; returns once stopped.
+    fn run(&self, engine: &Engine) {
+        let mut st = self.lock();
+        loop {
+            if st.stop {
+                return;
+            }
+            if st.active == 0 {
+                st = self.cv.wait(st).unwrap_or_else(|p| p.into_inner());
+                continue;
+            }
+            drop(st);
+            std::thread::sleep(EPOCH_TICK);
+            engine.increment_epoch();
+            st = self.lock();
+        }
+    }
 }
 
 impl Drop for HostInner {
     fn drop(&mut self) {
-        self.stop_ticker.store(true, Ordering::Relaxed);
+        self.ticker.stop();
     }
 }
 
@@ -194,18 +247,13 @@ impl PluginHost {
             .epoch_interruption(true)
             .max_wasm_stack(1024 * 1024);
         let engine = Engine::new(&cfg).map_err(|e| Error::Other(format!("wasmtime: {e:#}")))?;
-        let stop_ticker = Arc::new(AtomicBool::new(false));
+        let ticker = Arc::new(EpochTicker::default());
         {
             let engine = engine.clone();
-            let stop = stop_ticker.clone();
+            let ticker = ticker.clone();
             std::thread::Builder::new()
                 .name("nugget-plugin-epoch".into())
-                .spawn(move || {
-                    while !stop.load(Ordering::Relaxed) {
-                        std::thread::sleep(EPOCH_TICK);
-                        engine.increment_epoch();
-                    }
-                })?;
+                .spawn(move || ticker.run(&engine))?;
         }
         let net_guard = (!config.allow_private_network).then(NetGuard::default);
         let client = match config.http_client {
@@ -235,7 +283,7 @@ impl PluginHost {
                 net_guard,
                 compiled: Mutex::new(HashMap::new()),
                 kv: Mutex::new(HashMap::new()),
-                stop_ticker,
+                ticker,
             }),
         })
     }
@@ -671,6 +719,8 @@ impl LoadedPlugin {
             wasmtime::Result::<()>::Ok(())
         })();
         setup.map_err(|e| Error::Other(format!("wasmtime: {e:#}")))?;
+        // The epoch only advances while some call is running (see `EpochTicker`).
+        let _ticking = self.host.ticker.begin();
         let ticks = (timeout.as_millis() / EPOCH_TICK.as_millis()).max(1) as u64 + 1;
         store.set_epoch_deadline(ticks);
         store.epoch_deadline_trap();
@@ -1269,9 +1319,14 @@ const MAX_PINS: usize = 1024;
 /// When a name was checked, and the addresses it resolved to.
 type Pin = (Instant, Vec<IpAddr>);
 
+/// Name lookup used by [`NetGuard`]: the system resolver, or a fake in tests.
+pub(crate) type Lookup = Arc<dyn Fn(&str) -> std::io::Result<Vec<IpAddr>> + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub(crate) struct NetGuard {
     pins: Arc<Mutex<HashMap<String, Pin>>>,
+    /// `None`: the system resolver.
+    lookup: Option<Lookup>,
 }
 
 #[derive(Debug)]
@@ -1293,6 +1348,15 @@ impl std::fmt::Display for NetRefusal {
 impl std::error::Error for NetRefusal {}
 
 impl NetGuard {
+    /// A guard that resolves names with `lookup` instead of the system resolver (tests).
+    #[cfg(test)]
+    pub(crate) fn with_lookup(lookup: Lookup) -> Self {
+        Self {
+            pins: Arc::default(),
+            lookup: Some(lookup),
+        }
+    }
+
     /// Check the URL's destination: an IP literal directly, a name by resolving it (every
     /// address must be public). The checked addresses are pinned for the connection.
     pub(crate) async fn check(&self, url: &Url) -> std::result::Result<(), NetRefusal> {
@@ -1300,7 +1364,7 @@ impl NetGuard {
             Some(url::Host::Ipv4(ip)) => check_ip(&ip.to_string(), IpAddr::V4(ip)),
             Some(url::Host::Ipv6(ip)) => check_ip(&format!("[{ip}]"), IpAddr::V6(ip)),
             Some(url::Host::Domain(name)) => {
-                let ips = resolve_checked(name).await?;
+                let ips = resolve_checked(name, self.lookup.as_ref()).await?;
                 self.pin(name, ips);
                 Ok(())
             }
@@ -1342,7 +1406,7 @@ impl reqwest::dns::Resolve for NetGuard {
         Box::pin(async move {
             let ips = match guard.pinned(&name) {
                 Some(ips) => ips,
-                None => resolve_checked(&name).await?,
+                None => resolve_checked(&name, guard.lookup.as_ref()).await?,
             };
             // The connector sets the port.
             let addrs: reqwest::dns::Addrs =
@@ -1363,15 +1427,25 @@ fn check_ip(shown: &str, ip: IpAddr) -> std::result::Result<(), NetRefusal> {
 }
 
 /// Resolve `name` and return its addresses only if every one of them is public.
-async fn resolve_checked(name: &str) -> std::result::Result<Vec<IpAddr>, NetRefusal> {
-    let lookup = name.strip_suffix('.').unwrap_or(name);
-    let addrs = tokio::net::lookup_host((lookup, 0))
-        .await
-        .map_err(|e| NetRefusal::Unresolved(format!("could not resolve `{name}`: {e}")))?;
+async fn resolve_checked(
+    name: &str,
+    lookup: Option<&Lookup>,
+) -> std::result::Result<Vec<IpAddr>, NetRefusal> {
+    let host = name.strip_suffix('.').unwrap_or(name);
+    let unresolved =
+        |e: std::io::Error| NetRefusal::Unresolved(format!("could not resolve `{name}`: {e}"));
+    let found: Vec<IpAddr> = match lookup {
+        Some(lookup) => lookup(host).map_err(unresolved)?,
+        None => tokio::net::lookup_host((host, 0))
+            .await
+            .map_err(unresolved)?
+            .map(|a| a.ip())
+            .collect(),
+    };
     let mut ips: Vec<IpAddr> = Vec::new();
-    for a in addrs {
-        if !ips.contains(&a.ip()) {
-            ips.push(a.ip());
+    for ip in found {
+        if !ips.contains(&ip) {
+            ips.push(ip);
         }
     }
     if ips.is_empty() {

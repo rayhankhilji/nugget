@@ -5,14 +5,17 @@
 //! answer MCP `get_context` calls. [`super::wired`] builds the real one (`nugget-knowledge`,
 //! `nugget-vault`, `nugget-mcp`); tests use an oracle built from the gold labels.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
+use nugget_core::capability::{Capabilities, Tier};
 use nugget_core::ids::{EntityId, ItemRef};
 use nugget_graph::{ClaimId, Evidence, GraphStore};
+use nugget_infer::{Provider, Router};
 use nugget_store::Store;
 
-use super::fake_llm::ScriptedLlm;
 use crate::runner::BenchError;
 
 /// What a system is built from.
@@ -20,13 +23,51 @@ use crate::runner::BenchError;
 pub struct SystemContext {
     /// The store the corpus was ingested into (items, text and chunks; no embeddings).
     pub store: Store,
-    /// The scripted LLM. [`ScriptedLlm::router`] gives a router with it as the `Synthesis` tier.
-    pub llm: Arc<ScriptedLlm>,
+    /// The LLM the pipeline's extractor uses: the scripted fake
+    /// ([`super::fake_llm::ScriptedLlm`]) by default, or a real local model behind
+    /// [`super::metered::MeteredProvider`] (`--local-models`). [`synthesis_router`] routes the
+    /// `Synthesis` (and `Light`) tier to it.
+    pub llm: Arc<dyn Provider>,
+    /// What `llm` is, for the system label (`scripted`, or the local model's label).
+    pub llm_label: String,
+    /// Overrides of the pipeline's LLM settings; `None` keeps `nugget-knowledge`'s default.
+    pub llm_settings: LlmSettings,
     /// The user's name and mail addresses, as the daemon's configuration would hold them.
     pub me_name: String,
     pub me_emails: Vec<String>,
     /// Webmail domains of the corpus (`Scenario::webmail_domains`).
     pub webmail_domains: Vec<String>,
+}
+
+/// Overrides of `nugget_knowledge::LlmConfig` for a run (the default run sets none).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LlmSettings {
+    /// `LlmConfig::timeout_ms`.
+    pub timeout: Option<Duration>,
+    /// `LlmConfig::max_attempts`.
+    pub max_attempts: Option<u32>,
+}
+
+/// A router with `p` as the only provider of the `Synthesis` and `Light` tiers (where
+/// `nugget-knowledge` sends LLM extraction), declared to stream and to honour JSON schemas.
+pub fn synthesis_router(p: Arc<dyn Provider>) -> Router {
+    let id = p.id().clone();
+    let router = Router::new(
+        vec![p],
+        HashMap::from([
+            (Tier::Synthesis, vec![id.clone()]),
+            (Tier::Light, vec![id.clone()]),
+        ]),
+    );
+    router.set_capabilities(
+        &id,
+        Capabilities {
+            streaming: true,
+            json_schema: true,
+            ..Default::default()
+        },
+    );
+    router
 }
 
 /// One fact as rendered on a vault page, with the citations (footnotes) attached to it.

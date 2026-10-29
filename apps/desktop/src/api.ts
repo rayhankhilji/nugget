@@ -274,6 +274,8 @@ export interface AskStarted {
   excluded_sensitive?: number;
   /** The standalone query actually searched, when a follow-up was rewritten. */
   query_rewrite?: string | null;
+  /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
+  general?: boolean;
 }
 
 // ---- local runtime ----
@@ -826,6 +828,10 @@ interface ApiErrorPayload {
 
 /** JSON-RPC "method not found": the daemon predates this feature. */
 export const METHOD_NOT_FOUND = -32601;
+/** JSON-RPC code for a connection at its in-flight cap: the call did not run; retry shortly. */
+export const SERVER_BUSY = -32010;
+/** Waits before each retry of a busy call, about a second in all (the shell retries too). */
+export const BUSY_BACKOFF_MS = [100, 300, 600] as const;
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
@@ -844,6 +850,11 @@ export class ApiError extends Error {
   }
 
   /** True when the daemon doesn't implement the method (an older daemon version). */
+  /** The daemon turned the call away as busy; it did not run. */
+  get isBusy(): boolean {
+    return this.kind === "rpc" && this.code === SERVER_BUSY;
+  }
+
   get isMethodNotFound(): boolean {
     return this.kind === "rpc" && this.code === METHOD_NOT_FOUND;
   }
@@ -882,10 +893,24 @@ async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   if (!inTauri()) {
     throw new ApiError({ kind: "unavailable", message: t("common.notInApp") });
   }
-  try {
-    return await invoke<T>(command, args);
-  } catch (err) {
-    throw ApiError.from(err);
+  return withBusyRetry(() => invoke<T>(command, args));
+}
+
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Run `fn`, retrying with {@link BUSY_BACKOFF_MS} while the daemon answers "busy"
+ * ({@link SERVER_BUSY}), so a momentary overload is not shown as an error. Throws an `ApiError`.
+ */
+export async function withBusyRetry<T>(fn: () => Promise<T>, sleep: (ms: number) => Promise<void> = sleepMs): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const e = ApiError.from(err);
+      if (!e.isBusy || attempt >= BUSY_BACKOFF_MS.length) throw e;
+      await sleep(BUSY_BACKOFF_MS[attempt]!);
+    }
   }
 }
 
@@ -1933,3 +1958,103 @@ export function askInConversation(
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
   });
 }
+
+// ---- Z3: bring your own key ----
+
+/** The `kind` of a `[[providers]]` table a key is for. */
+export type AiKeyKind = "openai_compatible" | "openai_responses" | "anthropic";
+
+/** Why a key check (or save) did not succeed; `ok` when it did. */
+export type AiKeyReason = "ok" | "bad_key" | "wrong_url" | "no_network" | "server_error" | "exists";
+
+/** `ai.key.test` params. The key is sent to the daemon only; it is never stored by this call. */
+export interface AiKeyTestRequest {
+  kind: AiKeyKind;
+  /** Required for `openai_compatible`; defaults to the provider's own API otherwise. */
+  base_url?: string | null;
+  api_key: string;
+  model?: string | null;
+}
+
+export interface AiKeyTestResult {
+  ok: boolean;
+  reason: AiKeyReason;
+  /** Plain-English explanation from the daemon (never contains the key). */
+  message: string;
+  /** Model ids the provider listed. */
+  models: string[];
+}
+
+/** `ai.key.save` params: the key goes to the OS keychain, a `keychain:NAME` reference to config.toml. */
+export interface AiKeySaveRequest {
+  /** Provider id: 1–32 of `a-z 0-9 _ -`. */
+  name: string;
+  kind: AiKeyKind;
+  base_url?: string | null;
+  api_key: string;
+  model: string;
+}
+
+export interface AiKeySaveResult extends AiKeyTestResult {
+  saved: boolean;
+  provider_id: string | null;
+  /** The daemon reads providers at start: always true. */
+  restart_required: boolean;
+}
+
+export const aiKeyApi = {
+  /** Check a key against the provider's model list. Validation outcomes are results, not errors. */
+  aiKeyTest: (request: AiKeyTestRequest) => call<AiKeyTestResult>("ai_key_test", { request }),
+  /** Check, then save the key (keychain) and add the provider to config.toml. */
+  aiKeySave: (request: AiKeySaveRequest) => call<AiKeySaveResult>("ai_key_save", { request }),
+};
+
+// ---- Z3: model fit ----
+
+/** Coarse GPU class the daemon detected (`unknown`: could not tell, or none). */
+export type GpuKind = "apple_silicon" | "nvidia" | "amd" | "intel" | "unknown";
+
+/** Why a model is (or is not) recommended for this machine. */
+export type FitReason =
+  | "ram_fits_largest"
+  | "ram_fits"
+  | "ram_too_small"
+  | "rerank_opt_in"
+  | "needs_newer_app"
+  | "gpu_accelerated"
+  | "cpu_only_slower";
+
+/** How one manifest model fits this machine (`models.fit`). */
+export interface ModelFit {
+  id: string;
+  /** Same answer as `models.list`'s `recommended`. */
+  recommended: boolean;
+  tiers: Tier[];
+  size_bytes: number;
+  /** Nominal RAM the model needs, in GB. */
+  min_ram_gb: number;
+  /** Free disk space a fresh install needs (size + 10% + 1 GiB). */
+  disk_needed_bytes: number;
+  fits_ram: boolean;
+  /** Whether the models folder has room; `null` when free space could not be read. */
+  fits_disk: boolean | null;
+  /** This machine's memory as a nominal figure in GB. */
+  machine_ram_gb: number;
+  gpu: GpuKind;
+  /** Expected compute backend: `metal`, `cuda`, `vulkan` or `cpu`. */
+  accel: string;
+  reasons: FitReason[];
+}
+
+export interface FitReport {
+  hardware: { total_ram: number; available_ram: number; cpu_cores: number; gpu: GpuKind };
+  /** Nominal memory in GB (16 for a "16 GB" machine). */
+  ram_gb: number;
+  free_disk_bytes: number | null;
+  models: ModelFit[];
+}
+
+export const modelFitApi = {
+  /** Why each model is recommended and what it needs. Older daemons answer "method not found". */
+  modelsFit: () => call<FitReport>("models_fit"),
+};

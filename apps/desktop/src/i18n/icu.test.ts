@@ -78,7 +78,7 @@ describe("runtime", () => {
     expect(matchLocale(["sw", "fr-CA"])).toBe("fr");
     expect(matchLocale(["sw"])).toBe("en");
     expect(matchLocale(["not a tag", "ja-JP"])).toBe("ja");
-    // Stubs aren't picked automatically.
-    expect(matchLocale(["ar-EG"], LOCALES.filter((l) => !l.stub))).toBe("en");
+    // Arabic is a full locale, picked like any other.
+    expect(matchLocale(["ar-EG"], LOCALES.filter((l) => !l.stub))).toBe("ar");
   });
 });

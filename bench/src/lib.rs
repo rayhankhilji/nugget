@@ -20,6 +20,7 @@
 pub mod corpus;
 pub mod index;
 pub mod knowledge;
+pub mod local;
 pub mod real;
 pub mod report;
 pub mod runner;

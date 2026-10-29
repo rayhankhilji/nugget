@@ -399,6 +399,141 @@ impl Fixture {
         self.entities.iter().find(|e| e.id == id)
     }
 
+    /// Up to `n` item ids for a real-model run, in manifest order, deterministic: first the items
+    /// the scenario needs (the deleted items, the prompt-injection items, the items supporting
+    /// the job-change claims, two items mentioning the nickname person and one per
+    /// same-first-name person), then items evenly spaced through the rest of the manifest (which
+    /// keeps the mail / calendar / note mix). The scenario items are always kept, even when
+    /// they alone exceed `n`. `n >= items` keeps everything.
+    pub fn select_items(&self, n: usize) -> Vec<String> {
+        if n >= self.items.len() {
+            return self.items.iter().map(|i| i.id.clone()).collect();
+        }
+        let sc = &self.scenario;
+        let mut keep: Vec<&str> = Vec::new();
+        fn add<'a>(fx: &'a Fixture, id: &str, keep: &mut Vec<&'a str>) {
+            if let Some(it) = fx.item(id)
+                && !keep.contains(&it.id.as_str())
+            {
+                keep.push(&it.id);
+            }
+        }
+        for id in sc.delete.iter().chain(&sc.injection) {
+            add(self, id, &mut keep);
+        }
+        let jc = &sc.hard_cases.job_change;
+        for c in self
+            .claims
+            .iter()
+            .filter(|c| jc.superseded.contains(&c.id) || jc.current.contains(&c.id))
+        {
+            for s in &c.support {
+                add(self, &s.item, &mut keep);
+            }
+        }
+        let mentioned = |entity: &str| -> Vec<&str> {
+            let mut v: Vec<&str> = self
+                .mentions
+                .iter()
+                .filter(|m| m.entity == entity)
+                .map(|m| m.item.as_str())
+                .collect();
+            v.sort_by_key(|id| self.items.iter().position(|i| i.id == *id));
+            v.dedup();
+            v
+        };
+        let nick = mentioned(&sc.hard_cases.nickname_identity);
+        for id in &nick {
+            if nick.iter().filter(|i| keep.contains(i)).count() >= 2 {
+                break;
+            }
+            add(self, id, &mut keep);
+        }
+        for e in &sc.hard_cases.same_first_name {
+            let items = mentioned(e);
+            if !items.iter().any(|i| keep.contains(i))
+                && let Some(first) = items.first()
+            {
+                add(self, first, &mut keep);
+            }
+        }
+        let rest: Vec<&str> = self
+            .items
+            .iter()
+            .map(|i| i.id.as_str())
+            .filter(|id| !keep.contains(id))
+            .collect();
+        let want = n.saturating_sub(keep.len()).min(rest.len());
+        for k in 0..want {
+            keep.push(rest[k * rest.len() / want]);
+        }
+        self.items
+            .iter()
+            .filter(|i| keep.contains(&i.id.as_str()))
+            .map(|i| i.id.clone())
+            .collect()
+    }
+
+    /// The corpus restricted to `keep` (item ids), for scoring a run that processed only those
+    /// items. Precision and recall are then over what those items support:
+    ///
+    /// - items, scripted extractions and gold mentions: those of kept items;
+    /// - a gold claim is in scope when at least one of its supporting items is kept (its support
+    ///   is cut to those items); a superseded claim stays superseded only while every current
+    ///   job-change claim is in scope too (otherwise nothing in the subset supersedes it);
+    /// - a gold entity is in scope when a kept item mentions it or an in-scope claim names it;
+    /// - out-of-scope claims and entities become `optional`: neither a hit nor a miss, so they
+    ///   leave the recall denominators and a system entity matching one is not a false positive;
+    /// - the scenario's deleted and injection items: the kept ones.
+    pub fn subset(&self, keep: &[String]) -> Fixture {
+        let kept: HashSet<&str> = keep.iter().map(String::as_str).collect();
+        let mut fx = self.clone();
+        fx.items.retain(|i| kept.contains(i.id.as_str()));
+        fx.script.retain(|s| kept.contains(s.item.as_str()));
+        fx.mentions.retain(|m| kept.contains(m.item.as_str()));
+        for c in &mut fx.claims {
+            let support: Vec<GoldSupport> = c
+                .support
+                .iter()
+                .filter(|s| kept.contains(s.item.as_str()))
+                .cloned()
+                .collect();
+            if support.is_empty() {
+                c.optional = true;
+            } else {
+                c.support = support;
+            }
+        }
+        let jc = &fx.scenario.hard_cases.job_change;
+        let replaced = jc.current.iter().all(|id| {
+            fx.claims
+                .iter()
+                .any(|c| &c.id == id && !c.optional && c.status == GoldStatus::Active)
+        });
+        if !replaced {
+            for c in &mut fx.claims {
+                if c.status == GoldStatus::Superseded {
+                    c.optional = true;
+                }
+            }
+        }
+        let mut in_scope: HashSet<String> = fx.mentions.iter().map(|m| m.entity.clone()).collect();
+        for c in fx.claims.iter().filter(|c| !c.optional) {
+            in_scope.insert(c.subject.clone());
+            in_scope.extend(c.object.entity.clone());
+        }
+        for e in &mut fx.entities {
+            if !in_scope.contains(&e.id) {
+                e.optional = true;
+            }
+        }
+        fx.scenario.delete.retain(|id| kept.contains(id.as_str()));
+        fx.scenario
+            .injection
+            .retain(|id| kept.contains(id.as_str()));
+        fx
+    }
+
     pub fn stats(&self) -> FixtureStats {
         let mut items_by_kind = BTreeMap::new();
         for it in &self.items {
@@ -705,6 +840,76 @@ mod tests {
             assert!(!it.chunks.is_empty(), "{}", it.id);
             assert_eq!(ing.by_ref(&it.item).unwrap().id, it.id);
         }
+    }
+
+    #[test]
+    fn real_model_subsets_keep_the_scenario_and_spread_the_rest() {
+        let fx = Fixture::builtin().unwrap();
+        let all = fx.select_items(usize::MAX);
+        assert_eq!(all.len(), fx.items.len());
+        let small = fx.select_items(8);
+        assert_eq!(small, fx.select_items(8), "deterministic");
+        assert_eq!(small.len(), 8);
+        for id in fx.scenario.delete.iter().chain(&fx.scenario.injection) {
+            assert!(small.contains(id), "{id}");
+        }
+        let quick = fx.select_items(30);
+        assert_eq!(quick.len(), 30);
+        assert!(small.iter().all(|id| quick.contains(id)));
+        for kind in [ItemKind::Mail, ItemKind::Calendar, ItemKind::Note] {
+            assert!(
+                quick.iter().any(|id| fx.item(id).unwrap().kind == kind),
+                "{kind:?}"
+            );
+        }
+        // Manifest order, no duplicates.
+        let pos: Vec<usize> = quick
+            .iter()
+            .map(|id| fx.items.iter().position(|i| &i.id == id).unwrap())
+            .collect();
+        assert!(pos.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    /// Scoring a subset: only what the kept items support counts.
+    #[test]
+    fn subsets_restrict_the_gold_to_the_kept_items() {
+        let fx = Fixture::builtin().unwrap();
+        let keep = fx.select_items(8);
+        let sub = fx.subset(&keep);
+        assert_eq!(sub.items.len(), 8);
+        assert!(sub.mentions.iter().all(|m| keep.contains(&m.item)));
+        assert!(sub.script.iter().all(|s| keep.contains(&s.item)));
+        for c in sub.claims.iter().filter(|c| !c.optional) {
+            assert!(c.support.iter().all(|s| keep.contains(&s.item)), "{}", c.id);
+        }
+        // Every in-scope entity is mentioned in a kept item or named by an in-scope claim.
+        for e in sub.entities.iter().filter(|e| !e.optional) {
+            let mentioned = sub.mentions.iter().any(|m| m.entity == e.id);
+            let named =
+                sub.claims.iter().filter(|c| !c.optional).any(|c| {
+                    c.subject == e.id || c.object.entity.as_deref() == Some(e.id.as_str())
+                });
+            assert!(mentioned || named, "{}", e.id);
+        }
+        let (s, f) = (sub.stats(), fx.stats());
+        assert!(s.entities > 0 && s.entities < f.entities);
+        assert!(s.claims > 0 && s.claims < f.claims);
+        // The job change is in the smoke subset, so the superseded claims stay superseded.
+        assert!(
+            sub.claims
+                .iter()
+                .any(|c| c.status == GoldStatus::Superseded && !c.optional)
+        );
+        // Without the new job, nothing supersedes the old one: not scored either way.
+        let old_only = fx.subset(&["mail-002".to_owned()]);
+        assert!(
+            old_only
+                .claims
+                .iter()
+                .filter(|c| c.status == GoldStatus::Superseded)
+                .all(|c| c.optional)
+        );
+        assert!(old_only.scenario.delete.is_empty());
     }
 
     #[test]

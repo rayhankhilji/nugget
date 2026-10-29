@@ -672,8 +672,9 @@ impl<'a> Session<'a> {
     /// Load the dates of `items` not cached yet, in one feed call.
     fn prefetch_dates<'i>(&mut self, items: impl IntoIterator<Item = &'i ItemRef>) -> Result<()> {
         let mut missing: Vec<ItemRef> = Vec::new();
+        let mut seen: HashSet<&ItemRef> = HashSet::new();
         for i in items {
-            if !self.dates.contains_key(i) && !missing.contains(i) {
+            if !self.dates.contains_key(i) && seen.insert(i) {
                 missing.push(i.clone());
             }
         }

@@ -4,7 +4,11 @@
 // against it through bridge.mjs, which stands in for the Tauri shell. Every page of the PAGES
 // registry in src/App.tsx is opened and checked for real data and uncaught errors. A second
 // scenario (first-run.mjs) starts from an empty home, goes through onboarding and times how long
-// it takes from app start to a cited answer.
+// it takes from app start to a cited answer. A third (i18n.mjs) reopens every page in long, CJK
+// and right-to-left locales on the same indexed home and measures text that doesn't fit.
+// ai-setup.mjs installs the recommended local model in onboarding (signed test manifest, mock
+// download, fake llama-server) and times app start to a cited answer streamed by that model;
+// byok.mjs checks and saves an API key in onboarding.
 //
 // usage: pnpm run e2e        (see e2e/README.md for the environment variables)
 import { spawnSync } from "node:child_process";
@@ -14,6 +18,9 @@ import path from "node:path";
 import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
 import { CORPUS, addCorpusSource, countFiles, locateNuggetd, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
 import { firstRunScenario } from "./first-run.mjs";
+import { i18nScenario } from "./i18n.mjs";
+import { aiSetupScenario } from "./ai-setup.mjs";
+import { byokScenario } from "./byok.mjs";
 import {
   check,
   DESKTOP,
@@ -36,8 +43,14 @@ import {
   until,
 } from "./harness.mjs";
 
-/** Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, and a first run. */
-const SCENARIOS = ["pages", "first-run"];
+/**
+ * Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, the same pages
+ * in other locales (sharing that home), a first run, a first run with the recommended local model,
+ * and bring-your-own-key.
+ */
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok"];
+/** Scenarios that use the shared indexed home. */
+const INDEXED = ["pages", "i18n"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -202,6 +215,37 @@ function pageChecks({ expectedItems }) {
   };
 }
 
+// ---- the indexed home the pages and i18n scenarios share (indexed once) ----
+
+let indexed = null;
+
+/** Start nuggetd on a temp home and index the corpus, once; later calls reuse it. */
+function indexedHome(bin) {
+  indexed ??= (async () => {
+    const tSetup = Date.now();
+    const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "nuggetd.out.log") });
+    log(`daemon ready, home ${daemon.home}, socket ${daemon.socket}`);
+    try {
+      const source = await addCorpusSource(daemon.socket);
+      log(`added source ${source.id}`);
+      const settled = await waitForKnowledge(daemon.socket, { timeoutMs: INDEX_TIMEOUT_MS, log });
+      const setup_ms = Date.now() - tSetup;
+      log(`indexed ${settled.status.items} items; ${settled.knowledge.entities} entities, ${settled.knowledge.claims} facts (${secs(setup_ms)})`);
+      return { daemon, settled, setup_ms };
+    } catch (e) {
+      await stopIndexedHome(daemon);
+      throw e;
+    }
+  })();
+  return indexed;
+}
+
+async function stopIndexedHome(daemon) {
+  fs.cpSync(daemon.logDir, path.join(OUT, "daemon-logs"), { recursive: true });
+  await daemon.stop({ keep: KEEP });
+  if (KEEP) log(`kept the daemon home: ${daemon.home}`);
+}
+
 // ---- scenario: every page on an indexed home ----
 
 async function pagesScenario({ browser, bin }) {
@@ -209,21 +253,11 @@ async function pagesScenario({ browser, bin }) {
   const expectedItems = countFiles(CORPUS);
   log(`corpus: ${CORPUS} (${expectedItems} files)`);
 
-  const tSetup = Date.now();
-  const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "nuggetd.out.log") });
-  log(`daemon ready, home ${daemon.home}, socket ${daemon.socket}`);
+  const { daemon, settled, setup_ms } = await indexedHome(bin);
   let bridge;
   let ctx;
-  const timings = {};
+  const timings = { setup_ms };
   try {
-    const source = await addCorpusSource(daemon.socket);
-    log(`added source ${source.id}`);
-    const settled = await waitForKnowledge(daemon.socket, { timeoutMs: INDEX_TIMEOUT_MS, log });
-    timings.setup_ms = Date.now() - tSetup;
-    log(
-      `indexed ${settled.status.items} items; ${settled.knowledge.entities} entities, ${settled.knowledge.claims} facts (${secs(timings.setup_ms)})`,
-    );
-
     bridge = await startBridge({ socket: daemon.socket, dist: DIST });
     log(`bridge on ${bridge.url}`);
     ctx = await newContext(browser);
@@ -316,9 +350,6 @@ async function pagesScenario({ browser, bin }) {
   } finally {
     await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
-    fs.cpSync(daemon.logDir, path.join(OUT, "daemon-logs"), { recursive: true });
-    await daemon.stop({ keep: KEEP });
-    if (KEEP) log(`kept the daemon home: ${daemon.home}`);
   }
 }
 
@@ -346,27 +377,51 @@ async function main() {
     if (r.status !== 0) throw new Error(`pnpm run build failed (exit ${r.status ?? r.error?.message})`);
   }
 
-  const bin = locateNuggetd(log);
-  log(`nuggetd: ${bin}`);
+  // ai-setup runs nuggetd-e2e (located by the scenario); the others the plain nuggetd.
+  const bin = wanted.some((s) => s !== "ai-setup") ? locateNuggetd(log) : null;
+  if (bin) log(`nuggetd: ${bin}`);
 
   // E2E_CHROMIUM: a Chromium binary to use instead of Playwright's own download.
   const browser = await chromium.launch(process.env.E2E_CHROMIUM ? { executablePath: process.env.E2E_CHROMIUM } : {});
   const summary = { results };
   try {
-    for (const name of wanted) {
+    for (const [i, name] of wanted.entries()) {
       log(`---- scenario: ${name} ----`);
       try {
         if (name === "pages") Object.assign(summary, await pagesScenario({ browser, bin }));
-        else summary.first_run = await firstRunScenario({ browser, bin });
+        else if (name === "i18n") {
+          const { daemon } = await indexedHome(bin);
+          summary.i18n = await i18nScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
+        } else if (name === "first-run") summary.first_run = await firstRunScenario({ browser, bin });
+        else if (name === "ai-setup") summary.first_run_ai = await aiSetupScenario({ browser });
+        else summary.byok = await byokScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });
         log(`FAIL scenario ${name}: ${e.stack ?? e}`);
       }
+      // Stop the shared indexed home once no later scenario needs it.
+      if (indexed && !wanted.slice(i + 1).some((s) => INDEXED.includes(s))) {
+        const home = await indexed.catch(() => null);
+        indexed = null;
+        if (home) await stopIndexedHome(home.daemon);
+      }
     }
   } finally {
+    const home = indexed && (await indexed.catch(() => null));
+    if (home) await stopIndexedHome(home.daemon);
     await browser.close().catch(() => {});
+    // The first-run summary carries the time to a cited model answer when both ran.
+    const aiMs = summary.first_run_ai?.time_to_cited_model_answer_ms ?? null;
+    if (summary.first_run) summary.first_run.time_to_cited_model_answer_ms = aiMs;
     fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
+    if (summary.first_run || summary.first_run_ai) {
+      const cited = summary.first_run?.total_ms ?? null;
+      log(
+        `first run: cited answer (search, no AI) ${cited === null ? "not reached" : secs(cited)}; ` +
+          `cited model answer (local model installed in onboarding) ${aiMs === null ? "not reached" : secs(aiMs)} after app start`,
+      );
+    }
   }
 
   const failed = results.filter((r) => !r.ok).length;

@@ -24,6 +24,15 @@ required-features = ["fake-runtime"]
 test = false
 doc = false
 
+# The daemon with test overrides (signed test manifest, fake llama-server, hardware) read from
+# the environment, for the desktop end-to-end test (apps/desktop/e2e). Never shipped.
+[[bin]]
+name = "nuggetd-e2e"
+path = "src/bin/nuggetd-e2e.rs"
+required-features = ["fake-runtime"]
+test = false
+doc = false
+
 [features]
 fake-runtime = []
 

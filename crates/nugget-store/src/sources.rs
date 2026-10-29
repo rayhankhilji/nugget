@@ -261,16 +261,45 @@ impl Store {
         })
     }
 
-    /// Item and chunk counts per source, sorted by source id.
+    /// Item and chunk counts per source, sorted by source id. Read from the counts that
+    /// triggers keep per source (schema v10), so the cost does not grow with the store.
     pub fn source_counts(&self) -> Result<Vec<SourceCounts>> {
         self.with_read_conn(|conn| {
             let mut stmt = conn
-                .prepare(
-                    "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)
-                     FROM items i LEFT JOIN chunks c ON c.item_id = i.id
-                     GROUP BY i.source ORDER BY i.source",
+                .prepare_cached(
+                    "SELECT source, items, chunks FROM source_stats
+                     WHERE items > 0 ORDER BY source",
                 )
                 .db("prepare source_counts")?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok(SourceCounts {
+                        source: SourceId::new(r.get::<_, String>(0)?),
+                        items: r.get::<_, i64>(1)?.max(0) as u64,
+                        chunks: r.get::<_, i64>(2)?.max(0) as u64,
+                    })
+                })
+                .db("query source_counts")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read source_counts")
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{NewChunk, NewItem};
+
+    /// The aggregate `source_counts` ran before schema v10: the reference the kept counts must
+    /// equal.
+    pub(crate) const AGGREGATE_SQL: &str = "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)
+         FROM items i LEFT JOIN chunks c ON c.item_id = i.id
+         GROUP BY i.source ORDER BY i.source";
+
+    fn aggregate(s: &Store) -> Vec<SourceCounts> {
+        s.with_conn(|c| {
+            let mut stmt = c.prepare(AGGREGATE_SQL).db("prepare")?;
             let rows = stmt
                 .query_map([], |r| {
                     Ok(SourceCounts {
@@ -279,9 +308,75 @@ impl Store {
                         chunks: r.get::<_, i64>(2)? as u64,
                     })
                 })
-                .db("query source_counts")?;
-            rows.collect::<rusqlite::Result<_>>()
-                .db("read source_counts")
+                .db("query")?;
+            rows.collect::<rusqlite::Result<_>>().db("read")
         })
+        .unwrap()
+    }
+
+    fn check(s: &Store, step: &str) {
+        assert_eq!(s.source_counts().unwrap(), aggregate(s), "after {step}");
+    }
+
+    fn chunks(n: usize, tag: &str) -> Vec<NewChunk> {
+        (0..n)
+            .map(|i| NewChunk::text(format!("{tag} {i}")))
+            .collect()
+    }
+
+    /// The trigger-kept counts equal the aggregate through every kind of write: inserts,
+    /// re-chunking, chunk replacement, item and source deletes, and (raw) moves of items and
+    /// chunks.
+    #[test]
+    fn kept_counts_match_the_aggregate_across_writes() {
+        let s = Store::open_in_memory().unwrap();
+        check(&s, "nothing");
+        for i in 0..30 {
+            let src = format!("src{}", i % 3);
+            let it = NewItem::new(src.as_str(), format!("k{i}"), format!("h{i}"))
+                .with_text(format!("text {i}"));
+            if i % 4 == 0 {
+                s.upsert_item(&it).unwrap();
+            } else {
+                s.upsert_item_with_chunks(&it, &chunks(i % 5 + 1, "a"))
+                    .unwrap();
+            }
+        }
+        check(&s, "inserts");
+
+        // Updates: new content with a different number of chunks, and chunk replacement.
+        let it = NewItem::new("src1", "k1", "changed").with_text("changed");
+        s.upsert_item_with_chunks(&it, &chunks(7, "b")).unwrap();
+        check(&s, "re-chunking upsert");
+        s.replace_chunks(&it.item, &chunks(2, "c")).unwrap();
+        check(&s, "replace_chunks");
+        s.replace_chunks(&it.item, &[]).unwrap();
+        check(&s, "replace_chunks with none");
+
+        assert!(s.delete_item(&NewItem::new("src2", "k2", "").item).unwrap());
+        check(&s, "delete_item");
+        assert_eq!(s.delete_source(&SourceId::new("src0")).unwrap(), 10);
+        check(&s, "delete_source");
+
+        // Moves the API never makes, kept right anyway.
+        s.with_conn(|c| {
+            c.execute("UPDATE items SET source = 'src9' WHERE key = 'k5'", [])
+                .db("move item")?;
+            c.execute(
+                "UPDATE chunks SET item_id = (SELECT id FROM items WHERE key = 'k7')
+                 WHERE id = (SELECT max(id) FROM chunks
+                             WHERE item_id = (SELECT id FROM items WHERE key = 'k8'))",
+                [],
+            )
+            .db("move chunk")
+        })
+        .unwrap();
+        check(&s, "raw moves");
+
+        assert_eq!(s.delete_source(&SourceId::new("src9")).unwrap(), 1);
+        assert_eq!(s.delete_source(&SourceId::new("src1")).unwrap(), 10);
+        assert_eq!(s.delete_source(&SourceId::new("src2")).unwrap(), 8);
+        check(&s, "deleting everything");
+        assert!(s.source_counts().unwrap().is_empty());
     }
 }

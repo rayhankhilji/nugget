@@ -250,7 +250,7 @@ fn check_keys(r: &Value) {
 #[test]
 fn every_suite_report_conforms() {
     let reports = smoke_reports();
-    assert_eq!(reports.len(), 6);
+    assert_eq!(reports.len(), 7);
     for r in &reports {
         let errors = errors_for(r);
         assert!(errors.is_empty(), "{} report: {errors:#?}", r["suite"]);

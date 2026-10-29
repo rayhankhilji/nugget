@@ -271,8 +271,7 @@ async fn begin(app: &AppHandle, request: &DraftRequest) -> Result<DraftStarted, 
         .client(app)
         .await
         .map_err(|_| Failure::Error(errors::ERROR_OFFLINE.into()))?;
-    client
-        .call(method::DRAFT_BEGIN, request)
+    crate::daemon::retry_busy(|| client.call(method::DRAFT_BEGIN, request))
         .await
         .map_err(|e| errors::classify_ipc(&e))
 }

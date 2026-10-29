@@ -28,11 +28,35 @@
 //! of each embedding. Reading them from `chunk_vec` instead would cost more than the scan it
 //! replaces: `vec0` keeps 1024 vectors per (1.5 MB at 384 dimensions) blob, and a point lookup
 //! walks that blob's overflow-page chain up to the vector, measured at ~0.2 ms in memory and
-//! ~2 ms on an encrypted file per lookup. The copy doubles vector storage, so the index is only
-//! built once a store needs it: the first approximate search creates both tables and fills them
-//! from `chunk_vec` (in batches, idempotently; see [`ensure_ann_ready`]), and from then on
-//! `items::write_chunks` writes them in the same transaction as `chunk_vec`, and a delete trigger
-//! on `chunks` cleans them.
+//! ~2 ms on an encrypted file per lookup. The copy doubles vector storage, so the index only
+//! exists while a store needs it:
+//!
+//! - The first search past the thresholds starts building it on a background thread and
+//!   searches exactly meanwhile. The build ([`build_ann`]) reads on reader connections and
+//!   writes in short batches, so it never holds the writer for long (at 100k 384-dimensional
+//!   vectors: one 4.3 s writer hold before, about 20 ms per batch now; see
+//!   [`ANN_BUILD_BATCH`]). Once the tables exist, `items::write_chunks` writes them in the same
+//!   transaction as `chunk_vec`, and a delete trigger on `chunks` cleans them.
+//! - A search on a store that has shrunk to under half of a threshold drops it again
+//!   ([`far_below_threshold`]; the gap is hysteresis), so a small store stops paying for it on
+//!   every write. The check rides on the vector count the search takes anyway; writes pay
+//!   nothing for it.
+//!
+//! Searches run on the reader pool, never on the writer connection. W12 briefly ran them on
+//! the writer (its page cache is not discarded by its own writes, so edit freshness was 20 ms
+//! instead of 90 ms) and saw readers' later full-text searches go from 79 ms to 2.5 s at 100k
+//! chunks in the scale bench. That does not reproduce at the store level
+//! (`tests::writer_knn_vs_reader_fts`, 100k encrypted items, 384 dimensions): with kNN scans
+//! plus point lookups of 50 neighbours' vectors on the writer after each edit, reader
+//! full-text search stayed at 19–22 ms (16–22 ms with them on a reader), the WAL stayed at its
+//! autocheckpoint size (8 MiB) and checkpointed fully, and the writer kept no statement or
+//! read transaction open afterwards. So the store-level suspects are ruled out: no snapshot
+//! pinned by the writer (WAL growth, checkpoint starvation), no evicted or invalidated reader
+//! cache, no cache spill. What slowed the bench then is unexplained (it was not re-measured in
+//! isolation). Searches stay on the readers regardless: a 0.5 s exact scan on the writer would
+//! block every write behind it.
+
+use std::sync::{Arc, PoisonError, Weak};
 
 use nugget_core::{Error, Result};
 use rusqlite::{CachedStatement, Connection, OptionalExtension, TransactionBehavior, params};
@@ -41,6 +65,7 @@ use crate::Store;
 use crate::error::DbExt;
 use crate::items::{embedding_dim, f32_blob, f32_from_blob, item_ref, validate_embedding};
 use crate::search::{MAX_KNN, excerpt};
+use crate::store::Db;
 use crate::types::{ChunkId, Hit};
 
 /// Least vector count for [`Store::search_vector`] to switch from exact to approximate search.
@@ -117,15 +142,7 @@ pub(crate) struct AnnWriter<'c> {
 impl<'c> AnnWriter<'c> {
     /// `None` while the index has not been built (nothing to maintain).
     pub(crate) fn prepare(conn: &'c Connection) -> Result<Option<Self>> {
-        let exists: bool = conn
-            .prepare_cached(
-                "SELECT EXISTS (SELECT 1 FROM sqlite_master
-                                WHERE type = 'table' AND name = 'ann_vectors')",
-            )
-            .db("prepare index lookup")?
-            .query_row([], |r| r.get(0))
-            .db("look up approximate vector index")?;
-        if !exists {
+        if !ann_tables_exist(conn)? {
             return Ok(None);
         }
         Ok(Some(Self {
@@ -164,7 +181,7 @@ fn ann_center(conn: &Connection) -> Result<Vec<f32>> {
         .unwrap_or_default())
 }
 
-/// Mean of the vectors at `positions` (see [`ensure_ann_ready`]), one sequential read per `vec0`
+/// Mean of the vectors at `positions` (see [`vector_positions`]), one sequential read per `vec0`
 /// chunk. Zeros when there are none.
 fn mean_vector(
     conn: &Connection,
@@ -174,15 +191,8 @@ fn mean_vector(
     let stride = dim * 4;
     let mut sum = vec![0f64; dim];
     let mut n = 0usize;
-    let mut read = conn
-        .prepare_cached("SELECT vectors FROM chunk_vec_vector_chunks00 WHERE _rowid_ = ?1")
-        .db("prepare vector chunk read")?;
     for group in positions.chunk_by(|a, b| a.0 == b.0) {
-        let blob: Option<Vec<u8>> = read
-            .query_row([group[0].0], |r| r.get(0))
-            .optional()
-            .db("read vector chunk")?;
-        let Some(blob) = blob else {
+        let Some(blob) = vector_chunk_blob(conn, group[0].0)? else {
             continue;
         };
         for &(_, offset, _) in group {
@@ -211,127 +221,292 @@ fn ann_ready(conn: &Connection) -> Result<bool> {
     .db("read approximate index flag")
 }
 
-/// Make sure the approximate-search index holds every vector, building or completing it from
-/// `chunk_vec` if not.
-///
-/// The tables are created (and committed) first, so writes from then on maintain them. The
-/// existing vectors are then copied one `vec0` chunk (up to 1024 vectors) per transaction,
-/// reading each chunk's vector blob once from `vec0`'s storage (`chunk_vec_rowids` maps a rowid
-/// to its chunk and offset, `chunk_vec_vector_chunks00` holds the blobs): a sequential read
-/// instead of one overflow-chain walk per vector. Vectors already indexed, or deleted or moved
-/// since the scan began, are skipped, so an interrupted build resumes where it stopped and
-/// repeating it is harmless.
-fn ensure_ann_ready(conn: &mut Connection, dim: usize) -> Result<()> {
-    if ann_ready(conn)? {
-        return Ok(());
-    }
-    // (vec0 chunk, offset in it, rowid = chunk id), in storage order.
-    let mut positions: Vec<(i64, i64, ChunkId)> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT chunk_id, chunk_offset, rowid FROM chunk_vec_rowids
-                 WHERE chunk_id IS NOT NULL",
-            )
-            .db("prepare vector position scan")?;
-        let rows = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-            .db("vector position scan")?;
-        rows.collect::<rusqlite::Result<_>>()
-            .db("vector position scan")?
-    };
+/// Whether the approximate-search tables exist (complete or not).
+fn ann_tables_exist(conn: &Connection) -> Result<bool> {
+    conn.prepare_cached(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'ann_vectors')",
+    )
+    .db("prepare index lookup")?
+    .query_row([], |r| r.get(0))
+    .db("look up approximate vector index")
+}
+
+/// Vector positions in `vec0`'s storage: (vec0 chunk, offset in it, rowid = chunk id), sorted
+/// in storage order. `chunk_vec_rowids` maps a rowid to its chunk and offset;
+/// `chunk_vec_vector_chunks00` holds one blob of up to 1024 vectors per chunk.
+fn vector_positions(conn: &Connection) -> Result<Vec<(i64, i64, ChunkId)>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT chunk_id, chunk_offset, rowid FROM chunk_vec_rowids
+             WHERE chunk_id IS NOT NULL",
+        )
+        .db("prepare vector position scan")?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .db("vector position scan")?;
+    let mut positions: Vec<_> = rows
+        .collect::<rusqlite::Result<_>>()
+        .db("vector position scan")?;
     positions.sort_unstable();
-    // The centre is fixed once, with the tables, so every bit vector uses the same one; a build
-    // resumed after an interruption keeps it.
-    if ann_center(conn)?.len() != dim {
-        let center = mean_vector(conn, &positions, dim)?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .db("begin approximate index build")?;
-        tx.execute_batch(
-            "DROP TABLE IF EXISTS ann_bits;
-             DROP TABLE IF EXISTS ann_vectors;
-             DROP TRIGGER IF EXISTS chunks_ann_ad;",
-        )
-        .db("reset approximate vector index")?;
-        tx.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-            params![META_ANN_CENTER, hex::encode(f32_blob(&center))],
-        )
-        .db("store index centre")?;
-        create_ann_tables(&tx, dim)?;
-        tx.commit().db("commit approximate index tables")?;
-    } else {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .db("begin approximate index build")?;
-        create_ann_tables(&tx, dim)?;
-        tx.commit().db("commit approximate index tables")?;
+    Ok(positions)
+}
+
+/// The vector blob of `vec0` chunk `chunk` (one sequential read instead of one overflow-chain
+/// walk per vector). vec0 opens these blobs by the table's real rowid (its `rowid` column is
+/// not an alias of it), hence `_rowid_`.
+fn vector_chunk_blob(conn: &Connection, chunk: i64) -> Result<Option<Vec<u8>>> {
+    conn.prepare_cached("SELECT vectors FROM chunk_vec_vector_chunks00 WHERE _rowid_ = ?1")
+        .db("prepare vector chunk read")?
+        .query_row([chunk], |r| r.get(0))
+        .optional()
+        .db("read vector chunk")
+}
+
+/// Most vectors copied into the index per writer transaction while building it. Each batch
+/// holds the writer for about 15–20 ms at 384 dimensions on an encrypted file (256 took
+/// ~35 ms), so ingest keeps going during a build: at 100k vectors, with an upsert loop running
+/// throughout, the longest upsert wait fell from 4.3 s (the whole build under the writer) to
+/// 91 ms, and the build took 10 s in the background instead of 4.5 s in the search call.
+const ANN_BUILD_BATCH: usize = 128;
+/// A build re-reads the vector positions at most this many times to cover vectors it missed.
+const ANN_BUILD_PASSES: usize = 3;
+
+#[cfg(test)]
+thread_local! {
+    /// Test override of ([`ANN_MIN_VECTORS`], [`ANN_MIN_VECTOR_BYTES`]) for searches on this
+    /// thread.
+    static TEST_THRESHOLDS: std::cell::Cell<Option<(usize, usize)>> =
+        const { std::cell::Cell::new(None) };
+    /// Test hook run by a build on this thread between reading a batch and writing it, to
+    /// interleave other writes.
+    static TEST_BETWEEN_BATCHES: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// (least vector count, least vector bytes) for the approximate path.
+fn thresholds() -> (usize, usize) {
+    #[cfg(test)]
+    if let Some(t) = TEST_THRESHOLDS.with(std::cell::Cell::get) {
+        return t;
     }
+    (ANN_MIN_VECTORS, ANN_MIN_VECTOR_BYTES)
+}
+
+/// Whether `n` vectors of `dim` dimensions are past both thresholds (approximate search pays).
+fn past_threshold(n: usize, dim: usize, (min_n, min_bytes): (usize, usize)) -> bool {
+    n >= min_n && n.saturating_mul(dim * 4) >= min_bytes
+}
+
+/// Whether a store has shrunk far enough below the thresholds (under half of either) for its
+/// index to be dropped. The gap between this and [`past_threshold`] is hysteresis: a store
+/// hovering around a threshold neither rebuilds nor drops its index on every few writes.
+fn far_below_threshold(n: usize, dim: usize, (min_n, min_bytes): (usize, usize)) -> bool {
+    n < min_n / 2 || n.saturating_mul(dim * 4) < min_bytes / 2
+}
+
+/// Build or complete the approximate-search index from `chunk_vec`, **without holding the
+/// writer for the whole build**. Returns whether the index is complete (`false` if the store
+/// was closed or the index dropped meanwhile). The caller holds [`Db::ann_build`], so one
+/// build runs at a time.
+///
+/// 1. The centre is computed on a reader (reading every vector once), then the tables are
+///    created (and committed) in one short writer transaction with it. From then on every
+///    write maintains the index in its own transaction ([`AnnWriter`]), and the delete trigger
+///    removes deleted chunks from it.
+/// 2. The vectors that existed before are copied in batches: their positions and each `vec0`
+///    chunk's blob are read on a reader, then each batch of [`ANN_BUILD_BATCH`] vectors is
+///    written in its own short writer transaction, releasing the writer in between.
+///
+/// Races with writes between a batch's read and its write are settled inside the writer
+/// transaction: a vector is copied only if its rowid is still at the position it was read from
+/// (a deleted chunk is gone from `chunk_vec_rowids`; a re-inserted rowid is appended to a new
+/// position) and not already indexed (written after the tables existed). A vector that is
+/// unindexed yet present therefore predates the tables, and its slot's bytes are the ones read.
+/// The index is marked ready, in the same transaction, only once it holds exactly as many
+/// vectors as `chunk_vec`; an interrupted build (store closed, process killed) resumes where it
+/// stopped, keeping its centre.
+fn build_ann(db: &Weak<Db>, dim: usize) -> Result<bool> {
+    let live = || {
+        db.upgrade()
+            .ok_or_else(|| Error::Storage("store closed during index build".into()))
+    };
+    let Ok(d) = live() else { return Ok(false) };
+    if d.with_read_conn(ann_ready)? {
+        return Ok(true);
+    }
+    let prepared = d.with_read_conn(|c| Ok(ann_center(c)?.len() == dim && ann_tables_exist(c)?))?;
+    if !prepared {
+        // The centre is fixed once, with the tables, so every bit vector uses the same one.
+        let center = d.with_read_conn(|c| mean_vector(c, &vector_positions(c)?, dim))?;
+        d.with_conn(|c| {
+            let tx = c
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .db("begin approximate index build")?;
+            tx.execute_batch(
+                "DROP TABLE IF EXISTS ann_bits;
+                 DROP TABLE IF EXISTS ann_vectors;
+                 DROP TRIGGER IF EXISTS chunks_ann_ad;",
+            )
+            .db("reset approximate vector index")?;
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+                params![META_ANN_CENTER, hex::encode(f32_blob(&center))],
+            )
+            .db("store index centre")?;
+            create_ann_tables(&tx, dim)?;
+            tx.commit().db("commit approximate index tables")
+        })?;
+    }
+    drop(d);
     let stride = dim * 4;
     let mut added = 0usize;
-    for group in positions.chunk_by(|a, b| a.0 == b.0) {
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .db("begin approximate index batch")?;
-        {
-            // vec0 opens these blobs by the table's real rowid (its `rowid` column is not an
-            // alias of it), hence `_rowid_`.
-            let blob: Option<Vec<u8>> = tx
-                .prepare_cached("SELECT vectors FROM chunk_vec_vector_chunks00 WHERE _rowid_ = ?1")
-                .db("prepare vector chunk read")?
-                .query_row([group[0].0], |r| r.get(0))
-                .optional()
-                .db("read vector chunk")?;
-            let Some(blob) = blob else {
+    for _ in 0..ANN_BUILD_PASSES {
+        // Read after the tables were committed: anything written later is indexed by its writer.
+        let positions = match live() {
+            Ok(d) => d.with_read_conn(vector_positions)?,
+            Err(_) => return Ok(false),
+        };
+        for group in positions.chunk_by(|a, b| a.0 == b.0) {
+            let Ok(d) = live() else { return Ok(false) };
+            let Some(blob) = d.with_read_conn(|c| vector_chunk_blob(c, group[0].0))? else {
                 continue;
             };
-            let mut position = tx
-                .prepare_cached(
-                    "SELECT chunk_id, chunk_offset FROM chunk_vec_rowids WHERE rowid = ?1",
-                )
-                .db("prepare vector position check")?;
-            let mut indexed = tx
-                .prepare_cached("SELECT 1 FROM ann_vectors WHERE id = ?1")
-                .db("prepare index check")?;
-            let mut writer = AnnWriter::prepare(&tx)?.ok_or_else(|| {
-                Error::Storage("approximate vector index disappeared during its build".into())
-            })?;
-            for &(chunk, offset, id) in group {
-                let now: Option<(i64, i64)> = position
-                    .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
-                    .optional()
-                    .db("check vector position")?;
-                if now != Some((chunk, offset)) {
-                    continue;
-                }
-                if indexed
-                    .query_row([id], |_| Ok(()))
-                    .optional()
-                    .db("check index")?
-                    .is_some()
-                {
-                    continue;
-                }
-                let v = usize::try_from(offset)
-                    .ok()
-                    .and_then(|o| blob.get(o * stride..(o + 1) * stride))
-                    .and_then(f32_from_blob)
-                    .ok_or_else(|| {
-                        Error::Storage(format!("malformed stored vector for chunk {id}"))
-                    })?;
-                writer.insert(id, &v)?;
-                added += 1;
+            for batch in group.chunks(ANN_BUILD_BATCH) {
+                #[cfg(test)]
+                TEST_BETWEEN_BATCHES.with(|h| {
+                    if let Some(h) = h.borrow_mut().as_mut() {
+                        h();
+                    }
+                });
+                let n = d.with_conn(|c| copy_batch(c, batch, &blob, stride))?;
+                let Some(n) = n else {
+                    // Dropped meanwhile (the store shrank): nothing left to build.
+                    return Ok(false);
+                };
+                added += n;
             }
         }
-        tx.commit().db("commit approximate index batch")?;
+        let Ok(d) = live() else { return Ok(false) };
+        let complete = d.with_conn(|c| {
+            let tx = c
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .db("begin approximate index check")?;
+            if !ann_tables_exist(&tx)? {
+                return Ok(None);
+            }
+            // `ann_vectors` is written and deleted together with `ann_bits` (same statements,
+            // same transaction), so counting the small rowid tables suffices; counting
+            // `ann_vectors` itself would read every copied vector (~0.8 s at 100k).
+            let (vectors, bits): (i64, i64) = tx
+                .query_row(
+                    "SELECT (SELECT count(*) FROM chunk_vec_rowids),
+                            (SELECT count(*) FROM ann_bits_rowids)",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .db("count indexed vectors")?;
+            if vectors != bits {
+                return Ok(Some(false));
+            }
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, '1')",
+                [META_ANN_READY],
+            )
+            .db("mark approximate index ready")?;
+            tx.commit().db("commit approximate index flag")?;
+            Ok(Some(true))
+        })?;
+        match complete {
+            None => return Ok(false),
+            Some(true) => {
+                tracing::info!(vectors = added, "built the approximate vector index");
+                return Ok(true);
+            }
+            Some(false) => {}
+        }
     }
-    conn.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, '1')",
-        [META_ANN_READY],
-    )
-    .db("mark approximate index ready")?;
-    tracing::info!(vectors = added, "built the approximate vector index");
-    Ok(())
+    Err(Error::Storage(
+        "approximate vector index still incomplete after rebuilding passes".into(),
+    ))
+}
+
+/// Copy one batch of pre-existing vectors (positions from [`vector_positions`], all in the
+/// `vec0` chunk whose bytes are `blob`) into the index, in one writer transaction. Returns how
+/// many were copied, or `None` if the index no longer exists.
+fn copy_batch(
+    conn: &mut Connection,
+    batch: &[(i64, i64, ChunkId)],
+    blob: &[u8],
+    stride: usize,
+) -> Result<Option<usize>> {
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .db("begin approximate index batch")?;
+    let mut added = 0;
+    {
+        let Some(mut writer) = AnnWriter::prepare(&tx)? else {
+            return Ok(None);
+        };
+        let mut position = tx
+            .prepare_cached("SELECT chunk_id, chunk_offset FROM chunk_vec_rowids WHERE rowid = ?1")
+            .db("prepare vector position check")?;
+        let mut indexed = tx
+            .prepare_cached("SELECT 1 FROM ann_vectors WHERE id = ?1")
+            .db("prepare index check")?;
+        for &(chunk, offset, id) in batch {
+            let now: Option<(i64, i64)> = position
+                .query_row([id], |r| Ok((r.get(0)?, r.get(1)?)))
+                .optional()
+                .db("check vector position")?;
+            if now != Some((chunk, offset)) {
+                continue;
+            }
+            if indexed
+                .query_row([id], |_| Ok(()))
+                .optional()
+                .db("check index")?
+                .is_some()
+            {
+                continue;
+            }
+            let v = usize::try_from(offset)
+                .ok()
+                .and_then(|o| blob.get(o * stride..(o + 1) * stride))
+                .and_then(f32_from_blob)
+                .ok_or_else(|| Error::Storage(format!("malformed stored vector for chunk {id}")))?;
+            writer.insert(id, &v)?;
+            added += 1;
+        }
+    }
+    tx.commit().db("commit approximate index batch")?;
+    Ok(Some(added))
+}
+
+/// Drop the approximate-search index (tables, trigger, `meta` keys), so writes stop paying for
+/// it. Skipped while a build runs. Returns whether it was dropped.
+fn drop_ann(db: &Db) -> Result<bool> {
+    let Ok(_build) = db.ann_build.try_lock() else {
+        return Ok(false);
+    };
+    db.with_conn(|c| {
+        let tx = c
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .db("begin approximate index drop")?;
+        tx.execute_batch(
+            "DROP TRIGGER IF EXISTS chunks_ann_ad;
+             DROP TABLE IF EXISTS ann_bits;
+             DROP TABLE IF EXISTS ann_vectors;",
+        )
+        .db("drop approximate vector index")?;
+        tx.execute(
+            "DELETE FROM meta WHERE key IN (?1, ?2)",
+            [META_ANN_READY, META_ANN_CENTER],
+        )
+        .db("forget approximate vector index")?;
+        tx.commit().db("commit approximate index drop")
+    })?;
+    tracing::info!("dropped the approximate vector index: the store shrank below its threshold");
+    Ok(true)
 }
 
 /// Number of stored vectors.
@@ -457,9 +632,10 @@ impl Store {
     /// [`ANN_MIN_VECTORS`]), for sparse queries (or when
     /// `limit × ANN_OVERSAMPLE` exceeds 4096); approximate from there on, through the
     /// binary-quantized index described in this module: scores stay exact, but a true
-    /// neighbour may occasionally be missed. The first approximate search builds that index
-    /// (measured at 3.8 s for 100k vectors on an encrypted file); if building it fails, search
-    /// stays exact.
+    /// neighbour may occasionally be missed. The first search past the thresholds starts
+    /// building that index in the background (about 5 s for 100k vectors on an encrypted file,
+    /// in short writer transactions) and searches exactly until it is complete; if building it
+    /// fails, search stays exact. A store that shrinks to under half a threshold drops it.
     ///
     /// Returns `Error::Invalid` if the query's dimension differs from the store's. An empty result
     /// is returned while no embeddings have been stored.
@@ -473,8 +649,8 @@ impl Store {
         self.search_vector_mode(embedding, limit, Mode::Exact)
     }
 
-    /// [`Store::search_vector`] always using the approximate path (building its index if
-    /// needed), whatever the store's size; still exact when `limit × ANN_OVERSAMPLE` exceeds
+    /// [`Store::search_vector`] always using the approximate path (building its index on this
+    /// thread if needed, and never dropping it), whatever the store's size; still exact when `limit × ANN_OVERSAMPLE` exceeds
     /// 4096. For tests and benchmarks.
     #[doc(hidden)]
     pub fn search_vector_approx(&self, embedding: &[f32], limit: usize) -> Result<Vec<Hit>> {
@@ -483,8 +659,9 @@ impl Store {
 
     fn search_vector_mode(&self, embedding: &[f32], limit: usize, mode: Mode) -> Result<Vec<Hit>> {
         validate_embedding(embedding).map_err(Error::Invalid)?;
-        // Searches run on a reader connection; only the one-off index build takes the writer.
-        let Some((dim, k)) = self.with_read_conn(|c| {
+        // Searches run on a reader connection; the index build and drop take the writer only for
+        // short transactions.
+        let Some((dim, k, indexed, ready)) = self.with_read_conn(|c| {
             let Some(dim) = embedding_dim(c)? else {
                 return Ok(None);
             };
@@ -494,7 +671,9 @@ impl Store {
                     embedding.len()
                 )));
             }
-            Ok(Some((dim, limit.min(MAX_KNN))))
+            let indexed = ann_tables_exist(c)?;
+            let ready = indexed && ann_ready(c)?;
+            Ok(Some((dim, limit.min(MAX_KNN), indexed, ready)))
         })?
         else {
             return Ok(Vec::new());
@@ -502,40 +681,95 @@ impl Store {
         if k == 0 {
             return Ok(Vec::new());
         }
-        let wanted = k.saturating_mul(ANN_OVERSAMPLE) <= MAX_KNN
-            && match mode {
-                Mode::Exact => false,
-                Mode::Approx => true,
-                Mode::Auto => {
-                    quantizable(embedding) && {
-                        let n = self.with_read_conn(vector_count)?;
-                        n >= ANN_MIN_VECTORS && n.saturating_mul(dim * 4) >= ANN_MIN_VECTOR_BYTES
-                    }
-                }
-            };
-        let approx = wanted
-            && (self.with_read_conn(ann_ready)?
-                || match self.with_conn(|c| ensure_ann_ready(c, dim)) {
-                    Ok(()) => true,
-                    Err(e) if matches!(mode, Mode::Approx) => return Err(e),
-                    Err(e) => {
-                        tracing::warn!(
-                            error = %e,
-                            "cannot build the approximate vector index; searching exhaustively"
-                        );
+        let usable = k.saturating_mul(ANN_OVERSAMPLE) <= MAX_KNN;
+        let approx = match mode {
+            Mode::Exact => false,
+            Mode::Approx => usable && (ready || self.build_ann_now(dim)?),
+            Mode::Auto => {
+                let dense = quantizable(embedding);
+                // The count is only needed (and paid for) by dense queries and by stores that
+                // have an index to keep or drop.
+                if dense || indexed {
+                    let n = self.with_read_conn(vector_count)?;
+                    let limits = thresholds();
+                    if indexed && far_below_threshold(n, dim, limits) {
+                        if let Err(e) = drop_ann(self.db()) {
+                            tracing::warn!(error = %e, "cannot drop the approximate vector index");
+                        }
+                        false
+                    } else if usable && dense && past_threshold(n, dim, limits) {
+                        // Until the index is complete, search exactly while it builds.
+                        ready || {
+                            self.spawn_ann_build(dim);
+                            false
+                        }
+                    } else {
                         false
                     }
-                });
+                } else {
+                    false
+                }
+            }
+        };
         self.with_read_conn(|c| {
+            // One read transaction, so the index cannot be dropped between the readiness check
+            // and its use.
+            let tx = c.unchecked_transaction().db("begin vector search")?;
+            let approx = approx && ann_ready(&tx)?;
             // vec0 kNN queries must stand alone (no joins or extra ORDER BY), so fetch the
             // neighbours first, then their chunk and item rows.
             let neighbours = if approx {
-                approx_neighbours(c, embedding, k)?
+                approx_neighbours(&tx, embedding, k)?
             } else {
-                exact_neighbours(c, embedding, k)?
+                exact_neighbours(&tx, embedding, k)?
             };
-            neighbour_hits(c, neighbours)
+            let hits = neighbour_hits(&tx, neighbours)?;
+            tx.commit().db("end vector search")?;
+            Ok(hits)
         })
+    }
+
+    /// Build the approximate index on this thread (waiting for a build in progress), in short
+    /// writer transactions. Returns whether it is complete.
+    fn build_ann_now(&self, dim: usize) -> Result<bool> {
+        let lock = self.db().ann_build.clone();
+        let _build = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        build_ann(&Arc::downgrade(self.db()), dim)
+    }
+
+    /// Start building the approximate index on a background thread, unless a build is already
+    /// running. The thread holds the store only weakly: closing the store stops the build after
+    /// its current batch (the next build resumes it).
+    fn spawn_ann_build(&self, dim: usize) {
+        let lock = self.db().ann_build.clone();
+        if lock.try_lock().is_err() {
+            return;
+        }
+        let db = Arc::downgrade(self.db());
+        let spawned = std::thread::Builder::new()
+            .name("nugget-ann-build".into())
+            .spawn(move || {
+                // Several searches may race to start a build; only one runs it.
+                let Ok(_build) = lock.try_lock() else {
+                    return;
+                };
+                if let Err(e) = build_ann(&db, dim) {
+                    tracing::warn!(
+                        error = %e,
+                        "cannot build the approximate vector index; searching exhaustively"
+                    );
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "cannot start the approximate vector index build");
+        }
+    }
+
+    /// Whether the approximate-search index is complete (searches past the thresholds use it).
+    /// For tests and benchmarks.
+    #[doc(hidden)]
+    pub fn ann_index_ready(&self) -> Result<bool> {
+        self.with_read_conn(|c| Ok(ann_tables_exist(c)? && ann_ready(c)?))
     }
 }
 
@@ -673,5 +907,279 @@ mod tests {
         assert!(index_sizes(&s).2 < live);
         s.search_vector_approx(&q, 1).unwrap();
         assert_eq!(index_sizes(&s), (live, live, live));
+    }
+
+    fn ann_exists(s: &Store) -> bool {
+        count(
+            s,
+            "sqlite_master WHERE name IN ('ann_bits', 'ann_vectors', 'chunks_ann_ad')",
+        ) > 0
+    }
+
+    fn ann_meta(s: &Store) -> i64 {
+        count(s, "meta WHERE key IN ('ann_index_ready', 'ann_center')")
+    }
+
+    /// Wait (bounded) for the background build to complete the index.
+    fn wait_ready(s: &Store) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !s.ann_index_ready().unwrap() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "background index build did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// Every vector is indexed once, with its exact copy.
+    fn assert_index_consistent(s: &Store) {
+        let (v, b, c) = index_sizes(s);
+        assert_eq!((b, c), (v, v));
+        let differing = count(
+            s,
+            "chunk_vec_rowids r WHERE NOT EXISTS (
+                 SELECT 1 FROM ann_vectors a WHERE a.id = r.rowid
+                 AND a.embedding = (SELECT embedding FROM chunk_vec v WHERE v.rowid = r.rowid))",
+        );
+        assert_eq!(differing, 0);
+    }
+
+    #[test]
+    fn index_builds_in_the_background_and_drops_when_the_store_shrinks() {
+        TEST_THRESHOLDS.with(|t| t.set(Some((40, 0))));
+        let s = Store::open_in_memory().unwrap();
+        for i in 0..30u32 {
+            put(&s, &format!("k{i}"), &[i], 16);
+        }
+        // Below the threshold: exact, no index.
+        s.search_vector(&unit(3, 16), 3).unwrap();
+        assert!(!ann_exists(&s));
+
+        for i in 30..50u32 {
+            put(&s, &format!("k{i}"), &[i], 16);
+        }
+        // The first search past it answers exactly and starts the build.
+        let first = s.search_vector(&unit(3, 16), 3).unwrap();
+        assert_eq!(first[0].snippet, "chunk 3");
+        wait_ready(&s);
+        assert_index_consistent(&s);
+        let hits = s.search_vector(&unit(7, 16), 3).unwrap();
+        assert_eq!(hits[0].snippet, "chunk 7");
+
+        // Shrinking to between half the threshold and the threshold keeps it (hysteresis)...
+        for i in 0..25u32 {
+            s.delete_item(&item_ref("t".into(), format!("k{i}")))
+                .unwrap();
+        }
+        s.search_vector(&unit(30, 16), 3).unwrap();
+        assert!(s.ann_index_ready().unwrap());
+        assert_index_consistent(&s);
+
+        // ...under half drops it, tables, trigger and meta keys, even for a sparse query.
+        for i in 25..32u32 {
+            s.delete_item(&item_ref("t".into(), format!("k{i}")))
+                .unwrap();
+        }
+        let mut sparse = vec![0.0; 16];
+        sparse[0] = 1.0;
+        s.search_vector(&sparse, 3).unwrap();
+        assert!(!ann_exists(&s));
+        assert_eq!(ann_meta(&s), 0);
+        // Writes carry on without it; the store regrows to under the threshold: no rebuild.
+        for i in 50..60u32 {
+            put(&s, &format!("k{i}"), &[i], 16);
+        }
+        let hits = s.search_vector(&unit(55, 16), 3).unwrap();
+        assert_eq!(hits[0].snippet, "chunk 55");
+        assert!(!ann_exists(&s));
+
+        // Past it again (43 vectors): rebuilt, with a fresh centre.
+        for i in 60..75u32 {
+            put(&s, &format!("k{i}"), &[i], 16);
+        }
+        s.search_vector(&unit(65, 16), 3).unwrap();
+        wait_ready(&s);
+        assert_index_consistent(&s);
+        assert_eq!(ann_meta(&s), 2);
+    }
+
+    #[test]
+    fn index_build_releases_the_writer_and_covers_concurrent_writes() {
+        let s = Store::open_in_memory().unwrap();
+        for i in 0..1_500u32 {
+            put(&s, &format!("k{i}"), &[i], 16);
+        }
+        let writer = s.clone();
+        let batches = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        let counter = batches.clone();
+        TEST_BETWEEN_BATCHES.with(|h| {
+            *h.borrow_mut() = Some(Box::new(move || {
+                // The writer is free here: these would deadlock otherwise.
+                let del = |key: String| {
+                    writer.delete_item(&item_ref("t".into(), key)).unwrap();
+                };
+                let batch = counter.get();
+                counter.set(batch + 1);
+                match batch {
+                    // The newest chunk (not yet copied) is deleted and its rowid reused.
+                    0 => {
+                        del("k1499".into());
+                        put(&writer, "new0", &[5_000], 16);
+                    }
+                    // Chunks of later batches deleted, replaced, and new ones written.
+                    1 => {
+                        del("k1300".into());
+                        put(&writer, "k1301", &[5_001, 5_002], 16);
+                        put(&writer, "new1", &[5_003], 16);
+                    }
+                    // A chunk already copied is deleted.
+                    2 => del("k3".into()),
+                    _ => {}
+                }
+            }));
+        });
+        let q = unit(5_002, 16);
+        let approx = s.search_vector_approx(&q, 1).unwrap();
+        TEST_BETWEEN_BATCHES.with(|h| h.borrow_mut().take());
+        let batches = batches.get();
+        assert!(batches >= 6, "expected several batches, ran {batches}");
+        assert_eq!(approx[0].snippet, "chunk 5002");
+        assert!(s.ann_index_ready().unwrap());
+        assert_index_consistent(&s);
+        assert_eq!(index_sizes(&s).0, 1_500);
+    }
+
+    /// Reproduction of "vector kNN on the writer connection slows the readers' full-text
+    /// search" (see the module docs). Ignored: writes `NUGGET_REPRO_ITEMS` (default 100k)
+    /// encrypted items. Run with
+    /// `cargo test --release -p nugget-store --lib -- --ignored --nocapture writer_knn`.
+    #[test]
+    #[ignore = "slow: writes 100k items; run in release with --ignored --nocapture"]
+    fn writer_knn_vs_reader_fts() {
+        use std::time::{Duration, Instant};
+        let n: usize = std::env::var("NUGGET_REPRO_ITEMS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(100_000);
+        const DIM: usize = 384;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("repro.db");
+        let s = Store::open(&path, &crate::StoreKey::from_bytes([3u8; 32])).unwrap();
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut rnd = move || {
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            seed.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        };
+        let words: Vec<String> = (0..20_000).map(|i| format!("w{i:x}q")).collect();
+        let text = |rnd: &mut dyn FnMut() -> u64| {
+            (0..60)
+                .map(|_| {
+                    // Roughly Zipfian: square a uniform draw.
+                    let u = (rnd() >> 11) as f64 / (1u64 << 53) as f64;
+                    words[(u * u * words.len() as f64) as usize].as_str()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let vector = |rnd: &mut dyn FnMut() -> u64| {
+            let v: Vec<f32> = (0..DIM)
+                .map(|_| (rnd() >> 40) as f32 / 16_777_216.0 - 0.5)
+                .collect();
+            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+            v.into_iter().map(|x| x / norm).collect::<Vec<f32>>()
+        };
+        let t = Instant::now();
+        for i in 0..n {
+            let body = text(&mut rnd);
+            let item = NewItem::new("t", format!("k{i}"), format!("h{i}")).with_text(body.clone());
+            s.upsert_item_with_chunks(&item, &[NewChunk::embedded(body, vector(&mut rnd))])
+                .unwrap();
+        }
+        println!("wrote {n} items in {:.1?}", t.elapsed());
+        let wal = || std::fs::metadata(dir.path().join("repro.db-wal")).map_or(0, |m| m.len());
+        let queries: Vec<String> = (0..20)
+            .map(|i| {
+                format!(
+                    "{} {} {}",
+                    words[i % 4],
+                    words[4 + i % 16],
+                    words[100 + i * 7]
+                )
+            })
+            .collect();
+        let fts = |label: &str| {
+            let t = Instant::now();
+            for q in &queries {
+                s.search_text(q, 10).unwrap();
+            }
+            println!(
+                "{label}: reader FTS {:.1?}/query, WAL {:.1} MiB",
+                t.elapsed() / queries.len() as u32,
+                wal() as f64 / 1_048_576.0
+            );
+        };
+        fts("after ingest");
+        // Rounds of: edit one item, vector kNN, full-text search (the bench's freshness probe),
+        // with the kNN on the writer connection, then on a reader for comparison.
+        for on_writer in [true, false] {
+            let label = if on_writer { "writer" } else { "reader" };
+            let mut knn = Duration::ZERO;
+            let mut fts_during = Duration::ZERO;
+            for round in 0..40usize {
+                let body = text(&mut rnd);
+                let item = NewItem::new("t", format!("k{round}"), format!("e{label}{round}"))
+                    .with_text(body.clone());
+                s.upsert_item_with_chunks(&item, &[NewChunk::embedded(body, vector(&mut rnd))])
+                    .unwrap();
+                let q = vector(&mut rnd);
+                let t = Instant::now();
+                // A kNN scan, then point lookups of its neighbours' vectors (as MMR does).
+                let lookups = |c: &Connection| {
+                    let ids = exact_neighbours(c, &q, 50)?;
+                    let mut stmt = c
+                        .prepare_cached("SELECT embedding FROM chunk_vec WHERE rowid = ?1")
+                        .db("prepare lookup")?;
+                    for (id, _) in ids {
+                        let _: Vec<u8> = stmt.query_row([id], |r| r.get(0)).db("lookup")?;
+                    }
+                    Ok(())
+                };
+                if on_writer {
+                    s.with_conn(|c| lookups(c)).unwrap();
+                    let (busy, autocommit) = s
+                        .with_conn(|c| Ok((c.is_busy(), c.is_autocommit())))
+                        .unwrap();
+                    assert!(
+                        !busy && autocommit,
+                        "the writer kept a read transaction open"
+                    );
+                } else {
+                    s.with_read_conn(lookups).unwrap();
+                }
+                knn += t.elapsed();
+                let t = Instant::now();
+                s.search_text(&queries[round % queries.len()], 10).unwrap();
+                fts_during += t.elapsed();
+            }
+            println!(
+                "kNN on the {label}: {:.1?}/query; reader FTS after each edit {:.1?}/query",
+                knn / 40,
+                fts_during / 40
+            );
+            fts(&format!("after kNN on the {label}"));
+            let ckpt: (i64, i64, i64) = s
+                .with_conn(|c| {
+                    c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                    })
+                    .db("checkpoint")
+                })
+                .unwrap();
+            println!("checkpoint (busy, log, checkpointed): {ckpt:?}");
+            fts(&format!("after kNN on the {label} + checkpoint"));
+        }
     }
 }

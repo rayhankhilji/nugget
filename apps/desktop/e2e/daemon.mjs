@@ -73,6 +73,31 @@ export function locateNuggetd(log = console.log) {
   return bin;
 }
 
+/**
+ * The daemon with test overrides and the fake llama-server, for the local-model scenario:
+ * `$NUGGETD_E2E` and `$NUGGET_FAKE_LLAMA_SERVER` if both are set, else
+ * `cargo build --locked -p nuggetd --features fake-runtime --bins` (a no-op when up to date) and
+ * the debug binaries in `$CARGO_TARGET_DIR` (default `<repo>/target`).
+ */
+export function locateE2eBinaries(log = console.log) {
+  const exe = (name) => (process.platform === "win32" ? `${name}.exe` : name);
+  const given = [process.env.NUGGETD_E2E, process.env.NUGGET_FAKE_LLAMA_SERVER];
+  if (given.every(Boolean)) {
+    const [nuggetd, server] = given.map((p) => path.resolve(p));
+    for (const b of [nuggetd, server]) if (!fs.existsSync(b)) throw new Error(`${b} (from NUGGETD_E2E / NUGGET_FAKE_LLAMA_SERVER) does not exist`);
+    return { nuggetd, server };
+  }
+  log("building nuggetd-e2e and the fake llama-server (cargo build --locked -p nuggetd --features fake-runtime --bins)…");
+  const r = spawnSync("cargo", ["build", "--locked", "-p", "nuggetd", "--features", "fake-runtime", "--bins"], { cwd: REPO, stdio: "inherit" });
+  if (r.error) throw new Error(`could not run cargo (${r.error.message}); set NUGGETD_E2E and NUGGET_FAKE_LLAMA_SERVER`);
+  if (r.status !== 0) throw new Error(`cargo build -p nuggetd --features fake-runtime failed (exit ${r.status})`);
+  const target = process.env.CARGO_TARGET_DIR ? path.resolve(REPO, process.env.CARGO_TARGET_DIR) : path.join(REPO, "target");
+  const nuggetd = path.join(target, "debug", exe("nuggetd-e2e"));
+  const server = path.join(target, "debug", exe("nuggetd-fake-llama-server"));
+  for (const b of [nuggetd, server]) if (!fs.existsSync(b)) throw new Error(`cargo build succeeded but ${b} is missing`);
+  return { nuggetd, server };
+}
+
 let nextId = 1;
 
 /** One newline-delimited JSON-RPC request over the daemon's Unix socket. Resolves to the raw reply. */
@@ -120,6 +145,54 @@ export async function rpc(socket, method, params = null, timeoutMs) {
   return msg.result;
 }
 
+/**
+ * A request whose answer streams as notifications on the same connection (`draft.begin`,
+ * `retrieve.ask`, `chat`): sends it, keeps the connection open and resolves to
+ * `{ result, notes }` once `done(result, notes)` is true. Throws on a JSON-RPC error or timeout.
+ */
+export function rpcStream(socket, method, params, done, timeoutMs = 60_000) {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    const conn = net.connect(socket);
+    const notes = [];
+    let result;
+    let buf = "";
+    const finish = (fn, v) => {
+      clearTimeout(timer);
+      conn.destroy();
+      fn(v);
+    };
+    const timer = setTimeout(
+      () => finish(reject, new Error(`${method}: not done within ${timeoutMs} ms; result ${JSON.stringify(result)}, ${notes.length} notification(s): ${JSON.stringify(notes.slice(-5))}`)),
+      timeoutMs,
+    );
+    conn.setEncoding("utf8");
+    conn.on("connect", () => conn.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"));
+    conn.on("data", (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (msg.id === id) {
+          if (msg.error) return finish(reject, new Error(`${method} failed: ${msg.error.message} (code ${msg.error.code})`));
+          result = msg.result;
+        } else if (msg.method) notes.push(msg);
+        if (result !== undefined && done(result, notes)) return finish(resolve, { result, notes });
+      }
+    });
+    conn.on("error", (e) => finish(reject, e));
+    conn.on("close", () => finish(reject, new Error(`${method}: the daemon closed the connection`)));
+  });
+}
+
 function readyLine(logDir) {
   if (!fs.existsSync(logDir)) return null;
   for (const f of fs.readdirSync(logDir)) {
@@ -140,16 +213,17 @@ function readyLine(logDir) {
 /**
  * Start `bin` in a fresh temp home. Resolves once its log says "nuggetd ready" and the socket
  * answers `status`. `stderrPath` receives the daemon's stdout and stderr. `config` is the
- * `config/config.toml` to write (default: the all-pages config; `null` writes none).
+ * `config/config.toml` to write (default: the all-pages config; `null` writes none). `env` is
+ * added to the daemon's environment (e.g. `nuggetd-e2e`'s `NUGGET_E2E_*` overrides).
  */
-export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, config = CONFIG } = {}) {
+export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, config = CONFIG, env = {} } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-"));
   fs.mkdirSync(path.join(home, "config"), { recursive: true });
   if (config !== null) fs.writeFileSync(path.join(home, "config", "config.toml"), config);
   const out = stderrPath ? fs.openSync(stderrPath, "w") : "ignore";
   const proc = spawn(bin, ["--home", home], {
     // No OS keychain in CI; the store key goes to a 0600 file in the temp home.
-    env: { ...process.env, NUGGET_KEYCHAIN: "off" },
+    env: { ...process.env, NUGGET_KEYCHAIN: "off", ...env },
     stdio: ["ignore", out, out],
   });
   let exited = null;

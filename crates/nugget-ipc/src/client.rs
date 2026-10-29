@@ -134,33 +134,40 @@ impl Client {
         P: Serialize + ?Sized,
         R: DeserializeOwned,
     {
-        let params = serde_json::to_value(params)?;
-        let value = self.call_value(method, params).await?;
-        Ok(serde_json::from_value(value)?)
+        let value = self.call_raw(method, params).await?;
+        Ok(R::deserialize(value)?)
     }
 
     /// Untyped variant of [`call`](Self::call).
     pub async fn call_value(&self, method: &str, params: Value) -> Result<Value, IpcError> {
+        self.call_raw(method, &params).await
+    }
+
+    async fn call_raw<P: Serialize + ?Sized>(
+        &self,
+        method: &str,
+        params: &P,
+    ) -> Result<Value, IpcError> {
         let shared = &*self.inner.shared;
         if shared.closed.is_cancelled() {
             return Err(IpcError::Disconnected);
         }
-        if !(params.is_null() || params.is_object() || params.is_array()) {
-            return Err(IpcError::Protocol(
-                "params must serialize to an object, an array or null".into(),
-            ));
-        }
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
         let line = wire::encode(&OutRequest {
+            params,
             jsonrpc: JSONRPC,
             id: Some(id),
             method,
-            params: &params,
         })
         .map_err(|e| match e {
             EncodeError::TooLarge(n) => IpcError::TooLarge(n),
             EncodeError::Serde(e) => IpcError::Serde(e),
         })?;
+        if !wire::params_shape_ok(&line) {
+            return Err(IpcError::Protocol(
+                "params must serialize to an object, an array or null".into(),
+            ));
+        }
 
         let (tx, rx) = oneshot::channel();
         lock(&shared.pending).insert(id, tx);
@@ -282,13 +289,14 @@ async fn write_loop<W: AsyncWrite + Unpin>(
     mut rx: mpsc::Receiver<String>,
     shared: Arc<Shared>,
 ) {
+    let mut buf = Vec::new();
     loop {
         let line = tokio::select! {
             line = rx.recv() => line,
             () = shared.closed.cancelled() => None,
         };
         let Some(line) = line else { break };
-        if let Err(e) = wire::write_line(&mut write, &line).await {
+        if let Err(e) = wire::write_batch(&mut write, &mut buf, line, &mut rx).await {
             tracing::debug!(error = %e, "connection write failed");
             break;
         }
