@@ -252,7 +252,8 @@ impl Drop for NativeDesktop {
         self.registration.take();
         let n = |c: &std::sync::atomic::AtomicU32| c.load(std::sync::atomic::Ordering::Relaxed);
         eprintln!(
-            "cua native: {} window reads did not settle, {} actions needed the keyboard",
+            "cua native: {} real window reads, {} did not settle, {} actions needed the keyboard",
+            n(&self.driver.reads),
             n(&self.driver.unsettled),
             n(&self.driver.fallbacks)
         );

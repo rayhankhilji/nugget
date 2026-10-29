@@ -260,6 +260,7 @@ pub fn run_tasks(
     }
     if let Some(d) = &native {
         let n = |c: &std::sync::atomic::AtomicU32| c.load(std::sync::atomic::Ordering::Relaxed);
+        notes.insert("uia_window_reads".into(), json!(n(&d.driver.reads)));
         notes.insert("uia_unsettled_reads".into(), json!(n(&d.driver.unsettled)));
         notes.insert(
             "uia_keyboard_fallbacks".into(),

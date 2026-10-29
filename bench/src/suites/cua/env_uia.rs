@@ -410,6 +410,8 @@ pub struct UiaDriver {
     settle: Duration,
     /// Locates that timed out before the window showed the bench state.
     pub unsettled: std::sync::atomic::AtomicU32,
+    /// Real window reads (snapshots over the accessibility API) by `locate`.
+    pub reads: std::sync::atomic::AtomicU32,
     /// Actions that needed the keyboard fallback.
     pub fallbacks: std::sync::atomic::AtomicU32,
 }
@@ -445,6 +447,7 @@ impl UiaDriver {
             windows,
             settle: SETTLE,
             unsettled: Default::default(),
+            reads: Default::default(),
             fallbacks: Default::default(),
         }
     }
@@ -485,6 +488,8 @@ impl UiaDriver {
         loop {
             match bench().and_then(|b| {
                 let window = self.real_window(app, &b.name)?;
+                self.reads
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let tree = self
                     .sys
                     .snapshot(&WindowSel::Id(window.id.clone()), &real_limits())?;
