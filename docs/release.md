@@ -79,16 +79,21 @@ ended up inside the bundle; it should match the table above.
 <!-- sizes:begin -->
 | Platform | Installer | Size | Notes |
 |---|---|---|---|
-| macOS Apple silicon | `Nugget_<v>_aarch64.dmg` | TBD | TBD |
-| macOS Intel | `Nugget_<v>_x64.dmg` | TBD | TBD |
-| macOS (both) | `Nugget_<v>_<arch>.app.tar.gz` (updater payload) | TBD | TBD |
-| Windows x64 | `Nugget_<v>_x64-setup.exe` (NSIS) | TBD | TBD |
-| Windows x64 | `Nugget_<v>_x64_en-US.msi` | TBD | TBD |
-| Linux x64 | `Nugget_<v>_amd64.AppImage` | TBD | TBD |
-| Linux x64 | `Nugget_<v>_amd64.deb` | TBD | TBD |
-| Linux x64 | `Nugget-<v>-1.x86_64.rpm` | TBD | TBD |
+| macOS Apple silicon | `Nugget_<v>_aarch64.dmg` | 26.5 MiB | `.app` is 67.8 MiB on disk: `nugget-desktop` 15.3 MiB, `nuggetd` 52.4 MiB |
+| macOS Intel | `Nugget_<v>_x64.dmg` | 28.9 MiB | `.app` is 76.4 MiB on disk: `nugget-desktop` 16.2 MiB, `nuggetd` 59.5 MiB |
+| macOS (both) | `Nugget_<v>_<arch>.app.tar.gz` (updater payload) | 26.5 / 29.0 MiB | aarch64 / x64 |
+| Windows x64 | `Nugget_<v>_x64-setup.exe` (NSIS) | 19.4 MiB | LZMA solid; unpacks to 76.7 MiB (`nugget-desktop.exe` 17.8, `nuggetd.exe` 58.8) |
+| Windows x64 | `Nugget_<v>_x64_en-US.msi` | 28.1 MiB | installs to `Program Files\Nugget\{nugget-desktop,nuggetd}.exe` |
+| Linux x64 | `Nugget_<v>_amd64.AppImage` | 105.4 MiB | carries its own GTK/WebKitGTK libraries; `usr/bin/{nugget-desktop,nuggetd,xdg-open}` |
+| Linux x64 | `Nugget_<v>_amd64.deb` | 34.1 MiB | `/usr/bin/nugget-desktop` 23.4 MiB, `/usr/bin/nuggetd` 71.1 MiB |
+| Linux x64 | `Nugget-<v>-1.x86_64.rpm` | 34.1 MiB | same layout as the `.deb` |
+| Linux arm64 | AppImage / `.deb` / `.rpm` | 102.6 / 33.2 / 33.2 MiB | `nuggetd` 64.1 MiB |
 
-Measured from release dry run TBD (run link) on TBD (date).
+Measured from release dry run [40812638488](https://github.com/rayhankhilji/nugget/actions/runs/40812638488)
+(version 0.0.1) on 2026-10-29. Every installer puts `nuggetd` next to `nugget-desktop`, as in
+§2. `nuggetd` is three quarters of every bundle; the release profile keeps symbol tables
+(no `strip`), so `strip = "symbols"` in `[profile.release]` is the first thing to try if size
+matters. Each dry run writes the same tables to its job summary (`bundle-report-<target>`).
 <!-- sizes:end -->
 
 ## 3. Release workflow
@@ -244,12 +249,14 @@ Installing a dry-run build by hand:
 
 `.github/workflows/package-smoke.yml` runs `packaging/scripts/smoke-appimage.sh` on pull requests
 that touch `apps/desktop/`, `crates/` or `packaging/`, and the release dry run runs the same script
-on Linux x64. The script:
+on Linux x64 against the AppImage that run uploads. The workflow builds the AppImage with the
+sidecar staged as in §2; the script then:
 
-1. builds the AppImage (sidecar staged as in §2);
-2. starts it under Xvfb with the openbox window manager;
+1. starts it with throwaway `HOME`, XDG and `NUGGET_HOME` directories (`NUGGET_TRAY=off`);
+2. runs it under Xvfb with the openbox window manager;
 3. waits, with a time limit, for a window named `Nugget`, the app log line `connected to nuggetd`
-   and the daemon's own log, which proves the bundled sidecar was found, spawned and answered;
+   and the daemon's own log (`nuggetd ready`). The app must log `starting nuggetd` itself: it starts
+   the bundled sidecar at launch when no daemon answers;
 4. closes the window through the window manager (`wmctrl`, a `WM_DELETE_WINDOW` request, like a
    user clicking ×) and expects the app to exit with status 0;
 5. sends SIGTERM to the daemon it started.
