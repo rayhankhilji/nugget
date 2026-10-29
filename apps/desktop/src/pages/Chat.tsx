@@ -21,10 +21,11 @@ import {
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingNewChat } from "../hooks.nav";
 import { localityLabel, tierLabel } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
 import { CopyButton } from "../components/CopyButton";
 import { Markdown, type CitationLinks } from "../components/Markdown";
-import { withheldNotice } from "../citations";
+import { stripCitationMarkers, withheldNotice } from "../citations";
 import { Trans, useT } from "../i18n";
 import "../styles-chat.css";
 
@@ -44,6 +45,8 @@ interface Turn {
   queryRewrite?: string;
   /** Sensitive items withheld from a cloud model (not saved). */
   excludedSensitive?: number;
+  /** Sources were on but none matched, so this is a plain chat answer. */
+  generalAnswer?: boolean;
 }
 
 const SOURCES_KEY = "nugget.chat.useSources";
@@ -96,6 +99,7 @@ function toStored(turns: readonly Turn[]): StoredChatMessage[] {
     if (x.error) m.error = x.error.slice(0, MAX_SAVED_ERROR);
     if (x.tokens?.output != null) m.output_tokens = x.tokens.output;
     if (x.citations?.length) m.citations = x.citations;
+    if (x.generalAnswer) m.general_answer = true;
     return m;
   });
 }
@@ -113,6 +117,7 @@ function fromStored(messages: readonly StoredChatMessage[]): Turn[] {
           error: m.error ?? undefined,
           tokens: m.output_tokens != null ? { input: null, output: m.output_tokens } : undefined,
           citations: m.citations ?? undefined,
+          generalAnswer: m.general_answer === true || undefined,
         },
   );
 }
@@ -238,8 +243,11 @@ export function ChatPage() {
   // `chat` calls in flight. Unknown stream ids are buffered only while one is pending;
   // otherwise they belong to a stopped stream and are dropped.
   const awaiting = useRef(0);
+  // Streams dropped before they were attached (a sourced answer with nothing to cite).
+  const dropped = useRef(new Set<string>());
 
   useEvent(events.onChatDelta, (d) => {
+    if (dropped.current.has(d.stream_id)) return;
     if (attached.current.has(d.stream_id)) {
       setTurns((ts) =>
         ts.map((x) => (x.streamId === d.stream_id && isActive(x) ? { ...x, text: x.text + d.text, state: "streaming" } : x)),
@@ -252,6 +260,7 @@ export function ChatPage() {
   });
 
   useEvent(events.onChatDone, (d) => {
+    if (dropped.current.delete(d.stream_id)) return;
     if (attached.current.has(d.stream_id)) {
       attached.current.delete(d.stream_id);
       setTurns((ts) => ts.map((x) => (x.streamId === d.stream_id && x.state !== "cancelled" ? finish(x, d) : x)));
@@ -275,7 +284,8 @@ export function ChatPage() {
 
     const history: ChatMessage[] = turns
       .filter((x) => x.role === "user" || x.state === "done" || (x.state === "cancelled" && x.text))
-      .map((x) => ({ role: x.role, text: x.text }));
+      // An earlier reply's `[n]` markers pointed at that reply's passages: drop them.
+      .map((x) => ({ role: x.role, text: x.role === "assistant" ? stripCitationMarkers(x.text) : x.text }));
 
     const userTurn: Turn = { id: nextTurnId++, role: "user", text };
     const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
@@ -288,7 +298,17 @@ export function ChatPage() {
       const route = { provider: provider || null, tier };
       // With sources, the daemon retrieves for the question (rewritten from the conversation
       // when it is a follow-up) and the reply cites what it was given.
-      const asked: AskStarted | null = useSources ? await askInConversation(text, history, route) : null;
+      let asked: AskStarted | null = useSources ? await askInConversation(text, history, route) : null;
+      // Nothing in the sources matched: the sourced prompt would only decline, so stop that
+      // stream and answer as a plain chat instead, saying so on the turn.
+      let general: AskStarted | null = null;
+      if (asked && asked.citations.length === 0) {
+        general = asked;
+        asked = null;
+        dropped.current.add(general.stream_id);
+        early.current.delete(general.stream_id);
+        void api.chatCancel(general.stream_id).catch(() => {});
+      }
       const started = asked ?? (await api.chat({ ...route, messages: [...history, { role: "user", text }] }));
       const buffered = early.current.get(started.stream_id);
       early.current.delete(started.stream_id);
@@ -307,6 +327,9 @@ export function ChatPage() {
             next.citations = asked.citations;
             next.queryRewrite = asked.query_rewrite ?? undefined;
             next.excludedSensitive = asked.excluded_sensitive ?? 0;
+          } else if (general) {
+            next.generalAnswer = true;
+            next.excludedSensitive = general.excluded_sensitive ?? 0;
           }
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
@@ -448,7 +471,11 @@ export function ChatPage() {
         }
       />
       {providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} /> : null}
-      {noProviders && <p className="note note-warn">{t("chat.noProviders")}</p>}
+      {noProviders && (
+        <p className="note note-warn">
+          {t("chat.noProviders")} <GoToPage page="models" className="btn btn-ghost btn-small" />
+        </p>
+      )}
 
       <div className="chat-main">
         {historyOn && (
@@ -631,6 +658,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         </div>
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
+      {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
       {withheld && <p className="note small">{withheld}</p>}
       {turn.role === "assistant" && !!turn.citations?.length && (
         <div className="chat-sources">

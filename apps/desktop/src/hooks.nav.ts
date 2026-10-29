@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { PageId } from "./api";
 
 /**
  * In-app requests from the shell (command palette, shortcuts) to a page, e.g. "search for this".
@@ -58,4 +59,16 @@ export function requestNewChat(): void {
 /** Run `onNewChat` for a new chat requested before mount and for every later request. */
 export function usePendingNewChat(onNewChat: () => void): void {
   newChat.usePending(onNewChat);
+}
+
+const page = channel<PageId>();
+
+/** Ask the app to open page `id` (e.g. an empty state's "Add a source" pointing at Sources). */
+export function requestPage(id: PageId): void {
+  page.request(id);
+}
+
+/** Run `onPage` for every page request (the app shell listens; pages call `requestPage`). */
+export function usePendingPage(onPage: (id: PageId) => void): void {
+  page.usePending(onPage);
 }

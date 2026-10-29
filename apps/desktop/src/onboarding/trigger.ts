@@ -155,12 +155,36 @@ async function migrate(settings: DoubleTapSettings): Promise<DoubleTapSettings> 
   return out;
 }
 
+/** The start-up migration while it runs, so {@link readTrigger} doesn't run it a second time. */
+let startup: Promise<void> | null = null;
+
+/**
+ * Run the one-time migration of an older onboarding choice at app start, so it applies even
+ * if onboarding's trigger step is never shown again. A no-op once done (or outside the app);
+ * never throws. {@link readTrigger} runs the same migration, guarded by the same flag.
+ */
+export function migrateTriggerOnce(): Promise<void> {
+  if (!inTauri() || flagged(MIGRATED_KEY)) return Promise.resolve();
+  startup ??= (async () => {
+    try {
+      const settings = await migrate(await doubletapApi.settingsGet());
+      saveTrigger(fromSpec(settings.trigger));
+    } catch {
+      /* offered again next start */
+    } finally {
+      startup = null;
+    }
+  })();
+  return startup;
+}
+
 /**
  * The trigger Double Tap runs with: the shell's settings (migrating an older local choice
  * once), cached locally. Outside the app, the local copy or the default.
  */
 export async function readTrigger(os: Os): Promise<TriggerPref> {
   if (!inTauri()) return loadTrigger(os);
+  if (startup) await startup;
   const settings = await migrate(await doubletapApi.settingsGet());
   const pref = fromSpec(settings.trigger);
   saveTrigger(pref);

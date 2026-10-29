@@ -1334,6 +1334,8 @@ export interface StoredChatMessage {
   output_tokens?: number | null;
   /** Sources the reply cites as `[n]`, when it came with any. */
   citations?: Citation[] | null;
+  /** Answered without sources because none matched (with "Use my sources" on). */
+  general_answer?: boolean | null;
 }
 
 export interface StoredConversation {

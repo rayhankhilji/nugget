@@ -72,8 +72,9 @@ and **Plugins** ([Plugins](plugins.md)).
 The target is a useful search result in under two minutes from first launch, with backfill
 continuing in the background. The desktop end-to-end test measures it: its first-run scenario runs the
 real daemon from an empty home and the real app through setup to a first search result, against a
-budget of 120 s. The current figure is measured in CI by `pnpm run e2e` (see
-`apps/desktop/e2e/README.md`).
+budget of 120 s, and `pnpm run e2e` checks it on every CI run (see `apps/desktop/e2e/README.md`). On
+a 4-vCPU Linux VM, setup with AI left for later, adding the 93-item fixture folder and the first
+cited search results took 3.6 s of machine time; your own reading and clicking come on top.
 
 Indexing on its own: on a 4-vCPU cloud VM, a 5 000-file Markdown folder indexed in 25.5 s, and a
 change to a watched file became searchable in 0.6 s at the 95th percentile. See

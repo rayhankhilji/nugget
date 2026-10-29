@@ -15,6 +15,7 @@ import {
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
 import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
@@ -273,7 +274,7 @@ function IndexingCard({
     }
   });
 
-  const failing = (data?.sources ?? []).filter((s) => s.last_error);
+  const failing = (data?.sources ?? []).filter((s) => s.last_error || s.state === "error");
   return (
     <section className="status-card" aria-labelledby="indexing-title">
       <h2 id="indexing-title">{t("status.indexing")}</h2>
@@ -319,16 +320,24 @@ function IndexingCard({
                 </div>
               </dl>
               <p className="muted small">{t("status.freshnessHint")}</p>
+              {data.sources.length === 0 && (
+                <EmptyState title={t("status.noSourcesTitle")} action={<GoToPage page="sources" />}>
+                  {t("status.noSourcesBody")}
+                </EmptyState>
+              )}
               {failing.length > 0 && (
                 <>
                   <h3 className="ask-sub">{t("status.errors")}</h3>
+                  <p className="muted small">
+                    {t("status.errorsHint", { n: failing.length })} <GoToPage page="sources" className="btn btn-ghost btn-small" />
+                  </p>
                   <ul className="error-list">
                     {failing.map((s) => (
                       <li key={s.id}>
                         <b>{s.name}</b> <span className="muted small">
                           {t("status.sourceSynced", { kind: sourceKindLabel(s.kind), when: formatRelative(s.last_sync, now) })}
                         </span>
-                        <div className="note note-error small">{s.last_error}</div>
+                        <div className="note note-error small">{s.last_error || t("sources.errorNoDetail")}</div>
                       </li>
                     ))}
                   </ul>
@@ -374,7 +383,11 @@ function RuntimeCard({
         <>
           <ErrorNote error={error} onRetry={onRetry} />
           {loading && !data && <Loading lines={2} />}
-          {data && data.length === 0 && <EmptyState title={t("status.noRuntimesTitle")}>{t("status.noRuntimes")}</EmptyState>}
+          {data && data.length === 0 && (
+            <EmptyState title={t("status.noRuntimesTitle")} action={<GoToPage page="models" />}>
+              {t("status.noRuntimes")}
+            </EmptyState>
+          )}
           {data && data.length > 0 && (
             <div className="table-wrap" tabIndex={0} role="region" aria-label={t("status.localRuntimes")}>
               <table>

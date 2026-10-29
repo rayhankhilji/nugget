@@ -1,6 +1,7 @@
-import { useState, type Dispatch, type ReactNode, type RefObject } from "react";
-import type { SourceInfo } from "../api";
-import { formatList, Trans, useT, type MessageKey } from "../i18n";
+import { useEffect, useState, type Dispatch, type ReactNode, type RefObject } from "react";
+import { api, events, type ConnectorKind, type SourceInfo } from "../api";
+import { useEvent } from "../hooks";
+import { Trans, useT, type MessageKey } from "../i18n";
 import { LanguagePicker } from "../i18n/LanguagePicker";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
@@ -68,9 +69,21 @@ export function WelcomeStep({ headingRef }: StepProps) {
 
 // ---- 3. first source ----
 
+/** How often the source step re-reads `sources.list` while a new source indexes. */
+export const INDEX_POLL_MS = 1000;
+
+/** Where a just-added source is: not started, indexing, searchable, or failed. */
+export type IndexPhase = "waiting" | "indexing" | "ready" | "failed";
+
+export function indexPhase(s: Pick<SourceInfo, "state" | "items" | "last_error">): IndexPhase {
+  if (s.state === "error" || (s.last_error && s.items === 0)) return "failed";
+  if (s.state === "syncing") return s.items > 0 ? "indexing" : "waiting";
+  return s.items > 0 ? "ready" : "waiting";
+}
+
 export function SourceStep({ headingRef, connected }: StepProps) {
   const t = useT();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
   const [added, setAdded] = useState<SourceInfo[]>([]);
   const [announce, setAnnounce] = useState("");
 
@@ -80,23 +93,26 @@ export function SourceStep({ headingRef, connected }: StepProps) {
       <p className="ob-lead">{t("onboarding.source.lead")}</p>
       {connected ? (
         <div className="row ob-row-start">
-          <button type="button" className={added.length ? "btn" : "btn btn-primary"} onClick={() => setOpen(true)}>
-            {added.length ? t("onboarding.source.addAnother") : t("onboarding.source.add")}
+          {/* A folder is the quickest first source: open its form directly, skipping the kind picker. */}
+          <button type="button" className={added.length ? "btn" : "btn btn-primary"} onClick={() => setOpen("files")}>
+            {added.length ? t("onboarding.source.addAnother") : t("onboarding.source.addFolder")}
+          </button>
+          <button type="button" className="btn btn-ghost" onClick={() => setOpen("pick")}>
+            {t("onboarding.source.addOther")}
           </button>
         </div>
       ) : (
         <OfflineNote />
       )}
-      {added.length > 0 && (
-        <p className="note">{t("onboarding.source.added", { names: formatList(added.map((s) => s.name)) })}</p>
-      )}
+      {added.length > 0 && <IndexProgress added={added} />}
       <p className="muted">{t("onboarding.source.later")}</p>
       <div className="visually-hidden" aria-live="polite">
         {announce}
       </div>
       {open && (
         <AddSourceWizard
-          onClose={() => setOpen(false)}
+          initialKind={open === "pick" ? undefined : open}
+          onClose={() => setOpen(null)}
           onAdded={(s) => {
             setAdded((list) => [...list.filter((x) => x.id !== s.id), s]);
             setAnnounce(t("onboarding.source.addedAnnounce", { name: s.name }));
@@ -104,6 +120,70 @@ export function SourceStep({ headingRef, connected }: StepProps) {
         />
       )}
     </>
+  );
+}
+
+const PHASE_KEY: Record<IndexPhase, MessageKey> = {
+  waiting: "onboarding.source.waiting",
+  indexing: "onboarding.source.indexing",
+  ready: "onboarding.source.ready",
+  failed: "onboarding.source.failed",
+};
+
+/**
+ * Live indexing progress for the sources added in this step, so the first run shows that
+ * something is happening and says when search starts to work. Polls `sources.list` (and
+ * refreshes on `sources.changed`) until every added source is searchable or failed.
+ */
+function IndexProgress({ added }: { added: SourceInfo[] }) {
+  const t = useT();
+  const [live, setLive] = useState<Record<string, SourceInfo>>({});
+  const ids = added.map((s) => s.id).join("\u0000");
+  const current = added.map((s) => live[s.id] ?? s);
+  const settled = current.every((s) => {
+    const p = indexPhase(s);
+    return p === "ready" || p === "failed";
+  });
+  const [tick, setTick] = useState(0);
+
+  useEvent(events.onSourcesChanged, () => setTick((n) => n + 1));
+
+  useEffect(() => {
+    let alive = true;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const list = await api.sourcesList();
+        if (!alive) return;
+        setLive((cur) => {
+          const next = { ...cur };
+          for (const s of list) if (ids.split("\u0000").includes(s.id)) next[s.id] = s;
+          return next;
+        });
+      } catch {
+        /* keep the last answer; the next poll tries again */
+      }
+      if (alive && !settled) timer = window.setTimeout(() => void poll(), INDEX_POLL_MS);
+    };
+    void poll();
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [ids, settled, tick]);
+
+  return (
+    <ul className="ob-index" aria-live="polite">
+      {current.map((s) => {
+        const phase = indexPhase(s);
+        return (
+          <li key={s.id} className={`note ob-index-${phase}${phase === "failed" ? " note-error" : ""}`} data-phase={phase}>
+            {phase !== "ready" && phase !== "failed" && <span className="spinner" aria-hidden="true" />}{" "}
+            {t(PHASE_KEY[phase], { name: s.name, count: s.items, error: s.last_error ?? "" })}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -203,13 +283,19 @@ export const STEP_TITLE: Record<StepId, MessageKey> = {
   done: "onboarding.step.done",
 };
 
-export function DoneStep({ headingRef, state, dispatch }: StepProps) {
+export function DoneStep({ headingRef, state, dispatch, searchable = 0 }: StepProps & { searchable?: number }) {
   const t = useT();
   const pending = pendingSteps(state);
+  const withAi = state.ai === "local" || state.ai === "byok";
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.done.heading")}</StepHeading>
-      <p className="ob-lead">{t("onboarding.done.lead")}</p>
+      <p className="ob-lead">{t(withAi ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
+      {searchable > 0 && (
+        <p className="note" role="status">
+          {t("onboarding.done.searchable", { count: searchable })}
+        </p>
+      )}
       {state.ai && <p>{t(AI_SUMMARY[state.ai])}</p>}
       {pending.length > 0 ? (
         <>

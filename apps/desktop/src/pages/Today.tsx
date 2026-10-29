@@ -8,6 +8,7 @@
  */
 import { useEffect, useId, useRef, useState } from "react";
 import {
+  api,
   DISMISS_REASONS,
   errorMessage,
   proactiveApi,
@@ -23,6 +24,7 @@ import {
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { formatRelative, formatTime } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
@@ -44,6 +46,8 @@ export function TodayPage() {
   const cards = useAsync(() => proactiveApi.cardsList({}), []);
   const brief = useAsync(() => proactiveApi.briefGet(), []);
   const metrics = useAsync(() => proactiveApi.metrics(), []);
+  // Only to tell "all caught up" from "nothing connected yet"; unknown (`null`) is not "none".
+  const sources = useAsync(() => api.sourcesList().catch(() => null), []);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<unknown>(null);
   const [status, setStatus] = useState("");
@@ -140,7 +144,14 @@ export function TodayPage() {
           )}
           <ErrorNote error={cards.error} onRetry={cards.reload} />
           {cards.loading && !list && <Loading label={t("today.loading")} />}
-          {list && visible.length === 0 && <EmptyState title={t("today.emptyTitle")}>{t("today.emptyBody")}</EmptyState>}
+          {list && visible.length === 0 &&
+            (sources.data?.length === 0 ? (
+              <EmptyState title={t("today.noSourcesTitle")} action={<GoToPage page="sources" />}>
+                {t("today.noSourcesBody")}
+              </EmptyState>
+            ) : (
+              <EmptyState title={t("today.emptyTitle")}>{t("today.emptyBody")}</EmptyState>
+            ))}
           {visible.length > 0 && (
             <ul className="today-cards" aria-labelledby="today-inbox">
               {visible.map((c) => (

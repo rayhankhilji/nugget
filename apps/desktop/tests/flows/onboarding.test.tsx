@@ -52,7 +52,7 @@ describe("onboarding flow", () => {
 
     await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.source.heading"));
-    await click(button(t("onboarding.source.add")));
+    await click(button(t("onboarding.source.addOther")));
     expect(getByRole("dialog", { name: t("addSource.title") })).toBeTruthy();
     await click(within(getByRole("dialog")).getByRole("button", { name: t("common.cancel") }));
     expect(queryByRole("dialog")).toBeNull();
@@ -71,11 +71,11 @@ describe("onboarding flow", () => {
     expect(getByRole("main").textContent).toContain(t("onboarding.done.pending", { count: 1 }));
     expect(loadState()).toMatchObject({ ai: "local", skipped: ["trigger"], finished: false });
 
-    await click(button(t("onboarding.done.start")));
+    // Something is indexed (the fixture's sources), so finishing goes straight to Search.
+    await click(await findByText(t("onboarding.done.search"), { selector: "button" }));
     expect(nav()).not.toBeNull();
     expect(loadState().finished).toBe(true);
-    // The first page after setup is Today.
-    expect(within(nav()!).getByRole("button", { name: t("app.nav.today") }).getAttribute("aria-current")).toBe("page");
+    expect(within(nav()!).getByRole("button", { name: t("app.nav.search") }).getAttribute("aria-current")).toBe("page");
   });
 
   it("is not shown again once finished", async () => {
@@ -135,7 +135,7 @@ describe("onboarding flow", () => {
 
     await click(button(t("onboarding.continue")));
     expect(heading()).toBe(t("onboarding.source.heading"));
-    expect(queryByRole("button", { name: t("onboarding.source.add") })).toBeNull();
+    expect(queryByRole("button", { name: t("onboarding.source.addFolder") })).toBeNull();
     expect(getByRole("main").textContent).toContain(t("onboarding.offline"));
 
     await click(button(t("onboarding.skipAll")));

@@ -142,6 +142,7 @@ function ScopeStep({ onCancel, onCreated }: { onCancel: () => void; onCreated: (
         </label>
         {sources.loading && !sources.data && <Spinner label={t("connectApp.loadingSources")} />}
         {sourcesUnavailable && <p className="muted small">{t("connectApp.sourcesUnavailable")}</p>}
+        {sources.data && sources.data.length === 0 && <p className="muted small">{t("connectApp.noSources")}</p>}
         {!form.allSources && (
           <div className="scope-options">
             {sourceList.map((s, i) => (
