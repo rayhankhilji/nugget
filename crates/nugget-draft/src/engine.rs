@@ -164,6 +164,9 @@ pub struct DraftConfig {
     pub voice_timeout_ms: u64,
     /// How long a prewarmed retrieval stays usable.
     pub prewarm_ttl_ms: u64,
+    /// Grounding (AA3): the context goes in as a dated facts block and a post-check drops
+    /// sentences whose numbers or dates the sources don't support.
+    pub grounding: bool,
     #[serde(skip)]
     pub limits: PromptLimits,
 }
@@ -184,6 +187,7 @@ impl Default for DraftConfig {
             retrieval_timeout_ms: 1_500,
             voice_timeout_ms: 500,
             prewarm_ttl_ms: 30_000,
+            grounding: true,
             limits: PromptLimits::default(),
         }
     }
@@ -460,6 +464,7 @@ impl Drafter {
                 screenshot,
                 band,
                 limits: config.limits,
+                grounding: config.grounding,
             };
             let max_tokens = req
                 .max_tokens

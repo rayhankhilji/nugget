@@ -303,6 +303,8 @@ pub struct PromptInput<'a> {
     pub screenshot: bool,
     pub band: LengthBand,
     pub limits: PromptLimits,
+    /// Render the context as a grounded facts block (see `DraftConfig::grounding`).
+    pub grounding: bool,
 }
 
 /// The system prompt: fixed rules, then the voice.
@@ -486,6 +488,7 @@ mod tests {
             screenshot: false,
             band: LengthBand::for_draft(FieldKind::ChatMessage, voice),
             limits: PromptLimits::default(),
+            grounding: false,
         }
     }
 
