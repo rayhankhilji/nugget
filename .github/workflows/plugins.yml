@@ -43,7 +43,7 @@ jobs:
       # crates/nugget-plugin/src/tests/mod.rs); building them there first makes that a no-op.
       GUEST_TARGET_DIR: ${{ github.workspace }}/target/plugin-guests
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
