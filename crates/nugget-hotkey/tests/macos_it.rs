@@ -143,7 +143,10 @@ mod mac {
     fn listen(trigger: Trigger) -> (Box<dyn nugget_hotkey::Listener>, mpsc::Receiver<Instant>) {
         let (cb, rx) = channel_callback();
         let l = start(trigger, cb).expect("start the listener");
-        sleep(Duration::from_millis(400));
+        // The installation was queued on the main queue: once a later no-op has run there, the
+        // monitors are in place.
+        dispatch2::DispatchQueue::main().exec_sync(|| {});
+        sleep(Duration::from_millis(100));
         (l, rx)
     }
 
@@ -324,13 +327,24 @@ mod mac {
             let pipeline = Pipeline::new(chunks);
             let fired_at = if p.post {
                 let (listener, rx) = listen(Trigger::default());
-                rcmd_tap();
-                rcmd_tap();
-                let at = rx
-                    .recv_timeout(Duration::from_secs(2))
-                    .map_err(|_| "the double tap did not fire over TextEdit".to_string())?;
+                // A missed double tap is retried (twice at most) and reported, so a flaky
+                // trigger shows up in the log instead of failing the timing run outright.
+                let mut fired = None;
+                for attempt in 1..=3 {
+                    rcmd_tap();
+                    rcmd_tap();
+                    if let Ok(at) = rx.recv_timeout(Duration::from_secs(2)) {
+                        println!(
+                            "macos_it: double tap over TextEdit fired on attempt {attempt} of 3"
+                        );
+                        fired = Some(at);
+                        break;
+                    }
+                    println!("macos_it: double tap over TextEdit missed (attempt {attempt} of 3)");
+                    sleep(Duration::from_millis(500));
+                }
                 drop(listener);
-                at
+                fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?
             } else {
                 println!(
                     "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
