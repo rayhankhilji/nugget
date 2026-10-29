@@ -96,6 +96,7 @@
   "format.tier.synthesis": "Síntesis",
   "format.tier.agentic": "Agéntico",
   "format.tier.embedding": "Embeddings",
+  "format.tier.rerank": "Reordenación",
   "format.sourceKind.files": "Carpeta",
   "format.sourceKind.obsidian": "Bóveda de Obsidian",
   "format.sourceKind.gmail": "Gmail",

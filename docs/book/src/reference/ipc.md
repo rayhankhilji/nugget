@@ -25,7 +25,8 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 - Methods that take no parameters accept `{}` (or omitted `params`).
 - Timestamps are RFC 3339 strings. Ids (`SourceId`, `ProviderId`, `EntityId`, `ItemKey`) are strings.
   An `ItemRef` is `{"source": "<source id>", "key": "<item key>"}`.
-- Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`. Localities: `on_device`,
+- Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`, `rerank` (marks rerankers in
+  `models.list` and the `local-rerank` runtime provider; never routed). Localities: `on_device`,
   `local_network`, `cloud`.
 - The **Daemon** column says whether today's `nuggetd` implements the method:
   - **yes**: the daemon serves it.

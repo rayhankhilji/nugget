@@ -66,6 +66,7 @@ pub struct Env {
     pub server: MockServer,
     pub chat: ModelEntry,
     pub embed: ModelEntry,
+    pub rerank: ModelEntry,
 }
 
 pub fn no_proxy_client() -> reqwest::Client {
@@ -105,7 +106,7 @@ async fn model(server: &MockServer, id: &str, tiers: Vec<Tier>) -> ModelEntry {
     }
 }
 
-/// A temp `NUGGET_HOME` with a chat and an embedding "model" installed.
+/// A temp `NUGGET_HOME` with a chat, an embedding and a rerank "model" installed.
 pub async fn env() -> Env {
     let tmp = tempfile::tempdir().unwrap();
     let paths = Paths::rooted(tmp.path().to_path_buf());
@@ -126,8 +127,10 @@ pub async fn env() -> Env {
     )
     .await;
     let embed = model(&server, "embed-model", vec![Tier::Embedding]).await;
+    let rerank = model(&server, "rerank-model", vec![Tier::Rerank]).await;
     store.install(&chat, |_| {}).await.unwrap();
     store.install(&embed, |_| {}).await.unwrap();
+    store.install(&rerank, |_| {}).await.unwrap();
     Env {
         tmp,
         paths,
@@ -136,6 +139,7 @@ pub async fn env() -> Env {
         server,
         chat,
         embed,
+        rerank,
     }
 }
 

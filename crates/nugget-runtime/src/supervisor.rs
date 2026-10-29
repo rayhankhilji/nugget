@@ -1029,18 +1029,28 @@ async fn start_new(
 
 fn check_role(role: RuntimeRole, model: &ModelEntry) -> Result<()> {
     let embeds = model.tiers.contains(&Tier::Embedding);
-    let chats = model.tiers.iter().any(|t| *t != Tier::Embedding);
+    let chats = model.tiers.iter().any(|t| t.is_chat());
+    let reranks = model.tiers.contains(&Tier::Rerank);
+    let fail = |what: &str| {
+        Err(Error::Invalid(format!(
+            "model `{}` {what} (tiers: {})",
+            model.id,
+            model
+                .tiers
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )))
+    };
     match role {
-        RuntimeRole::Embedding if !embeds => Err(Error::Invalid(format!(
-            "model `{}` does not serve the embedding tier",
-            model.id
-        ))),
-        RuntimeRole::Chat if !chats => Err(Error::Invalid(format!(
-            "model `{}` is an embedding-only model",
-            model.id
-        ))),
-        // No manifest tier marks rerankers yet: the rerank role runs whatever model was
-        // explicitly configured for it (`llama-server --reranking` refuses non-rerankers).
+        // A reranker is a cross-encoder: it neither embeds nor generates.
+        RuntimeRole::Embedding | RuntimeRole::Chat if reranks => {
+            fail("is a reranker; it serves only the rerank role")
+        }
+        RuntimeRole::Embedding if !embeds => fail("does not serve the embedding tier"),
+        RuntimeRole::Chat if !chats => fail("serves no chat tier"),
+        RuntimeRole::Rerank if !reranks => fail("is not a reranker (no rerank tier)"),
         _ => Ok(()),
     }
 }
@@ -1060,7 +1070,7 @@ pub(crate) fn provider_config(
             .tiers
             .iter()
             .copied()
-            .filter(|t| *t != Tier::Embedding)
+            .filter(|t| t.is_chat())
             .collect(),
     };
     // On a Unix socket the URL only names the path (and `Host`); the socket is the address.
@@ -1374,5 +1384,50 @@ async fn restart(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(tiers: Vec<Tier>) -> ModelEntry {
+        ModelEntry {
+            id: "m".into(),
+            family: "test".into(),
+            file_name: "m.gguf".into(),
+            url: "https://example.org/m.gguf".into(),
+            mirrors: vec![],
+            revision: "0".repeat(40),
+            size: 1,
+            sha256: "0".repeat(64),
+            min_ram_gb: 1,
+            tiers,
+            license: "Apache-2.0".into(),
+            min_app_version: "0.0.1".into(),
+        }
+    }
+
+    #[test]
+    fn check_role_runs_a_reranker_only_for_the_rerank_role() {
+        let rerank = entry(vec![Tier::Rerank]);
+        assert!(check_role(RuntimeRole::Rerank, &rerank).is_ok());
+        for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+            let err = check_role(role, &rerank).unwrap_err();
+            assert!(matches!(err, Error::Invalid(_)), "{role:?}: {err}");
+        }
+        // Mixed with other tiers (the manifest refuses this), it still never chats or embeds.
+        let mixed = entry(vec![Tier::Triage, Tier::Embedding, Tier::Rerank]);
+        assert!(check_role(RuntimeRole::Chat, &mixed).is_err());
+        assert!(check_role(RuntimeRole::Embedding, &mixed).is_err());
+        // The rerank role refuses models without the rerank tier.
+        for tiers in [vec![Tier::Embedding], vec![Tier::Triage, Tier::Synthesis]] {
+            assert!(check_role(RuntimeRole::Rerank, &entry(tiers)).is_err());
+        }
+        // Chat and embedding models keep their roles.
+        assert!(check_role(RuntimeRole::Chat, &entry(vec![Tier::Light])).is_ok());
+        assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Embedding])).is_ok());
+        assert!(check_role(RuntimeRole::Chat, &entry(vec![Tier::Embedding])).is_err());
+        assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Light])).is_err());
     }
 }

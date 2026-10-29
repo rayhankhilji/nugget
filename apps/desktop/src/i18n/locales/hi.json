@@ -96,6 +96,7 @@
   "format.tier.synthesis": "सिंथेसिस",
   "format.tier.agentic": "एजेंटिक",
   "format.tier.embedding": "एम्बेडिंग",
+  "format.tier.rerank": "री-रैंकिंग",
   "format.sourceKind.files": "फ़ोल्डर",
   "format.sourceKind.obsidian": "Obsidian वॉल्ट",
   "format.sourceKind.gmail": "Gmail",

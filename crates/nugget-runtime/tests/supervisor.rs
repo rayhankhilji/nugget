@@ -210,7 +210,7 @@ async fn configs_work_with_nugget_infer_providers() {
 async fn rerank_role_serves_the_rerank_endpoint_and_no_tier() {
     let e = env().await;
     let rt = e.runtime(common::opts());
-    let cfg = rt.ensure(RuntimeRole::Rerank, &e.embed).await.unwrap();
+    let cfg = rt.ensure(RuntimeRole::Rerank, &e.rerank).await.unwrap();
     assert_eq!(cfg.id.as_str(), nugget_runtime::RERANK_PROVIDER_ID);
     assert_eq!(cfg.id.as_str(), "local-rerank");
     assert!(cfg.tiers.is_empty(), "never routed: {:?}", cfg.tiers);
@@ -604,6 +604,16 @@ async fn bad_requests_are_refused_before_spawning() {
     assert!(matches!(err, Error::Invalid(_)), "{err}");
     let err = rt.ensure(RuntimeRole::Chat, &e.embed).await.unwrap_err();
     assert!(matches!(err, Error::Invalid(_)), "{err}");
+    // A reranker serves only the rerank role, and the rerank role only a reranker.
+    for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+        let err = rt.ensure(role, &e.rerank).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{role:?}: {err}");
+    }
+    for m in [&e.chat, &e.embed] {
+        let err = rt.ensure(RuntimeRole::Rerank, m).await.unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{}: {err}", m.id);
+    }
+    assert!(rt.status().is_empty(), "nothing was started");
     // Model not installed.
     let mut missing = e.embed.clone();
     missing.id = "not-installed".into();

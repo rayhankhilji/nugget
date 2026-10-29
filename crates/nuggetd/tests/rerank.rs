@@ -203,8 +203,7 @@ async fn rerank_manifest(server: &MockServer) -> Manifest {
             size: bytes.len() as u64,
             sha256: nugget_store::content_hash(&bytes),
             min_ram_gb: 1,
-            // The manifest has no rerank tier; the entry is only used because it is configured.
-            tiers: vec![Tier::Embedding],
+            tiers: vec![Tier::Rerank],
             license: "Apache-2.0".into(),
             min_app_version: "0.0.1".into(),
         }],
@@ -263,11 +262,19 @@ async fn the_local_rerank_runtime_is_used_once_installed() {
             .any(|r| r.role == RuntimeRole::Rerank && r.state == RuntimeState::Ready)
     })
     .await;
-    // Not a router provider.
+    // Not a router provider: listed with the rerank tier only, and no provider routes a tier.
     let providers: Vec<nugget_core::ipc::ProviderInfo> =
         h.call(method::PROVIDERS_LIST, json!({})).await;
+    let rerank = providers
+        .iter()
+        .find(|p| p.id.as_str() == "local-rerank")
+        .expect("local-rerank is listed");
+    assert_eq!(rerank.tiers, vec![Tier::Rerank]);
     assert!(
-        providers.iter().all(|p| p.tiers.is_empty()),
+        providers
+            .iter()
+            .filter(|p| p.id.as_str() != "local-rerank")
+            .all(|p| p.tiers.is_empty()),
         "{providers:?}"
     );
 

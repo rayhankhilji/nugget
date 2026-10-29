@@ -123,6 +123,10 @@ fn rejects_signed_but_invalid_entries() {
         ("zero size", Box::new(|e| e.size = 0)),
         ("no tiers", Box::new(|e| e.tiers.clear())),
         (
+            "rerank with other tiers",
+            Box::new(|e| e.tiers = vec![Tier::Embedding, Tier::Rerank]),
+        ),
+        (
             "bad semver",
             Box::new(|e| e.min_app_version = "soon".into()),
         ),
@@ -153,7 +157,7 @@ fn rejects_signed_but_invalid_entries() {
 #[test]
 fn shipped_manifest_verifies_with_embedded_dev_key() {
     let m = default_manifest().unwrap();
-    assert_eq!(m.models.len(), 3);
+    assert_eq!(m.models.len(), 4);
     for e in &m.models {
         assert_eq!(e.revision.len(), 40, "{}", e.id);
         assert!(e.url.contains(&e.revision), "{}", e.id);
@@ -162,8 +166,19 @@ fn shipped_manifest_verifies_with_embedded_dev_key() {
         assert!(e.file_name.ends_with(".gguf"));
         assert_eq!(e.license, "Apache-2.0");
     }
-    for tier in [Tier::Triage, Tier::Synthesis, Tier::Embedding] {
+    for tier in [Tier::Triage, Tier::Synthesis, Tier::Embedding, Tier::Rerank] {
         assert!(m.models.iter().any(|e| e.tiers.contains(&tier)), "{tier:?}");
+    }
+    // The reranker serves the rerank tier alone.
+    let rerank = m
+        .get("bge-reranker-v2-m3-q4km")
+        .expect("the shipped reranker");
+    assert_eq!(rerank.tiers, vec![Tier::Rerank]);
+    assert_eq!(rerank.family, "bert");
+    for e in &m.models {
+        if e.tiers.contains(&Tier::Rerank) {
+            assert_eq!(e.tiers, vec![Tier::Rerank], "{}", e.id);
+        }
     }
     // Shipped bytes must not have been re-encoded (e.g. CRLF on checkout).
     assert!(!DEFAULT_MANIFEST_JSON.contains(&b'\r'));
