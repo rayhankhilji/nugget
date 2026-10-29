@@ -138,7 +138,8 @@ def _provenance(latest: dict) -> str:
         if text not in envs:
             envs.append(text)
     env_text = "; ".join(envs) if envs else "environment not recorded"
-    return (f"Nightly run of {date} at {commit} on a GitHub-hosted Linux runner ({env_text}). "
+    machine = latest.get("machine") or "a GitHub-hosted Linux runner"
+    return (f"Run of {date} at {commit} on {machine} ({env_text}). "
             f"Full history: [benchmark dashboard]({DASHBOARD}).")
 
 
@@ -161,7 +162,7 @@ def render(latest: dict, runs_cfg: dict) -> str:
         status = report.get("status")
         metrics = {m.get("name"): m for m in report.get("metrics") or [] if isinstance(m, dict)}
         title = run.get("title") or run.get("id", "")
-        if run.get("linux_only"):
+        if run.get("linux_only") and "linux" not in title.lower():
             title += " (Linux only)"
         repro = f"`{run_command(run)}`"
         for i, head in enumerate(run.get("headline") or []):

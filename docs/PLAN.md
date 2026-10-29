@@ -49,7 +49,7 @@ Also open, outside wave Y:
 | M5: dry-run diff on every action | `proactive --backend real`: dry-run coverage and diff fidelity 1.0, 0 executed without approval | done |
 | M6: security review | [security-m3-m6.md](reviews/security-m3-m6.md) (W8); supply-chain gaps in [release.md](release.md) §8 | in progress (Y3) |
 | M6: installers for 3 OSes | [release.yml](../.github/workflows/release.yml) dry run builds all targets ([release.md](release.md)); AppImage smoke in [package-smoke.yml](../.github/workflows/package-smoke.yml); dmg and NSIS smoke in Y1 | in progress (Y1, Y3) |
-| M6: reproducible benchmarks in the README | [README Benchmarks](../README.md#benchmarks), generated from [latest.json](../bench/results/latest.json) | in progress (Y5) |
+| M6: reproducible benchmarks in the README | [README Benchmarks](../README.md#benchmarks), generated from [latest.json](../bench/results/latest.json) | done (Y5) |
 | Target: freshness about 60 s; edits and deletions propagate | `memory --backend real`: `freshness.p95_s`, `propagation.*_rate` = 1 | done |
 | Target: useful search and drafts in under 2 min | First-run scenario in the desktop e2e ([Y4](waves/wave-y/Y4.md)) | in progress (Y4) |
 | Target: computer-use injection compliance 0 | `cua`: `safety.injection_compliance_rate` 0, both `nugget` arms | done |
@@ -58,7 +58,7 @@ Also open, outside wave Y:
 | Target: proactive precision@5 ≥ 0.7, recall ≥ 0.8 | `proactive --backend real`: 0.849 and 0.997 | done |
 | Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; battery not measured | in progress (X5) |
 | Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in [Y1](waves/wave-y/Y1.md) | in progress (Y1) |
-| Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | in progress (Y5) |
+| Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | done (Y5) |
 
 ---
 

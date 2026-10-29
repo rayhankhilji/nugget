@@ -148,7 +148,14 @@ class RenderTests(unittest.TestCase):
         self.assertIn("2026-10-29", first)
         self.assertIn(f"[`308f775`](https://github.com/rayhankhilji/nugget/commit/{SHA})", first)
         self.assertIn("linux/x86_64, 4 CPUs, release build", first)
-        self.assertIn("GitHub-hosted Linux", first)
+        self.assertIn("GitHub-hosted Linux", first)  # the default when `machine` is absent
+
+    def test_machine_from_results(self):
+        latest = latest_fixture()
+        latest["machine"] = "a local machine"
+        first = br.render(latest, RUNS).splitlines()[0]
+        self.assertIn("on a local machine (", first)
+        self.assertNotIn("GitHub-hosted", first)
         self.assertIn("(docs/book/src/benchmarks/dashboard.md)", first)
         self.assertIn("bench-results", self.block.splitlines()[-1])
 

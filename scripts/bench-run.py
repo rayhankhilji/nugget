@@ -59,6 +59,15 @@ def run_one(run: dict, reports: Path) -> int:
     return code
 
 
+def machine() -> str:
+    """Where the benchmarks ran, in words, for the README table's header line."""
+    if os.environ.get("BENCH_MACHINE"):
+        return os.environ["BENCH_MACHINE"]
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        return "a GitHub-hosted Linux runner" if sys.platform.startswith("linux") else "a GitHub-hosted runner"
+    return "a local machine"
+
+
 def collect(runs: list[dict], reports: Path, date: str, commit: str | None) -> tuple[dict, list[str]]:
     entries, problems = [], []
     for run in runs:
@@ -76,6 +85,7 @@ def collect(runs: list[dict], reports: Path, date: str, commit: str | None) -> t
         "format": FORMAT,
         "date": date,
         "git_commit": commit,
+        "machine": machine(),
         "generated_at": dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "runs": entries,
     }

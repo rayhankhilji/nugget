@@ -56,7 +56,27 @@ real model, so they measure Nugget's own pipeline, not a frontier model. What ea
 means: [bench/README.md](bench/README.md).
 
 <!-- bench:begin -->
-_Not generated yet: run `python3 scripts/bench-readme.py` with `bench/results/latest.json` present._
+Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/commit/be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8) on a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed (linux/x86_64, 4 CPUs, release build). Full history: [benchmark dashboard](docs/book/src/benchmarks/dashboard.md).
+
+| Suite | Metric | Value | Target | Reproduce |
+|---|---|---|---|---|
+| Knowledge graph (M2) | Claim extraction F1 (`claims.f1`) | 96.3% | — | `cargo run --release -p nugget-bench -- knowledge` |
+|  | Unsupported claims (`claims.unsupported_rate`) | 0% | ≤ 0% ✓ |  |
+|  | MCP get_context p50 (`mcp.get_context.p50_ms`) | 0.762 ms | — |  |
+| Memory, real stack (M1) | Change to searchable p95 (`freshness.p95_s`) | 0.435 s | ≤ 60 s ✓ | `cargo run --release -p nugget-bench -- memory --backend real --scale standard` |
+|  | Eval-set hybrid recall@10 (`retrieval.eval.hybrid.recall@10`) | 100% | ≥ 90.5% ✓ |  |
+| Store and retriever performance | Retriever search p95 (`query.retriever.search.latency.p95_us`) | 30,345 us | — | `cargo run --release -p nugget-bench -- perf --backend real --scale standard` |
+|  | Ingest throughput (`ingest.items_per_s`) | 688 items/s | — |  |
+| Proactive cards, real crate (M5) | Accepted-card precision (`cards.accepted_precision`) | 97.6% | — | `cargo run --release -p nugget-bench -- proactive --backend real` |
+|  | Actions run without approval (`actions.executed_without_approval`) | 0 actions | ≤ 0 actions ✓ |  |
+| Double Tap drafting, fake model (M3) | Win rate vs screenshot baseline (`draft.win_rate_vs_baseline`) | 95.5% | — | `cargo run --release -p nugget-bench -- draft` |
+|  | Hallucination rate (`draft.nugget.hallucination_rate`) | 25% | ≤ 40% ✓ |  |
+| Computer use, in process (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `cargo run --release -p nugget-bench -- cua` |
+|  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
+| Computer use, Linux desktop under Xvfb (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `sudo bench/cua/env/setup-debian.sh && cargo run --release -p nugget-bench -- cua --cua-env xvfb` |
+|  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
+
+To refresh: `python3 scripts/bench-readme.py` with a new `bench/results/latest.json` (the nightly workflow publishes `latest.json` on the `bench-results` branch).
 <!-- bench:end -->
 
 ## Architecture

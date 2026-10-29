@@ -24,7 +24,8 @@ A gap means the run failed, was not implemented yet, or did not report that metr
 `scripts/bench-run.py` writes one results file per night: `bench/results/latest.json` in the
 repository (the README table is generated from it), and `history/YYYY-MM-DD.json` plus
 `latest.json` on the `bench-results` branch. Each is a JSON object with `format` (1), `date`
-(UTC, `YYYY-MM-DD`), `git_commit` (the commit benchmarked), `generated_at`, and `runs`: one entry
+(UTC, `YYYY-MM-DD`), `git_commit` (the commit benchmarked), `machine` (where it ran, in words),
+`generated_at`, and `runs`: one entry
 per run that produced a report, in `scripts/bench-runs.json` order, each with `id`, `command` and
 the full nugget-bench `report` (which validates against `bench/schema/report.schema.json`).
 
