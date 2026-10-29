@@ -149,7 +149,10 @@ impl AxEl {
             description: get("AXDescription").and_then(cf_string),
             placeholder: get("AXPlaceholderValue").and_then(cf_string),
             states: States {
-                focused: get("AXFocused").and_then(cf_bool).unwrap_or(false),
+                // View-based NSTableView cells report AXFocused = true whether or not the table
+                // has focus (a cell being edited puts the focus on its field editor instead), so
+                // a cell's claim is ignored.
+                focused: raw != "AXCell" && get("AXFocused").and_then(cf_bool).unwrap_or(false),
                 editable: role.is_text_input() && enabled,
                 secure,
                 multiline,
