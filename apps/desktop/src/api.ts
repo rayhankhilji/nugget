@@ -259,6 +259,8 @@ export interface AskRequest {
   provider?: string | null;
   /** Default `synthesis`. */
   tier?: Tier;
+  /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
+  history?: ChatMessage[];
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -270,6 +272,8 @@ export interface AskStarted {
   citations: Citation[];
   /** Relevant sensitive items withheld because the model is a cloud model. */
   excluded_sensitive?: number;
+  /** The standalone query actually searched, when a follow-up was rewritten. */
+  query_rewrite?: string | null;
 }
 
 // ---- local runtime ----
@@ -1895,3 +1899,28 @@ export const agentEvents = {
       if (n.method === AGENT_NOTIFICATION.killChanged && isKillState(n.params)) h(n.params);
     }),
 };
+
+// ---- X4: conversational ask ----
+
+/** Context budget (tokens) for a Chat reply that uses the user's sources, as Search's default. */
+export const CHAT_ASK_BUDGET = 2000;
+/** Earlier turns such a reply sends along (the daemon bounds them again). */
+export const CHAT_ASK_HISTORY = 24;
+
+/**
+ * `retrieve.ask` for the newest message of a conversation: the daemon rewrites a follow-up into
+ * a standalone query (with a local model only) and gives the model the earlier turns.
+ */
+export function askInConversation(
+  query: string,
+  history: readonly ChatMessage[],
+  route: { provider: string | null; tier: Tier },
+): Promise<AskStarted> {
+  return api.retrieveAsk({
+    query,
+    budget_tokens: CHAT_ASK_BUDGET,
+    provider: route.provider,
+    tier: route.tier,
+    history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+  });
+}

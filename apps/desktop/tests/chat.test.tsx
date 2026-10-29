@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /** Chat page: streaming with Markdown, stop, errors, and persisted history. */
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { EVENT, type StoredConversation } from "../src/api";
-import { ChatPage } from "../src/pages/Chat";
+import { ChatPage, writeUseSources } from "../src/pages/Chat";
 import { requestNewChat } from "../src/hooks.nav";
 import { click, daemon, emitEvent, flush, press, render, setupHarness, submit, type } from "./harness";
 
@@ -33,6 +33,9 @@ function savedConversation(d: ReturnType<typeof daemon>): StoredConversation {
 }
 
 describe("Chat", () => {
+  // These flows cover plain chat; answering from sources is covered below.
+  beforeEach(() => writeUseSources(false));
+
   it("streams a reply, renders Markdown when done and saves the turn once", async () => {
     const d = daemon({ chat: started });
     const root = await renderChat();
@@ -162,5 +165,30 @@ describe("Chat", () => {
     await done();
     expect(root.querySelector(".msg-assistant .msg-md")?.textContent).toBe("there");
     expect(d.count("chat_history_save")).toBe(0);
+  });
+
+  it("answers from sources with the conversation, and its citations open", async () => {
+    writeUseSources(true);
+    const d = daemon({
+      retrieve_ask: {
+        stream_id: "s1",
+        provider: "local-chat",
+        locality: "on_device",
+        citations: [{ n: 1, item: { source: "web-1", key: "a" }, chunk_id: 1, title: "Heron notes", url: "https://example.com/herons", sensitive: false }],
+        excluded_sensitive: 0,
+        query_rewrite: "herons second walk",
+      },
+      open_url: null,
+    });
+    const root = await renderChat();
+    await send(root, "and the second one?");
+    expect(d.count("chat")).toBe(0);
+    expect(d.last("retrieve_ask")).toMatchObject({ request: { query: "and the second one?", history: [], tier: "synthesis" } });
+    await delta("At the lake [1].");
+    await done();
+    expect(root.textContent).toContain("Searched for: herons second walk");
+    await click(root.querySelector(".msg-assistant button.cite"));
+    expect(d.last("open_url")).toMatchObject({ url: "https://example.com/herons" });
+    expect(savedConversation(d).messages[1]).toMatchObject({ citations: [{ n: 1, title: "Heron notes" }] });
   });
 });

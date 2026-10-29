@@ -286,3 +286,20 @@ h6.md-heading {
 .md th {
   background: color-mix(in srgb, var(--text) 5%, transparent);
 }
+
+/* ---- Replies from the user's sources ---- */
+
+.chat-rewrite {
+  margin: 4px 0 0;
+  font-style: italic;
+}
+
+.chat-sources {
+  margin-top: 8px;
+}
+
+.chat-sources-title {
+  margin: 0 0 4px;
+  font-size: inherit;
+  font-weight: 500;
+}
