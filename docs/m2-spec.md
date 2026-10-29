@@ -148,8 +148,3 @@ tools and gets the indexed note back from `get_context`.
 - `claims.superseded_active` is 1: a hand-over of a multi-valued fact ("Priya works on Fennel",
   handed to Oskar) is not superseded. It needs either complete-list semantics for a project
   note's owners and members or a hand-over fact from the LLM extractor.
-- `EXTRACTOR_VERSION` was not bumped, so duplicates already in an existing graph are cleaned up
-  only when a related item is processed again.
-- A split entity can be merged back by later re-extraction if it shares identifiers with the
-  original.
-- The source-filtered graph overview queries claims and mentions per scanned entity (up to 5000).

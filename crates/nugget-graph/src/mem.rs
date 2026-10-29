@@ -5,10 +5,10 @@
 //! That copy makes a batch O(graph size): fine for tests and fixtures, which is what `MemGraph`
 //! is for.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Mutex;
 
-use nugget_core::ids::{EntityId, ItemRef};
+use nugget_core::ids::{EntityId, ItemRef, SourceId};
 use nugget_core::{Error, Result};
 use serde_json::Value;
 use time::OffsetDateTime;
@@ -1088,6 +1088,24 @@ impl GraphStore for MemGraph {
 
     fn prune_orphans(&self, among: Option<&[EntityId]>) -> Result<Vec<EntityId>> {
         Ok(self.lock().prune_orphans(among))
+    }
+
+    fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>> {
+        let s = self.lock();
+        let mut out: BTreeSet<EntityId> = BTreeSet::new();
+        for c in s.claims.values() {
+            if !c.status.is_active() || !c.evidence.iter().any(|e| &e.item.source == source) {
+                continue;
+            }
+            out.extend(s.resolve(&c.subject));
+            if let ClaimObject::Entity(o) = &c.object {
+                out.extend(s.resolve(o));
+            }
+        }
+        for m in s.mentions.iter().filter(|m| &m.item.source == source) {
+            out.extend(s.resolve(&m.entity));
+        }
+        Ok(out.into_iter().collect())
     }
 
     fn apply_batch(&self, batch: &GraphBatch) -> Result<Vec<BatchResult>> {

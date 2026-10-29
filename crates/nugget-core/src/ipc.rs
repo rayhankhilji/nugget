@@ -569,6 +569,9 @@ pub struct EvidenceView {
     pub title: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    /// When the source item was last modified (its creation in the index if unknown).
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub observed_at: Option<time::OffsetDateTime>,
 }
 
 /// Exactly one of `entity` / `literal` is set.
@@ -596,6 +599,8 @@ pub struct ClaimView {
     pub confidence: f32,
     pub status: String,
     pub evidence: Vec<EvidenceView>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub updated_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

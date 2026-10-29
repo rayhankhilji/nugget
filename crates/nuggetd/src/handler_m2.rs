@@ -304,6 +304,10 @@ impl RpcHandler {
                 .map(|(s, v)| Identifier::new(s.trim(), v.trim()))
                 .collect();
             let id = k.graph.split(&e.id, &r.claims, &new)?;
+            // Re-extraction must not merge them back: remember the split as a constraint.
+            if let Err(err) = k.knowledge.record_split(&e.id, &id) {
+                tracing::warn!(entity = %e.id, new = %id, error = %err, "remembering a split failed");
+            }
             Ok((e.id, e.name, id, touched))
         })
         .await?;

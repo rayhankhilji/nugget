@@ -40,7 +40,7 @@ pub use mem::MemGraph;
 pub use types::*;
 
 use nugget_core::Result;
-use nugget_core::ids::{EntityId, ItemRef};
+use nugget_core::ids::{EntityId, ItemRef, SourceId};
 
 /// Storage for the knowledge graph. Synchronous; implementations are `Send + Sync`.
 pub trait GraphStore: Send + Sync {
@@ -158,6 +158,14 @@ pub trait GraphStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Live entities that items of `source` support, ascending by id: entities with a mention
+    /// from an item of `source`, or that are subject or object of an active claim
+    /// ([`ClaimStatus::is_active`]) with evidence from an item of `source`. One query in
+    /// `SqliteGraph`; the default scans every entity ([`entities_supported_by_scan`]).
+    fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>> {
+        entities_supported_by_scan(self, source)
+    }
+
     /// Apply `batch` in order and return one result per op. `MemGraph` and `SqliteGraph` apply it
     /// atomically (one transaction: all or nothing, one change-feed step per touched entity);
     /// the default applies the ops one by one through the methods above and stops at the first
@@ -169,6 +177,29 @@ pub trait GraphStore: Send + Sync {
         }
         Ok(out)
     }
+}
+
+/// [`GraphStore::entities_supported_by`] through `list_entities`, `claims_for` and
+/// `mentions_for` (the default; one round of lookups per entity).
+pub fn entities_supported_by_scan<G: GraphStore + ?Sized>(
+    g: &G,
+    source: &SourceId,
+) -> Result<Vec<EntityId>> {
+    let mut out = Vec::new();
+    for e in g.list_entities(&EntityQuery::default())? {
+        let supported = g
+            .claims_for(&e.id, false)?
+            .iter()
+            .any(|c| c.evidence.iter().any(|ev| &ev.item.source == source))
+            || g.mentions_for(&e.id, 0)?
+                .iter()
+                .any(|m| &m.item.source == source);
+        if supported {
+            out.push(e.id);
+        }
+    }
+    out.sort();
+    Ok(out)
 }
 
 /// Apply one op through the single-write methods of `g` (the default `apply_batch`).

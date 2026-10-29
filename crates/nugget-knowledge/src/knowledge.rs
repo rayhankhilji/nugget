@@ -16,6 +16,7 @@ use tokio::sync::broadcast;
 use crate::config::{KnowledgeConfig, RunBudget};
 use crate::feed::ItemFeed;
 use crate::session::{Session, plan};
+use crate::splits::Split;
 use crate::state::{SourceLedger, State};
 
 /// Counters for one [`Knowledge::run_once`].
@@ -82,12 +83,27 @@ pub struct KnowledgeStatus {
     pub pending_links: u64,
 }
 
+impl Inner {
+    /// The user's splits (a snapshot; [`Knowledge::record_split`] replaces it).
+    pub fn splits(&self) -> Result<Arc<Vec<Split>>> {
+        let mut cached = self.splits.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(s) = cached.as_ref() {
+            return Ok(s.clone());
+        }
+        let s = Arc::new(crate::splits::load(self.feed.as_ref())?);
+        *cached = Some(s.clone());
+        Ok(s)
+    }
+}
+
 pub(crate) struct Inner {
     pub feed: Arc<dyn ItemFeed>,
     pub graph: Arc<dyn GraphStore>,
     pub router: Option<Arc<Router>>,
     pub cfg: KnowledgeConfig,
     pub emb_cache: Mutex<HashMap<String, Vec<f32>>>,
+    /// User splits ([`crate::splits`]), loaded on first use.
+    splits: Mutex<Option<Arc<Vec<Split>>>>,
     run_lock: tokio::sync::Mutex<()>,
     status: Mutex<KnowledgeStatus>,
     tx: broadcast::Sender<Vec<EntityId>>,
@@ -140,6 +156,7 @@ impl Knowledge {
                 router,
                 cfg: config,
                 emb_cache: Mutex::new(HashMap::new()),
+                splits: Mutex::new(None),
                 run_lock: tokio::sync::Mutex::new(()),
                 status: Mutex::new(status),
                 tx,
@@ -278,6 +295,31 @@ impl Knowledge {
         })
         .await
         .map_err(|e| Error::Other(format!("knowledge reset task failed: {e}")))?
+    }
+
+    /// Remember that the user split `new` off `from` (call right after `GraphStore::split`), so
+    /// re-extraction never merges them back together, and the occurrences the split moved (by
+    /// item, or by a name only `new` has) keep resolving to `new` with their facts. Kept until
+    /// the user merges the two again or one of them is gone; [`Knowledge::reset`] and extractor
+    /// upgrades keep it. Blocking (store writes): call it off the async runtime.
+    pub fn record_split(&self, from: &EntityId, new: &EntityId) -> Result<()> {
+        let Some(split) = crate::splits::describe(self.inner.graph.as_ref(), from, new)? else {
+            return Err(Error::NotFound(format!(
+                "split of {new} off {from}: an entity is missing"
+            )));
+        };
+        let mut cached = self.inner.splits.lock().unwrap_or_else(|p| p.into_inner());
+        let mut list: Vec<Split> = match cached.as_ref() {
+            Some(s) => s.as_ref().clone(),
+            None => crate::splits::load(self.inner.feed.as_ref())?,
+        };
+        list.retain(|s| !(s.from == split.from && s.to == split.to));
+        list.push(split);
+        let excess = list.len().saturating_sub(crate::splits::MAX_SPLITS);
+        list.drain(..excess);
+        crate::splits::save(self.inner.feed.as_ref(), &list)?;
+        *cached = Some(Arc::new(list));
+        Ok(())
     }
 
     fn llm_local_available(&self) -> bool {

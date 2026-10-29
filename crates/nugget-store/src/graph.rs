@@ -1743,6 +1743,36 @@ impl GraphStore for SqliteGraph {
         self.write("prune_orphans", |tx, touched| prune_tx(tx, touched, among))
     }
 
+    fn entities_supported_by(&self, source: &SourceId) -> Result<Vec<EntityId>> {
+        // One query, driven by the (source, key) indexes on mentions and claim_evidence.
+        self.read(|c| {
+            let mut stmt = c
+                .prepare_cached(&format!(
+                    "SELECT e.id FROM entities e
+                     JOIN (SELECT entity_id AS id FROM mentions WHERE source = ?1
+                           UNION
+                           SELECT c.subject FROM claim_evidence ev
+                             JOIN claims c ON c.id = ev.claim_id
+                             WHERE ev.source = ?1 AND c.{ACTIVE}
+                           UNION
+                           SELECT c.object_entity FROM claim_evidence ev
+                             JOIN claims c ON c.id = ev.claim_id
+                             WHERE ev.source = ?1 AND c.{ACTIVE}
+                               AND c.object_entity IS NOT NULL) s ON s.id = e.id
+                     WHERE e.merged_into IS NULL AND e.deleted_at IS NULL
+                     ORDER BY e.id"
+                ))
+                .db("prepare entities_supported_by")?;
+            let rows = stmt
+                .query_map([source.as_str()], |r| {
+                    Ok(EntityId::new(r.get::<_, String>(0)?))
+                })
+                .db("query entities_supported_by")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read entities_supported_by")
+        })
+    }
+
     fn apply_batch(&self, batch: &GraphBatch) -> Result<Vec<BatchResult>> {
         if batch.is_empty() {
             return Ok(Vec::new());
