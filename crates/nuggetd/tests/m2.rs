@@ -381,6 +381,7 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     );
 
     // A fact added in the vault becomes a user-asserted fact.
+    let before_edit = seen.lock().unwrap().len();
     let edited = std::fs::read_to_string(&page).unwrap().replace(
         "<!-- nugget:end facts -->",
         "\n### Hobbies\n- Plays chess\n<!-- nugget:end facts -->",
@@ -397,6 +398,20 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
             .unwrap()
             .contains("- Plays chess (you)")
     })
+    .await;
+    // The watcher signals applied edits; the knowledge worker (which does not poll) tells
+    // clients.
+    eventually(
+        "the vault edit is broadcast as knowledge.changed",
+        || async {
+            seen.lock().unwrap()[before_edit..].iter().any(|n| {
+                n.method == notification::KNOWLEDGE_CHANGED
+                    && n.params["entities"]
+                        .as_array()
+                        .is_some_and(|a| a.iter().any(|v| v == alice.id.as_str()))
+            })
+        },
+    )
     .await;
 
     // Rejecting and restoring a fact; both audited, and the vault follows.

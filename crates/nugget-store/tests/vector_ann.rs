@@ -10,7 +10,9 @@
 //! `NUGGET_ANN_VECTORS=<n>` changes the corpus size; `NUGGET_ANN_MEMORY=1` uses an unencrypted
 //! in-memory store instead of an encrypted file.
 
-use std::time::Instant;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use nugget_core::ids::ItemRef;
 use nugget_store::{ANN_MIN_VECTORS, NewChunk, NewItem, Store, StoreKey};
@@ -116,13 +118,6 @@ fn approximate_search_finds_the_exact_top_hit_and_tracks_updates() {
     }
     assert!(overlap >= 180, "recall@10 {}", overlap as f64 / 200.0);
 
-    // Below the threshold the default path is exact.
-    let q = queries.sample();
-    assert_eq!(
-        ids(&s.search_vector(&q, 10).unwrap()),
-        ids(&s.search_vector_exact(&q, 10).unwrap())
-    );
-
     // Updating an item's chunks: its old vectors disappear from both indexes, the new one is
     // found.
     let target = queries.sample();
@@ -145,6 +140,14 @@ fn approximate_search_finds_the_exact_top_hit_and_tracks_updates() {
     let gone = s.search_vector_approx(&replacement, 10).unwrap();
     assert!(gone.iter().all(|h| h.item != iref));
     assert_eq!(gone.len(), 10);
+
+    // Below the threshold the default path is exact (and, far below it, drops the index).
+    let q = queries.sample();
+    assert_eq!(
+        ids(&s.search_vector(&q, 10).unwrap()),
+        ids(&s.search_vector_exact(&q, 10).unwrap())
+    );
+    assert!(!s.ann_index_ready().unwrap());
 }
 
 #[test]
@@ -175,10 +178,46 @@ fn ann_recall_and_latency_at_scale() {
     queries.noise = noise;
     let queries: Vec<Vec<f32>> = (0..100).map(|_| queries.sample()).collect();
 
-    // First approximate call (side index already complete: written alongside the vectors).
+    // The first search past the thresholds starts building the approximate index; meanwhile a
+    // writer keeps upserting, and its latencies show how long the build holds the writer.
+    let stop = Arc::new(AtomicBool::new(false));
+    let writer = {
+        let (s, stop) = (s.clone(), stop.clone());
+        let mut corpus = Corpus::new(99, 10, noise);
+        std::thread::spawn(move || {
+            let mut latencies = Vec::new();
+            let mut i = 0usize;
+            while !stop.load(Ordering::Relaxed) {
+                let item = NewItem::new("w", format!("w{}", i % 100), format!("wh{i}"));
+                let chunk = NewChunk::embedded("w", corpus.sample());
+                let t = Instant::now();
+                s.upsert_item_with_chunks(&item, &[chunk]).unwrap();
+                latencies.push(t.elapsed());
+                i += 1;
+            }
+            latencies
+        })
+    };
+    std::thread::sleep(Duration::from_millis(200));
     let t = Instant::now();
     s.search_vector(&queries[0], 10).unwrap();
     println!("first search_vector: {:.1?}", t.elapsed());
+    let deadline = Instant::now() + Duration::from_secs(600);
+    while !s.ann_index_ready().unwrap() {
+        assert!(Instant::now() < deadline, "index build did not finish");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    println!("index complete {:.1?} after the first search", t.elapsed());
+    stop.store(true, Ordering::Relaxed);
+    let mut latencies = writer.join().unwrap();
+    latencies.sort();
+    println!(
+        "upserts during the build: {}, p50 {:.1?}, p99 {:.1?}, max {:.1?}",
+        latencies.len(),
+        latencies[latencies.len() / 2],
+        latencies[latencies.len() * 99 / 100],
+        latencies.last().unwrap()
+    );
 
     for k in [10usize, 50] {
         // Separate loops: the exact scan reads every vector and would evict the approximate

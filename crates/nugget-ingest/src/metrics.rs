@@ -11,7 +11,9 @@ pub(crate) struct Metrics {
     window: usize,
     samples: Mutex<VecDeque<u64>>,
     queue_depth: AtomicU64,
-    committed: AtomicU64,
+    /// Changes committed since start. A `watch` channel, so consumers (knowledge extraction)
+    /// wake on commits instead of polling the counter.
+    committed: tokio::sync::watch::Sender<u64>,
 }
 
 impl Metrics {
@@ -20,7 +22,7 @@ impl Metrics {
             window: window.max(1),
             samples: Mutex::new(VecDeque::new()),
             queue_depth: AtomicU64::new(0),
-            committed: AtomicU64::new(0),
+            committed: tokio::sync::watch::Sender::new(0),
         }
     }
 
@@ -31,7 +33,8 @@ impl Metrics {
             s.pop_front();
         }
         s.push_back(ms);
-        self.committed.fetch_add(1, Ordering::Relaxed);
+        drop(s);
+        self.committed.send_modify(|n| *n += 1);
     }
 
     /// `(p50, p95)` in milliseconds over the window (nearest-rank).
@@ -71,7 +74,12 @@ impl Metrics {
 
     /// Changes committed since start.
     pub fn committed(&self) -> u64 {
-        self.committed.load(Ordering::Relaxed)
+        *self.committed.borrow()
+    }
+
+    /// A receiver that sees every change of [`committed`](Self::committed).
+    pub fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.committed.subscribe()
     }
 }
 
