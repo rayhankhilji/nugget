@@ -44,8 +44,10 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # A debug build is enough: the corpus is small (93 items, a few seconds to index).
+      # `--features fake-runtime --bins` also builds nuggetd-e2e and the fake llama-server for
+      # the ai-setup scenario (the feature changes nothing in nuggetd itself).
       - name: Build nuggetd
-        run: cargo build --locked -p nuggetd
+        run: cargo build --locked -p nuggetd --features fake-runtime --bins
 
       # The pnpm version comes from `packageManager` in apps/desktop/package.json.
       - uses: pnpm/action-setup@v4
@@ -73,6 +75,8 @@ jobs:
         working-directory: apps/desktop
         env:
           NUGGETD: ${{ github.workspace }}/target/debug/nuggetd
+          NUGGETD_E2E: ${{ github.workspace }}/target/debug/nuggetd-e2e
+          NUGGET_FAKE_LLAMA_SERVER: ${{ github.workspace }}/target/debug/nuggetd-fake-llama-server
           E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
         run: pnpm run e2e
 

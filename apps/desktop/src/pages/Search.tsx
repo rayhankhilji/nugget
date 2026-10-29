@@ -87,6 +87,7 @@ export function SearchPage() {
           id="search-q"
           ref={inputRef}
           type="search"
+          dir="auto"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t("search.placeholder")}
@@ -142,7 +143,9 @@ export function SearchPage() {
             return (
               <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
                 <div className="result-head">
-                  <span className="result-title">{title}</span>
+                  <span className="result-title" dir="auto">
+                    {title}
+                  </span>
                   <span className="result-tools">
                     <span className="muted small" title={t("search.score")}>
                       {formatNumber(h.score, { minimumFractionDigits: 3, maximumFractionDigits: 3 })}
@@ -154,7 +157,9 @@ export function SearchPage() {
                     )}
                   </span>
                 </div>
-                <p className="result-snippet">{h.snippet}</p>
+                <p className="result-snippet" dir="auto">
+                  {h.snippet}
+                </p>
                 <p className="muted small result-meta">
                   <SourceBadge id={h.item.source} source={byId.get(h.item.source)} /> <code>{h.item.key}</code>
                 </p>
@@ -181,7 +186,7 @@ function SourceBadge({ id, source }: { id: string; source: SourceInfo | undefine
   return (
     <span className="source-badge" title={source ? t("search.sourceBadge", { kind: sourceKindLabel(kind), id }) : id}>
       <SourceIcon kind={kind} size={13} />
-      {source?.name ?? id}
+      <span dir="auto">{source?.name ?? id}</span>
     </span>
   );
 }
@@ -320,7 +325,7 @@ function AskPanel({
         <label htmlFor="ask-q" className="visually-hidden">
           {t("search.question")}
         </label>
-        <input id="ask-q" type="text" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={t("search.questionPlaceholder")} autoFocus />
+        <input id="ask-q" type="text" dir="auto" value={question} onChange={(e) => setQuestion(e.target.value)} placeholder={t("search.questionPlaceholder")} autoFocus />
         <label className="field-inline">
           <span>{t("search.budget")}</span>
           <select value={budget} onChange={(e) => setBudget(Number(e.target.value))}>
@@ -342,7 +347,7 @@ function AskPanel({
       {ctx && ctx.citations.length > 0 && (
         <>
           <h3 className="ask-sub">{t("search.context")}</h3>
-          <div className="context-text" tabIndex={0} role="region" aria-label={t("search.retrievedContext")}>
+          <div className="context-text" dir="auto" tabIndex={0} role="region" aria-label={t("search.retrievedContext")}>
             <CitedText text={ctx.text} valid={valid} byN={byN} onCite={cite} />
           </div>
           <h3 className="ask-sub">{t("search.citations")}</h3>
@@ -381,7 +386,7 @@ function AskPanel({
               {answer.error}
             </p>
           ) : (
-            <div className="answer-text">
+            <div className="answer-text" dir="auto">
               {answer.text ? (
                 <CitedText text={answer.text} valid={answerValid} byN={answerByN} onCite={answerCite} />
               ) : (
@@ -458,7 +463,7 @@ function CitationItem({
       <span className="cite-n">[{c.n}]</span>
       <span className="citation-body">
         <span className="citation-title">
-          {title}
+          <span dir="auto">{title}</span>
           {c.sensitive && (
             <>
               {" "}

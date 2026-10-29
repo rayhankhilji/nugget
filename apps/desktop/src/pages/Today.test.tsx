@@ -104,6 +104,21 @@ beforeEach(() => installDomShims());
 afterEach(() => cleanup());
 
 describe("Today page", () => {
+  it("says there is no feedback yet instead of a usefulness rate before any card is accepted or dismissed", async () => {
+    const quiet = { total: 1, by_state: {}, shown: 1, accepted: 0, dismissed: 0, snoozed: 0, precision: 0, by_kind: {}, dismiss_reasons: {}, model_updates: 0 };
+    let metrics = quiet;
+    setup({ proactive_metrics: () => metrics });
+    const { container } = await render(<TodayPage />);
+    expect(container.querySelector(".today-metrics")?.textContent).toBe("No feedback yet");
+    expect(container.textContent).not.toContain("were useful");
+
+    // Accepting a card gives the rate something to measure.
+    metrics = { ...quiet, accepted: 1, precision: 1 };
+    await click(byText(container, "button", "Accept"));
+    await flush();
+    expect(container.querySelector(".today-metrics")?.textContent).toBe("100% of suggestions were useful (1 of 1)");
+  });
+
   it("renders the brief and cards with why and evidence as plain text", async () => {
     const { feedback } = setup();
     const { container } = await render(<TodayPage />);

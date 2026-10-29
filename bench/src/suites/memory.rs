@@ -13,9 +13,11 @@
 //! metric names stable where they mean the same thing.
 
 use std::collections::{BTreeMap, HashMap};
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::corpus::{Corpus, CorpusConfig, Rng, marker};
+use crate::corpus::{Corpus, CorpusConfig, Query, Rng, marker};
 use crate::index::FakeIndex;
 use crate::report::{Direction, Metric};
 use crate::runner::{Backend, BenchError, Benchmark, RunContext, Scale};
@@ -104,6 +106,12 @@ pub fn run_with(ctx: &mut RunContext, p: &MemoryParams) -> Result<Vec<Metric>, B
     }
 
     let mut out = retrieval(&corpus, &ix, p, ctx.seed());
+    if let Some(path) = rank_dump_path() {
+        let queries = corpus.queries(p.queries, p.query_terms, p.query_noise, ctx.seed());
+        let mut dump = RankDump::default();
+        dump.add_fake_arms(&ix, &queries);
+        dump.write(&path, &queries)?;
+    }
     out.extend(freshness(&corpus, &mut ix, p, ctx.seed())?);
     Ok(out)
 }
@@ -156,6 +164,131 @@ pub(crate) fn retrieval(
         ));
     }
     out
+}
+
+/// Diagnostic switch: when this environment variable names a file, the known-item phase writes
+/// the target's rank in every retrieval arm, per query, to it as TSV. Off by default; the report
+/// is the same either way. It exists to explain recall gaps between the real stack and the fake
+/// baseline query by query instead of guessing from the aggregate.
+pub const RANK_DUMP_ENV: &str = "NUGGET_BENCH_DUMP_MISSES";
+
+/// Depth of the extra single-leg searches in a rank dump, to see how far a missed target fell.
+pub(crate) const RANK_DUMP_DEEP: usize = 100;
+
+pub(crate) fn rank_dump_path() -> Option<PathBuf> {
+    std::env::var_os(RANK_DUMP_ENV)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Per-query results (document ids, best first) of named retrieval arms.
+#[derive(Debug, Default)]
+pub(crate) struct RankDump {
+    arms: Vec<(String, Vec<Vec<usize>>)>,
+}
+
+impl RankDump {
+    pub(crate) fn push(&mut self, arm: impl Into<String>, results: Vec<Vec<usize>>) {
+        self.arms.push((arm.into(), results));
+    }
+
+    fn results(&self, arm: &str, q: usize) -> Option<&[usize]> {
+        self.arms
+            .iter()
+            .find(|(a, _)| a == arm)
+            .and_then(|(_, r)| r.get(q))
+            .map(Vec::as_slice)
+    }
+
+    /// The fake index's arms: the metric's hybrid top 10, and each leg alone at depth.
+    pub(crate) fn add_fake_arms(&mut self, ix: &FakeIndex, queries: &[Query]) {
+        let ids = |hits: Vec<crate::index::Hit>| -> Vec<usize> {
+            hits.iter()
+                .filter_map(|h| h.item.key.0.strip_prefix("doc-")?.parse().ok())
+                .collect()
+        };
+        let arm = |f: &dyn Fn(&str) -> Vec<crate::index::Hit>| -> Vec<Vec<usize>> {
+            queries.iter().map(|q| ids(f(&q.text))).collect()
+        };
+        self.push("fake.hybrid@10", arm(&|t| ix.search_hybrid(t, 10)));
+        self.push("fake.bm25", arm(&|t| ix.search_text(t, RANK_DUMP_DEEP)));
+        self.push(
+            "fake.vector",
+            arm(&|t| ix.search_vector(&ix.embed(t), RANK_DUMP_DEEP)),
+        );
+    }
+
+    /// TSV: one row per query with the target's 1-based rank in each arm (`-` when absent).
+    /// Then, when both hybrid arms are present, `#` lines for every query whose hybrid top-10
+    /// outcome differs between the real stack and the fake index: each side's top 10 as
+    /// `doc(bm25 rank/vector rank)` from that side's single-leg arms, which shows what pushed
+    /// the target out.
+    pub(crate) fn write(&self, path: &Path, queries: &[Query]) -> Result<(), BenchError> {
+        let rank = |arm: &str, i: usize, id: usize| {
+            self.results(arm, i)
+                .and_then(|r| r.iter().position(|&d| d == id))
+        };
+        let mut s = String::from("query\ttarget\ttext");
+        for (arm, _) in &self.arms {
+            let _ = write!(s, "\t{arm}");
+        }
+        s.push('\n');
+        for (i, q) in queries.iter().enumerate() {
+            let _ = write!(s, "{i}\t{}\t{}", q.relevant, q.text);
+            for (arm, _) in &self.arms {
+                match rank(arm, i, q.relevant) {
+                    Some(r) => {
+                        let _ = write!(s, "\t{}", r + 1);
+                    }
+                    None => s.push_str("\t-"),
+                }
+            }
+            s.push('\n');
+        }
+        let hit = |side: &str, i: usize| {
+            self.results(&format!("{side}.hybrid@10"), i)
+                .map(|r| r.iter().take(10).any(|&d| d == queries[i].relevant))
+        };
+        let fmt_rank =
+            |r: Option<usize>| r.map_or_else(|| "-".to_string(), |r| (r + 1).to_string());
+        for (label, real_hit) in [("real_only", true), ("fake_only", false)] {
+            let diff: Vec<usize> = (0..queries.len())
+                .filter(|&i| hit("real", i) == Some(real_hit) && hit("fake", i) == Some(!real_hit))
+                .collect();
+            let ids: Vec<String> = diff.iter().map(usize::to_string).collect();
+            let _ = writeln!(s, "# hybrid@10 {label}: {}", ids.join(" "));
+            for &i in &diff {
+                let q = &queries[i];
+                let _ = writeln!(s, "#   q{i} target {} \"{}\"", q.relevant, q.text);
+                for side in ["fake", "real"] {
+                    let top = self
+                        .results(&format!("{side}.hybrid@10"), i)
+                        .unwrap_or_default();
+                    let cells: Vec<String> = top
+                        .iter()
+                        .take(10)
+                        .map(|&d| {
+                            format!(
+                                "{d}{}({}/{})",
+                                if d == q.relevant { "*" } else { "" },
+                                fmt_rank(rank(&format!("{side}.bm25"), i, d)),
+                                fmt_rank(rank(&format!("{side}.vector"), i, d)),
+                            )
+                        })
+                        .collect();
+                    let _ = writeln!(
+                        s,
+                        "#     {side}: target {}/{} | {}",
+                        fmt_rank(rank(&format!("{side}.bm25"), i, q.relevant)),
+                        fmt_rank(rank(&format!("{side}.vector"), i, q.relevant)),
+                        cells.join(" ")
+                    );
+                }
+            }
+        }
+        std::fs::write(path, s)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -464,6 +597,39 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn rank_dump_lists_ranks_and_hybrid_differences() {
+        let queries = vec![
+            Query {
+                text: "alpha".into(),
+                relevant: 7,
+            },
+            Query {
+                text: "beta".into(),
+                relevant: 8,
+            },
+        ];
+        let mut d = RankDump::default();
+        d.push("fake.hybrid@10", vec![vec![1, 7], vec![1, 2]]);
+        d.push("fake.bm25", vec![vec![7, 1], vec![8]]);
+        d.push("fake.vector", vec![vec![1], vec![]]);
+        d.push("real.hybrid@10", vec![vec![1, 2], vec![8]]);
+        d.push("real.bm25", vec![vec![2, 7], vec![8]]);
+        d.push("real.vector", vec![vec![1, 2], vec![]]);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ranks.tsv");
+        d.write(&path, &queries).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert!(lines[0].starts_with("query\ttarget\ttext\tfake.hybrid@10"));
+        assert_eq!(lines[1], "0\t7\talpha\t2\t1\t-\t-\t2\t-");
+        assert_eq!(lines[2], "1\t8\tbeta\t-\t1\t-\t1\t1\t-");
+        assert!(text.contains("# hybrid@10 real_only: 1\n"));
+        assert!(text.contains("# hybrid@10 fake_only: 0\n"));
+        assert!(text.contains("#     fake: target 1/- | 1(2/1) 7*(1/-)"));
+        assert!(text.contains("#     real: target 2/- | 1(-/1) 2(1/2)"));
     }
 
     #[test]

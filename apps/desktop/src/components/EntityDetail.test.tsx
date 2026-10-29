@@ -3,6 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EntityDetail } from "../api";
 import { formatTime } from "../format";
+import { formatDate } from "../i18n";
 import { entityDetail } from "../test/fixtures";
 import { byText, cleanup, click, installDomShims, mockDaemon, render } from "../test/render";
 import { EntityDetailPanel } from "./EntityDetail";
@@ -85,6 +86,20 @@ describe("EntityDetailPanel facts", () => {
     expect(items[1]!.querySelector("time")).toBeNull();
     // Mentions get icons too.
     expect(container.querySelector(".mentions svg.source-icon-files")).toBeTruthy();
+  });
+
+  it("shows ISO dates inside fact text in the reader's locale, keeping the stored text", async () => {
+    const at = "2026-11-10T13:00:00Z";
+    const stored = `Ada attended Wren Mobile usability test on ${at}, due 2026-11-12T00:00:00Z`;
+    const detail: EntityDetail = { ...timed, claims: [{ ...timed.claims[1]!, id: 3, text: stored }] };
+    mockDaemon({ knowledge_entity: detail });
+    const { container } = await render(panel());
+    const fact = container.querySelector(".fact-text")!.textContent;
+    expect(fact).toBe(
+      `Ada attended Wren Mobile usability test on ${formatDate(at, { dateStyle: "medium", timeStyle: "short" })}, due Nov 12, 2026`,
+    );
+    expect(fact).not.toContain("T13:00");
+    expect(detail.claims[0]!.text).toBe(stored);
   });
 
   it("falls back to grouping by predicate when the daemon sends no timestamps", async () => {

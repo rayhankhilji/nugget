@@ -278,6 +278,36 @@ pub async fn retrieve_ask(
     daemon.call(&app, method::RETRIEVE_ASK, &req).await
 }
 
+// ---- Z3: AI setup ----
+
+/// Check a provider API key against the provider (`ai.key.test`). The request carries the key:
+/// it is passed through, never logged.
+#[tauri::command]
+pub async fn ai_key_test(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "ai.key.test", &request).await
+}
+
+/// Check a provider API key, then store it in the keychain and add the provider to the config
+/// (`ai.key.save`). The request carries the key: it is passed through, never logged.
+#[tauri::command]
+pub async fn ai_key_save(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    daemon.call(&app, "ai.key.save", &request).await
+}
+
+/// What each manifest model needs and whether this machine has it (`models.fit`).
+#[tauri::command]
+pub async fn models_fit(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
+    daemon.call(&app, "models.fit", &()).await
+}
+
 #[tauri::command]
 pub async fn runtime_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Vec<RuntimeInfo>> {
     daemon.call(&app, method::RUNTIME_STATUS, &()).await

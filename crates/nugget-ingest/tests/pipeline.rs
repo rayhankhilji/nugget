@@ -149,8 +149,15 @@ async fn unchanged_versions_are_skipped() {
     h.add("fake-1").await;
     eventually("pass 1", || h.cursor("fake-1") == Some(json!(1))).await;
     let committed = h.ingest.committed();
+    let mut commits = h.ingest.subscribe_committed();
+    assert_eq!(*commits.borrow_and_update(), committed);
 
     h.ingest.sync_now(Some(&SourceId::new("fake-1"))).unwrap();
+    // Commits wake watchers (knowledge extraction waits on this instead of polling).
+    tokio::time::timeout(std::time::Duration::from_secs(10), commits.changed())
+        .await
+        .expect("a commit is signalled")
+        .expect("ingest is running");
     eventually("pass 2", || h.cursor("fake-1") == Some(json!(2))).await;
     assert_eq!(
         h.item("fake-1", "a").unwrap().text.as_deref(),

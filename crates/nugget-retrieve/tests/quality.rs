@@ -434,6 +434,38 @@ async fn date_phrases_filter_by_modification_time() {
     assert_eq!(ctx.response.citations.len(), 1);
 }
 
+/// Items without a source modification time are filtered by the store's update time, and the
+/// items kept by the filter come back fully loaded (title, recency, packed text).
+#[tokio::test]
+async fn date_filter_falls_back_to_update_time() {
+    let store = boiler_store();
+    let today = OffsetDateTime::now_utc().date();
+    add(
+        &store,
+        "d",
+        "Boiler log",
+        "Boiler pressure checked, no source date.",
+        None,
+    );
+    if OffsetDateTime::now_utc().date() != today {
+        return; // Stored across midnight: today's date is ambiguous.
+    }
+    let r = Retriever::new(store, None, cfg()).with_reference_time(now());
+    let res = r.search(&format!("boiler on {today}"), 5).await.unwrap();
+    assert!(res.date.as_ref().unwrap().applied);
+    assert_eq!(keys(&res.items), ["d"]);
+    assert_eq!(res.items[0].title.as_deref(), Some("Boiler log"));
+    // The source date wins over the update time: `a` was stored today but dated February.
+    let res = r.search("boiler on 2026-02-10", 5).await.unwrap();
+    assert_eq!(keys(&res.items), ["a"]);
+    let ctx = r
+        .pack_context(&format!("boiler on {today}"), 500)
+        .await
+        .unwrap();
+    assert_eq!(ctx.response.citations.len(), 1);
+    assert!(ctx.response.text.contains("no source date"));
+}
+
 #[tokio::test]
 async fn date_offset_moves_day_boundaries() {
     let store = Store::open_in_memory().unwrap();

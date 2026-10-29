@@ -528,3 +528,44 @@ async fn ask_without_history_is_unchanged() {
     collect(&mut notes, &started.stream_id).await;
     h.stop().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "zzyzx quasar tensile", "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(started.general, "{started:?}");
+    assert!(started.citations.is_empty());
+    // One stream, answered in full: the client no longer cancels and re-asks.
+    let (text, done) = collect(&mut notes, &started.stream_id).await;
+    assert_eq!(done.error, None);
+    assert!(!text.is_empty());
+    let requests = h.requests().await;
+    assert_eq!(requests.len(), 1);
+    let roles: Vec<&str> = requests[0]["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles, ["user"], "no sourced system prompt");
+    assert!(!h.bodies().await.contains("numbered passages"));
+    assert_eq!(audited_ask(&h.store)["general"], json!(true));
+
+    // With passages it is a sourced answer, as before.
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron fishing river", "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(!started.general);
+    assert!(!started.citations.is_empty());
+    collect(&mut notes, &started.stream_id).await;
+    h.stop().await;
+}

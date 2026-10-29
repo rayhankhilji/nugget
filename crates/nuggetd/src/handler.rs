@@ -480,10 +480,12 @@ impl RpcHandler {
 
         let stream_id = uuid::Uuid::new_v4().to_string();
         let meta = provider.meta();
+        let general = ctx.citations.is_empty();
         tracing::info!(
             stream = %stream_id,
             provider = %provider.id(),
             passages = ctx.citations.len(),
+            general,
             excluded_sensitive = ctx.excluded_sensitive,
             history = history.len(),
             rewritten,
@@ -502,6 +504,7 @@ impl RpcHandler {
                 "excluded_sensitive": ctx.excluded_sensitive,
                 "history": history.len(),
                 "rewritten": rewritten,
+                "general": general,
             }),
         )
         .await;
@@ -512,6 +515,7 @@ impl RpcHandler {
             citations: ctx.citations,
             excluded_sensitive: ctx.excluded_sensitive,
             query_rewrite: rewritten.then_some(search_query),
+            general,
         };
         self.spawn_stream(provider, stream, stream_id, notify);
         to_result(started)
@@ -946,6 +950,9 @@ fn ask_history(history: Vec<ipc::ChatMessage>) -> Vec<ipc::ChatMessage> {
 
 /// The provider request for `retrieve.ask`: the earlier turns (see [`ask_history`]), then the
 /// question, under the context system prompt, with the cited items as egress provenance.
+///
+/// With no passages at all the sourced prompt could only decline, so the question goes out as an
+/// ordinary chat instead (no system prompt), and [`AskStarted::general`] tells the client.
 fn ask_request(history: &[ipc::ChatMessage], query: &str, ctx: &ContextResponse) -> ChatRequest {
     let mut items: Vec<nugget_core::ids::ItemRef> = Vec::with_capacity(ctx.citations.len());
     for c in &ctx.citations {
@@ -962,9 +969,10 @@ fn ask_request(history: &[ipc::ChatMessage], query: &str, ctx: &ContextResponse)
         })
         .collect();
     messages.push(Message::user_text(query));
-    let mut req = ChatRequest::new(messages)
-        .with_system(ask_system_prompt(&ctx.text))
-        .with_feature(FEATURE_ASK);
+    let mut req = ChatRequest::new(messages).with_feature(FEATURE_ASK);
+    if !ctx.citations.is_empty() {
+        req = req.with_system(ask_system_prompt(&ctx.text));
+    }
     req.items = items;
     req
 }
@@ -1340,7 +1348,17 @@ mod tests {
     fn ask_request_sends_history_then_question_under_the_context_prompt() {
         let ctx = ContextResponse {
             text: "[1] walk.md\nherons".into(),
-            citations: Vec::new(),
+            citations: vec![ipc::Citation {
+                n: 1,
+                item: nugget_core::ids::ItemRef {
+                    source: nugget_core::ids::SourceId::new("files"),
+                    key: nugget_core::ids::ItemKey::new("walk.md"),
+                },
+                chunk_id: 1,
+                title: Some("walk.md".into()),
+                url: None,
+                sensitive: false,
+            }],
             excluded_sensitive: 0,
         };
         let history = [
@@ -1359,5 +1377,24 @@ mod tests {
         assert!(req.system.as_deref().unwrap().contains("herons"));
         let plain = ask_request(&[], "q", &ctx);
         assert_eq!(plain.messages, vec![Message::user_text("q")]);
+    }
+
+    #[test]
+    fn ask_request_without_passages_is_an_ordinary_chat() {
+        let ctx = ContextResponse {
+            text: String::new(),
+            citations: Vec::new(),
+            excluded_sensitive: 0,
+        };
+        let req = ask_request(&[msg(IpcRole::User, "hi")], "what is a heron?", &ctx);
+        assert!(req.system.is_none(), "{:?}", req.system);
+        assert!(req.items.is_empty());
+        assert_eq!(
+            req.messages,
+            vec![
+                Message::user_text("hi"),
+                Message::user_text("what is a heron?")
+            ]
+        );
     }
 }

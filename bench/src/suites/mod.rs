@@ -5,6 +5,7 @@ pub mod draft;
 pub mod knowledge;
 pub mod memory;
 pub mod perf;
+pub mod perf_daemon;
 pub mod proactive;
 pub mod scale;
 

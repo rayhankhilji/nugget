@@ -22,6 +22,8 @@ sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
 getrandom = "0.3"
+# Liveness locks of egress ledger owners (same crate as the daemon lock in nugget-ipc).
+fs4 = "1"
 zeroize = "1"
 
 # OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.

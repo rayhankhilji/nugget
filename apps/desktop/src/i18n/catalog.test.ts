@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { LOCALES } from ".";
@@ -8,8 +8,10 @@ const DIR = join(__dirname, "locales");
 const load = (code: string): Record<string, string> => JSON.parse(readFileSync(join(DIR, `${code}.json`), "utf8"));
 const en = load("en");
 const enKeys = Object.keys(en).sort();
+/** Keys whose English text is also right in a translation (brand names, keys, format-only strings). */
+const sameAsEnglish: Record<string, string[]> = JSON.parse(readFileSync(join(__dirname, "same-as-english.json"), "utf8"));
 
-const full = LOCALES.filter((l) => l.code !== "en" && !l.stub);
+const full = LOCALES.filter((l) => l.code !== "en" && !l.stub && !l.pseudo);
 const stubs = LOCALES.filter((l) => l.stub);
 
 /** Plural categories each language actually uses (CLDR), from the platform's own data. */
@@ -23,7 +25,8 @@ describe("message catalogs", () => {
       .filter((f) => f.endsWith(".json"))
       .map((f) => f.slice(0, -5))
       .sort();
-    expect(files).toEqual(LOCALES.map((l) => l.code).sort());
+    // Pseudo-locales are generated from English and have no file.
+    expect(files).toEqual(LOCALES.filter((l) => !l.pseudo).map((l) => l.code).sort());
   });
 
   it("English messages all parse", () => {
@@ -82,6 +85,27 @@ describe("message catalogs", () => {
       }
       expect(bad).toEqual([]);
     });
+
+    it("has no message still in English unless allow-listed", () => {
+      const allowed = new Set([...(sameAsEnglish["*"] ?? []), ...(sameAsEnglish[code] ?? [])]);
+      const english = enKeys.filter((k) => cat[k] === en[k] && !allowed.has(k));
+      expect(english, `still English in ${code}.json (translate, or add to same-as-english.json)`).toEqual([]);
+    });
+
+    it("lists only real keys for review", () => {
+      const file = join(DIR, "review", `${code}.json`);
+      if (!existsSync(file)) return;
+      const review = JSON.parse(readFileSync(file, "utf8")) as { keys: string[] };
+      expect(Array.isArray(review.keys)).toBe(true);
+      expect(review.keys.filter((k) => !(k in en))).toEqual([]);
+    });
+  });
+
+  it("allow-lists only keys that exist, for locales that exist", () => {
+    for (const [code, keys] of Object.entries(sameAsEnglish)) {
+      if (code !== "*") expect(full.map((l) => l.code), `allow-list for unknown locale ${code}`).toContain(code);
+      expect(keys.filter((k) => !(k in en)), `unknown keys allow-listed under ${code}`).toEqual([]);
+    }
   });
 
   describe.each(stubs.map((l) => [l.code, l.dir]))("stub %s", (code, dir) => {

@@ -315,12 +315,18 @@ impl Daemon {
                 }
             }
         }
-        let models = Arc::new(
-            ModelStore::open(&paths, egress.clone())?.with_download_options(DownloadOptions {
-                parts: config.models.download_parts,
-                ..DownloadOptions::default()
-            }),
-        );
+        // Creates the models directory and an HTTP client (which loads TLS roots).
+        let models = {
+            let (paths, egress) = (paths.clone(), egress.clone());
+            Arc::new(
+                blocking(move || ModelStore::open(&paths, egress))
+                    .await?
+                    .with_download_options(DownloadOptions {
+                        parts: config.models.download_parts,
+                        ..DownloadOptions::default()
+                    }),
+            )
+        };
         let hardware = match overrides.hardware {
             Some(hw) => hw,
             None => blocking(|| Ok(nugget_models::detect_hardware())).await?,
@@ -404,7 +410,17 @@ impl Daemon {
             None => Arc::new(KeyringSecrets::new()),
         };
         let mut registry = opts.connectors.unwrap_or_else(sources::registry);
-        crate::features::plugins::connector_factories(&paths, &config)
+        // Opening the plugin store and compiling installed plugins is file and CPU work.
+        let plugin_factories = {
+            let (paths, config) = (paths.clone(), config.clone());
+            blocking(move || {
+                Ok(crate::features::plugins::connector_factories(
+                    &paths, &config,
+                ))
+            })
+            .await?
+        };
+        plugin_factories
             .into_iter()
             .for_each(|f| registry.register(f));
         let resolver =

@@ -7,7 +7,10 @@
 //! endpoint except `/health`, and serves:
 //! - `GET /health`: 503 while "loading" (see `--fake-start-delay-ms`), then `{"status":"ok"}`;
 //! - `GET /v1/models`;
-//! - `POST /v1/chat/completions` (JSON or SSE stream; refused with `--embedding`);
+//! - `POST /v1/chat/completions` (JSON or SSE stream; refused with `--embedding`): replies
+//!   "Hello from fake", unless a message holds numbered passages (a line starting `[1] `, as in
+//!   the daemon's `retrieve.ask` prompt): then it quotes the first words of passage 1's text and
+//!   cites it, `According to your notes, "<up to 8 words>" [1].`, streamed in several chunks;
 //! - `POST /v1/embeddings` (deterministic 8-dim unit vectors; needs `--embedding`);
 //! - `POST /v1/rerank` (also `/rerank`, `/v1/reranking`; needs `--reranking`): each document
 //!   scores the number of distinct query words it contains, Jina/Cohere response shape;
@@ -546,28 +549,34 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
             srv.prompt_tokens.fetch_add(5, Ordering::Relaxed);
             srv.predicted.fetch_add(2, Ordering::Relaxed);
             let alias = &srv.opts.alias;
+            let cited = cited_reply(&body);
             if body.get("stream").and_then(Value::as_bool) == Some(true) {
+                if let Some(reply) = &cited {
+                    let mut chunks = Vec::new();
+                    let words: Vec<&str> = reply.split_inclusive(' ').collect();
+                    for (i, piece) in words.chunks(3).enumerate() {
+                        let mut delta = json!({"content": piece.concat()});
+                        if i == 0 {
+                            delta["role"] = json!("assistant");
+                        }
+                        chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": delta}]}));
+                    }
+                    chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}));
+                    let n = words.len();
+                    chunks.push(json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": n, "total_tokens": 5 + n}}));
+                    return write_sse(&mut conn, &chunks).await;
+                }
                 let chunks = [
                     json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Hello"}}]}),
                     json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {"content": " from fake"}}]}),
                     json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
                     json!({"id": "c1", "object": "chat.completion.chunk", "model": alias, "choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}}),
                 ];
-                let mut out = String::new();
-                for c in chunks {
-                    out.push_str(&format!("data: {c}\n\n"));
-                }
-                out.push_str("data: [DONE]\n\n");
-                let head = format!(
-                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
-                    out.len()
-                );
-                conn.write_all(head.as_bytes()).await?;
-                conn.write_all(out.as_bytes()).await?;
-                return conn.shutdown().await;
+                return write_sse(&mut conn, &chunks).await;
             }
+            let content = cited.as_deref().unwrap_or("Hello from fake");
             let b = json!({"id": "c1", "object": "chat.completion", "model": alias,
-                "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hello from fake"}, "finish_reason": "stop"}],
+                "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}});
             respond(&mut conn, 200, &b).await
         }
@@ -613,6 +622,65 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
             respond(&mut conn, c, &b).await
         }
     }
+}
+
+/// Write `chunks` as an SSE response (`data: {chunk}` events, then `data: [DONE]`).
+async fn write_sse(conn: &mut (impl AsyncWrite + Unpin), chunks: &[Value]) -> std::io::Result<()> {
+    let mut out = String::new();
+    for c in chunks {
+        out.push_str(&format!("data: {c}\n\n"));
+    }
+    out.push_str("data: [DONE]\n\n");
+    let head = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        out.len()
+    );
+    conn.write_all(head.as_bytes()).await?;
+    conn.write_all(out.as_bytes()).await?;
+    conn.shutdown().await
+}
+
+/// The cited reply for a chat request whose messages hold numbered passages (a line starting
+/// with `[1] `, the passage header): up to eight words of passage 1's first text line, quoted
+/// and cited. `None` when there is no passage 1.
+fn cited_reply(body: &Value) -> Option<String> {
+    let texts = body
+        .get("messages")?
+        .as_array()?
+        .iter()
+        .filter_map(|m| match m.get("content") {
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(Value::Array(parts)) => Some(
+                parts
+                    .iter()
+                    .filter_map(|p| p.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            ),
+            _ => None,
+        });
+    for text in texts {
+        let mut lines = text.lines();
+        if lines.by_ref().any(|l| l.starts_with("[1] ")) {
+            let first = lines.map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+            // Plain words only, so the quote renders as text (no Markdown or citation syntax).
+            let words: Vec<String> = first
+                .split_whitespace()
+                .map(|w| {
+                    w.chars()
+                        .filter(|c| c.is_alphanumeric() || "'.,&-".contains(*c))
+                        .collect::<String>()
+                })
+                .filter(|w| !w.is_empty())
+                .take(8)
+                .collect();
+            return Some(format!(
+                "According to your notes, \"{}\" [1].",
+                words.join(" ")
+            ));
+        }
+    }
+    None
 }
 
 /// Deterministic unit vector from the text.

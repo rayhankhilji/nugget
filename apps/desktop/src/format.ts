@@ -1,5 +1,5 @@
 import { currentLocale, formatDate, t, type MessageKey } from "./i18n";
-import { numberFormat } from "./i18n/icu";
+import { dateFormat, numberFormat } from "./i18n/icu";
 
 const UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
 
@@ -132,4 +132,35 @@ export function splitList(text: string): string[] {
 export function baseName(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+/**
+ * ISO 8601 dates and date-times inside prose (`2026-11-10`, `2026-11-10T13:00:00Z`,
+ * `2026-11-10T13:00+02:00`). Not glued to other digits or letters, so ids and versions are left alone.
+ */
+const ISO_IN_TEXT =
+  /(?<![\w.:-])(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})?)?(?![\w:-])/g;
+
+/**
+ * `text` with its ISO dates and date-times written for the reader's locale: a bare date, or a
+ * date-time at exactly midnight UTC (how a day is often stored), as a date ("Nov 10, 2026");
+ * any other date-time as date and time in the local time zone ("Nov 10, 2026, 1:00 PM").
+ * For display only: the stored text keeps its ISO form. Invalid dates are left as they are.
+ * `locale` and `timeZone` are injectable for tests.
+ */
+export function formatDatesInText(text: string, locale?: string, timeZone?: string): string {
+  const loc = locale ?? currentLocale();
+  return text.replace(ISO_IN_TEXT, (whole, y: string, mo: string, d: string, h?: string, mi?: string, sec?: string, zone?: string) => {
+    const day = new Date(Date.UTC(+y, +mo - 1, +d));
+    // Reject impossible dates (2026-02-31, month 13) instead of letting Date roll them over.
+    if (day.getUTCFullYear() !== +y || day.getUTCMonth() !== +mo - 1 || day.getUTCDate() !== +d) return whole;
+    const utcDay = { dateStyle: "medium", timeZone: "UTC" } as const;
+    if (h === undefined) return dateFormat(loc, utcDay).format(day);
+    if (+h > 23 || +mi! > 59 || +(sec ?? 0) > 59) return whole;
+    const midnight = +h === 0 && +mi! === 0 && +(sec ?? 0) === 0;
+    if (midnight && zone && /^(?:Z|[+-]00:?00)$/.test(zone)) return dateFormat(loc, utcDay).format(day);
+    const at = new Date(whole.replace(" ", "T").replace(/([+-]\d{2})(\d{2})$/, "$1:$2"));
+    if (Number.isNaN(at.getTime())) return whole;
+    return dateFormat(loc, { dateStyle: "medium", timeStyle: "short", ...(timeZone ? { timeZone } : {}) }).format(at);
+  });
 }

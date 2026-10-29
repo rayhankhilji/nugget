@@ -494,6 +494,10 @@ pub struct AskStarted {
     /// The standalone query actually searched, when the follow-up was rewritten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub query_rewrite: Option<String>,
+    /// Nothing relevant was found in the sources, so the model answers as an ordinary chat
+    /// (no passages, no citations). Clients should say so on the reply.
+    #[serde(default)]
+    pub general: bool,
 }
 
 // ---- local runtime ----

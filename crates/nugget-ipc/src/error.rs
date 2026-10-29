@@ -41,6 +41,11 @@ pub mod code {
     pub const MESSAGE_TOO_LARGE: i64 = -32008;
     /// The source or provider needs (re)authorization or a credential.
     pub const UNAUTHORIZED: i64 = -32009;
+    /// The connection already has its maximum of requests running (see
+    /// [`ServerOptions::max_in_flight`](crate::ServerOptions::max_in_flight)). The request was
+    /// not run; retry once one of the connection's earlier calls has finished. `data` is
+    /// `{"max_in_flight": n}`. Maps to `nugget_core::Error::RateLimited`.
+    pub const SERVER_BUSY: i64 = -32010;
 }
 
 /// A JSON-RPC 2.0 error object, exactly as serialized on the wire.
@@ -89,6 +94,15 @@ impl RpcError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(code::INTERNAL_ERROR, message)
+    }
+
+    /// [`code::SERVER_BUSY`]: the connection is at its in-flight cap of `max_in_flight`.
+    pub fn busy(max_in_flight: usize) -> Self {
+        Self::new(
+            code::SERVER_BUSY,
+            format!("too many requests in flight on this connection (max {max_in_flight})"),
+        )
+        .with_data(serde_json::json!({ "max_in_flight": max_in_flight }))
     }
 
     pub fn too_large(len: usize) -> Self {
@@ -152,6 +166,9 @@ impl From<RpcError> for nugget_core::Error {
             code::IO => E::Io(std::io::Error::other(m)),
             code::CANCELLED => E::Cancelled,
             code::UNAUTHORIZED => E::Unauthorized(m),
+            code::SERVER_BUSY => E::RateLimited {
+                retry_after_ms: None,
+            },
             _ => E::Other(m),
         }
     }
@@ -187,6 +204,12 @@ impl IpcError {
     /// True when the daemon is unreachable or went away, i.e. reconnecting may help.
     pub fn is_disconnect(&self) -> bool {
         matches!(self, Self::Connect(_) | Self::Disconnected | Self::Io(_))
+    }
+
+    /// True when the server refused the call because the connection was at its in-flight cap
+    /// ([`code::SERVER_BUSY`]). The call did not run, so retrying it later is safe.
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Rpc(e) if e.code == code::SERVER_BUSY)
     }
 
     /// The JSON-RPC error, if the server answered with one.

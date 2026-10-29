@@ -14,8 +14,7 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use nugget_connector::http::MeteredHttp;
@@ -162,12 +161,72 @@ struct HostInner {
     /// Compiled components by SHA-256, shared by every load of the same bytes.
     compiled: Mutex<HashMap<String, Component>>,
     kv: Mutex<HashMap<PathBuf, Weak<KvNamespace>>>,
-    stop_ticker: Arc<AtomicBool>,
+    ticker: Arc<EpochTicker>,
+}
+
+/// Advances the engine's epoch every [`EPOCH_TICK`] while at least one plugin call is running,
+/// and parks otherwise, so an idle host costs no wakeups. Deadlines are relative to the epoch
+/// when a call starts, so pausing between calls does not change them.
+#[derive(Default)]
+struct EpochTicker {
+    state: Mutex<TickerState>,
+    cv: Condvar,
+}
+
+#[derive(Default)]
+struct TickerState {
+    active: usize,
+    stop: bool,
+}
+
+/// One running call; the ticker runs while any exists.
+struct Ticking<'a>(&'a EpochTicker);
+
+impl Drop for Ticking<'_> {
+    fn drop(&mut self) {
+        let mut st = self.0.lock();
+        st.active = st.active.saturating_sub(1);
+    }
+}
+
+impl EpochTicker {
+    fn lock(&self) -> std::sync::MutexGuard<'_, TickerState> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn begin(&self) -> Ticking<'_> {
+        self.lock().active += 1;
+        self.cv.notify_all();
+        Ticking(self)
+    }
+
+    fn stop(&self) {
+        self.lock().stop = true;
+        self.cv.notify_all();
+    }
+
+    /// The ticker thread's loop; returns once stopped.
+    fn run(&self, engine: &Engine) {
+        let mut st = self.lock();
+        loop {
+            if st.stop {
+                return;
+            }
+            if st.active == 0 {
+                st = self.cv.wait(st).unwrap_or_else(|p| p.into_inner());
+                continue;
+            }
+            drop(st);
+            std::thread::sleep(EPOCH_TICK);
+            engine.increment_epoch();
+            st = self.lock();
+        }
+    }
 }
 
 impl Drop for HostInner {
     fn drop(&mut self) {
-        self.stop_ticker.store(true, Ordering::Relaxed);
+        self.ticker.stop();
     }
 }
 
@@ -188,18 +247,13 @@ impl PluginHost {
             .epoch_interruption(true)
             .max_wasm_stack(1024 * 1024);
         let engine = Engine::new(&cfg).map_err(|e| Error::Other(format!("wasmtime: {e:#}")))?;
-        let stop_ticker = Arc::new(AtomicBool::new(false));
+        let ticker = Arc::new(EpochTicker::default());
         {
             let engine = engine.clone();
-            let stop = stop_ticker.clone();
+            let ticker = ticker.clone();
             std::thread::Builder::new()
                 .name("nugget-plugin-epoch".into())
-                .spawn(move || {
-                    while !stop.load(Ordering::Relaxed) {
-                        std::thread::sleep(EPOCH_TICK);
-                        engine.increment_epoch();
-                    }
-                })?;
+                .spawn(move || ticker.run(&engine))?;
         }
         let net_guard = (!config.allow_private_network).then(NetGuard::default);
         let client = match config.http_client {
@@ -229,7 +283,7 @@ impl PluginHost {
                 net_guard,
                 compiled: Mutex::new(HashMap::new()),
                 kv: Mutex::new(HashMap::new()),
-                stop_ticker,
+                ticker,
             }),
         })
     }
@@ -665,6 +719,8 @@ impl LoadedPlugin {
             wasmtime::Result::<()>::Ok(())
         })();
         setup.map_err(|e| Error::Other(format!("wasmtime: {e:#}")))?;
+        // The epoch only advances while some call is running (see `EpochTicker`).
+        let _ticking = self.host.ticker.begin();
         let ticks = (timeout.as_millis() / EPOCH_TICK.as_millis()).max(1) as u64 + 1;
         store.set_epoch_deadline(ticks);
         store.epoch_deadline_trap();

@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { api, errorMessage, events, type ModelInfo, type ModelProgress } from "../api";
+import { api, errorMessage, events, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader } from "../components/ui";
 import { t as translate, useT, type MessageKey } from "../i18n";
+import { FitNotes, loadFit, MachineLine } from "../onboarding/ModelFit";
 
 const PHASES = new Set(["downloading", "verifying", "installed", "failed"]);
 
@@ -15,6 +16,7 @@ export function phaseLabel(phase: string): string {
 export function ModelsPage() {
   const t = useT();
   const models = useAsync(api.modelsList);
+  const fit = useAsync(loadFit); // `null` on an older daemon: no explanations
   const [progress, setProgress] = useState<Record<string, ModelProgress>>({});
   const [requestError, setRequestError] = useState<Record<string, string>>({});
 
@@ -52,6 +54,7 @@ export function ModelsPage() {
           </button>
         }
       />
+      {fit.data && <MachineLine report={fit.data} />}
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && <Loading label={t("models.loading")} />}
       {models.data && list.length === 0 && (
@@ -77,6 +80,7 @@ export function ModelsPage() {
               model={m}
               progress={progress[m.id]}
               error={requestError[m.id]}
+              fit={fit.data}
               onInstall={() => void install(m.id)}
             />
           ))}
@@ -90,11 +94,13 @@ function ModelCard({
   model,
   progress,
   error,
+  fit,
   onInstall,
 }: {
   model: ModelInfo;
   progress?: ModelProgress;
   error?: string;
+  fit?: FitReport | null;
   onInstall: () => void;
 }) {
   const t = useT();
@@ -103,6 +109,7 @@ function ModelCard({
   const installed = model.installed || progress?.phase === "installed";
   const pct = progress ? percent(progress.downloaded, progress.total || model.size_bytes) : 0;
   const labelId = `model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  const modelFit = fit?.models.find((f) => f.id === model.id);
 
   return (
     <li className="card" aria-labelledby={labelId}>
@@ -116,6 +123,7 @@ function ModelCard({
         </span>
       </div>
       <p className="muted small">{formatBytes(model.size_bytes)}</p>
+      {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} />}
 
       {busy && progress && (
         <div className="progress">
