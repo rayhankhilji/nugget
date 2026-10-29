@@ -4,7 +4,10 @@
 //! CI plumbing are exercised end to end. `--backend real` measures the real encrypted
 //! `nugget-store` and `nugget-retrieve` (written directly, without the ingest pipeline): write
 //! throughput, text, vector and hybrid search, `Retriever::search` and `build_context` latency,
-//! vector recall against exact search and edit freshness (see [`crate::suites::scale`]).
+//! vector recall against exact search and edit freshness (see [`crate::suites::scale`]); then the
+//! `nuggetd` binary itself on a seeded store, over IPC: startup, search, knowledge extraction,
+//! the vault render, idle CPU and wakeups, RSS and ingest (`daemon.*`, see
+//! [`crate::suites::perf_daemon`]; skipped when no binary is found).
 
 use std::time::Instant;
 
@@ -52,7 +55,11 @@ impl Benchmark for PerfBench {
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
         match ctx.backend() {
             Backend::Fake => run_with(ctx, &PerfParams::for_scale(ctx.scale())),
-            Backend::Real => crate::suites::scale::run(ctx),
+            Backend::Real => {
+                let mut out = crate::suites::scale::run(ctx)?;
+                out.extend(crate::suites::perf_daemon::run(ctx)?);
+                Ok(out)
+            }
         }
     }
 }
