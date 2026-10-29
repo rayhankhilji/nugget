@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":7,"result":{"ok":true}}
+{"jsonrpc":"2.0","id":"a","error":{"code":-32601,"message":"nope","data":[1]}}

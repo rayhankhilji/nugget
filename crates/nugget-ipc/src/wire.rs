@@ -200,6 +200,38 @@ fn decode_response(id: Option<Value>, mut obj: Map<String, Value>) -> Incoming {
     Incoming::Response { id, result }
 }
 
+/// Fuzzing entry point (`fuzz/fuzz_targets/ipc_frame.rs`); not part of the API.
+///
+/// Splits `data` into lines with the same codec and cap as a live connection, decodes every line
+/// as the server and client do, and re-encodes the reply the server would send. Must never panic.
+#[doc(hidden)]
+pub fn fuzz_frames(data: &[u8]) {
+    use tokio_util::bytes::BytesMut;
+    use tokio_util::codec::Decoder;
+
+    let mut codec = LinesCodec::new_with_max_length(MAX_MESSAGE_BYTES);
+    let mut buf = BytesMut::from(data);
+    loop {
+        match codec.decode_eof(&mut buf) {
+            Ok(Some(line)) => match decode(&line) {
+                Incoming::Invalid { id, error } => {
+                    let _ = response_line_or_error(&id, &Err(error));
+                }
+                Incoming::Request { id, .. } => {
+                    let id = id.unwrap_or(Value::Null);
+                    let _ = response_line_or_error(&id, &Ok(Value::Null));
+                }
+                Incoming::Response { id, result } => {
+                    let _ = response_line_or_error(&id, &result);
+                }
+            },
+            Ok(None) => break,
+            // Over-long or non-UTF-8 lines end the connection in the real loops.
+            Err(_) => break,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
