@@ -12,6 +12,7 @@
 pub mod agent;
 pub mod apps;
 pub mod desktop;
+pub mod env_ax;
 pub mod env_native;
 pub mod env_uia;
 pub mod nugget;
@@ -87,7 +88,7 @@ pub enum CuaEnv {
     /// app. Linux only.
     Xvfb,
     /// Socket plus the machine's own desktop: an Edge window per app, read and driven through
-    /// UI Automation ([`env_native`]). Windows only.
+    /// UI Automation, on Windows; a Chrome window per app over AX on macOS ([`env_native`]).
     Native,
 }
 
@@ -260,10 +261,14 @@ pub fn run_tasks(
     }
     if let Some(d) = &native {
         let n = |c: &std::sync::atomic::AtomicU32| c.load(std::sync::atomic::Ordering::Relaxed);
-        notes.insert("uia_window_reads".into(), json!(n(&d.driver.reads)));
-        notes.insert("uia_unsettled_reads".into(), json!(n(&d.driver.unsettled)));
+        let a = d.info.accessibility;
+        notes.insert(format!("{a}_window_reads"), json!(n(&d.driver.reads)));
         notes.insert(
-            "uia_keyboard_fallbacks".into(),
+            format!("{a}_unsettled_reads"),
+            json!(n(&d.driver.unsettled)),
+        );
+        notes.insert(
+            format!("{a}_keyboard_fallbacks"),
             json!(n(&d.driver.fallbacks)),
         );
     }

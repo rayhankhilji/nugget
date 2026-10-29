@@ -1,7 +1,8 @@
 //! The id mapping and the native session over a fake browser: a `ComputerUse` that renders each
 //! app the way Chromium exposes the HTML front end (title bar, `<h1>`, labels before fields,
 //! text inside buttons, ` (on)` after switches, a select's options as list items, the status
-//! line) under its own ids, and posts actions to the world as the page's script would.
+//! line) under its own ids, and posts actions to the world as the page's script would. With
+//! `ax` set it shows the tree the way Chrome does over AX on macOS instead (see [`axify`]).
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -38,6 +39,8 @@ struct FakeEdge {
     status: Mutex<HashMap<String, String>>,
     /// Pattern calls that change nothing (a page that ignores them), to exercise the keyboard.
     ignore_set_value: bool,
+    /// Present the tree as Chrome does over AX on macOS.
+    ax: bool,
     typed: Mutex<HashMap<ElementId, String>>,
 }
 
@@ -49,6 +52,7 @@ impl FakeEdge {
             ids: Mutex::new(HashMap::new()),
             status: Mutex::new(HashMap::new()),
             ignore_set_value: false,
+            ax: false,
             typed: Mutex::new(HashMap::new()),
         }
     }
@@ -246,7 +250,10 @@ impl ComputerUse for FakeEdge {
             .iter()
             .position(|a| *a == app)
             .ok_or_else(|| Error::NotFound(app.clone()))?;
-        let (_, root) = self.page(&app);
+        let (_, mut root) = self.page(&app);
+        if self.ax {
+            axify(&mut root, false);
+        }
         Ok(UiTree {
             app: AppInfo {
                 id: None,
@@ -283,10 +290,11 @@ impl ComputerUse for FakeEdge {
                 target: t,
                 text: value.clone(),
             }),
-            (Real::Option(t, o), UiAction::Select) => self.post(Action::Select {
-                target: t,
-                option: o,
-            }),
+            (Real::Option(t, o), UiAction::Select) | (Real::Option(t, o), UiAction::Press) => self
+                .post(Action::Select {
+                    target: t,
+                    option: o,
+                }),
             (_, UiAction::Focus | UiAction::Scroll { .. }) => done(),
             _ => Err(Error::Unsupported("fake".into())),
         }
@@ -324,6 +332,58 @@ impl ComputerUse for FakeEdge {
     }
     fn open_app(&self, _name: &str) -> Result<ActionOutcome> {
         Err(Error::Unsupported("fake".into()))
+    }
+}
+
+/// A UIA-style fake tree as Chrome shows it over AX on macOS (after the AX backend has named
+/// labelled controls from their AXTitleUIElement): static text in `AXValue`, `aria-label`s as
+/// descriptions, a `<select>` as an `AXPopUpButton` (a button) whose options are menu items
+/// to press, switches as `AXCheckBox`/`AXSwitch`.
+fn axify(n: &mut UiNode, in_combo: bool) {
+    let combo = n.role == A11yRole::ComboBox;
+    let raw = match n.role {
+        A11yRole::StaticText => {
+            n.value = n.name.take();
+            "AXStaticText"
+        }
+        A11yRole::Window => "AXWindow",
+        A11yRole::WebArea => "AXWebArea",
+        A11yRole::Heading => "AXHeading",
+        A11yRole::TextField => "AXTextField",
+        A11yRole::TextArea => "AXTextArea",
+        A11yRole::CheckBox => "AXCheckBox",
+        A11yRole::Button if n.states.checked.is_some() => {
+            n.role = A11yRole::CheckBox;
+            "AXCheckBox/AXSwitch"
+        }
+        A11yRole::Button => "AXButton",
+        A11yRole::ComboBox => {
+            n.role = A11yRole::Button;
+            n.actions = vec![K::Press, K::Focus, K::Expand];
+            "AXPopUpButton"
+        }
+        A11yRole::List if in_combo => {
+            n.role = A11yRole::Menu;
+            "AXMenu"
+        }
+        A11yRole::ListItem if in_combo => {
+            n.role = A11yRole::MenuItem;
+            n.actions = vec![K::Press];
+            "AXMenuItem"
+        }
+        A11yRole::List => {
+            n.description = n.name.take();
+            "AXList"
+        }
+        _ => {
+            n.role = A11yRole::Group;
+            n.description = n.name.take();
+            "AXGroup"
+        }
+    };
+    n.raw_role = raw.into();
+    for c in &mut n.children {
+        axify(c, in_combo || combo);
     }
 }
 
@@ -421,6 +481,81 @@ fn matching_skips_decoys_and_checks_state() {
         Node::window("forms", "Change of address").child(Node::button("forms.back", "Back"));
     let m = match_tree(&other, &real);
     assert_eq!(m.missing, vec!["forms.back".to_owned()]);
+}
+
+#[test]
+fn matching_reads_chrome_over_ax() {
+    let bench = Node::window("forms", "Change of address")
+        .child(Node::text("forms.intro", "Email"))
+        .child(Node::textbox("forms.email", "Email", "a@b.c"))
+        .child(Node::switch("forms.news", "Newsletter", true))
+        .child(Node::combo(
+            "forms.country",
+            "Country",
+            "Germany",
+            vec!["France".into(), "Germany".into()],
+        ))
+        .child(Node::list("forms.recent", "Recent").child(Node::item("forms.r1", "Paris")))
+        .child(Node::button("forms.next", "Next"));
+    let fake = FakeEdge::new(Stage::new());
+    let mut real = rn(A11yRole::Window, "Change of address");
+    for b in &bench.children {
+        fake.render(b, &mut real.children);
+    }
+    axify(&mut real, false);
+    // Unnormalised, the static text, the list and the select are not found.
+    assert!(!match_tree(&bench, &real).consistent());
+    normalize(&mut real);
+    let m = match_tree(&bench, &real);
+    assert!(m.consistent(), "{m:?}");
+    assert_eq!(m.nodes["forms.intro"].raw_role, "AXStaticText");
+    assert_eq!(m.nodes["forms.email"].raw_role, "AXTextField");
+    assert_eq!(m.nodes["forms.news"].states.checked, Some(true));
+    assert_eq!(m.nodes["forms.country"].role, A11yRole::ComboBox);
+    assert_eq!(m.nodes["forms.recent"].name.as_deref(), Some("Recent"));
+    assert_eq!(m.options.len(), 2);
+    assert_eq!(m.options["forms.country.opt0"].raw_role, "AXMenuItem");
+    let tree = present(&bench, &m, None);
+    let country = tree.find(&ElementId("forms-country".into())).unwrap();
+    assert_eq!(country.role, A11yRole::ComboBox);
+    assert!(country.children[1].states.selected);
+}
+
+#[test]
+fn driver_selects_a_chrome_option_by_pressing_it() {
+    let (t, stage, driver) = setup("forms-fill-basic", |s| FakeEdge {
+        ax: true,
+        ..FakeEdge::new(s)
+    });
+    let mut session = EpisodeSession::new(Transport::Local(stage.clone()), t.max_steps, None);
+    let mut s = NativeSession::new(&mut session, stage.clone(), driver.clone(), 5);
+    let obs = s.observe().unwrap();
+    let mut all = Vec::new();
+    for w in &obs.windows {
+        w.walk(&mut all);
+    }
+    let Some(combo) = all
+        .into_iter()
+        .find(|n| n.role == Role::ComboBox && n.enabled && n.options.len() > 1)
+    else {
+        return;
+    };
+    let want = combo
+        .options
+        .iter()
+        .find(|o| combo.value.as_deref() != Some(o.as_str()))
+        .unwrap()
+        .clone();
+    let r = s
+        .act(&Action::Select {
+            target: combo.id.clone(),
+            option: want.clone(),
+        })
+        .unwrap();
+    assert!(r.ok, "{r:?}");
+    assert_eq!(driver.fallbacks.load(Ordering::Relaxed), 0);
+    let now = stage.with(|w| w.observe()).unwrap();
+    assert_eq!(now.find(&combo.id).unwrap().value.as_deref(), Some(&*want));
 }
 
 #[test]
@@ -534,8 +669,11 @@ fn keyboard_fallback_when_the_page_ignores_set_value() {
 
 /// The whole nugget arm, its tools reading the fake real windows: every action goes through the
 /// fake's accessibility actions, and the scripted model finds its targets by bench id.
-fn nugget_arm(id: &str) {
-    let (t, stage, driver) = setup(id, FakeEdge::new);
+fn nugget_arm(id: &str, ax: bool) {
+    let (t, stage, driver) = setup(id, |s| FakeEdge {
+        ax,
+        ..FakeEdge::new(s)
+    });
     let _reg = register(driver.clone());
     let mut agent = NuggetAgent::new(std::slice::from_ref(&t));
     let mut session = EpisodeSession::new(Transport::Local(stage.clone()), t.max_steps, None);
@@ -551,7 +689,14 @@ fn nugget_arm(id: &str) {
 
 #[test]
 fn nugget_arm_fills_a_form_over_the_real_tree() {
-    nugget_arm("forms-fill-basic");
+    nugget_arm("forms-fill-basic", false);
+}
+
+#[test]
+fn nugget_arm_fills_a_form_over_chrome_ax() {
+    for id in ["forms-fill-basic", "forms-fix-email", "forms-no-newsletter"] {
+        nugget_arm(id, true);
+    }
 }
 
 #[test]
@@ -562,5 +707,6 @@ fn nugget_arm_organises_files_over_the_real_tree() {
         .find(|t| t.app() == "files" && t.injection.is_none() && t.user.deny.is_empty())
         .unwrap()
         .id;
-    nugget_arm(&id);
+    nugget_arm(&id, false);
+    nugget_arm(&id, true);
 }

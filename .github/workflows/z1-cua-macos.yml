@@ -1,0 +1,101 @@
+name: Z1 cua macOS (temporary)
+
+# Temporary iteration workflow for the macOS computer-use job; the job below is folded into
+# real-os.yml as-is.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [z/desktop-coverage]
+    paths:
+      - "bench/src/suites/cua/**"
+      - "crates/nugget-a11y/src/platform/macos/**"
+      - ".github/workflows/z1-cua-macos.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  NO_COLOR: "1"
+
+jobs:
+  # ---- computer use over real AX ----
+  # `bench cua` in the native environment on macOS: one Google Chrome app window per test app,
+  # read and driven through real AX (bench/src/suites/cua/env_ax.rs). Same tasks, agents and
+  # --strict as cua-windows.
+  cua-macos:
+    name: Computer use over AX (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cua-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: TCC evidence (what the runner grants)
+        run: sh tests/fixtures/native/macos/tcc-evidence.sh
+
+      # Background Chrome windows keep their timers (the pages poll for world changes).
+      - name: Chrome and App Nap
+        run: |
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --version
+          defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
+
+      - name: Build nugget-bench
+        run: cargo build --locked -p nugget-bench
+
+      - name: bench cua, nugget arm, native env
+        run: |
+          mkdir -p "$RUNNER_TEMP/cua-native"
+          set -o pipefail
+          NUGGET_CUA_DUMP="$RUNNER_TEMP/cua-native/trees" \
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent nugget \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/nugget" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/nugget.log"
+
+      - name: bench cua, reference agent, native env
+        if: always()
+        run: |
+          set -o pipefail
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent reference \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/reference" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/reference.log"
+
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        run: screencapture -x "$RUNNER_TEMP/cua-native/screen.png"
+
+      - name: Summary
+        if: always()
+        run: |
+          for arm in nugget reference; do
+            f="$RUNNER_TEMP/cua-native/$arm.log"
+            [ -f "$f" ] || continue
+            {
+              echo "### bench cua --cua-env native --cua-agent $arm (forms, files), macOS AX"
+              echo '```'
+              grep -E '^== cua|tasks\.|^  success_rate |steps\.|wall_time\.|safety\.|target |ax_|cua native' "$f" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: cua-native-macos
+          path: ${{ runner.temp }}/cua-native
+          if-no-files-found: warn

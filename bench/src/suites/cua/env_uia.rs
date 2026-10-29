@@ -1,6 +1,8 @@
-//! Real accessibility for the `native` environment: the app windows (Edge, see
-//! [`super::env_native`]) read and driven through the OS accessibility API
-//! (`nugget_a11y::system_computer()`, UI Automation on Windows).
+//! Real accessibility for the `native` environment: the app windows (Edge on Windows, Chrome on
+//! macOS, see [`super::env_native`]) read and driven through the OS accessibility API
+//! (`nugget_a11y::system_computer()`: UI Automation on Windows, AX on macOS). Nothing here is
+//! specific to one OS: it works on any [`ComputerUse`]. Each snapshot is first put in the
+//! matcher's conventions by [`super::env_ax::normalize`] (a no-op for UIA trees).
 //!
 //! - **Matching.** A web page's accessibility tree has no bench ids (`UiNode` carries no
 //!   automation id), so the real tree of an app window is matched to the app's bench tree
@@ -42,6 +44,7 @@ use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 
 use super::agent::{ActResult, EnvError};
+use super::env_ax::normalize;
 use super::nugget_env::{WorldPort, decode_id, encode_id};
 use super::ui::{Action, Node, Observation, Role, app_of, check_action};
 
@@ -430,11 +433,21 @@ fn ok() -> ActResult {
     }
 }
 
-fn chord(key: Key, ctrl: bool) -> KeyChord {
+fn chord(key: Key) -> KeyChord {
     KeyChord {
         key,
+        modifiers: Modifiers::default(),
+    }
+}
+
+/// Select all: Command+A on macOS, Ctrl+A elsewhere.
+fn select_all() -> KeyChord {
+    let mac = cfg!(target_os = "macos");
+    KeyChord {
+        key: Key::Char('a'),
         modifiers: Modifiers {
-            ctrl,
+            ctrl: !mac,
+            meta: mac,
             ..Modifiers::default()
         },
     }
@@ -490,9 +503,10 @@ impl UiaDriver {
                 let window = self.real_window(app, &b.name)?;
                 self.reads
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let tree = self
+                let mut tree = self
                     .sys
                     .snapshot(&WindowSel::Id(window.id.clone()), &real_limits())?;
+                normalize(&mut tree.root);
                 let matched = match_tree(&b, &tree.root);
                 Ok(Located {
                     window,
@@ -578,6 +592,13 @@ impl UiaDriver {
                     .position(|o| o == option)
                     .and_then(|i| located.matched.options.get(&option_id(target, i)));
                 match opt {
+                    // AX exposes a closed `<select>`'s options as menu items to press.
+                    Some(o)
+                        if !o.actions.contains(&UiActionKind::Select)
+                            && o.actions.contains(&UiActionKind::Press) =>
+                    {
+                        self.sys.act(&o.id, &UiAction::Press)
+                    }
                     Some(o) => self.sys.act(&o.id, &UiAction::Select),
                     None => self.sys.act(
                         &real.id,
@@ -596,13 +617,13 @@ impl UiaDriver {
         let fallback = match action {
             Action::Click { .. } => None,
             Action::Type { text, .. } => Some(vec![
-                KeyInput::Keys(vec![chord(Key::Char('a'), true)]),
+                KeyInput::Keys(vec![select_all()]),
                 KeyInput::Text(text.clone()),
-                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab), false)]),
+                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
             Action::Select { option, .. } => Some(vec![
                 KeyInput::Text(option.clone()),
-                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab), false)]),
+                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
         };
         if let Some(inputs) = fallback {
@@ -649,10 +670,11 @@ impl UiaDriver {
     fn status(&self, app: &str, bench: &dyn Fn() -> Result<Node>) -> Option<String> {
         let b = bench().ok()?;
         let w = self.real_window(app, &b.name).ok()?;
-        let tree = self
+        let mut tree = self
             .sys
             .snapshot(&WindowSel::Id(w.id), &real_limits())
             .ok()?;
+        normalize(&mut tree.root);
         let m = match_tree(&b, &tree.root);
         m.trailing.into_iter().next()
     }
