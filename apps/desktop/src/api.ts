@@ -828,6 +828,10 @@ interface ApiErrorPayload {
 
 /** JSON-RPC "method not found": the daemon predates this feature. */
 export const METHOD_NOT_FOUND = -32601;
+/** JSON-RPC code for a connection at its in-flight cap: the call did not run; retry shortly. */
+export const SERVER_BUSY = -32010;
+/** Waits before each retry of a busy call, about a second in all (the shell retries too). */
+export const BUSY_BACKOFF_MS = [100, 300, 600] as const;
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
@@ -846,6 +850,11 @@ export class ApiError extends Error {
   }
 
   /** True when the daemon doesn't implement the method (an older daemon version). */
+  /** The daemon turned the call away as busy; it did not run. */
+  get isBusy(): boolean {
+    return this.kind === "rpc" && this.code === SERVER_BUSY;
+  }
+
   get isMethodNotFound(): boolean {
     return this.kind === "rpc" && this.code === METHOD_NOT_FOUND;
   }
@@ -884,10 +893,24 @@ async function call<T>(command: string, args?: InvokeArgs): Promise<T> {
   if (!inTauri()) {
     throw new ApiError({ kind: "unavailable", message: t("common.notInApp") });
   }
-  try {
-    return await invoke<T>(command, args);
-  } catch (err) {
-    throw ApiError.from(err);
+  return withBusyRetry(() => invoke<T>(command, args));
+}
+
+const sleepMs = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Run `fn`, retrying with {@link BUSY_BACKOFF_MS} while the daemon answers "busy"
+ * ({@link SERVER_BUSY}), so a momentary overload is not shown as an error. Throws an `ApiError`.
+ */
+export async function withBusyRetry<T>(fn: () => Promise<T>, sleep: (ms: number) => Promise<void> = sleepMs): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const e = ApiError.from(err);
+      if (!e.isBusy || attempt >= BUSY_BACKOFF_MS.length) throw e;
+      await sleep(BUSY_BACKOFF_MS[attempt]!);
+    }
   }
 }
 
