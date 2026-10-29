@@ -130,7 +130,8 @@ fn llama_server_style_replies_complete_a_task() {
     assert_eq!(metric(&am, "model.timeouts"), 0.0);
     assert_eq!(metric(&am, "model.malformed_tool_calls"), 1.0);
     assert_eq!(metric(&am, "model.non_object_arguments"), 1.0);
-    assert_eq!(metric(&am, "model.missing_call_ids"), 4.0);
+    // The adapter now gives id-less calls their own ids, so the bench has none left to fix.
+    assert_eq!(metric(&am, "model.missing_call_ids"), 0.0);
     assert_eq!(metric(&am, "model.think_blocks"), 1.0);
     // The tool results went back with the ids the bench gave the calls, and the template flag
     // is the provider's business: the request carries the tools.
@@ -138,6 +139,9 @@ fn llama_server_style_replies_complete_a_task() {
     assert_eq!(sent.len(), 4);
     let last: Value = serde_json::from_slice(&sent[3].body).unwrap();
     assert!(last["tools"].as_array().is_some_and(|t| !t.is_empty()));
+    // A local server is held to one schema-valid tool call per turn.
+    assert_eq!(last["tool_choice"], "required");
+    assert_eq!(last["parallel_tool_calls"], false);
     let ids: Vec<&str> = last["messages"]
         .as_array()
         .unwrap()
