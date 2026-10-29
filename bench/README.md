@@ -718,7 +718,8 @@ Full methodology, task format, environments and how to plug in the real agent:
   a calendar, a shop checkout with **Pay**, and settings with dangerous toggles. Each exposes its
   true state on a test-only socket. They run in process (`inproc`, any OS, the CI default),
   behind a loopback socket (`socket`), on a real Linux desktop (`xvfb`), or natively on Windows
-  through UI Automation (`native`, see [Native environments](#native-environments)). The desktop has
+  through UI Automation and on macOS through AX (`native`, see
+  [Native environments](#native-environments)). The desktop has
   Xvfb, a window manager, D-Bus, the AT-SPI bus and a kiosk Chromium window per app, and can be
   started by `cua/env/desktop.sh`.
 - **Tasks.** 51 tasks in `cua/tasks/*.json`, each with a start state and state-based checks.
@@ -778,8 +779,8 @@ the attacker's address typed in, and the user approves the Submit they asked for
 ## Native environments
 
 `--cua-env native` runs the `cua` apps on the machine's own desktop and drives them through the
-OS accessibility API. It exists on Windows (UI Automation); elsewhere it fails with a clear error
-(on Linux, `xvfb` is the equivalent).
+OS accessibility API. It exists on Windows (UI Automation) and macOS (AX); elsewhere it fails with
+a clear error (on Linux, `xvfb` is the equivalent).
 
 - **Windows.** The apps are served on the loopback socket and each gets a Microsoft Edge app
   window (`msedge --app=<url> --force-renderer-accessibility`, a throwaway profile, tiled 3×2,
@@ -789,14 +790,27 @@ OS accessibility API. It exists on Windows (UI Automation); elsewhere it fails w
   SelectionItem for a list option, and typing (select all, the text, Tab) when the page ignores
   the pattern call. The page posts the change to the apps server like a user's input, and the
   action counts once the world changes.
-- **The `nugget` arm** reads the windows over UI Automation as well. Its computer-use backend
+- **macOS.** The same, with a Google Chrome app window per app (`Google Chrome --app=<url>
+  --force-renderer-accessibility --use-mock-keychain`, a throwaway profile each, so each window is
+  its own process and maps to its app by pid). Chrome is preinstalled on GitHub's macOS images;
+  `NUGGET_CUA_CHROME` overrides it. The bench process needs the Accessibility permission.
+  `env_ax.rs` first puts Chrome's AX tree in the matcher's conventions: static text carries its
+  text in `AXValue`, an `aria-label` is an `AXDescription`, and a `<select>` is an
+  `AXPopUpButton` that shows only its selected option. A `<label for>` names its field through
+  `AXTitleUIElement`, which the AX backend now reads into the field's name. Clicks are `AXPress`,
+  text is a settable `AXValue`. A `<select>` takes a set `AXValue` but fires no `change`, so
+  options are chosen by type-ahead: the field is focused (which now raises its window and makes
+  its app frontmost, so the keys reach it) and the option's letters are pressed.
+- **The `nugget` arm** reads the windows over UI Automation (AX on macOS) as well. Its computer-use backend
   (`env_uia.rs`) matches each window's UIA tree to the app's bench tree by role class, accessible
   name and document order. It waits until the window shows the bench state, so a page that has
   not reloaded yet is never read. It shows the model bench ids (`[forms-next]`) with the real
   names, values, states and bounds.
 - **Run it:** `cargo run -p nugget-bench -- cua --cua-env native --cua-agent nugget --cua-tasks
-  forms,files` on Windows. CI: the `cua-windows` job in `.github/workflows/real-os.yml` runs the
-  `nugget` and `reference` arms with `--strict` and uploads the reports.
+  forms,files` on Windows or macOS. CI: the `cua-windows` and `cua-macos` jobs in
+  `.github/workflows/real-os.yml` run the `nugget` and `reference` arms with `--strict` and upload
+  the reports. `NUGGET_CUA_DUMP=<dir>` writes each window's real tree, and the trees after a
+  failed action, as JSON.
 
 Results, 2026-10-29, `windows-latest` (Edge, UIA), debug build, seed 42, run 40834714638
 (`cua-windows`). The 16 tasks are the form-fill and file-organising tasks
@@ -821,7 +835,31 @@ effect back from the real window. The wall time is the cost of real accessibilit
 waits for the page to post the change and reload, and each read is a UIA snapshot of the Edge
 window. The `nugget` arm reads the window before and after every action.
 
-One fix came out of these runs: pages reload on every world change, including a confirmation.
+Results, 2026-10-29, `macos-latest` (arm64, Google Chrome, AX), debug build, seed 42, run
+40856114735 (`cua-macos`), the same 16 tasks, next to the Windows run above:
+
+| Metric | `nugget` arm, macOS | `reference`, macOS | `nugget` arm, Windows | `reference`, Windows |
+|---|---|---|---|---|
+| `success_rate` | **1.00** (16 of 16) | 1.00 | 1.00 | 1.00 |
+| `success_rate.app.forms` / `.app.files` | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| `steps.mean` / `.p50` / `.p95` | 6.19 / 6 / 14 | 6.19 / 6 / 14 | 6.19 / 6 / 14 | 6.19 / 6 / 14 |
+| `safety.unconfirmed_risky_actions` | **0** (7 risky actions, 9 confirmations) | 0 | 0 | 0 |
+| `safety.injection_compliance_rate` | **0.00** (2 tasks, both flagged) | 0.00 | 0.00 | 0.00 |
+| `safety.false_confirmation_rate` | **0.00** | 0.00 | 0.00 | 0.00 |
+| `agent.verification.passed` / `.failed` | 99 / 0 | | 99 / 0 | |
+| `wall_time.p50_s` / `.p95_s` / `.total_s` | 4.09 / 11.9 / 87.5 | 3.93 / 10.0 / 76.2 | 4.84 / 12.0 / 92.5 | 4.11 / 10.2 / 79.2 |
+| Window reads (none timed out before matching) | 626 (AX) | 99 (AX) | 620 (UIA) | 99 (UIA) |
+| Actions that needed the keyboard | 3 (the 3 country lists) | 3 | 3 | 3 |
+
+On AX the outcomes, steps and safety numbers are again the same as in process, and the wall time
+is close to Windows. Each country list costs the 1.5 s the driver waits for the set value before
+it types. Fixes from these runs: a field labelled by `<label for>` had no name over AX
+(`nugget-a11y`, macOS); focusing an element in a background app left the keys going to the
+frontmost one (`nugget-a11y`, macOS); and an action, or its keyboard fallback, whose page was
+replaced between the read and the action (a page can reload twice, from its own script and from
+its version poll) is retried once on a fresh read. Before the retry, two runs in three lost one task to it.
+
+One fix came out of the Windows runs: pages reload on every world change, including a confirmation.
 In one run in two, a click sent to a page that was about to reload was lost
 (`files-delete-backup`, `reference` arm). The stage now records the version each page was served
 at, and the native session acts only on a current page.
