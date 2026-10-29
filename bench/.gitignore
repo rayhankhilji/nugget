@@ -1,2 +1,6 @@
 # Benchmark reports are machine-specific; publish curated numbers in the README instead.
-/results/
+# Real-model reports (bench/results/real-models) are the published numbers and are kept.
+/results/*
+!/results/real-models/
+# `--local-models` downloads (models and llama-server builds).
+/.local-models/

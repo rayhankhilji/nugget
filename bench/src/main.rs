@@ -67,6 +67,9 @@ struct Cli {
 
     #[command(flatten)]
     draft: nugget_bench::suites::draft::DraftOptions,
+
+    #[command(flatten)]
+    local: nugget_bench::local::LocalOptions,
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
     #[arg(long, value_enum, default_value_t = CuaAgentKind::Reference)]
@@ -233,6 +236,7 @@ fn main() -> ExitCode {
         embed_url: cli.embed_url.clone(),
         embed_model: cli.embed_model.clone(),
         draft: cli.draft.clone(),
+        local: cli.local.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;

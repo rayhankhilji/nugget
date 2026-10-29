@@ -76,6 +76,8 @@ pub struct RunConfig {
     pub embed_model: Option<String>,
     /// `draft` suite options (provider, fake-model latency, locality).
     pub draft: suites::draft::DraftOptions,
+    /// `--local-models` options (real local models through `nugget-runtime`).
+    pub local: crate::local::LocalOptions,
 }
 
 impl Default for RunConfig {
@@ -87,6 +89,7 @@ impl Default for RunConfig {
             embed_url: None,
             embed_model: None,
             draft: suites::draft::DraftOptions::default(),
+            local: crate::local::LocalOptions::default(),
         }
     }
 }
