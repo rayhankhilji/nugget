@@ -912,10 +912,11 @@ change fail.
 
 ### W12: retrieval at scale
 
-Before/after for the W12 store and retriever work. "Before" is commit `340d98d` (brute-force
-`sqlite-vec` kNN, one store connection), measured 2026-10-28 on the dev container (Linux x86_64,
-release build, nothing else running), seed 42. The "after" column is filled from the same
-commands on the W12 merge.
+Before/after for the W12 store and retriever work, both measured on the same dev container
+(Linux x86_64, 4 vCPUs, release build, nothing else running), seed 42, on 2026-10-29. "Before" is
+`340d98d` plus only the bench code (brute-force `sqlite-vec` kNN, one store connection, snippets
+taken for every full-text match). "After" is `w/retrieval` with the integration branch merged
+(so it also carries W9's reader pool).
 
 Commands (from the workspace root; reports land in `bench/results/`):
 
@@ -926,72 +927,97 @@ cargo build --release -p nugget-bench
 ./target/release/nugget-bench perf --backend real --scale standard     # real store, 10k items
 ./target/release/nugget-bench memory --backend real --scale standard   # real pipeline, 5k files
 cargo test --release -p nugget-bench --test scale -- --ignored --nocapture   # 100k items, ~10 min
+cargo test --release -p nugget-store --test vector_ann -- --ignored --nocapture  # ANN, 100k dense vectors
 ```
 
 **100k items** (`tests/scale.rs`: 100,000 items written directly with
 `upsert_item_with_chunks`, one 384-dimensional chunk each, hash embeddings; 100 queries, 50 for
-exact recall, 30 edits; the run takes about 10 minutes plus the build):
+exact recall, 30 edits):
 
 | Metric | Before | After |
 |---|---|---|
-| `query.store.text.latency.p50_us` / `p95_us` | 414,579 / 587,928 | TBD |
-| `query.store.vector.latency.p50_us` / `p95_us` | 550,113 / 624,651 | TBD |
-| `query.store.hybrid.latency.p50_us` / `p95_us` | 992,779 / 1,190,455 | TBD |
-| `query.retriever.search.latency.p50_us` / `p95_us` | 1,035,014 / 1,275,814 | TBD |
-| `query.retriever.build_context.latency.p50_us` / `p95_us` | 1,035,110 / 1,252,583 | TBD |
-| `query.exact.vector.latency.p50_us` (Rust brute force, reference) | 33,686 | TBD |
-| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | TBD |
-| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.84 / 0.11 / 0.79 | TBD |
-| `retrieval.retriever.recall@10` / `mrr@10` | 0.77 / 0.393 | TBD |
-| `freshness.edit.p50_ms` / `p95_ms` | 1,173 / 1,354 | TBD |
-| `propagation.edit_rate` | 1.0 | TBD |
-| `update.latency.p50_us` / `p95_us` | 4,309 / 9,041 | TBD |
-| `delete.latency.p50_us` / `p95_us` | 839 / 3,357 | TBD |
-| `ingest.items_per_s` (store writes) | 743 | TBD |
-| `resources.db_bytes_per_1k_items` | 3.62 MB | TBD |
-| `resources.peak_rss_mib` | 625 | TBD |
+| `query.store.text.latency.p50_us` / `p95_us` | 374,881 / 526,869 | **35,566 / 103,410** |
+| `query.store.vector.latency.p50_us` / `p95_us` | 526,132 / 593,706 | 502,100 / 552,022 |
+| `query.store.hybrid.latency.p50_us` / `p95_us` | 958,721 / 1,078,822 | 588,714 / 660,200 |
+| `query.retriever.search.latency.p50_us` / `p95_us` | 1,000,362 / 1,168,488 | 631,194 / 713,722 |
+| `query.retriever.build_context.latency.p50_us` / `p95_us` | 996,339 / 1,172,003 | 612,727 / 695,501 |
+| `query.exact.vector.latency.p50_us` (Rust brute force, reference) | 33,379 | 32,793 |
+| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | 1.000 |
+| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.84 / 0.11 / 0.79 | 0.84 / 0.11 / 0.79 |
+| `retrieval.retriever.recall@10` / `mrr@10` | 0.77 / 0.393 | 0.77 / 0.393 |
+| `freshness.edit.p50_ms` / `p95_ms` | 1,118 / 1,211 | 1,118 / 1,243 |
+| `propagation.edit_rate` | 1.0 | 1.0 |
+| `update.latency.p50_us` / `p95_us` | 4,109 / 8,823 | 8,693 / 12,130 |
+| `delete.latency.p50_us` / `p95_us` | 775 / 2,305 | 709 / 1,972 |
+| `ingest.items_per_s` (store writes) | 831 | 829 |
+| `resources.db_bytes_per_1k_items` | 3.62 MB | 3.62 MB |
+| `resources.peak_rss_mib` | 625 | 660 |
 
-Edit freshness at 100k is dominated by the probe itself: each check runs two full-text
-searches, a vector search and `Retriever::search` (about a second together), and the write is
-4 ms. It falls with query latency.
+Full-text search is 10× faster: the ranked query used to build a snippet for every match before
+sorting; it now ranks on the FTS table alone and snippets only the returned rows. Vector search
+here stays on the exact scan, because the bench's hash embeddings are sparse and sparse queries
+never take the approximate path (their sign bits are noise; see `nugget-store/src/vector.rs`).
+Dense vectors do: `vector_ann` (100k clustered 384-dimensional vectors, encrypted file) measures
+exact vs approximate `search_vector` at **556 ms vs 14 ms** (k = 10, recall@10 0.997) and 555 ms
+vs 74 ms (k = 50, recall@50 1.000); the index is built once, in 4.5 s, on the first large search.
+The approximate path starts once the vectors outgrow a connection's 32 MiB page cache (at 20k
+384-dimensional vectors exact search is 12 ms; at 50k, 270 ms). Edits cost 4 ms more at this
+size because the item's text layout is planned and its old chunks' layout removed (see
+`items::text_layout`). Edit freshness is dominated by the probe's own searches (a vector exact
+scan and `Retriever::search` each round); the write is 9 ms.
 
 **`perf --backend real --scale standard`** (10,000 items, 2 chunks each, 256 dimensions; 300
 queries, 100 for exact recall, 100 edits):
 
 | Metric | Before | After |
 |---|---|---|
-| `query.store.text.latency.p50_us` / `p95_us` | 27,572 / 64,359 | TBD |
-| `query.store.vector.latency.p50_us` / `p95_us` | 12,589 / 60,447 | TBD |
-| `query.store.hybrid.latency.p50_us` / `p95_us` | 20,784 / 178,470 | TBD |
-| `query.retriever.search.latency.p50_us` / `p95_us` | 23,265 / 172,397 | TBD |
-| `query.retriever.build_context.latency.p50_us` / `p95_us` | 23,593 / 141,588 | TBD |
-| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | TBD |
-| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.853 / 0.223 / 0.763 | TBD |
-| `retrieval.retriever.recall@10` / `mrr@10` | 0.763 / 0.401 | TBD |
-| `freshness.edit.p50_ms` / `p95_ms` | 20.8 / 34.3 | TBD |
-| `update.latency.p50_us` / `p95_us` | 1,504 / 5,485 | TBD |
-| `ingest.items_per_s` / `chunks_per_s` | 587 / 1,175 | TBD |
-| `resources.db_bytes_per_1k_items` | 4.92 MB | TBD |
+| `query.store.text.latency.p50_us` / `p95_us` | 26,946 / 57,781 | **3,547 / 14,716** |
+| `query.store.vector.latency.p50_us` / `p95_us` | 9,532 / 53,569 | 6,756 / 7,954 |
+| `query.store.hybrid.latency.p50_us` / `p95_us` | 18,250 / 142,681 | 15,033 / 27,892 |
+| `query.retriever.search.latency.p50_us` / `p95_us` | 19,451 / 143,374 | 15,062 / 27,239 |
+| `query.retriever.build_context.latency.p50_us` / `p95_us` | 18,205 / 115,796 | 15,448 / 27,209 |
+| `retrieval.store.vector.recall_vs_exact@10` | 1.000 | 1.000 |
+| `retrieval.store.{text,vector,hybrid}.recall@10` | 0.853 / 0.223 / 0.763 | 0.853 / 0.223 / 0.763 |
+| `retrieval.retriever.recall@10` / `mrr@10` | 0.763 / 0.401 | 0.763 / 0.401 |
+| `freshness.edit.p50_ms` / `p95_ms` | 18.8 / 32.5 | 88.2 / 93.4 |
+| `update.latency.p50_us` / `p95_us` | 1,422 / 2,956 | 1,726 / 4,693 |
+| `ingest.items_per_s` | 760 | 778 |
+| `resources.db_bytes_per_1k_items` | 4.93 MB | 5.01 MB |
+| `resources.peak_rss_mib` | 113 | 146 |
+
+Edit freshness rose because searches now run on the reader pool: SQLite discards a reader's page
+cache when another connection writes, so the probe's first vector scan after each edit decrypts
+the vectors again (about 70 ms here). Running vector scans on the writer connection instead
+keeps freshness at 20 ms but leaves the readers' later full-text searches persistently slow (at
+100k chunks, 79 ms became 2.5 s per query), so they stay on the pool. 88 ms is far inside the
+60 s target. The tail latencies (p95) fell 2–5×. The DB size and RSS rows include the reader
+pool's per-connection caches; this corpus's chunks overlap their items' text only partly (two
+chunks per item written directly), so the text-dedup saving does not show here; it does in
+`memory` below.
 
 **`memory --backend real --scale standard`** (5,000 files through the pipeline, 500 queries,
 300 file operations):
 
 | Metric | Before | After |
 |---|---|---|
-| `freshness.p50_s` / `p95_s` / `max_s` | 0.364 / 0.401 / 0.419 | TBD |
-| `query.latency.p50_ms` / `p95_ms` (`Retriever::search`, hybrid + MMR) | 9.11 / 15.99 | TBD |
-| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.recall@10` | 0.968 / 0.338 / 0.936 / 0.854 | TBD |
-| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.mrr@10` | 0.888 / 0.169 / 0.580 / 0.544 | TBD |
-| `retrieval.hybrid.recall@10` vs its target (fake baseline 0.938) | **missed** by 1 query in 500 | TBD |
-| `retrieval.eval.{text_only,hybrid,hybrid_mmr}.recall@10` | 0.905 / 1.000 / 0.976 | TBD |
-| `retrieval.eval.{text_only,hybrid,hybrid_mmr}.mrr@10` | 0.768 / 0.883 / 0.865 | TBD |
-| `ingest.files_per_s` | 531 | TBD |
-| `propagation.*` | all 1.0 | TBD |
-| `resources.peak_rss_mib` | 85 | TBD |
+| `freshness.p50_s` / `p95_s` / `max_s` | 0.364 / 0.402 / 0.429 | 0.379 / 0.425 / 0.490 |
+| `query.latency.p50_ms` / `p95_ms` (`Retriever::search`, hybrid + MMR) | 7.83 / 12.54 | 9.55 / 13.82 |
+| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.recall@10` | 0.968 / 0.338 / 0.936 / 0.854 | 0.968 / 0.338 / 0.936 / 0.854 |
+| `retrieval.{bm25,vector,hybrid,hybrid_mmr}.mrr@10` | 0.888 / 0.169 / 0.580 / 0.544 | 0.888 / 0.169 / 0.580 / 0.544 |
+| `retrieval.hybrid.recall@10` vs its target (fake baseline 0.938) | **missed** by 1 query in 500 | **missed** by 1 query in 500 (unchanged) |
+| `retrieval.eval.{hybrid,hybrid_mmr}.recall@10` | 1.000 / 0.976 | 1.000 / 0.976 |
+| `retrieval.eval.{hybrid,hybrid_mmr}.mrr@10` | 0.883 / 0.865 | 0.895 / 0.877 |
+| `ingest.files_per_s` | 531 | 557 |
+| `resources.db_bytes_per_1k_items` (item text stored once) | 6.03 MB | **4.61 MB** (−24%) |
+| `propagation.*` | all 1.0 | all 1.0 |
+| `resources.peak_rss_mib` | 86 | 84 |
 
-`perf --scale standard` (fake index, harness only, for completeness): BM25 / vector / hybrid
-query p50 188 / 1,780 / 2,230 us, ingest 21,566 items/s. It does not touch the store, so W12
-should not move it.
+The retriever's query latency here (5,000 small files) is within noise; it now also parses date
+phrases and, with a configured reranker, reranks. The eval set's MRR rose with the FTS changes.
+The hybrid recall@10 target was already missed by one query before W12.
+
+`perf --scale standard` (fake index, harness only): BM25 / vector / hybrid query p50 173 / 1,800 /
+2,118 us after (188 / 1,780 / 2,230 before). It does not touch the store.
 
 ## Adding a suite
 
