@@ -198,14 +198,20 @@ public static class NuggetCtrlBreak {
 }
 "@
 $r = [NuggetCtrlBreak]::Send([uint32]$Target)
-[IO.File]::WriteAllText($Out, $r)
+[IO.File]::WriteAllText("$Out.tmp", $r)
+Move-Item -LiteralPath "$Out.tmp" -Destination $Out
+# Stay attached a moment: the daemon should be gone (cleanly) before this helper leaves.
+Start-Sleep -Seconds 3
 if ($r -eq 'ok') { exit 0 } else { exit 1 }
 '@ | Set-Content -LiteralPath $helper -Encoding utf8
     $shell = (Get-Process -Id $PID).Path
     $p = Start-Process -FilePath $shell -ArgumentList '-NoProfile', '-NonInteractive', '-File', "`"$helper`"", $daemonPid, "`"$out`"" `
-        -WindowStyle Hidden -Wait -PassThru
-    $result = if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw } else { '(no result)' }
-    if ($p.ExitCode -ne 0) { Fail "could not send CTRL_BREAK to nuggetd: $result" }
+        -WindowStyle Hidden -PassThru
+    $null = $p.Handle
+    $sent = Wait-Until 30 'the CTRL_BREAK helper' { (Test-Path -LiteralPath $out) -or $p.HasExited }
+    $result = if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw } else { "(no result; helper status $($p.ExitCode))" }
+    if (-not $sent -or $result -ne 'ok') { Fail "could not send CTRL_BREAK to nuggetd: $result" }
+    Log 'CTRL_BREAK sent to the daemon''s process group'
 }
 
 function Cleanup([bool]$failed) {
@@ -326,6 +332,9 @@ try {
     $daemonProc = Get-Process -Id $script:daemon.ProcessId -ErrorAction SilentlyContinue
     if (-not $daemonProc) { Fail 'nuggetd exited with the app; it should keep running' }
     $null = $daemonProc.Handle
+    if ($daemonProc.WaitForExit(2000)) {
+        Fail ('nuggetd exited (status 0x{0:X8}) within 2s of the app; it should keep running' -f $daemonProc.ExitCode)
+    }
     $tTerm = Now
     Send-CtrlBreak $script:daemon.ProcessId
     if (-not $daemonProc.WaitForExit($daemonStopTimeout * 1000)) {
@@ -335,7 +344,10 @@ try {
     $tStop = Elapsed $tTerm
     $daemonStatus = $daemonProc.ExitCode
     # Buffered log lines are flushed on exit; "stopped" is the last line of a clean shutdown.
-    if (-not (Daemon-Logged '"stopped"')) { Fail "nuggetd exited (status $daemonStatus) without logging 'stopped' (unclean shutdown?)" }
+    if (-not (Daemon-Logged '"stopped"')) {
+        $seen = if (Daemon-Logged 'console control signal received') { 'it logged the signal' } else { 'it never logged the signal' }
+        Fail ("nuggetd exited (status 0x{0:X8}) without logging 'stopped' (unclean shutdown; {1})" -f $daemonStatus, $seen)
+    }
     if ($daemonStatus -ne 0) { Fail "nuggetd exited with status $daemonStatus" }
     Log "nuggetd stopped cleanly ${tStop}s after CTRL_BREAK (status 0)"
 
