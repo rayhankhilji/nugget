@@ -55,8 +55,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use nugget_a11y::computer::ComputerUse;
 use nugget_agent::{
-    Agent, AgentConfig, AgentEvent, AgentRun, Budgets, Claim, EventSink, GateOutcome, Model,
-    ToolRegistry, Verification,
+    Agent, AgentConfig, AgentEvent, AgentRun, Budgets, Claim, EventSink, GateOutcome, MemoryLog,
+    Model, ToolRegistry, Verification,
 };
 use nugget_core::capability::Locality;
 use nugget_core::egress::NullEgress;
@@ -96,6 +96,10 @@ pub const DEFAULT_TASK_TIMEOUT: Duration = Duration::from_secs(300);
 pub const TASK_TIMEOUT_ENV: &str = "NUGGET_BENCH_CUA_TASK_TIMEOUT";
 /// How long after the loop's deadline the harness stops waiting for the agent thread.
 pub const HARD_STOP_GRACE: Duration = Duration::from_secs(30);
+/// Sampling for real models, so that runs are comparable: greedy decoding, and a fixed seed for
+/// servers that sample anyway (llama-server takes `seed` in the request body).
+pub const REAL_TEMPERATURE: f32 = 0.0;
+pub const REAL_SEED: u64 = 42;
 
 /// Counts over the runs, for the report.
 #[derive(Debug, Default, Clone)]
@@ -184,6 +188,8 @@ pub struct NuggetAgent {
     counters: Arc<ModelCounters>,
     timed_out: Vec<String>,
     model_errors: Vec<String>,
+    /// Per-task action logs of real-model runs, for classifying failures.
+    traces: Vec<(String, Value)>,
 }
 
 impl NuggetAgent {
@@ -218,6 +224,7 @@ impl NuggetAgent {
             counters: Arc::new(ModelCounters::default()),
             timed_out: Vec::new(),
             model_errors: Vec::new(),
+            traces: Vec::new(),
         }
     }
 
@@ -240,9 +247,14 @@ impl NuggetAgent {
     pub fn local(
         tasks: &[Task],
         label: impl Into<String>,
-        cfg: ProviderConfig,
+        mut cfg: ProviderConfig,
         secrets: nugget_runtime::RuntimeSecrets,
     ) -> Self {
+        let mut extra = cfg.extra_body.take().unwrap_or_else(|| json!({}));
+        if let Some(t) = extra.as_object_mut() {
+            t.entry("seed").or_insert(json!(REAL_SEED));
+        }
+        cfg.extra_body = Some(extra);
         let factory: ProviderFactory = Arc::new(move || {
             build_provider_with(&cfg, Arc::new(NullEgress), &secrets).map_err(|e| e.to_string())
         });
@@ -429,6 +441,28 @@ pub fn outcome_of(run: &AgentRun) -> Outcome {
     }
 }
 
+/// One task's action log as JSON (model turns, gate decisions, results, verification, the end),
+/// without the tool list repeated in every trace. A run cut off by the hard stop ends with
+/// whatever was logged before it.
+fn trace(log: &MemoryLog) -> Value {
+    let started = log.entries().first().map_or(0, |e| e.at_ms);
+    Value::Array(
+        log.entries()
+            .into_iter()
+            .map(|e| {
+                let mut v = serde_json::to_value(&e).unwrap_or(Value::Null);
+                if let Some(o) = v.as_object_mut() {
+                    o.remove("task_id");
+                    o.remove("tools");
+                    o.insert("t_ms".into(), json!(e.at_ms.saturating_sub(started)));
+                    o.remove("at_ms");
+                }
+                v
+            })
+            .collect(),
+    )
+}
+
 /// A `finish(failure)` summary that declines the task ([`INSTRUCTIONS`]).
 fn is_refusal(summary: &str) -> bool {
     summary
@@ -500,7 +534,11 @@ impl CuaAgent for NuggetAgent {
             flags: flags.clone(),
             forced: forced.clone(),
         });
-        let agent = Agent::new(model, tools, gate).with_events(sink);
+        let log = Arc::new(MemoryLog::new());
+        let real = matches!(self.model, ModelChoice::Real { .. });
+        let agent = Agent::new(model, tools, gate)
+            .with_events(sink)
+            .with_log(log.clone());
         let confirmations = agent.confirmations();
         // Generous turn budget: an observation may precede every action.
         let turns = (task.max_steps.max(script.len() as u32)) * 2 + 10;
@@ -512,6 +550,7 @@ impl CuaAgent for NuggetAgent {
             },
             confirm_timeout: Duration::from_secs(30),
             instructions: Some(INSTRUCTIONS.into()),
+            temperature: real.then_some(REAL_TEMPERATURE),
             ..AgentConfig::default()
         };
         let goal = nugget_agent::Task::new(task.id.clone(), task.instruction.clone())
@@ -539,6 +578,9 @@ impl CuaAgent for NuggetAgent {
             });
             h.join()
         });
+        if real {
+            self.traces.push((task.id.clone(), trace(&log)));
+        }
         let run = match joined {
             Ok(Ok(Some(run))) => run,
             Ok(Ok(None)) => {
@@ -585,6 +627,14 @@ impl CuaAgent for NuggetAgent {
                 ),
                 ("timed_out_tasks".into(), json!(self.timed_out)),
                 ("model_error_tasks".into(), json!(self.model_errors)),
+                (
+                    "sampling".into(),
+                    json!({"temperature": REAL_TEMPERATURE, "seed": REAL_SEED}),
+                ),
+                (
+                    "task_traces".into(),
+                    Value::Object(self.traces.iter().cloned().collect()),
+                ),
             ]);
         }
         p
