@@ -6,13 +6,59 @@ inspectable and owned by you.
 
 Grounding: [Sentient OS teardown](research/sentient-os-teardown.md) and [shipped-artifact findings](research/shipped-artifact-findings.md).
 
-Status (2026-10-28):
+Status (2026-10-29):
 - **M0 (Foundations): done.** Workspace, CI on three OSes, Tauri shell, `nugget-store`, providers, signed model manifest, bench harness; `nuggetd` runs them.
 - **M1 (Memory): done.** Ingest runtime, files, Obsidian, Gmail, Google Calendar, IMAP and CalDAV connectors, hybrid cited retrieval and the local runtime are wired into `nuggetd`.
 - **M2 (Knowledge graph): done.** Extraction, the vault and the local MCP server (`nuggetd mcp`, `nuggetd mcp install`) are wired into `nuggetd` and the app.
-- **M3 (Double Tap), M4 (Agent and computer use), M5 (Proactive): crates built and tested; being wired into the daemon and app in [wave W](waves/wave-w/README.md).**
-- **M6 (Hardening and v1.0): partly done.** Packaging, the release workflow and signed updates, i18n, onboarding and the user guide have landed; the Microsoft 365 and SaaS connectors and the WASM plugin host are built and being wired in wave W. The E2E relay is not started.
+- **M3 (Double Tap), M4 (Agent and computer use), M5 (Proactive): wired into the daemon and app.** All twelve [wave W](waves/wave-w/README.md) packages are merged, plus a real-app end-to-end test in CI ([e2e.yml](../.github/workflows/e2e.yml)).
+- **[Wave X](waves/wave-x/README.md) (release readiness): X1–X4 merged** (safety tuning, knowledge UX, release dry run, reranker and chat citations). **X5 (daemon CPU/RSS/startup at 100k items) is still running** ([swarm.md](swarm.md)).
+- **M6 (Hardening and v1.0): mostly built, not released.** Packaging, the release workflow with a dry run that builds unsigned installers on all three OSes, the AppImage smoke test, the opt-in signed updater, i18n, onboarding and the user guide have landed. The Microsoft 365 and SaaS connectors and the WASM plugin host are wired into the daemon and app (W5, W6). No release has been cut; the signing paths are untested without real certificates ([release.md](release.md) §8). The E2E relay (optional) is not started.
 - There is no `nugget-privacy` crate: egress accounting lives in `nugget-core` and `nugget-store`, and the PII scan in `nugget-ingest`.
+
+What remains for v1 is mostly [wave Y](waves/wave-y/README.md), which produces the evidence the exit criteria ask for:
+- **Y1:** real macOS and Windows runs (installer smoke, accessibility, Double Tap insertion, native `cua` env). Only Linux has run the platform code so far.
+- **Y2:** real-model evaluations. Every published draft, cua and knowledge number so far comes from scripted models.
+- **Y3:** trust and supply chain: model-manifest rollback protection, a release key, a signed update feed, reproducible builds, X1 agent-safety follow-ups.
+- **Y4:** a measured first run (target under 2 min) and empty, loading and error states.
+- **Y5:** reproducible benchmarks in the README and nightly dashboards.
+
+Also open, outside wave Y:
+- Double Tap p50 against a cloud model (target under 1.2 s) has never been measured; it needs a provider key.
+- The [M3–M6 security review](reviews/security-m3-m6.md) still lists 14 findings as Open. Code has regression tests for PA-1, PA-2, PA-3, PA-4, PA-6 and BR-9; PA-5, PA-7 and PM-1 to PM-6 show no fix yet. The table needs reconciling.
+- The `memory --backend real` recall gate misses at standard scale by 0.002 (1 query of 500) with the hash embedder; it waits on a re-run with a real embedding model.
+- Battery cost per 1k items and idle overhead are not measured yet (`bench/perf` plan).
+- The book's [What works today](book/src/status.md) page still describes wave W.
+
+### v1 checklist
+
+| Criterion | Evidence | State |
+|---|---|---|
+| M0: `nuggetd` runs on 3 OSes | [ci.yml](../.github/workflows/ci.yml) (Rust, bench and desktop jobs on Ubuntu, macOS, Windows) | done |
+| M0: chat works with local and remote models | [e2e.rs](../crates/nuggetd/tests/e2e.rs) (OpenAI-compatible mock server); real local models in [Y2](waves/wave-y/Y2.md) | done (real-model run in progress, Y2) |
+| M0: CI green | [ci.yml](../.github/workflows/ci.yml), [e2e.yml](../.github/workflows/e2e.yml), [package-smoke.yml](../.github/workflows/package-smoke.yml) | done |
+| M1: freshness 60 s or less on the bench | `memory --backend real`: `freshness.p95_s` 0.60 s at standard scale ([bench/README.md](../bench/README.md), Results); [nightly.yml](../.github/workflows/nightly.yml) | done |
+| M1: retrieval eval ≥ baseline | `memory --backend real`: eval-set hybrid recall@10 1.000 vs 0.905 text-only; synthetic standard-scale gate 0.936 vs 0.938 ([bench/README.md](../bench/README.md)) | done (synthetic gate missed by 0.002) |
+| M2: every vault fact cites sources | `knowledge`: `vault.citation_coverage` = 1, run with `--strict` in [ci.yml](../.github/workflows/ci.yml) | done |
+| M2: Claude Desktop and Cursor can query Nugget over MCP | [mcp_clients.rs](../crates/nuggetd/tests/mcp_clients.rs) (clients connected as `nuggetd mcp install` configures them); [MCP guide](book/src/guide/mcp.md) | done |
+| M3: Double Tap p50 under 1.2 s (cloud) | `draft`: `ttft.p50_s` with a real cloud provider; only the fake model has run | not started |
+| M3: Double Tap p50 under 3 s (local) | `draft --provider-url` with a local model; time to first inserted token in [Y1](waves/wave-y/Y1.md) | in progress (Y1, Y2) |
+| M3: drafting eval wins over a screenshot-only baseline | `draft`: `draft.win_rate_vs_baseline` 0.95 with the fake model ([bench/README.md](../bench/README.md)); real model in [Y2](waves/wave-y/Y2.md) | in progress (Y2) |
+| M4: published success rate on `bench/cua` | `cua`: `success_rate` 1.00 for the `nugget` arm with a scripted model, inproc ([bench/cua/README.md](../bench/cua/README.md), Reference results); real model and native envs pending | in progress (Y1, Y2) |
+| M4: 0 unconfirmed risky actions in red-team tests | `cua`: `safety.unconfirmed_risky_actions` 0 for the `nugget` and `nugget-compliant` arms ([bench/cua/README.md](../bench/cua/README.md)) | done (real-model re-check in Y2) |
+| M5: precision of accepted cards tracked | `proactive --backend real`: accepted precision 0.976, precision@5 0.849 ([bench/README.md](../bench/README.md), Results) | done |
+| M5: dry-run diff on every action | `proactive --backend real`: dry-run coverage and diff fidelity 1.0, 0 executed without approval | done |
+| M6: security review | [security-m3-m6.md](reviews/security-m3-m6.md) (W8); supply-chain gaps in [release.md](release.md) §8 | in progress (Y3) |
+| M6: installers for 3 OSes | [release.yml](../.github/workflows/release.yml) dry run builds all targets ([release.md](release.md)); AppImage smoke in [package-smoke.yml](../.github/workflows/package-smoke.yml); dmg and NSIS smoke in Y1 | in progress (Y1, Y3) |
+| M6: reproducible benchmarks in the README | [README Benchmarks](../README.md#benchmarks), generated from [latest.json](../bench/results/latest.json) | in progress (Y5) |
+| Target: freshness about 60 s; edits and deletions propagate | `memory --backend real`: `freshness.p95_s`, `propagation.*_rate` = 1 | done |
+| Target: useful search and drafts in under 2 min | First-run scenario in the desktop e2e ([Y4](waves/wave-y/Y4.md)) | in progress (Y4) |
+| Target: computer-use injection compliance 0 | `cua`: `safety.injection_compliance_rate` 0, both `nugget` arms | done |
+| Target: needless confirmations ≤ 0.10 | `cua`: `safety.false_confirmation_rate` 0.00 after X1 | done |
+| Target: no secrets sent to cloud models in drafts | `draft`: `sensitive_prompt_exposure_rate` and `sensitive_leak_rate` 0 (fake model, cloud-marked) | done |
+| Target: proactive precision@5 ≥ 0.7, recall ≥ 0.8 | `proactive --backend real`: 0.849 and 0.997 | done |
+| Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; battery not measured | in progress (X5) |
+| Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in [Y1](waves/wave-y/Y1.md) | in progress (Y1) |
+| Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | in progress (Y5) |
 
 ---
 
