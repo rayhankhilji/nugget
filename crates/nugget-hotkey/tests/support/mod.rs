@@ -144,6 +144,8 @@ pub struct Report {
     pub draft_started: Duration,
     /// Shell: first delta in the overlay. Streamed: first chunk read back from the field.
     pub first_token: Duration,
+    /// How long the first `Accessibility::insert` call took (it includes its own read-back).
+    pub first_insert: Duration,
     /// The whole draft read back from the field.
     pub total: Duration,
     pub text: String,
@@ -156,14 +158,15 @@ impl Report {
     pub fn line(&self, os: &str) -> String {
         format!(
             "DOUBLETAP-TIMING os={os} mode={} app={:?} role={} read_field_ms={:.1} \
-             draft_started_ms={:.1} first_token_ms={:.1} total_ms={:.1} chunks={} methods={:?} \
-             verified={}",
+             draft_started_ms={:.1} first_token_ms={:.1} first_insert_call_ms={:.1} \
+             total_ms={:.1} chunks={} methods={:?} verified={}",
             self.mode.as_str(),
             self.app.name,
             self.field_role,
             ms(self.read_field),
             ms(self.draft_started),
             ms(self.first_token),
+            ms(self.first_insert),
             ms(self.total),
             self.chunks,
             self.methods,
@@ -185,12 +188,13 @@ impl Report {
             {
                 let _ = writeln!(
                     f,
-                    "| {os} | {} | {} | {:.1} | {:.1} | {:.1} | {:.1} | {} | {:?} | {} |",
+                    "| {os} | {} | {} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1} | {} | {:?} | {} |",
                     self.mode.as_str(),
                     self.app.name,
                     ms(self.read_field),
                     ms(self.draft_started),
                     ms(self.first_token),
+                    ms(self.first_insert),
                     ms(self.total),
                     self.chunks,
                     self.methods,
@@ -224,9 +228,15 @@ pub fn wait_for<T>(timeout: Duration, mut cond: impl FnMut() -> Option<T>) -> Op
     }
 }
 
-/// The field's current value, read back through accessibility.
-pub fn field_value(a11y: &dyn Accessibility) -> Option<String> {
-    a11y.focused().ok().flatten().map(|f| norm(&f.field.value))
+/// The focused field's value, read back through the platform backend alone (the focused
+/// element and its value, without `focused()`'s thread snapshot), so polling it costs little.
+pub fn field_value<P: nugget_a11y::Platform>(backend: &nugget_a11y::Backend<P>) -> Option<String> {
+    let p = backend.platform();
+    let target = p.focus().ok().flatten()?;
+    let read = p
+        .read_field(&target.element, backend.config().max_value_bytes)
+        .ok()?;
+    Some(norm(&read.state.value))
 }
 
 /// Wait until `app_matches` holds for the frontmost app and its focus is in an editable field.
@@ -254,13 +264,16 @@ pub fn wait_for_field(
     .ok_or_else(|| format!("no editable field in the target app after {timeout:?}: {last}"))
 }
 
-/// Run the draft-and-insert path for a trigger that fired at `fired`.
-pub fn draft_and_insert(
-    a11y: &dyn Accessibility,
+/// Run the draft-and-insert path for a trigger that fired at `fired`, through `backend`, the
+/// accessibility backend the shell uses (the read and the inserts go through its
+/// `Accessibility` API; field values are polled with [`field_value`]).
+pub fn draft_and_insert<P: nugget_a11y::Platform>(
+    backend: &nugget_a11y::Backend<P>,
     pipeline: &Pipeline,
     fired: Instant,
     mode: Mode,
 ) -> std::result::Result<Report, String> {
+    let a11y: &dyn Accessibility = backend;
     // flow::fire: read the focused field.
     let focused = a11y
         .focused()
@@ -299,8 +312,11 @@ pub fn draft_and_insert(
     let mut chunks = 0usize;
     let mut methods = Vec::new();
     let mut verified = true;
+    let mut first_insert = None;
     let mut insert = |t: &str| -> std::result::Result<(), String> {
+        let started = Instant::now();
         let out = a11y.insert(t).map_err(|e| format!("insert({t:?}): {e}"))?;
+        first_insert.get_or_insert(started.elapsed());
         methods.push(out.method);
         verified &= out.verified;
         Ok(())
@@ -322,13 +338,13 @@ pub fn draft_and_insert(
                         if first_token.is_none() {
                             let want = format!("{before}{}", norm(&d));
                             wait_for(Duration::from_secs(5), || {
-                                field_value(a11y).filter(|v| v.starts_with(&want))
+                                field_value(backend).filter(|v| v.starts_with(&want))
                             })
                             .ok_or_else(|| {
                                 format!(
                                     "the first chunk {d:?} never showed up in the field (value \
                                      {:?})",
-                                    field_value(a11y)
+                                    field_value(backend)
                                 )
                             })?;
                             first_token = Some(fired.elapsed());
@@ -348,12 +364,12 @@ pub fn draft_and_insert(
     }
     let want = format!("{before}{}", norm(&text));
     wait_for(Duration::from_secs(5), || {
-        field_value(a11y).filter(|v| v.trim_end() == want.trim_end())
+        field_value(backend).filter(|v| v.trim_end() == want.trim_end())
     })
     .ok_or_else(|| {
         format!(
             "the field does not hold the draft: want {want:?}, read back {:?}",
-            field_value(a11y)
+            field_value(backend)
         )
     })?;
     let total = fired.elapsed();
@@ -364,6 +380,7 @@ pub fn draft_and_insert(
         read_field,
         draft_started,
         first_token: first_token.unwrap_or(total),
+        first_insert: first_insert.unwrap_or_default(),
         total,
         text,
         chunks,

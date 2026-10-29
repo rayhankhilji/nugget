@@ -312,18 +312,12 @@ mod mac {
             focused.field.selection
         );
         check(!focused.field.secure, "TextEdit's text view is not secure")?;
-        support::read_breakdown(
-            &nugget_a11y::Backend::new(
-                nugget_a11y::AxPlatform::new(),
-                nugget_a11y::A11yConfig::default(),
-            ),
-            "macos",
-        );
-
+        // The backend the shell's `doubletap::flow` builds on macOS.
         let ax = nugget_a11y::Backend::new(
             nugget_a11y::AxPlatform::new(),
             nugget_a11y::A11yConfig::default(),
         );
+        support::read_breakdown(&ax, "macos");
         let front = || {
             ax.frontmost_app()
                 .map(|f| format!("{:?}", f.map(|(a, _)| (a.name, a.window_title))))
@@ -335,7 +329,8 @@ mod mac {
                 (Mode::Streamed, support::STREAMED_CHUNKS),
             ] {
                 let pipeline = Pipeline::new(chunks);
-                let fired_at = if p.post {
+                // The listener stays up while the draft runs, as in the shell.
+                let (listener, fired_at) = if p.post {
                     let t = Instant::now();
                     let (listener, rx) = listen(Trigger::default());
                     println!(
@@ -363,17 +358,19 @@ mod mac {
                         );
                         sleep(Duration::from_millis(500));
                     }
-                    drop(listener);
-                    fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?
+                    let fired =
+                        fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?;
+                    (Some(listener), fired)
                 } else {
                     println!(
                         "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
                      does (no key press)"
                     );
-                    Instant::now()
+                    (None, Instant::now())
                 };
-                let report = support::draft_and_insert(a11y.as_ref(), &pipeline, fired_at, mode)
+                let report = support::draft_and_insert(&ax, &pipeline, fired_at, mode)
                     .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
+                drop(listener);
                 report.publish("macos");
                 check(is_textedit(&report.app), "the draft was read from TextEdit")?;
             }

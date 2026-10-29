@@ -343,8 +343,8 @@ jobs:
         run: |
           {
             echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
-            echo "| OS | mode | app | read field ms | draft started ms | first token ms | total ms | chunks | insert methods | verified |"
-            echo "|---|---|---|---|---|---|---|---|---|---|"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
           NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" \
             cargo test -p nugget-hotkey --locked --test windows_it -- --ignored --test-threads=1 --nocapture 2>&1 \
@@ -357,8 +357,8 @@ jobs:
         run: |
           {
             echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
-            echo "| OS | mode | app | read field ms | draft started ms | first token ms | total ms | chunks | insert methods | verified |"
-            echo "|---|---|---|---|---|---|---|---|---|---|"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
           NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" NUGGET_DOUBLETAP_ARTIFACTS="$PWD/doubletap-artifacts" \
             cargo test -p nugget-hotkey --locked --test macos_it -- --ignored 2>&1 \

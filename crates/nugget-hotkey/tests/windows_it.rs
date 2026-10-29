@@ -284,13 +284,12 @@ fn windows_doubletap_into_notepad() {
         focused.field.selection
     );
     assert!(!focused.field.secure);
-    support::read_breakdown(
-        &nugget_a11y::Backend::new(
-            nugget_a11y::UiaPlatform::new(),
-            nugget_a11y::A11yConfig::default(),
-        ),
-        "windows",
+    // The backend the shell's `doubletap::flow` builds on Windows.
+    let backend = nugget_a11y::Backend::new(
+        nugget_a11y::UiaPlatform::new(),
+        nugget_a11y::A11yConfig::default(),
     );
+    support::read_breakdown(&backend, "windows");
     for k in [RCONTROL, LCONTROL, LMENU] {
         send(k, false);
     }
@@ -308,9 +307,10 @@ fn windows_doubletap_into_notepad() {
         let fired_at = rx
             .recv_timeout(Duration::from_secs(2))
             .expect("the double tap did not fire over Notepad");
-        drop(listener);
-        let report = support::draft_and_insert(a11y.as_ref(), &pipeline, fired_at, mode)
+        // The listener stays up while the draft runs, as in the shell.
+        let report = support::draft_and_insert(&backend, &pipeline, fired_at, mode)
             .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));
+        drop(listener);
         report.publish("windows");
         assert!(is_notepad(&report.app), "{:?}", report.app);
     }
