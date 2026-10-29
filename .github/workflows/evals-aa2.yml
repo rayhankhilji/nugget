@@ -22,7 +22,7 @@ env:
   RUSTUP_MAX_RETRIES: "10"
   RUST_BACKTRACE: "1"
   SCALE: quick
-  BASELINE: ""
+  BASELINE: "abe2f7423a7a62b7747105e81ed47eb54f098b41"
   NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
   RESULTS: ${{ github.workspace }}/eval-results
 
