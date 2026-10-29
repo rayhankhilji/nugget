@@ -15,12 +15,8 @@ on:
       - "apps/desktop/src-tauri/**"
       - "packaging/**"
       - "tests/fixtures/native/**"
+      - "bench/src/suites/cua/**"
       - ".github/workflows/real-os.yml"
-  # TEMPORARY while Y1 iterates; removed before the final push. A push runs only the jobs whose
-  # tag ([ci:smoke], [ci:a11y], [ci:doubletap], [ci:cua], [ci:notify]) or [ci:all] is in the
-  # head commit message.
-  push:
-    branches: [y/real-os]
 
 # Least privilege: every job only reads the repository.
 permissions:
@@ -35,14 +31,13 @@ env:
   NO_COLOR: "1"
 
 jobs:
-  # ---- BEGIN smoke (installer smoke tests) ----
+  # ---- installer smoke tests ----
   # Build the dmg / NSIS installer the way release.yml does, then install and launch it: the
   # `Nugget` window must appear, the app must start and connect to the bundled nuggetd, closing
   # the window must quit the app (status 0), and the daemon must stop cleanly.
   # See packaging/scripts/smoke-macos.sh and smoke-windows.ps1.
   smoke-macos:
     name: Installer smoke (macOS dmg)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:smoke]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -105,7 +100,6 @@ jobs:
 
   smoke-windows:
     name: Installer smoke (Windows NSIS)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:smoke]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: windows-latest
     timeout-minutes: 75
     env:
@@ -174,15 +168,13 @@ jobs:
           path: ${{ runner.temp }}/smoke/
           retention-days: 14
           if-no-files-found: warn
-  # ---- END smoke ----
 
-  # ---- BEGIN a11y (accessibility against native test apps) ----
+  # ---- accessibility against native test apps ----
   # nugget-a11y against small native fixture apps (tests/fixtures/native/{windows,macos}):
   # read the focused field, its text and selection, walk the tree, set values, press, toggle,
   # select, type, and insert with read-back (accessibility and clipboard paths).
   a11y-windows:
     name: Accessibility (Windows UIA)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:a11y]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
@@ -228,7 +220,6 @@ jobs:
 
   a11y-macos:
     name: Accessibility (macOS AX)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:a11y]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -266,14 +257,13 @@ jobs:
           if-no-files-found: ignore
   # ---- END a11y ----
 
-  # ---- BEGIN doubletap (hotkey and insert path) ----
+  # ---- hotkey and insert path ----
   # The Double Tap path on a real desktop: nugget-hotkey listeners fed with synthesized key
   # presses (SendInput / CGEvent), then trigger -> focused-field read -> draft (scripted provider)
   # -> insert into Notepad / TextEdit, read back through UIA / AX. Prints and summarises the time
   # to the first inserted token. Tests: crates/nugget-hotkey/tests/{windows_it,macos_it}.rs.
   doubletap:
     name: Double Tap (${{ matrix.os }})
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:doubletap]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -388,16 +378,14 @@ jobs:
           name: doubletap-${{ matrix.os }}
           path: doubletap-artifacts/
           if-no-files-found: ignore
-  # ---- END doubletap ----
 
-  # ---- BEGIN cua (computer use over real UIA) ----
+  # ---- computer use over real UIA ----
   # `bench cua` in the native environment: one Edge window per test app, read and driven through
   # real UI Automation. The nugget arm (real agent loop and computer-use tools, scripted model)
   # runs the form-fill and file-organising tasks; the reference agent runs them too, as a check
   # of the harness. --strict fails the job when a target is missed; any harness error fails it.
   cua-windows:
     name: Computer use over UIA (windows-latest)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:cua]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -476,9 +464,8 @@ jobs:
           name: cua-native-windows
           path: ${{ runner.temp }}/cua-native
           if-no-files-found: warn
-  # ---- END cua ----
 
-  # ---- BEGIN notify (notification click) ----
+  # ---- notification click ----
   # Notification click (apps/desktop/src-tauri/src/notify.rs). Both OSes run the handler tests
   # against tauri's mock runtime: the function each platform callback calls must show `main` on
   # Today. Windows then posts a real toast through `notify::show` and clicks it on screen (UI
@@ -487,7 +474,6 @@ jobs:
   # runner (the step's notice says why).
   notify-windows:
     name: Notification click (Windows toast)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:notify]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: windows-latest
     timeout-minutes: 50
     env:
@@ -703,7 +689,6 @@ jobs:
 
   notify-macos:
     name: Notification click (macOS)
-    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:notify]') || contains(github.event.head_commit.message, '[ci:all]')
     runs-on: macos-latest
     timeout-minutes: 40
     steps:
@@ -757,4 +742,3 @@ jobs:
           name: notify-macos
           path: ${{ runner.temp }}/notify-record
           if-no-files-found: ignore
-  # ---- END notify ----
