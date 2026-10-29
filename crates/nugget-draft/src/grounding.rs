@@ -11,7 +11,8 @@
 //!   instruction and the facts that are not superseded ([`crate::prompt_facts`]). A sentence
 //!   with any unsupported value, including one found only in a superseded fact, is dropped:
 //!   it is never emitted.
-//! - **Proper names** the corpus doesn't know are only counted ([`GroundingReport`]).
+//! - **Proper names** the corpus doesn't know, and unsupported **weekday names** (usually a
+//!   proposal such as "see you Friday"), are only counted ([`GroundingReport`]).
 //!
 //! Greeting and sign-off lines are held until the first body sentence is accepted, so a draft
 //! whose every content sentence was dropped emits nothing at all (the fallback). Like the
@@ -52,6 +53,8 @@ pub struct GroundingReport {
     pub values_superseded: u32,
     /// Capitalised words the corpus doesn't know (counted, not dropped).
     pub names_flagged: u32,
+    /// Weekday names the corpus doesn't support (counted, not dropped: usually a proposal).
+    pub weekdays_flagged: u32,
     /// Facts marked superseded in the prompt.
     pub superseded_facts: u32,
     /// Every content sentence was dropped, so nothing (not even the greeting) was emitted.
@@ -330,9 +333,16 @@ impl Grounder {
             if v.keys.iter().any(|k| self.corpus.supported.contains(k)) {
                 continue;
             }
+            let superseded = v.keys.iter().any(|k| self.corpus.superseded.contains(k));
+            // A bare weekday is usually a proposal ("see you Friday"), not a fact: count it,
+            // unless it comes from a superseded fact.
+            if v.kind == ValueKind::Weekday && !superseded {
+                self.report.weekdays_flagged += 1;
+                continue;
+            }
             ok = false;
             self.report.values_unsupported += 1;
-            if v.keys.iter().any(|k| self.corpus.superseded.contains(k)) {
+            if superseded {
                 self.report.values_superseded += 1;
             }
             if self.report.unsupported.len() < MAX_REPORTED {
@@ -1221,6 +1231,16 @@ mod tests {
         let (out, _) = run(&mut g, &[draft]);
         assert_eq!(out, draft);
         assert_eq!(g.report().names_flagged, 1);
+    }
+
+    #[test]
+    fn unsupported_weekdays_are_flagged_not_dropped() {
+        let mut g = grounder();
+        let draft = "Sounds good, see you Wednesday.";
+        let (out, _) = run(&mut g, &["Sounds good, ", "see you Wednesday."]);
+        assert_eq!(out, draft);
+        assert_eq!(g.report().weekdays_flagged, 1);
+        assert_eq!(g.report().sentences_dropped, 0);
     }
 
     #[test]
