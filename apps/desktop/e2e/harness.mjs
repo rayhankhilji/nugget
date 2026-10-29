@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 export const here = path.dirname(fileURLToPath(import.meta.url));
 export const DESKTOP = path.resolve(here, "..");
-export const DIST = path.join(DESKTOP, "dist");
+export const DIST = path.resolve(process.env.E2E_DIST || path.join(DESKTOP, "dist"));
 export const OUT = path.resolve(process.env.E2E_ARTIFACTS || path.join(here, "artifacts"));
 export const KEEP = process.env.E2E_KEEP === "1";
 export const INDEX_TIMEOUT_MS = Number(process.env.E2E_INDEX_TIMEOUT_MS || 180_000);
