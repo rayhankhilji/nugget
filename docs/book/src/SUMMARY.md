@@ -25,6 +25,7 @@
 - [Plugins](guide/plugins.md)
 - [Privacy](guide/privacy.md)
 - [Languages](guide/languages.md)
+- [Accessibility](guide/accessibility.md)
 - [Troubleshooting](guide/troubleshooting.md)
 
 # Reference
