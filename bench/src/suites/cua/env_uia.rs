@@ -579,49 +579,63 @@ impl UiaDriver {
             }
             _ => {}
         }
-        let located = match self.locate(&app, bench) {
-            Ok(l) => l,
-            Err(e) => return fail(format!("cannot read the {app} window: {e}")),
-        };
-        let Some(real) = located.real(action.target()).cloned() else {
-            return fail(format!(
-                "`{}` is not in the real {app} window (accessibility match failed)",
-                node.name
-            ));
-        };
+        // The page can be replaced between the read and the action (a second reload): the
+        // element is then gone, so read the window again and retry once.
+        let mut attempt = 0;
         let v0 = version();
-        let first = match action {
-            Action::Click { .. } => self.sys.act(&real.id, &UiAction::Press),
-            Action::Type { text, .. } => self.sys.act(
-                &real.id,
-                &UiAction::SetValue {
-                    value: text.clone(),
-                },
-            ),
-            Action::Select { target, option } => {
-                let opt = node
-                    .options
-                    .iter()
-                    .position(|o| o == option)
-                    .and_then(|i| located.matched.options.get(&option_id(target, i)));
-                let has = |n: &UiNode, k: UiActionKind| n.actions.contains(&k);
-                match opt {
-                    Some(o) if has(o, UiActionKind::Select) => {
-                        self.sys.act(&o.id, &UiAction::Select)
+        let (real, first) = loop {
+            let located = match self.locate(&app, bench) {
+                Ok(l) => l,
+                Err(e) => return fail(format!("cannot read the {app} window: {e}")),
+            };
+            let Some(real) = located.real(action.target()).cloned() else {
+                return fail(format!(
+                    "`{}` is not in the real {app} window (accessibility match failed)",
+                    node.name
+                ));
+            };
+            let first: Result<ActionOutcome> = match action {
+                Action::Click { .. } => self.sys.act(&real.id, &UiAction::Press),
+                Action::Type { text, .. } => self.sys.act(
+                    &real.id,
+                    &UiAction::SetValue {
+                        value: text.clone(),
+                    },
+                ),
+                Action::Select { target, option } => {
+                    let opt = node
+                        .options
+                        .iter()
+                        .position(|o| o == option)
+                        .and_then(|i| located.matched.options.get(&option_id(target, i)));
+                    let has = |n: &UiNode, k: UiActionKind| n.actions.contains(&k);
+                    match opt {
+                        Some(o) if has(o, UiActionKind::Select) => {
+                            self.sys.act(&o.id, &UiAction::Select)
+                        }
+                        // AX may expose a closed `<select>`'s options as menu items to press.
+                        Some(o) if has(o, UiActionKind::Press) => {
+                            self.sys.act(&o.id, &UiAction::Press)
+                        }
+                        Some(o) if !has(&real, UiActionKind::SetValue) => {
+                            self.sys.act(&o.id, &UiAction::Select)
+                        }
+                        _ => self.sys.act(
+                            &real.id,
+                            &UiAction::SetValue {
+                                value: option.clone(),
+                            },
+                        ),
                     }
-                    // AX may expose a closed `<select>`'s options as menu items to press.
-                    Some(o) if has(o, UiActionKind::Press) => self.sys.act(&o.id, &UiAction::Press),
-                    Some(o) if !has(&real, UiActionKind::SetValue) => {
-                        self.sys.act(&o.id, &UiAction::Select)
-                    }
-                    _ => self.sys.act(
-                        &real.id,
-                        &UiAction::SetValue {
-                            value: option.clone(),
-                        },
-                    ),
                 }
+            };
+            let stale = matches!(&first, Err(Error::NotFound(_)));
+            if stale && attempt == 0 && version() == v0 {
+                attempt += 1;
+                std::thread::sleep(POLL * 5);
+                continue;
             }
+            break (real, first);
         };
         let first_err = first.err();
         if self.await_effect(&v0, version, FALLBACK_AFTER) {
