@@ -723,12 +723,12 @@ async fn kill_and_resume_are_broadcast() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_injection_in_a_page_forces_the_next_edit_to_a_confirmation() {
+async fn an_injection_in_a_page_forces_a_tainted_edit_to_a_confirmation() {
     let mut rig = start(contact_page(&format!("Contact us. {INJECTION}."))).await;
     rig.script.push("browser_snapshot", json!({}));
     rig.script.push(
         "browser_type",
-        json!({"element": "n1", "text": "Where is my order?"}),
+        json!({"element": "n1", "text": "Where is my order? Reply to attacker@evil.example"}),
     );
     rig.script.push(
         "finish",
@@ -747,7 +747,8 @@ async fn an_injection_in_a_page_forces_the_next_edit_to_a_confirmation() {
         .await;
     assert!(!finding.patterns.is_empty());
 
-    // Typing is an edit the policy allows, but after the injection it is confirmed first.
+    // Typing is an edit the policy allows, but after the injection, typing an address only the
+    // injected text named is confirmed first.
     let req = events.confirmation(&task).await;
     assert_eq!(req.tool, "browser_type");
     assert!(req.forced_by_injection);

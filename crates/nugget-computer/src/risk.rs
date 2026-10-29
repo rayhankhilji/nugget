@@ -235,14 +235,135 @@ fn is_affirmative(node: &UiNode) -> bool {
     !w.is_empty() && w.len() <= 3 && any_phrase(&w, AFFIRMATIVE_WORDS.iter().copied())
 }
 
+/// Containers whose removals are reversible: a shopping cart and its translations. Matched
+/// against the target's ancestors' names, its dialog's text and the window title.
+pub const CART_WORDS: &[&str] = &[
+    "cart",
+    "shopping cart",
+    "basket",
+    "shopping basket",
+    "trolley",
+    "shopping bag",
+    "your bag",
+    "my bag",
+    "warenkorb",
+    "einkaufswagen",
+    "panier",
+    "carrito",
+    "cesta",
+    "carrello",
+    "winkelwagen",
+    "winkelmand",
+    "carrinho",
+    "kundvagn",
+    "koszyk",
+];
+/// Verbs a cart line's own removal button uses.
+const CART_REMOVAL_WORDS: &[&str] = &["remove", "delete"];
+/// Objects whose removal is not a cart line even inside a cart: these stay Destroy.
+const CART_PROTECTED_WORDS: &[&str] = &[
+    "account",
+    "payment",
+    "card",
+    "method",
+    "wallet",
+    "address",
+    "profile",
+    "all",
+    "everything",
+    "history",
+    "data",
+    "order",
+    "subscription",
+];
+/// Labels of buttons that submit or commit their form (a sign-in, a send, a payment).
+const SUBMIT_WORDS: &[&str] = &[
+    "submit",
+    "send",
+    "post",
+    "publish",
+    "pay",
+    "place order",
+    "purchase",
+    "buy",
+    "buy now",
+    "order now",
+    "confirm purchase",
+    "checkout",
+    "check out",
+    "sign in",
+    "log in",
+    "sign up",
+    "save",
+];
+
+/// Does a container name, dialog text or window title name a shopping cart?
+fn names_cart(text: &str) -> bool {
+    let w = words(text);
+    any_phrase(&w, CART_WORDS.iter().copied()) || (w.len() == 1 && w[0] == "bag")
+}
+
+/// Is the target inside a cart: an ancestor, its dialog or the window title names one?
+fn in_cart(ancestors: &[(Role, Option<String>)], context: &[String]) -> bool {
+    ancestors
+        .iter()
+        .filter_map(|(_, name)| name.as_deref())
+        .chain(context.iter().map(String::as_str))
+        .any(names_cart)
+}
+
+/// Is `text` the removal of one cart line ("Remove", "Remove one Gel pen", "Delete",
+/// "Remove from cart")? Only remove/delete may carry its risk: with those words dropped, no
+/// other risk word may be left, nor a protected object ("Remove payment method").
+fn is_cart_line_removal(text: &str, kw: &RiskKeywords) -> bool {
+    let w = words(text);
+    if !any_phrase(&w, CART_REMOVAL_WORDS.iter().copied())
+        || any_phrase(&w, CART_PROTECTED_WORDS.iter().copied())
+    {
+        return false;
+    }
+    let rest: Vec<&str> = w
+        .iter()
+        .map(String::as_str)
+        .filter(|x| !CART_REMOVAL_WORDS.contains(x))
+        .collect();
+    classify_text(&rest.join(" "), kw).is_none()
+}
+
 /// What a click on `node` risks. `context` is the text around it (its dialog's title and text,
 /// the window title), consulted for confirming buttons such as "OK" in "Delete 3 files?".
 /// `None` (the element is not in the last snapshot) is treated as [`RiskClass::Send`].
 pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) -> RiskClass {
+    click_risk_in(node, &[], context, kw)
+}
+
+/// [`click_risk`] for an element looked up in the last snapshot, with its containers.
+pub(crate) fn click_risk_found(
+    found: Option<&crate::state::Found>,
+    kw: &RiskKeywords,
+) -> RiskClass {
+    match found {
+        Some(f) => click_risk_in(Some(&f.node), &f.ancestors, &f.context, kw),
+        None => click_risk_in(None, &[], &[], kw),
+    }
+}
+
+/// [`click_risk`] knowing the element's containers (innermost first, with their names). Inside
+/// a shopping cart ([`CART_WORDS`] in a container's name, the dialog or the window title),
+/// removing one line ("Remove", "Remove one Gel pen", "Delete") is Edit: the item can be put
+/// back. Any other Destroy label ("Remove payment method", "Empty trash") and every Security,
+/// Spend or Send word keep their class.
+pub fn click_risk_in(
+    node: Option<&UiNode>,
+    ancestors: &[(Role, Option<String>)],
+    context: &[String],
+    kw: &RiskKeywords,
+) -> RiskClass {
     let Some(node) = node else {
         return RiskClass::Send;
     };
-    let mut own = classify_text(&label_text(node), kw);
+    let label = label_text(node);
+    let mut own = classify_text(&label, kw);
     // Toggling a check box or switch sets a preference ("Send me the newsletter"); it sends or
     // spends nothing by itself. Destroy and Security words still count.
     if (node.role == Role::CheckBox || node.states.checked.is_some())
@@ -250,8 +371,19 @@ pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) 
     {
         own = Some(RiskClass::Edit);
     }
+    let cart = || in_cart(ancestors, context);
+    if own == Some(RiskClass::Destroy) && is_cart_line_removal(&label, kw) && cart() {
+        own = Some(RiskClass::Edit);
+    }
     let ctx = if is_affirmative(node) {
-        classify_text(&context.join(" "), kw)
+        let text = context.join(" ");
+        match classify_text(&text, kw) {
+            // "OK" in "Remove Gel pen from your cart?"
+            Some(RiskClass::Destroy) if is_cart_line_removal(&text, kw) && cart() => {
+                Some(RiskClass::Edit)
+            }
+            c => c,
+        }
     } else {
         None
     };
@@ -260,6 +392,69 @@ pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) 
         .max()
         .unwrap_or(RiskClass::Edit)
         .max(RiskClass::Edit)
+}
+
+/// Does activating `node` submit what its form or dialog holds? `Some(true)` for a button
+/// labelled like a submit ("Send", "Pay", "Place order", "Sign in"; "OK"/"Continue" in a
+/// dialog), `Some(false)` for controls that never submit (check boxes, list items, links,
+/// tabs, menu items, text inputs), `None` when it cannot be told. The accessibility model
+/// exposes no default-button flag, so this goes by role and label.
+fn submits(node: &UiNode, in_dialog: bool) -> Option<bool> {
+    if node.role == Role::CheckBox
+        || node.states.checked.is_some()
+        || is_text_input(node)
+        || matches!(
+            node.role,
+            Role::ListItem | Role::Link | Role::Tab | Role::MenuItem
+        )
+    {
+        return Some(false);
+    }
+    if node.role != Role::Button {
+        return None;
+    }
+    let w = words(node.name.as_deref().unwrap_or_default());
+    if w.is_empty() || w.len() > 5 {
+        return None;
+    }
+    if any_phrase(&w, SUBMIT_WORDS.iter().copied()) || (in_dialog && is_affirmative(node)) {
+        return Some(true);
+    }
+    None
+}
+
+/// What the policy gate should know about the element a call targets: its role, containers,
+/// sibling fields, dialog and whether it submits. `None` (not in the last snapshot) is an empty
+/// context.
+pub(crate) fn action_context(found: Option<&crate::state::Found>) -> nugget_policy::ActionContext {
+    let Some(f) = found else {
+        return nugget_policy::ActionContext::default();
+    };
+    let in_dialog = f.ancestors.iter().any(|(r, _)| *r == Role::Dialog);
+    let mut ctx = nugget_policy::ActionContext::default()
+        .with_role(f.node.role.as_str())
+        .with_ancestors(
+            f.ancestors
+                .iter()
+                .map(|(role, name)| nugget_policy::ContextNode::new(role.as_str(), name.clone())),
+        )
+        .with_form_fields(f.fields.iter().cloned())
+        .with_secure_field(is_secret_field(&f.node));
+    if let Some(s) = submits(&f.node, in_dialog) {
+        ctx = ctx.with_submits(s);
+    }
+    if in_dialog {
+        // `context` is the dialog's name, description and texts, then the window title.
+        let n = f.context.len() - usize::from(f.window.title.is_some()).min(f.context.len());
+        let text = f.context[..n].join("\n");
+        if !text.is_empty() {
+            ctx = ctx.with_dialog_text(text);
+        }
+    }
+    if let Some(t) = &f.window.title {
+        ctx = ctx.with_window_title(t.clone());
+    }
+    ctx
 }
 
 /// What typing into (or setting the value of) `node` risks: a secret field is Security, an
@@ -331,6 +526,7 @@ pub fn keys_risk(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::Found;
 
     fn kw() -> RiskKeywords {
         RiskKeywords::default()
@@ -507,6 +703,194 @@ mod tests {
             ..UiNode::default()
         };
         assert_eq!(click_risk(Some(&send), &[], &kw), RiskClass::Send);
+    }
+
+    fn button(name: &str) -> UiNode {
+        UiNode {
+            role: Role::Button,
+            name: Some(name.into()),
+            ..UiNode::default()
+        }
+    }
+
+    fn cart_line() -> Vec<(Role, Option<String>)> {
+        vec![
+            (Role::ListItem, None),
+            (Role::List, Some("Cart".into())),
+            (Role::Window, Some("Corner Shop".into())),
+        ]
+    }
+
+    #[test]
+    fn cart_line_removal_is_edit() {
+        let k = kw();
+        let shop = vec!["Corner Shop".to_string()];
+        for name in [
+            "Remove one Gel pen",
+            "Remove",
+            "Remove Gel pen",
+            "Delete",
+            "Remove from cart",
+            "Decrease quantity",
+        ] {
+            assert_eq!(
+                click_risk_in(Some(&button(name)), &cart_line(), &shop, &k),
+                RiskClass::Edit,
+                "{name}"
+            );
+        }
+        // A cart named by the window title, or in another language.
+        let basket = vec!["Your shopping basket".to_string()];
+        assert_eq!(
+            click_risk_in(Some(&button("Remove")), &[], &basket, &k),
+            RiskClass::Edit
+        );
+        let de = vec![(Role::List, Some("Warenkorb".into()))];
+        assert_eq!(
+            click_risk_in(Some(&button("Delete")), &de, &[], &k),
+            RiskClass::Edit
+        );
+        // "OK" in a dialog asking to remove a cart line.
+        let dlg = vec![
+            "Remove Gel pen from your cart?".to_string(),
+            "Corner Shop".to_string(),
+        ];
+        assert_eq!(
+            click_risk_in(Some(&button("OK")), &[], &dlg, &k),
+            RiskClass::Edit
+        );
+    }
+
+    #[test]
+    fn removal_outside_cart_or_of_protected_things_stays() {
+        let k = kw();
+        let shop = vec!["Corner Shop".to_string()];
+        let files = vec![
+            (Role::ListItem, None),
+            (Role::List, Some("Files".into())),
+            (Role::Window, Some("Corner Shop".into())),
+        ];
+        assert_eq!(
+            click_risk_in(Some(&button("Remove one Gel pen")), &files, &shop, &k),
+            RiskClass::Destroy
+        );
+        assert_eq!(
+            click_risk_in(Some(&button("Remove")), &[], &[], &k),
+            RiskClass::Destroy
+        );
+        assert_eq!(
+            click_risk(Some(&button("Remove one Gel pen")), &shop, &k),
+            RiskClass::Destroy
+        );
+        for (name, class) in [
+            ("Remove payment method", RiskClass::Destroy),
+            ("Delete account", RiskClass::Destroy),
+            ("Remove card", RiskClass::Destroy),
+            ("Empty trash", RiskClass::Destroy),
+            ("Remove all", RiskClass::Destroy),
+            ("Cancel order", RiskClass::Destroy),
+            ("Remove permission", RiskClass::Security),
+            ("Remove and buy", RiskClass::Spend),
+        ] {
+            assert_eq!(
+                click_risk_in(Some(&button(name)), &cart_line(), &shop, &k),
+                class,
+                "{name}"
+            );
+        }
+        // A list of "Tea bags" is not a bag.
+        let tea = vec![(Role::List, Some("Tea bags".into()))];
+        assert_eq!(
+            click_risk_in(Some(&button("Remove")), &tea, &[], &k),
+            RiskClass::Destroy
+        );
+        // "OK" in a dialog deleting something else, inside a shop window.
+        let dlg = vec!["Delete your account?".to_string(), "Cart".to_string()];
+        assert_eq!(
+            click_risk_in(Some(&button("OK")), &[], &dlg, &k),
+            RiskClass::Destroy
+        );
+    }
+
+    fn found(node: UiNode, ancestors: Vec<(Role, Option<String>)>, context: Vec<String>) -> Found {
+        Found {
+            node,
+            window: nugget_a11y::computer::WindowInfo {
+                id: nugget_a11y::computer::WindowId("w1".into()),
+                app: nugget_a11y::computer::AppEntry {
+                    id: None,
+                    name: "Shop".into(),
+                    pid: None,
+                    frontmost: true,
+                },
+                title: Some("Corner Shop".into()),
+                bounds: None,
+                focused: true,
+                minimized: false,
+            },
+            app: "Shop".into(),
+            context,
+            ancestors,
+            fields: vec!["Email".into(), "Card number".into()],
+        }
+    }
+
+    #[test]
+    fn found_click_risk_and_context() {
+        let k = kw();
+        let f = found(
+            button("Remove one Gel pen"),
+            cart_line(),
+            vec!["Corner Shop".into()],
+        );
+        assert_eq!(click_risk_found(Some(&f), &k), RiskClass::Edit);
+        assert_eq!(click_risk_found(None, &k), RiskClass::Send);
+        let c = action_context(Some(&f));
+        assert_eq!(c.role.as_deref(), Some("button"));
+        assert_eq!(c.ancestors.len(), 3);
+        assert_eq!(c.ancestors[1].role, "list");
+        assert_eq!(c.ancestors[1].name.as_deref(), Some("Cart"));
+        assert_eq!(c.form_fields, vec!["Email", "Card number"]);
+        assert_eq!(c.window_title.as_deref(), Some("Corner Shop"));
+        assert_eq!(c.submits, None);
+        assert_eq!(c.dialog_text, None);
+
+        let pay = found(button("Pay $12.40"), vec![], vec!["Corner Shop".into()]);
+        assert_eq!(action_context(Some(&pay)).submits, Some(true));
+        let ok = found(
+            button("OK"),
+            vec![(Role::Dialog, Some("Leave?".into()))],
+            vec![
+                "Leave?".into(),
+                "Your cart is kept.".into(),
+                "Corner Shop".into(),
+            ],
+        );
+        let c = action_context(Some(&ok));
+        assert_eq!(c.submits, Some(true));
+        assert_eq!(c.dialog_text.as_deref(), Some("Leave?\nYour cart is kept."));
+        // "OK" outside a dialog: cannot tell.
+        let ok_bare = found(button("OK"), vec![], vec![]);
+        assert_eq!(action_context(Some(&ok_bare)).submits, None);
+        for role in [
+            Role::CheckBox,
+            Role::ListItem,
+            Role::Link,
+            Role::Tab,
+            Role::MenuItem,
+        ] {
+            let n = UiNode {
+                role,
+                name: Some("Send".into()),
+                ..UiNode::default()
+            };
+            let f = found(n, vec![], vec![]);
+            assert_eq!(action_context(Some(&f)).submits, Some(false), "{role:?}");
+        }
+        assert_eq!(
+            action_context(None),
+            nugget_policy::ActionContext::default()
+        );
     }
 
     #[test]

@@ -157,6 +157,34 @@ pub struct ActionContext {
     pub secure_field: bool,
     /// Accessibility role of the target (`button`, `link`, `text_field`, ...).
     pub role: Option<String>,
+    /// Whether activating the target submits or commits what the form or dialog holds (a form's
+    /// default button, a `submit` input). `None` when the executor cannot tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submits: Option<bool>,
+    /// The containers around the target, innermost first (the list item and list a button sits
+    /// in, the table row, the toolbar). Tells a row's "Remove" in a cart from a "Delete" on its
+    /// own, and a message row named after its subject from a command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ancestors: Vec<ContextNode>,
+}
+
+/// One container in [`ActionContext::ancestors`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextNode {
+    /// Accessibility role, in the same vocabulary as [`ActionContext::role`].
+    pub role: String,
+    /// Its accessible name, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl ContextNode {
+    pub fn new(role: impl Into<String>, name: Option<String>) -> Self {
+        Self {
+            role: role.into(),
+            name,
+        }
+    }
 }
 
 impl ActionContext {
@@ -186,6 +214,17 @@ impl ActionContext {
     }
     pub fn with_role(mut self, role: impl Into<String>) -> Self {
         self.role = Some(role.into());
+        self
+    }
+    pub fn with_submits(mut self, submits: bool) -> Self {
+        self.submits = Some(submits);
+        self
+    }
+    pub fn with_ancestors<I>(mut self, ancestors: I) -> Self
+    where
+        I: IntoIterator<Item = ContextNode>,
+    {
+        self.ancestors = ancestors.into_iter().collect();
         self
     }
 }
