@@ -100,7 +100,11 @@ const BASE_ATTRS: &[&str] = &[
     "AXSelected",
     "AXExpanded",
     "AXDisclosing",
+    "AXTitleUIElement",
 ];
+
+/// How deep [`AxEl::label_text`] looks for a label's text.
+const LABEL_DEPTH: usize = 2;
 
 impl AxEl {
     fn get(&self, name: &str) -> Option<CFRetained<CFType>> {
@@ -186,6 +190,17 @@ impl AxEl {
                 node.states.expanded = computer::checked_from_ax("AXCheckBox", None, v);
             }
         }
+        // A web control labelled by a `<label for>` (Chromium, WebKit) has no AXTitle: its name
+        // is the text of its AXTitleUIElement.
+        if node.name.as_deref().is_none_or(|n| n.trim().is_empty())
+            && let Some(label) = names
+                .iter()
+                .position(|n| *n == "AXTitleUIElement")
+                .and_then(|i| v[i].clone())
+                .and_then(AxEl::element)
+        {
+            node.name = label.label_text(LABEL_DEPTH);
+        }
         if let Some(u) = get("AXURL").and_then(cf_url) {
             node.attrs.insert("url".into(), u);
         }
@@ -208,6 +223,29 @@ impl AxEl {
                 ax::is_settable(&self.0, "AXSelectedText") || ax::is_settable(&self.0, "AXValue");
         }
         node
+    }
+
+    /// The text of a label element: its title, value or description, else its children's text.
+    fn label_text(&self, depth: usize) -> Option<String> {
+        let v = ax::attrs(&self.0, &["AXTitle", "AXValue", "AXDescription"]);
+        if let Some(s) = v
+            .iter()
+            .flatten()
+            .filter_map(|t| cf_string(t))
+            .map(|s| s.trim().to_owned())
+            .find(|s| !s.is_empty())
+        {
+            return Some(s);
+        }
+        if depth == 0 {
+            return None;
+        }
+        let parts: Vec<String> = self
+            .children(16)
+            .iter()
+            .filter_map(|c| c.label_text(depth - 1))
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(" "))
     }
 
     fn selection_utf16(&self) -> Option<(usize, usize)> {

@@ -183,7 +183,7 @@ reasons for any failure.
 | `inproc` | In process | Direct calls | Any (CI default) |
 | `socket` | Loopback HTTP server | HTTP, as an out-of-process agent would use it | Any |
 | `xvfb` | Loopback server plus a real desktop (below) | HTTP; the display is on `Session::display()` | Linux |
-| `native` | Loopback server plus one Microsoft Edge app window per app on the machine's own desktop | Every action through real UI Automation; the `nugget` arm also reads the windows over UIA | Windows |
+| `native` | Loopback server plus one browser app window per app on the machine's own desktop (Edge on Windows, Chrome on macOS) | Every action through real UI Automation (AX on macOS); the `nugget` arm also reads the windows that way | Windows, macOS |
 
 `native` (`env_native.rs`, `env_uia.rs`) opens each app in Edge (`--app=`, renderer
 accessibility forced on, throwaway profile, occlusion throttling off; `NUGGET_CUA_EDGE`
@@ -193,8 +193,10 @@ Automation. The session performs each action on the real window through
 fallback); the page posts it to the server like a user's input, and the action counts as done
 when the world changes. The `nugget` arm's computer-use backend snapshots the real windows and
 matches them to the bench tree by role, accessible name and document order, so the model sees
-bench ids (`[forms-next]`) over real names, values and states. On other OSes the environment
-fails with a clear error. Results: [`bench/README.md`, Native environments](../README.md#native-environments).
+bench ids (`[forms-next]`) over real names, values and states. On macOS (`env_ax.rs`) the
+windows are Google Chrome app windows read and driven over AX, with Chrome's AX conventions
+normalised for the matcher (`NUGGET_CUA_CHROME` overrides the browser). On Linux the
+environment fails with a clear error. Results: [`bench/README.md`, Native environments](../README.md#native-environments).
 
 `xvfb` (`desktop.rs`) starts, in order:
 
@@ -243,10 +245,9 @@ secrets and no network access beyond the package install.
 The tasks, apps, scoring and socket are OS-independent. Only `desktop.rs` (the display) is
 Linux-specific.
 
-- **macOS.** Run in a disposable VM (Tart, or Anka on Apple Silicon) with a logged-in session.
-  Launch Chromium with `--app` windows exactly as on Linux, then drive and read them through AX
-  (`nugget-a11y`'s macOS backend). The agent process needs the Accessibility permission in the
-  VM image, granted once through the TCC database at image-build time.
+- **macOS.** Done as `--cua-env native` (Chrome `--app` windows over AX), on GitHub's
+  `macos-latest` runners, which grant the Accessibility permission. A disposable VM (Tart, or
+  Anka on Apple Silicon) needs it granted through the TCC database at image-build time.
 - **Windows.** Run a GitHub-hosted `windows-latest` runner, or a Hyper-V VM with an interactive
   session (UI Automation needs a desktop, so run as a logged-in user, not as a service).
   Chromium exposes the same tree through UI Automation.

@@ -158,6 +158,32 @@ impl AtspiPlatform {
     }
 }
 
+/// The AT-SPI role name (`GetRoleName`: "password text", "text", "push button"...).
+///
+/// GTK 4 answers `GetRoleName` with its own (ARIA) role names where its numeric role is the
+/// AT-SPI one: "text box" for entries, text views and password entries alike (numeric
+/// `PasswordText` marks a `GtkPasswordEntry`), and "application" for a `GtkApplicationWindow`
+/// (numeric `Frame`). For those two names the numeric role decides.
+fn role_name(acc: &AccessibleProxyBlocking<'_>) -> String {
+    let name = acc.get_role_name().unwrap_or_default();
+    if !matches!(name.as_str(), "text box" | "application") {
+        return name;
+    }
+    match acc.get_role() {
+        Ok(atspi::Role::PasswordText) => "password text".into(),
+        Ok(atspi::Role::Frame) => "frame".into(),
+        Ok(atspi::Role::Window) => "window".into(),
+        Ok(atspi::Role::Dialog) => "dialog".into(),
+        _ => name,
+    }
+}
+
+/// The end offset for `Text.GetText(0, end)`: the character count, capped. `-1` ("to the end")
+/// only when the count is unknown: GTK 4's entries answer `GetText(0, -1)` with "".
+fn text_end(count: i32, max_chars: i32) -> i32 {
+    if count > 0 { count.min(max_chars) } else { -1 }
+}
+
 /// A live AT-SPI object: bus name and object path on the accessibility bus.
 #[derive(Clone)]
 pub struct AtspiEl {
@@ -273,7 +299,7 @@ impl AtspiEl {
     fn text_contents(&self, max_chars: i32) -> Option<(String, i32)> {
         let t = self.text()?;
         let count = t.character_count().ok()?;
-        let end = if count > max_chars { max_chars } else { -1 };
+        let end = text_end(count, max_chars);
         let s = t.get_text(0, end).ok()?;
         Some((s, count))
     }
@@ -297,7 +323,7 @@ impl AtspiEl {
 
     fn read_node(&self, with_text: bool) -> (Node, InterfaceSet, HashMap<String, String>) {
         let acc = self.acc();
-        let role_name = acc.get_role_name().unwrap_or_default();
+        let role_name = role_name(&acc);
         let st = acc.get_state().unwrap_or_else(|_| StateSet::empty());
         let attrs = acc.get_attributes().unwrap_or_default();
         let ifaces = self.interfaces();
@@ -522,7 +548,7 @@ impl AtspiPlatform {
         let count = t.character_count().unwrap_or(0).max(0);
         // Read up to max_value_bytes characters; the byte cap is applied after cleaning.
         let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
-        let end = if count > max_chars { max_chars } else { -1 };
+        let end = text_end(count, max_chars);
         let raw = t.get_text(0, end).unwrap_or_default();
         let value = sanitize::clean_value(&raw, max_value_bytes);
         let truncated = count > max_chars || value.len() < raw.len();
