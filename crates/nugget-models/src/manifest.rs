@@ -14,8 +14,8 @@ use url::Url;
 
 /// Hex-encoded ed25519 public key of the **development** manifest signing key.
 ///
-/// The matching private key is never committed. Release builds must replace or extend this with a
-/// release key held offline (see the crate docs).
+/// The matching private key is never committed. It is trusted only in debug builds or when the
+/// build opted in with `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (see [`trusted_keys`]).
 pub const DEV_PUBLIC_KEY_HEX: &str =
     "a56054ce95a98642b081f19398960b1e933a4e9f3f22079dc272630bf681d9b3";
 
@@ -141,29 +141,47 @@ impl ModelEntry {
     }
 }
 
+/// Most detached signatures accepted in one signature file.
+const MAX_SIGNATURES: usize = 8;
+
 /// Verify a detached signature over `bytes` with any of `keys`, then parse and validate the
 /// manifest. This is the only supported way to obtain a [`Manifest`] from untrusted bytes.
 ///
-/// `sig` may be the raw 64-byte signature or its hex encoding (surrounding whitespace ignored).
+/// `sig` may be the raw 64-byte signature or hex text: one signature, or several (one per line,
+/// e.g. a development and a release signature over the same bytes; blank lines and `#` comments
+/// are ignored). It does **not** check rollback; see [`crate::verify_manifest_checked`].
 pub fn verify_manifest(bytes: &[u8], sig: &[u8], keys: &[VerifyingKey]) -> Result<Manifest> {
+    verify_manifest_with_key(bytes, sig, keys).map(|(m, _)| m)
+}
+
+/// [`verify_manifest`], also returning the trusted key that verified the signature. Keys are tried
+/// in order, so with several valid signatures the earliest key in `keys` wins.
+pub fn verify_manifest_with_key(
+    bytes: &[u8],
+    sig: &[u8],
+    keys: &[VerifyingKey],
+) -> Result<(Manifest, VerifyingKey)> {
     if keys.is_empty() {
         return Err(Error::Integrity(
             "no trusted manifest keys configured".into(),
         ));
     }
-    let sig = decode_signature(sig)?;
-    if !keys.iter().any(|k| k.verify_strict(bytes, &sig).is_ok()) {
-        return Err(Error::Integrity(
-            "manifest signature does not match any trusted key".into(),
-        ));
-    }
+    let sigs = decode_signatures(sig)?;
+    let key = keys
+        .iter()
+        .find(|k| sigs.iter().any(|s| k.verify_strict(bytes, s).is_ok()))
+        .ok_or_else(|| {
+            Error::Integrity("manifest signature does not match any trusted key".into())
+        })?;
     let manifest: Manifest = serde_json::from_slice(bytes)
         .map_err(|e| Error::Invalid(format!("manifest is not valid JSON: {e}")))?;
     validate_manifest(&manifest)?;
-    Ok(manifest)
+    Ok((manifest, *key))
 }
 
 /// The manifest bundled with this build, verified against [`trusted_keys`].
+///
+/// This skips rollback protection; the daemon uses [`crate::default_manifest_checked`].
 pub fn default_manifest() -> Result<Manifest> {
     verify_manifest(
         DEFAULT_MANIFEST_JSON,
@@ -172,9 +190,69 @@ pub fn default_manifest() -> Result<Manifest> {
     )
 }
 
-/// Keys trusted to sign manifests in this build.
+/// Hex release public key baked in at build time from `NUGGET_MANIFEST_RELEASE_PUBKEY`, if set
+/// (an empty value counts as unset).
+pub fn release_public_key_hex() -> Option<&'static str> {
+    option_env!("NUGGET_MANIFEST_RELEASE_PUBKEY")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+/// Whether this build trusts the development key: always in debug builds
+/// (`cfg(debug_assertions)`), otherwise only when built with `NUGGET_TRUST_DEV_MANIFEST_KEY=1`.
+pub fn dev_key_trusted() -> bool {
+    cfg!(debug_assertions)
+        || matches!(
+            option_env!("NUGGET_TRUST_DEV_MANIFEST_KEY").map(str::trim),
+            Some("1" | "true" | "yes")
+        )
+}
+
+/// Keys trusted to sign manifests in this build: the release key (if one was baked in), then the
+/// development key if [`dev_key_trusted`]. Fails when that leaves no key: a release build made
+/// without `NUGGET_MANIFEST_RELEASE_PUBKEY` and without the dev-key opt-in trusts nothing.
 pub fn trusted_keys() -> Result<Vec<VerifyingKey>> {
-    Ok(vec![parse_verifying_key(DEV_PUBLIC_KEY_HEX)?])
+    let dev = dev_key_trusted();
+    if dev && !cfg!(debug_assertions) {
+        static WARN: std::sync::Once = std::sync::Once::new();
+        WARN.call_once(|| {
+            tracing::warn!(
+                "this release build trusts the DEVELOPMENT manifest key \
+                 (built with NUGGET_TRUST_DEV_MANIFEST_KEY=1); do not ship it to users"
+            );
+        });
+    }
+    select_trusted_keys(release_public_key_hex(), dev)
+}
+
+/// Pure key selection behind [`trusted_keys`]: `release` (hex, if any) first, then the
+/// development key when `allow_dev`. An invalid release key or an empty result is an error.
+pub fn select_trusted_keys(release: Option<&str>, allow_dev: bool) -> Result<Vec<VerifyingKey>> {
+    let mut keys = Vec::new();
+    if let Some(hex_key) = release.map(str::trim).filter(|s| !s.is_empty()) {
+        let key = parse_verifying_key(hex_key).map_err(|e| {
+            Error::Invalid(format!(
+                "NUGGET_MANIFEST_RELEASE_PUBKEY baked into this build is not a valid ed25519 \
+                 public key: {e}"
+            ))
+        })?;
+        keys.push(key);
+    }
+    if allow_dev {
+        let dev = parse_verifying_key(DEV_PUBLIC_KEY_HEX)?;
+        if !keys.contains(&dev) {
+            keys.push(dev);
+        }
+    }
+    if keys.is_empty() {
+        return Err(Error::Integrity(
+            "no trusted manifest keys in this build: it is a release build made without \
+             NUGGET_MANIFEST_RELEASE_PUBKEY and without NUGGET_TRUST_DEV_MANIFEST_KEY=1 \
+             (see docs/security/manifest-trust.md)"
+                .into(),
+        ));
+    }
+    Ok(keys)
 }
 
 /// Parse a hex-encoded 32-byte ed25519 public key.
@@ -210,6 +288,35 @@ pub fn decode_signature(sig: &[u8]) -> Result<Signature> {
     let arr: [u8; 64] =
         decode_hex_array(text.trim(), "signature").map_err(|e| Error::Integrity(e.to_string()))?;
     Ok(Signature::from_bytes(&arr))
+}
+
+/// Decode one raw signature, or one or more hex signatures (one per line).
+fn decode_signatures(sig: &[u8]) -> Result<Vec<Signature>> {
+    if sig.len() == 64 {
+        return Ok(vec![decode_signature(sig)?]);
+    }
+    let text = std::str::from_utf8(sig)
+        .map_err(|_| Error::Integrity("signature is neither 64 raw bytes nor hex text".into()))?;
+    let sigs = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| {
+            decode_hex_array::<64>(l, "signature")
+                .map(|a| Signature::from_bytes(&a))
+                .map_err(|e| Error::Integrity(e.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if sigs.is_empty() {
+        return Err(Error::Integrity("signature file is empty".into()));
+    }
+    if sigs.len() > MAX_SIGNATURES {
+        return Err(Error::Integrity(format!(
+            "signature file has {} signatures (at most {MAX_SIGNATURES})",
+            sigs.len()
+        )));
+    }
+    Ok(sigs)
 }
 
 fn validate_manifest(m: &Manifest) -> Result<()> {

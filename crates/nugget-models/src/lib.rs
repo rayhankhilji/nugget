@@ -21,10 +21,22 @@
 //! Installed models are re-checkable at any time ([`ModelStore::verify`]), and
 //! [`ModelStore::needs_update`] tells whether a newer manifest pins different bytes.
 //!
+//! **Rollback protection.** [`ManifestTrust`] records, per trusted key, the highest manifest
+//! `version` accepted in this installation (`<models_dir>/manifest-trust.json`) and refuses older
+//! ones; [`verify_manifest_checked`] and [`default_manifest_checked`] apply it.
+//!
 //! ## Signing keys
-//! This build trusts only the **development** key [`DEV_PUBLIC_KEY_HEX`]. Sign manifests with
-//! `cargo run -p nugget-models --example sign-manifest`; the private key is read from
-//! `NUGGET_MANIFEST_SIGNING_KEY` (hex) or a key file and is never committed.
+//! [`trusted_keys`] (see [`select_trusted_keys`]) is, in order:
+//! - the **release** key, baked in at build time from `NUGGET_MANIFEST_RELEASE_PUBKEY` (hex
+//!   ed25519 public key; [`release_public_key_hex`]), if set;
+//! - the **development** key [`DEV_PUBLIC_KEY_HEX`], only in debug builds or when built with
+//!   `NUGGET_TRUST_DEV_MANIFEST_KEY=1` ([`dev_key_trusted`]).
+//!
+//! A release build with neither trusts no key and refuses every manifest. A signature file may
+//! hold several signatures (one hex line each), so one manifest can carry both a development and a
+//! release signature. Sign manifests with `cargo run -p nugget-models --example sign-manifest`;
+//! the private key is read from `NUGGET_MANIFEST_SIGNING_KEY` (hex) or a key file and is never
+//! committed. Details: `docs/security/manifest-trust.md`.
 
 pub mod archive;
 mod download;
@@ -34,14 +46,16 @@ mod preflight;
 mod runtime;
 mod runtime_store;
 mod store;
+mod trust;
 
 pub use download::{DownloadOptions, EGRESS_FEATURE, Phase, Progress, RUNTIME_EGRESS_FEATURE};
 pub use ed25519_dalek::{Signature, SigningKey, VerifyingKey};
 pub use hardware::{GpuKind, Hardware, detect_hardware, recommend};
 pub use manifest::{
     DEFAULT_MANIFEST_JSON, DEFAULT_MANIFEST_SIG, DEV_PUBLIC_KEY_HEX, Manifest, ModelEntry,
-    decode_signature, default_manifest, parse_signing_key, parse_verifying_key, sign_manifest,
-    trusted_keys, verify_manifest,
+    decode_signature, default_manifest, dev_key_trusted, parse_signing_key, parse_verifying_key,
+    release_public_key_hex, select_trusted_keys, sign_manifest, trusted_keys, verify_manifest,
+    verify_manifest_with_key,
 };
 pub use preflight::{DiskSpace, GIB, SystemDiskSpace, check_disk_space, required_bytes};
 pub use runtime::{
@@ -51,6 +65,9 @@ pub use runtime::{
 pub use runtime_store::InstalledRuntime;
 pub use semver;
 pub use store::{GcReport, InstalledModel, ModelStore, Slot, default_client};
+pub use trust::{
+    MANIFEST_TRUST_FILE, ManifestTrust, default_manifest_checked, verify_manifest_checked,
+};
 
 /// Version of this build, compared against [`ModelEntry::min_app_version`].
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

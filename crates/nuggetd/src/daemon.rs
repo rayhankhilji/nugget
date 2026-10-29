@@ -17,7 +17,7 @@ use nugget_infer::{Provider, ProviderConfig, Router, build_provider};
 use nugget_ingest::{Ingest, KeyringSecrets, MemorySecrets, PowerPolicy, SystemPowerPolicy};
 use nugget_ipc::Listener;
 use nugget_models::{
-    DownloadOptions, Hardware, Manifest, ModelStore, RuntimeAccel, default_manifest,
+    DownloadOptions, Hardware, Manifest, ModelStore, RuntimeAccel, default_manifest_checked,
 };
 use nugget_retrieve::Retriever;
 use nugget_runtime::{Runtime, RuntimeOptions};
@@ -297,7 +297,9 @@ impl Daemon {
         let overrides = opts.runtime;
         let manifest = match overrides.manifest.clone() {
             Some(m) => Ok(m),
-            None => default_manifest().map_err(|e| {
+            // Signature, entry validation and rollback protection (per-key version record in the
+            // model store).
+            None => default_manifest_checked(&paths).map_err(|e| {
                 tracing::error!(error = %e, "bundled model manifest failed verification");
                 e.to_string()
             }),
