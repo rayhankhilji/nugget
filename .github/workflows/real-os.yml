@@ -387,12 +387,91 @@ jobs:
   # ---- END doubletap ----
 
   # ---- BEGIN cua (computer use over real UIA) ----
-  cua-placeholder:
-    name: Computer use (placeholder)
-    if: false
-    runs-on: ubuntu-latest
+  # `bench cua` in the native environment: one Edge window per test app, read and driven through
+  # real UI Automation. The nugget arm (real agent loop and computer-use tools, scripted model)
+  # runs the form-fill and file-organising tasks; the reference agent runs them too, as a check
+  # of the harness. --strict fails the job when a target is missed; any harness error fails it.
+  cua-windows:
+    name: Computer use over UIA (windows-latest)
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:cua]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
-      - run: "true"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cua-windows
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+
+      # No first-run pages, sign-in prompts or background Edge on the runner.
+      - name: Quiet Microsoft Edge
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+          New-Item -Path $key -Force | Out-Null
+          foreach ($p in @{ HideFirstRunExperience = 1; BrowserSignin = 0; StartupBoostEnabled = 0;
+                            BackgroundModeEnabled = 0; DefaultBrowserSettingEnabled = 0;
+                            AutoImportAtFirstRun = 4; SyncDisabled = 1 }.GetEnumerator()) {
+            New-ItemProperty -Path $key -Name $p.Key -Value $p.Value -PropertyType DWord -Force | Out-Null
+          }
+          $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (Test-Path $edge) { (Get-Item $edge).VersionInfo.ProductVersion } else { Write-Error "Edge not found at $edge" }
+
+      - name: Build nugget-bench
+        run: cargo build --locked -p nugget-bench
+
+      - name: bench cua, nugget arm, native env
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cua-native"
+          set -o pipefail
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent nugget \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/nugget" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/nugget.log"
+
+      - name: bench cua, reference agent, native env
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent reference \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/reference" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/reference.log"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          for arm in nugget reference; do
+            f="$RUNNER_TEMP/cua-native/$arm.log"
+            [ -f "$f" ] || continue
+            {
+              echo "### bench cua --cua-env native --cua-agent $arm (forms, files)"
+              echo '```'
+              grep -E '^== cua|tasks\.|^  success_rate |steps\.|wall_time\.|safety\.|target |uia_|cua native' "$f" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: cua-native-windows
+          path: ${{ runner.temp }}/cua-native
+          if-no-files-found: warn
   # ---- END cua ----
 
   # ---- BEGIN notify (notification click) ----

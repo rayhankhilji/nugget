@@ -367,8 +367,10 @@ impl CuaAgent for NuggetAgent {
             ModelChoice::Real { provider, .. } => Model::Provider(provider.clone()),
         };
         let (tx, rx) = mpsc::channel();
-        let cu: Arc<dyn ComputerUse> =
-            Arc::new(SessionComputer::new(Arc::new(ChannelPort(tx.clone()))));
+        // In the native environment, the real windows over the OS accessibility API.
+        let port = Arc::new(ChannelPort(tx.clone()));
+        let cu: Arc<dyn ComputerUse> = super::env_native::computer(port.clone())
+            .unwrap_or_else(|| Arc::new(SessionComputer::new(port)));
         let mut tools = ToolRegistry::new();
         for t in computer_tools(cu) {
             tools.register(t);
