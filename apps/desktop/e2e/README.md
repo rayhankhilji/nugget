@@ -21,6 +21,17 @@ It runs five scenarios:
 - **byok**: onboarding's "Bring your own key" form against a mock OpenAI-compatible server on
   localhost: bad key, wrong URL and no network are reported, a good key is saved to the secret
   store (never to `config.toml`) and the egress ledger shows the checks.
+- **a11y**: on the indexed home, axe-core audits every page and the main dialogs in light and dark
+  and fails on serious or critical violations; each page's accessibility tree is checked too (see
+  "What happens: a11y").
+- **prefs**: on the indexed home, display preferences on every page: with reduced motion nothing
+  animates (no infinite or longer-than-instant animation or transition, spinners still but
+  visible) and the knowledge graph draws once and stops, even after a node is dragged (a control
+  run without the preference sees both move); with more contrast and with forced colours the
+  pages render and the overrides in `src/styles-a11y.css` apply (screenshots `prefs-contrast-*`,
+  `prefs-forced-*`); at 200% zoom (a 680×430 viewport at device scale 2) neither the window nor
+  `main` scrolls sideways and i18n.mjs's `measure` finds no label overflowing
+  (`zoom200-<page>.png`, `prefs-zoom-offenders.json`).
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -156,6 +167,34 @@ To fix an offender, let the text wrap (`min-width: 0` on flex items, `flex-wrap:
 `overflow-wrap: anywhere`, no fixed widths); cut it with `text-overflow: ellipsis` and a `title`
 only where truncation is acceptable, and then add the selector to `ALLOW` with the reason.
 
+## What happens: a11y
+
+`a11y.mjs` injects axe-core (a devDependency, MPL-2.0) into the page and runs it with the tags
+`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa` and `best-practice`, colour contrast included. The app
+follows the system theme, so each check runs with Playwright's emulated `prefers-color-scheme`,
+light and then dark. One check per theme and:
+
+| What | Audited |
+| --- | --- |
+| every page of the `PAGES` registry | the whole document; Search again with results, Knowledge with Ada Wexford's facts open and on the Graph tab, Connected apps with its connect dialog; in light also `treeChecks` from `a11y-tree.mjs` (landmarks, headings, names) |
+| Add source | the kind step and the folder step, opened from Sources |
+| Merge and Split entity | from Ada Wexford on Knowledge: Merge as it opens and with a candidate picked (preview shown), Split with a fact ticked |
+| a Today card | its sources (expanded) and its action's review dialog (a dry-run preview) |
+| command palette | Ctrl+K, empty and filtered |
+| onboarding | every step walked with Continue, the AI step with each choice, and the folder form from the source step |
+
+Dialogs are audited alone (`dialog[open]`, the page behind hidden), so page violations aren't
+counted twice. Before each run the viewport grows to the tallest scroll content, so text below the
+fold is measured instead of reported as obscured. Today's card comes from the corpus by date (an
+unanswered mail); when the daemon has none, `cards_list` answers with one fixed card for the
+sources check and the action dialog is skipped. A first check plants a faint paragraph and an
+unnamed button and expects axe to report both, so a broken injection can't pass silently.
+
+Every finding, any impact, is written to `a11y-violations.json` (`{ check, theme, scope, id,
+impact, nodes }`); what axe could not decide is recorded with impact `needs-review` and never
+fails. `summary.json` has `a11y` with the counts by rule. Accepted violations go in `ALLOW` in
+`a11y.mjs` (rule id and selector) with the reason; it is empty.
+
 ## Events
 
 `bridge.mjs` keeps one connection to the daemon open, like the shell, and turns its notifications
@@ -230,6 +269,7 @@ per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboar
 the commands the UI called, `i18n`, `first_run`, `first_run_ai` and `byok`), `daemon-logs/`, `nuggetd.out.log`, the first run's
 `first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`; also `ai-setup-*.png`, `ai-setup-daemon-logs/`,
 `ai-setup-nuggetd.out.log`, `byok-*.png`, `byok-daemon-logs/` and `byok-config.toml` (with the key masked, if it ever leaked).
+The a11y scenario adds `a11y-<theme>-<check>.png` and `a11y-violations.json`.
 
 `harness.mjs` holds what the scenarios share: settings from the environment, the log, `t(key)`
 for UI strings, `check`, `until`, `shot` and the browser context setup.
