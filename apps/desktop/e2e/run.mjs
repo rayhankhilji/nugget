@@ -4,7 +4,9 @@
 // against it through bridge.mjs, which stands in for the Tauri shell. Every page of the PAGES
 // registry in src/App.tsx is opened and checked for real data and uncaught errors. A second
 // scenario (first-run.mjs) starts from an empty home, goes through onboarding and times how long
-// it takes from app start to a cited answer.
+// it takes from app start to a cited answer. ai-setup.mjs installs the recommended local model in
+// onboarding (signed test manifest, mock download, fake llama-server) and times app start to a
+// cited answer streamed by that model; byok.mjs checks and saves an API key in onboarding.
 //
 // usage: pnpm run e2e        (see e2e/README.md for the environment variables)
 import { spawnSync } from "node:child_process";
@@ -14,6 +16,8 @@ import path from "node:path";
 import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
 import { CORPUS, addCorpusSource, countFiles, locateNuggetd, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
 import { firstRunScenario } from "./first-run.mjs";
+import { aiSetupScenario } from "./ai-setup.mjs";
+import { byokScenario } from "./byok.mjs";
 import {
   check,
   DESKTOP,
@@ -36,8 +40,11 @@ import {
   until,
 } from "./harness.mjs";
 
-/** Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, and a first run. */
-const SCENARIOS = ["pages", "first-run"];
+/**
+ * Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, a first run,
+ * a first run with the recommended local model, and bring-your-own-key.
+ */
+const SCENARIOS = ["pages", "first-run", "ai-setup", "byok"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -346,8 +353,9 @@ async function main() {
     if (r.status !== 0) throw new Error(`pnpm run build failed (exit ${r.status ?? r.error?.message})`);
   }
 
-  const bin = locateNuggetd(log);
-  log(`nuggetd: ${bin}`);
+  // ai-setup runs nuggetd-e2e (located by the scenario); the others the plain nuggetd.
+  const bin = wanted.some((s) => s !== "ai-setup") ? locateNuggetd(log) : null;
+  if (bin) log(`nuggetd: ${bin}`);
 
   // E2E_CHROMIUM: a Chromium binary to use instead of Playwright's own download.
   const browser = await chromium.launch(process.env.E2E_CHROMIUM ? { executablePath: process.env.E2E_CHROMIUM } : {});
@@ -357,7 +365,9 @@ async function main() {
       log(`---- scenario: ${name} ----`);
       try {
         if (name === "pages") Object.assign(summary, await pagesScenario({ browser, bin }));
-        else summary.first_run = await firstRunScenario({ browser, bin });
+        else if (name === "first-run") summary.first_run = await firstRunScenario({ browser, bin });
+        else if (name === "ai-setup") summary.first_run_ai = await aiSetupScenario({ browser });
+        else summary.byok = await byokScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });
@@ -366,7 +376,17 @@ async function main() {
     }
   } finally {
     await browser.close().catch(() => {});
+    // The first-run summary carries the time to a cited model answer when both ran.
+    const aiMs = summary.first_run_ai?.time_to_cited_model_answer_ms ?? null;
+    if (summary.first_run) summary.first_run.time_to_cited_model_answer_ms = aiMs;
     fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
+    if (summary.first_run || summary.first_run_ai) {
+      const cited = summary.first_run?.total_ms ?? null;
+      log(
+        `first run: cited answer (search, no AI) ${cited === null ? "not reached" : secs(cited)}; ` +
+          `cited model answer (local model installed in onboarding) ${aiMs === null ? "not reached" : secs(aiMs)} after app start`,
+      );
+    }
   }
 
   const failed = results.filter((r) => !r.ok).length;
