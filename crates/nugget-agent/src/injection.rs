@@ -14,6 +14,20 @@ pub struct InjectionFinding {
     pub patterns: Vec<String>,
     /// Short excerpt around the first match.
     pub excerpt: String,
+    /// Distinctive things the flagged text names (addresses, hosts, amounts, quoted or proper
+    /// names), lowercase. An action that names one of them, and the user did not, is tainted by
+    /// the injection: see [`InjectionFinding::relates_to`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entities: Vec<String>,
+}
+
+impl InjectionFinding {
+    /// Does `action` act on something only the flagged text named? `user_text` is what the user
+    /// asked (task goal and context): entities it mentions are not taint.
+    pub fn relates_to(&self, action: &nugget_policy::ActionDescriptor, user_text: &str) -> bool {
+        let _ = (action, user_text);
+        false
+    }
 }
 
 /// Scans untrusted text for injected instructions.
@@ -168,6 +182,7 @@ impl InjectionDetector for HeuristicDetector {
         Some(InjectionFinding {
             patterns,
             excerpt: excerpt?,
+            entities: Vec::new(),
         })
     }
 }

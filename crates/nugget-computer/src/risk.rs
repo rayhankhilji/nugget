@@ -262,6 +262,27 @@ pub fn click_risk(node: Option<&UiNode>, context: &[String], kw: &RiskKeywords) 
         .max(RiskClass::Edit)
 }
 
+/// What the policy gate should know about the element a call targets: its role, containers,
+/// sibling fields and dialog. `None` (not in the last snapshot) is an empty context.
+pub(crate) fn action_context(found: Option<&crate::state::Found>) -> nugget_policy::ActionContext {
+    let Some(f) = found else {
+        return nugget_policy::ActionContext::default();
+    };
+    let mut ctx = nugget_policy::ActionContext::default()
+        .with_role(f.node.role.as_str())
+        .with_ancestors(
+            f.ancestors
+                .iter()
+                .map(|(role, name)| nugget_policy::ContextNode::new(role.as_str(), name.clone())),
+        )
+        .with_form_fields(f.fields.iter().cloned())
+        .with_secure_field(is_secret_field(&f.node));
+    if let Some(t) = &f.window.title {
+        ctx = ctx.with_window_title(t.clone());
+    }
+    ctx
+}
+
 /// What typing into (or setting the value of) `node` risks: a secret field is Security, an
 /// unknown element Send, anything else Edit.
 pub fn input_risk(node: Option<&UiNode>, explicit_id: bool) -> RiskClass {

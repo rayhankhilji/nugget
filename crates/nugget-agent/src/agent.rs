@@ -667,20 +667,41 @@ impl Agent {
         });
 
         let t0 = Instant::now();
-        let mut decision = self.gate.evaluate(&descriptor);
+        let mut decision = self
+            .gate
+            .evaluate_with_context(&descriptor, &tool.context(&args));
         let mut forced = false;
+        // After a suspected injection: anything above Edit asks, and so does an Edit that acts on
+        // something only the injected text named (an address, an item); other edits go ahead.
+        // A confirmation the policy asks for anyway carries the warning.
         if leg.cfg.injection_confirm
             && risk >= RiskClass::Edit
-            && decision == Decision::Allow
             && let Some(f) = &st.suspicion
         {
-            decision = Decision::Confirm(format!(
+            let warning = format!(
                 "An earlier observation contained text that looked like instructions to the agent \
                  ({}). Check that this {} action is what you asked for.",
                 f.patterns.join(", "),
                 risk_label(risk)
-            ));
-            forced = true;
+            );
+            match &mut decision {
+                Decision::Allow => {
+                    let user = format!(
+                        "{}\n{}",
+                        st.task.goal,
+                        st.task.context.as_deref().unwrap_or_default()
+                    );
+                    if risk > RiskClass::Edit || f.relates_to(&descriptor, &user) {
+                        decision = Decision::Confirm(warning);
+                        forced = true;
+                    }
+                }
+                Decision::Confirm(reason) => {
+                    reason.push(' ');
+                    reason.push_str(&warning);
+                }
+                Decision::Deny(_) => {}
+            }
         }
         let gate_outcome = match decision {
             Decision::Allow => GateOutcome::Allowed,

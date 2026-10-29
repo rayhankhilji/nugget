@@ -895,6 +895,11 @@ impl Tool for ComputerTool {
         }
     }
 
+    fn context(&self, args: &Value) -> nugget_policy::ActionContext {
+        let (found, _) = self.target(args);
+        crate::risk::action_context(found.as_ref())
+    }
+
     fn describe(&self, args: &Value) -> ActionTarget {
         let (found, _) = self.target(args);
         let explicit = element_arg(args).ok().flatten();
