@@ -267,12 +267,123 @@ jobs:
   # ---- END a11y ----
 
   # ---- BEGIN doubletap (hotkey and insert path) ----
-  doubletap-placeholder:
-    name: Double Tap (placeholder)
-    if: false
-    runs-on: ubuntu-latest
+  # The Double Tap path on a real desktop: nugget-hotkey listeners fed with synthesized key
+  # presses (SendInput / CGEvent), then trigger -> focused-field read -> draft (scripted provider)
+  # -> insert into Notepad / TextEdit, read back through UIA / AX. Prints and summarises the time
+  # to the first inserted token. Tests: crates/nugget-hotkey/tests/{windows_it,macos_it}.rs.
+  doubletap:
+    name: Double Tap (${{ matrix.os }})
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:doubletap]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
     steps:
-      - run: "true"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+
+      # SQLCipher's vendored OpenSSL (nugget-store, used by the draft engine in the insert test)
+      # needs a Windows-native Perl; Git's MSYS Perl breaks its build.
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: doubletap
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+
+      - name: Build the tests
+        shell: bash
+        run: cargo test -p nugget-hotkey --locked --no-run
+
+      - name: Session diagnostics
+        shell: bash
+        run: |
+          mkdir -p doubletap-artifacts
+          if [ "$RUNNER_OS" = macOS ]; then
+            sw_vers
+            echo "user: $(id -un)"
+            echo "--- process ancestry"
+            pid=$$
+            while [ "$pid" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$pid"; pid=$(ps -o ppid= -p "$pid" | tr -d ' '); done
+            echo "--- TCC grants (readable only with Full Disk Access)"
+            for db in "/Library/Application Support/com.apple.TCC/TCC.db" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
+              sqlite3 "$db" "select service, client, auth_value from access where service in ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceListenEvent')" 2>&1 || true
+            done
+          else
+            cmd //c ver
+            powershell -NoProfile -Command "Get-Command notepad.exe | Format-List Source; Get-AppxPackage *WindowsNotepad* | Format-List Name,Version" || true
+          fi
+
+      - name: Unit tests (real OS)
+        shell: bash
+        run: cargo test -p nugget-hotkey --locked
+
+      - name: Double Tap hotkeys and insert (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            cargo test -p nugget-hotkey --locked --test windows_it -- --ignored --test-threads=1 --nocapture 2>&1 \
+            | tee doubletap-artifacts/windows_it.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Double Tap hotkeys and insert (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          {
+            echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            cargo test -p nugget-hotkey --locked --test macos_it -- --ignored 2>&1 \
+            | tee doubletap-artifacts/macos_it.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Screenshot
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p doubletap-artifacts
+          if [ "$RUNNER_OS" = macOS ]; then
+            screencapture -x doubletap-artifacts/screen.png || true
+          else
+            powershell -NoProfile -Command '
+              Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+              $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+              $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+              $bmp.Save("$PWD\doubletap-artifacts\screen.png")' || true
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: doubletap-${{ matrix.os }}
+          path: doubletap-artifacts/
+          if-no-files-found: ignore
   # ---- END doubletap ----
 
   # ---- BEGIN cua (computer use over real UIA) ----

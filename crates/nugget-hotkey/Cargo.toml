@@ -12,7 +12,7 @@ tracing.workspace = true
 
 # Chords on macOS, Windows and X11: Carbon `RegisterEventHotKey`, Win32 `RegisterHotKey` and
 # `XGrabKey`. Each grabs the chord, so the focused app never sees it.
-[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 global-hotkey = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -40,6 +40,29 @@ futures-util = { version = "0.3", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 x11rb = { version = "0.13", features = ["xinput", "xtest"] }
+
+# Real-OS integration tests (tests/windows_it.rs, tests/macos_it.rs): the Double Tap path from the
+# trigger to the inserted text, through the same crates the desktop shell and daemon use.
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
+nugget-a11y.workspace = true
+nugget-draft.workspace = true
+nugget-infer.workspace = true
+nugget-retrieve.workspace = true
+nugget-store.workspace = true
+tokio = { workspace = true }
+futures.workspace = true
+async-trait.workspace = true
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGEvent", "CGEventTypes", "CGRemoteOperation"] }
+
+# NSEvent monitors and Carbon hot keys need the main thread's NSApplication loop, which libtest
+# does not give a test: this test has its own `main` (and runs only with `--ignored`).
+[[test]]
+name = "macos_it"
+path = "tests/macos_it.rs"
+harness = false
 
 [lints]
 workspace = true
