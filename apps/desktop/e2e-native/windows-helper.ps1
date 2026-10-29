@@ -44,6 +44,31 @@ public static class NuggetE2E {
         return s.ToString();
     }
 
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc cb, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] static extern IntPtr SendMessageText(IntPtr hwnd, uint msg, IntPtr w, StringBuilder l);
+
+    /// The text of the first Edit / RichEdit child window (classic and Windows 11 Notepad), read
+    /// with WM_GETTEXT from the window itself; null when there is none.
+    public static string ChildEditText(IntPtr parent) {
+        string found = null;
+        EnumChildWindows(parent, (h, l) => {
+            var c = new StringBuilder(256);
+            GetClassName(h, c, c.Capacity);
+            var cls = c.ToString();
+            if (cls == "Edit" || cls.StartsWith("RichEdit")) {
+                int len = (int)SendMessage(h, 0x000E, IntPtr.Zero, IntPtr.Zero); // WM_GETTEXTLENGTH
+                var s = new StringBuilder(len + 1);
+                SendMessageText(h, 0x000D, (IntPtr)(len + 1), s); // WM_GETTEXT
+                found = s.ToString();
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
     public static List<IntPtr> Windows() {
         var all = new List<IntPtr>();
         EnumWindows((h, l) => { all.Add(h); return true; }, IntPtr.Zero);
@@ -107,6 +132,10 @@ function Read-Text([IntPtr]$hwnd) {
             if ($null -ne $t) { return $t }
         }
     }
+    # Else the Edit / RichEdit child window itself (classic Notepad's Edit shows up in UIA as a
+    # pane without a text or value pattern).
+    $t = [NuggetE2E]::ChildEditText($hwnd)
+    if ($null -ne $t) { return $t }
     # Else the focused element, when it is in the same process (the insertion left focus there).
     $focused = $A::FocusedElement
     if ($null -ne $focused -and $focused.Current.ProcessId -eq $root.Current.ProcessId) {
