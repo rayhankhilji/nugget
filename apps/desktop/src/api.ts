@@ -1472,6 +1472,8 @@ export interface OverlayView {
 }
 
 export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
+/** The saved settings, sent to every window after a change (from the settings page or onboarding). */
+export const DOUBLETAP_SETTINGS_EVENT = "doubletap:settings";
 
 export const doubletapApi = {
   settingsGet: () => call<DoubleTapSettings>("doubletap_settings_get"),
@@ -1491,6 +1493,7 @@ export const doubletapApi = {
   overlayAccept: (text: string | null) => call<void>("overlay_accept", { text }),
   overlayCancel: () => call<void>("overlay_cancel"),
   onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
+  onSettings: (h: (settings: DoubleTapSettings) => void) => on<DoubleTapSettings>(DOUBLETAP_SETTINGS_EVENT, h),
 };
 
 // ---- W6 plugins ----

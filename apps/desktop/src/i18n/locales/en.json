@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "Relaxed (500 ms)",
   "onboarding.trigger.summary": "Your trigger: {trigger}",
   "onboarding.trigger.summaryDoubleTap": "double-tap {key}",
-  "onboarding.trigger.saved": "Saved on this device. Double Tap starts listening for it once it's turned on in a later update.",
+  "onboarding.trigger.saved": "Double Tap listens for it right away. You can change it any time in Double Tap settings.",
   "onboarding.trigger.mod.left_command": "Left ⌘ Command",
   "onboarding.trigger.mod.right_command": "Right ⌘ Command",
   "onboarding.trigger.mod.left_control": "Left Ctrl",

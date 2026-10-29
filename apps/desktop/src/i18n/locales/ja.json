@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "ゆっくり（500 ms）",
   "onboarding.trigger.summary": "トリガー：{trigger}",
   "onboarding.trigger.summaryDoubleTap": "{key}をダブルタップ",
-  "onboarding.trigger.saved": "このデバイスに保存しました。今後のアップデートでDouble Tapが有効になると、このトリガーの待ち受けを開始します。",
+  "onboarding.trigger.saved": "Double Tapはすぐにこのトリガーの待ち受けを開始します。Double Tapの設定からいつでも変更できます。",
   "onboarding.trigger.mod.left_command": "左 ⌘ Command",
   "onboarding.trigger.mod.right_command": "右 ⌘ Command",
   "onboarding.trigger.mod.left_control": "左 Ctrl",

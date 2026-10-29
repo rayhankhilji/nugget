@@ -50,6 +50,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use futures::future::BoxFuture;
 use nugget_core::capability::Tier;
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
@@ -59,10 +60,11 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_draft::{
     DEFAULT_EXCLUDED_APPS, DraftConfig, DraftStream, Drafter, MAX_BUDGET_TOKENS, ProfileVoice,
-    Refusal, VoiceFeedback, Warmer, gate_with,
+    Refusal, RetrievalRunner, VoiceFeedback, Warmer, gate_with,
 };
 use nugget_infer::{ChatEvent, Provider, StopReason};
 use nugget_ipc::{Notifier, RpcError, code, parse_params, to_result};
+use nugget_retrieve::PackedContext;
 use nugget_store::AuditEntry;
 use nugget_voice::{MeIdentity, StoreFeedbackSink, VoiceConfig, VoiceSource as _};
 use serde::Deserialize;
@@ -216,6 +218,19 @@ impl Warmer for ProviderWarmer {
     }
 }
 
+/// Runs draft retrieval (synchronous SQLite calls between awaits) on a blocking-pool thread,
+/// driven by the runtime's handle, as `retrieve.*` does, so a slow store never stalls the async
+/// workers that stream drafts and answer `draft.cancel`.
+struct BlockingRetrieval;
+
+#[async_trait]
+impl RetrievalRunner for BlockingRetrieval {
+    async fn run(&self, job: BoxFuture<'static, Result<PackedContext>>) -> Result<PackedContext> {
+        let handle = tokio::runtime::Handle::current();
+        blocking(move || handle.block_on(job)).await
+    }
+}
+
 /// The `draft` feature.
 pub(crate) struct DraftFeature {
     state: Arc<State>,
@@ -243,7 +258,8 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
     .with_feedback_sink(Arc::new(VoiceFeedback::new(StoreFeedbackSink::new(
         state.store.clone(),
     ))))
-    .with_warmer(Arc::new(ProviderWarmer));
+    .with_warmer(Arc::new(ProviderWarmer))
+    .with_retrieval_runner(Arc::new(BlockingRetrieval));
 
     // Subscribe before anything can commit, so no change is missed while the profile loads.
     let events = state.ingest.subscribe();
@@ -656,6 +672,35 @@ mod tests {
         let err = parse("nope = 1").unwrap_err().to_string();
         assert!(err.contains("[draft]"), "{err}");
         assert!(parse("[voice]\nnope = 1").is_err());
+    }
+
+    /// On a single-threaded runtime, a retrieval job that blocks its thread until another task
+    /// runs only finishes if it runs off the runtime's thread.
+    #[test]
+    fn retrieval_runs_off_the_async_thread() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let runtime_thread = std::thread::current().id();
+            let (tx, rx) = std::sync::mpsc::channel::<()>();
+            let job: BoxFuture<'static, Result<PackedContext>> = Box::pin(async move {
+                assert_ne!(std::thread::current().id(), runtime_thread);
+                rx.recv_timeout(Duration::from_secs(10))
+                    .map_err(|_| Error::Other("the async thread was blocked".into()))?;
+                // Still inside the runtime: async work in the job is driven too.
+                tokio::task::yield_now().await;
+                Err(Error::Other("ran".into()))
+            });
+            let sender = tokio::spawn(async move {
+                tokio::task::yield_now().await;
+                tx.send(()).unwrap();
+            });
+            let out = BlockingRetrieval.run(job).await.unwrap_err();
+            assert_eq!(out.to_string(), Error::Other("ran".into()).to_string());
+            sender.await.unwrap();
+        });
     }
 
     #[test]

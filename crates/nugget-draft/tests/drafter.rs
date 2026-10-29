@@ -14,7 +14,7 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_draft::{
     DraftConfig, Drafter, FEATURE_DRAFT, FeedbackOutcome, FeedbackRecord, FeedbackSink, NoVoice,
-    VoiceQuery, VoiceSource,
+    RetrievalRunner, VoiceQuery, VoiceSource,
 };
 use nugget_infer::{
     ChatEvent, ChatRequest, ChatStream, Part, Provider, ProviderKind, ProviderMeta, Router,
@@ -439,6 +439,52 @@ async fn cancellation_stops_the_stream() {
     stream.cancel();
     let (_, events) = collect(stream).await;
     assert!(matches!(events.last(), Some(Err(Error::Cancelled))));
+}
+
+/// Runs retrieval jobs on a named plain thread and counts them.
+#[derive(Default)]
+struct ThreadRunner {
+    threads: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl RetrievalRunner for ThreadRunner {
+    async fn run(
+        &self,
+        job: futures::future::BoxFuture<'static, Result<nugget_retrieve::PackedContext>>,
+    ) -> Result<nugget_retrieve::PackedContext> {
+        let handle = tokio::runtime::Handle::current();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::Builder::new()
+            .name("retrieval-runner".into())
+            .spawn(move || {
+                let name = std::thread::current().name().map(str::to_owned);
+                let _ = tx.send((name, handle.block_on(job)));
+            })
+            .unwrap();
+        let (name, out) = rx.await.unwrap();
+        self.threads.lock().unwrap().push(name.unwrap_or_default());
+        out
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retrieval_goes_through_the_runner() {
+    let local = Fake::new("local", Locality::OnDevice, &["The Q3 numbers are up."]);
+    let runner = Arc::new(ThreadRunner::default());
+    let s = setup(vec![local], DraftConfig::default(), Arc::new(NoVoice));
+    let drafter = s.drafter.with_retrieval_runner(runner.clone());
+    let (started, stream) = drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    assert!(keys(&started).contains(&"q3"), "{:?}", keys(&started));
+    let (text, _) = collect(stream).await;
+    assert!(text.contains("Q3"), "{text}");
+    assert_eq!(
+        *runner.threads.lock().unwrap(),
+        vec!["retrieval-runner".to_string()]
+    );
 }
 
 #[tokio::test]

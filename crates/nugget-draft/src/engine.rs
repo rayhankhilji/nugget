@@ -15,7 +15,7 @@ use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{ContextResponse, DraftContext, DraftFeedback, DraftRequest, DraftStarted};
 use nugget_core::{Error, Result};
 use nugget_infer::{ChatEvent, ChatStream, Provider, Router, StopReason};
-use nugget_retrieve::{ContextOptions, Retriever};
+use nugget_retrieve::{ContextOptions, PackedContext, Retriever};
 use nugget_store::{AuditEntry, Store};
 use nugget_voice::{Channel, VoiceHints};
 use serde::{Deserialize, Serialize};
@@ -130,6 +130,13 @@ pub trait FeedbackSink: Send + Sync {
 #[async_trait]
 pub trait Warmer: Send + Sync {
     async fn warm(&self, provider: Arc<dyn Provider>);
+}
+
+/// Runs a draft's retrieval job (store and index calls that block between awaits). Without one
+/// the job is polled wherever it is awaited; a host can move it off its async workers.
+#[async_trait]
+pub trait RetrievalRunner: Send + Sync {
+    async fn run(&self, job: BoxFuture<'static, Result<PackedContext>>) -> Result<PackedContext>;
 }
 
 /// Drafting settings.
@@ -278,6 +285,7 @@ struct Inner {
     voice: Arc<dyn VoiceSource>,
     feedback: RwLock<Option<Arc<dyn FeedbackSink>>>,
     warmer: RwLock<Option<Arc<dyn Warmer>>>,
+    retrieval_runner: RwLock<Option<Arc<dyn RetrievalRunner>>>,
     config: DraftConfig,
     sessions: Mutex<Sessions>,
     cache: Mutex<Cache>,
@@ -322,6 +330,7 @@ impl Drafter {
                 voice,
                 feedback: RwLock::new(None),
                 warmer: RwLock::new(None),
+                retrieval_runner: RwLock::new(None),
                 config,
                 sessions: Mutex::new(Sessions::default()),
                 cache: Mutex::new(Cache::default()),
@@ -347,6 +356,16 @@ impl Drafter {
     /// Connection prewarming used by [`prewarm`](Self::prewarm).
     pub fn with_warmer(self, warmer: Arc<dyn Warmer>) -> Self {
         *self.inner.warmer.write().unwrap_or_else(|e| e.into_inner()) = Some(warmer);
+        self
+    }
+
+    /// Where retrieval runs (see [`RetrievalRunner`]); prewarmed and draft retrievals alike.
+    pub fn with_retrieval_runner(self, runner: Arc<dyn RetrievalRunner>) -> Self {
+        *self
+            .inner
+            .retrieval_runner
+            .write()
+            .unwrap_or_else(|e| e.into_inner()) = Some(runner);
         self
     }
 
@@ -637,6 +656,12 @@ impl Drafter {
             return (f, true);
         }
         let retriever = self.inner.retriever.clone();
+        let runner = self
+            .inner
+            .retrieval_runner
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let budget = self.inner.config.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize;
         let q = query.to_owned();
         let fut = async move {
@@ -644,7 +669,12 @@ impl Drafter {
             let opts = ContextOptions {
                 exclude_sensitive: cloud,
             };
-            let ctx = match retriever.pack_context_with(&q, budget, opts).await {
+            let job = async move { retriever.pack_context_with(&q, budget, opts).await }.boxed();
+            let packed = match runner {
+                Some(r) => r.run(job).await,
+                None => job.await,
+            };
+            let ctx = match packed {
                 Ok(p) => Some(p.response),
                 Err(e) => {
                     tracing::warn!(error = %e, "draft: retrieval failed; drafting without context");

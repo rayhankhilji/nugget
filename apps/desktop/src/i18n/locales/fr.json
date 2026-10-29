@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "Lente (500 ms)",
   "onboarding.trigger.summary": "Votre déclencheur : {trigger}",
   "onboarding.trigger.summaryDoubleTap": "double appui sur {key}",
-  "onboarding.trigger.saved": "Enregistré sur cet appareil. Double Tap commencera à l’écouter une fois activé dans une prochaine mise à jour.",
+  "onboarding.trigger.saved": "Double Tap l’écoute dès maintenant. Vous pouvez le modifier à tout moment dans les réglages de Double Tap.",
   "onboarding.trigger.mod.left_command": "⌘ Commande gauche",
   "onboarding.trigger.mod.right_command": "⌘ Commande droite",
   "onboarding.trigger.mod.left_control": "Ctrl gauche",
