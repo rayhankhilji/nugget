@@ -110,10 +110,14 @@ async fn run(
         // name ("An app id is required"). A host app names itself through the host Registry,
         // first thing on its connection. Older portals lack it, and a sandbox (Flatpak) or a
         // systemd scope already gives the app id: failure here is not an error.
-        if let Ok(app_id) = APP_ID.parse::<ashpd::AppID>()
-            && let Err(e) = ashpd::register_host_app_with_connection(conn.clone(), app_id).await
-        {
-            tracing::debug!(error = %e, "nugget-hotkey: host portal registration skipped");
+        let registered = match APP_ID.parse::<ashpd::AppID>() {
+            Ok(app_id) => ashpd::register_host_app_with_connection(conn.clone(), app_id)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = &registered {
+            tracing::debug!(error = %e, "nugget-hotkey: host portal registration failed");
         }
         let portal = GlobalShortcuts::with_connection(conn)
             .await
@@ -121,7 +125,10 @@ async fn run(
         let session = portal
             .create_session(CreateSessionOptions::default())
             .await
-            .map_err(portal_err)?;
+            .map_err(|e| match &registered {
+                Err(r) => portal_err(format!("{e}; registering the app id failed: {r}")),
+                Ok(()) => portal_err(e),
+            })?;
         let activated = portal.receive_activated().await.map_err(portal_err)?;
         Ok::<_, Error>((portal, session, activated))
     };
