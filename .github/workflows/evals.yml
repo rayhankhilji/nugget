@@ -56,10 +56,16 @@ jobs:
         include:
           - suite: doubletap
             args: doubletap
+          # Same, with llama-server on every logical core (its default is the physical ones).
+          - suite: doubletap-threads4
+            args: doubletap --local-threads 4
           - suite: draft
             args: draft --draft-judge model --draft-dump eval-results/draft-drafts.jsonl
           - suite: cua
             args: cua --cua-agent nugget --cua-env inproc
+          # The manifest's agentic-tier model, which the app routes the agent to on 16 GB.
+          - suite: cua-8b
+            args: cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
           - suite: knowledge
             args: knowledge
     steps:
@@ -100,7 +106,9 @@ jobs:
       - name: Run ${{ matrix.suite }}
         run: |
           extra=()
-          if [ -n "$CHAT_MODEL" ]; then extra+=(--local-chat-model "$CHAT_MODEL"); fi
+          if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
+            extra+=(--local-chat-model "$CHAT_MODEL")
+          fi
           ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
             "${extra[@]}" --out-dir "$RESULTS"
 
