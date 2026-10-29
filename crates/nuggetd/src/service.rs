@@ -523,9 +523,12 @@ mod tests {
         ));
         assert!(p.contains("<key>RunAtLoad</key>\n    <true/>"));
         assert!(p.contains("<key>SuccessfulExit</key>\n        <false/>"));
-        assert!(p.contains(
-            "<string>/Users/me/Library/Application Support/Nugget/logs/launchd.log</string>"
-        ));
+        // The log path is joined with the host's separator (launchd only runs on macOS).
+        let log = spec(None).log_dir.join("launchd.log");
+        assert!(
+            p.contains(&format!("<string>{}</string>", log.display())),
+            "{p}"
+        );
         // A user agent: no root-only keys.
         assert!(!p.contains("UserName"));
         assert!(!p.contains("GroupName"));

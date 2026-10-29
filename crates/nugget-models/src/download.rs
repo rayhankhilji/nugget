@@ -642,8 +642,11 @@ async fn run_parts(ctx: &Arc<Ctx>) -> Result<()> {
     while let Some(joined) = set.join_next().await {
         let res = joined.map_err(|e| Error::Other(format!("download task failed: {e}")))?;
         if let Err(e) = res {
-            // Fail fast; `state.json` keeps every committed byte for the next attempt.
+            // Fail fast; `state.json` keeps every committed byte for the next attempt. Wait for
+            // the aborted parts to stop: until then they can still commit progress and record
+            // egress, which would race the caller's final `persist_state` and its accounting.
             set.abort_all();
+            while set.join_next().await.is_some() {}
             return Err(e);
         }
     }
