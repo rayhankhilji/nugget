@@ -320,45 +320,84 @@ mod mac {
             "macos",
         );
 
-        for (mode, chunks) in [
-            (Mode::Shell, support::SHELL_CHUNKS),
-            (Mode::Streamed, support::STREAMED_CHUNKS),
-        ] {
-            let pipeline = Pipeline::new(chunks);
-            let fired_at = if p.post {
-                let (listener, rx) = listen(Trigger::default());
-                // A missed double tap is retried (twice at most) and reported, so a flaky
-                // trigger shows up in the log instead of failing the timing run outright.
-                let mut fired = None;
-                for attempt in 1..=3 {
-                    rcmd_tap();
-                    rcmd_tap();
-                    if let Ok(at) = rx.recv_timeout(Duration::from_secs(2)) {
+        let ax = nugget_a11y::Backend::new(
+            nugget_a11y::AxPlatform::new(),
+            nugget_a11y::A11yConfig::default(),
+        );
+        let front = || {
+            ax.frontmost_app()
+                .map(|f| format!("{:?}", f.map(|(a, _)| (a.name, a.window_title))))
+                .unwrap_or_else(|e| format!("error: {e}"))
+        };
+        let result = (|| -> Result<(), String> {
+            for (mode, chunks) in [
+                (Mode::Shell, support::SHELL_CHUNKS),
+                (Mode::Streamed, support::STREAMED_CHUNKS),
+            ] {
+                let pipeline = Pipeline::new(chunks);
+                let fired_at = if p.post {
+                    let t = Instant::now();
+                    let (listener, rx) = listen(Trigger::default());
+                    println!(
+                        "macos_it: listener installed in {:.0} ms; frontmost {}",
+                        support::ms(t.elapsed()),
+                        front()
+                    );
+                    // A missed double tap is retried (twice at most) and reported, so a flaky
+                    // trigger shows up in the log instead of failing the timing run outright.
+                    let mut fired = None;
+                    for attempt in 1..=3 {
+                        rcmd_tap();
+                        rcmd_tap();
+                        if let Ok(at) = rx.recv_timeout(Duration::from_secs(2)) {
+                            println!(
+                                "macos_it: double tap over TextEdit fired on attempt {attempt} of 3"
+                            );
+                            fired = Some(at);
+                            break;
+                        }
                         println!(
-                            "macos_it: double tap over TextEdit fired on attempt {attempt} of 3"
+                            "macos_it: double tap over TextEdit missed (attempt {attempt} of 3); \
+                         frontmost {}",
+                            front()
                         );
-                        fired = Some(at);
-                        break;
+                        sleep(Duration::from_millis(500));
                     }
-                    println!("macos_it: double tap over TextEdit missed (attempt {attempt} of 3)");
-                    sleep(Duration::from_millis(500));
-                }
-                drop(listener);
-                fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?
-            } else {
-                println!(
-                    "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
+                    drop(listener);
+                    fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?
+                } else {
+                    println!(
+                        "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
                      does (no key press)"
-                );
-                Instant::now()
-            };
-            let report = support::draft_and_insert(a11y.as_ref(), &pipeline, fired_at, mode)
-                .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
-            report.publish("macos");
-            check(is_textedit(&report.app), "the draft was read from TextEdit")?;
+                    );
+                    Instant::now()
+                };
+                let report = support::draft_and_insert(a11y.as_ref(), &pipeline, fired_at, mode)
+                    .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
+                report.publish("macos");
+                check(is_textedit(&report.app), "the draft was read from TextEdit")?;
+            }
+            Ok(())
+        })();
+        if let Err(e) = &result {
+            println!("macos_it: insert failed ({e}); frontmost {}", front());
+            screenshot("insert-failure");
+        } else {
+            println!("macos_it: TextEdit insert ok");
         }
-        println!("macos_it: TextEdit insert ok");
-        Ok(())
+        result
+    }
+
+    /// A screenshot into `$NUGGET_DOUBLETAP_ARTIFACTS`, taken while the failure is on screen.
+    fn screenshot(name: &str) {
+        if let Ok(dir) = std::env::var("NUGGET_DOUBLETAP_ARTIFACTS") {
+            let path = std::path::Path::new(&dir).join(format!("{name}.png"));
+            let _ = std::process::Command::new("/usr/sbin/screencapture")
+                .arg("-x")
+                .arg(&path)
+                .status();
+            println!("macos_it: screenshot {}", path.display());
+        }
     }
 
     fn check(ok: bool, what: &str) -> Result<(), String> {

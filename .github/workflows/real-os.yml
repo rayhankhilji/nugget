@@ -324,6 +324,10 @@ jobs:
             for db in "/Library/Application Support/com.apple.TCC/TCC.db" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
               sqlite3 "$db" "select service, client, auth_value from access where service in ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceListenEvent')" 2>&1 || true
             done
+            echo "--- Siri and Dictation settings (a double Command press can be their shortcut)"
+            for d in com.apple.Siri com.apple.assistant.support com.apple.HIToolbox; do
+              echo "[$d]"; defaults read "$d" 2>&1 | head -40 || true
+            done
           else
             cmd //c ver
             powershell -NoProfile -Command "Get-Command notepad.exe | Format-List Source; Get-AppxPackage *WindowsNotepad* | Format-List Name,Version" || true
@@ -356,7 +360,7 @@ jobs:
             echo "| OS | mode | app | read field ms | draft started ms | first token ms | total ms | chunks | insert methods | verified |"
             echo "|---|---|---|---|---|---|---|---|---|---|"
           } >> "$GITHUB_STEP_SUMMARY"
-          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" NUGGET_DOUBLETAP_ARTIFACTS="$PWD/doubletap-artifacts" \
             cargo test -p nugget-hotkey --locked --test macos_it -- --ignored 2>&1 \
             | tee doubletap-artifacts/macos_it.log
           exit "${PIPESTATUS[0]}"
