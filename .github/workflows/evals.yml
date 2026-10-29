@@ -43,6 +43,10 @@ env:
   CHAT_MODEL: ${{ inputs.chat_model || '' }}
   NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
   RESULTS: ${{ github.workspace }}/eval-results
+  # The bench is a release build: trust the committed development manifest key, which signs
+  # manifests/default.json (docs/security/manifest-trust.md). Never set in release.yml's
+  # release builds.
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
 
 jobs:
   eval:
@@ -63,7 +67,7 @@ jobs:
           # Before/after on one runner (AA3): the extractor at `base_ref` on the 30-item subset,
           # then this commit on the same subset, then this commit on every item.
           - suite: knowledge
-            base_ref: 50e9b75
+            base_ref: 50e9b751793bcd217e49408189f21559f763d5fd
             base_args: knowledge
             args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
             args2: >-
