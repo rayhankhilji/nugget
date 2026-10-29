@@ -36,6 +36,8 @@ pub struct Stage {
     world: Mutex<Option<World>>,
     epoch: AtomicU64,
     pages: Mutex<BTreeSet<String>>,
+    /// Per app: the world version its page was last served at, and when.
+    served: Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -74,6 +76,11 @@ impl Stage {
     /// App pages served at least once (display readiness).
     pub fn pages_served(&self) -> BTreeSet<String> {
         lock(&self.pages).clone()
+    }
+
+    /// The version `app`'s page was last served at, and when (a display page that is current).
+    pub fn page_served(&self, app: &str) -> Option<(String, std::time::Instant)> {
+        lock(&self.served).get(app).cloned()
     }
 
     /// Apply an action and translate the outcome for agents.
@@ -267,6 +274,8 @@ fn route(req: &Request, stage: &Stage) -> (u16, &'static str, String) {
                 ("GET", "") => {
                     lock(&stage.pages).insert(app.to_owned());
                     let version = stage.version();
+                    lock(&stage.served)
+                        .insert(app.to_owned(), (version.clone(), std::time::Instant::now()));
                     let window = stage.with(|w| w.window(app)).ok().flatten();
                     (
                         200,

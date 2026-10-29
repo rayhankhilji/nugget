@@ -266,6 +266,33 @@ impl Drop for NativeDesktop {
     }
 }
 
+/// How long a freshly served page gets to replace the old document.
+const PAGE_COMMIT: Duration = Duration::from_millis(400);
+/// Longest wait for a page to reload after the world changed.
+const PAGE_RELOAD: Duration = Duration::from_secs(6);
+
+/// Wait until `app`'s window shows a page served at the current world version (pages reload
+/// whenever the world changes, a confirmation included): an input sent to a page that is about
+/// to reload would be lost with it. Bounded; on timeout the action goes ahead.
+fn wait_current_page(stage: &Stage, app: &str) {
+    let t0 = Instant::now();
+    while t0.elapsed() < PAGE_RELOAD {
+        let Some((v, at)) = stage.page_served(app) else {
+            // No page shows this app (no display).
+            return;
+        };
+        if v == stage.version() {
+            let age = at.elapsed();
+            if age >= PAGE_COMMIT {
+                return;
+            }
+            std::thread::sleep(PAGE_COMMIT - age);
+            continue;
+        }
+        std::thread::sleep(Duration::from_millis(40));
+    }
+}
+
 /// A task's session in the native environment: the harness session for observing and
 /// confirming, real UI Automation for every action (see the module docs).
 pub struct NativeSession<'a> {
@@ -303,6 +330,7 @@ impl Session for NativeSession<'_> {
             return Err(EnvError::StepBudget(self.max_steps));
         }
         self.steps += 1;
+        wait_current_page(&self.stage, action.app());
         let obs = self.inner.observe()?;
         let stage = self.stage.clone();
         let app = action.app().to_owned();
