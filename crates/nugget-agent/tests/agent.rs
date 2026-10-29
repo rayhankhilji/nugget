@@ -1035,7 +1035,7 @@ async fn triage_refusal_ends_the_run_before_any_action() {
     let world = World::new();
     let model = Scripted::new(vec![
         text_turn(
-            r#"{"verdict": "refuse", "reason": "impersonates a company to redirect payments"}"#,
+            r#"{"harm": "impersonation", "reason": "impersonates a company to redirect payments"}"#,
         ),
         turn(vec![(
             "c1",
@@ -1077,16 +1077,14 @@ async fn triage_refusal_ends_the_run_before_any_action() {
     assert_eq!(req.feature, "agent");
     assert_eq!(req.max_tokens, Some(120));
     let schema = req.json_schema.as_ref().unwrap();
-    assert_eq!(
-        schema["properties"]["verdict"]["enum"],
-        json!(["proceed", "refuse"])
-    );
+    assert_eq!(schema["properties"]["harm"]["enum"][0], "none");
+    assert_eq!(schema["required"], json!(["harm", "reason"]));
     assert_eq!(req.messages.len(), 1);
     let msg = format!("{:?}", req.messages[0]);
     assert!(msg.contains("sign as Acme") && msg.contains("Open apps: mail."));
     assert!(!msg.contains("untrusted-"));
     let system = req.system.clone().unwrap();
-    assert!(system.contains("impersonate"));
+    assert!(system.contains("impersonation"));
 
     // Logged and evented like any finish.
     let entries = log.entries();

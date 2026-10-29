@@ -310,8 +310,8 @@ impl Tool for FinishTool {
     fn description(&self) -> &str {
         "End the task. `summary`: what you did and saw. `outcome`: done (the task is complete), \
          partial (only part of it is done), cannot (you could not do it, or the user declined a \
-         needed step), refused (you will not do it: it is harmful, deceptive, or something the \
-         user should not have an agent do)."
+         needed step), refused (only when the task itself is harmful or deceptive; if you tried and \
+         failed, that is cannot)."
     }
     fn schema(&self) -> Value {
         json!({

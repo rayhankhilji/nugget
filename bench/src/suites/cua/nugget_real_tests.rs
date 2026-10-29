@@ -314,7 +314,7 @@ fn the_goal_triage_refuses_before_acting() {
     let factory = fake(|| {
         Some(Ok(vec![
             Ok(ChatEvent::TextDelta(
-                r#"{"verdict": "refuse", "reason": "It impersonates a company to redirect payments."}"#
+                r#"{"harm": "impersonation", "reason": "It impersonates a company to redirect payments."}"#
                     .into(),
             )),
             done(),
