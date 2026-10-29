@@ -611,19 +611,36 @@ jobs:
             $history = [Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory($env:NOTIFY_APP_ID).Count
           } catch { Write-Host "toast history unavailable: $_" }
           Write-Host "toasts in the OS history for $($env:NOTIFY_APP_ID): $history"
-          Write-Host 'top-level windows:'
-          foreach ($w in TopLevel) { Write-Host ('  ' + (Describe $w)) }
 
-          # The banner first; then the notification center (Win+N, then Win+A on older shells).
+          # The runner has Do Not Disturb on (banners are suppressed; the toast still lands in the
+          # notification center), so open the notification center: Win+N, or Win+A on older shells.
           $clicked = $false
-          foreach ($attempt in @('banner', 'N', 'A')) {
-            if ($attempt -ne 'banner') {
-              Write-Host "opening the notification center (Win+$attempt)"
-              [NotifyInput]::WinKey([byte][char]$attempt)
-              Start-Sleep -Seconds 2
-              Shot "center-$attempt"
+          foreach ($key in @('N', 'A')) {
+            Write-Host "opening the notification center (Win+$key)"
+            [NotifyInput]::WinKey([byte][char]$key)
+            Start-Sleep -Seconds 2
+            Shot "center-$key"
+            Write-Host 'top-level windows:'
+            foreach ($w in TopLevel) {
+              Write-Host ('  ' + (Describe $w))
+              if ($w.Current.ClassName -in @('CASCADIA_HOSTING_WINDOW_CLASS', 'Progman', 'Shell_TrayWnd', '#32770')) { continue }
+              try {
+                $d = $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $all)
+                Write-Host "    $($d.Count) descendants"
+                $d | Select-Object -First 40 | ForEach-Object { Write-Host ('    ' + (Describe $_)) }
+              } catch { Write-Host "    descendants failed: $_" }
             }
-            $until = (Get-Date).AddSeconds(15)
+            # What is on screen where the notification center lists notifications.
+            $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            foreach ($y in 200, 260, 300) {
+              try {
+                $e = $A::FromPoint((New-Object System.Windows.Point ($b.Right - 180), $y))
+                $chain = @()
+                while ($e) { $chain += (Describe $e); $e = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($e) }
+                Write-Host "FromPoint y=$($y):"; $chain | ForEach-Object { Write-Host "    $_" }
+              } catch { Write-Host "FromPoint failed: $_" }
+            }
+            $until = (Get-Date).AddSeconds(10)
             while (-not $clicked -and (Get-Date) -lt $until -and -not $p.HasExited) {
               $t = FindToast
               if ($t) {
@@ -635,11 +652,7 @@ jobs:
             }
             if ($clicked) { break }
           }
-          if (-not $clicked) {
-            Shot 'not-found'
-            Write-Host 'windows after searching:'
-            foreach ($w in TopLevel) { Write-Host ('  ' + (Describe $w)) }
-          }
+          if (-not $clicked) { Shot 'not-found' }
 
           if (-not $p.WaitForExit(([int]$env:NUGGET_NOTIFY_CLICK_TIMEOUT + 30) * 1000)) { $p.Kill() }
           Shot 'after'
