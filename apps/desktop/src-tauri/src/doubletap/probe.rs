@@ -10,7 +10,7 @@
 //! written. Never contains more than the overlay already shows.
 
 #[cfg(debug_assertions)]
-pub(crate) fn record(event: &str, detail: serde_json::Value) {
+pub(crate) fn record(event: &str, detail: impl FnOnce() -> serde_json::Value) {
     use std::io::Write as _;
     use std::sync::OnceLock;
 
@@ -23,7 +23,7 @@ pub(crate) fn record(event: &str, detail: serde_json::Value) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f64() * 1000.0)
         .unwrap_or_default();
-    let line = serde_json::json!({ "t": t, "event": event, "detail": detail });
+    let line = serde_json::json!({ "t": t, "event": event, "detail": detail() });
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -35,22 +35,21 @@ pub(crate) fn record(event: &str, detail: serde_json::Value) {
 
 #[cfg(not(debug_assertions))]
 #[inline(always)]
-pub(crate) fn record(_event: &str, _detail: serde_json::Value) {}
+pub(crate) fn record(_event: &str, _detail: impl FnOnce() -> serde_json::Value) {}
 
 /// Record the overlay window's state as the window system reports it.
 pub(crate) fn window(event: &str, win: &tauri::WebviewWindow) {
     if cfg!(debug_assertions) {
         let pos = win.outer_position().ok().map(|p| (p.x, p.y));
         let size = win.outer_size().ok().map(|s| (s.width, s.height));
-        record(
-            event,
+        record(event, || {
             serde_json::json!({
                 "visible": win.is_visible().ok(),
                 "focused": win.is_focused().ok(),
                 "position": pos,
                 "size": size,
                 "scale": win.scale_factor().ok(),
-            }),
-        );
+            })
+        });
     }
 }

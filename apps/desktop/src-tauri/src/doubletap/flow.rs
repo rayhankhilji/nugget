@@ -130,7 +130,7 @@ pub fn restart_listener(app: &AppHandle) {
     }
     probe::record(
         "listener",
-        serde_json::json!({ "listening": slot.is_some(), "error": error }),
+        || serde_json::json!({ "listening": slot.is_some(), "error": error }),
     );
     *lock(&state.trigger_error) = error;
 }
@@ -160,7 +160,7 @@ pub async fn restart_listener_async(app: &AppHandle) {
 
 /// Runs on the hotkey dispatcher thread.
 fn on_trigger(app: &AppHandle) {
-    probe::record("trigger", serde_json::Value::Null);
+    probe::record("trigger", || serde_json::Value::Null);
     let app = app.clone();
     tauri::async_runtime::spawn(fire(app));
 }
@@ -195,7 +195,7 @@ pub async fn fire(app: AppHandle) {
         }
         let step = m.apply(Event::Begin);
         let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
-        probe::record("view", serde_json::json!(m.view()));
+        probe::record("view", || serde_json::json!(m.view()));
         drop(m);
         run(&app, step.effects);
     }
@@ -345,7 +345,7 @@ pub fn apply(app: &AppHandle, event: Event) {
         if step.changed {
             // Emitted under the lock so views arrive in order.
             let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
-            probe::record("view", serde_json::json!(m.view()));
+            probe::record("view", || serde_json::json!(m.view()));
         }
         step.effects
     };
@@ -483,7 +483,7 @@ async fn insert(app: AppHandle, text: String) {
     .await;
     probe::record(
         "insert",
-        serde_json::json!({ "ok": matches!(result, Ok(Ok(_))) }),
+        || serde_json::json!({ "ok": matches!(result, Ok(Ok(_))) }),
     );
     match result {
         Ok(Ok(outcome)) => apply(
