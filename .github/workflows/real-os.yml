@@ -177,12 +177,93 @@ jobs:
   # ---- END smoke ----
 
   # ---- BEGIN a11y (accessibility against native test apps) ----
-  a11y-placeholder:
-    name: Accessibility (placeholder)
-    if: false
-    runs-on: ubuntu-latest
+  # nugget-a11y against small native fixture apps (tests/fixtures/native/{windows,macos}):
+  # read the focused field, its text and selection, walk the tree, set values, press, toggle,
+  # select, type, and insert with read-back (accessibility and clipboard paths).
+  a11y-windows:
+    name: Accessibility (Windows UIA)
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:a11y]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: windows-latest
+    timeout-minutes: 40
     steps:
-      - run: "true"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+      # nugget-a11y pulls in no OpenSSL or aws-lc, so no Perl or NASM setup is needed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-windows
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+      - name: Build the WinForms fixture
+        shell: pwsh
+        run: |
+          $exe = & tests/fixtures/native/windows/build.ps1 -OutDir "$env:RUNNER_TEMP\a11y-fixture" | Select-Object -Last 1
+          "NUGGET_A11Y_FIXTURE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NUGGET_A11Y_RECORD=$env:RUNNER_TEMP\a11y-record" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --test windows_uia --no-run
+      - name: UIA against the fixture
+        run: cargo test -p nugget-a11y --test windows_uia -- --ignored --nocapture --test-threads=1
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\a11y-record" | Out-Null
+          $bmp.Save("$env:RUNNER_TEMP\a11y-record\screen.png")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-windows
+          path: ${{ runner.temp }}/a11y-record
+          if-no-files-found: ignore
+
+  a11y-macos:
+    name: Accessibility (macOS AX)
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:a11y]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-macos
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+      - name: TCC evidence (what the runner grants)
+        run: sh tests/fixtures/native/macos/tcc-evidence.sh
+      - name: Build the AppKit fixture
+        run: |
+          app=$(sh tests/fixtures/native/macos/build.sh "$RUNNER_TEMP/a11y-fixture" | tail -n 1)
+          echo "NUGGET_A11Y_FIXTURE=$app" >> "$GITHUB_ENV"
+          echo "NUGGET_A11Y_RECORD=$RUNNER_TEMP/a11y-record" >> "$GITHUB_ENV"
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --test macos_ax --no-run
+      - name: AX against the fixture
+        run: cargo test -p nugget-a11y --test macos_ax -- --ignored --nocapture --test-threads=1
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-record"
+          screencapture -x "$RUNNER_TEMP/a11y-record/screen.png"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-macos
+          path: ${{ runner.temp }}/a11y-record
+          if-no-files-found: ignore
   # ---- END a11y ----
 
   # ---- BEGIN doubletap (hotkey and insert path) ----
