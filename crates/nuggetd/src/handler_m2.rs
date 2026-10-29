@@ -2,15 +2,15 @@
 
 use nugget_core::ipc::{
     ClaimStatusRequest, EntitiesRequest, EntityDetail, EntityRef, GraphRequest, KnowledgeStatus,
-    McpClientCreate, McpClientRef, MergeRequest,
+    McpClientCreate, McpClientRef, MergeRequest, SplitRequest,
 };
 use nugget_core::{Error, Result};
-use nugget_graph::{EntityKind, EntityQuery};
+use nugget_graph::{Claim, ClaimStatus, EntityKind, EntityQuery, Identifier, NewEntity};
 use nugget_ipc::{Notifier, RpcError, to_result};
 use serde_json::{Value, json};
 
 use crate::daemon::blocking;
-use crate::graphview::{self, Lookups, parse_kind, parse_status, status_str};
+use crate::graphview::{self, Lookups, parse_kind, status_str};
 use crate::handler::RpcHandler;
 use crate::mcp::{BridgeLine, BridgeOpen, BridgeSession, McpService};
 
@@ -21,8 +21,69 @@ const MAX_GRAPH_DEPTH: u32 = 3;
 /// Mentions shown on an entity's detail page.
 const DETAIL_MENTIONS: usize = 100;
 
+/// Longest entity name, alias or identifier a split accepts.
+const MAX_NAME_LEN: usize = 1024;
+
 fn kinds(list: &[String]) -> Result<Vec<EntityKind>> {
     list.iter().map(|k| parse_kind(k)).collect()
+}
+
+/// A user's decision about a fact (`ClaimStatusRequest::status`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decision {
+    /// `rejected` (or the older `retracted`): sticky rejection.
+    Reject,
+    /// `active`: restore a fact that is not current.
+    Restore,
+    /// `user_asserted`: the user vouches for the fact.
+    Assert,
+    /// `unasserted`: undo the user's assertion.
+    Unassert,
+}
+
+impl Decision {
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "rejected" | "retracted" => Self::Reject,
+            "active" => Self::Restore,
+            "user_asserted" => Self::Assert,
+            "unasserted" => Self::Unassert,
+            _ => return None,
+        })
+    }
+
+    /// The status `c` ends up with.
+    fn target(self, c: &Claim) -> Result<ClaimStatus> {
+        let sourced = !c.evidence.is_empty();
+        Ok(match self {
+            Self::Reject => ClaimStatus::Rejected,
+            // Already current: nothing to restore (and never downgrade the user's own fact).
+            Self::Restore if c.status.is_active() => c.status,
+            Self::Restore if sourced => ClaimStatus::Active,
+            // Without evidence only the user's word makes it a fact.
+            Self::Restore => ClaimStatus::UserAsserted,
+            Self::Assert => ClaimStatus::UserAsserted,
+            Self::Unassert if c.status != ClaimStatus::UserAsserted => {
+                return Err(Error::Invalid(format!(
+                    "claim {} is not a fact you asserted (it is {})",
+                    c.id,
+                    status_str(c.status)
+                )));
+            }
+            Self::Unassert if sourced => ClaimStatus::Active,
+            Self::Unassert => ClaimStatus::Retracted,
+        })
+    }
+}
+
+fn check_name(what: &str, s: &str) -> Result<()> {
+    if s.trim().is_empty() {
+        return Err(Error::Invalid(format!("the {what} is empty")));
+    }
+    if s.len() > MAX_NAME_LEN || s.chars().any(char::is_control) {
+        return Err(Error::Invalid(format!("the {what} is not a valid name")));
+    }
+    Ok(())
 }
 
 impl RpcHandler {
@@ -111,9 +172,14 @@ impl RpcHandler {
         };
         let depth = req.depth.min(MAX_GRAPH_DEPTH);
         let graph = self.state.knowledge.graph.clone();
-        let view = blocking(move || match &req.center {
-            Some(c) => graphview::neighbourhood(graph.as_ref(), c, depth, limit, &kinds),
-            None => graphview::overview(graph.as_ref(), &kinds, limit),
+        let view = blocking(move || {
+            let source = req.source.as_ref();
+            match &req.center {
+                Some(c) => {
+                    graphview::neighbourhood(graph.as_ref(), c, depth, limit, &kinds, source)
+                }
+                None => graphview::overview(graph.as_ref(), &kinds, limit, source),
+            }
         })
         .await?;
         to_result(view)
@@ -160,23 +226,20 @@ impl RpcHandler {
         &self,
         req: ClaimStatusRequest,
     ) -> Result<Value, RpcError> {
-        let to = match req.status.as_str() {
-            "retracted" | "rejected" => graphview::user_rejected(),
-            "active" => parse_status("active")?,
-            _ => {
-                return Err(RpcError::invalid_params(
-                    "status must be `retracted` (reject the fact) or `active` (restore it)",
-                ));
-            }
+        let Some(decision) = Decision::parse(req.status.as_str()) else {
+            return Err(RpcError::invalid_params(
+                "status must be `rejected` (reject the fact), `active` (restore it), \
+                 `user_asserted` (assert it) or `unasserted` (withdraw your assertion)",
+            ));
         };
-        let to_name = status_str(to);
         let k = self.state.knowledge.clone();
         let claim = req.claim;
-        let (from, touched) = blocking(move || {
+        let (from, to_name, touched) = blocking(move || {
             let c = k
                 .graph
                 .get_claim(claim)?
                 .ok_or_else(|| Error::NotFound(format!("claim {claim}")))?;
+            let to = decision.target(&c)?;
             let mut touched = vec![c.subject.clone()];
             if let nugget_graph::ClaimObject::Entity(o) = &c.object {
                 touched.push(o.clone());
@@ -184,7 +247,7 @@ impl RpcHandler {
             if c.status != to {
                 k.graph.set_claim_status(claim, to)?;
             }
-            Ok((status_str(c.status), touched))
+            Ok((status_str(c.status), status_str(to), touched))
         })
         .await?;
         if from != to_name {
@@ -198,6 +261,64 @@ impl RpcHandler {
             self.after_graph_edit(touched).await;
         }
         Ok(Value::Null)
+    }
+
+    pub(crate) async fn knowledge_split(&self, req: SplitRequest) -> Result<Value, RpcError> {
+        check_name("new entity's name", &req.name)?;
+        for a in &req.aliases {
+            check_name("alias", a)?;
+        }
+        for (scheme, value) in &req.identifiers {
+            check_name("identifier", scheme)?;
+            check_name("identifier", value)?;
+        }
+        if req.claims.is_empty() {
+            return Err(RpcError::invalid_params(
+                "choose at least one fact to split off",
+            ));
+        }
+        let kind = req.kind.as_deref().map(parse_kind).transpose()?;
+        let k = self.state.knowledge.clone();
+        let r = req.clone();
+        let (from, from_name, new_id, mut touched) = blocking(move || {
+            let e = k
+                .graph
+                .get_entity(&r.entity)?
+                .ok_or_else(|| Error::NotFound(format!("entity {}", r.entity)))?;
+            let mut touched = vec![e.id.clone()];
+            for &id in &r.claims {
+                let c = k
+                    .graph
+                    .get_claim(id)?
+                    .ok_or_else(|| Error::NotFound(format!("claim {id}")))?;
+                touched.push(c.subject.clone());
+                if let nugget_graph::ClaimObject::Entity(o) = &c.object {
+                    touched.push(o.clone());
+                }
+            }
+            let mut new = NewEntity::new(kind.unwrap_or(e.kind), r.name.trim());
+            new.aliases = r.aliases.iter().map(|a| a.trim().to_owned()).collect();
+            new.identifiers = r
+                .identifiers
+                .iter()
+                .map(|(s, v)| Identifier::new(s.trim(), v.trim()))
+                .collect();
+            let id = k.graph.split(&e.id, &r.claims, &new)?;
+            Ok((e.id, e.name, id, touched))
+        })
+        .await?;
+        tracing::info!(entity = %from, new = %new_id, claims = req.claims.len(), "entity split");
+        self.audit(
+            "knowledge.split",
+            from.as_str(),
+            json!({"entity": from, "name": from_name, "new": new_id, "new_name": req.name.trim(), "claims": req.claims}),
+        )
+        .await;
+        touched.push(new_id.clone());
+        touched.sort();
+        touched.dedup();
+        self.after_graph_edit(touched).await;
+        to_result(EntityRef { id: new_id })
     }
 
     /// Re-render the vault pages a user edit affected and tell clients.
@@ -283,5 +404,65 @@ impl RpcHandler {
     pub(crate) fn mcp_bridge_close(&self, req: BridgeSession) -> Result<Value, RpcError> {
         self.mcp()?.bridge_close(&req.session);
         Ok(Value::Null)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nugget_core::ids::{EntityId, ItemKey, ItemRef, SourceId};
+    use nugget_graph::{ClaimObject, Evidence};
+
+    fn claim(status: ClaimStatus, sourced: bool) -> Claim {
+        let evidence = if sourced {
+            vec![Evidence {
+                item: ItemRef {
+                    source: SourceId::new("notes"),
+                    key: ItemKey::new("a.md"),
+                },
+                chunk_id: None,
+                quote: None,
+            }]
+        } else {
+            Vec::new()
+        };
+        Claim {
+            id: 7,
+            subject: EntityId::new("ent_a"),
+            predicate: "note".into(),
+            object: ClaimObject::Literal("x".into()),
+            text: "x".into(),
+            confidence: 1.0,
+            status,
+            evidence,
+            valid_from: None,
+            valid_to: None,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            updated_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn decisions_map_to_statuses() {
+        use ClaimStatus::*;
+        for name in ["rejected", "retracted"] {
+            assert_eq!(Decision::parse(name), Some(Decision::Reject));
+        }
+        for bad in ["superseded", "", "Active"] {
+            assert_eq!(Decision::parse(bad), None, "{bad}");
+        }
+        let t = |d: &str, s, sourced| Decision::parse(d).unwrap().target(&claim(s, sourced));
+        assert_eq!(t("rejected", Active, true).unwrap(), Rejected);
+        assert_eq!(t("rejected", UserAsserted, false).unwrap(), Rejected);
+        // Restore: back to active when sourced, else the user's own fact again.
+        assert_eq!(t("active", Rejected, true).unwrap(), Active);
+        assert_eq!(t("active", Rejected, false).unwrap(), UserAsserted);
+        assert_eq!(t("active", Superseded, true).unwrap(), Active);
+        assert_eq!(t("active", UserAsserted, true).unwrap(), UserAsserted);
+        assert_eq!(t("user_asserted", Retracted, false).unwrap(), UserAsserted);
+        // Undoing an assertion: the sources decide.
+        assert_eq!(t("unasserted", UserAsserted, false).unwrap(), Retracted);
+        assert_eq!(t("unasserted", UserAsserted, true).unwrap(), Active);
+        assert!(t("unasserted", Active, true).is_err());
     }
 }

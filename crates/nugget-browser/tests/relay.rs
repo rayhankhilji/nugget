@@ -3,15 +3,15 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use nugget_browser::bridge::{
-    AttachInfo, BridgeError, BridgeHub, BrowserBridge, HubHandler, KillSwitch,
-};
+#[cfg(unix)]
+use nugget_browser::bridge::HubHandler;
+use nugget_browser::bridge::{AttachInfo, BridgeError, BridgeHub, BrowserBridge, KillSwitch};
 use nugget_browser::framing::{
     MAX_FROM_EXTENSION, MAX_TO_EXTENSION, read_frame_async, write_frame_async,
 };
-use nugget_browser::host::{
-    DaemonLink, HubLink, IpcDaemonLink, RelayEnd, run_relay, spawn_extension_reader,
-};
+#[cfg(unix)]
+use nugget_browser::host::IpcDaemonLink;
+use nugget_browser::host::{DaemonLink, HubLink, RelayEnd, run_relay, spawn_extension_reader};
 use nugget_browser::protocol::{
     BrowserEvent, ErrorCode, ExtensionMessage, HostMessage, HostRequest,
 };

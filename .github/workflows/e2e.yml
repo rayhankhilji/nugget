@@ -1,0 +1,88 @@
+name: E2E
+
+# Real-app end-to-end test (apps/desktop/e2e): the real nuggetd indexes the fictional corpus in
+# bench/fixtures/knowledge/items and the real desktop frontend runs in headless Chromium against it,
+# through a Node bridge that stands in for the Tauri shell. See apps/desktop/e2e/README.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  e2e:
+    name: Desktop E2E (real daemon)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the channel and components; this makes sure they are present.
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # A debug build is enough: the corpus is small (93 items, a few seconds to index).
+      - name: Build nuggetd
+        run: cargo build --locked -p nuggetd
+
+      # The pnpm version comes from `packageManager` in apps/desktop/package.json.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies and build
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      # The Chromium build matching the `playwright` devDependency, plus its system libraries.
+      - name: Install Playwright Chromium
+        working-directory: apps/desktop
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run the end-to-end test
+        working-directory: apps/desktop
+        env:
+          NUGGETD: ${{ github.workspace }}/target/debug/nuggetd
+          E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
+        run: pnpm run e2e
+
+      # Screenshots of every page, summary.json (checks, command errors, console errors), the
+      # daemon logs and the rendered vault page. Uploaded on failure too.
+      - name: Upload screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e
+          path: ${{ runner.temp }}/e2e-artifacts/
+          retention-days: 14
+          if-no-files-found: warn

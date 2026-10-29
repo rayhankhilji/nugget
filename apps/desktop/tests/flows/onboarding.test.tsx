@@ -74,8 +74,8 @@ describe("onboarding flow", () => {
     await click(button(t("onboarding.done.start")));
     expect(nav()).not.toBeNull();
     expect(loadState().finished).toBe(true);
-    // The first page after setup is the default (chat).
-    expect(within(nav()!).getByRole("button", { name: t("app.nav.chat") }).getAttribute("aria-current")).toBe("page");
+    // The first page after setup is Today.
+    expect(within(nav()!).getByRole("button", { name: t("app.nav.today") }).getAttribute("aria-current")).toBe("page");
   });
 
   it("is not shown again once finished", async () => {

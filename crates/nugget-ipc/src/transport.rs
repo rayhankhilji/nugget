@@ -428,6 +428,19 @@ mod imp {
             .name(name(paths)?)
             .security_descriptor(sd)
             .create_tokio()
+            .map_err(|e| {
+                // The pipe is created as the first instance of its name; Windows reports an
+                // existing pipe of that name (another listener, or a squatter) as
+                // ERROR_ACCESS_DENIED rather than "in use".
+                if e.kind() == io::ErrorKind::PermissionDenied {
+                    io::Error::new(
+                        io::ErrorKind::AddrInUse,
+                        format!("nuggetd is already listening on {}", display(paths)),
+                    )
+                } else {
+                    e
+                }
+            })
     }
 }
 

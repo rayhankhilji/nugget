@@ -11,9 +11,14 @@ use nugget_core::ipc::{
     PluginInspectResult, PluginInstallParams, PluginInstallResult, PluginListResult,
     PluginRemoveResult, ProbeRequest, ProviderInfo, RuntimeInfo, SearchHit, SearchRequest,
     SourceInfo, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync, SourceUpdate,
-    StatusResponse, method, plugin_method,
+    SplitRequest, StatusResponse, method, plugin_method,
 };
-use serde_json::Value;
+use nugget_core::ipc::{
+    BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest, CardPreview,
+    CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest, ProactiveMetrics,
+    ReminderView, proactive_method,
+};
+use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -40,6 +45,8 @@ const MAX_TEXT_LEN: usize = 1024;
 const MAX_CLIENT_NAME_LEN: usize = 100;
 /// Entity kinds and MCP tool names are short identifiers.
 const MAX_LIST_LEN: usize = 64;
+/// Facts one split may move.
+const MAX_SPLIT_CLAIMS: usize = 2_000;
 
 #[tauri::command]
 pub async fn connection_info(app: AppHandle, daemon: State<'_, Daemon>) -> Result<ConnectionInfo> {
@@ -323,6 +330,9 @@ fn graph_request(request: GraphRequest) -> Result<GraphRequest> {
     for k in &request.kinds {
         check_text("kind", k)?;
     }
+    if let Some(s) = &request.source {
+        check_text("source", s.as_str())?;
+    }
     Ok(GraphRequest {
         depth: request.depth.clamp(1, MAX_GRAPH_DEPTH),
         limit: request.limit.clamp(1, MAX_GRAPH_LIMIT),
@@ -341,14 +351,45 @@ fn check_merge(request: &MergeRequest) -> Result<()> {
     Ok(())
 }
 
-/// The UI only rejects a fact (`retracted`) or restores it (`active`).
+/// The UI rejects a fact (`rejected`), restores it (`active`), or asserts / withdraws the user's
+/// own fact (`user_asserted` / `unasserted`).
 fn check_claim_status(request: &ClaimStatusRequest) -> Result<()> {
     match request.status.as_str() {
-        "retracted" | "active" => Ok(()),
+        "rejected" | "active" | "user_asserted" | "unasserted" => Ok(()),
         other => Err(CmdError::Other(format!(
-            "a fact can only be rejected or restored, not set to “{other}”"
+            "a fact can only be rejected, restored, asserted or withdrawn, not set to “{other}”"
         ))),
     }
+}
+
+fn check_split(request: &SplitRequest) -> Result<()> {
+    check_entity_id("split", request.entity.as_str())?;
+    if request.name.trim().is_empty() {
+        return Err(CmdError::Other("the new entity needs a name".into()));
+    }
+    check_text("name", &request.name)?;
+    if request.claims.is_empty() {
+        return Err(CmdError::Other(
+            "choose at least one fact to split off".into(),
+        ));
+    }
+    if request.claims.len() > MAX_SPLIT_CLAIMS
+        || request.aliases.len() > MAX_LIST_LEN
+        || request.identifiers.len() > MAX_LIST_LEN
+    {
+        return Err(CmdError::Other("too many items in the split".into()));
+    }
+    if let Some(k) = &request.kind {
+        check_text("kind", k)?;
+    }
+    for a in &request.aliases {
+        check_text("alias", a)?;
+    }
+    for (scheme, value) in &request.identifiers {
+        check_text("identifier", scheme)?;
+        check_text("identifier", value)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -392,7 +433,7 @@ pub async fn knowledge_merge(
     Ok(())
 }
 
-/// Reject (`retracted`) or restore (`active`) a fact.
+/// Reject, restore, assert or withdraw a fact (see `check_claim_status`).
 #[tauri::command]
 pub async fn knowledge_claim_status(
     app: AppHandle,
@@ -404,6 +445,17 @@ pub async fn knowledge_claim_status(
         .call(&app, method::KNOWLEDGE_CLAIM_STATUS, &request)
         .await?;
     Ok(())
+}
+
+/// Split facts off an entity into a new one; returns the new entity.
+#[tauri::command]
+pub async fn knowledge_split(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: SplitRequest,
+) -> Result<EntityRef> {
+    check_split(&request)?;
+    daemon.call(&app, method::KNOWLEDGE_SPLIT, &request).await
 }
 
 #[tauri::command]
@@ -626,6 +678,168 @@ pub async fn pick_folders(app: AppHandle, multiple: bool) -> Result<Vec<String>>
         .collect()
 }
 
+// ---- W4 proactive (M5) ----
+//
+// Typed proxies for the card inbox, morning brief and reminders, plus two shell helpers the
+// Today page needs: OS notifications (driven from Rust; the webview has no `notification:`
+// permission) and opening a draft in the mail app (`mailto:` only, see `open::mailto`).
+
+/// Card ids and dismiss reasons are short; free-text dismiss reasons stay modest.
+const MAX_CARD_ID_LEN: usize = 256;
+const MAX_REASON_TEXT_LEN: usize = 2_000;
+/// Notification text the UI composes (a title and one or two lines).
+const MAX_NOTIFY_TITLE_LEN: usize = 200;
+const MAX_NOTIFY_BODY_LEN: usize = 2_000;
+
+const CARD_FEEDBACK: &[&str] = &["accept", "dismiss", "snooze", "seen", "done"];
+const DISMISS_REASONS: &[&str] = &[
+    "not_relevant",
+    "already_handled",
+    "wrong_info",
+    "not_important",
+    "other",
+];
+
+fn check_card_id(card_id: &str) -> Result<()> {
+    if card_id.trim().is_empty() || card_id.len() > MAX_CARD_ID_LEN {
+        return Err(CmdError::Other("no such card".into()));
+    }
+    Ok(())
+}
+
+fn check_card_feedback(request: &CardFeedbackRequest) -> Result<()> {
+    check_card_id(&request.card_id)?;
+    if !CARD_FEEDBACK.contains(&request.feedback.as_str()) {
+        return Err(CmdError::Other("unknown card feedback".into()));
+    }
+    if let Some(reason) = &request.reason
+        && !DISMISS_REASONS.contains(&reason.as_str())
+    {
+        return Err(CmdError::Other("unknown dismiss reason".into()));
+    }
+    if request
+        .reason_text
+        .as_ref()
+        .is_some_and(|t| t.len() > MAX_REASON_TEXT_LEN)
+    {
+        return Err(CmdError::Other("the reason is too long".into()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cards_list(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: CardsListRequest,
+) -> Result<CardsList> {
+    daemon
+        .call(&app, proactive_method::CARDS_LIST, &request)
+        .await
+}
+
+#[tauri::command]
+pub async fn cards_feedback(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: CardFeedbackRequest,
+) -> Result<CardView> {
+    check_card_feedback(&request)?;
+    daemon
+        .call(&app, proactive_method::CARDS_FEEDBACK, &request)
+        .await
+}
+
+#[tauri::command]
+pub async fn cards_preview(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: CardPreviewRequest,
+) -> Result<CardPreview> {
+    check_card_id(&request.card_id)?;
+    daemon
+        .call(&app, proactive_method::CARDS_PREVIEW, &request)
+        .await
+}
+
+#[tauri::command]
+pub async fn cards_execute(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: CardExecuteRequest,
+) -> Result<CardExecuteResult> {
+    check_card_id(&request.card_id)?;
+    if request.digest.trim().is_empty() || request.digest.len() > MAX_TEXT_LEN {
+        return Err(CmdError::Other(
+            "preview the action before approving it".into(),
+        ));
+    }
+    daemon
+        .call(&app, proactive_method::CARDS_EXECUTE, &request)
+        .await
+}
+
+#[tauri::command]
+pub async fn brief_get(app: AppHandle, daemon: State<'_, Daemon>) -> Result<BriefView> {
+    daemon
+        .call(&app, proactive_method::BRIEF_GET, &json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn proactive_metrics(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<ProactiveMetrics> {
+    daemon
+        .call(&app, proactive_method::PROACTIVE_METRICS, &json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn proactive_refresh(app: AppHandle, daemon: State<'_, Daemon>) -> Result<CardsChanged> {
+    daemon
+        .call(&app, proactive_method::PROACTIVE_REFRESH, &json!({}))
+        .await
+}
+
+#[tauri::command]
+pub async fn reminders_list(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<Vec<ReminderView>> {
+    daemon
+        .call(&app, proactive_method::REMINDERS_LIST, &json!({}))
+        .await
+}
+
+/// Show an OS notification (morning brief, due reminder). Text is shown as plain text.
+#[tauri::command]
+pub async fn notify(app: AppHandle, title: String, body: String) -> Result<()> {
+    use tauri_plugin_notification::NotificationExt;
+    let title: String = title.chars().take(MAX_NOTIFY_TITLE_LEN).collect();
+    let body: String = body.chars().take(MAX_NOTIFY_BODY_LEN).collect();
+    app.notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show()
+        .map_err(|e| CmdError::Other(format!("couldn't show the notification: {e}")))
+}
+
+/// Opens a `mailto:` link (a drafted reply) in the default mail app. Nothing else is accepted.
+#[tauri::command]
+pub async fn open_mailto(url: String) -> Result<()> {
+    let url = open::mailto(&url).map_err(CmdError::Other)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        tauri_plugin_opener::open_url(url.as_str(), None::<&str>)
+            .map_err(|e| format!("Couldn't open the mail app: {e}"))
+    })
+    .await
+    .map_err(|e| CmdError::Other(e.to_string()))?
+    .map_err(CmdError::Other)
+}
+
 /// Native file picker for a `.nuggetplugin` package. Returns its absolute path, or `None` when
 /// cancelled.
 #[tauri::command]
@@ -703,8 +917,13 @@ mod tests {
         assert!(check_plugin_field("id", &id.id).is_ok());
         assert!(check_plugin_field("id", " ").is_err());
 
+        let absolute = if cfg!(windows) {
+            r"C:\Users\me\rss.nuggetplugin"
+        } else {
+            "/home/me/rss.nuggetplugin"
+        };
         let install: PluginInstallParams =
-            serde_json::from_value(json!({ "path": "/home/me/rss.nuggetplugin" })).unwrap();
+            serde_json::from_value(json!({ "path": absolute })).unwrap();
         assert!(check_plugin_install(&install).is_ok());
         let relative = PluginInstallParams {
             path: "rss.nuggetplugin".into(),
@@ -804,6 +1023,7 @@ mod tests {
             depth: 99,
             limit: 1_000_000,
             kinds: vec![],
+            source: None,
         })
         .unwrap();
         assert_eq!((g.depth, g.limit), (MAX_GRAPH_DEPTH, MAX_GRAPH_LIMIT));
@@ -815,6 +1035,7 @@ mod tests {
                 depth: 1,
                 limit: 10,
                 kinds: vec![],
+                source: None,
             })
             .is_err()
         );
@@ -826,9 +1047,11 @@ mod tests {
         assert!(check_merge(&same).is_err());
 
         for (status, ok) in [
-            ("retracted", true),
+            ("rejected", true),
             ("active", true),
-            ("user_asserted", false),
+            ("user_asserted", true),
+            ("unasserted", true),
+            ("retracted", false),
             ("superseded", false),
             ("", false),
         ] {
@@ -838,6 +1061,30 @@ mod tests {
             };
             assert_eq!(check_claim_status(&req).is_ok(), ok, "{status}");
         }
+
+        let split = SplitRequest {
+            entity: nugget_core::ids::EntityId::new("ent_1"),
+            claims: vec![3],
+            name: "Sam Lee".into(),
+            kind: None,
+            aliases: vec![],
+            identifiers: vec![("email".into(), "sam@home.net".into())],
+        };
+        assert!(check_split(&split).is_ok());
+        assert!(
+            check_split(&SplitRequest {
+                name: "  ".into(),
+                ..split.clone()
+            })
+            .is_err()
+        );
+        assert!(
+            check_split(&SplitRequest {
+                claims: vec![],
+                ..split.clone()
+            })
+            .is_err()
+        );
     }
 
     #[test]
@@ -925,5 +1172,45 @@ mod tests {
             message: "method not found".into(),
         });
         assert!(matches!(rpc, CmdError::Rpc { code: -32601, .. }));
+    }
+
+    /// The proactive `request` objects `api.ts` builds decode into the IPC types and are checked.
+    #[test]
+    fn proactive_requests_match_the_ipc_types() {
+        let list: CardsListRequest = serde_json::from_value(json!({})).unwrap();
+        assert!(!list.include_closed);
+        let fb: CardFeedbackRequest = serde_json::from_value(json!({
+            "card_id": "c1", "feedback": "dismiss", "reason": "other", "reason_text": "meh"
+        }))
+        .unwrap();
+        assert!(check_card_feedback(&fb).is_ok());
+        let snooze: CardFeedbackRequest = serde_json::from_value(json!({
+            "card_id": "c1", "feedback": "snooze", "until": "2026-10-29T08:00:00Z"
+        }))
+        .unwrap();
+        assert!(snooze.until.is_some() && check_card_feedback(&snooze).is_ok());
+        let bad: CardFeedbackRequest =
+            serde_json::from_value(json!({ "card_id": "c1", "feedback": "delete" })).unwrap();
+        assert!(check_card_feedback(&bad).is_err());
+        let bad: CardFeedbackRequest = serde_json::from_value(
+            json!({ "card_id": "c1", "feedback": "dismiss", "reason": "spam" }),
+        )
+        .unwrap();
+        assert!(check_card_feedback(&bad).is_err());
+        let bad: CardFeedbackRequest =
+            serde_json::from_value(json!({ "card_id": " ", "feedback": "seen" })).unwrap();
+        assert!(check_card_feedback(&bad).is_err());
+        let prev: CardPreviewRequest =
+            serde_json::from_value(json!({ "card_id": "c1", "action": 0 })).unwrap();
+        assert_eq!(prev.action, 0);
+        let exec: CardExecuteRequest = serde_json::from_value(
+            json!({ "card_id": "c1", "action": 1, "digest": "abc", "confirmed": true }),
+        )
+        .unwrap();
+        assert!(exec.confirmed);
+        let exec: CardExecuteRequest =
+            serde_json::from_value(json!({ "card_id": "c1", "action": 1, "digest": "abc" }))
+                .unwrap();
+        assert!(!exec.confirmed);
     }
 }

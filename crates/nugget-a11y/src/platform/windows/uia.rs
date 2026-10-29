@@ -677,7 +677,7 @@ unsafe fn rects(sa: *mut SAFEARRAY) -> Vec<Rect> {
             let mut data: *mut std::ffi::c_void = std::ptr::null_mut();
             if SafeArrayAccessData(sa, &mut data).is_ok() && !data.is_null() {
                 let vals = std::slice::from_raw_parts(data.cast::<f64>(), n);
-                for c in vals.chunks_exact(4) {
+                for c in vals.as_chunks::<4>().0 {
                     if c[2] > 0.0 || c[3] > 0.0 {
                         out.push(Rect {
                             x: c[0],

@@ -219,6 +219,8 @@ impl PolicyGate for FakeGate {
 
     fn record_approved(&self, action: &ActionDescriptor, risk: RiskClass) -> bool {
         self.approved.lock().unwrap().push((action.clone(), risk));
+        // `fetch_update` is `try_update` from Rust 1.99, newer than the MSRV.
+        #[allow(deprecated)]
         self.approvals_left
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()

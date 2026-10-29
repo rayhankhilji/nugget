@@ -338,7 +338,33 @@ pub fn fixture() -> Fixture {
         },
     );
 
-    // 5. Receipts: a renewal in 5 days, a trial ending in 3 days, a plain past receipt.
+    // 5. Receipts: a renewal in 5 days (the vendor's receipt from last cycle proves the user
+    //    pays it), a trial ending in 3 days (after the sign-up mail), a plain past receipt.
+    put_mail(
+        &store,
+        Mail {
+            key: "m-cloudy-receipt",
+            from: "Cloudy Billing <billing@cloudy.io>",
+            subject: "Your receipt from Cloudy",
+            body: "Thanks for your purchase. Pro plan, monthly: $49.00.",
+            days_ago: 26.0,
+            message_id: "<receipt@cloudy.io>",
+            ..Default::default()
+        },
+    );
+    put_mail(
+        &store,
+        Mail {
+            key: "m-streamco-welcome",
+            from: "StreamCo <no-reply@streamco.tv>",
+            subject: "Welcome to StreamCo",
+            body: "Your account is ready. Enjoy watching.",
+            days_ago: 11.0,
+            message_id: "<welcome@streamco.tv>",
+            ..Default::default()
+        },
+    );
+    // Receipts and notices.
     let renewal = put_mail(
         &store,
         Mail {

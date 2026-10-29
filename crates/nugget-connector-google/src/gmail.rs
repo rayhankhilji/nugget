@@ -43,6 +43,8 @@ use crate::{GoogleEndpoints, RetryPolicy};
 
 pub(crate) const KIND: &str = "gmail";
 const FEATURE: &str = "sync:gmail";
+/// Egress-ledger feature for changes made on the user's behalf ([`GmailConnector::archive`]).
+pub const ACTION_FEATURE: &str = "action:gmail";
 /// Messages per `messages.list` page.
 const LIST_PAGE: &str = "100";
 /// History records per `history.list` page.
@@ -135,31 +137,59 @@ impl ConnectorFactory for GmailFactory {
     }
 
     fn build(&self, settings: &Value, ctx: ConnectorContext) -> Result<Arc<dyn Connector>> {
+        Ok(Arc::new(self.connector(settings, ctx)?))
+    }
+}
+
+impl GmailFactory {
+    /// Like [`ConnectorFactory::build`], typed (for [`GmailConnector::archive`]).
+    pub fn connector(&self, settings: &Value, ctx: ConnectorContext) -> Result<GmailConnector> {
         let settings = GmailSettings::parse(settings)?;
+        let scope = if settings.allow_modify {
+            nugget_oauth::google::SCOPE_GMAIL_MODIFY
+        } else {
+            nugget_oauth::google::SCOPE_GMAIL_READONLY
+        };
+        let oauth = || OAuthSettings {
+            client_id: settings.client_id.clone(),
+            client_secret: settings.client_secret.clone(),
+            login_hint: settings.account_hint.clone(),
+        };
         let api = GoogleApi::new(
             FEATURE,
-            nugget_oauth::google::SCOPE_GMAIL_READONLY,
-            OAuthSettings {
-                client_id: settings.client_id.clone(),
-                client_secret: settings.client_secret.clone(),
-                login_hint: settings.account_hint.clone(),
-            },
+            scope,
+            oauth(),
             &self.endpoints,
             self.retry,
             ctx.clone(),
         )?;
-        Ok(Arc::new(GmailConnector {
+        let actions = if settings.allow_modify {
+            Some(GoogleApi::new(
+                ACTION_FEATURE,
+                scope,
+                oauth(),
+                &self.endpoints,
+                self.retry,
+                ctx.clone(),
+            )?)
+        } else {
+            None
+        };
+        Ok(GmailConnector {
             api,
+            actions,
             base: self.endpoints.gmail_api.clone(),
             settings,
             ctx,
-        }))
+        })
     }
 }
 
 /// One Gmail account.
 pub struct GmailConnector {
     api: GoogleApi,
+    /// Same account, metered as [`ACTION_FEATURE`]; only with `allow_modify`.
+    actions: Option<GoogleApi>,
     base: String,
     settings: GmailSettings,
     ctx: ConnectorContext,
@@ -341,6 +371,38 @@ impl Connector for GmailConnector {
 }
 
 impl GmailConnector {
+    /// Whether the source allows changing labels (`allow_modify`), so [`archive`](Self::archive)
+    /// can work.
+    pub fn can_modify(&self) -> bool {
+        self.actions.is_some()
+    }
+
+    /// Archive messages (by item key, the Gmail message id): `messages.modify` removing the
+    /// `INBOX` label. Nothing is deleted. Messages that no longer exist are skipped. Needs
+    /// `allow_modify` (else `Unsupported`) and a token granted `gmail.modify` (else Google
+    /// answers 403, reported as `Unauthorized`: reconnect the account). Returns how many
+    /// messages were archived.
+    pub async fn archive(&self, ids: &[String], cancel: &CancellationToken) -> Result<usize> {
+        let api = self.actions.as_ref().ok_or_else(|| {
+            Error::Unsupported("archiving is off for this Gmail source (allow_modify)".into())
+        })?;
+        if let Some(bad) = ids.iter().find(|id| !valid_id(id)) {
+            return Err(Error::Invalid(format!("not a Gmail message id: {bad}")));
+        }
+        let body = json!({"removeLabelIds": ["INBOX"]});
+        let mut done = 0;
+        for id in ids {
+            let url = self.url(&["messages", id, "modify"], &[])?;
+            let resp = api.post_json(&url, &body, cancel).await?;
+            match resp.status.as_u16() {
+                200..=299 => done += 1,
+                404 => tracing::debug!(source = %self.ctx.source, "gmail archive: message gone"),
+                s => return Err(Error::Other(format!("gmail messages.modify: HTTP {s}"))),
+            }
+        }
+        Ok(done)
+    }
+
     fn url(&self, segments: &[&str], query: &[(&str, &str)]) -> Result<url::Url> {
         let mut all = vec!["users", "me"];
         all.extend_from_slice(segments);

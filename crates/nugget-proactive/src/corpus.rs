@@ -14,7 +14,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
 use crate::config::ProactiveConfig;
-use crate::text::{Address, normalize_subject, parse_iso_date, stable_hash};
+use crate::text::{Address, is_generated_subject, normalize_subject, parse_iso_date, stable_hash};
 
 /// Source ids with this prefix belong to this crate and are never read as content.
 pub const OWN_SOURCE_PREFIX: &str = "proactive";
@@ -95,6 +95,9 @@ impl MailMessage {
         {
             return Some("automated-sender");
         }
+        if is_generated_subject(&self.subject) {
+            return Some("generated-subject");
+        }
         let lower = self.body.to_lowercase();
         if lower.contains("unsubscribe")
             || lower.contains("manage your email preferences")
@@ -125,6 +128,34 @@ fn automated_local(local: &str) -> bool {
         "digest",
         "admin",
         "postmaster",
+        // Role mailboxes (RFC 2142 and common practice): not a person writing to the user.
+        "account",
+        "accounts",
+        "service",
+        "services",
+        "customerservice",
+        "events",
+        "sales",
+        "careers",
+        "jobs",
+        "contact",
+        "help",
+        "helpdesk",
+        "feedback",
+        "survey",
+        "deals",
+        "offers",
+        "promo",
+        "promotions",
+        "shop",
+        "store",
+        "payments",
+        "invoices",
+        "membership",
+        "members",
+        "community",
+        "webmaster",
+        "security",
     ];
     const PARTS: &[&str] = &[
         "noreply",
@@ -164,11 +195,25 @@ pub struct CalEvent {
     pub url: Option<String>,
 }
 
+/// A text item that is neither mail nor an event: a note, a document.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteDoc {
+    pub item: ItemRef,
+    pub title: Option<String>,
+    pub text: String,
+    /// Last modified.
+    pub date: OffsetDateTime,
+    pub sensitive: bool,
+    pub url: Option<String>,
+}
+
 /// Mail, events and other (note) items, with threads computed.
 #[derive(Debug, Clone, Default)]
 pub struct Corpus {
     pub mail: Vec<MailMessage>,
     pub events: Vec<CalEvent>,
+    /// Text notes (Markdown and plain text), by item key.
+    pub notes: Vec<NoteDoc>,
     /// The user's addresses (configured or inferred), lowercased.
     pub user_addresses: Vec<String>,
     pub internal_domains: Vec<String>,
@@ -203,13 +248,17 @@ impl Corpus {
     pub fn from_items(items: &[Item], cfg: &ProactiveConfig) -> Self {
         let mut mail = Vec::new();
         let mut events = Vec::new();
+        let mut notes = Vec::new();
         for it in items {
             if let Some(m) = parse_mail(it) {
                 mail.push(m);
             } else if let Some(e) = parse_event(it, cfg.utc_offset) {
                 events.push(e);
+            } else if let Some(n) = parse_note(it) {
+                notes.push(n);
             }
         }
+        notes.sort_by(|a, b| a.item.key.cmp(&b.item.key));
         let mut users = cfg.user_set();
         if users.is_empty() {
             for m in &mail {
@@ -236,6 +285,7 @@ impl Corpus {
         Self {
             mail,
             events,
+            notes,
             user_addresses: users,
             internal_domains,
             threads,
@@ -507,6 +557,30 @@ fn parse_mail(item: &Item) -> Option<MailMessage> {
         url: url(meta),
         from_user: false,
         thread: String::new(),
+    })
+}
+
+/// A Markdown or plain-text item with text (notes, documents).
+fn parse_note(item: &Item) -> Option<NoteDoc> {
+    let mime = mime(item);
+    let texty = mime.starts_with("text/markdown")
+        || mime.starts_with("text/x-markdown")
+        || mime.starts_with("text/plain")
+        || (mime.is_empty()
+            && [".md", ".markdown", ".txt"]
+                .iter()
+                .any(|e| item.item.key.as_str().to_lowercase().ends_with(e)));
+    let text = item.text.clone().filter(|t| !t.trim().is_empty())?;
+    if !texty {
+        return None;
+    }
+    Some(NoteDoc {
+        item: item.item.clone(),
+        title: item.title.clone(),
+        text,
+        date: item.source_modified_at.unwrap_or(item.created_at),
+        sensitive: sensitive(&item.metadata),
+        url: url(&item.metadata),
     })
 }
 

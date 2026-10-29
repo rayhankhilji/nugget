@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use nugget_core::ids::{EntityId, ItemRef};
+use nugget_core::ids::{EntityId, ItemRef, SourceId};
 use nugget_core::ipc::{
     ClaimObjectView, ClaimView, EntityLink, EntitySummaryView, EvidenceView, GraphEdgeView,
     GraphNodeView, GraphViewIpc, MentionView,
@@ -158,21 +158,7 @@ pub(crate) fn status_str(s: ClaimStatus) -> String {
     }
 }
 
-/// The status as IPC shows it: the four statuses of the IPC contract, with a user-rejected
-/// claim (`rejected`, where the graph has that status) shown as `retracted`.
-pub(crate) fn ipc_status(s: ClaimStatus) -> String {
-    match status_str(s).as_str() {
-        "rejected" => "retracted".to_owned(),
-        other => other.to_owned(),
-    }
-}
-
-/// The status a user's "reject this fact" sets: the sticky `rejected` status when the graph
-/// has it (so re-extraction never revives the fact), else `retracted`.
-pub(crate) fn user_rejected() -> ClaimStatus {
-    parse_status("rejected").unwrap_or(ClaimStatus::Retracted)
-}
-
+#[cfg(test)]
 pub(crate) fn parse_status(s: &str) -> Result<ClaimStatus> {
     serde_json::from_value(Value::String(s.to_owned()))
         .map_err(|_| Error::Invalid(format!("unknown claim status `{s}`")))
@@ -213,7 +199,7 @@ pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
         object: lk.object(&c.object)?,
         text: c.text.clone(),
         confidence: c.confidence,
-        status: ipc_status(c.status),
+        status: status_str(c.status),
         evidence,
     })
 }
@@ -269,6 +255,7 @@ pub(crate) fn overview(
     graph: &dyn GraphStore,
     kinds: &[EntityKind],
     limit: usize,
+    source: Option<&SourceId>,
 ) -> Result<GraphViewIpc> {
     let (mut all, scan_cut) = scan_entities(graph, None, kinds)?;
     all.sort_by(|a, b| {
@@ -277,8 +264,30 @@ pub(crate) fn overview(
             .then(b.mentions.cmp(&a.mentions))
             .then(a.name.cmp(&b.name))
     });
-    let truncated = scan_cut || all.len() > limit;
-    all.truncate(limit);
+    let truncated = match source {
+        None => {
+            let cut = all.len() > limit;
+            all.truncate(limit);
+            scan_cut || cut
+        }
+        // Most connected first, so stop once `limit` supported entities are found.
+        Some(src) => {
+            let mut kept = Vec::with_capacity(limit.min(all.len()));
+            let mut cut = false;
+            for e in all {
+                if !supported_by(graph, &e.id, src)? {
+                    continue;
+                }
+                if kept.len() == limit {
+                    cut = true;
+                    break;
+                }
+                kept.push(e);
+            }
+            all = kept;
+            scan_cut || cut
+        }
+    };
     let ids: HashSet<EntityId> = all.iter().map(|e| e.id.clone()).collect();
     let mut seen = HashSet::new();
     let mut edges = Vec::new();
@@ -287,6 +296,9 @@ pub(crate) fn overview(
             let ClaimObject::Entity(to) = &c.object else {
                 continue;
             };
+            if source.is_some_and(|s| !claim_from(&c, s)) {
+                continue;
+            }
             if ids.contains(&c.subject) && ids.contains(to) && seen.insert(c.id) {
                 edges.push(GraphEdgeView {
                     claim: c.id,
@@ -313,26 +325,68 @@ pub(crate) fn overview(
     })
 }
 
-/// Neighbourhood of `center`, keeping only nodes of `kinds` (the centre always stays) and the
-/// edges between kept nodes.
+/// Whether a claim has evidence from `source`.
+pub(crate) fn claim_from(c: &Claim, source: &SourceId) -> bool {
+    c.evidence.iter().any(|e| &e.item.source == source)
+}
+
+/// Whether items of `source` support the entity: a mention from it, or an active claim with
+/// evidence from it.
+pub(crate) fn supported_by(
+    graph: &dyn GraphStore,
+    id: &EntityId,
+    source: &SourceId,
+) -> Result<bool> {
+    if graph
+        .claims_for(id, false)?
+        .iter()
+        .any(|c| claim_from(c, source))
+    {
+        return Ok(true);
+    }
+    Ok(graph
+        .mentions_for(id, ORIGIN_MENTIONS)?
+        .iter()
+        .any(|m| &m.item.source == source))
+}
+
+/// Neighbourhood of `center`, keeping only nodes of `kinds` (and, with `source`, nodes supported
+/// by that source; the centre always stays) and the edges between kept nodes (with `source`,
+/// only edges whose claim has evidence from it).
 pub(crate) fn neighbourhood(
     graph: &dyn GraphStore,
     center: &EntityId,
     depth: u32,
     limit: usize,
     kinds: &[EntityKind],
+    source: Option<&SourceId>,
 ) -> Result<GraphViewIpc> {
     let center = graph
         .get_entity(center)?
         .ok_or_else(|| Error::NotFound(format!("entity {center}")))?
         .id;
-    let view = graph.neighbourhood(&center, depth, limit)?;
-    let keep: HashSet<EntityId> = view
-        .nodes
-        .iter()
-        .filter(|n| n.id == center || kinds.is_empty() || kinds.contains(&n.kind))
-        .map(|n| n.id.clone())
-        .collect();
+    let mut view = graph.neighbourhood(&center, depth, limit)?;
+    let mut keep: HashSet<EntityId> = HashSet::new();
+    for n in &view.nodes {
+        let wanted = n.id == center
+            || ((kinds.is_empty() || kinds.contains(&n.kind))
+                && match source {
+                    Some(s) => supported_by(graph, &n.id, s)?,
+                    None => true,
+                });
+        if wanted {
+            keep.insert(n.id.clone());
+        }
+    }
+    if let Some(s) = source {
+        let mut edges = Vec::with_capacity(view.edges.len());
+        for e in view.edges {
+            if graph.get_claim(e.claim)?.is_some_and(|c| claim_from(&c, s)) {
+                edges.push(e);
+            }
+        }
+        view.edges = edges;
+    }
     Ok(GraphViewIpc {
         nodes: view
             .nodes
@@ -366,7 +420,13 @@ mod tests {
 
     #[test]
     fn statuses_and_kinds_round_trip_by_name() {
-        for s in ["active", "superseded", "retracted", "user_asserted"] {
+        for s in [
+            "active",
+            "superseded",
+            "retracted",
+            "user_asserted",
+            "rejected",
+        ] {
             assert_eq!(status_str(parse_status(s).unwrap()), s);
         }
         assert!(parse_status("bogus").is_err());
@@ -382,5 +442,92 @@ mod tests {
         );
         assert_eq!(item_url(&serde_json::json!({"url": "a\nb"})), None);
         assert_eq!(item_url(&serde_json::json!({})), None);
+    }
+
+    fn item(source: &str, key: &str) -> ItemRef {
+        ItemRef {
+            source: SourceId::new(source),
+            key: nugget_core::ids::ItemKey::new(key),
+        }
+    }
+
+    fn link(g: &dyn GraphStore, a: &EntityId, b: &EntityId, pred: &str, it: &ItemRef) -> i64 {
+        g.add_claim(&nugget_graph::NewClaim {
+            subject: a.clone(),
+            predicate: pred.into(),
+            object: ClaimObject::Entity(b.clone()),
+            text: pred.into(),
+            confidence: 0.9,
+            status: ClaimStatus::Active,
+            evidence: vec![nugget_graph::Evidence {
+                item: it.clone(),
+                chunk_id: None,
+                quote: None,
+            }],
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn source_filter_keeps_only_supported_nodes_and_edges() {
+        use nugget_graph::{MemGraph, NewEntity};
+        let g = MemGraph::new();
+        let alice = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Alice"))
+            .unwrap();
+        let acme = g
+            .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
+            .unwrap();
+        let apollo = g
+            .create_entity(&NewEntity::new(EntityKind::Project, "Apollo"))
+            .unwrap();
+        let (mail, notes) = (item("mail", "m1"), item("notes", "n1"));
+        let works_at = link(&g, &alice, &acme, "works_at", &mail);
+        let works_on = link(&g, &alice, &apollo, "works_on", &notes);
+        let mail_src = SourceId::new("mail");
+
+        let all = overview(&g, &[], 10, None).unwrap();
+        assert_eq!((all.nodes.len(), all.edges.len()), (3, 2));
+        let only = overview(&g, &[], 10, Some(&mail_src)).unwrap();
+        let names: BTreeSet<&str> = only.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, BTreeSet::from(["Acme", "Alice"]));
+        assert_eq!(
+            only.edges.iter().map(|e| e.claim).collect::<Vec<_>>(),
+            [works_at]
+        );
+        assert!(!only.truncated);
+        let one = overview(&g, &[], 1, Some(&mail_src)).unwrap();
+        assert_eq!(one.nodes.len(), 1);
+        assert!(one.truncated);
+
+        let n = neighbourhood(&g, &apollo, 2, 10, &[], Some(&mail_src)).unwrap();
+        // The centre stays even when the source does not support it.
+        let names: BTreeSet<&str> = n.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, BTreeSet::from(["Acme", "Alice", "Apollo"]));
+        assert_eq!(
+            n.edges.iter().map(|e| e.claim).collect::<Vec<_>>(),
+            [works_at]
+        );
+        let n = neighbourhood(&g, &alice, 1, 10, &[], Some(&SourceId::new("notes"))).unwrap();
+        let names: BTreeSet<&str> = n.nodes.iter().map(|n| n.name.as_str()).collect();
+        assert_eq!(names, BTreeSet::from(["Alice", "Apollo"]));
+        assert_eq!(
+            n.edges.iter().map(|e| e.claim).collect::<Vec<_>>(),
+            [works_on]
+        );
+        // A mention alone is support too.
+        g.add_mention(&Mention {
+            entity: acme.clone(),
+            item: item("cal", "c1"),
+            chunk_id: None,
+            surface: "Acme".into(),
+            confidence: 1.0,
+        })
+        .unwrap();
+        let cal = overview(&g, &[], 10, Some(&SourceId::new("cal"))).unwrap();
+        assert_eq!(cal.nodes.len(), 1);
+        assert!(cal.edges.is_empty());
     }
 }

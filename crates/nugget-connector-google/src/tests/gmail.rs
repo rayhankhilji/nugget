@@ -792,6 +792,64 @@ async fn unreadable_cursor_starts_over_and_cancel_is_honoured() {
     assert!(matches!(r, Err(Error::Cancelled)));
 }
 
+// ---- archive (proactive actions) ----
+
+#[tokio::test]
+async fn archive_removes_the_inbox_label_when_allowed() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("POST"))
+        .and(path(format!("{API}/messages/m1/modify")))
+        .and(header("authorization", "Bearer at"))
+        .and(wiremock::matchers::body_json(
+            json!({"removeLabelIds": ["INBOX"]}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"id": "m1"})))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{API}/messages/gone/modify")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&h.server)
+        .await;
+    let mut s = settings();
+    s["allow_modify"] = json!(true);
+    let g = GmailFactory::new()
+        .with_endpoints(h.endpoints())
+        .connector(&s, h.ctx())
+        .unwrap();
+    assert!(g.can_modify());
+    let n = g
+        .archive(&["m1".into(), "gone".into()], &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+    h.assert_egress(crate::GMAIL_ACTION_FEATURE).await;
+    // Ids are validated before anything is sent.
+    let err = g
+        .archive(&["../x".into()], &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)));
+}
+
+#[tokio::test]
+async fn archive_is_unsupported_without_allow_modify() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let g = GmailFactory::new()
+        .with_endpoints(h.endpoints())
+        .connector(&settings(), h.ctx())
+        .unwrap();
+    assert!(!g.can_modify());
+    let err = g
+        .archive(&["m1".into()], &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)));
+    assert!(h.server.received_requests().await.unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn a_repeating_page_token_stops_the_listing() {
     // history.list that hands out the same page token forever: before, the pass looped (and

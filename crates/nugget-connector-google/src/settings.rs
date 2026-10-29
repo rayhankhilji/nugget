@@ -24,6 +24,10 @@ pub(crate) struct GmailSettings {
     /// Also index Spam and Trash.
     #[serde(default)]
     pub include_spam_trash: bool,
+    /// Ask for `gmail.modify` (instead of `gmail.readonly`) so suggested actions may archive
+    /// threads after the user confirms. Takes effect after reconnecting the account.
+    #[serde(default)]
+    pub allow_modify: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +97,10 @@ impl GmailSettings {
         });
         props["include_spam_trash"] = json!({
             "type": "boolean", "default": false, "title": "Include Spam and Trash"
+        });
+        props["allow_modify"] = json!({
+            "type": "boolean", "default": false, "title": "Allow archiving",
+            "description": "Lets suggested actions archive threads after you confirm (asks Google for permission to change labels; reconnect the account after turning it on). Nothing is ever sent or deleted."
         });
         schema
     }

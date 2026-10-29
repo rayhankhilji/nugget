@@ -12,7 +12,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use nugget_core::ids::EntityId;
 use nugget_core::ipc::{
-    EntityDetail, EntitySummaryView, GraphViewIpc, KnowledgeStatus, McpClientCreated,
+    EntityDetail, EntityRef, EntitySummaryView, GraphViewIpc, KnowledgeStatus, McpClientCreated,
     McpClientInfo, SourceInfo, method, notification,
 };
 use nugget_core::paths::Paths;
@@ -276,7 +276,7 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     let mut h = Harness::start().await;
     let seen = collect(&h.client);
     h.add_files("notes", &markdown_corpus()).await;
-    h.add_files("mail", &mail_corpus()).await;
+    let mail_src = h.add_files("mail", &mail_corpus()).await.id;
 
     // People and organisations from mail headers; the project from Markdown frontmatter.
     let alice = h.wait_entity("person", "Alice Smith").await;
@@ -299,8 +299,10 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     // Facts carry evidence with titles from the store.
     let detail = h
         .wait_detail(&alice.id, |d| {
+            // The vault renders right after extraction; wait for both.
             d.claims.iter().any(|c| c.predicate == "works_at")
                 && d.claims.iter().any(|c| c.predicate == "works_on")
+                && d.vault_path.is_some()
         })
         .await;
     let works_at = detail
@@ -315,8 +317,8 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
         Some("Acme")
     );
     let ev = &works_at.evidence[0];
-    // Files items are titled by their file name.
-    assert_eq!(ev.title.as_deref(), Some("lunch"), "{ev:?}");
+    // Mail files are titled by their Subject (other files by their file name).
+    assert_eq!(ev.title.as_deref(), Some("Lunch on Friday"), "{ev:?}");
     assert!(
         ev.url.as_deref().is_some_and(|u| u.starts_with("file:")),
         "{ev:?}"
@@ -336,7 +338,7 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     assert!(text.contains(alice.id.as_str()), "{text}");
     assert!(text.contains("[^1]: "), "citation footnotes: {text}");
     assert!(
-        text.contains("[lunch]("),
+        text.contains("[Lunch on Friday]("),
         "cited by title with a link: {text}"
     );
 
@@ -401,12 +403,12 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     let _: Value = h
         .call(
             method::KNOWLEDGE_CLAIM_STATUS,
-            json!({"claim": works_at.id, "status": "retracted"}),
+            json!({"claim": works_at.id, "status": "rejected"}),
         )
         .await;
     let d = h.entity(&alice.id).await;
     let c = d.claims.iter().find(|c| c.id == works_at.id).unwrap();
-    assert_eq!(c.status, "retracted");
+    assert_eq!(c.status, "rejected");
     assert!(
         !std::fs::read_to_string(&page)
             .unwrap()
@@ -434,7 +436,84 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
             json!({"claim": works_at.id, "status": "superseded"}),
         )
         .await;
-    assert!(err.contains("retracted"), "{err}");
+    assert!(err.contains("rejected"), "{err}");
+
+    // Undo a user-asserted fact, then redo it.
+    let chess = h
+        .entity(&alice.id)
+        .await
+        .claims
+        .into_iter()
+        .find(|c| c.text == "Plays chess")
+        .unwrap();
+    let err = h
+        .call_err(
+            method::KNOWLEDGE_CLAIM_STATUS,
+            json!({"claim": works_at.id, "status": "unasserted"}),
+        )
+        .await;
+    assert!(err.contains("asserted"), "{err}");
+    let status_of = |d: &EntityDetail, id: i64| {
+        d.claims
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.status.clone())
+    };
+    let _: Value = h
+        .call(
+            method::KNOWLEDGE_CLAIM_STATUS,
+            json!({"claim": chess.id, "status": "unasserted"}),
+        )
+        .await;
+    let d = h.entity(&alice.id).await;
+    assert_eq!(status_of(&d, chess.id).as_deref(), Some("retracted"));
+    eventually("withdrawn fact left the page", || async {
+        !std::fs::read_to_string(&page)
+            .unwrap()
+            .contains("Plays chess")
+    })
+    .await;
+    let _: Value = h
+        .call(
+            method::KNOWLEDGE_CLAIM_STATUS,
+            json!({"claim": chess.id, "status": "user_asserted"}),
+        )
+        .await;
+    let d = h.entity(&alice.id).await;
+    assert_eq!(status_of(&d, chess.id).as_deref(), Some("user_asserted"));
+
+    // Source filter: the mail source supports `works_at`, not the Markdown project.
+    let g: GraphViewIpc = h
+        .call(
+            method::KNOWLEDGE_GRAPH,
+            json!({"center": alice.id, "depth": 1, "limit": 50, "source": mail_src}),
+        )
+        .await;
+    assert!(g.nodes.iter().any(|n| n.name == "Acme"), "{g:?}");
+    assert!(g.nodes.iter().all(|n| n.name != "Apollo"), "{g:?}");
+    assert!(g.edges.iter().all(|e| e.predicate != "works_on"), "{g:?}");
+
+    // Split: the chess fact moves to a new entity.
+    let split: EntityRef = h
+        .call(
+            method::KNOWLEDGE_SPLIT,
+            json!({"entity": alice.id, "claims": [chess.id], "name": "Alice (chess club)"}),
+        )
+        .await;
+    assert_ne!(split.id, alice.id);
+    let other = h.entity(&split.id).await;
+    assert_eq!(other.name, "Alice (chess club)");
+    assert_eq!(other.kind, "person");
+    assert!(other.claims.iter().any(|c| c.id == chess.id));
+    assert!(status_of(&h.entity(&alice.id).await, chess.id).is_none());
+    assert!(
+        h.call_err(
+            method::KNOWLEDGE_SPLIT,
+            json!({"entity": alice.id, "claims": [], "name": "X"})
+        )
+        .await
+        .contains("at least one")
+    );
     assert!(
         h.call_err(
             method::KNOWLEDGE_CLAIM_STATUS,
@@ -475,7 +554,11 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     );
 
     let actions = h.audit_actions();
-    for a in ["knowledge.merge", "knowledge.claim.status"] {
+    for a in [
+        "knowledge.merge",
+        "knowledge.claim.status",
+        "knowledge.split",
+    ] {
         assert!(actions.iter().any(|x| x == a), "{a} audited: {actions:?}");
     }
     let changed: Vec<Value> = seen
@@ -599,7 +682,10 @@ async fn mcp_http_scopes_revocation_and_audit() {
     let out = tool(&c, "get_entity", json!({"id": alice.id})).await;
     assert!(out.contains("Alice Smith"), "{out}");
     assert!(out.contains("Acme"), "{out}");
-    assert!(out.contains("\"lunch\""), "evidence titles: {out}");
+    assert!(
+        out.contains("\"Lunch on Friday\""),
+        "evidence titles: {out}"
+    );
     let out = tool(&c, "find_entities", json!({"text": "acme"})).await;
     assert!(out.contains("Acme"), "{out}");
     let out = tool(

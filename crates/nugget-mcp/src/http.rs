@@ -10,6 +10,13 @@
 //! 5. **`Authorization: Bearer ngt_…`** must name a live client (401 otherwise).
 //! 6. **Per-client rate limit** (429 with `Retry-After`).
 //!
+//! Resource limits: the listener binds exactly the configured port and fails if it is taken (no
+//! fallback, so a squatter is never mistaken for Nugget); at most
+//! [`HttpConfig::max_connections`] connections are served at once (others wait in the backlog);
+//! a connection that does not send a complete request head within
+//! [`HttpConfig::header_timeout_ms`] (also while idle between requests) is closed; a body not
+//! fully received within [`HttpConfig::body_timeout_ms`] gets 408, and one over 1 MiB gets 413.
+//!
 //! The MCP layer is rmcp's `StreamableHttpService`, stateless (no sessions: each request
 //! carries its own credentials and scopes) with JSON responses, and its own Host/Origin checks
 //! configured to match.
@@ -24,12 +31,13 @@ use http::{HeaderValue, Method, Request, Response, StatusCode, header};
 use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::body::Incoming;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use nugget_core::{Error, Result};
 use rmcp::transport::streamable_http_server::session::never::NeverSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
@@ -38,20 +46,46 @@ use crate::server::{AuthenticatedClient, McpHandler, McpServer};
 
 /// The MCP endpoint path.
 pub const MCP_PATH: &str = "/mcp";
-/// Default loopback port.
-pub const DEFAULT_PORT: u16 = 7466;
+/// Default loopback port (the daemon's `[mcp] port` default).
+pub const DEFAULT_PORT: u16 = 7319;
+/// Default cap on open connections.
+pub const DEFAULT_MAX_CONNECTIONS: usize = 64;
+/// Default time a connection gets to send a request's headers (also the idle keep-alive limit).
+pub const DEFAULT_HEADER_TIMEOUT_MS: u64 = 10_000;
+/// Default time a request gets to send its whole body.
+pub const DEFAULT_BODY_TIMEOUT_MS: u64 = 30_000;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 
 type Body = BoxBody<Bytes, Infallible>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HttpConfig {
-    /// Port on 127.0.0.1; 0 picks a free one.
+    /// Port on 127.0.0.1; 0 picks a free one. Binding fails (no fallback port) when it is taken.
     pub port: u16,
     /// Exact `Origin` values allowed (e.g. `http://localhost:6274` for the MCP Inspector).
     /// Empty: every request carrying an `Origin` header is refused.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// Most connections served at once; further ones wait in the listen backlog. At least 1.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+    /// Milliseconds a connection gets to send a complete request head, counted from when the
+    /// server starts waiting for it (so an idle keep-alive connection is closed after this too).
+    #[serde(default = "default_header_timeout_ms")]
+    pub header_timeout_ms: u64,
+    /// Milliseconds a request gets to send its whole body once the head is in (408 otherwise).
+    #[serde(default = "default_body_timeout_ms")]
+    pub body_timeout_ms: u64,
+}
+
+fn default_max_connections() -> usize {
+    DEFAULT_MAX_CONNECTIONS
+}
+fn default_header_timeout_ms() -> u64 {
+    DEFAULT_HEADER_TIMEOUT_MS
+}
+fn default_body_timeout_ms() -> u64 {
+    DEFAULT_BODY_TIMEOUT_MS
 }
 
 impl Default for HttpConfig {
@@ -59,6 +93,9 @@ impl Default for HttpConfig {
         Self {
             port: DEFAULT_PORT,
             allowed_origins: Vec::new(),
+            max_connections: DEFAULT_MAX_CONNECTIONS,
+            header_timeout_ms: DEFAULT_HEADER_TIMEOUT_MS,
+            body_timeout_ms: DEFAULT_BODY_TIMEOUT_MS,
         }
     }
 }
@@ -94,6 +131,7 @@ struct Gate {
     service: StreamableHttpService<McpHandler, NeverSessionManager>,
     allowed_hosts: [String; 2],
     allowed_origins: Vec<String>,
+    body_timeout: Duration,
 }
 
 impl McpServer {
@@ -130,10 +168,21 @@ impl McpServer {
             service,
             allowed_hosts,
             allowed_origins: config.allowed_origins,
+            body_timeout: Duration::from_millis(config.body_timeout_ms),
         });
+        let header_timeout = Duration::from_millis(config.header_timeout_ms);
+        let slots = Arc::new(Semaphore::new(config.max_connections.max(1)));
         let task_cancel = cancel.clone();
         let task = tokio::spawn(async move {
             loop {
+                // Take a slot before accepting: over the cap, connections wait in the backlog.
+                let permit = tokio::select! {
+                    _ = task_cancel.cancelled() => break,
+                    p = slots.clone().acquire_owned() => match p {
+                        Ok(p) => p,
+                        Err(_) => break,
+                    },
+                };
                 let (stream, peer) = tokio::select! {
                     _ = task_cancel.cancelled() => break,
                     r = listener.accept() => match r {
@@ -151,11 +200,14 @@ impl McpServer {
                 let gate = gate.clone();
                 let conn_cancel = task_cancel.clone();
                 tokio::spawn(async move {
+                    let _permit = permit;
                     let svc = hyper::service::service_fn(move |req| {
                         let gate = gate.clone();
                         async move { Ok::<_, Infallible>(gate.handle(req).await) }
                     });
                     let conn = hyper::server::conn::http1::Builder::new()
+                        .timer(TokioTimer::new())
+                        .header_read_timeout(header_timeout)
                         .serve_connection(TokioIo::new(stream), svc);
                     tokio::select! {
                         r = conn => if let Err(e) = r {
@@ -180,7 +232,7 @@ fn plain(status: StatusCode, msg: &'static str) -> Response<Body> {
 }
 
 impl Gate {
-    async fn handle(&self, mut req: Request<Incoming>) -> Response<Body> {
+    async fn handle(&self, req: Request<Incoming>) -> Response<Body> {
         if req.uri().path() != MCP_PATH {
             return plain(StatusCode::NOT_FOUND, "not found");
         }
@@ -243,7 +295,20 @@ impl Gate {
             );
             return r;
         }
-        req.extensions_mut().insert(AuthenticatedClient(client));
+        // Read the whole body under a deadline and a size cap, so a slow sender cannot hold a
+        // connection slot.
+        let (mut parts, body) = req.into_parts();
+        let limited = http_body_util::Limited::new(body, MAX_BODY_BYTES);
+        let bytes = match tokio::time::timeout(self.body_timeout, limited.collect()).await {
+            Err(_) => return plain(StatusCode::REQUEST_TIMEOUT, "request body timed out"),
+            Ok(Err(e)) if e.is::<http_body_util::LengthLimitError>() => {
+                return plain(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+            }
+            Ok(Err(_)) => return plain(StatusCode::BAD_REQUEST, "unreadable request body"),
+            Ok(Ok(c)) => c.to_bytes(),
+        };
+        parts.extensions.insert(AuthenticatedClient(client));
+        let req = Request::from_parts(parts, Full::new(bytes));
         let mut svc = self.service.clone();
         let mut resp = match tower_service::Service::call(&mut svc, req).await {
             Ok(r) => r,

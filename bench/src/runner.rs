@@ -44,7 +44,7 @@ impl Scale {
     }
 }
 
-/// What a suite runs against. Only `memory` has a real backend so far; other suites ignore it.
+/// What a suite runs against. `memory` and `proactive` have a real backend; others ignore it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
 pub enum Backend {
     /// The in-crate [`FakeIndex`](crate::index::FakeIndex) with a simulated watcher (fast; CI).

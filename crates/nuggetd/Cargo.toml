@@ -54,6 +54,7 @@ nugget-agent.workspace = true
 nugget-policy.workspace = true
 nugget-browser.workspace = true
 nugget-computer.workspace = true
+nugget-proactive.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

@@ -928,3 +928,60 @@ fn request_bodies_escape_untrusted_values() {
     let parsed = xml::parse(m.as_bytes()).unwrap();
     assert_eq!(parsed.children(DAV, "href").count(), 2);
 }
+
+#[tokio::test]
+async fn put_event_creates_in_the_first_event_calendar_and_records_egress() {
+    let h = H::new().await;
+    h.mount_discovery().await;
+    Mock::given(method("PUT"))
+        .and(path("/calendars/me/work/abc-1.ics"))
+        .and(header("if-none-match", "*"))
+        .and(header("content-type", "text/calendar; charset=utf-8"))
+        .respond_with(ResponseTemplate::new(201))
+        .mount(&h.server)
+        .await;
+    let ics = "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n";
+    let url = h
+        .connector()
+        .put_event("abc-1.ics", ics, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(url.ends_with("/calendars/me/work/abc-1.ics"), "{url}");
+    let puts = h.requests("PUT").await;
+    assert_eq!(puts.len(), 1);
+    assert_eq!(puts[0].body, ics.as_bytes());
+    assert!(
+        h.egress
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e.feature == ACTION_FEATURE)
+    );
+
+    // Bad resource names never reach the network.
+    for bad in ["", "../x.ics", "a/b.ics", ".hidden"] {
+        let err = h
+            .connector()
+            .put_event(bad, ics, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{bad}: {err}");
+    }
+}
+
+#[tokio::test]
+async fn put_event_refuses_to_overwrite() {
+    let h = H::new().await;
+    h.mount_discovery().await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(412))
+        .mount(&h.server)
+        .await;
+    let err = h
+        .connector()
+        .put_event("dup.ics", "x", &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("already exists"), "{err}");
+}

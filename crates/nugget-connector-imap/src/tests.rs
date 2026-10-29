@@ -976,3 +976,95 @@ fn production_tls_uses_the_platform_verifier() {
     // Builds without a test root; the connector never falls back to anything weaker.
     platform_tls_config().unwrap();
 }
+
+// ---- archive (proactive actions) ----
+
+fn key(folder: &str, uv: u32, uid: u32) -> ItemKey {
+    ItemKey::new(item_key(folder, uv, uid))
+}
+
+#[tokio::test]
+async fn archive_moves_messages_to_the_archive_mailbox() {
+    let mut st = mailbox_state();
+    st.move_cap = true;
+    st.mailbox("Archive", 21).special = Some("\\Archive");
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let keys = [key("INBOX", 7, 1), key("INBOX", 7, 3), key("INBOX", 99, 2)];
+    let moved = h
+        .connector()
+        .archive(&keys, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(moved, 2);
+    h.server.with(|s| {
+        let inbox: Vec<u32> = s.mailboxes["INBOX"].msgs.keys().copied().collect();
+        assert_eq!(inbox, vec![2], "the stale-uidvalidity key is left alone");
+        assert_eq!(s.mailboxes["Archive"].msgs.len(), 2);
+    });
+    let log = h.server.log();
+    assert!(
+        log.iter().any(|l| l.contains("SELECT \"INBOX\"")),
+        "{log:?}"
+    );
+    assert!(
+        log.iter().any(|l| l.contains("UID MOVE 1,3 \"Archive\"")),
+        "{log:?}"
+    );
+    assert!(
+        !log.iter()
+            .any(|l| l.contains("EXPUNGE") || l.contains("STORE"))
+    );
+    let egress = h.egress.0.lock().unwrap();
+    assert!(egress.iter().any(|e| e.feature == ACTION_FEATURE));
+}
+
+#[tokio::test]
+async fn archive_falls_back_to_all_mail() {
+    let mut st = mailbox_state();
+    st.move_cap = true;
+    st.mailbox("[Gmail]/All Mail", 31).special = Some("\\All");
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let moved = h
+        .connector()
+        .archive(&[key("INBOX", 7, 2)], &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(moved, 1);
+    h.server
+        .with(|s| assert_eq!(s.mailboxes["[Gmail]/All Mail"].msgs.len(), 1));
+}
+
+#[tokio::test]
+async fn archive_without_move_or_archive_mailbox_is_unsupported() {
+    // No MOVE capability: nothing changes.
+    let mut st = mailbox_state();
+    st.mailbox("Archive", 21).special = Some("\\Archive");
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let err = h
+        .connector()
+        .archive(&[key("INBOX", 7, 1)], &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)), "{err}");
+    h.server
+        .with(|s| assert_eq!(s.mailboxes["INBOX"].msgs.len(), 3));
+
+    // MOVE but nowhere to archive to.
+    let mut st = mailbox_state();
+    st.move_cap = true;
+    let h = Harness::new(st, Mode::Implicit, json!({})).await;
+    let err = h
+        .connector()
+        .archive(&[key("INBOX", 7, 1)], &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Unsupported(_)), "{err}");
+
+    // Malformed keys are refused before connecting.
+    let err = h
+        .connector()
+        .archive(&[ItemKey::new("nope")], &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err}");
+}

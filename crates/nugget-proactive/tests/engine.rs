@@ -222,7 +222,19 @@ async fn feedback_moves_weights_and_order() {
     assert!(after.weights["kind_renewal"] < before.weights["kind_renewal"]);
     assert!(after.weights["kind_unanswered_thread"] > before.weights["kind_unanswered_thread"]);
 
-    // A new renewal now scores lower than the first one did.
+    // A new renewal (from a vendor the user pays) now scores lower than the first one did.
+    put_mail(
+        &f.store,
+        Mail {
+            key: "m-boxy-receipt",
+            from: "Box <billing@boxy.io>",
+            subject: "Your receipt",
+            body: "Thanks for your purchase: $10.00.",
+            days_ago: 30.0,
+            message_id: "<receipt@boxy.io>",
+            ..Default::default()
+        },
+    );
     put_mail(
         &f.store,
         Mail {
@@ -252,6 +264,24 @@ async fn feedback_moves_weights_and_order() {
         Proactive::new(f.store.clone(), cfg()).model().unwrap(),
         p.model().unwrap()
     );
+}
+
+#[tokio::test]
+async fn cards_below_min_score_are_kept_but_not_offered() {
+    let f = fixture();
+    let strict = nugget_proactive::ProactiveConfig {
+        min_score: 0.99,
+        ..cfg()
+    };
+    let p = Proactive::new(f.store.clone(), strict.clone());
+    p.refresh(now()).await.unwrap();
+    assert!(!p.all_cards().unwrap().is_empty());
+    assert!(p.inbox().unwrap().is_empty());
+    assert!(p.brief(now()).unwrap().top.is_empty());
+    // The same cards, with the default threshold, are offered.
+    let p = Proactive::new(f.store.clone(), cfg());
+    assert!(!p.inbox().unwrap().is_empty());
+    assert!(p.inbox().unwrap().iter().all(|c| c.rank >= cfg().min_score));
 }
 
 // ---- metrics ----
@@ -470,6 +500,67 @@ async fn execution_only_after_approval_and_policy() {
 }
 
 #[tokio::test]
+async fn archiving_always_needs_confirmation() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let policy = Arc::new(RecordingPolicy::default());
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(policy.clone(), exec.clone()).with_audit(f.store.clone());
+    let ana = card_of(&p, CandidateKind::UnansweredThread);
+    let archive = p.prepare_action(&r, &ana.id, 1).await.unwrap();
+    assert!(archive.action.requires_confirmation().is_some());
+    exec.calls.lock().unwrap().clear();
+
+    // The policy allows it, but the action itself asks for confirmation.
+    let out = p
+        .run_action(&r, &archive, &archive.approve(false), now())
+        .await
+        .unwrap();
+    let ExecOutcome::NeedsConfirmation(reason) = out else {
+        panic!("expected a confirmation, got {out:?}");
+    };
+    assert!(reason.contains("inbox"), "{reason}");
+    assert!(exec.calls.lock().unwrap().is_empty());
+    let audit = f.store.recent_audit(10).unwrap();
+    assert!(
+        audit
+            .iter()
+            .any(|a| a.action == "action.archive_thread.needs_confirmation")
+    );
+
+    // A policy denial still wins over the user's confirmation.
+    *policy.decision.lock().unwrap() = Some(Decision::Deny("no mailbox edits".into()));
+    assert_eq!(
+        p.run_action(&r, &archive, &archive.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Denied("no mailbox edits".into())
+    );
+    *policy.decision.lock().unwrap() = None;
+
+    assert_eq!(
+        p.run_action(&r, &archive, &archive.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Executed("archived".into())
+    );
+    assert_eq!(
+        *exec.calls.lock().unwrap(),
+        vec!["archive:Pricing for the pilot".to_string()]
+    );
+    // Other actions need no extra confirmation.
+    let draft = p.prepare_action(&r, &ana.id, 0).await;
+    assert!(draft.is_err(), "the card is done");
+    let reminder = Action::Reminder(nugget_proactive::Reminder {
+        text: "x".into(),
+        at: now(),
+        about: None,
+    });
+    assert!(reminder.requires_confirmation().is_none());
+}
+
+#[tokio::test]
 async fn missing_executor_is_unsupported() {
     let f = fixture();
     let p = Proactive::new(f.store.clone(), cfg());
@@ -669,4 +760,189 @@ fn card_stores_round_trip() {
         )
         .unwrap();
     assert!(StoreCardStore::new(store).load().is_err());
+}
+
+// ---- approval binding (security review PA-4) ----
+
+#[tokio::test]
+async fn pa_run_action_executes_action_not_on_the_card() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let ana = card_of(&p, CandidateKind::UnansweredThread);
+    let evil = Action::CreateEvent(nugget_proactive::CreateEvent {
+        title: "x".into(),
+        start: now(),
+        end: now() + Duration::hours(1),
+        attendees: vec!["attacker@evil.example".into()],
+        description: None,
+    });
+    assert!(!ana.actions.contains(&evil));
+    // The runner signs it, but the card does not offer it at that position.
+    let forged = r.prepare(&ana.id, 0, &evil, &[]).await.unwrap();
+    assert!(
+        p.run_action(&r, &forged, &forged.approve(true), now())
+            .await
+            .is_err()
+    );
+    // Moving a real action to another position breaks its digest.
+    let mut moved = p.prepare_action(&r, &ana.id, 0).await.unwrap();
+    moved.action_index = 1;
+    assert!(
+        p.run_action(&r, &moved, &moved.approve(true), now())
+            .await
+            .is_err()
+    );
+    assert!(
+        !exec
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.starts_with("event"))
+    );
+    assert_ne!(p.card(&ana.id).unwrap().state, CardState::Done);
+}
+
+#[tokio::test]
+async fn approvals_are_keyed_by_the_runner() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let ours = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let theirs = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let c = card_of(&p, CandidateKind::Commitment);
+    // Minted by another runner (another key): refused, even though it is the card's action.
+    let foreign = p.prepare_action(&theirs, &c.id, 0).await.unwrap();
+    assert!(
+        p.run_action(&ours, &foreign, &foreign.approve(true), now())
+            .await
+            .is_err()
+    );
+    // The same key (e.g. the install's, after a restart) accepts it.
+    let key = nugget_proactive::new_approval_key().unwrap();
+    let a = runner(Arc::new(RecordingPolicy::default()), exec.clone()).with_key(key);
+    let b = runner(Arc::new(RecordingPolicy::default()), exec.clone()).with_key(key);
+    let prepared = p.prepare_action(&a, &c.id, 0).await.unwrap();
+    assert!(matches!(
+        p.run_action(&b, &prepared, &prepared.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Executed(_)
+    ));
+}
+
+#[tokio::test]
+async fn an_approval_executes_once() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = runner(Arc::new(RecordingPolicy::default()), exec.clone());
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    let approval = prepared.approve(true);
+    assert!(matches!(
+        r.execute(&prepared, &approval).await.unwrap(),
+        ExecOutcome::Executed(_)
+    ));
+    let err = r.execute(&prepared, &approval).await.unwrap_err();
+    assert!(err.to_string().contains("already used"), "{err}");
+    assert_eq!(exec.calls.lock().unwrap().len(), 1);
+}
+
+/// Reminders that wait for a signal, so two runs overlap.
+struct GatedReminders {
+    gate: tokio::sync::Notify,
+    calls: std::sync::Mutex<u32>,
+}
+
+#[async_trait::async_trait]
+impl nugget_proactive::ReminderExecutor for GatedReminders {
+    async fn create_reminder(&self, _: &nugget_proactive::Reminder) -> nugget_core::Result<String> {
+        self.gate.notified().await;
+        *self.calls.lock().unwrap() += 1;
+        Ok("rem-1".into())
+    }
+}
+
+#[tokio::test]
+async fn concurrent_runs_on_a_card_execute_once() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let gated = Arc::new(GatedReminders {
+        gate: tokio::sync::Notify::new(),
+        calls: std::sync::Mutex::new(0),
+    });
+    let r = ActionRunner::new(
+        Arc::new(RecordingPolicy::default()),
+        Executors {
+            reminders: Some(gated.clone()),
+            ..Default::default()
+        },
+    );
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    assert!(matches!(prepared.action, Action::Reminder(_)));
+    let approval = prepared.approve(true);
+    let (first, second) = tokio::join!(p.run_action(&r, &prepared, &approval, now()), async {
+        // Runs while the first is parked in the executor.
+        let out = p.run_action(&r, &prepared, &approval, now()).await;
+        gated.gate.notify_one();
+        out
+    });
+    assert_eq!(first.unwrap(), ExecOutcome::Executed("rem-1".into()));
+    assert!(second.is_err());
+    assert_eq!(*gated.calls.lock().unwrap(), 1);
+    // And afterwards the card is closed: no replay.
+    assert!(p.run_action(&r, &prepared, &approval, now()).await.is_err());
+}
+
+/// Asks for confirmation and refuses to count any approval (the rate limit is reached).
+struct ExhaustedPolicy;
+
+impl nugget_policy::PolicyGate for ExhaustedPolicy {
+    fn evaluate(&self, _: &nugget_policy::ActionDescriptor) -> Decision {
+        Decision::Confirm("check this".into())
+    }
+    fn halted(&self) -> bool {
+        false
+    }
+    fn record_approved(&self, _: &nugget_policy::ActionDescriptor, _: RiskClass) -> bool {
+        false
+    }
+}
+
+#[tokio::test]
+async fn a_confirmed_action_over_the_rate_limit_is_denied() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let exec = Arc::new(RecordingExec::default());
+    let r = ActionRunner::new(
+        Arc::new(ExhaustedPolicy),
+        Executors {
+            reminders: Some(exec.clone()),
+            ..Default::default()
+        },
+    );
+    let c = card_of(&p, CandidateKind::Commitment);
+    let prepared = p.prepare_action(&r, &c.id, 0).await.unwrap();
+    assert!(matches!(
+        p.run_action(&r, &prepared, &prepared.approve(false), now())
+            .await
+            .unwrap(),
+        ExecOutcome::NeedsConfirmation(_)
+    ));
+    assert!(matches!(
+        p.run_action(&r, &prepared, &prepared.approve(true), now())
+            .await
+            .unwrap(),
+        ExecOutcome::Denied(_)
+    ));
+    assert!(exec.calls.lock().unwrap().is_empty());
 }

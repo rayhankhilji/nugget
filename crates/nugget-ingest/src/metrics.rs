@@ -55,7 +55,9 @@ impl Metrics {
     }
 
     pub fn dequeued(&self) {
-        // Saturating: never wrap below zero.
+        // Saturating: never wrap below zero. (`fetch_update` is `try_update` from Rust 1.99,
+        // newer than the MSRV.)
+        #[allow(deprecated)]
         let _ = self
             .queue_depth
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |d| {

@@ -24,7 +24,7 @@ use std::time::Duration;
 use nugget_connector::Registry;
 
 pub use gcal::{CalendarConnector, CalendarFactory};
-pub use gmail::{GmailConnector, GmailFactory};
+pub use gmail::{ACTION_FEATURE as GMAIL_ACTION_FEATURE, GmailConnector, GmailFactory};
 
 /// Google endpoints. [`Default`] is production; tests point everything at a mock server.
 #[derive(Debug, Clone, PartialEq, Eq)]

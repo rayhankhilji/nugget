@@ -63,6 +63,11 @@ pub struct Features {
     /// The trigger asks a question or makes a request.
     pub question: f64,
     pub kind: Option<CandidateKind>,
+    /// Who the card is about (a lowercased address), for per-sender learning: dismissing cards
+    /// from cold outreach mutes that sender without muting the kind. Not a model input when
+    /// unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
 }
 
 /// Feature names in model order.

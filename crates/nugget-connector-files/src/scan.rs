@@ -494,11 +494,21 @@ fn build_document(
         _ => nugget_extract::detect_mime(Some(path), &head[..n]),
     };
 
+    // Mail and calendar files name themselves (Subject, SUMMARY), which extraction reads; their
+    // file names (`mail-010.eml`) are not titles. Everything else is titled by its file name.
+    let self_titled = matches!(
+        mime.as_str(),
+        "message/rfc822"
+            | "message/global"
+            | "text/calendar"
+            | "application/ics"
+            | "text/x-vcalendar"
+    );
     let mut doc = Document::new(key, mime, Content::File(open_path));
     doc.title = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty() && !self_titled);
     doc.version = Some(version.to_string());
     doc.modified_at = md.modified().ok().map(OffsetDateTime::from);
     let furl = file_url(path);
@@ -541,6 +551,8 @@ mod tests {
         _dir: tempfile::TempDir,
         root: PathBuf,
         canon_root: PathBuf,
+        // Read only by the Unix-only symlink tests.
+        #[cfg_attr(not(unix), allow(dead_code))]
         outside: PathBuf,
         cfg: Config,
     }
@@ -577,6 +589,7 @@ mod tests {
     }
 
     /// Run `build` on a thread so a blocking open fails the test instead of hanging it.
+    #[cfg(unix)]
     fn build_bounded(f: Swap, rel: &'static str, md: Metadata) -> Result<Document> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {

@@ -309,8 +309,9 @@ export const ENTITY_KINDS: readonly EntityKind[] = [
   "topic",
 ];
 
-export type ClaimStatus = "active" | "superseded" | "retracted" | "user_asserted";
-export const CLAIM_STATUSES: readonly ClaimStatus[] = ["active", "superseded", "retracted", "user_asserted"];
+/** `retracted`: lost its evidence. `rejected`: rejected by the user (sticky). */
+export type ClaimStatus = "active" | "superseded" | "retracted" | "user_asserted" | "rejected";
+export const CLAIM_STATUSES: readonly ClaimStatus[] = ["active", "superseded", "retracted", "user_asserted", "rejected"];
 
 /** `knowledge.entities`: page through entities, optionally filtered by text and kind. */
 export interface EntitiesRequest {
@@ -393,6 +394,8 @@ export interface GraphRequest {
   depth: number;
   limit: number;
   kinds?: EntityKind[];
+  /** Only nodes and edges supported by items of this source. */
+  source?: string | null;
 }
 
 export interface GraphNodeView {
@@ -424,8 +427,7 @@ export interface MergeRequest {
 
 export interface ClaimStatusRequest {
   claim: number;
-  /** `retracted` rejects the fact; `active` restores it. */
-  status: "retracted" | "active";
+  status: ClaimDecision;
 }
 
 export interface VaultStatus {
@@ -923,7 +925,7 @@ export const api = {
   knowledgeGraph: (request: GraphRequest) => call<GraphView>("knowledge_graph", { request }),
   /** Merge `from` into `into`; `from`'s id keeps resolving to `into`. */
   knowledgeMerge: (request: MergeRequest) => call<void>("knowledge_merge", { request }),
-  /** Reject (`retracted`) or restore (`active`) a fact. */
+  /** Reject, restore, assert or un-assert a fact (see `ClaimDecision`). */
   knowledgeClaimStatus: (request: ClaimStatusRequest) => call<void>("knowledge_claim_status", { request }),
   knowledgeStatus: () => call<KnowledgeStatus>("knowledge_status"),
 
@@ -969,7 +971,7 @@ export interface RawNotification {
   params: unknown;
 }
 
-export type PageId = "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
+export type PageId = "today" | "chat" | "search" | "knowledge" | "sources" | "apps" | "plugins" | "agent" | "safety" | "doubletap" | "models" | "privacy" | "status";
 
 async function on<T>(event: string, handler: (payload: T) => void): Promise<UnlistenFn> {
   if (!inTauri()) return () => {};
@@ -998,6 +1000,317 @@ export const events = {
   onNotification: (h: (n: RawNotification) => void) => on(EVENT.notification, h),
   /** Tray menu asked the window to show a page. */
   onNavigate: (h: (page: PageId) => void) => on(EVENT.navigate, h),
+};
+
+// ---- W7: knowledge ----
+
+/**
+ * What `knowledge.claim.status` accepts: `rejected` (sticky rejection), `active` (restore; a fact
+ * without sources comes back as `user_asserted`), `user_asserted` (the user vouches for it) and
+ * `unasserted` (undo the user's assertion: `active` if sources support it, else `retracted`).
+ */
+export type ClaimDecision = "rejected" | "active" | "user_asserted" | "unasserted";
+
+/** `knowledge.split`: move facts (and named aliases/identifiers) off an entity into a new one. */
+export interface SplitRequest {
+  entity: string;
+  claims: number[];
+  name: string;
+  /** Defaults to the split entity's kind. */
+  kind?: EntityKind | null;
+  aliases?: string[];
+  identifiers?: [string, string][];
+}
+
+/** Split facts off an entity; resolves to the new entity's id. */
+export async function knowledgeSplit(request: SplitRequest): Promise<string> {
+  const r = await call<EntityRef>("knowledge_split", { request });
+  return r.id;
+}
+
+// ---- W4 proactive ----
+//
+// Card inbox, morning brief and reminders (`nugget_core::ipc`, `---- Proactive (M5) ----`).
+// Card titles, details, evidence quotes and diff lines are untrusted source text: render them as
+// plain text only.
+
+/** `unanswered_thread`, `commitment`, `meeting_prep`, `renewal`, `follow_up` (or newer kinds). */
+export type CardKind = string;
+/** `new`, `seen`, `snoozed`, `accepted`, `dismissed`, `done`, `expired`. */
+export type CardState = string;
+export type CardFeedbackKind = "accept" | "dismiss" | "snooze" | "seen" | "done";
+export type DismissReason = "not_relevant" | "already_handled" | "wrong_info" | "not_important" | "other";
+export const DISMISS_REASONS: readonly DismissReason[] = ["not_relevant", "already_handled", "wrong_info", "not_important", "other"];
+/** `executed`, `needs_confirmation` (ask, then retry with `confirmed`), `denied`, `halted`. */
+export type ExecuteOutcome = "executed" | "needs_confirmation" | "denied" | "halted";
+
+export interface CardsListRequest {
+  /** Also return snoozed, accepted and closed cards (default: the open inbox only). */
+  include_closed?: boolean;
+}
+
+export interface CardsList {
+  cards: CardView[];
+  /** RFC 3339. */
+  last_refresh?: string | null;
+  /** `[proactive] enabled`. */
+  enabled: boolean;
+}
+
+/** One feature's share of a card's score. */
+export interface CardFactor {
+  /** `urgency`, `importance`, `freshness`, `kind:<kind>`, ... */
+  name: string;
+  value: number;
+  weight: number;
+  /** `value × weight` (log-odds). */
+  contribution: number;
+}
+
+/** A source item backing a card. `quote` is untrusted: render as plain text. */
+export interface CardEvidence {
+  item: ItemRef;
+  quote?: string | null;
+  url?: string | null;
+}
+
+export interface CardActionView {
+  /** Position in the card's actions (`cards.preview`/`cards.execute` take it). */
+  index: number;
+  /** `draft_reply`, `create_event`, `reminder`, `archive_thread`, `research_note`. */
+  kind: string;
+  label: string;
+  /** `observe`, `edit`, `send`, `destroy`, `spend`, `security`. */
+  risk: string;
+  /** Whether an executor is configured for it. */
+  supported: boolean;
+}
+
+export interface CardView {
+  id: string;
+  kind: CardKind;
+  title: string;
+  detail: string;
+  summary?: string | null;
+  people?: string[];
+  /** RFC 3339. */
+  due?: string | null;
+  score: number;
+  rank: number;
+  /** Top factors of the score (why it is here). */
+  factors: CardFactor[];
+  evidence: CardEvidence[];
+  actions: CardActionView[];
+  state: CardState;
+  sensitive: boolean;
+  created_at: string;
+  snoozed_until?: string | null;
+}
+
+export interface CardFeedbackRequest {
+  card_id: string;
+  feedback: CardFeedbackKind;
+  reason?: DismissReason | null;
+  reason_text?: string | null;
+  /** RFC 3339, for `snooze` (default: tomorrow at the brief time). */
+  until?: string | null;
+}
+
+export interface CardPreviewRequest {
+  card_id: string;
+  action: number;
+}
+
+export interface PreviewLine {
+  /** `add`, `remove`, `context`. */
+  op: string;
+  text: string;
+}
+
+/** A dry run: what the action would change. Nothing has executed. */
+export interface CardPreview {
+  card_id: string;
+  action: number;
+  kind: string;
+  summary: string;
+  risk: string;
+  /** Where the change lands, e.g. `mail:drafts`, `calendar`, `vault`. */
+  target: string;
+  diff: PreviewLine[];
+  /** Pass back to `cards.execute`; approvals are bound to it. */
+  digest: string;
+}
+
+export interface CardExecuteRequest {
+  card_id: string;
+  action: number;
+  digest: string;
+  confirmed?: boolean;
+}
+
+/** Something the desktop finishes on the user's behalf after an action ran. */
+export interface ActionArtifact {
+  /** `draft`, `file`, `note`, `event`, `reminder`, `archived`. */
+  kind: string;
+  path?: string | null;
+  text?: string | null;
+  url?: string | null;
+  /** RFC 3339. */
+  at?: string | null;
+}
+
+export interface CardExecuteResult {
+  outcome: ExecuteOutcome | string;
+  /** The executor's result id, or the policy's reason. */
+  detail?: string | null;
+  artifact?: ActionArtifact | null;
+}
+
+export interface BriefCardView {
+  card_id: string;
+  kind: CardKind;
+  title: string;
+  summary: string;
+  due?: string | null;
+  rank: number;
+  factors: CardFactor[];
+  /** Offered action kinds, best first. */
+  actions: string[];
+}
+
+export interface BriefMeetingView {
+  title: string;
+  start: string;
+  end?: string | null;
+  all_day: boolean;
+  location?: string | null;
+  attendees: string[];
+  /** Attendees outside the user's organisation. */
+  external: string[];
+  prep_card?: string | null;
+  prep: CardEvidence[];
+}
+
+export interface BriefView {
+  /** The user's local date, `YYYY-MM-DD`. */
+  date: string;
+  generated_at: string;
+  top: BriefCardView[];
+  meetings: BriefMeetingView[];
+  overdue: BriefCardView[];
+  renewals: BriefCardView[];
+  open_cards: number;
+}
+
+export interface KindMetricsView {
+  shown: number;
+  accepted: number;
+  dismissed: number;
+  precision?: number | null;
+}
+
+export interface ProactiveMetrics {
+  total: number;
+  by_state: Record<string, number>;
+  shown: number;
+  accepted: number;
+  dismissed: number;
+  snoozed: number;
+  precision?: number | null;
+  by_kind: Record<string, KindMetricsView>;
+  median_time_to_action_secs?: number | null;
+  mean_time_to_action_secs?: number | null;
+  dismiss_reasons: Record<string, number>;
+  model_updates: number;
+}
+
+/** `cards.changed`: refetch `cards.list`. */
+export interface CardsChanged {
+  /** `refresh`, `feedback`, `execute`. */
+  reason: string;
+  open: number;
+  created: number;
+  resolved: number;
+}
+
+export interface ReminderView {
+  id: string;
+  text: string;
+  at: string;
+  about?: ItemRef | null;
+  card_id?: string | null;
+}
+
+export const PROACTIVE_NOTIFICATION = {
+  cardsChanged: "cards.changed",
+  briefReady: "brief.ready",
+  reminderDue: "reminder.due",
+} as const;
+
+export function isBriefView(v: unknown): v is BriefView {
+  return (
+    isRecord(v) &&
+    typeof v.date === "string" &&
+    Array.isArray(v.top) &&
+    Array.isArray(v.meetings) &&
+    Array.isArray(v.overdue) &&
+    Array.isArray(v.renewals) &&
+    isCount(v.open_cards)
+  );
+}
+
+export function isReminderView(v: unknown): v is ReminderView {
+  return isRecord(v) && typeof v.id === "string" && typeof v.text === "string" && typeof v.at === "string";
+}
+
+/**
+ * Whether a link from card evidence may be offered: `https:` only (`open_url` also checks).
+ * `file:`/`obsidian:` links in untrusted evidence are not offered.
+ */
+export function isSafeEvidenceUrl(url: string | null | undefined): url is string {
+  return isOpenableUrl(url) && url.toLowerCase().startsWith("https:");
+}
+
+/** A `mailto:` link `open_mailto` would accept (the Rust side is the real check). */
+export function isMailtoUrl(url: string | null | undefined): url is string {
+  if (!url || url.length > 32 * 1024) return false;
+  if (/[\s\u0000-\u001f\u007f-\u009f]/.test(url)) return false;
+  return /^mailto:/i.test(url);
+}
+
+export const proactiveApi = {
+  cardsList: (request: CardsListRequest = {}) => call<CardsList>("cards_list", { request }),
+  cardsFeedback: (request: CardFeedbackRequest) => call<CardView>("cards_feedback", { request }),
+  /** Dry run; nothing executes. */
+  cardsPreview: (request: CardPreviewRequest) => call<CardPreview>("cards_preview", { request }),
+  /** Executes through the policy gate, bound to the approved preview's `digest`. */
+  cardsExecute: (request: CardExecuteRequest) => call<CardExecuteResult>("cards_execute", { request }),
+  briefGet: () => call<BriefView>("brief_get"),
+  metrics: () => call<ProactiveMetrics>("proactive_metrics"),
+  refresh: () => call<CardsChanged>("proactive_refresh"),
+  remindersList: () => call<ReminderView[]>("reminders_list"),
+  /** OS notification, shown by the Rust shell. */
+  notify: (title: string, body: string) => call<void>("notify", { title, body }),
+  /** Open a drafted reply (`mailto:` only) in the default mail app. */
+  openMailto: (url: string) => call<void>("open_mailto", { url }),
+};
+
+export const proactiveEvents = {
+  /** `cards.changed` (malformed payloads still trigger a refetch). */
+  onCardsChanged: (h: (c: CardsChanged | null) => void) =>
+    on<RawNotification>(EVENT.notification, (n) => {
+      if (n?.method === PROACTIVE_NOTIFICATION.cardsChanged) h(isRecord(n.params) ? (n.params as unknown as CardsChanged) : null);
+    }),
+  /** `brief.ready`; malformed payloads are dropped. */
+  onBriefReady: (h: (b: BriefView) => void) =>
+    on<RawNotification>(EVENT.notification, (n) => {
+      if (n?.method === PROACTIVE_NOTIFICATION.briefReady && isBriefView(n.params)) h(n.params);
+    }),
+  /** `reminder.due`; malformed payloads are dropped. */
+  onReminderDue: (h: (r: ReminderView) => void) =>
+    on<RawNotification>(EVENT.notification, (n) => {
+      if (n?.method === PROACTIVE_NOTIFICATION.reminderDue && isReminderView(n.params)) h(n.params);
+    }),
 };
 
 // ---- W11: chat history ----

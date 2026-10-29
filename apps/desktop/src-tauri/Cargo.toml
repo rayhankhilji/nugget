@@ -32,7 +32,13 @@ tauri-plugin-opener = "=2.5.5"
 tauri-plugin-dialog = "=2.7.3"
 # Signed self-update (minisign). 2.12.0 is the last release that accepts tauri 2.11 and Rust 1.88;
 # 2.13+ needs tauri 2.12 and Rust 1.90. Driven only from Rust (`updater.rs`), never the webview.
-tauri-plugin-updater = "=2.12.0"
+# No `zip` feature: our update payloads are raw NSIS/MSI installers, raw AppImages and the macOS
+# `.app` tarball (which the plugin unpacks without it), so the legacy zip path (zip 4.x, with open
+# advisories) is never needed.
+tauri-plugin-updater = { version = "=2.12.0", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# OS notifications (morning brief, reminders), shown from Rust (`commands::notify`) only. 2.4.0 is
+# the last release that accepts tauri 2.11 and Rust 1.88.
+tauri-plugin-notification = "=2.4.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # A second launch focuses the running window. 2.4.5 is the last release that accepts tauri 2.11
 # and Rust 1.88 (MSRV 1.77.2); 2.5+ needs tauri 2.12 and Rust 1.90.

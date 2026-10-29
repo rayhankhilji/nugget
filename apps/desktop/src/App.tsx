@@ -19,6 +19,8 @@ import { SourcesPage } from "./pages/Sources";
 import { ModelsPage } from "./pages/Models";
 import { PrivacyPage } from "./pages/Privacy";
 import { StatusPage } from "./pages/Status";
+import { TodayPage } from "./pages/Today";
+import { startProactiveNotifications } from "./proactiveNotifications";
 import { DoubleTapPage } from "./pages/DoubleTap";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
@@ -42,6 +44,7 @@ export interface PageDef {
  * `keywords` under `app.keywords.*`).
  */
 export const PAGES: readonly PageDef[] = [
+  { id: "today", label: "app.nav.today", Component: TodayPage },
   { id: "chat", label: "app.nav.chat", Component: ChatPage, keywords: "app.keywords.chat" },
   { id: "search", label: "app.nav.search", Component: SearchPage, keywords: "app.keywords.search" },
   { id: "knowledge", label: "app.nav.knowledge", Component: KnowledgePage, keywords: "app.keywords.knowledge" },
@@ -66,7 +69,7 @@ function initialPage(): PageId {
   } catch {
     /* storage unavailable */
   }
-  return "chat";
+  return "today";
 }
 
 /** The shortcut for a page: ⌘/Ctrl+<n> for the first nine, else its own, if any. */
@@ -85,7 +88,10 @@ export function App() {
   const [onboarding, setOnboarding] = useState(shouldShowOnboarding);
   const [palette, setPalette] = useState(false);
   const [help, setHelp] = useState(false);
-  const endOnboarding = useCallback(() => setOnboarding(false), []);
+  const endOnboarding = useCallback(() => {
+    setOnboarding(false);
+    setPage("today");
+  }, []);
   const mainRef = useRef<HTMLElement>(null);
   // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
   const focusMain = useRef(false);
@@ -133,6 +139,8 @@ export function App() {
     const t = window.setInterval(() => void refreshConnection(), 5000);
     return () => window.clearInterval(t);
   }, [conn?.connected, refreshConnection]);
+
+  useEffect(() => startProactiveNotifications(), []);
 
   useEvent(events.onConnection, setConn);
   useEvent(events.onNavigate, (p) => {

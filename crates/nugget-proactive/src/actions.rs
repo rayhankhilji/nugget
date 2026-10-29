@@ -6,22 +6,25 @@
 //! [`ActionRunner::execute`] (verifies the digest, asks the [`PolicyGate`], then calls the
 //! executor). Nothing executes without an approval whose digest matches what was previewed.
 
-use std::sync::Arc;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
+use hmac::{Hmac, Mac};
 use nugget_core::ids::ItemRef;
 use nugget_core::{Error, Result};
 use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
 use nugget_store::{AuditEntry, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::text::truncate;
 
-/// Save a reply as a draft in the user's mailbox. Never sends.
+/// Draft a reply for the user to copy or open in their mail app. Never sends, and nothing is
+/// written to the mailbox.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DraftReply {
     /// The message replied to.
@@ -181,11 +184,26 @@ impl Action {
     /// The executor's declared risk (the policy engine may raise it).
     pub fn risk(&self) -> RiskClass {
         match self {
-            // A draft stays in the mailbox; nothing leaves the device until the user sends it.
+            // A draft stays on the device; nothing leaves it until the user sends it themselves.
             Self::DraftReply(_) => RiskClass::Edit,
             Self::CreateEvent(e) if !e.attendees.is_empty() => RiskClass::Send,
             Self::CreateEvent(_) | Self::Reminder(_) | Self::ResearchNote(_) => RiskClass::Edit,
+            // Changes the mailbox on the server; also always needs explicit confirmation
+            // ([`Action::requires_confirmation`]).
             Self::ArchiveThread(_) => RiskClass::Destroy,
+        }
+    }
+
+    /// A reason the user must explicitly confirm before this action runs, whatever the policy
+    /// says ([`ActionRunner::execute`] answers [`ExecOutcome::NeedsConfirmation`] until the
+    /// approval is `confirmed`).
+    pub fn requires_confirmation(&self) -> Option<&'static str> {
+        match self {
+            Self::ArchiveThread(_) => Some(
+                "Archiving changes your mailbox: the thread leaves the inbox on the mail server \
+                 (nothing is deleted).",
+            ),
+            _ => None,
         }
     }
 
@@ -214,10 +232,12 @@ impl Action {
                     Some(b) => diff.extend(b.lines().map(add)),
                     None => diff.push(ctx(format!("(body to be drafted: {})", d.intent))),
                 }
-                diff.push(ctx("Saved to Drafts. Nothing is sent."));
+                diff.push(ctx(
+                    "Nothing is sent: copy the draft or open it in your mail app to send it yourself.",
+                ));
                 (
-                    format!("Save a draft reply to {}", d.to.join(", ")),
-                    "mail:drafts".to_owned(),
+                    format!("Draft a reply to {}", d.to.join(", ")),
+                    "mail:compose".to_owned(),
                     diff,
                 )
             }
@@ -257,7 +277,7 @@ impl Action {
                         if a.messages.len() == 1 { "" } else { "s" }
                     )),
                     add(format!("Archive: {}", a.subject)),
-                    ctx("Messages are kept; only the inbox label is removed."),
+                    ctx("Messages are kept; they only leave the inbox."),
                 ],
             ),
             Self::ResearchNote(n) => {
@@ -321,7 +341,8 @@ pub trait Drafter: Send + Sync {
 /// Mailbox changes (Gmail / IMAP connectors).
 #[async_trait]
 pub trait MailExecutor: Send + Sync {
-    /// Save a draft; returns the draft's id.
+    /// Keep a draft for the user to copy or open in their mail app; returns the draft's id.
+    /// Must never send it, nor write it to the mailbox.
     async fn save_draft(&self, draft: &DraftReply) -> Result<String>;
     async fn archive_thread(&self, archive: &ArchiveThread) -> Result<String>;
 }
@@ -357,22 +378,27 @@ pub struct Executors {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreparedAction {
     pub card_id: String,
+    /// Position of the action in the card's actions.
+    pub action_index: usize,
     pub action: Action,
     pub preview: ActionPreview,
-    /// SHA-256 over the action and its preview; approvals are bound to it.
+    /// HMAC-SHA-256 (keyed by the [`ActionRunner`]) over the card, the action's position, the
+    /// action and its preview; approvals are bound to it, and only the runner can mint one.
     pub digest: String,
 }
 
 impl PreparedAction {
-    fn new(card_id: &str, action: Action) -> Result<Self> {
-        let preview = action.preview();
-        let digest = digest(card_id, &action, &preview)?;
-        Ok(Self {
-            card_id: card_id.to_owned(),
-            action,
-            preview,
-            digest,
-        })
+    /// Whether this is the card's offered `action`, ignoring content `prepare` filled in (a
+    /// drafted reply body).
+    pub fn matches_offered(&self, offered: &Action) -> bool {
+        match (&self.action, offered) {
+            (Action::DraftReply(mine), Action::DraftReply(theirs)) if theirs.body.is_none() => {
+                let mut mine = mine.clone();
+                mine.body = None;
+                &mine == theirs
+            }
+            (mine, theirs) => mine == theirs,
+        }
     }
 
     /// The user approved this exact preview. `confirmed` answers a policy `Confirm` (the UI
@@ -385,14 +411,65 @@ impl PreparedAction {
     }
 }
 
-fn digest(card_id: &str, action: &Action, preview: &ActionPreview) -> Result<String> {
-    let mut h = Sha256::new();
+/// Length of the key approvals are bound with.
+pub const APPROVAL_KEY_LEN: usize = 32;
+
+/// A fresh random key for [`ActionRunner::with_key`].
+pub fn new_approval_key() -> Result<[u8; APPROVAL_KEY_LEN]> {
+    let mut key = [0u8; APPROVAL_KEY_LEN];
+    getrandom::fill(&mut key).map_err(|e| Error::Other(format!("approval key: {e}")))?;
+    Ok(key)
+}
+
+/// Approvals remembered as used (older ones belong to closed cards, which refuse actions).
+const USED_APPROVALS: usize = 4096;
+
+fn digest(
+    key: &[u8; APPROVAL_KEY_LEN],
+    card_id: &str,
+    index: usize,
+    action: &Action,
+    preview: &ActionPreview,
+) -> Result<String> {
+    let mut h = <Hmac<Sha256> as Mac>::new_from_slice(key)
+        .map_err(|e| Error::Other(format!("approval key: {e}")))?;
     h.update(card_id.as_bytes());
-    h.update([0]);
-    h.update(serde_json::to_vec(action)?);
-    h.update([0]);
-    h.update(serde_json::to_vec(preview)?);
-    Ok(hex::encode(h.finalize()))
+    h.update(&[0]);
+    h.update(index.to_string().as_bytes());
+    h.update(&[0]);
+    h.update(&serde_json::to_vec(action)?);
+    h.update(&[0]);
+    h.update(&serde_json::to_vec(preview)?);
+    Ok(hex::encode(h.finalize().into_bytes()))
+}
+
+/// Digests of approvals that executed or are executing, oldest first.
+#[derive(Default)]
+struct UsedApprovals {
+    order: VecDeque<String>,
+    set: HashSet<String>,
+}
+
+impl UsedApprovals {
+    /// Claim `digest`; false when it was already used.
+    fn claim(&mut self, digest: &str) -> bool {
+        if !self.set.insert(digest.to_owned()) {
+            return false;
+        }
+        self.order.push_back(digest.to_owned());
+        while self.order.len() > USED_APPROVALS {
+            if let Some(old) = self.order.pop_front() {
+                self.set.remove(&old);
+            }
+        }
+        true
+    }
+
+    fn release(&mut self, digest: &str) {
+        if self.set.remove(digest) {
+            self.order.retain(|d| d != digest);
+        }
+    }
 }
 
 /// The user's explicit approval of one prepared action.
@@ -419,15 +496,32 @@ pub struct ActionRunner {
     policy: Arc<dyn PolicyGate>,
     executors: Executors,
     audit: Option<Store>,
+    key: [u8; APPROVAL_KEY_LEN],
+    used: Mutex<UsedApprovals>,
 }
 
 impl ActionRunner {
+    /// Approvals are bound with a random key for this runner; use [`ActionRunner::with_key`] to
+    /// keep one per install.
     pub fn new(policy: Arc<dyn PolicyGate>, executors: Executors) -> Self {
+        let key = new_approval_key().unwrap_or_else(|e| {
+            // Without randomness, no approval can be trusted: refuse every one.
+            tracing::error!(error = %e, "no approval key; actions are refused");
+            [0; APPROVAL_KEY_LEN]
+        });
         Self {
             policy,
             executors,
             audit: None,
+            key,
+            used: Mutex::new(UsedApprovals::default()),
         }
+    }
+
+    /// Bind approvals with this key (e.g. the install's, kept in the encrypted store).
+    pub fn with_key(mut self, key: [u8; APPROVAL_KEY_LEN]) -> Self {
+        self.key = key;
+        self
     }
 
     /// Record every decision and execution in the store's audit log.
@@ -440,6 +534,7 @@ impl ActionRunner {
     pub async fn prepare(
         &self,
         card_id: &str,
+        action_index: usize,
         action: &Action,
         context: &[String],
     ) -> Result<PreparedAction> {
@@ -463,82 +558,143 @@ impl ActionRunner {
                 .await?;
             d.body = Some(body);
         }
-        PreparedAction::new(card_id, action)
+        let preview = action.preview();
+        let digest = digest(&self.key, card_id, action_index, &action, &preview)?;
+        Ok(PreparedAction {
+            card_id: card_id.to_owned(),
+            action_index,
+            action,
+            preview,
+            digest,
+        })
     }
 
     /// Execute after the user's approval: the approval must match the preview's digest, the
-    /// kill switch must be off, and the policy must allow it (or the user confirmed).
+    /// kill switch must be off, an executor must be configured, and the policy must allow it.
+    /// A policy `Confirm`, or the action's own [`Action::requires_confirmation`], needs an
+    /// approval with `confirmed`.
     pub async fn execute(
         &self,
         prepared: &PreparedAction,
         approval: &Approval,
     ) -> Result<ExecOutcome> {
-        let expected = digest(&prepared.card_id, &prepared.action, &prepared.preview)?;
-        if expected != prepared.digest || approval.digest != expected {
+        let expected = digest(
+            &self.key,
+            &prepared.card_id,
+            prepared.action_index,
+            &prepared.action,
+            &prepared.preview,
+        )?;
+        if self.key == [0; APPROVAL_KEY_LEN]
+            || expected != prepared.digest
+            || approval.digest != expected
+        {
             return Err(Error::Integrity(
                 "approval does not match the previewed action".into(),
             ));
         }
+        // Single shot: an approval runs once. It is released again when nothing ran (policy
+        // asked for confirmation, denied, halted, or the executor failed).
+        if !self.used().claim(&expected) {
+            return Err(Error::Integrity("this approval was already used".into()));
+        }
+        let out = self.execute_claimed(prepared, approval).await;
+        if !matches!(out, Ok(ExecOutcome::Executed(_))) {
+            self.used().release(&expected);
+        }
+        out
+    }
+
+    fn used(&self) -> std::sync::MutexGuard<'_, UsedApprovals> {
+        self.used.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn execute_claimed(
+        &self,
+        prepared: &PreparedAction,
+        approval: &Approval,
+    ) -> Result<ExecOutcome> {
         let task = format!("proactive:{}", prepared.card_id);
         if self.policy.halted() {
             self.audit("halted", &task, prepared, json!({}));
             return Ok(ExecOutcome::Halted);
         }
+        let missing = |what: &str| Error::Unsupported(format!("no {what} executor configured"));
+        // Resolve the executor first: nothing to confirm for an action that cannot run here.
+        let ex = &self.executors;
+        let what = match &prepared.action {
+            Action::DraftReply(_) | Action::ArchiveThread(_) => ex.mail.is_none().then_some("mail"),
+            Action::CreateEvent(_) => ex.calendar.is_none().then_some("calendar"),
+            Action::Reminder(_) => ex.reminders.is_none().then_some("reminder"),
+            Action::ResearchNote(_) => ex.notes.is_none().then_some("note"),
+        };
+        if let Some(what) = what {
+            return Err(missing(what));
+        }
         let descriptor = prepared.action.descriptor(&task);
-        match self.policy.evaluate(&descriptor) {
-            Decision::Allow => {}
-            Decision::Confirm(reason) if !approval.confirmed => {
-                self.audit(
-                    "needs_confirmation",
-                    &task,
-                    prepared,
-                    json!({"reason": reason}),
-                );
-                return Ok(ExecOutcome::NeedsConfirmation(reason));
-            }
-            Decision::Confirm(_) => {}
+        let policy_reason = match self.policy.evaluate(&descriptor) {
+            Decision::Allow => None,
+            Decision::Confirm(reason) => Some(reason),
             Decision::Deny(reason) => {
                 self.audit("denied", &task, prepared, json!({"reason": reason}));
                 return Ok(ExecOutcome::Denied(reason));
             }
+        };
+        let policy_confirm = policy_reason.is_some();
+        let reason =
+            policy_reason.or_else(|| prepared.action.requires_confirmation().map(str::to_owned));
+        if let Some(reason) = reason
+            && !approval.confirmed
+        {
+            self.audit(
+                "needs_confirmation",
+                &task,
+                prepared,
+                json!({"reason": reason}),
+            );
+            return Ok(ExecOutcome::NeedsConfirmation(reason));
         }
-        let missing = |what: &str| Error::Unsupported(format!("no {what} executor configured"));
+        // The user approved a policy `Confirm`: it counts against the task's rate limit.
+        if policy_confirm
+            && !self
+                .policy
+                .record_approved(&descriptor, prepared.preview.risk)
+        {
+            let reason = "the rate limit for approved actions is reached".to_owned();
+            self.audit("denied", &task, prepared, json!({"reason": reason}));
+            return Ok(ExecOutcome::Denied(reason));
+        }
         let id = match &prepared.action {
             Action::DraftReply(d) => {
-                self.executors
-                    .mail
+                ex.mail
                     .as_ref()
                     .ok_or_else(|| missing("mail"))?
                     .save_draft(d)
                     .await?
             }
             Action::ArchiveThread(a) => {
-                self.executors
-                    .mail
+                ex.mail
                     .as_ref()
                     .ok_or_else(|| missing("mail"))?
                     .archive_thread(a)
                     .await?
             }
             Action::CreateEvent(e) => {
-                self.executors
-                    .calendar
+                ex.calendar
                     .as_ref()
                     .ok_or_else(|| missing("calendar"))?
                     .create_event(e)
                     .await?
             }
             Action::Reminder(r) => {
-                self.executors
-                    .reminders
+                ex.reminders
                     .as_ref()
                     .ok_or_else(|| missing("reminder"))?
                     .create_reminder(r)
                     .await?
             }
             Action::ResearchNote(n) => {
-                self.executors
-                    .notes
+                ex.notes
                     .as_ref()
                     .ok_or_else(|| missing("note"))?
                     .write_note(n)

@@ -553,6 +553,8 @@ mod tests {
                     .lock()
                     .unwrap()
                     .push((d.key.0.clone(), d.version.clone()));
+                // `fetch_update` is `try_update` from Rust 1.99, which is newer than the MSRV.
+                #[allow(deprecated)]
                 let failed = self
                     .fail_next
                     .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))

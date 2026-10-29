@@ -8,14 +8,31 @@
 
 use std::path::{Path, PathBuf};
 
+#[cfg(unix)]
+use nugget_core::Error;
+use nugget_core::Result;
 use nugget_core::paths::Paths;
-use nugget_core::{Error, Result};
 
 /// `sun_path` holds 104 bytes on macOS and 108 on Linux, including the NUL; keep a margin.
 const MAX_SOCKET_PATH: usize = 100;
 
 /// The longest socket file name used in the directory.
 const LONGEST_NAME: &str = "embedding.sock";
+
+/// The socket `role_name`'s server listens on, inside the private directory (created if needed),
+/// or `None` where servers use loopback TCP instead (not Unix).
+pub(crate) fn server_socket(paths: &Paths, role_name: &str) -> Result<Option<PathBuf>> {
+    #[cfg(unix)]
+    {
+        let dir = private_dir(paths)?;
+        Ok(Some(socket_path(&dir, role_name)))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (paths, role_name);
+        Ok(None)
+    }
+}
 
 /// Socket file of `role_name`'s server inside `dir`.
 pub(crate) fn socket_path(dir: &Path, role_name: &str) -> PathBuf {

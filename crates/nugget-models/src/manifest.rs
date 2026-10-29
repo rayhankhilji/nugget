@@ -131,7 +131,7 @@ impl ModelEntry {
             ));
         }
         for src in self.sources() {
-            validate_url(src, &self.revision).or_else(&bad)?;
+            validate_url(src, &self.revision).or_else(bad)?;
         }
         Ok(())
     }
