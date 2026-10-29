@@ -798,10 +798,9 @@ OS accessibility API. It exists on Windows (UI Automation); elsewhere it fails w
   forms,files` on Windows. CI: the `cua-windows` job in `.github/workflows/real-os.yml` runs the
   `nugget` and `reference` arms with `--strict` and uploads the reports.
 
-Results, 2026-10-29, `windows-latest` (Edge, UIA), debug build, seed 42: the 16 form-fill and
-file-organising tasks (`--cua-tasks forms,files`, which includes the files-and-mail task and the
-2 adversarial tasks). Run 40831559459 is the first green run; the counts of window reads are
-from the later green run linked in the Y1 report.
+Results, 2026-10-29, `windows-latest` (Edge, UIA), debug build, seed 42, run 40834714638
+(`cua-windows`). The 16 tasks are the form-fill and file-organising tasks
+(`--cua-tasks forms,files`), which include the files-and-mail task and the 2 adversarial tasks.
 
 | Metric | `nugget` arm, native | `reference`, native | `nugget` arm, `inproc` |
 |---|---|---|---|
@@ -809,19 +808,23 @@ from the later green run linked in the Y1 report.
 | `success_rate.app.forms` / `.app.files` | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
 | `steps.mean` / `.p50` / `.p95` | 6.19 / 6 / 14 | 6.19 / 6 / 14 | 6.19 / 6 / 14 |
 | `safety.unconfirmed_risky_actions` | **0** (7 risky actions, 9 confirmations) | 0 | 0 |
-| `safety.injection_compliance_rate` | **0.00** (2 tasks; detector flagged both) | 0.00 | 0.00 |
+| `safety.injection_compliance_rate` | **0.00** (2 tasks, both flagged by the detector) | 0.00 | 0.00 |
 | `safety.false_confirmation_rate` | **0.00** | 0.00 | 0.00 |
 | `agent.verification.passed` / `.failed` | 99 / 0 | | 99 / 0 |
-| `wall_time.p50_s` / `.p95_s` / `.total_s` | 4.66 / 12.6 / 94.9 | 2.57 / 9.04 / 57.3 | 0.06 / 0.14 / 0.86 |
-| Window reads that never matched the bench state | 0 | 0 | |
+| `wall_time.p50_s` / `.p95_s` / `.total_s` | 4.84 / 12.0 / 92.5 | 4.11 / 10.2 / 79.2 | 0.06 / 0.14 / 0.86 |
+| UIA window reads (none timed out before matching the bench state) | 620 | 99 | |
 | Actions that needed the keyboard fallback | 3 | 3 | |
 
-Real UIA gives the same outcomes, step counts and safety numbers as the in-process run: every
-action reached the apps through the real controls, and every post-action check read back the
-intended effect from the real window. Wall time is what real accessibility costs: each action
-waits for the page to post and reload, and each read is a UIA snapshot of the Edge window
-(about 1.5 s more per task for the `nugget` arm, which reads the window before and after every
-action, than for `reference`).
+On real UIA the outcomes, step counts and safety numbers are the same as in process. Every action
+reached the apps through the real controls, and every check after an action read the intended
+effect back from the real window. The wall time is the cost of real accessibility. Each action
+waits for the page to post the change and reload, and each read is a UIA snapshot of the Edge
+window. The `nugget` arm reads the window before and after every action.
+
+One fix came out of these runs: pages reload on every world change, including a confirmation.
+In one run in two, a click sent to a page that was about to reload was lost
+(`files-delete-backup`, `reference` arm). The stage now records the version each page was served
+at, and the native session acts only on a current page.
 
 ## Results
 
