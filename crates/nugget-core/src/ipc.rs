@@ -444,6 +444,9 @@ pub struct Citation {
     /// The item is marked sensitive (PII findings or triage): it never goes to cloud models.
     #[serde(default)]
     pub sensitive: bool,
+    /// The item's date (`YYYY-MM-DD`): its source modification time, else its last update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

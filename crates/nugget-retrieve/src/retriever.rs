@@ -67,6 +67,8 @@ struct Ranked {
     url: Option<String>,
     /// See [`is_sensitive`].
     sensitive: bool,
+    /// `YYYY-MM-DD` of the source modification time, else the update time.
+    date: Option<String>,
 }
 
 struct Ranking {
@@ -539,6 +541,9 @@ impl Retriever {
                 url: meta.as_ref().and_then(item_url),
                 // An item deleted since the search cannot be checked: treat it as sensitive.
                 sensitive: meta.as_ref().is_none_or(|i| is_sensitive(&i.metadata)),
+                date: meta
+                    .as_ref()
+                    .map(|i| iso_date(i.source_modified_at.unwrap_or(i.updated_at))),
                 cand,
             })
             .collect();
@@ -838,6 +843,7 @@ impl Retriever {
                 title: r.cand.title.clone(),
                 url: r.url.clone(),
                 sensitive: r.sensitive,
+                date: r.date.clone(),
                 primary,
                 neighbours,
                 secondary,
@@ -845,6 +851,12 @@ impl Retriever {
         }
         Ok(out)
     }
+}
+
+/// `YYYY-MM-DD` (UTC) of a timestamp.
+fn iso_date(at: OffsetDateTime) -> String {
+    let d = at.to_offset(UtcOffset::UTC).date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
 /// Whether an item must stay away from cloud models: its `sensitive` metadata (set by ingest

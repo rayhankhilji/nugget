@@ -18,6 +18,10 @@
 //!   and sign-offs, citation markers and (for chat and email) markdown are stripped; the draft
 //!   is cut to the voice's length band; nothing emitted is ever retracted and no trailing newline
 //!   is ever emitted.
+//! - **Grounding** (on by default, [`DraftConfig::grounding`]): the context goes in as dated
+//!   facts, newest first, with superseded facts marked ([`prompt_facts`]), and a streaming
+//!   post-check drops sentences whose numbers, amounts, dates or times no source supports
+//!   ([`grounding`]); [`DraftTimings::grounding`] reports what it dropped.
 //! - **Latency.** [`Drafter::prewarm`] starts provider warm-up, retrieval and the voice lookup on
 //!   trigger; [`DraftTimings`] records retrieval, provider open, first token and total.
 //! - **Cancellation** ([`Drafter::cancel`], [`DraftStream::cancel`]) and **feedback**
@@ -28,8 +32,10 @@
 
 pub mod classify;
 mod engine;
+pub mod grounding;
 pub mod post;
 pub mod prompt;
+pub mod prompt_facts;
 mod voice;
 
 pub use classify::{
@@ -41,6 +47,7 @@ pub use engine::{
     MAX_BUDGET_TOKENS, NoVoice, Prewarm, RetrievalRunner, VoiceQuery, VoiceSource, Warmer,
     post_options, retrieval_query,
 };
+pub use grounding::{Grounder, GroundingReport};
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
 pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};
 

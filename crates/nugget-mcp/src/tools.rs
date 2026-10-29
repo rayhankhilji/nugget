@@ -408,6 +408,7 @@ async fn get_context(b: &dyn KnowledgeBackend, scope: &Scope, a: &JsonObject) ->
             title: p.title.clone(),
             url: p.url.clone(),
             sensitive: p.sensitive,
+            date: None,
         });
     }
     let mut text = format!(
