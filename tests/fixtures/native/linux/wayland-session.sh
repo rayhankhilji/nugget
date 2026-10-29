@@ -136,6 +136,22 @@ dbus-update-activation-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_T
     XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS ${KDE_FULL_SESSION:+KDE_FULL_SESSION} \
     ${QT_QPA_PLATFORM:+QT_QPA_PLATFORM} >/dev/null 2>&1 || true
 
+if [ "$compositor" = kwin ]; then
+    # Start the KDE portal backend ourselves (rather than by activation) so its log is kept,
+    # and wait for it before the portal front end looks for backends.
+    xdpk="$(ls /usr/lib/*/libexec/xdg-desktop-portal-kde /usr/libexec/xdg-desktop-portal-kde 2>/dev/null | head -n 1)"
+    if [ -n "$xdpk" ]; then
+        "$xdpk" >"$logs/portal-kde.log" 2>&1 &
+        pids+=($!)
+        for _ in $(seq 1 100); do
+            gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+                --method org.freedesktop.DBus.NameHasOwner org.freedesktop.impl.portal.desktop.kde \
+                2>/dev/null | grep -q true && break
+            sleep 0.1
+        done
+    fi
+fi
+
 if [ "$compositor" = sway ]; then
     # The headless backend has no input devices, and a seat without a keyboard never gives
     # keyboard focus: GTK then reports no `active` window and no `focused` widget over AT-SPI.
