@@ -122,6 +122,14 @@ while let line = readLine() {
         let window = pid == 0 ? nil : attr(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute)
         let title = window.flatMap { attr($0 as! AXUIElement, kAXTitleAttribute) as? String } ?? ""
         reply(["ok": true, "pid": Int(pid), "bundle": running?.bundleIdentifier ?? "", "name": running?.localizedName ?? "", "window": title])
+    case "focus":
+        // Whether app <pid> is frontmost (AXFrontmost) and the title of its focused window.
+        guard let pid = Int32(arg) else { reply(["ok": false, "error": "focus <pid>"]); continue }
+        let axApp = AXUIElementCreateApplication(pid)
+        let window = attr(axApp, kAXFocusedWindowAttribute)
+        let title = window.flatMap { attr($0 as! AXUIElement, kAXTitleAttribute) as? String } ?? ""
+        let frontmost = (attr(axApp, kAXFrontmostAttribute) as? Bool) ?? false
+        reply(["ok": true, "frontmost": frontmost, "window": title])
     case "activate":
         guard let a = app(arg) else { reply(["ok": false, "error": "\(arg) is not running"]); continue }
         reply(["ok": a.activate(options: [])])

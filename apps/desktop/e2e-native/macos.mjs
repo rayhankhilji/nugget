@@ -67,8 +67,10 @@ export const macos = {
     return `${f.name ?? ""} | ${f.window ?? ""} [pid ${f.pid ?? 0}]`;
   },
 
-  overlayIsForeground(fg) {
-    return fg.includes(`[pid ${this.appPid}]`) && fg.includes("Nugget Double Tap");
+  /** The app is frontmost (AXFrontmost) with the overlay as its focused window. */
+  async overlayIsForeground() {
+    const f = await helper.call(`focus ${this.appPid}`);
+    return f.frontmost && f.window === "Nugget Double Tap";
   },
 
   async trigger() {
