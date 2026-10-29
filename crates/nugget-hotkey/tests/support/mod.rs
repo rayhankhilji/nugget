@@ -392,3 +392,55 @@ pub const STREAMED_CHUNKS: &[&str] = &[
     " the updated timeline",
     " on Monday morning.",
 ];
+
+fn count_nodes(n: &nugget_a11y::tree::Node) -> usize {
+    1 + n.children.iter().map(count_nodes).sum::<usize>()
+}
+
+/// Where the focused-field read spends its time, step by step through the backend the shell
+/// uses (`Accessibility::focused` = focus + read_field + caret + the thread snapshot). Printed,
+/// three times each, so a cold first call shows up.
+pub fn read_breakdown<P: nugget_a11y::Platform>(backend: &nugget_a11y::Backend<P>, os: &str) {
+    let cfg = backend.config().clone();
+    for run in 0..3 {
+        let t = Instant::now();
+        let target = backend.platform().focus();
+        let focus = t.elapsed();
+        let (read, caret) = match &target {
+            Ok(Some(target)) => {
+                let t = Instant::now();
+                let r = backend
+                    .platform()
+                    .read_field(&target.element, cfg.max_value_bytes);
+                let read = t.elapsed();
+                let t = Instant::now();
+                if let Ok(r) = &r {
+                    let _ = backend.platform().caret_bounds(&target.element, &r.state);
+                }
+                (read, t.elapsed())
+            }
+            _ => (Duration::ZERO, Duration::ZERO),
+        };
+        let t = Instant::now();
+        let snap = backend.snapshot();
+        let snapshot = t.elapsed();
+        let (nodes, truncated) = match &snap {
+            Ok(Some((_, s))) => (count_nodes(&s.root), s.truncated),
+            _ => (0, false),
+        };
+        let t = Instant::now();
+        let focused = backend.focused();
+        let whole = t.elapsed();
+        println!(
+            "DOUBLETAP-A11Y os={os} run={run} focus_ms={:.1} read_field_ms={:.1} caret_ms={:.1} \
+             snapshot_ms={:.1} snapshot_nodes={nodes} truncated={truncated} focused_ms={:.1} \
+             ok={}",
+            ms(focus),
+            ms(read),
+            ms(caret),
+            ms(snapshot),
+            ms(whole),
+            matches!(focused, Ok(Some(_))),
+        );
+    }
+}

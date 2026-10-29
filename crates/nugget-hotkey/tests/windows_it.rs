@@ -127,8 +127,9 @@ fn windows_hotkeys() {
     send(RCONTROL, true);
     send(RCONTROL, false);
     send(RCONTROL, true);
-    send(RCONTROL, false);
+    // Measured from just before the second release is injected (`send` then waits 25 ms).
     let released = Instant::now();
+    send(RCONTROL, false);
     let at = rx
         .recv_timeout(Duration::from_secs(2))
         .expect("the right-Ctrl double tap did not fire within 2 s");
@@ -283,6 +284,13 @@ fn windows_doubletap_into_notepad() {
         focused.field.selection
     );
     assert!(!focused.field.secure);
+    support::read_breakdown(
+        &nugget_a11y::Backend::new(
+            nugget_a11y::UiaPlatform::new(),
+            nugget_a11y::A11yConfig::default(),
+        ),
+        "windows",
+    );
     for k in [RCONTROL, LCONTROL, LMENU] {
         send(k, false);
     }

@@ -12,7 +12,7 @@ tracing.workspace = true
 
 # Chords on macOS, Windows and X11: Carbon `RegisterEventHotKey`, Win32 `RegisterHotKey` and
 # `XGrabKey`. Each grabs the chord, so the focused app never sees it.
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 global-hotkey = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]

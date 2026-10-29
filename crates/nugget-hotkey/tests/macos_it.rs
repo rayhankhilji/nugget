@@ -164,8 +164,9 @@ mod mac {
         command(RIGHT_COMMAND, DEVICE_RCMD, true);
         command(RIGHT_COMMAND, DEVICE_RCMD, false);
         command(RIGHT_COMMAND, DEVICE_RCMD, true);
-        command(RIGHT_COMMAND, DEVICE_RCMD, false);
+        // Measured from just before the second release is posted (`command` then waits 25 ms).
         let released = Instant::now();
+        command(RIGHT_COMMAND, DEVICE_RCMD, false);
         let at = rx
             .recv_timeout(Duration::from_secs(2))
             .map_err(|_| "the right-Command double tap did not fire within 2 s".to_string())?;
@@ -286,7 +287,19 @@ mod mac {
             .map_err(|e| e.to_string())?;
         check(status.success(), "open -a TextEdit")?;
         let a11y = nugget_a11y::system();
-        let focused = support::wait_for_field(a11y.as_ref(), Duration::from_secs(15), is_textedit)?;
+        let focused =
+            match support::wait_for_field(a11y.as_ref(), Duration::from_secs(8), is_textedit) {
+                Ok(f) => f,
+                Err(first) => {
+                    // A process started from the runner may not be activated: bring TextEdit
+                    // forward the way computer use does, and look again.
+                    println!("macos_it: TextEdit is not in front yet ({first}); activating it");
+                    nugget_a11y::system_computer()
+                        .open_app("TextEdit")
+                        .map_err(|e| format!("activate TextEdit: {e}"))?;
+                    support::wait_for_field(a11y.as_ref(), Duration::from_secs(10), is_textedit)?
+                }
+            };
         println!(
             "TextEdit field: app={:?} id={:?} role={} value={:?} selection={:?}",
             focused.app.name,
@@ -296,6 +309,13 @@ mod mac {
             focused.field.selection
         );
         check(!focused.field.secure, "TextEdit's text view is not secure")?;
+        support::read_breakdown(
+            &nugget_a11y::Backend::new(
+                nugget_a11y::AxPlatform::new(),
+                nugget_a11y::A11yConfig::default(),
+            ),
+            "macos",
+        );
 
         for (mode, chunks) in [
             (Mode::Shell, support::SHELL_CHUNKS),
