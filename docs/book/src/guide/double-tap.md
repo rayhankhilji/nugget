@@ -1,11 +1,9 @@
 # Double Tap: drafting in your voice
 
-> **Status: being wired in (wave W).** The pieces are built and tested as libraries: the trigger
-> (`nugget-hotkey`), reading the focused field (`nugget-a11y`), the drafting engine
-> (`nugget-draft`) and the voice profile (`nugget-voice`). The daemon methods (`draft.begin`,
-> `draft.cancel`, `draft.feedback`, `voice.status`), the caret overlay and the **Double Tap**
-> settings page are being connected in this wave. Until they land, the daemon answers the `draft.*`
-> methods with "method not found". This page describes the behaviour of the built pieces.
+> **Status:** Double Tap works in the desktop app: the trigger, the draft overlay at the caret and
+> the **Double Tap** settings page. The daemon serves `draft.begin`, `draft.cancel`,
+> `draft.feedback` and `voice.status`. Its latency targets are not yet measured in the shipped app
+> (see [Latency](#latency)).
 
 Put the cursor in a text field in any app, press the trigger, and Nugget drafts a reply in your own
 writing style, grounded in passages from your own data. You see the draft before anything is
@@ -58,6 +56,11 @@ On the **Double Tap** settings page:
 | Trigger | The modifier to double-tap, or a chord |
 | Provider per app | Which model to use in a given app or site, for example a local model in your work mail and a cloud model in a chat app. Otherwise the `synthesis` tier is used, like Ask |
 | Excluded apps | Apps and sites where Double Tap never reads or drafts |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/double-tap-dark.png">
+  <img src="../images/screenshots/double-tap-light.png" alt="The Double Tap settings page: the on switch, the trigger (a double-tapped key or a key combination), the provider per app and the excluded apps" loading="lazy">
+</picture>
 
 ## What it will not do
 

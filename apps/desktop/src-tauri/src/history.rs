@@ -53,6 +53,9 @@ pub struct StoredMessage {
     /// Sources the reply cites as `[n]`, when the reply came with any (kept opaque here).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub citations: Option<Vec<Value>>,
+    /// The reply is a general answer: "Use my sources" found no matching passages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub general_answer: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -334,6 +337,7 @@ mod tests {
             error: None,
             output_tokens: None,
             citations: None,
+            general_answer: None,
         }
     }
 

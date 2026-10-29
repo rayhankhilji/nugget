@@ -5,7 +5,8 @@ import { useT, type MessageKey } from "../i18n";
 import { graphSourceOptions, kindLabel } from "../knowledge";
 import { EntityDetailPanel } from "../components/EntityDetail";
 import { GraphPanel, KindChips } from "../components/GraphView";
-import { Empty, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { GoToPage } from "../components/GoToPage";
+import { Empty, EmptyState, ErrorNote, NotAvailable, PageHeader, Spinner } from "../components/ui";
 
 const PAGE_SIZE = 50;
 type Tab = "browse" | "graph";
@@ -21,8 +22,10 @@ export function KnowledgePage() {
   const [center, setCenter] = useState<string | null>(null);
   const [listTick, setListTick] = useState(0);
   const status = useAsync(api.knowledgeStatus);
-  const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
+  // `null` when the list can't be had (older daemon, offline): unknown, not "no sources".
+  const sources = useAsync(() => api.sourcesList().catch((): SourceInfo[] | null => null));
   const sourceNames = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  const sourceKinds = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.kind])), [sources.data]);
   const sourceOptions = useMemo(() => graphSourceOptions(sources.data ?? []), [sources.data]);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ browse: null, graph: null });
 
@@ -55,6 +58,7 @@ export function KnowledgePage() {
       id={selected}
       vaultRoot={vaultRoot}
       sourceNames={sourceNames}
+      sourceKinds={sourceKinds}
       onSelect={setSelected}
       onShowInGraph={(id) => {
         setCenter(id);
@@ -109,9 +113,16 @@ export function KnowledgePage() {
 
       {tab === "browse" && (
         <div id="kb-panel-browse" role="tabpanel" aria-labelledby="kb-tab-browse" className="kb-layout">
-          <EntityBrowser selected={selected} onSelect={setSelected} total={s?.entities ?? null} refreshKey={listTick} />
+          <EntityBrowser
+            selected={selected}
+            onSelect={setSelected}
+            total={s?.entities ?? null}
+            refreshKey={listTick}
+            noSources={sources.data?.length === 0}
+            pending={s?.pending_items ?? 0}
+          />
           <div className="kb-detail">
-            {detail || <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>}
+            {detail || (s?.entities !== 0 && <Empty title={t("knowledge.chooseTitle")}>{t("knowledge.chooseBody")}</Empty>)}
           </div>
         </div>
       )}
@@ -130,12 +141,18 @@ function EntityBrowser({
   onSelect,
   total,
   refreshKey,
+  noSources,
+  pending,
 }: {
   selected: string | null;
   onSelect: (id: string) => void;
   /** All entities, from `knowledge.status` (shown when no filter is set). */
   total: number | null;
   refreshKey: number;
+  /** Known to have no sources at all (so nothing can be extracted yet). */
+  noSources: boolean;
+  /** Items still waiting for extraction. */
+  pending: number;
 }) {
   const t = useT();
   const [text, setText] = useState("");
@@ -223,7 +240,9 @@ function EntityBrowser({
       </p>
       <ErrorNote error={list.error} onRetry={list.reload} />
       {list.data && rows.length === 0 && !filtered && (
-        <Empty title={t("knowledge.emptyTitle")}>{t("knowledge.emptyBody")}</Empty>
+        <EmptyState title={t("knowledge.emptyTitle")} action={noSources ? <GoToPage page="sources" /> : undefined}>
+          {noSources ? t("knowledge.emptyNoSources") : pending > 0 ? t("knowledge.emptyPending", { n: pending }) : t("knowledge.emptyBody")}
+        </EmptyState>
       )}
       <ul className="entity-list" onKeyDown={onListKey} aria-busy={list.loading || undefined}>
         {rows.map((e) => (

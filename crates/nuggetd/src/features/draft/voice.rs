@@ -79,6 +79,77 @@ impl VoiceSource for SharedVoice {
     }
 }
 
+/// The voice profile, read-only, for other features (the proactive `DraftReply`): the encrypted
+/// snapshot this feature saves after each refresh, loaded for the identity and settings in
+/// `[draft]` (a snapshot made for others is ignored). Never builds or saves a profile; neutral
+/// hints until a snapshot exists. Reloaded when older than `max_age`.
+pub(crate) struct SnapshotVoice {
+    store: Store,
+    me: MeIdentity,
+    config: VoiceConfig,
+    max_age: Duration,
+    loaded: RwLock<Option<(std::time::Instant, Option<VoiceProfile>)>>,
+}
+
+impl SnapshotVoice {
+    /// For the `[draft]` table `draft` (an invalid table is an error, as for the draft feature).
+    pub(crate) fn from_draft_table(
+        store: Store,
+        draft: &toml::Table,
+        max_age: Duration,
+    ) -> Result<Self> {
+        let cfg: super::DraftSection = super::section("draft", draft)?;
+        Ok(Self {
+            store,
+            me: cfg.me(),
+            config: cfg.voice_config(),
+            max_age,
+            loaded: RwLock::new(None),
+        })
+    }
+
+    /// Load the snapshot unless the copy held is younger than `max_age`. Returns whether a
+    /// profile is held. Blocking: call on a blocking thread.
+    pub(crate) fn load_blocking(&self) -> bool {
+        if let Some((at, p)) = &*self.loaded.read().unwrap_or_else(PoisonError::into_inner)
+            && at.elapsed() < self.max_age
+        {
+            return p.is_some();
+        }
+        let profile = match VoiceProfile::load(&self.store, self.me.clone(), self.config.clone()) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot read the voice profile snapshot");
+                None
+            }
+        };
+        let held = profile.is_some();
+        *self.loaded.write().unwrap_or_else(PoisonError::into_inner) =
+            Some((std::time::Instant::now(), profile));
+        held
+    }
+}
+
+impl VoiceSource for SnapshotVoice {
+    fn hints(&self, query: &VoiceQuery) -> VoiceHints {
+        self.load_blocking();
+        match &*self.loaded.read().unwrap_or_else(PoisonError::into_inner) {
+            Some((_, Some(p))) => VoiceSource::hints(p, query),
+            _ => VoiceHints {
+                channel: Some(query.channel),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn status(&self) -> VoiceStatus {
+        match &*self.loaded.read().unwrap_or_else(PoisonError::into_inner) {
+            Some((_, Some(p))) => VoiceSource::status(p),
+            _ => VoiceStatus::default(),
+        }
+    }
+}
+
 /// Whether an ingest event may mean new or changed items in the store.
 fn is_commit(ev: &IngestEvent) -> bool {
     match ev {

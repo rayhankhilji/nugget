@@ -166,6 +166,13 @@ pub trait Tool: Send + Sync {
         }
     }
 
+    /// What the tool can see around this call (the target's role, its containers, the form and
+    /// dialog it sits in), for [`nugget_policy::PolicyGate::evaluate_with_context`]. Default:
+    /// nothing.
+    fn context(&self, _args: &Value) -> nugget_policy::ActionContext {
+        nugget_policy::ActionContext::default()
+    }
+
     /// Arguments as they may be written to the action log. The default masks values of keys that
     /// look secret and truncates long strings; tools handling sensitive text override it.
     fn redact(&self, args: &Value) -> Value {

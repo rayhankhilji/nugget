@@ -54,6 +54,11 @@ enabled = true
 # Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
 # chat_model = "qwen3-4b-q4km"
 # embedding_model = "nomic-embed-text-v1.5-q8"
+# A reranker that reorders search results (served as `local-rerank`; never chosen automatically).
+# rerank_model = "bge-reranker-v2-m3-q4km"
+# Or one you run yourself (`llama-server --reranking ...`), which takes precedence:
+# [retrieve.reranker]
+# base_url = "http://127.0.0.1:8013"
 # Stop a server after this many idle minutes (0 = keep running); it restarts on the next request.
 idle_stop_minutes = 30
 
@@ -84,6 +89,11 @@ enabled = true
 enabled = true
 http = true
 port = 7319
+# HTTP limits: connections served at once (others wait), milliseconds a connection gets to send a
+# request's headers (also the idle keep-alive limit), and milliseconds a request gets for its body.
+# max_connections = 64
+# header_timeout_ms = 10000
+# body_timeout_ms = 30000
 
 # --- On-device: Ollama ---------------------------------------------------------------------------
 # Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
@@ -236,7 +246,21 @@ pub struct McpSection {
     /// Exact `Origin` values allowed on HTTP requests (e.g. the MCP Inspector's). Empty: any
     /// request with an `Origin` header (a browser page) is refused.
     pub allowed_origins: Vec<String>,
+    /// Most HTTP connections served at once; further ones wait in the listen backlog
+    /// (default 64, 1..=[`MAX_MCP_CONNECTIONS`]).
+    pub max_connections: usize,
+    /// Milliseconds an HTTP connection gets to send a complete request head; an idle keep-alive
+    /// connection is closed after this too (default 10000, 1..=[`MAX_MCP_TIMEOUT_MS`]).
+    pub header_timeout_ms: u64,
+    /// Milliseconds an HTTP request gets to send its whole body (default 30000,
+    /// 1..=[`MAX_MCP_TIMEOUT_MS`]).
+    pub body_timeout_ms: u64,
 }
+
+/// Upper bound for `[mcp] max_connections`.
+pub const MAX_MCP_CONNECTIONS: usize = 4096;
+/// Upper bound for `[mcp] header_timeout_ms` and `body_timeout_ms` (10 minutes).
+pub const MAX_MCP_TIMEOUT_MS: u64 = 600_000;
 
 impl Default for McpSection {
     fn default() -> Self {
@@ -245,6 +269,9 @@ impl Default for McpSection {
             http: true,
             port: DEFAULT_MCP_PORT,
             allowed_origins: Vec::new(),
+            max_connections: nugget_mcp::http::DEFAULT_MAX_CONNECTIONS,
+            header_timeout_ms: nugget_mcp::http::DEFAULT_HEADER_TIMEOUT_MS,
+            body_timeout_ms: nugget_mcp::http::DEFAULT_BODY_TIMEOUT_MS,
         }
     }
 }
@@ -262,6 +289,10 @@ pub struct RuntimeConfig {
     /// Manifest id of the embedding model (served as `local-embedding`). Unset:
     /// `models.selected.embedding`, then the recommendation for the Embedding tier.
     pub embedding_model: Option<String>,
+    /// Manifest id of a cross-encoder reranker, an entry with the `rerank` tier (served as
+    /// `local-rerank`, used by search only, never routed). Unset (default): no local reranker;
+    /// there is no automatic recommendation. `[retrieve.reranker]` takes precedence.
+    pub rerank_model: Option<String>,
     /// Stop a server after this many minutes without requests; 0 keeps it running. A stopped
     /// server starts again on the next request.
     pub idle_stop_minutes: u64,
@@ -273,6 +304,7 @@ impl Default for RuntimeConfig {
             enabled: true,
             chat_model: None,
             embedding_model: None,
+            rerank_model: None,
             idle_stop_minutes: 30,
         }
     }
@@ -361,6 +393,7 @@ impl Config {
         for (field, id) in [
             ("chat_model", &self.runtime.chat_model),
             ("embedding_model", &self.runtime.embedding_model),
+            ("rerank_model", &self.runtime.rerank_model),
         ] {
             if let Some(id) = id
                 && !is_model_id(id)
@@ -369,6 +402,20 @@ impl Config {
                     "runtime.{field}: `{id}` is not a model id"
                 )));
             }
+        }
+        if let Some(r) = &self.retrieve.reranker {
+            if r.base_url.trim().is_empty() {
+                return Err(Error::Invalid(
+                    "retrieve.reranker.base_url is required".into(),
+                ));
+            }
+            // Same checks as at start-up (URL, local only unless allow_cloud), reported early.
+            nugget_retrieve::HttpReranker::new(
+                r,
+                None,
+                std::sync::Arc::new(nugget_core::egress::NullEgress),
+            )
+            .map_err(|e| Error::Invalid(format!("retrieve.reranker: {e}")))?;
         }
         if self.runtime.idle_stop_minutes > 7 * 24 * 60 {
             return Err(Error::Invalid(
@@ -396,6 +443,21 @@ impl Config {
             if !(o.starts_with("http://") || o.starts_with("https://")) || o.ends_with('/') {
                 return Err(Error::Invalid(format!(
                     "mcp.allowed_origins: `{o}` is not an origin like http://localhost:6274"
+                )));
+            }
+        }
+        if !(1..=MAX_MCP_CONNECTIONS).contains(&self.mcp.max_connections) {
+            return Err(Error::Invalid(format!(
+                "mcp.max_connections must be between 1 and {MAX_MCP_CONNECTIONS}"
+            )));
+        }
+        for (key, v) in [
+            ("header_timeout_ms", self.mcp.header_timeout_ms),
+            ("body_timeout_ms", self.mcp.body_timeout_ms),
+        ] {
+            if !(1..=MAX_MCP_TIMEOUT_MS).contains(&v) {
+                return Err(Error::Invalid(format!(
+                    "mcp.{key} must be between 1 and {MAX_MCP_TIMEOUT_MS}"
                 )));
             }
         }
@@ -449,13 +511,7 @@ fn msg(e: Error) -> String {
 }
 
 pub(crate) fn tier_name(t: Tier) -> &'static str {
-    match t {
-        Tier::Triage => "triage",
-        Tier::Light => "light",
-        Tier::Synthesis => "synthesis",
-        Tier::Agentic => "agentic",
-        Tier::Embedding => "embedding",
-    }
+    t.as_str()
 }
 
 /// Create the config file without clobbering one that appeared concurrently.
@@ -557,6 +613,65 @@ mod tests {
     }
 
     #[test]
+    fn mcp_http_limits_default_to_nugget_mcp_and_parse() {
+        let defaults = nugget_mcp::HttpConfig::default();
+        for cfg in [
+            Config::parse("").unwrap(),
+            Config::parse("[mcp]\nport = 7400\n").unwrap(),
+            Config::default_local(),
+        ] {
+            assert_eq!(cfg.mcp.max_connections, defaults.max_connections);
+            assert_eq!(cfg.mcp.header_timeout_ms, defaults.header_timeout_ms);
+            assert_eq!(cfg.mcp.body_timeout_ms, defaults.body_timeout_ms);
+        }
+        // The documented (commented-out) keys parse to the same defaults once uncommented.
+        let uncommented: String = DEFAULT_CONFIG
+            .lines()
+            .map(|l| {
+                let keys = ["max_connections", "header_timeout_ms", "body_timeout_ms"];
+                match l.strip_prefix("# ") {
+                    Some(rest) if keys.iter().any(|k| rest.starts_with(&format!("{k} = "))) => rest,
+                    _ => l,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_ne!(uncommented, DEFAULT_CONFIG.trim_end_matches('\n'));
+        assert_eq!(
+            Config::parse(&uncommented).unwrap().mcp,
+            McpSection::default()
+        );
+
+        let cfg = Config::parse(
+            "[mcp]\nmax_connections = 8\nheader_timeout_ms = 2500\nbody_timeout_ms = 60000\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.mcp.max_connections, 8);
+        assert_eq!(cfg.mcp.header_timeout_ms, 2500);
+        assert_eq!(cfg.mcp.body_timeout_ms, 60_000);
+        assert_eq!(cfg.mcp.port, DEFAULT_MCP_PORT);
+    }
+
+    #[test]
+    fn mcp_http_limits_out_of_range_are_rejected() {
+        for bad in [
+            "max_connections = 0",
+            "max_connections = 4097",
+            "header_timeout_ms = 0",
+            "header_timeout_ms = 600001",
+            "body_timeout_ms = 0",
+            "body_timeout_ms = 600001",
+            "max_connections = -1",
+            "body_timeout_ms = \"slow\"",
+        ] {
+            let err = Config::parse(&format!("[mcp]\n{bad}\n")).unwrap_err();
+            let key = bad.split(' ').next().unwrap();
+            assert!(msg(err).contains(key), "{bad}");
+        }
+        assert!(Config::parse("[mcp]\nmax_connections = 4096\nbody_timeout_ms = 600000\n").is_ok());
+    }
+
+    #[test]
     fn parses_models_section() {
         let cfg = Config::parse(
             "[models]\ndownload_parts = 2\n[models.selected]\ntriage = \"qwen3-4b-q4km\"\n",
@@ -577,6 +692,7 @@ mod tests {
         assert!(!cfg.runtime.enabled);
         assert_eq!(cfg.runtime.chat_model.as_deref(), Some("qwen3-4b-q4km"));
         assert_eq!(cfg.runtime.embedding_model, None);
+        assert_eq!(cfg.runtime.rerank_model, None);
         assert_eq!(cfg.runtime.idle_stop_minutes, 0);
         assert_eq!(cfg.ingest.queue_capacity, 8);
         assert!(!cfg.ingest.allow_cloud_embeddings);
@@ -584,6 +700,45 @@ mod tests {
         assert!(!cfg.retrieve.allow_cloud_embedding);
         let empty = Config::parse("").unwrap();
         assert_eq!(empty.runtime, RuntimeConfig::default());
+        assert_eq!(empty.retrieve.reranker, None);
+    }
+
+    #[test]
+    fn parses_the_rerank_model_and_an_external_reranker() {
+        let cfg = Config::parse(
+            "[runtime]\nrerank_model = \"bge-reranker-v2-m3-q4km\"\n\
+             [retrieve]\nrerank_pool = 20\n[retrieve.reranker]\nbase_url = \"http://127.0.0.1:8013\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.runtime.rerank_model.as_deref(),
+            Some("bge-reranker-v2-m3-q4km")
+        );
+        assert_eq!(cfg.retrieve.rerank_pool, 20);
+        let r = cfg.retrieve.reranker.unwrap();
+        assert_eq!(r.base_url, "http://127.0.0.1:8013");
+        assert_eq!(r.timeout_ms, 2_000, "unset fields keep their defaults");
+        for (text, needle) in [
+            (
+                "[runtime]\nrerank_model = \"Bad Id\"",
+                "runtime.rerank_model",
+            ),
+            (
+                "[retrieve.reranker]\ntimeout_ms = 5",
+                "base_url is required",
+            ),
+            (
+                "[retrieve.reranker]\nbase_url = \"not a url\"",
+                "retrieve.reranker",
+            ),
+            (
+                "[retrieve.reranker]\nbase_url = \"https://rerank.example.com\"",
+                "not on this device",
+            ),
+        ] {
+            let err = Config::parse(text).unwrap_err().to_string();
+            assert!(err.contains(needle), "{text:?}: {err}");
+        }
     }
 
     #[test]

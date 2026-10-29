@@ -92,10 +92,10 @@ A cloud-only embedding tier is ignored unless you opt in (see [Privacy](privacy.
 - Over HTTP, check the port (`port` under `[mcp]`, 7319 by default) and that `http = true`. Requests
   from a browser page are refused unless their origin is listed in `allowed_origins`.
 
-## Features being wired in (wave W)
+## Double Tap, the agent, Today and plugins
 
-These apply once [Double Tap](double-tap.md), the [agent](agent.md), [Today](today.md) and
-[plugins](plugins.md) land in the app.
+For [Double Tap](double-tap.md), the [agent](agent.md), [Today](today.md) and
+[plugins](plugins.md):
 
 | Problem | What to do |
 |---|---|

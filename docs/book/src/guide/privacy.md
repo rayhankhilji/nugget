@@ -44,7 +44,7 @@ Features you will see:
 | `sync:gmail`, `sync:gcal`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
 
-Being wired in during wave W (see [What works today](../status.md)):
+And for the newer features:
 
 | Feature | Caused by |
 |---|---|
@@ -83,8 +83,8 @@ Only counts are kept; the matched values are never stored or logged. If the scan
 local triage model flags the item, the item is marked **sensitive**. Items whose status is unknown are
 treated as sensitive. Sensitive items:
 
-- are never sent to a cloud model for triage, embedding or knowledge extraction, nor (once wired in)
-  for Double Tap drafts or the Today judge;
+- are never sent to a cloud model for triage, embedding or knowledge extraction, nor for Double Tap
+  drafts or the Today judge;
 - are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
 - are hidden from MCP clients unless a client is explicitly allowed to see them.
 
@@ -94,10 +94,10 @@ treated as sensitive. Sensitive items:
 |---|---|---|
 | Ask and chat | Nothing | The question and the selected, non-sensitive passages |
 | Knowledge extraction | Nothing | Text of non-sensitive items, only from sources you listed |
-| [Double Tap](double-tap.md) (wave W) | Nothing | The field text, the thread read around it, subject and recipients, non-sensitive passages and your voice examples. Screenshots only if you allow cloud screenshots |
-| [Agent](agent.md) (wave W) | Nothing | The goal, observations of the apps and pages it works in, and any context from your data |
-| [Today](today.md) (wave W) | Nothing; cards are generated and ranked on your device | Card evidence for the judge, only if you allowed a cloud judge, never sensitive evidence |
-| [Plugins](plugins.md) (wave W) | Requests to the hosts you approved for the plugin, whichever model you use | The same |
+| [Double Tap](double-tap.md) | Nothing | The field text, the thread read around it, subject and recipients, non-sensitive passages and your voice examples. Screenshots only if you allow cloud screenshots |
+| [Agent](agent.md) | Nothing | The goal, observations of the apps and pages it works in, and any context from your data |
+| [Today](today.md) | Nothing; cards are generated and ranked on your device | Card evidence for the judge, only if you allowed a cloud judge, never sensitive evidence |
+| [Plugins](plugins.md) | Requests to the hosts you approved for the plugin, whichever model you use | The same |
 
 "Local" includes a server on your local network; such requests stay off the internet but are still
 recorded in the ledger. Every cloud request is recorded with the feature named above.
@@ -118,11 +118,12 @@ system settings. The agent's [safety policy](safety.md) denies acting in those b
 
 Separately from the egress ledger, the daemon keeps an append-only **audit log** of changes: sources
 added, updated and removed, sign-ins started and finished, secrets set (the account name only, never
-the value), model installs, every MCP call (arguments summarised, never content) and, as the wave W
-features land, every draft (without its content) and plugin installs and approvals. Each entry includes a SHA-256 hash of the previous one, so editing or
-deleting old entries is detectable; `nuggetd status` reports whether the chain verified at startup.
-The hash is not keyed yet, so someone who has your store key could rewrite the whole chain; keying it
-is planned.
+the value), model installs, every MCP call (arguments summarised, never content), every draft (without its
+content) and plugin installs and approvals. Each new entry is chained to the previous one with an HMAC-SHA256 keyed from
+your store key, so editing or deleting old entries is detectable; `nuggetd status` reports whether
+the chain verified at startup. The newest entry is also anchored in your OS keychain, so cutting off
+the newest entries is detected too. With a key-file store (no keychain), or if that keychain entry is
+deleted, there is no anchor and such truncation is not detected.
 
 Actions taken on your behalf by the [agent](agent.md) and by [Today cards](today.md) also go into a
 separate hash-chained **action log**, exportable from the [Safety](safety.md) page.

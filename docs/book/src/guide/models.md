@@ -7,9 +7,12 @@ provider you configure says which tiers it serves:
 |---|---|---|
 | `triage` | Per-item keep, junk or sensitive, plus a short summary, during indexing | **Local only.** Cloud providers are never used for triage. |
 | `light` | Cheap classification and routing calls | Any provider you assign |
-| `synthesis` | Ask, chat, knowledge extraction, drafting (being wired in, wave W) | Any provider you assign. Knowledge extraction uses local providers only, unless you allow cloud for specific sources |
-| `agentic` | Tool-using agent loops and computer use (being wired in, wave W) | Any provider you assign |
+| `synthesis` | Ask, chat, knowledge extraction, Double Tap drafting | Any provider you assign. Knowledge extraction uses local providers only, unless you allow cloud for specific sources |
+| `agentic` | Tool-using agent loops and computer use | Any provider you assign |
 | `embedding` | Vectors for semantic search, at indexing and query time | **Local or LAN only** unless you opt in |
+
+A sixth tier, `rerank`, only marks reranker models in the manifest. It is never routed and providers
+cannot list it (see [reranking](#reranking-search-results)).
 
 There are three ways to serve a tier.
 
@@ -24,6 +27,7 @@ installed, and the install refuses to start if your disk is too full. The curren
 | `qwen3-4b-q4km` | triage, light, synthesis | 2.5 GB | 8 GB | Apache-2.0 |
 | `qwen3-8b-q4km` | synthesis, agentic | 5.0 GB | 16 GB | Apache-2.0 |
 | `nomic-embed-text-v1.5-q8` | embedding | 146 MB | 4 GB | Apache-2.0 |
+| `bge-reranker-v2-m3-q4km` | rerank | 438 MB | 4 GB | Apache-2.0 |
 
 When a selected model is installed, `nuggetd` downloads a pinned, verified build of llama.cpp's
 `llama-server` for your OS and hardware (Metal, Vulkan or CPU), and runs one server for chat and one for
@@ -34,6 +38,21 @@ Servers stop after 30 idle minutes and start again on the next request
 
 The model and runtime downloads are the only network traffic in this setup, and both appear in the
 egress ledger.
+
+### Reranking search results
+
+The reranker is optional and never picked automatically. Install `bge-reranker-v2-m3-q4km` on the
+**Models** page and set it in `config.toml`:
+
+```toml
+[runtime]
+rerank_model = "bge-reranker-v2-m3-q4km"
+```
+
+`nuggetd` then runs a third server, `local-rerank`, with `llama-server --reranking`, and search sends
+its top candidates to it before packing context. Only manifest models with the `rerank` tier are
+accepted here, and a reranker is never used for chat or embeddings. To use a reranker you run
+yourself instead, see [`[retrieve.reranker]`](../reference/config.md#retrievereranker).
 
 ## Option 2: your own local server
 

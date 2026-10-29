@@ -13,7 +13,7 @@ export const PROTOCOL_VERSION = 1;
 
 // ---- nugget_core types ----
 
-export type Tier = "triage" | "light" | "synthesis" | "agentic" | "embedding";
+export type Tier = "triage" | "light" | "synthesis" | "agentic" | "embedding" | "rerank";
 export const CHAT_TIERS: readonly Tier[] = ["light", "synthesis", "agentic", "triage"];
 
 export type Locality = "on_device" | "local_network" | "cloud";
@@ -259,6 +259,8 @@ export interface AskRequest {
   provider?: string | null;
   /** Default `synthesis`. */
   tier?: Tier;
+  /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
+  history?: ChatMessage[];
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -270,11 +272,13 @@ export interface AskStarted {
   citations: Citation[];
   /** Relevant sensitive items withheld because the model is a cloud model. */
   excluded_sensitive?: number;
+  /** The standalone query actually searched, when a follow-up was rewritten. */
+  query_rewrite?: string | null;
 }
 
 // ---- local runtime ----
 
-export type RuntimeRole = "chat" | "embedding";
+export type RuntimeRole = "chat" | "embedding" | "rerank";
 export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "stopping" | "failed";
 
 export interface RuntimeInfo {
@@ -342,6 +346,8 @@ export interface EvidenceView {
   quote?: string | null;
   title?: string | null;
   url?: string | null;
+  /** RFC 3339: when the source said it (the item's modified time), if the daemon sends it. */
+  observed_at?: string | null;
 }
 
 export interface EntityLink {
@@ -364,6 +370,8 @@ export interface ClaimView {
   confidence: number;
   status: ClaimStatus;
   evidence: EvidenceView[];
+  /** RFC 3339: when the fact last changed, if the daemon sends it. */
+  updated_at?: string | null;
 }
 
 export interface MentionView {
@@ -1289,8 +1297,8 @@ export const proactiveApi = {
   metrics: () => call<ProactiveMetrics>("proactive_metrics"),
   refresh: () => call<CardsChanged>("proactive_refresh"),
   remindersList: () => call<ReminderView[]>("reminders_list"),
-  /** OS notification, shown by the Rust shell. */
-  notify: (title: string, body: string) => call<void>("notify", { title, body }),
+  /** OS notification, shown by the Rust shell. With `openToday`, clicking it opens Today. */
+  notify: (title: string, body: string, openToday = false) => call<void>("notify", { title, body, openToday }),
   /** Open a drafted reply (`mailto:` only) in the default mail app. */
   openMailto: (url: string) => call<void>("open_mailto", { url }),
 };
@@ -1326,6 +1334,8 @@ export interface StoredChatMessage {
   output_tokens?: number | null;
   /** Sources the reply cites as `[n]`, when it came with any. */
   citations?: Citation[] | null;
+  /** Answered without sources because none matched (with "Use my sources" on). */
+  general_answer?: boolean | null;
 }
 
 export interface StoredConversation {
@@ -1472,6 +1482,8 @@ export interface OverlayView {
 }
 
 export const DOUBLETAP_OVERLAY_EVENT = "doubletap:overlay";
+/** The saved settings, sent to every window after a change (from the settings page or onboarding). */
+export const DOUBLETAP_SETTINGS_EVENT = "doubletap:settings";
 
 export const doubletapApi = {
   settingsGet: () => call<DoubleTapSettings>("doubletap_settings_get"),
@@ -1491,6 +1503,7 @@ export const doubletapApi = {
   overlayAccept: (text: string | null) => call<void>("overlay_accept", { text }),
   overlayCancel: () => call<void>("overlay_cancel"),
   onOverlay: (h: (view: OverlayView) => void) => on<OverlayView>(DOUBLETAP_OVERLAY_EVENT, h),
+  onSettings: (h: (settings: DoubleTapSettings) => void) => on<DoubleTapSettings>(DOUBLETAP_SETTINGS_EVENT, h),
 };
 
 // ---- W6 plugins ----
@@ -1895,3 +1908,28 @@ export const agentEvents = {
       if (n.method === AGENT_NOTIFICATION.killChanged && isKillState(n.params)) h(n.params);
     }),
 };
+
+// ---- X4: conversational ask ----
+
+/** Context budget (tokens) for a Chat reply that uses the user's sources, as Search's default. */
+export const CHAT_ASK_BUDGET = 2000;
+/** Earlier turns such a reply sends along (the daemon bounds them again). */
+export const CHAT_ASK_HISTORY = 24;
+
+/**
+ * `retrieve.ask` for the newest message of a conversation: the daemon rewrites a follow-up into
+ * a standalone query (with a local model only) and gives the model the earlier turns.
+ */
+export function askInConversation(
+  query: string,
+  history: readonly ChatMessage[],
+  route: { provider: string | null; tier: Tier },
+): Promise<AskStarted> {
+  return api.retrieveAsk({
+    query,
+    budget_tokens: CHAT_ASK_BUDGET,
+    provider: route.provider,
+    tier: route.tier,
+    history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+  });
+}

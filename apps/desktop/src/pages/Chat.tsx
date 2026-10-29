@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type
 import {
   ApiError,
   api,
+  askInConversation,
   CHAT_TIERS,
   chatHistory,
   events,
   errorMessage,
   isCommandMissing,
   isOpenableUrl,
+  type AskStarted,
   type ChatDone,
   type ChatMessage,
   type Citation,
@@ -19,9 +21,11 @@ import {
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingNewChat } from "../hooks.nav";
 import { localityLabel, tierLabel } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
 import { CopyButton } from "../components/CopyButton";
 import { Markdown, type CitationLinks } from "../components/Markdown";
+import { stripCitationMarkers, withheldNotice } from "../citations";
 import { Trans, useT } from "../i18n";
 import "../styles-chat.css";
 
@@ -37,6 +41,31 @@ interface Turn {
   tokens?: { input: number | null; output: number | null };
   /** Sources the reply's `[n]` markers refer to, when the reply came with any. */
   citations?: Citation[];
+  /** What was searched, when the daemon rewrote a follow-up (not saved). */
+  queryRewrite?: string;
+  /** Sensitive items withheld from a cloud model (not saved). */
+  excludedSensitive?: number;
+  /** Sources were on but none matched, so this is a plain chat answer. */
+  generalAnswer?: boolean;
+}
+
+const SOURCES_KEY = "nugget.chat.useSources";
+
+/** Whether Chat answers from the user's sources (default on). */
+export function readUseSources(): boolean {
+  try {
+    return localStorage.getItem(SOURCES_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function writeUseSources(on: boolean): void {
+  try {
+    localStorage.setItem(SOURCES_KEY, on ? "true" : "false");
+  } catch {
+    /* storage unavailable: the choice lasts for this session */
+  }
 }
 
 /** Deltas/done events that arrive before `chat` returns its stream id. */
@@ -70,6 +99,7 @@ function toStored(turns: readonly Turn[]): StoredChatMessage[] {
     if (x.error) m.error = x.error.slice(0, MAX_SAVED_ERROR);
     if (x.tokens?.output != null) m.output_tokens = x.tokens.output;
     if (x.citations?.length) m.citations = x.citations;
+    if (x.generalAnswer) m.general_answer = true;
     return m;
   });
 }
@@ -87,6 +117,7 @@ function fromStored(messages: readonly StoredChatMessage[]): Turn[] {
           error: m.error ?? undefined,
           tokens: m.output_tokens != null ? { input: null, output: m.output_tokens } : undefined,
           citations: m.citations ?? undefined,
+          generalAnswer: m.general_answer === true || undefined,
         },
   );
 }
@@ -108,6 +139,7 @@ export function ChatPage() {
   const opener = useOpener();
   const [tier, setTier] = useState<Tier>("synthesis");
   const [provider, setProvider] = useState("");
+  const [useSources, setUseSources] = useState(readUseSources);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [announce, setAnnounce] = useState("");
@@ -211,8 +243,11 @@ export function ChatPage() {
   // `chat` calls in flight. Unknown stream ids are buffered only while one is pending;
   // otherwise they belong to a stopped stream and are dropped.
   const awaiting = useRef(0);
+  // Streams dropped before they were attached (a sourced answer with nothing to cite).
+  const dropped = useRef(new Set<string>());
 
   useEvent(events.onChatDelta, (d) => {
+    if (dropped.current.has(d.stream_id)) return;
     if (attached.current.has(d.stream_id)) {
       setTurns((ts) =>
         ts.map((x) => (x.streamId === d.stream_id && isActive(x) ? { ...x, text: x.text + d.text, state: "streaming" } : x)),
@@ -225,6 +260,7 @@ export function ChatPage() {
   });
 
   useEvent(events.onChatDone, (d) => {
+    if (dropped.current.delete(d.stream_id)) return;
     if (attached.current.has(d.stream_id)) {
       attached.current.delete(d.stream_id);
       setTurns((ts) => ts.map((x) => (x.streamId === d.stream_id && x.state !== "cancelled" ? finish(x, d) : x)));
@@ -248,8 +284,8 @@ export function ChatPage() {
 
     const history: ChatMessage[] = turns
       .filter((x) => x.role === "user" || x.state === "done" || (x.state === "cancelled" && x.text))
-      .map((x) => ({ role: x.role, text: x.text }));
-    history.push({ role: "user", text });
+      // An earlier reply's `[n]` markers pointed at that reply's passages: drop them.
+      .map((x) => ({ role: x.role, text: x.role === "assistant" ? stripCitationMarkers(x.text) : x.text }));
 
     const userTurn: Turn = { id: nextTurnId++, role: "user", text };
     const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
@@ -259,7 +295,21 @@ export function ChatPage() {
 
     awaiting.current++;
     try {
-      const started = await api.chat({ provider: provider || null, tier, messages: history });
+      const route = { provider: provider || null, tier };
+      // With sources, the daemon retrieves for the question (rewritten from the conversation
+      // when it is a follow-up) and the reply cites what it was given.
+      let asked: AskStarted | null = useSources ? await askInConversation(text, history, route) : null;
+      // Nothing in the sources matched: the sourced prompt would only decline, so stop that
+      // stream and answer as a plain chat instead, saying so on the turn.
+      let general: AskStarted | null = null;
+      if (asked && asked.citations.length === 0) {
+        general = asked;
+        asked = null;
+        dropped.current.add(general.stream_id);
+        early.current.delete(general.stream_id);
+        void api.chatCancel(general.stream_id).catch(() => {});
+      }
+      const started = asked ?? (await api.chat({ ...route, messages: [...history, { role: "user", text }] }));
       const buffered = early.current.get(started.stream_id);
       early.current.delete(started.stream_id);
       if (!buffered?.done) attached.current.add(started.stream_id);
@@ -273,6 +323,14 @@ export function ChatPage() {
             text: buffered?.text ?? "",
             state: buffered?.text ? "streaming" : "pending",
           };
+          if (asked) {
+            next.citations = asked.citations;
+            next.queryRewrite = asked.query_rewrite ?? undefined;
+            next.excludedSensitive = asked.excluded_sensitive ?? 0;
+          } else if (general) {
+            next.generalAnswer = true;
+            next.excludedSensitive = general.excluded_sensitive ?? 0;
+          }
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
         }),
@@ -395,6 +453,17 @@ export function ChatPage() {
                 ))}
               </select>
             </label>
+            <label className="field-inline" title={t("chat.useSourcesHint")}>
+              <input
+                type="checkbox"
+                checked={useSources}
+                onChange={(e) => {
+                  setUseSources(e.target.checked);
+                  writeUseSources(e.target.checked);
+                }}
+              />
+              <span>{t("chat.useSources")}</span>
+            </label>
             <button type="button" className="btn btn-ghost" onClick={startNew} disabled={!!active || turns.length === 0}>
               {t("chat.newChat")}
             </button>
@@ -402,7 +471,11 @@ export function ChatPage() {
         }
       />
       {providers.error ? <ErrorNote error={providers.error} onRetry={providers.reload} /> : null}
-      {noProviders && <p className="note note-warn">{t("chat.noProviders")}</p>}
+      {noProviders && (
+        <p className="note note-warn">
+          {t("chat.noProviders")} <GoToPage page="models" className="btn btn-ghost btn-small" />
+        </p>
+      )}
 
       <div className="chat-main">
         {historyOn && (
@@ -535,24 +608,30 @@ export function ChatPage() {
   );
 }
 
+/** Element id of source `n` in the list under reply `turnId`. */
+const citeId = (turnId: number, n: number) => `msg-${turnId}-cite-${n}`;
+
 function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: string, label: string) => void }) {
   const t = useT();
   const opener = onOpenLink;
-  // Only sources with a URL the shell can open become clickable.
+  const sourcesRef = useRef<HTMLOListElement>(null);
+  // A source with a URL the shell can open opens; any other moves focus to it in the list below.
   const cite = useMemo<CitationLinks | undefined>(() => {
-    const openable = (turn.citations ?? []).filter((c) => isOpenableUrl(c.url));
-    if (openable.length === 0) return undefined;
-    const byN = new Map(openable.map((c) => [c.n, c]));
+    const citations = turn.citations ?? [];
+    if (citations.length === 0) return undefined;
+    const byN = new Map(citations.map((c) => [c.n, c]));
     const titleOf = (n: number) => byN.get(n)?.title || byN.get(n)?.item.key || "";
     return {
       valid: new Set(byN.keys()),
       label: (n) => t("chat.citationLabel", { n, title: titleOf(n) }),
       onCite: (n) => {
         const c = byN.get(n);
-        if (c?.url) opener(c.url, titleOf(n));
+        if (c && isOpenableUrl(c.url)) opener(c.url, titleOf(n));
+        else sourcesRef.current?.querySelector<HTMLElement>(`#${citeId(turn.id, n)}`)?.focus();
       },
     };
-  }, [turn.citations, opener, t]);
+  }, [turn.citations, turn.id, opener, t]);
+  const withheld = turn.provider ? withheldNotice(turn.excludedSensitive, turn.provider) : null;
 
   const streaming = isActive(turn);
   return (
@@ -576,6 +655,37 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
           {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
+        </div>
+      )}
+      {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
+      {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
+      {withheld && <p className="note small">{withheld}</p>}
+      {turn.role === "assistant" && !!turn.citations?.length && (
+        <div className="chat-sources">
+          <h3 className="chat-sources-title small muted">{t("chat.sources")}</h3>
+          <ol className="citations chat-citations" ref={sourcesRef}>
+            {turn.citations.map((c) => {
+              const title = c.title || c.item.key;
+              return (
+                <li key={c.n} id={citeId(turn.id, c.n)} tabIndex={-1} className="citation">
+                  <span className="cite-n">[{c.n}]</span>
+                  <span className="citation-body">
+                    <span className="citation-title">{title}</span>
+                  </span>
+                  {isOpenableUrl(c.url) && (
+                    <button
+                      type="button"
+                      className="btn btn-small"
+                      onClick={() => opener(c.url!, title)}
+                      aria-label={t("search.openTitle", { title })}
+                    >
+                      {t("search.open")}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
         </div>
       )}
       {turn.state === "error" && (

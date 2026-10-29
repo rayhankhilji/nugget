@@ -164,3 +164,8 @@ debug = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Drop debug info (mostly std's) from shipped binaries; symbol names stay so panic backtraces
+# remain readable in bug reports. Measured on Linux x64 (2026-10-29): stripping symbols too
+# would shrink nuggetd from 75.3 to 61.6 MB, but its gzip size only from 26.4 to 24.5 MB, about
+# 2 MB per installer, which is not worth unreadable backtraces.
+strip = "debuginfo"

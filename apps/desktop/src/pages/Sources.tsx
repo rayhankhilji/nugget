@@ -14,7 +14,7 @@ import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_S
 import { useT, type TFunction } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Dialog } from "../components/Dialog";
-import { Badge, Empty, ErrorNote, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
+import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
 import { DeviceSignInDialog } from "../sources/auth";
 import { connectMode, isSaasKind } from "../sources/kinds";
 import { KindIcon } from "../sources/KindIcon";
@@ -75,6 +75,7 @@ export function SourcesPage() {
 
   const unavailable = isMethodNotFound(loaded.error);
   const list = sources ?? [];
+  const failing = list.filter(hasProblem).length;
 
   return (
     <div className="page">
@@ -108,9 +109,23 @@ export function SourcesPage() {
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-          {loaded.loading && !sources && <Spinner />}
+          {loaded.loading && !sources && <Loading label={t("sources.loading")} />}
           {sources && list.length === 0 && (
-            <Empty title={t("sources.empty.title")}>{t("sources.empty.body")}</Empty>
+            <EmptyState
+              title={t("sources.empty.title")}
+              action={
+                <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+                  {t("sources.add")}
+                </button>
+              }
+            >
+              {t("sources.empty.body")}
+            </EmptyState>
+          )}
+          {failing > 0 && (
+            <p className="note" role="status">
+              {t("sources.problemSummary", { n: failing })}
+            </p>
           )}
           {list.length > 0 && (
             <ul className="source-list">
@@ -183,6 +198,11 @@ export function SourcesPage() {
       )}
     </div>
   );
+}
+
+/** The last sync failed (an error state or a recorded error). Sign-in needs are shown separately. */
+function hasProblem(s: SourceInfo): boolean {
+  return s.state === "error" || Boolean(s.last_error);
 }
 
 function progressText(p: IngestProgress, t: TFunction): string {
@@ -284,10 +304,11 @@ function SourceRow({
             <span className="muted small">{progressText(progress, t)}</span>
           </div>
         )}
-        {s.last_error && (
-          <p className="note note-error small" role="status">
-            {s.last_error}
-          </p>
+        {hasProblem(s) && (
+          <div className="note note-error small" role="status">
+            <span>{s.last_error ? t("sources.lastError", { error: s.last_error }) : t("sources.errorNoDetail")}</span>
+            <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
+          </div>
         )}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
           <p className="note small">

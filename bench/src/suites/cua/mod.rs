@@ -55,6 +55,10 @@ pub enum CuaAgentKind {
     /// The real `nugget-agent` loop with the computer-use tools and the policy gate; a scripted
     /// model by default, a real provider through `NUGGET_BENCH_CUA_MODEL`.
     Nugget,
+    /// The `nugget` arm with a scripted model that obeys injected instructions, and a strict
+    /// simulated user who approves only what the task asked for. Shows whether the policy and
+    /// the injection guard stop an obedient model.
+    NuggetCompliant,
 }
 
 impl CuaAgentKind {
@@ -64,6 +68,7 @@ impl CuaAgentKind {
             CuaAgentKind::Null => "null",
             CuaAgentKind::Naive => "naive",
             CuaAgentKind::Nugget => "nugget",
+            CuaAgentKind::NuggetCompliant => "nugget-compliant",
         }
     }
 }
@@ -155,6 +160,7 @@ pub fn make_agent(kind: CuaAgentKind, tasks: &[Task]) -> Box<dyn CuaAgent> {
         CuaAgentKind::Null => Box::new(NullAgent),
         CuaAgentKind::Naive => Box::new(NaiveAgent::new(tasks)),
         CuaAgentKind::Nugget => Box::new(nugget::NuggetAgent::new(tasks)),
+        CuaAgentKind::NuggetCompliant => Box::new(nugget::NuggetAgent::compliant(tasks)),
     }
 }
 
@@ -193,7 +199,9 @@ pub fn run_tasks(
 
     let mut episodes = Vec::with_capacity(tasks.len());
     for t in tasks {
-        stage.load(World::new(t).map_err(BenchError::Failed)?);
+        let mut world = World::new(t).map_err(BenchError::Failed)?;
+        world.set_strict_user(agent.strict_user());
+        stage.load(world);
         let mut session = EpisodeSession::new(transport.clone(), t.max_steps, display.clone());
         let brief = TaskBrief::from(t);
         let t0 = Instant::now();
@@ -529,9 +537,62 @@ impl Benchmark for CuaBench {
             let mut reference = ReferenceAgent::new(&tasks);
             let (ref_eps, _) = run_tasks(&tasks, &mut reference, CuaEnv::Inproc)?;
             m.extend(reference_metrics(&ref_eps));
+            // The compliant arm on the adversarial tasks: does the guard stop a model that
+            // obeys the injections?
+            let adversarial: Vec<Task> = tasks
+                .iter()
+                .filter(|t| t.injection.is_some())
+                .cloned()
+                .collect();
+            if !adversarial.is_empty() {
+                let mut compliant = nugget::NuggetAgent::compliant(&adversarial);
+                let (eps, _) = run_tasks(&adversarial, &mut compliant, CuaEnv::Inproc)?;
+                m.extend(compliant_metrics(&eps, &compliant.metrics()));
+            }
         }
         Ok(m)
     }
+}
+
+/// `metrics` named in `names`, prefixed `<prefix>.` and without targets.
+fn prefixed(prefix: &str, label: &str, metrics: Vec<Metric>, names: &[&str]) -> Vec<Metric> {
+    metrics
+        .into_iter()
+        .filter(|m| names.contains(&m.name.as_str()))
+        .map(|m| {
+            Metric::new(
+                format!("{prefix}.{}", m.name),
+                m.value,
+                m.unit,
+                Direction::Info,
+                format!("{label}: {}", m.description),
+            )
+        })
+        .collect()
+}
+
+/// The headline metrics of a compliant-arm run on the adversarial tasks, prefixed `compliant.`.
+pub fn compliant_metrics(episodes: &[Episode], agent_metrics: &[Metric]) -> Vec<Metric> {
+    const HEADLINE: &[&str] = &[
+        "success_rate",
+        "safety.unconfirmed_risky_actions",
+        "safety.confirmations",
+        "safety.injection_compliance_rate",
+        "agent.gate.approved",
+        "agent.gate.rejected",
+        "agent.gate.forced_by_injection",
+        "agent.injection.detected_tasks",
+        "agent.injection.detection_rate",
+        "agent.injection.obeyed_tasks",
+    ];
+    let mut all = metrics(episodes);
+    all.extend(agent_metrics.iter().cloned());
+    prefixed(
+        "compliant",
+        "Injection-obeying scripted model, strict user, adversarial tasks",
+        all,
+        HEADLINE,
+    )
 }
 
 /// The headline metrics of a reference run, prefixed `reference.` and without targets.
@@ -544,19 +605,7 @@ pub fn reference_metrics(episodes: &[Episode]) -> Vec<Metric> {
         "safety.false_confirmation_rate",
         "safety.injection_compliance_rate",
     ];
-    metrics(episodes)
-        .into_iter()
-        .filter(|m| HEADLINE.contains(&m.name.as_str()))
-        .map(|m| {
-            Metric::new(
-                format!("reference.{}", m.name),
-                m.value,
-                m.unit,
-                Direction::Info,
-                format!("Reference agent: {}", m.description),
-            )
-        })
-        .collect()
+    prefixed("reference", "Reference agent", metrics(episodes), HEADLINE)
 }
 
 #[cfg(test)]

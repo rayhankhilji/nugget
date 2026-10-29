@@ -137,9 +137,7 @@ fn plan_full(
     for source in sources {
         let versions = feed.item_versions(&source)?;
         let mut ledger = SourceLedger::load(feed, &source)?;
-        if reset {
-            ledger.clear();
-        }
+        // Items processed before but gone from the store lose their evidence, upgrade or not.
         let mut gone: Vec<&String> = ledger
             .keys()
             .filter(|k| !versions.contains_key(&ItemKey::new(k.as_str())))
@@ -149,6 +147,12 @@ fn plan_full(
             source: source.clone(),
             key: ItemKey::new(k.as_str()),
         }));
+        if reset {
+            // An extractor upgrade re-extracts every item: each one's old evidence is retracted
+            // first, so what the old extractor got wrong (duplicates included) is re-resolved by
+            // the new one, and entities left with nothing behind them are pruned.
+            ledger.clear();
+        }
         let mut keys: Vec<(&ItemKey, &Option<String>)> = versions.iter().collect();
         keys.sort_by(|a, b| a.0.cmp(b.0));
         for (key, version) in keys {
@@ -504,6 +508,14 @@ impl<'a> Session<'a> {
                 };
                 if &other.id == me || other.kind != EntityKind::Person {
                     return Ok(());
+                }
+                let splits = self.inner.splits()?;
+                if !splits.is_empty() {
+                    let live = crate::splits::live(self.graph(), &splits)?;
+                    if crate::splits::apart(&live, me, &other.id) {
+                        // The user split them apart: the address stays with the other person.
+                        return Ok(());
+                    }
                 }
                 // The address is the user's: the person holding it is the user.
                 self.graph().merge(me, &other.id)?;
@@ -868,15 +880,17 @@ impl<'a> Session<'a> {
         reuse: &mut HashMap<String, ClaimId>,
     ) -> Result<()> {
         let mut ids: Vec<EntityId> = Vec::with_capacity(ex.entities.len());
+        let splits = self.inner.splits()?;
         for spec in &ex.entities {
             let me = self.state.me.clone();
-            let resolver = Resolver {
-                graph: self.inner.graph.as_ref(),
-                cfg: &self.inner.cfg,
-                router: self.inner.router.as_deref(),
-                emb_cache: &self.inner.emb_cache,
+            let resolver = Resolver::new(
+                self.inner.graph.as_ref(),
+                &self.inner.cfg,
+                self.inner.router.as_deref(),
+                &self.inner.emb_cache,
                 me,
-            };
+            )
+            .with_splits(&splits, Some(&item.item));
             let r = resolver.resolve(spec).await?;
             if r.created {
                 self.stats.entities_created += 1;

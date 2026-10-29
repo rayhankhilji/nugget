@@ -15,11 +15,12 @@ Six suites are registered (`bench/src/suites/`). `cargo run -p nugget-bench -- -
 | `perf` | Implemented against the fake index only | Ingest, dedup, update, delete and query micro-benchmarks |
 | `knowledge` | Implemented: the real M2 pipeline (`nugget-knowledge`, `nugget-vault`, `nugget-mcp`) on a labelled fixture corpus, with a scripted fake model | Entity and claim precision and recall, resolution, unsupported claims, injection resistance, citation coverage, user-edit merge fidelity, retraction, MCP `get_context` round trips |
 | `draft` | Implemented: Nugget's drafting context against a Sentient-style "whole vault plus screenshot" baseline, with a deterministic fake model by default or a real one (`--provider-url`) | Voice match (stylometric), fact recall, hallucination rate, injection resistance, sensitive-item leaks, prompt size, time to first token and total latency |
-| `cua` | Implemented: six deterministic test apps, run in process, over a loopback socket, or on an Xvfb desktop with AT-SPI (`--cua-env`); agents `reference`, `null` and `naive` (`--cua-agent`) | Computer-use task success, steps, time, unconfirmed risky actions and injected instructions followed |
-| `proactive` | Implemented against an in-crate reference engine over a 30-day fixture world; `--backend real` (the `nugget-proactive` crate) is not implemented yet | Card precision and recall, distractor false positives, dedup, learning curve, dry-run coverage and the approval gate, against a recency baseline |
+| `cua` | Implemented: six deterministic test apps, run in process, over a loopback socket, or on an Xvfb desktop with AT-SPI (`--cua-env`); agents `reference`, `null`, `naive`, `nugget` (the real agent loop and policy gate on a scripted model) and `nugget-compliant` (a scripted model that obeys injected instructions) (`--cua-agent`) | Computer-use task success, steps, time, unconfirmed risky actions and injected instructions followed |
+| `proactive` | Implemented over a 30-day fixture world, against an in-crate reference engine or, with `--backend real`, the `nugget-proactive` crate | Card precision and recall, distractor false positives, dedup, learning curve, dry-run coverage and the approval gate, against a recency baseline |
 
-The `cua` agents validate the harness: no Nugget agent arm exists yet. Computer use and the real
-proactive engine are being wired into the daemon in wave W, and their bench arms with them.
+The `reference`, `null` and `naive` `cua` agents validate the harness; `nugget` and
+`nugget-compliant` measure Nugget's own agent loop, policy gate and injection detector. Both still
+use scripted models: results with a real model are not published yet.
 
 ```sh
 cargo run -p nugget-bench -- --list                                     # registered suites
@@ -122,3 +123,6 @@ nDCG@10 0.913, against 0.905 and 0.810 for full-text alone.
   by default.
 - Nugget's own computer-use agent and the real proactive engine on their suites (being wired in
   wave W).
+
+The [benchmark dashboard](../benchmarks/dashboard.md) charts the headline metrics of each nightly
+run over time.

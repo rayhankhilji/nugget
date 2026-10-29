@@ -59,7 +59,7 @@ pub struct ModelEntry {
     pub sha256: String,
     /// Minimum total system RAM (GiB) for this model to be recommended.
     pub min_ram_gb: u32,
-    /// Workload tiers this model can serve.
+    /// Workload tiers this model can serve. `rerank` marks a reranker and stands alone.
     pub tiers: Vec<Tier>,
     /// SPDX license id of the model weights, e.g. `Apache-2.0`.
     pub license: String,
@@ -120,6 +120,10 @@ impl ModelEntry {
         }
         if self.tiers.is_empty() {
             return bad("tiers is empty".into());
+        }
+        // A reranker (cross-encoder) neither generates nor embeds.
+        if self.tiers.contains(&Tier::Rerank) && self.tiers.len() > 1 {
+            return bad("the rerank tier cannot be combined with other tiers".into());
         }
         if self.license.trim().is_empty() {
             return bad("license is empty".into());

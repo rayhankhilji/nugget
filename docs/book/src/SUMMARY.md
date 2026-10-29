@@ -43,6 +43,7 @@
 - [Data flow](architecture/data-flow.md)
 - [Security model](architecture/security.md)
 - [Benchmarks](architecture/benchmarks.md)
+  - [Benchmark dashboard](benchmarks/dashboard.md)
 
 # Contributing
 

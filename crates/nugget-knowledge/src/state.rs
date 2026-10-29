@@ -26,8 +26,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::feed::ItemFeed;
 
-/// Bump to re-extract everything after extractor changes.
-pub const EXTRACTOR_VERSION: u32 = 1;
+/// Bump to re-extract everything after extractor changes. A run that finds an older version
+/// re-extracts every item (each item's old evidence is retracted first), so the new resolver
+/// folds duplicates the old one left and entities nothing supports any more are pruned.
+///
+/// - 1: M2.
+/// - 2: W7 resolution and Markdown fixes (trusted note identifiers, name-only twins folded,
+///   organisations linked across name and mail domain, verbatim frontmatter quotes).
+pub const EXTRACTOR_VERSION: u32 = 2;
 pub(crate) const STATE_KEY: &str = "knowledge";
 /// The pre-sharding notes index (read for migration, cleared once moved).
 pub(crate) const NOTES_KEY: &str = "knowledge/notes";

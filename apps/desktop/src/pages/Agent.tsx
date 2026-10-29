@@ -2,6 +2,7 @@ import { useEffect, useId, useState, type FormEvent } from "react";
 import {
   agentApi,
   agentEvents,
+  api,
   isMethodNotFound,
   type AgentOutcome,
   type AgentTaskSummary,
@@ -31,6 +32,7 @@ import {
 import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { Dialog } from "../components/Dialog";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 
@@ -42,6 +44,9 @@ export function AgentPage() {
   const t = useT();
   const history = useAsync(() => agentApi.agentList(HISTORY_LIMIT));
   const policy = useAsync(agentApi.policyGet);
+  // Only to explain a run that can't start: an older daemon or a failed call shows nothing here.
+  const providers = useAsync(api.providersList);
+  const noModel = providers.data !== undefined && providers.data.filter((p) => !p.error).length === 0;
   const [runs, setRuns] = useState<Record<string, RunView>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [halted, setHalted] = useState(false);
@@ -179,7 +184,17 @@ export function AgentPage() {
           {run.outcome && run.outcome.outcome !== "needs_input" && <OutcomePanel outcome={run.outcome} summary={run.summary} counts={run.verification} injections={run.injections} />}
         </section>
       ) : (
-        <RunForm halted={halted} onStarted={started} />
+        <>
+          {noModel && (
+            <p className="note" role="note">
+              <span>
+                <strong>{t("agent.noModel.title")}</strong> {t("agent.noModel.body")}
+              </span>{" "}
+              <GoToPage page="models" className="btn btn-ghost btn-small" />
+            </p>
+          )}
+          <RunForm halted={halted} onStarted={started} />
+        </>
       )}
 
       <History history={history} activeId={activeId} onDetails={setDetailOf} />
@@ -556,7 +571,7 @@ function History({
         </button>
       </div>
       <ErrorNote error={history.error} onRetry={history.reload} />
-      {history.loading && !history.data && <Loading />}
+      {history.loading && !history.data && <Loading label={t("agent.history.loading")} />}
       {history.data && rows.length === 0 && <EmptyState title={t("agent.history.emptyTitle")}>{t("agent.history.emptyBody")}</EmptyState>}
       {rows.length > 0 && (
         <div className="table-wrap" tabIndex={0} role="region" aria-label={t("agent.history.label")}>
@@ -621,7 +636,7 @@ function DetailDialog({ taskId, onClose }: { taskId: string; onClose: () => void
   return (
     <Dialog title={t("agent.detail.title")} description={s?.goal} onClose={onClose} wide>
       <ErrorNote error={detail.error} onRetry={detail.reload} />
-      {detail.loading && !d && <Loading />}
+      {detail.loading && !d && <Loading label={t("agent.detail.loading")} />}
       {d && s && (
         <>
           <p>

@@ -99,7 +99,7 @@ used), enable **Device Flow** on it, and put its client ID in the source's `clie
 On an OAuth App the device flow requests the scopes `repo` and `read:discussion`, because GitHub has no
 read-only repository scope for OAuth Apps; Nugget still only reads. A GitHub App with read-only
 permissions avoids that, but its user tokens expire after 8 hours and refreshing them needs the app's
-client secret, which this wave has no way to store yet; prefer an OAuth App or a token for now.
+client secret, which Nugget has no way to store yet; prefer an OAuth App or a token for now.
 
 > `sources.auth.begin` returns the device code in a separate `user_code` field, and the Sources
 > wizard shows it next to the link to GitHub.

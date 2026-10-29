@@ -136,36 +136,109 @@ export function prepareGraph(
   return { nodes, links, truncated: view.truncated || omitted > 0, omitted, center: center && keptIds.has(center) ? center : null };
 }
 
-/** Deterministic starting positions: the center pinned at the origin, others in rings by depth. */
-export function seedPositions(nodes: SimNode[], rng: () => number, center: string | null): void {
-  const spread = Math.sqrt(nodes.length) * 6;
-  for (const n of nodes) {
+/**
+ * Deterministic starting positions. The center is pinned at the origin. Nodes are visited in their
+ * prepared order (center, then by depth and degree); a node with already placed neighbours starts
+ * near their mean, others on a golden-angle spiral. Starting close to the final shape lets the
+ * force layout settle in far fewer ticks than random positions.
+ */
+export function seedPositions(nodes: SimNode[], rng: () => number, center: string | null, links: readonly SimLink[] = []): void {
+  const index = new Map<string, number>();
+  nodes.forEach((n, i) => index.set(n.id, i));
+  // Adjacency as CSR arrays: no per-node allocations.
+  const deg = new Int32Array(nodes.length + 1);
+  const ends: [number, number][] = [];
+  for (const l of links) {
+    const a = index.get(typeof l.source === "string" ? l.source : l.source.id);
+    const b = index.get(typeof l.target === "string" ? l.target : l.target.id);
+    if (a === undefined || b === undefined) continue;
+    ends.push([a, b]);
+    deg[a + 1]!++;
+    deg[b + 1]!++;
+  }
+  for (let i = 0; i < nodes.length; i++) deg[i + 1]! += deg[i]!;
+  const adj = new Int32Array(deg[nodes.length]!);
+  const fill = deg.slice(0, nodes.length);
+  for (const [a, b] of ends) {
+    adj[fill[a]!++] = b;
+    adj[fill[b]!++] = a;
+  }
+
+  const placed = new Uint8Array(nodes.length);
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  let spiral = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    n.vx = 0;
+    n.vy = 0;
     if (n.id === center) {
       n.x = 0;
       n.y = 0;
       n.fx = 0;
       n.fy = 0;
+      placed[i] = 1;
       continue;
     }
+    let sx = 0;
+    let sy = 0;
+    let k = 0;
+    for (let j = deg[i]!; j < deg[i + 1]!; j++) {
+      const m = adj[j]!;
+      if (!placed[m]) continue;
+      sx += nodes[m]!.x;
+      sy += nodes[m]!.y;
+      k++;
+    }
     const angle = rng() * Math.PI * 2;
-    const ring = n.depth > 0 ? n.depth * 80 : 20;
-    const radius = ring + rng() * (40 + spread);
-    n.x = Math.cos(angle) * radius;
-    n.y = Math.sin(angle) * radius;
-    n.vx = 0;
-    n.vy = 0;
+    if (k > 0) {
+      const radius = 25 + rng() * 35;
+      n.x = sx / k + Math.cos(angle) * radius;
+      n.y = sy / k + Math.sin(angle) * radius;
+    } else {
+      // Unconnected to anything placed: next spiral slot, nudged so ties don't line up.
+      const s = spiral++ + (center ? 1 : 0);
+      const radius = 40 * Math.sqrt(s + 0.5);
+      const a = s * golden + (rng() - 0.5) * 0.2;
+      n.x = Math.cos(a) * radius;
+      n.y = Math.sin(a) * radius;
+    }
+    placed[i] = 1;
   }
+}
+
+/**
+ * Ticks to run before the first paint (off-screen), so the user never sees the initial explosion.
+ * Bounded by count, not time, so the result is deterministic.
+ */
+export function preTicks(nodeCount: number): number {
+  if (nodeCount <= 200) return 120;
+  if (nodeCount <= LARGE_GRAPH) return 60;
+  if (nodeCount <= 1200) return 30;
+  return 20;
+}
+
+/** Mean node speed (world units per tick) below which the layout counts as settled. */
+export const SETTLED_SPEED = 0.05;
+
+/** True when the nodes have (nearly) stopped moving: mean speed under `threshold`. */
+export function isSettled(nodes: readonly SimNode[], threshold = SETTLED_SPEED): boolean {
+  if (nodes.length === 0) return true;
+  let sum = 0;
+  for (const n of nodes) sum += Math.abs(n.vx ?? 0) + Math.abs(n.vy ?? 0);
+  return sum / nodes.length < threshold;
 }
 
 /** A stopped simulation: the caller drives it with `tick()` (one or two per animation frame). */
 export function createSimulation(graph: PreparedGraph, seed: number): Simulation<SimNode, SimLink> {
   const rng = mulberry32(seed);
-  seedPositions(graph.nodes, rng, graph.center);
+  seedPositions(graph.nodes, rng, graph.center, graph.links);
   const large = graph.nodes.length > LARGE_GRAPH;
   const sim = forceSimulation<SimNode, SimLink>(graph.nodes)
     .randomSource(rng)
-    // Large graphs settle in ~130 ticks instead of ~300.
-    .alphaDecay(large ? 0.05 : 0.0228)
+    // Seeded near their final shape, graphs settle well before alpha reaches the default minimum:
+    // large ones in ~130 ticks, small ones in ~200 (instead of ~300).
+    .alphaMin(0.002)
+    .alphaDecay(large ? 0.05 : 0.03)
     .velocityDecay(0.4)
     .force(
       "link",
@@ -274,4 +347,62 @@ export function neighbours(links: readonly SimLink[], id: string): Set<string> {
     else if (b === id) out.add(a);
   }
   return out;
+}
+
+// ---- keyboard navigation ----
+
+export type Direction = "left" | "right" | "up" | "down";
+
+/**
+ * The node to move to from `from` when pressing an arrow key: the closest one in that direction,
+ * favouring nodes straight ahead (off-axis distance counts double). Nodes outside a 60° half-angle
+ * cone are only used when nothing is inside it. O(n) per key press.
+ */
+export function nearestInDirection(nodes: readonly SimNode[], from: SimNode, dir: Direction): SimNode | null {
+  const ax = dir === "left" ? -1 : dir === "right" ? 1 : 0;
+  const ay = dir === "up" ? -1 : dir === "down" ? 1 : 0;
+  let best: SimNode | null = null;
+  let bestScore = Infinity;
+  let bestInCone = false;
+  for (const n of nodes) {
+    if (n === from) continue;
+    const dx = n.x - from.x;
+    const dy = n.y - from.y;
+    const along = dx * ax + dy * ay;
+    if (along <= 1e-9) continue;
+    const across = Math.abs(dx * ay - dy * ax);
+    const inCone = across <= along * Math.sqrt(3);
+    const score = along + across * 2;
+    if ((inCone && !bestInCone) || (inCone === bestInCone && score < bestScore)) {
+      best = n;
+      bestScore = score;
+      bestInCone = inCone;
+    }
+  }
+  return best;
+}
+
+/** The node nearest the world point (`x`, `y`): where keyboard navigation starts. */
+export function nearestTo(nodes: readonly SimNode[], x: number, y: number): SimNode | null {
+  let best: SimNode | null = null;
+  let bestD = Infinity;
+  for (const n of nodes) {
+    const d = (n.x - x) ** 2 + (n.y - y) ** 2;
+    if (d < bestD) {
+      best = n;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * Next index when cycling with Tab (`step` 1) or Shift-Tab (-1) from `current`, or `null` when
+ * Tab should leave the canvas instead: nothing is focused yet (`current` -1, e.g. after Escape)
+ * or the cycle runs off either end. That keeps Tab from trapping keyboard users in a big graph.
+ */
+export function cycleIndex(current: number, step: 1 | -1, count: number): number | null {
+  if (count === 0 || current < 0) return null;
+  const next = current + step;
+  return next < 0 || next >= count ? null : next;
 }

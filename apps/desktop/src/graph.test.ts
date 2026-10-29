@@ -2,14 +2,20 @@ import { describe, expect, it } from "vitest";
 import type { GraphEdgeView, GraphNodeView, GraphView } from "./api";
 import {
   createSimulation,
+  cycleIndex,
   fitTransform,
   hashSeed,
+  isSettled,
   MAX_RENDER_NODES,
   mulberry32,
+  nearestInDirection,
+  nearestTo,
   neighbours,
   nodeAt,
   prepareGraph,
+  preTicks,
   runLayout,
+  seedPositions,
   toWorld,
   zoomAt,
   type SimNode,
@@ -181,5 +187,78 @@ describe("view maths", () => {
     expect([...neighbours(g.links, "c")].sort()).toEqual(["a", "b", "d"]);
     createSimulation(g, 1); // resolves link endpoints to node objects
     expect([...neighbours(g.links, "a")].sort()).toEqual(["c", "e"]);
+  });
+});
+
+describe("layout settling", () => {
+  it("seeds linked nodes near each other, deterministically", () => {
+    const g = prepareGraph(sample(), { center: "c" });
+    seedPositions(g.nodes, mulberry32(1), g.center, g.links);
+    const at = new Map(g.nodes.map((n) => [n.id, { x: n.x, y: n.y }]));
+    expect(at.get("c")).toEqual({ x: 0, y: 0 });
+    const dist = (a: string, b: string) => Math.hypot(at.get(a)!.x - at.get(b)!.x, at.get(a)!.y - at.get(b)!.y);
+    // Children start within reach of the node they hang off.
+    expect(dist("a", "e")).toBeLessThanOrEqual(60 + 1e-9);
+    expect(dist("c", "a")).toBeLessThanOrEqual(60 + 1e-9);
+    const g2 = prepareGraph(sample(), { center: "c" });
+    seedPositions(g2.nodes, mulberry32(1), g2.center, g2.links);
+    expect(g2.nodes.map((n) => [n.x, n.y])).toEqual(g.nodes.map((n) => [n.x, n.y]));
+  });
+
+  it("pre-ticks a bounded number of times, fewer for bigger graphs", () => {
+    const counts = [10, 300, 1000, 2000].map(preTicks);
+    for (let i = 1; i < counts.length; i++) expect(counts[i]!).toBeLessThanOrEqual(counts[i - 1]!);
+    expect(counts.every((c) => c > 0 && c <= 200)).toBe(true);
+  });
+
+  it("settles: nodes stop moving well before alpha runs out", () => {
+    const g = prepareGraph(big(70), { center: "n0" });
+    const sim = createSimulation(g, 11);
+    expect(isSettled(g.nodes)).toBe(true); // nothing has moved yet
+    sim.tick(1);
+    expect(isSettled(g.nodes)).toBe(false);
+    let ticks = 1;
+    while (!isSettled(g.nodes) && ticks < 1000) {
+      sim.tick();
+      ticks++;
+    }
+    expect(ticks).toBeLessThan(300);
+    expect(g.nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y))).toBe(true);
+  });
+});
+
+describe("keyboard navigation", () => {
+  const at = (id: string, x: number, y: number): SimNode => ({ id, kind: "person", name: id, depth: 1, degree: 1, r: 4, x, y });
+  const o = at("o", 0, 0);
+  const nodes = [o, at("r", 100, 10), at("far-r", 300, 0), at("l", -50, 0), at("u", 5, -80), at("d", 0, 60), at("dr", 40, 45)];
+
+  it("moves to the nearest node in each direction", () => {
+    expect(nearestInDirection(nodes, o, "right")?.id).toBe("r");
+    expect(nearestInDirection(nodes, o, "left")?.id).toBe("l");
+    expect(nearestInDirection(nodes, o, "up")?.id).toBe("u");
+    expect(nearestInDirection(nodes, o, "down")?.id).toBe("d");
+    expect(nearestInDirection([o], o, "down")).toBeNull();
+  });
+
+  it("prefers nodes inside the cone, falling back to any node that way", () => {
+    const a = at("a", 0, 0);
+    const side = at("side", 10, 100); // to the right, but far off-axis
+    expect(nearestInDirection([a, side], a, "right")?.id).toBe("side");
+    const ahead = at("ahead", 200, 0);
+    expect(nearestInDirection([a, side, ahead], a, "right")?.id).toBe("ahead");
+  });
+
+  it("finds the node nearest a point", () => {
+    expect(nearestTo(nodes, 95, 5)?.id).toBe("r");
+    expect(nearestTo([], 0, 0)).toBeNull();
+  });
+
+  it("cycles with Tab without trapping focus", () => {
+    expect(cycleIndex(0, 1, 3)).toBe(1);
+    expect(cycleIndex(2, -1, 3)).toBe(1);
+    expect(cycleIndex(2, 1, 3)).toBeNull();
+    expect(cycleIndex(0, -1, 3)).toBeNull();
+    expect(cycleIndex(-1, 1, 3)).toBeNull();
+    expect(cycleIndex(0, 1, 0)).toBeNull();
   });
 });

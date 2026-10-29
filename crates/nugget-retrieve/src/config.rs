@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::rerank::HttpRerankerConfig;
+
 /// Tuning knobs for [`Retriever`](crate::Retriever). `RetrieveConfig::default()` is the
 /// recommended setting; every field has a serde default so partial TOML/JSON works.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -78,6 +80,12 @@ pub struct RetrieveConfig {
     pub rerank_weight: f32,
     /// Give up on the reranker after this long and keep the first-stage order.
     pub rerank_timeout_ms: u64,
+    /// A reranker you run yourself (`[retrieve.reranker]` in the daemon's config), e.g.
+    /// `llama-server --reranking -m <reranker>.gguf --port 8013` with
+    /// `base_url = "http://127.0.0.1:8013"`. The daemon builds an
+    /// [`HttpReranker`](crate::HttpReranker) from it; it takes precedence over a local runtime
+    /// reranker. `None` (default): no external reranker.
+    pub reranker: Option<HttpRerankerConfig>,
     /// Parse date phrases ("last week", "in march") out of queries and keep results modified in
     /// that range (see [`crate::dates`]).
     pub dates: bool,
@@ -119,6 +127,7 @@ impl Default for RetrieveConfig {
             rerank_pool: 30,
             rerank_weight: 0.7,
             rerank_timeout_ms: 2_500,
+            reranker: None,
             dates: true,
             date_utc_offset_minutes: 0,
             rewrite_followups: true,
@@ -143,5 +152,27 @@ impl Default for RecencyBoost {
             half_life_days: 30.0,
             weight: 0.2,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_external_reranker_parses_from_a_partial_table() {
+        let c: RetrieveConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(c.reranker, None);
+        let c: RetrieveConfig = serde_json::from_value(serde_json::json!({
+            "rerank_pool": 20,
+            "reranker": {"base_url": "http://127.0.0.1:8013", "timeout_ms": 900},
+        }))
+        .unwrap();
+        assert_eq!(c.rerank_pool, 20);
+        let r = c.reranker.unwrap();
+        assert_eq!(r.base_url, "http://127.0.0.1:8013");
+        assert_eq!(r.timeout_ms, 900);
+        // Unset fields keep the reranker defaults.
+        assert_eq!(r.path, HttpRerankerConfig::default().path);
     }
 }

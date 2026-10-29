@@ -10,8 +10,9 @@ import {
   type ProviderInfo,
   type TriggerSpec,
 } from "../api";
-import { useAsync } from "../hooks";
+import { useAsync, useEvent } from "../hooks";
 import { formatRelative } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import {
@@ -47,6 +48,15 @@ export function DoubleTapPage() {
   useEffect(() => {
     if (saved.data && form === null) setForm(saved.data);
   }, [saved.data, form]);
+
+  // Saved elsewhere (onboarding, another window): show it, unless there are unsaved edits.
+  const savedRef = useRef(saved.data);
+  savedRef.current = saved.data;
+  useEvent(doubletapApi.onSettings, (next) => {
+    setForm((f) => (f === null || (savedRef.current !== undefined && sameSettings(f, savedRef.current)) ? next : f));
+    saved.reload();
+    status.reload();
+  });
 
   const dirty = form !== null && saved.data !== undefined && !sameSettings(form, saved.data);
   const invalid = form !== null && triggerError(form.trigger) !== null;
@@ -104,7 +114,7 @@ export function DoubleTapPage() {
       ) : (
         <ErrorNote error={saved.error} onRetry={saved.reload} />
       )}
-      {saved.loading && !saved.data && <Loading />}
+      {saved.loading && !saved.data && <Loading label={t("doubletap.loading")} />}
 
       {form && (
         <form onSubmit={(e) => void save(e)} noValidate>
@@ -338,6 +348,11 @@ function ProviderTable({ map, onChange }: { map: Record<string, string>; onChang
       <h2 id="dt-providers">{t("doubletap.providers.title")}</h2>
       <p className="muted small">{t("doubletap.providers.description")}</p>
       <ErrorNote error={providers.error} onRetry={providers.reload} />
+      {providers.data && ids.length === 0 && (
+        <p className="muted small">
+          {t("doubletap.providers.noModels")} <GoToPage page="models" className="btn btn-ghost btn-small" />
+        </p>
+      )}
       {rows.length === 0 ? (
         <EmptyState title={t("doubletap.providers.empty")} />
       ) : (
@@ -418,6 +433,15 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
   const inputId = useId();
   const [value, setValue] = useState("");
   const [restoreError, setRestoreError] = useState<unknown>(null);
+  // The shell's built-in list (password managers, banking). It is saved in `excluded_apps` like
+  // the user's own entries; here it is shown apart and read-only. An older shell without the
+  // command, or a failed call, shows every entry as the user's own, as before.
+  const defaults = useAsync(doubletapApi.defaultExcluded);
+  const builtIn = defaults.data ?? [];
+  const isBuiltIn = (a: string) => builtIn.some((d) => d.toLowerCase() === a.toLowerCase());
+  const activeBuiltIn = list.filter(isBuiltIn);
+  const own = list.filter((a) => !isBuiltIn(a));
+  const removed = builtIn.filter((d) => !list.some((a) => a.toLowerCase() === d.toLowerCase())).length;
 
   const add = (e: { preventDefault: () => void }) => {
     e.preventDefault();
@@ -441,11 +465,39 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
       <h2 id="dt-excluded">{t("doubletap.excluded.title")}</h2>
       <p className="muted small">{t("doubletap.excluded.description")}</p>
       <ErrorNote error={restoreError} />
-      {list.length === 0 ? (
-        <EmptyState title={t("doubletap.excluded.empty")} />
+      {builtIn.length > 0 && (
+        <>
+          <h3>{t("doubletap.excluded.builtInTitle")}</h3>
+          <p className="muted small">{t("doubletap.excluded.builtInBody")}</p>
+          {activeBuiltIn.length > 0 && (
+            <details className="help">
+              <summary>{t("doubletap.excluded.builtInShow", { n: activeBuiltIn.length })}</summary>
+              <ul className="path-list" aria-label={t("doubletap.excluded.builtInTitle")}>
+                {activeBuiltIn.map((a) => (
+                  <li key={a}>
+                    <code>{a}</code>
+                    <Badge>{t("doubletap.excluded.builtInBadge")}</Badge>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+          {removed > 0 && (
+            <p className="note" role="note">
+              <span>{t("doubletap.excluded.builtInRemoved", { n: removed })}</span>
+              <button type="button" className="btn btn-ghost btn-small" onClick={() => void restore()}>
+                {t("doubletap.excluded.restore")}
+              </button>
+            </p>
+          )}
+          <h3>{t("doubletap.excluded.ownTitle")}</h3>
+        </>
+      )}
+      {own.length === 0 ? (
+        <EmptyState title={builtIn.length > 0 ? t("doubletap.excluded.ownEmpty") : t("doubletap.excluded.empty")} />
       ) : (
         <ul className="path-list">
-          {list.map((a) => (
+          {own.map((a) => (
             <li key={a}>
               <code>{a}</code>
               <button
@@ -481,9 +533,11 @@ function ExcludedApps({ list, onChange }: { list: string[]; onChange: (l: string
         <button type="button" className="btn btn-small" disabled={!value.trim()} onClick={add}>
           {t("doubletap.add")}
         </button>
-        <button type="button" className="btn btn-ghost btn-small" onClick={() => void restore()}>
-          {t("doubletap.excluded.restore")}
-        </button>
+        {builtIn.length === 0 && (
+          <button type="button" className="btn btn-ghost btn-small" onClick={() => void restore()}>
+            {t("doubletap.excluded.restore")}
+          </button>
+        )}
       </div>
     </section>
   );
@@ -536,7 +590,7 @@ function PermissionsCard({
     <section className="status-card" aria-labelledby="dt-perm">
       <h2 id="dt-perm">{t("doubletap.perm.title")}</h2>
       {isMethodNotFound(error) ? <NotAvailable /> : <ErrorNote error={error} onRetry={onUpdate} />}
-      {loading && !s && <Loading lines={1} />}
+      {loading && !s && <Loading label={t("doubletap.perm.loading")} lines={1} />}
       {s && (
         <>
           <dl className="stats">
@@ -602,7 +656,7 @@ function VoiceCard() {
     <section className="status-card" aria-labelledby="dt-voice">
       <h2 id="dt-voice">{t("doubletap.voice.title")}</h2>
       {isMethodNotFound(voice.error) ? <NotAvailable /> : <ErrorNote error={voice.error} onRetry={voice.reload} />}
-      {voice.loading && !v && <Loading lines={1} />}
+      {voice.loading && !v && <Loading label={t("doubletap.voice.loading")} lines={1} />}
       {v && (
         <>
           <dl className="stats">

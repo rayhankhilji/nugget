@@ -6,6 +6,11 @@ Type into **Search** and you get one result per item (file, message, event or no
 best-matching passage, and a link that opens the original (the file, the Obsidian note, or the message
 in your mail client or web app, when its source provides a link).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/search-dark.png">
+  <img src="../images/screenshots/search-light.png" alt="The Search page with results for &quot;Tidewater budget&quot;: each hit shows its title, the best-matching passage and the source it came from" loading="lazy">
+</picture>
+
 How a query is answered:
 
 1. **Hybrid matching.** The query runs through full-text search (BM25 over every chunk and a separate
@@ -34,6 +39,13 @@ cloud embedding provider unless you set
    when the passages do not contain the answer, and to treat the passages as data, not instructions.
 4. The answer streams in. Each `[n]` links to its source.
 
+The **Chat** page asks the same way when **Use my sources** is on, and keeps the conversation:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/chat-dark.png">
+  <img src="../images/screenshots/chat-light.png" alt="The Chat page: an answer about Tidewater Billing with [1] and [2] citations, and the numbered list of sources it was given" loading="lazy">
+</picture>
+
 ### What the citations promise, and what they do not
 
 - Every `[n]` refers to a real passage that was sent to the model, and the list of sources sent is
@@ -61,5 +73,4 @@ and the list of items included.
 - Over MCP, the `search` and `get_context` tools do the same for Claude Desktop, Claude Code, Cursor
   and other apps, limited to the sources each app is allowed to see (see [MCP](mcp.md)).
 
-The same budgeted, cited retrieval feeds [Double Tap](double-tap.md) drafts, which are being wired in
-during wave W.
+The same budgeted, cited retrieval feeds [Double Tap](double-tap.md) drafts.

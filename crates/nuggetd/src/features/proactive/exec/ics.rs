@@ -1,5 +1,14 @@
 //! RFC 5545 rendering of one event: TEXT escaping, CRLF line ends, lines folded at 75 octets,
 //! UTC times. Every field comes from untrusted card content, so nothing is written raw.
+//!
+//! **Organizer.** RFC 5545 §3.8.4.3: `ORGANIZER` MUST be present in a group-scheduled event (one
+//! with attendees) and MUST NOT be in an event only on the user's own calendar. So:
+//! - attendees and a known organizer: `ORGANIZER;CN=<name>:mailto:<email>` plus the attendees;
+//! - no attendees: no `ORGANIZER`;
+//! - attendees but no organizer address: the event is written as a personal one, without
+//!   `ATTENDEE` lines (servers refuse or misattribute a group event without an organizer), and
+//!   the addresses are listed in the description so the user can invite them from their
+//!   calendar app.
 
 use nugget_proactive::CreateEvent;
 use time::OffsetDateTime;
@@ -11,15 +20,57 @@ const FOLD_AT: usize = 75;
 /// Longest summary / description kept (characters).
 const MAX_SUMMARY: usize = 500;
 const MAX_DESCRIPTION: usize = 20_000;
+/// Longest organizer display name kept (characters).
+const MAX_CN: usize = 200;
+
+/// Who organizes the event: the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Organizer {
+    /// A plain address (see [`attendee`]).
+    pub email: String,
+    pub name: Option<String>,
+}
+
+impl Organizer {
+    /// `email` when it is a plain address, with the display name `name` (when not blank).
+    pub(crate) fn new(email: &str, name: Option<&str>) -> Option<Self> {
+        Some(Self {
+            email: attendee(email)?,
+            name: name
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(str::to_owned),
+        })
+    }
+
+    /// The `ORGANIZER` content line (unfolded).
+    fn line(&self) -> String {
+        let cn = self
+            .name
+            .as_deref()
+            .map(|n| param_value(&clip(n, MAX_CN)))
+            .filter(|v| !v.is_empty() && v != "\"\"");
+        match cn {
+            Some(cn) => format!("ORGANIZER;CN={cn}:mailto:{}", self.email),
+            None => format!("ORGANIZER:mailto:{}", self.email),
+        }
+    }
+}
 
 /// Render `event` as a complete `VCALENDAR` with one `VEVENT`. `method` adds `METHOD:` (e.g.
-/// `PUBLISH` for a file the OS opens; CalDAV servers refuse objects with one).
+/// `PUBLISH` for a file the OS opens; CalDAV servers refuse objects with one). `organizer` is
+/// the user (see the module docs for when it is written).
 pub(crate) fn render(
     event: &CreateEvent,
     uid: &str,
     stamp: OffsetDateTime,
     method: Option<&str>,
+    organizer: Option<&Organizer>,
 ) -> String {
+    let attendees: Vec<String> = event.attendees.iter().filter_map(|a| attendee(a)).collect();
+    // Without an organizer the attendees cannot be scheduled: keep them in the description.
+    let uninvited = (organizer.is_none() && !attendees.is_empty())
+        .then(|| format!("Invite: {}", attendees.join(", ")));
     let mut lines = vec![
         "BEGIN:VCALENDAR".to_owned(),
         "VERSION:2.0".to_owned(),
@@ -44,18 +95,21 @@ pub(crate) fn render(
         "SUMMARY:{}",
         escape_text(&clip(&event.title, MAX_SUMMARY))
     ));
-    if let Some(d) = event
+    let description = event
         .description
         .as_deref()
         .filter(|d| !d.trim().is_empty())
-    {
-        lines.push(format!(
-            "DESCRIPTION:{}",
-            escape_text(&clip(d, MAX_DESCRIPTION))
-        ));
+        .map(|d| clip(d, MAX_DESCRIPTION));
+    let description = match (description, uninvited) {
+        (Some(d), Some(u)) => Some(format!("{d}\n\n{u}")),
+        (d, u) => d.or(u),
+    };
+    if let Some(d) = description {
+        lines.push(format!("DESCRIPTION:{}", escape_text(&d)));
     }
-    for a in &event.attendees {
-        if let Some(addr) = attendee(a) {
+    if let Some(o) = organizer.filter(|_| !attendees.is_empty()) {
+        lines.push(o.line());
+        for addr in &attendees {
             lines.push(format!(
                 "ATTENDEE;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:{addr}"
             ));
@@ -107,6 +161,21 @@ pub(crate) fn escape_text(s: &str) -> String {
         }
     }
     out
+}
+
+/// RFC 5545 §3.1 `param-value`: `"` and control characters dropped (a quoted-string cannot hold
+/// them); quoted when it holds `:`, `;` or `,`.
+pub(crate) fn param_value(s: &str) -> String {
+    let v: String = s
+        .chars()
+        .map(|c| if c == '\t' { ' ' } else { c })
+        .filter(|c| *c != '"' && !c.is_control())
+        .collect();
+    if v.contains([':', ';', ',']) {
+        format!("\"{v}\"")
+    } else {
+        v
+    }
 }
 
 /// Fold a content line: at most 75 octets per physical line, continuations start with a space,
@@ -183,7 +252,13 @@ mod tests {
 
     #[test]
     fn renders_a_valid_event_with_crlf_and_utc_times() {
-        let s = render(&event(), "abc@nugget", at(28, 9, 0, 0), Some("PUBLISH"));
+        let s = render(
+            &event(),
+            "abc@nugget",
+            at(28, 9, 0, 0),
+            Some("PUBLISH"),
+            Some(&me()),
+        );
         assert!(s.starts_with("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"), "{s}");
         assert!(s.ends_with("END:VEVENT\r\nEND:VCALENDAR\r\n"));
         // Every line ends in CRLF; no bare LF anywhere.
@@ -196,19 +271,97 @@ mod tests {
         assert!(s.contains("\r\nSUMMARY:Pricing\\; review\\, \"pilot\" \\\\ v2\r\n"));
         assert!(s.contains("\r\nDESCRIPTION:Line one\\nLine two\\nwith a tab here\r\n"));
         assert!(s.contains("\r\nATTENDEE;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:ana@acme.io\r\n"));
+        assert!(s.contains("\r\nORGANIZER;CN=Alex Morgan:mailto:alex@morgan.example\r\n"));
         // An injected line break cannot add properties.
         assert_eq!(s.matches("ATTENDEE").count(), 1, "{s}");
         assert!(!s.contains("other@y.io"));
         assert!(!s.contains("METHOD:PUBLISH\r\nMETHOD"));
-        let caldav = render(&event(), "u", at(28, 9, 0, 0), None);
+        let caldav = render(&event(), "u", at(28, 9, 0, 0), None, Some(&me()));
         assert!(!caldav.contains("METHOD:"));
+    }
+
+    fn me() -> Organizer {
+        Organizer::new("alex@morgan.example", Some("Alex Morgan")).unwrap()
+    }
+
+    #[test]
+    fn organizer_only_with_attendees() {
+        // No attendees: a personal event, no ORGANIZER.
+        let mut e = event();
+        e.attendees.clear();
+        let s = render(&e, "u", at(28, 9, 0, 0), None, Some(&me()));
+        assert!(!s.contains("ORGANIZER") && !s.contains("ATTENDEE"), "{s}");
+        // Attendees but nobody to organize: no group event; the addresses go in the description.
+        let s = render(&event(), "u", at(28, 9, 0, 0), Some("PUBLISH"), None);
+        assert!(!s.contains("ORGANIZER") && !s.contains("ATTENDEE"), "{s}");
+        assert!(
+            s.contains(
+                "DESCRIPTION:Line one\\nLine two\\nwith a tab here\\n\\nInvite: ana@acme.io\r\n"
+            ),
+            "{s}"
+        );
+        let mut e = event();
+        e.description = None;
+        let s = render(&e, "u", at(28, 9, 0, 0), None, None);
+        assert!(s.contains("\r\nDESCRIPTION:Invite: ana@acme.io\r\n"), "{s}");
+        // No name: no CN.
+        let o = Organizer::new("mailto:alex@morgan.example", Some("  ")).unwrap();
+        let s = render(&event(), "u", at(28, 9, 0, 0), None, Some(&o));
+        assert!(
+            s.contains("\r\nORGANIZER:mailto:alex@morgan.example\r\n"),
+            "{s}"
+        );
+        assert_eq!(Organizer::new("not an address", Some("x")), None);
+    }
+
+    #[test]
+    fn organizer_names_are_quoted_and_folded() {
+        assert_eq!(param_value("Alex Morgan"), "Alex Morgan");
+        assert_eq!(param_value("Morgan, Alex"), "\"Morgan, Alex\"");
+        assert_eq!(param_value("a:b;c"), "\"a:b;c\"");
+        assert_eq!(param_value("Alex \"AM\" Morgan"), "Alex AM Morgan");
+        assert_eq!(
+            param_value("Alex\r\nORGANIZER:x\u{7}"),
+            "\"AlexORGANIZER:x\""
+        );
+        assert_eq!(param_value("a\tb"), "a b");
+        // An injected line break cannot add a property; a quote cannot end the value early.
+        let o = Organizer::new(
+            "alex@morgan.example",
+            Some("Evil\r\nATTENDEE:mailto:x@y.io\"; X"),
+        )
+        .unwrap();
+        let s = render(&event(), "u", at(28, 9, 0, 0), None, Some(&o));
+        assert!(
+            s.contains(
+                "\r\nORGANIZER;CN=\"EvilATTENDEE:mailto:x@y.io; X\":mailto:alex@morgan.example\r\n"
+            ),
+            "{s}"
+        );
+        assert_eq!(s.matches("\r\nATTENDEE").count(), 1, "{s}");
+        // A long name folds at 75 octets and unfolds to the same line.
+        let long = "Ågren-Östlund ".repeat(12);
+        let o = Organizer::new("alex@morgan.example", Some(&long)).unwrap();
+        let s = render(&event(), "u", at(28, 9, 0, 0), None, Some(&o));
+        let start = s.find("ORGANIZER").unwrap();
+        let end = s[start..].find("\r\nATTENDEE").unwrap() + start;
+        let folded = &s[start..end];
+        assert!(folded.contains("\r\n "), "{folded}");
+        assert!(folded.split("\r\n").all(|l| l.len() <= 75), "{folded}");
+        assert_eq!(
+            folded.replace("\r\n ", ""),
+            format!(
+                "ORGANIZER;CN={}:mailto:alex@morgan.example",
+                long.trim_end()
+            )
+        );
     }
 
     #[test]
     fn inverted_ranges_get_a_default_length() {
         let mut e = event();
         e.end = e.start;
-        let s = render(&e, "u", at(28, 9, 0, 0), None);
+        let s = render(&e, "u", at(28, 9, 0, 0), None, None);
         assert!(s.contains("DTEND:20261029T133000Z"), "{s}");
     }
 

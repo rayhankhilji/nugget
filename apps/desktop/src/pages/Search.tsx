@@ -16,6 +16,7 @@ import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingSearch } from "../hooks.nav";
 import { splitCitations, withheldNotice } from "../citations";
 import { sourceKindLabel } from "../format";
+import { GoToPage } from "../components/GoToPage";
 import { SourceIcon } from "../components/SourceIcon";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
@@ -39,6 +40,10 @@ export function SearchPage() {
   const byId = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
   // Nothing to search yet: no sources, or none has indexed an item. Unknown (older daemon) is not "nothing".
   const nothingIndexed = !!sources.data && sources.data.reduce((n, s) => n + s.items, 0) === 0;
+  // Sources exist but none has indexed anything yet: indexing is still running (or failing).
+  const stillIndexing = nothingIndexed && (sources.data?.length ?? 0) > 0;
+  const failing = (sources.data ?? []).filter((s) => s.state === "error" || s.last_error).length;
+  const nothingHint = stillIndexing ? t("search.indexingHint") : t("search.noSourcesHint");
 
   const run = async (e?: FormEvent, override?: string) => {
     e?.preventDefault();
@@ -105,6 +110,11 @@ export function SearchPage() {
       {askOpen && <AskPanel initialQuestion={query.trim()} byId={byId} onOpen={opener.open} />}
 
       <ErrorNote error={error} onRetry={() => void run()} />
+      {failing > 0 && (
+        <p className="note" role="status">
+          {t("search.failingSources", { n: failing })} <GoToPage page="sources" className="btn btn-ghost btn-small" />
+        </p>
+      )}
 
       <div aria-live="polite" className={opener.status ? (opener.status.error ? "note note-error" : "note") : "visually-hidden"}>
         {opener.status?.text}
@@ -121,8 +131,8 @@ export function SearchPage() {
         </h2>
       )}
       {hits && hits.length === 0 && (
-        <EmptyState title={t("search.noResults", { query: searched })}>
-          {nothingIndexed ? t("search.noSourcesHint") : t("search.noResultsHint")}
+        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" /> : undefined}>
+          {nothingIndexed ? nothingHint : t("search.noResultsHint")}
         </EmptyState>
       )}
       {hits && hits.length > 0 && (
@@ -155,7 +165,9 @@ export function SearchPage() {
       )}
       {!hits && !busy && !error &&
         (nothingIndexed ? (
-          <EmptyState title={t("search.noSourcesTitle")}>{t("search.noSourcesHint")}</EmptyState>
+          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" />}>
+            {nothingHint}
+          </EmptyState>
         ) : (
           <EmptyState title={t("search.typeQuery")}>{t("search.typeQueryHint")}</EmptyState>
         ))}

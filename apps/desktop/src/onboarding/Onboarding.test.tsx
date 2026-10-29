@@ -4,8 +4,10 @@ import { emit } from "@tauri-apps/api/event";
 import { act } from "react";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { Onboarding } from "./Onboarding";
-import { loadState, STORAGE_KEY } from "./machine";
+import { INITIAL, loadState, STORAGE_KEY } from "./machine";
+import { indexPhase } from "./steps";
 import { TRIGGER_KEY } from "./trigger";
+import type { DoubleTapSettings, SourceInfo } from "../api";
 
 beforeEach(() => {
   installDomShims();
@@ -17,7 +19,17 @@ const button = (c: HTMLElement, text: string | RegExp) => byText(c, "button", te
 
 describe("Onboarding", () => {
   it("walks every step, saving progress, and exits when finished", async () => {
-    mockDaemon();
+    let dt: DoubleTapSettings = {
+      enabled: true,
+      trigger: { kind: "double_tap", modifier: "right_control", window_ms: 350 },
+      app_providers: {},
+      excluded_apps: [],
+      allow_terminals: false,
+    };
+    mockDaemon({
+      doubletap_settings_get: () => dt,
+      doubletap_settings_set: (args: unknown) => (dt = (args as { settings: DoubleTapSettings }).settings),
+    });
     const onExit = vi.fn();
     const { container } = await render(<Onboarding connected onExit={onExit} />);
     expect(heading(container)).toBe("Welcome to Nugget");
@@ -45,8 +57,10 @@ describe("Onboarding", () => {
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Add your first source");
     expect(loadState().ai).toBe("local");
-    await click(button(container, "Add a source"));
+    // "Add a folder" opens the folder form directly, skipping the kind picker.
+    await click(button(container, "Add a folder"));
     expect(document.querySelector("dialog")).not.toBeNull();
+    expect(byText(document.body, "dialog button", "Choose folders…")).toBeDefined();
     await click(document.querySelector<HTMLElement>('dialog button[aria-label="Close"]'));
     expect(document.querySelector("dialog")).toBeNull();
 
@@ -55,15 +69,60 @@ describe("Onboarding", () => {
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Choose your Double Tap trigger");
     await click(container.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!);
+    // Saved where Double Tap reads it (and cached locally).
+    expect(dt.trigger).toMatchObject({ kind: "chord" });
     expect(JSON.parse(localStorage.getItem(TRIGGER_KEY)!)).toMatchObject({ kind: "chord" });
 
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("You're all set");
     expect(container.textContent).toContain("Every step is done.");
     expect(onExit).not.toHaveBeenCalled();
-    await click(button(container, "Start using Nugget"));
-    expect(onExit).toHaveBeenCalled();
+    // The mocked daemon has an indexed source, so the last step points at Search.
+    expect(container.textContent).toContain("1,234 items are indexed and searchable.");
+    await click(button(container, "Search your sources"));
+    expect(onExit).toHaveBeenCalledWith("search");
     expect(loadState().finished).toBe(true);
+  });
+
+  it("shows indexing progress for a new folder and says when search works", async () => {
+    const folder: SourceInfo = { id: "files-9", kind: "files", name: "notes", enabled: true, state: "syncing", items: 0, chunks: 0 };
+    let listed: SourceInfo[] = [];
+    mockDaemon({
+      pick_folders: () => ["/home/me/notes"],
+      sources_add: () => ((listed = [folder]), folder),
+      sources_list: () => listed,
+    });
+    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "source", completed: ["welcome", "ai"] }} />);
+    await click(button(container, "Add a folder"));
+    await click(byText(document.body, "dialog button", "Choose folders…"));
+    expect(document.querySelector("dialog code")?.textContent).toBe("/home/me/notes");
+    await click(byText(document.body, "dialog button", "Add folder"));
+    await flush();
+    expect(document.querySelector("dialog")).toBeNull();
+    expect(container.querySelector(".ob-index li")?.textContent).toContain("notes: getting ready to index…");
+
+    listed = [{ ...folder, items: 5 }];
+    await act(() => emit("nugget:sources-changed", {}));
+    await flush();
+    expect(container.querySelector(".ob-index li")?.textContent).toContain("notes: indexing, 5 items so far…");
+
+    listed = [{ ...folder, state: "watching", items: 93, chunks: 120 }];
+    await act(() => emit("nugget:sources-changed", {}));
+    await flush();
+    const row = container.querySelector<HTMLElement>(".ob-index li")!;
+    expect(row.dataset.phase).toBe("ready");
+    expect(row.textContent).toContain("notes: 93 items indexed. Search works now.");
+  });
+
+  it("finishes to the default page when nothing is searchable yet", async () => {
+    mockDaemon({ sources_list: [] });
+    const onExit = vi.fn();
+    const { container } = await render(<Onboarding connected onExit={onExit} initial={{ ...INITIAL, step: "done" }} />);
+    await flush();
+    expect(container.textContent).toContain("chat and drafting start once you choose a model");
+    expect(button(container, "Search your sources")).toBeUndefined();
+    await click(button(container, "Start using Nugget"));
+    expect(onExit).toHaveBeenCalledWith(undefined);
   });
 
   it("skips steps, lists them at the end and lets the user go back", async () => {
@@ -106,5 +165,17 @@ describe("Onboarding", () => {
     expect(container.querySelector('input[type="password"], input[type="text"], textarea')).toBeNull();
     expect(container.textContent).toContain('api_key = "keychain:anthropic"');
     expect(container.textContent).toContain("dev.nugget.Nugget");
+  });
+});
+
+describe("indexPhase", () => {
+  it("tells waiting, indexing, searchable and failed apart", () => {
+    expect(indexPhase({ state: "syncing", items: 0 })).toBe("waiting");
+    expect(indexPhase({ state: "idle", items: 0 })).toBe("waiting");
+    expect(indexPhase({ state: "syncing", items: 3 })).toBe("indexing");
+    expect(indexPhase({ state: "watching", items: 3 })).toBe("ready");
+    expect(indexPhase({ state: "idle", items: 3 })).toBe("ready");
+    expect(indexPhase({ state: "error", items: 3, last_error: "denied" })).toBe("failed");
+    expect(indexPhase({ state: "idle", items: 0, last_error: "no such folder" })).toBe("failed");
   });
 });

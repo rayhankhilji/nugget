@@ -36,6 +36,16 @@ providers:
 
 ## In the desktop app
 
+The first launch opens a short setup: Welcome, Choose your AI, First source, Permissions and
+Double Tap. You can skip any step, and **Run setup again** in the sidebar brings it back.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/welcome-dark.png">
+  <img src="../images/screenshots/welcome-light.png" alt="The first step of setup, Welcome to Nugget: what stays on this device and what leaves only when you choose" loading="lazy">
+</picture>
+
+After setup, or to check on things later:
+
 1. Open **Status**. If the daemon is not running, the app offers to start it.
 2. Open **Models** and pick models: [Local or bring-your-own-key](models.md) explains the choice.
    A recommended badge marks the best fit for your machine's memory.
@@ -48,15 +58,25 @@ providers:
    **Connected AI apps** to let Claude Desktop, Claude Code or Cursor read them over
    [MCP](mcp.md).
 
-Pages being added in wave W: **Double Tap** settings ([Double Tap](double-tap.md)), **Agent**
-([The agent](agent.md)), **Safety** ([Safety](safety.md)), **Today** ([Today](today.md)) and
-**Plugins** ([Plugins](plugins.md)). They are not in the app yet.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/status-dark.png">
+  <img src="../images/screenshots/status-light.png" alt="The Status page: daemon version, uptime, item and chunk counts, the audit log check, providers, indexing freshness and knowledge counts" loading="lazy">
+</picture>
+
+The sidebar also has **Today** ([Today](today.md)), **Double Tap** settings
+([Double Tap](double-tap.md)), **Agent** ([The agent](agent.md)), **Safety** ([Safety](safety.md))
+and **Plugins** ([Plugins](plugins.md)).
 
 ## Time to first value
 
-The plan's target is a useful search result in under two minutes from first launch, with backfill
-continuing in the background. That target is **not measured yet** (it is planned for the `perf`
-benchmark). What is measured: on a 4-vCPU cloud VM, a 5 000-file Markdown folder indexed in 25.5 s,
-and a change to a watched file became searchable in 0.6 s at the 95th percentile. See
+The target is a useful search result in under two minutes from first launch, with backfill
+continuing in the background. The desktop end-to-end test measures it: its first-run scenario runs the
+real daemon from an empty home and the real app through setup to a first search result, against a
+budget of 120 s, and `pnpm run e2e` checks it on every CI run (see `apps/desktop/e2e/README.md`). On
+a 4-vCPU Linux VM, setup with AI left for later, adding the 93-item fixture folder and the first
+cited search results took 3.6 s of machine time; your own reading and clicking come on top.
+
+Indexing on its own: on a 4-vCPU cloud VM, a 5 000-file Markdown folder indexed in 25.5 s, and a
+change to a watched file became searchable in 0.6 s at the 95th percentile. See
 [Benchmarks](../architecture/benchmarks.md) for the conditions, which use a test embedder, not a real
 model.

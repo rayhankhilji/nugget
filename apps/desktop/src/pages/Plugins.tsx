@@ -124,7 +124,7 @@ export function PluginsPage() {
       ) : (
         <>
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-          {loaded.loading && !plugins && <Loading />}
+          {loaded.loading && !plugins && <Loading label={t("plugins.loading")} />}
           {plugins && list.length === 0 && <EmptyState title={t("plugins.emptyTitle")}>{t("plugins.emptyBody")}</EmptyState>}
           {list.length > 0 && (
             <ul className="source-list" aria-label={t("plugins.listLabel")}>

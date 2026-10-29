@@ -59,7 +59,7 @@ The local model chosen for each tier, by manifest id (as listed on the Models pa
 
 The on-device runtime: `nuggetd` runs installed models with a pinned, verified `llama-server` on
 `127.0.0.1`, as the providers `local-chat` (triage, light, synthesis) and `local-embedding`
-(embedding).
+(embedding), plus `local-rerank` (rerank) when `rerank_model` is set.
 
 <!-- check-refs: config.runtime -->
 | Key | Type | Default | Description |
@@ -67,6 +67,7 @@ The on-device runtime: `nuggetd` runs installed models with a pinned, verified `
 | `enabled` | bool | `true` | Run selected, installed models locally |
 | `chat_model` | model id | unset | Chat model. Unset: `models.selected.triage`, then the manifest's recommendation for this machine (triage tier, else synthesis) |
 | `embedding_model` | model id | unset | Embedding model. Unset: `models.selected.embedding`, then the recommendation |
+| `rerank_model` | model id | unset | Reranker for search, served as `local-rerank` with `llama-server --reranking`. Must be a manifest model with the `rerank` tier, such as `bge-reranker-v2-m3-q4km` (install it on the **Models** page). Rerankers are never used for chat or embeddings. Unset: none; it is never chosen automatically. `[retrieve.reranker]` takes precedence |
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
@@ -130,6 +131,7 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 | `rerank_pool` | integer | `30` | Top grouped candidates scored by a reranker, when one is configured, before MMR |
 | `rerank_weight` | float, 0 to 1 | `0.7` | Share of the reranker's score in relevance; 1.0 replaces the first-stage score |
 | `rerank_timeout_ms` | integer | `2500` | After this, reranking is skipped and the first-stage order kept |
+| `reranker` | table | unset | A reranker you run yourself, below |
 | `dates` | bool | `true` | Parse date phrases ("last week", "in march") and keep items modified in that range, falling back to unfiltered results when none match |
 | `date_utc_offset_minutes` | integer | `0` | UTC offset used to resolve date phrases (clamped to ±18 h) |
 | `rewrite_followups` | bool | `true` | Rewrite follow-up questions into standalone queries from chat history, with a local model only |
@@ -148,6 +150,23 @@ required.
 |---|---|---|---|
 | `half_life_days` | float | `30` | Age at which the boost halves |
 | `weight` | float | `0.2` | Size of the boost for a brand-new item |
+
+### `[retrieve.reranker]`
+
+Off unless present. Search sends its top candidates to a reranking server you run, for example
+`llama-server --reranking -m <reranker>.gguf --port 8013`, at `<base_url>/v1/rerank`. Only servers
+on this device or your network are accepted unless `allow_cloud = true` (https only); requests
+that leave the device are recorded in the egress ledger.
+
+```toml
+[retrieve.reranker]
+base_url = "http://127.0.0.1:8013"   # required
+# path = "v1/rerank"
+# timeout_ms = 2000
+```
+
+Without it, search uses the local runtime's reranker when `[runtime] rerank_model` is set, and
+otherwise does not rerank. A reranker that is not running is skipped at once.
 
 ## `[knowledge]`
 
@@ -240,6 +259,9 @@ The MCP server that lets AI apps read your knowledge with a per-app token. See
 | `http` | bool | `true` | Also listen for streamable HTTP on `127.0.0.1` |
 | `port` | integer | `7319` | HTTP port on `127.0.0.1`; `0` picks a free port. If the port is taken, HTTP is skipped (with a warning) and stdio still works |
 | `allowed_origins` | array of origins | `[]` | Exact `Origin` values allowed on HTTP requests, such as `http://localhost:6274` for the MCP Inspector. Empty: any request with an `Origin` header (a browser page) is refused |
+| `max_connections` | integer | `64` | HTTP connections served at once (1–4096); others wait |
+| `header_timeout_ms` | integer | `10000` | Close a connection whose request headers (or the next request) don't arrive in time (1–600000) |
+| `body_timeout_ms` | integer | `30000` | Answer 408 when a request body doesn't arrive in time (1–600000) |
 
 ## `[[providers]]`
 
@@ -255,7 +277,7 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `base_url` | URL | per kind | API root. `anthropic`: without `/v1`, default `https://api.anthropic.com`. `openai_responses`: default `https://api.openai.com/v1`. `openai_compatible`: required, including the version prefix, for example `http://127.0.0.1:11434/v1`. Plain `http` to an internet host is refused |
 | `model` | string | required | The provider's model name |
 | `api_key` | `env:VAR` or `keychain:NAME` | none | Omit for local servers that need no key |
-| `tiers` | array of `triage`, `light`, `synthesis`, `agentic`, `embedding` | `[]` | Tiers this provider serves |
+| `tiers` | array of `triage`, `light`, `synthesis`, `agentic`, `embedding` | `[]` | Tiers this provider serves. `rerank` is refused: use `[retrieve.reranker]` |
 | `locality` | `on_device`, `local_network` or `cloud` | from the host | Treat the endpoint as further away than its address suggests (for a local gateway that forwards to the cloud). It can only raise the classification, never lower it |
 | `context_tokens` | integer | unset | Context window, if known |
 | `max_output_tokens` | integer | unset | Output cap when a request sets none. Anthropic requires one and falls back to 16000 |

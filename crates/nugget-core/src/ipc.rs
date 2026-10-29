@@ -469,6 +469,11 @@ pub struct AskRequest {
     pub provider: Option<ProviderId>,
     #[serde(default = "default_ask_tier")]
     pub tier: Tier,
+    /// Earlier turns of the conversation, oldest first, for a follow-up question: the query
+    /// is rewritten into a standalone one for retrieval (by a local model only) and the turns
+    /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
+    #[serde(default)]
+    pub history: Vec<ChatMessage>,
 }
 
 fn default_ask_tier() -> Tier {
@@ -486,6 +491,9 @@ pub struct AskStarted {
     /// Relevant sensitive items withheld because the provider is a cloud model.
     #[serde(default)]
     pub excluded_sensitive: u32,
+    /// The standalone query actually searched, when the follow-up was rewritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_rewrite: Option<String>,
 }
 
 // ---- local runtime ----
@@ -495,6 +503,9 @@ pub struct AskStarted {
 pub enum RuntimeRole {
     Chat,
     Embedding,
+    /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
+    /// routed for a model tier.
+    Rerank,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -569,6 +580,9 @@ pub struct EvidenceView {
     pub title: Option<String>,
     #[serde(default)]
     pub url: Option<String>,
+    /// When the source item was last modified (its creation in the index if unknown).
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub observed_at: Option<time::OffsetDateTime>,
 }
 
 /// Exactly one of `entity` / `literal` is set.
@@ -596,6 +610,8 @@ pub struct ClaimView {
     pub confidence: f32,
     pub status: String,
     pub evidence: Vec<EvidenceView>,
+    #[serde(with = "time::serde::rfc3339::option", default)]
+    pub updated_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

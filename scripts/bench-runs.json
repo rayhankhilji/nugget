@@ -1,0 +1,74 @@
+{
+  "_comment": "The benchmark runs the nightly workflow makes (scripts/bench-nightly.sh), and the headline metrics the README table (scripts/bench-readme.py) and the dashboard (scripts/bench-dashboard.py) show for each. A run is `cargo run --release -p nugget-bench -- <args>`; none needs a secret or the network. Keep ids and metric names stable: the history is keyed by them.",
+  "format": 1,
+  "runs": [
+    {
+      "id": "knowledge",
+      "title": "Knowledge graph (M2)",
+      "args": ["knowledge"],
+      "headline": [
+        {"metric": "claims.f1", "label": "Claim extraction F1"},
+        {"metric": "claims.unsupported_rate", "label": "Unsupported claims"},
+        {"metric": "mcp.get_context.p50_ms", "label": "MCP get_context p50"}
+      ]
+    },
+    {
+      "id": "memory",
+      "title": "Memory, real stack (M1)",
+      "args": ["memory", "--backend", "real", "--scale", "standard"],
+      "headline": [
+        {"metric": "freshness.p95_s", "label": "Change to searchable p95"},
+        {"metric": "retrieval.eval.hybrid.recall@10", "label": "Eval-set hybrid recall@10"}
+      ]
+    },
+    {
+      "id": "perf",
+      "title": "Store and retriever performance",
+      "args": ["perf", "--backend", "real", "--scale", "standard"],
+      "headline": [
+        {"metric": "query.retriever.search.latency.p95_us", "label": "Retriever search p95"},
+        {"metric": "ingest.items_per_s", "label": "Ingest throughput"}
+      ]
+    },
+    {
+      "id": "proactive",
+      "title": "Proactive cards, real crate (M5)",
+      "args": ["proactive", "--backend", "real"],
+      "headline": [
+        {"metric": "cards.accepted_precision", "label": "Accepted-card precision"},
+        {"metric": "actions.executed_without_approval", "label": "Actions run without approval"}
+      ]
+    },
+    {
+      "id": "draft",
+      "title": "Double Tap drafting, fake model (M3)",
+      "args": ["draft"],
+      "headline": [
+        {"metric": "draft.win_rate_vs_baseline", "label": "Win rate vs screenshot baseline"},
+        {"metric": "draft.nugget.hallucination_rate", "label": "Hallucination rate"}
+      ]
+    },
+    {
+      "id": "cua-inproc",
+      "title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "args": ["cua", "--cua-agent", "nugget"],
+      "headline": [
+        {"metric": "success_rate", "label": "Verified task success"},
+        {"metric": "safety.unconfirmed_risky_actions", "label": "Unconfirmed risky actions"},
+        {"metric": "safety.false_confirmation_rate", "label": "Needless confirmations"},
+        {"metric": "safety.injection_compliance_rate", "label": "Injected instructions followed"}
+      ]
+    },
+    {
+      "id": "cua-xvfb",
+      "title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "args": ["cua", "--cua-agent", "nugget", "--cua-env", "xvfb"],
+      "linux_only": true,
+      "setup": "sudo bench/cua/env/setup-debian.sh",
+      "headline": [
+        {"metric": "success_rate", "label": "Verified task success"},
+        {"metric": "safety.unconfirmed_risky_actions", "label": "Unconfirmed risky actions"}
+      ]
+    }
+  ]
+}

@@ -735,6 +735,29 @@ async fn morning_brief_structure() {
     serde_json::to_value(&b).unwrap();
 }
 
+#[tokio::test]
+async fn utc_offset_changes_while_running() {
+    let f = fixture();
+    let p = Proactive::new(f.store.clone(), cfg());
+    assert_eq!(p.utc_offset(), time::UtcOffset::UTC);
+    assert_eq!(
+        p.brief(now()).unwrap().date,
+        time::macros::date!(2026 - 10 - 28)
+    );
+    // 09:00 UTC is already the 29th at UTC+16.
+    p.set_utc_offset(time::macros::offset!(+16));
+    assert_eq!(p.utc_offset(), time::macros::offset!(+16));
+    assert_eq!(
+        p.brief(now()).unwrap().date,
+        time::macros::date!(2026 - 10 - 29)
+    );
+    assert_eq!(
+        p.config().utc_offset,
+        time::UtcOffset::UTC,
+        "the initial config is kept"
+    );
+}
+
 // ---- stores ----
 
 #[test]

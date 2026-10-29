@@ -90,7 +90,7 @@ export function SafetyPage() {
         {announce}
       </div>
       <ErrorNote error={loaded.error} onRetry={loaded.reload} />
-      {loaded.loading && !state && <Loading />}
+      {loaded.loading && !state && <Loading label={t("safety.loading")} />}
 
       {state && config && (
         <>
@@ -205,7 +205,7 @@ function Approvals() {
     <section className="safety-section" aria-labelledby="safety-approvals-title">
       <h2 id="safety-approvals-title">{t("safety.approvals.title")}</h2>
       <ErrorNote error={approvals.error ?? error} onRetry={reload} />
-      {approvals.loading && !data && <Loading />}
+      {approvals.loading && !data && <Loading label={t("safety.approvals.loading")} lines={1} />}
       {data && (
         <>
           <h3>{t("safety.approvals.pending")}</h3>
@@ -638,7 +638,7 @@ function Browser() {
     <section className="safety-section" aria-labelledby="safety-browser-title">
       <h2 id="safety-browser-title">{t("safety.browser.title")}</h2>
       {isMethodNotFound(status.error) ? <NotAvailable what={t("safety.browser.title")} /> : <ErrorNote error={status.error} onRetry={status.reload} />}
-      {status.loading && !s && <Loading />}
+      {status.loading && !s && <Loading label={t("safety.browser.loading")} lines={1} />}
       {s && (
         <div className="card">
           <div className="card-head">

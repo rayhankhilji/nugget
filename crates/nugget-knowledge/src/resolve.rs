@@ -19,12 +19,16 @@
 //! merged only when a trusted record (a contact card, the entity's own note) asserted those
 //! identifiers together. Once an occurrence resolves, name-only duplicates it makes unambiguous
 //! are folded in (see [`Resolver::absorb`]).
+//!
+//! User splits are constraints ([`crate::splits`]): a split pair is never merged, and an
+//! occurrence the user moved to the split-off entity (by its item or by a name only that entity
+//! has) resolves to it, not to the entity it was split from.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 
 use nugget_core::capability::{Capabilities, Tier};
-use nugget_core::ids::EntityId;
+use nugget_core::ids::{EntityId, ItemRef};
 use nugget_core::{Error, Result};
 use nugget_graph::{
     Entity, EntityKind, EntityPatch, EntityQuery, GraphStore, Identifier, NewEntity, normalize_name,
@@ -34,6 +38,7 @@ use serde_json::{Value, json};
 
 use crate::config::{KnowledgeConfig, ResolutionConfig};
 use crate::spec::EntitySpec;
+use crate::splits::{Live, Split};
 
 /// Identifier schemes that identify one entity: different values mean different entities.
 fn is_strong(scheme: &str) -> bool {
@@ -89,11 +94,142 @@ pub(crate) struct Resolver<'a> {
     pub emb_cache: &'a Mutex<HashMap<String, Vec<f32>>>,
     /// The user's entity: identifier matches that include it resolve to it.
     pub me: Option<EntityId>,
+    /// User splits (constraints).
+    pub splits: &'a [Split],
+    /// The item whose occurrences are being resolved.
+    pub item: Option<&'a ItemRef>,
+    /// The splits that apply now; recomputed after a merge.
+    live: Mutex<Option<Vec<Live>>>,
+}
+
+impl<'a> Resolver<'a> {
+    pub fn new(
+        graph: &'a dyn GraphStore,
+        cfg: &'a KnowledgeConfig,
+        router: Option<&'a Router>,
+        emb_cache: &'a Mutex<HashMap<String, Vec<f32>>>,
+        me: Option<EntityId>,
+    ) -> Self {
+        Self {
+            graph,
+            cfg,
+            router,
+            emb_cache,
+            me,
+            splits: &[],
+            item: None,
+            live: Mutex::new(None),
+        }
+    }
+
+    /// Resolve occurrences of `item` under the user's `splits`.
+    pub fn with_splits(mut self, splits: &'a [Split], item: Option<&'a ItemRef>) -> Self {
+        self.splits = splits;
+        self.item = item;
+        self
+    }
 }
 
 impl Resolver<'_> {
     fn rcfg(&self) -> &ResolutionConfig {
         &self.cfg.resolution
+    }
+
+    // ---------------------------------------------------------------- user splits
+
+    fn live(&self) -> Result<Vec<Live>> {
+        if self.splits.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut cached = self.live.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(v) = cached.as_ref() {
+            return Ok(v.clone());
+        }
+        let v = crate::splits::live(self.graph, self.splits)?;
+        *cached = Some(v.clone());
+        Ok(v)
+    }
+
+    /// Merge `from` into `into` unless a user split keeps them apart. Returns whether merged.
+    fn merge(&self, into: &EntityId, from: &EntityId) -> Result<bool> {
+        if crate::splits::apart(&self.live()?, into, from) {
+            return Ok(false);
+        }
+        self.graph.merge(into, from)?;
+        *self.live.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        Ok(true)
+    }
+
+    /// Whether the user moved this occurrence to the split-off side of `l`: it comes from one of
+    /// that side's items, carries one of the identifiers the split moved, or bears one of its
+    /// names that the other side does not have.
+    fn moved_by(&self, l: &Live, spec: &EntitySpec) -> Result<bool> {
+        let s = &self.splits[l.idx];
+        if self.item.is_some_and(|i| s.items.contains(i))
+            || spec.identifiers.iter().any(|i| s.identifiers.contains(i))
+        {
+            return Ok(true);
+        }
+        let mut names: Vec<&str> = Vec::new();
+        if !spec.weak_name {
+            names.push(&spec.name);
+        }
+        names.extend(spec.aliases.iter().map(String::as_str));
+        let named: Vec<&str> = names
+            .into_iter()
+            .filter(|n| s.names.contains(&normalize_name(n)))
+            .collect();
+        if named.is_empty() {
+            return Ok(false);
+        }
+        let Some(from) = self.canonical(&l.from)? else {
+            return Ok(true);
+        };
+        Ok(named.iter().any(|n| !known_name(&from, n)))
+    }
+
+    /// The entity an occurrence resolved to `e` really belongs to: the side the user split it
+    /// off to, when it was moved there (following later splits of that side too).
+    fn redirect(&self, e: Entity, spec: &EntitySpec) -> Result<Entity> {
+        let live = self.live()?;
+        let mut cur = e;
+        for _ in 0..live.len() {
+            let mut next = None;
+            for l in live.iter().filter(|l| l.from == cur.id) {
+                if self.moved_by(l, spec)?
+                    && let Some(to) = self.canonical(&l.to)?
+                    && to.kind == spec.kind
+                {
+                    next = Some(to);
+                    break;
+                }
+            }
+            match next {
+                Some(n) => cur = n,
+                None => break,
+            }
+        }
+        Ok(cur)
+    }
+
+    /// Among name candidates, keep one side of each split pair: the split-off side for
+    /// occurrences moved there, the original otherwise.
+    fn pick_sides(&self, cands: &mut Vec<Entity>, spec: &EntitySpec) -> Result<()> {
+        if cands.len() < 2 {
+            return Ok(());
+        }
+        for l in self.live()? {
+            let has = |id: &EntityId| cands.iter().any(|c| &c.id == id);
+            if has(&l.from) && has(&l.to) {
+                let drop = if self.moved_by(&l, spec)? {
+                    l.from
+                } else {
+                    l.to
+                };
+                cands.retain(|c| c.id != drop);
+            }
+        }
+        Ok(())
     }
 
     fn canonical(&self, id: &EntityId) -> Result<Option<Entity>> {
@@ -118,17 +254,19 @@ impl Resolver<'_> {
                 .as_ref()
                 .and_then(|me| hits.iter().position(|h| &h.id == me))
                 .unwrap_or(0);
-            let primary = hits.remove(pos);
+            let primary = self.redirect(hits.remove(pos), spec)?;
             let mut merged = Vec::new();
             if spec.trusted_identifiers {
                 for other in hits {
-                    if Some(&other.id) == self.me.as_ref()
+                    if other.id == primary.id
+                        || Some(&other.id) == self.me.as_ref()
                         || single_valued_conflict(&primary, &other)
                     {
                         continue;
                     }
-                    self.graph.merge(&primary.id, &other.id)?;
-                    merged.push(other.id);
+                    if self.merge(&primary.id, &other.id)? {
+                        merged.push(other.id);
+                    }
                 }
             }
             let mut touched = self.attach(&primary, spec)?;
@@ -150,6 +288,7 @@ impl Resolver<'_> {
                 None => None,
             };
             if let Some(e) = found {
+                let e = self.redirect(e, spec)?;
                 let mut touched = self.attach(&e, spec)?;
                 let merged = self.absorb(&e.id, spec)?;
                 touched.extend(merged.iter().cloned());
@@ -165,6 +304,7 @@ impl Resolver<'_> {
                 && self.rcfg().embedding_kinds.contains(&spec.kind)
                 && let Some(e) = self.by_embedding(spec).await?
             {
+                let e = self.redirect(e, spec)?;
                 let touched = self.attach(&e, spec)?;
                 return Ok(Resolved {
                     id: e.id,
@@ -325,10 +465,9 @@ impl Resolver<'_> {
         }
         let mut merged = Vec::new();
         for d in dupes {
-            if single_valued_conflict(&e, &d) {
+            if single_valued_conflict(&e, &d) || !self.merge(&e.id, &d.id)? {
                 continue;
             }
-            self.graph.merge(&e.id, &d.id)?;
             if e.kind == EntityKind::Organization
                 && name_from_domain(&e)
                 && !name_from_domain(&d)
@@ -382,6 +521,7 @@ impl Resolver<'_> {
                 }
             }
         }
+        self.pick_sides(&mut cands, spec)?;
         Ok(match cands.len() {
             0 => None,
             1 => cands.pop(),
@@ -765,13 +905,7 @@ mod tests {
         cfg: &'a KnowledgeConfig,
         cache: &'a Mutex<HashMap<String, Vec<f32>>>,
     ) -> Resolver<'a> {
-        Resolver {
-            graph,
-            cfg,
-            router: None,
-            emb_cache: cache,
-            me: None,
-        }
+        Resolver::new(graph, cfg, None, cache, None)
     }
 
     fn person(g: &dyn GraphStore, name: &str, email: Option<&str>) -> EntityId {

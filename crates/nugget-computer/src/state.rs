@@ -31,6 +31,11 @@ pub(crate) struct Found {
     pub app: String,
     /// Text around the element for risk: its dialog's name and text, and the window title.
     pub context: Vec<String>,
+    /// The element's containers, innermost first, with their names (truncated).
+    pub ancestors: Vec<(Role, Option<String>)>,
+    /// Labels of the editable fields in the element's dialog, or in its window when it is in
+    /// none (truncated, at most [`CONTEXT_ITEMS_MAX`]).
+    pub fields: Vec<String>,
 }
 
 impl Shared {
@@ -128,6 +133,33 @@ fn found_in(tree: &UiTree, id: &ElementId) -> Option<Found> {
     for s in &mut context {
         *s = nugget_agent::tool::truncate(s, CONTEXT_TEXT_MAX);
     }
+    let short = |s: &Option<String>| {
+        s.as_deref()
+            .map(|s| nugget_agent::tool::truncate(s, CONTEXT_TEXT_MAX))
+    };
+    let ancestors = path
+        .iter()
+        .rev()
+        .skip(1)
+        .map(|n| (n.role, short(&n.name)))
+        .collect();
+    let scope = path
+        .iter()
+        .rev()
+        .find(|n| n.role == Role::Dialog)
+        .copied()
+        .unwrap_or(&tree.root);
+    let fields = scope
+        .iter()
+        .filter(|n| {
+            matches!(
+                n.role,
+                Role::TextField | Role::TextArea | Role::SearchField | Role::ComboBox
+            )
+        })
+        .filter_map(|n| short(&n.name).or_else(|| short(&n.placeholder)))
+        .take(CONTEXT_ITEMS_MAX)
+        .collect();
     let app_id = tree.app.id.as_deref().or(tree.window.app.id.as_deref());
     let name = if tree.app.name.is_empty() {
         &tree.window.app.name
@@ -139,6 +171,8 @@ fn found_in(tree: &UiTree, id: &ElementId) -> Option<Found> {
         window: tree.window.clone(),
         app: app_key(app_id, name),
         context,
+        ancestors,
+        fields,
     })
 }
 

@@ -1,0 +1,148 @@
+name: Package smoke
+
+# Builds the Linux AppImage (with the nuggetd sidecar) the way release.yml does, then launches it
+# under Xvfb: the main window must appear, the app must connect to nuggetd, closing the window
+# must quit the app with status 0, and the daemon must stop on SIGTERM.
+# See packaging/scripts/smoke-appimage.sh.
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packaging/**"
+      - "Cargo.lock"
+      - ".github/workflows/package-smoke.yml"
+  push:
+    branches: [main, x/release]
+    paths:
+      - "apps/desktop/**"
+      - "crates/**"
+      - "packaging/**"
+      - "Cargo.lock"
+      - ".github/workflows/package-smoke.yml"
+  workflow_dispatch:
+  # From another workflow (e.g. release.yml): pass the name of an artifact of the calling run
+  # that holds a Linux x86_64 .AppImage to smoke-test it instead of building one.
+  workflow_call:
+    inputs:
+      appimage-artifact:
+        description: Artifact (of the calling run) containing the .AppImage; empty builds one.
+        type: string
+        required: false
+        default: ""
+
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  # A fixed prefix: under workflow_call, github.workflow is the caller's name.
+  group: package-smoke-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  appimage:
+    name: AppImage smoke (x86_64)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      TARGET: x86_64-unknown-linux-gnu
+      PREBUILT: ${{ inputs.appimage-artifact || '' }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # The release build dependencies, plus a headless X server, a window manager that honours
+      # EWMH close requests, and the tools that drive it.
+      - name: Install Linux build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file rpm xdg-utils \
+            libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev \
+            libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
+            xvfb openbox wmctrl xdotool imagemagick dbus-x11
+
+      - name: Install Rust toolchain
+        if: env.PREBUILT == ''
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        if: env.PREBUILT == ''
+        with:
+          key: package-smoke-${{ env.TARGET }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        if: env.PREBUILT == ''
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        if: env.PREBUILT == ''
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        if: env.PREBUILT == ''
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        if: env.PREBUILT == ''
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      - name: Build the AppImage
+        if: env.PREBUILT == ''
+        working-directory: apps/desktop
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          pnpm tauri build --ci --target "$TARGET" --bundles appimage \
+            --config src-tauri/tauri.bundle.conf.json
+
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        if: env.PREBUILT != ''
+        with:
+          name: ${{ env.PREBUILT }}
+          path: ${{ runner.temp }}/prebuilt
+
+      - name: Locate the AppImage
+        id: appimage
+        run: |
+          if [ -n "$PREBUILT" ]; then dir="$RUNNER_TEMP/prebuilt"; else dir="target/$TARGET/release/bundle/appimage"; fi
+          mapfile -t found < <(find "$dir" -name '*.AppImage' -type f)
+          if [ "${#found[@]}" -ne 1 ]; then
+            echo "::error::expected exactly one .AppImage in $dir, found ${#found[@]}"
+            ls -lR "$dir" || true
+            exit 1
+          fi
+          ls -l "${found[0]}"
+          echo "path=${found[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke-test the AppImage
+        env:
+          APPIMAGE: ${{ steps.appimage.outputs.path }}
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: packaging/scripts/smoke-appimage.sh "$APPIMAGE"
+
+      # App and daemon logs, plus a screenshot of the running app. Uploaded on failure too.
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: package-smoke-appimage
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn

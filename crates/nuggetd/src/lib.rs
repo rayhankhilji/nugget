@@ -21,6 +21,7 @@ pub mod logging;
 pub mod mcp;
 pub mod mcp_bridge;
 pub mod probes;
+mod rerank;
 pub mod service;
 mod sources;
 

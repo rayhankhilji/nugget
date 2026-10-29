@@ -25,7 +25,8 @@ object per line, over a local socket. The protocol types live in `nugget_core::i
 - Methods that take no parameters accept `{}` (or omitted `params`).
 - Timestamps are RFC 3339 strings. Ids (`SourceId`, `ProviderId`, `EntityId`, `ItemKey`) are strings.
   An `ItemRef` is `{"source": "<source id>", "key": "<item key>"}`.
-- Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`. Localities: `on_device`,
+- Tiers: `triage`, `light`, `synthesis`, `agentic`, `embedding`, `rerank` (marks rerankers in
+  `models.list` and the `local-rerank` runtime provider; never routed). Localities: `on_device`,
   `local_network`, `cloud`.
 - The **Daemon** column says whether today's `nuggetd` implements the method:
   - **yes**: the daemon serves it.
@@ -77,11 +78,14 @@ provider that actually answered after any fallback.
 | Method | Params | Result | Daemon |
 |---|---|---|---|
 | `retrieve.context` | `ContextRequest`: `{query, budget_tokens}` (budget at most 131072) | `ContextResponse`: `text` (passages, each under a `[n]` header), `citations`, `excluded_sensitive` | yes |
-| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`; then `chat.delta` and `chat.done` | yes |
+| `retrieve.ask` | `AskRequest`: `query`, `budget_tokens`, `provider` (optional; used alone, never substituted), `tier` (default `synthesis`), `history` (optional earlier `ChatMessage`s, oldest first) | `AskStarted`: `stream_id`, `provider`, `locality`, `citations`, `excluded_sensitive`, `query_rewrite` (when a follow-up was rewritten); then `chat.delta` and `chat.done` | yes |
 
 A `Citation` is `{n, item, chunk_id, title, url, sensitive}`. For `retrieve.ask` the daemon chooses
 the provider first, then packs the context for it: with a `cloud` provider, sensitive items are left out
 and counted in `excluded_sensitive`, and the context is repacked if it falls back to another provider.
+With `history`, a follow-up question is first rewritten into a standalone query for retrieval, by a
+local (never `cloud`) chat model or, without one, a heuristic; the earlier user and assistant turns
+then go to the model before the question (`system` entries are ignored, and the turns are bounded).
 
 ### Sources and ingest
 

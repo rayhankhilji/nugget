@@ -1,0 +1,211 @@
+{
+  "format": 1,
+  "generated_from": 1,
+  "repository": "https://github.com/rayhankhilji/nugget",
+  "series": [
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "claims.f1",
+      "label": "Claim extraction F1",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.9627329192546584, "target_met": null}
+      ]
+    },
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "claims.unsupported_rate",
+      "label": "Unsupported claims",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "mcp.get_context.p50_ms",
+      "label": "MCP get_context p50",
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.761966, "target_met": null}
+      ]
+    },
+    {
+      "run": "memory",
+      "run_title": "Memory, real stack (M1)",
+      "metric": "freshness.p95_s",
+      "label": "Change to searchable p95",
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": 60.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.435240194, "target_met": true}
+      ]
+    },
+    {
+      "run": "memory",
+      "run_title": "Memory, real stack (M1)",
+      "metric": "retrieval.eval.hybrid.recall@10",
+      "label": "Eval-set hybrid recall@10",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.9047619047619048,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 1.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "perf",
+      "run_title": "Store and retriever performance",
+      "metric": "query.retriever.search.latency.p95_us",
+      "label": "Retriever search p95",
+      "unit": "us",
+      "direction": "lower_is_better",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 30344.73, "target_met": null}
+      ]
+    },
+    {
+      "run": "perf",
+      "run_title": "Store and retriever performance",
+      "metric": "ingest.items_per_s",
+      "label": "Ingest throughput",
+      "unit": "items/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 687.7699598538476, "target_met": null}
+      ]
+    },
+    {
+      "run": "proactive",
+      "run_title": "Proactive cards, real crate (M5)",
+      "metric": "cards.accepted_precision",
+      "label": "Accepted-card precision",
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.9755065970502429, "target_met": null}
+      ]
+    },
+    {
+      "run": "proactive",
+      "run_title": "Proactive cards, real crate (M5)",
+      "metric": "actions.executed_without_approval",
+      "label": "Actions run without approval",
+      "unit": "actions",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "draft",
+      "run_title": "Double Tap drafting, fake model (M3)",
+      "metric": "draft.win_rate_vs_baseline",
+      "label": "Win rate vs screenshot baseline",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.9545454545454546, "target_met": null}
+      ]
+    },
+    {
+      "run": "draft",
+      "run_title": "Double Tap drafting, fake model (M3)",
+      "metric": "draft.nugget.hallucination_rate",
+      "label": "Hallucination rate",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.4,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.25, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "success_rate",
+      "label": "Verified task success",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.8,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 1.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "safety.unconfirmed_risky_actions",
+      "label": "Unconfirmed risky actions",
+      "unit": "actions",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "safety.false_confirmation_rate",
+      "label": "Needless confirmations",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.1,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "safety.injection_compliance_rate",
+      "label": "Injected instructions followed",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-xvfb",
+      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "metric": "success_rate",
+      "label": "Verified task success",
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.8,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 1.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-xvfb",
+      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "metric": "safety.unconfirmed_risky_actions",
+      "label": "Unconfirmed risky actions",
+      "unit": "actions",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    }
+  ]
+}

@@ -1,8 +1,20 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { doubletapApi, errorMessage } from "../api";
+import { useEvent } from "../hooks";
 import { t as translate, useT, type MessageKey } from "../i18n";
 import { detectOs, type Os } from "./platform";
 import { StepHeading, type StepProps } from "./steps";
-import { CHORDS, DEFAULT_WINDOW_MS, loadTrigger, modifiersFor, saveTrigger, type Modifier, type TriggerPref } from "./trigger";
+import {
+  CHORDS,
+  DEFAULT_WINDOW_MS,
+  fromSpec,
+  loadTrigger,
+  modifiersFor,
+  readTrigger,
+  writeTrigger,
+  type Modifier,
+  type TriggerPref,
+} from "./trigger";
 
 const SPEEDS: { ms: number; label: MessageKey }[] = [
   { ms: 250, label: "onboarding.trigger.speed.fast" },
@@ -42,18 +54,61 @@ export function TriggerStep({ headingRef }: StepProps) {
   const keyId = useId();
   const speedId = useId();
   const chordId = useId();
+  // The local copy for the first render; the shell's settings (what Double Tap runs with) next.
   const [pref, setPref] = useState<TriggerPref>(() => loadTrigger(os));
   // Remember both halves so flipping the type back and forth doesn't lose a choice.
   const [lastTap, setLastTap] = useState(() => (pref.kind === "double_tap" ? pref : loadTrigger(os)));
   const [lastChord, setLastChord] = useState<string>(pref.kind === "chord" ? pref.accelerator : CHORDS[0]);
+  const [error, setError] = useState<string | null>(null);
+  // Saves run one after another; only the latest one's answer is shown.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const latest = useRef(0);
 
-  const update = (next: TriggerPref) => {
+  const show = (next: TriggerPref) => {
     setPref(next);
-    saveTrigger(next);
     if (next.kind === "double_tap") setLastTap(next);
     else setLastChord(next.accelerator);
   };
+
+  useEffect(() => {
+    let alive = true;
+    const seq = latest.current;
+    readTrigger(os)
+      .then((p) => alive && seq === latest.current && show(p))
+      .catch(() => {
+        /* keep the local copy; saving reports what's wrong */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [os]);
+  // A change saved elsewhere (the Double Tap settings page, another window).
+  useEvent(doubletapApi.onSettings, (s) => show(fromSpec(s.trigger)));
+
+  const update = (next: TriggerPref) => {
+    const before = pref;
+    const seq = ++latest.current;
+    show(next);
+    setError(null);
+    const run = queue.current.then(() => writeTrigger(next));
+    queue.current = run.catch(() => {});
+    run
+      .then((saved) => {
+        if (seq === latest.current) show(saved);
+      })
+      .catch((err: unknown) => {
+        if (seq !== latest.current) return;
+        show(before);
+        setError(translate("doubletap.saveFailed", { error: errorMessage(err) }));
+      });
+  };
   const tap = lastTap.kind === "double_tap" ? lastTap : { kind: "double_tap" as const, modifier: modifiersFor(os)[0]!, window_ms: DEFAULT_WINDOW_MS };
+  // The shell may hold a value onboarding doesn't offer (set in Double Tap settings): list it too.
+  const modifiers = pref.kind === "double_tap" && !modifiersFor(os).includes(pref.modifier) ? [...modifiersFor(os), pref.modifier] : modifiersFor(os);
+  const speeds = pref.kind === "double_tap" && !SPEEDS.some((s) => s.ms === pref.window_ms)
+    ? [...SPEEDS.map((s) => ({ ms: s.ms, label: t(s.label) })), { ms: pref.window_ms, label: t("format.latency.ms", { n: pref.window_ms }) }]
+    : SPEEDS.map((s) => ({ ms: s.ms, label: t(s.label) }));
+  const chords: string[] = pref.kind === "chord" && !(CHORDS as readonly string[]).includes(pref.accelerator) ? [...CHORDS, pref.accelerator] : [...CHORDS];
 
   return (
     <>
@@ -93,7 +148,7 @@ export function TriggerStep({ headingRef }: StepProps) {
               value={pref.modifier}
               onChange={(e) => update({ ...pref, modifier: e.target.value as Modifier })}
             >
-              {modifiersFor(os).map((m) => (
+              {modifiers.map((m) => (
                 <option key={m} value={m}>
                   {modifierLabel(m, os)}
                 </option>
@@ -107,9 +162,9 @@ export function TriggerStep({ headingRef }: StepProps) {
               value={pref.window_ms}
               onChange={(e) => update({ ...pref, window_ms: Number(e.target.value) })}
             >
-              {SPEEDS.map((s) => (
+              {speeds.map((s) => (
                 <option key={s.ms} value={s.ms}>
-                  {t(s.label)}
+                  {s.label}
                 </option>
               ))}
             </select>
@@ -120,7 +175,7 @@ export function TriggerStep({ headingRef }: StepProps) {
           <div className="field-inline">
             <label htmlFor={chordId}>{t("onboarding.trigger.combination")}</label>
             <select id={chordId} value={pref.accelerator} onChange={(e) => update({ kind: "chord", accelerator: e.target.value })}>
-              {CHORDS.map((c) => (
+              {chords.map((c) => (
                 <option key={c} value={c}>
                   {acceleratorLabel(c, os)}
                 </option>
@@ -133,7 +188,13 @@ export function TriggerStep({ headingRef }: StepProps) {
       <p className="note" role="status">
         {t("onboarding.trigger.summary", { trigger: triggerLabel(pref, os) })}
       </p>
-      <p className="muted small">{t("onboarding.trigger.saved")}</p>
+      {error ? (
+        <p className="field-error" role="alert">
+          {error}
+        </p>
+      ) : (
+        <p className="muted small">{t("onboarding.trigger.saved")}</p>
+      )}
     </>
   );
 }

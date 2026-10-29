@@ -732,7 +732,9 @@ impl McpService {
                 .serve_http(HttpConfig {
                     port: cfg.port,
                     allowed_origins: cfg.allowed_origins.clone(),
-                    ..HttpConfig::default()
+                    max_connections: cfg.max_connections,
+                    header_timeout_ms: cfg.header_timeout_ms,
+                    body_timeout_ms: cfg.body_timeout_ms,
                 })
                 .await
             {

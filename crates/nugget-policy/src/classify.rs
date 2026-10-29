@@ -12,6 +12,34 @@
 //! - the context: payment fields in the form, a compose window, the dialog text. A generic
 //!   affirmative ("OK", "Continue", "✓", an icon-only button, Enter) inherits the context's risk,
 //!   so a send hidden behind "OK" in a compose window is still a send.
+//!
+//! # Context rules for clicked labels
+//!
+//! Wording alone must not turn a reversible click into a confirmation. For clicks (`click`,
+//! `press`, `toggle`, ... and unknown verbs) a label keyword is set aside, one keyword at a time,
+//! when the [`ActionContext`] shows the word does not describe what the click does:
+//! - **Toggles.** A check box, switch, radio button or checkable menu item sets a preference:
+//!   Send and Spend words do not count ("Send me the newsletter"); Destroy and Security words
+//!   still do ("Delete my data when I quit", "Allow remote access").
+//! - **Content rows.** A target inside a collection (an ancestor or the target itself is a list,
+//!   list item, row, cell, table, tree, ...) whose label reads as content (it matches the row's
+//!   name, has a `Name: subject` shape, or ends with `?`; length alone is not enough, so a
+//!   listed "Click here to delete your account" still counts): a keyword counts only when it
+//!   *leads* the label. "Sam Ortiz: Renew the contract?" opens a message;
+//!   "Delete message" or a row's "Delete" still destroys.
+//! - **Cart lines.** In a shopping cart (cart, basket, bag, trolley, ... in the ancestors, the
+//!   window title, the URL, the dialog or the label itself), removal words ("Remove", "Delete",
+//!   "Remove one Gel pen", "Remove from cart", "Clear all") take a line out of a cart, which is
+//!   reversible; a price in such a removal label does not count either. A label that names
+//!   something else (account, card, payment method, address, data, ...) and every non-removal
+//!   word ("permanently", "unsubscribe") still count.
+//! - **Checkout navigation.** A bare "Checkout" / "Check out" / "Proceed to checkout" (and the
+//!   Dutch and Chinese equivalents) only opens the checkout form, unless the context shows it
+//!   commits: payment fields in the form, a submitting button in a form with real fields, or a
+//!   dialog, window title or URL that is about paying. A price in the label is still Spend. This
+//!   also applies without any context; a checkout *URL* still counts as Spend.
+//!
+//! Nothing here lowers the declared risk, and navigation verbs and typed text are unaffected.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -54,6 +82,9 @@ pub struct RiskClassifier {
     cancel_phrases: Vec<Keyword>,
     store_labels: Vec<Keyword>,
     currency_codes: Vec<Keyword>,
+    cart_words: Vec<Keyword>,
+    cart_protected: Vec<Keyword>,
+    search_fields: Vec<Keyword>,
 }
 
 impl Default for RiskClassifier {
@@ -122,6 +153,9 @@ impl RiskClassifier {
             cancel_phrases: kw(CANCEL_PHRASES),
             store_labels: kw(STORE_LABELS),
             currency_codes: kw(CURRENCY_CODES),
+            cart_words: kw(CART_WORDS),
+            cart_protected: kw(CART_PROTECTED),
+            search_fields: kw(SEARCH_FIELDS),
         }
     }
 
@@ -169,10 +203,14 @@ impl RiskClassifier {
             VerbKind::Activate | VerbKind::Navigate | VerbKind::Other
         );
         if label_counts && let Some(label) = &label {
-            if let Some((class, word)) = self.keyword_risk(label) {
+            // Clicks get the context rules (see the module docs); navigation does not.
+            let scope = matches!(kind, VerbKind::Activate | VerbKind::Other)
+                .then(|| self.label_scope(label, ctx));
+            let (hit, skip_price) = self.label_risk(label, scope.as_ref());
+            if let Some((class, word)) = hit {
                 acc.raise(class, || format!("label matches {class} keyword “{word}”"));
             }
-            if self.has_price(label) {
+            if !skip_price && self.has_price(label) {
                 acc.raise(RiskClass::Spend, || "label shows a price".into());
             }
         }
@@ -350,6 +388,127 @@ impl RiskClassifier {
         best
     }
 
+    /// The highest label keyword that the context does not set aside, and whether the price
+    /// rule is set aside too (a removal from a cart). `scope` is `None` for non-click verbs.
+    fn label_risk(
+        &self,
+        label: &str,
+        scope: Option<&LabelScope>,
+    ) -> (Option<(RiskClass, String)>, bool) {
+        let folded = fold_confusables(label);
+        let folded = (folded != label).then_some(folded);
+        let mut best: Option<(RiskClass, &Keyword)> = None;
+        let mut skip_price = false;
+        for (kw, class) in &self.label_keywords {
+            if best.is_some_and(|(b, _)| b >= *class) {
+                continue;
+            }
+            if !(kw.matches(label) || folded.as_deref().is_some_and(|f| kw.matches(f))) {
+                continue;
+            }
+            if let Some(scope) = scope {
+                let leading = leads(kw, label) || folded.as_deref().is_some_and(|f| leads(kw, f));
+                match scope.exempt(kw, *class, leading) {
+                    Some(Exempt::CartRemoval) => {
+                        skip_price |= leading;
+                        continue;
+                    }
+                    Some(Exempt::Other) => continue,
+                    None => {}
+                }
+            }
+            best = Some((*class, kw));
+        }
+        (
+            best.map(|(class, kw)| (class, kw.as_str().to_string())),
+            skip_price,
+        )
+    }
+
+    /// What the context says about a clicked label (see the module docs).
+    fn label_scope(&self, label: &str, ctx: &ActionContext) -> LabelScope {
+        let role = ctx.role.as_deref().map(role_key);
+        let toggle = role.as_deref().is_some_and(|r| TOGGLE_ROLES.contains(&r));
+        let ancestors: Vec<(String, Option<String>)> = ctx
+            .ancestors
+            .iter()
+            .map(|a| (role_key(&a.role), a.name.as_deref().map(normalize)))
+            .collect();
+        let collection = role.as_deref().is_some_and(|r| ITEM_ROLES.contains(&r))
+            || ancestors.iter().any(|(r, _)| {
+                COLLECTION_ROLES.contains(&r.as_str()) || ITEM_ROLES.contains(&r.as_str())
+            });
+        let content_like = collection && {
+            let words = lead_words(label);
+            let core = words.join(" ");
+            let names_row = ancestors.iter().any(|(r, name)| {
+                ITEM_ROLES.contains(&r.as_str())
+                    && name.as_deref().is_some_and(|n| {
+                        let n = n.trim();
+                        n.split(' ').count() >= 2
+                            && (core.contains(n) || (words.len() >= 2 && n.contains(&core)))
+                    })
+            });
+            names_row || core.contains(": ") || core.trim_end().ends_with(['?', '？'])
+        };
+        let mentions_cart = |t: &str| self.cart_words.iter().any(|k| k.matches(t));
+        let cart = mentions_cart(label)
+            || ancestors
+                .iter()
+                .any(|(_, n)| n.as_deref().is_some_and(mentions_cart))
+            || [
+                ctx.window_title.as_deref(),
+                ctx.url.as_deref(),
+                ctx.dialog_text.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(|t| mentions_cart(&normalize(t)));
+        let protected = cart && {
+            let folded = fold_confusables(label);
+            self.cart_protected
+                .iter()
+                .any(|k| k.matches(label) || k.matches(&folded))
+        };
+        let checkout_nav = CHECKOUT_NAV.contains(&checkout_core(label).as_str());
+        let checkout_commits = checkout_nav && self.checkout_commits(ctx);
+        LabelScope {
+            toggle,
+            content_like,
+            cart: cart && !protected,
+            checkout_nav: checkout_nav && !checkout_commits,
+        }
+    }
+
+    /// Whether a "Checkout" button, in this context, commits the purchase rather than opening
+    /// the checkout form.
+    fn checkout_commits(&self, ctx: &ActionContext) -> bool {
+        let fields: Vec<String> = ctx.form_fields.iter().map(|f| normalize(f)).collect();
+        let payment = fields
+            .iter()
+            .any(|f| self.payment_fields.iter().any(|k| k.matches(f)));
+        let real_fields = fields
+            .iter()
+            .any(|f| !trim_label(f).is_empty() && !self.search_fields.iter().any(|k| k.matches(f)));
+        let about_paying = |t: &str| {
+            let t = normalize(t);
+            self.has_price(&t)
+                || self
+                    .keyword_risk(&t)
+                    .is_some_and(|(c, _)| c == RiskClass::Spend)
+        };
+        payment
+            || (ctx.submits == Some(true) && real_fields)
+            || [
+                ctx.dialog_text.as_deref(),
+                ctx.window_title.as_deref(),
+                ctx.url.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .any(about_paying)
+    }
+
     fn has_price(&self, label: &str) -> bool {
         label.chars().any(|c| c.is_ascii_digit())
             && (label.chars().any(|c| CURRENCY_SYMBOLS.contains(&c))
@@ -413,6 +572,89 @@ impl RiskClassifier {
         let _ = action;
         best
     }
+}
+
+/// Why a label keyword is set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Exempt {
+    /// A removal word on a cart line (the price rule is set aside too when it leads).
+    CartRemoval,
+    Other,
+}
+
+/// The context of a clicked label, as far as the keyword exemptions need it.
+#[derive(Debug, Clone, Copy)]
+struct LabelScope {
+    /// The target is a check box, switch, radio button or checkable menu item.
+    toggle: bool,
+    /// The target sits in a collection and its label reads as content.
+    content_like: bool,
+    /// The target is in a shopping cart and its label names nothing but the line.
+    cart: bool,
+    /// The label is a bare checkout step and nothing shows it commits a purchase.
+    checkout_nav: bool,
+}
+
+impl LabelScope {
+    fn exempt(&self, kw: &Keyword, class: RiskClass, leading: bool) -> Option<Exempt> {
+        let word = kw.as_str();
+        if class == RiskClass::Destroy && self.cart && CART_REMOVALS.contains(&word) {
+            return Some(Exempt::CartRemoval);
+        }
+        if self.toggle && matches!(class, RiskClass::Send | RiskClass::Spend) {
+            return Some(Exempt::Other);
+        }
+        if self.checkout_nav && class == RiskClass::Spend && CHECKOUT_WORDS.contains(&word) {
+            return Some(Exempt::Other);
+        }
+        if self.content_like && !leading {
+            return Some(Exempt::Other);
+        }
+        None
+    }
+}
+
+/// A role in a comparable form: lowercase, no separators (`check_box`, `CheckBox` and
+/// `checkbox` are all `checkbox`).
+fn role_key(role: &str) -> String {
+    role.chars()
+        .filter(|c| !matches!(c, '_' | '-' | ' '))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The words of a normalized label, without leading symbol-only tokens (icons, bullets) and a
+/// leading role word (`button "Delete"`).
+fn lead_words(label: &str) -> Vec<&str> {
+    let mut words = label
+        .split(' ')
+        .skip_while(|w| !w.chars().any(char::is_alphanumeric))
+        .peekable();
+    if words
+        .peek()
+        .is_some_and(|w| ROLE_WORDS.contains(&trim_label(w)))
+    {
+        words.next();
+    }
+    words.collect()
+}
+
+/// Whether `kw` matches at the start of `label` (its first words).
+fn leads(kw: &Keyword, label: &str) -> bool {
+    let words = lead_words(label);
+    if words.is_empty() {
+        return false;
+    }
+    let n = kw.as_str().split(' ').count().clamp(1, words.len());
+    kw.matches(&words[..n].join(" "))
+}
+
+/// A label reduced for comparison with [`CHECKOUT_NAV`]: no role word, no trailing count or
+/// parenthetical ("Checkout (3 items)").
+fn checkout_core(label: &str) -> String {
+    let core = lead_words(label).join(" ");
+    let core = core.split(['(', '[']).next().unwrap_or("");
+    trim_label(core).to_string()
 }
 
 fn verb_kind(verb: &str) -> VerbKind {
@@ -1502,6 +1744,198 @@ const CANCEL_PHRASES: &[&str] = &[
     "cancel your account",
     "cancel your booking",
     "cancel your reservation",
+];
+
+/// Roles that toggle a preference (as [`role_key`] spells them).
+const TOGGLE_ROLES: &[&str] = &[
+    "checkbox",
+    "switch",
+    "toggleswitch",
+    "radio",
+    "radiobutton",
+    "menuitemcheckbox",
+    "menuitemradio",
+];
+
+/// Roles of one entry in a collection (as [`role_key`] spells them).
+const ITEM_ROLES: &[&str] = &[
+    "listitem", "row", "cell", "gridcell", "treeitem", "option", "article",
+];
+
+/// Roles of a collection (as [`role_key`] spells them).
+const COLLECTION_ROLES: &[&str] = &[
+    "list", "table", "tree", "grid", "treegrid", "listbox", "feed", "log", "rowgroup", "outline",
+];
+
+/// Role words an executor may put in front of a label (`button "Delete"`).
+const ROLE_WORDS: &[&str] = &["button", "link", "menuitem", "tab", "checkbox", "option"];
+
+/// Words that place the action in a shopping cart. (Russian `корзина` is left out: it also
+/// means the trash.)
+const CART_WORDS: &[&str] = &[
+    "cart",
+    "carts",
+    "shopping cart",
+    "basket",
+    "baskets",
+    "bag",
+    "shopping bag",
+    "trolley",
+    "warenkorb",
+    "einkaufswagen",
+    "panier",
+    "carrito",
+    "cesta",
+    "carrinho",
+    "carrello",
+    "winkelwagen",
+    "winkelmand",
+    "winkelmandje",
+    "koszyk",
+    "sepet*",
+    "购物车",
+    "購物車",
+    "カート",
+    "買い物かご",
+    "장바구니",
+    "سلة التسوق",
+    "कार्ट",
+];
+
+/// Destroy keywords ([`Keyword::as_str`] form) that, in a cart, take a line out of it.
+const CART_REMOVALS: &[&str] = &[
+    "delet",
+    "remov",
+    "discard",
+    "clear all",
+    "eliminar",
+    "borrar",
+    "quitar",
+    "vaciar",
+    "excluir",
+    "apagar",
+    "remover",
+    "supprim",
+    "retirer",
+    "vider",
+    "lösch",
+    "entfern",
+    "leeren",
+    "elimina",
+    "cancella",
+    "rimuovi",
+    "verwijder",
+    "usuń",
+    "kaldır",
+    "sil",
+    "删除",
+    "刪除",
+    "移除",
+    "清空",
+    "削除",
+    "삭제",
+    "제거",
+    "حذف",
+    "إزالة",
+    "ازالة",
+    "हटाएं",
+    "हटाएँ",
+];
+
+/// Things a removal label in a cart page may name that are not a cart line.
+const CART_PROTECTED: &[&str] = &[
+    "account*",
+    "card",
+    "cards",
+    "payment*",
+    "method*",
+    "address*",
+    "profile*",
+    "data",
+    "history",
+    "file*",
+    "folder*",
+    "photo*",
+    "message*",
+    "mail*",
+    "email*",
+    "contact*",
+    "subscription*",
+    "membership*",
+    "password*",
+    "user*",
+    "member*",
+    "wallet*",
+    "saved",
+    "everything",
+    "permanently",
+    "cuenta",
+    "tarjeta",
+    "compte",
+    "carte",
+    "konto",
+    "karte",
+    "conto",
+    "carta",
+    "cartão",
+    "rekening",
+    "kaart",
+    "hesap",
+    "kart",
+    "аккаунт",
+    "карт*",
+    "账户",
+    "帳戶",
+    "账号",
+    "帳號",
+    "卡",
+    "アカウント",
+    "カード",
+    "계정",
+    "카드",
+    "حساب",
+    "بطاقة",
+    "खाता",
+];
+
+/// Spend keywords ([`Keyword::as_str`] form) that name the checkout step.
+const CHECKOUT_WORDS: &[&str] = &["checkout", "check out", "afrekenen", "结账", "結帳", "结算"];
+
+/// Whole labels (after [`checkout_core`]) that only move from the cart to the checkout form.
+const CHECKOUT_NAV: &[&str] = &[
+    "checkout",
+    "check out",
+    "go to checkout",
+    "proceed to checkout",
+    "continue to checkout",
+    "proceed to check out",
+    "go to check out",
+    "secure checkout",
+    "naar afrekenen",
+    "verder naar afrekenen",
+    "afrekenen",
+    "结账",
+    "去结账",
+    "結帳",
+    "去結帳",
+    "结算",
+    "去结算",
+];
+
+/// Form fields that do not make a form something to submit (a search box next to the cart).
+const SEARCH_FIELDS: &[&str] = &[
+    "search*",
+    "find",
+    "filter*",
+    "query",
+    "buscar",
+    "rechercher",
+    "suche*",
+    "cerca",
+    "zoeken",
+    "搜索",
+    "検索",
+    "검색",
 ];
 
 const STORE_LABELS: &[&str] = &["get", "install*", "update", "download", "obtain", "buy*"];

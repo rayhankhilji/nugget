@@ -10,6 +10,7 @@ mod daemon;
 mod doubletap;
 mod history;
 mod login;
+mod notify;
 mod open;
 mod settings;
 mod tray;
@@ -42,6 +43,7 @@ fn main() {
         // Driven from `commands::notify` only; the webview has no `notification:` permission.
         .plugin(tauri_plugin_notification::init())
         .manage(daemon::Daemon::new())
+        .manage(notify::PendingToday::default())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
             commands::start_daemon,
@@ -145,10 +147,14 @@ fn main() {
             app.manage(window_state);
             autostart::reconcile(app.handle());
             agent::setup(app);
-            // Connect early so the tray reflects the daemon state before the window asks.
+            // Connect early so the tray reflects the daemon state before the window asks, starting
+            // the bundled nuggetd if none is answering (the Offline screen offers a retry).
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let daemon = handle.state::<daemon::Daemon>();
+                if let Err(e) = daemon.start(&handle).await {
+                    tracing::warn!(error = %e, "couldn't start nuggetd");
+                }
                 let _ = daemon.connection_info(&handle).await;
             });
             updater::spawn_background_checks(app.handle());
@@ -157,6 +163,7 @@ fn main() {
         })
         .on_window_event(|window, event| {
             doubletap::on_window_event(window, event);
+            notify::on_window_event(window, event);
             // Events can arrive before `setup` has managed the state.
             let Some(state) = window.try_state::<window_state::WindowState>() else {
                 return;
@@ -173,6 +180,9 @@ fn main() {
                     if tray::has_tray(window.app_handle()) {
                         api.prevent_close();
                         let _ = window.hide();
+                    } else {
+                        // Hidden helper windows (the Double Tap overlay) would keep the app alive.
+                        window.app_handle().exit(0);
                     }
                 }
                 _ => {}
