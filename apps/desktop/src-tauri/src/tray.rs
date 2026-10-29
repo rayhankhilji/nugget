@@ -9,8 +9,11 @@
 //!   runtime. AppIndicator reports no clicks, so everything (state line included) lives in the
 //!   menu. The tray is skipped, with one log line, when no StatusNotifier host is on the session
 //!   bus (e.g. GNOME without the AppIndicator extension), when the library is missing, or when
-//!   `NUGGET_TRAY=off`; `NUGGET_TRAY=on` forces it (XEmbed-only trays). Without a tray, closing
-//!   the window quits Nugget, and launching it again focuses the running window (single instance).
+//!   `NUGGET_TRAY=off`; `NUGGET_TRAY=on` forces it (XEmbed-only trays).
+//!
+//! `NUGGET_TRAY=off` skips the tray on every platform (the installer smoke tests use it). Without
+//! a tray, closing the window quits Nugget, and launching it again focuses the running window
+//! (single instance).
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -34,8 +37,7 @@ pub struct Tray<R: Runtime> {
 
 /// Create the tray, or log once why there is none. The app works either way (see module docs).
 pub fn init<R: Runtime>(app: &tauri::App<R>) {
-    #[cfg(target_os = "linux")]
-    if let Some(why) = linux::skip_reason() {
+    if let Some(why) = skip_reason() {
         tracing::info!(reason = %why, "no tray icon; closing the window quits Nugget");
         return;
     }
@@ -153,18 +155,32 @@ pub fn set_update<R: Runtime>(app: &AppHandle<R>, version: Option<&str>) {
     }
 }
 
+/// `Some(reason)` when the tray should not be created.
+fn skip_reason() -> Option<String> {
+    match std::env::var("NUGGET_TRAY").ok().as_deref().map(str::trim) {
+        Some("off" | "0") => Some("NUGGET_TRAY=off".into()),
+        Some("on" | "1") => None,
+        _ => platform_skip_reason(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn platform_skip_reason() -> Option<String> {
+    linux::skip_reason()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn platform_skip_reason() -> Option<String> {
+    None
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     /// Desktops show AppIndicator icons through a StatusNotifier host that owns this name.
     const WATCHER: &str = "org.kde.StatusNotifierWatcher";
 
-    /// `Some(reason)` when the tray should not be created.
+    /// `Some(reason)` when no StatusNotifier host can show the tray.
     pub fn skip_reason() -> Option<String> {
-        match std::env::var("NUGGET_TRAY").ok().as_deref().map(str::trim) {
-            Some("off" | "0") => return Some("NUGGET_TRAY=off".into()),
-            Some("on" | "1") => return None,
-            _ => {}
-        }
         match has_watcher() {
             Ok(true) => None,
             Ok(false) => Some(format!(

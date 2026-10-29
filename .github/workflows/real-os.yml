@@ -36,12 +36,144 @@ env:
 
 jobs:
   # ---- BEGIN smoke (installer smoke tests) ----
-  smoke-placeholder:
-    name: Installer smoke (placeholder)
-    if: false
-    runs-on: ubuntu-latest
+  # Build the dmg / NSIS installer the way release.yml does, then install and launch it: the
+  # `Nugget` window must appear, the app must start and connect to the bundled nuggetd, closing
+  # the window must quit the app (status 0), and the daemon must stop cleanly.
+  # See packaging/scripts/smoke-macos.sh and smoke-windows.ps1.
+  smoke-macos:
+    name: Installer smoke (macOS dmg)
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:smoke]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      TARGET: aarch64-apple-darwin
     steps:
-      - run: "true"
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-os-smoke-${{ env.TARGET }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      # Ad-hoc signed, as a release dry run without an Apple certificate.
+      - name: Build the dmg
+        working-directory: apps/desktop
+        run: |
+          echo '{"bundle":{"macOS":{"signingIdentity":"-"}}}' > "$RUNNER_TEMP/signing.json"
+          pnpm tauri build --ci --target "$TARGET" --bundles app,dmg \
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+
+      - name: Smoke-test the dmg
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: |
+          shopt -s nullglob
+          dmgs=(target/"$TARGET"/release/bundle/dmg/*.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
+          packaging/scripts/smoke-macos.sh "${dmgs[0]}"
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-os-smoke-macos
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn
+
+  smoke-windows:
+    name: Installer smoke (Windows NSIS)
+    if: github.event_name != 'push' || contains(github.event.head_commit.message, '[ci:smoke]') || contains(github.event.head_commit.message, '[ci:all]')
+    runs-on: windows-latest
+    timeout-minutes: 75
+    env:
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-os-smoke-${{ env.TARGET }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        shell: bash
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      - name: Build the NSIS installer
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          pnpm tauri build --ci --target "$TARGET" --bundles nsis \
+            --config src-tauri/tauri.bundle.conf.json
+
+      - name: Smoke-test the NSIS installer
+        shell: pwsh
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: |
+          $found = @(Get-ChildItem "target/$env:TARGET/release/bundle/nsis" -Filter '*-setup.exe')
+          if ($found.Count -ne 1) { Write-Output "::error::expected one -setup.exe, found $($found.Count)"; exit 1 }
+          ./packaging/scripts/smoke-windows.ps1 $found[0].FullName
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-os-smoke-windows
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn
   # ---- END smoke ----
 
   # ---- BEGIN a11y (accessibility against native test apps) ----
