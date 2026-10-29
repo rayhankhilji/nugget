@@ -67,7 +67,7 @@ jobs:
           if [ "${{ matrix.compositor }}" = sway ]; then
             extra="sway wtype xdg-desktop-portal-wlr"
           else
-            extra="kwin-wayland xdg-desktop-portal-kde qtwayland5"
+            extra="kwin-wayland xdg-desktop-portal-kde qtwayland5 libgl1-mesa-dri libegl1"
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends $common $extra

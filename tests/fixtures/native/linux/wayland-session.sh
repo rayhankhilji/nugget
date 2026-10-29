@@ -69,13 +69,15 @@ EOF
     ;;
 kwin)
     export XDG_CURRENT_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=5
-    export QT_QPA_PLATFORM=wayland
     # kwin_wayland carries a file capability (cap_sys_nice), which a no_new_privs container
     # refuses to exec ("Operation not permitted"); a plain copy has none and runs anywhere.
     cp "$(command -v kwin_wayland)" "$runtime/kwin_wayland"
-    "$runtime/kwin_wayland" --virtual --no-lockscreen --width 1280 --height 800 \
+    # No GPU: composite with QPainter rather than through EGL.
+    KWIN_COMPOSE=Q "$runtime/kwin_wayland" --virtual --no-lockscreen --width 1280 --height 800 \
         --socket wayland-1 >"$logs/kwin.log" 2>&1 &
     pids+=($!)
+    # Qt clients started later (the KDE portal backend) connect to it.
+    export QT_QPA_PLATFORM=wayland
     ;;
 *)
     echo "wayland-session: unknown compositor $compositor" >&2
