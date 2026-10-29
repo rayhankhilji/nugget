@@ -295,6 +295,11 @@ async fn shutdown_stops_watchers_and_hung_connectors() {
     h.add("fake-1").await;
     h.add("fake-2").await;
     h.wait_state("fake-1", SourceState::Watching).await;
+    // The state turns Watching just before `watch` is entered; wait for the watcher itself.
+    eventually("watch started", || {
+        watcher.watch_calls.load(Ordering::SeqCst) == 1
+    })
+    .await;
     eventually("hung pass started", || hung.calls() == 1).await;
 
     tokio::time::timeout(Duration::from_secs(5), h.ingest.shutdown())
@@ -439,8 +444,15 @@ async fn huge_errors_are_capped_in_status_and_item_errors() {
     assert!(!errors.is_empty());
     assert!(errors.iter().all(|e| e.message.chars().count() <= max));
     // Progress events carry the capped message too.
+    // The state can turn Error before the progress event is sent: wait for it (bounded).
     let mut saw = false;
-    while let Ok(ev) = events.try_recv() {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !saw {
+        let ev = match tokio::time::timeout_at(deadline, events.recv()).await {
+            Ok(Ok(ev)) => ev,
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) | Err(_) => break,
+        };
         if let IngestEvent::Progress(p) = ev
             && let Some(e) = p.error
         {
