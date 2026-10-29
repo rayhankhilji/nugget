@@ -1,6 +1,7 @@
 //! Registered suites. See `bench/README.md` for methodology.
 
 pub mod cua;
+pub mod doubletap;
 pub mod draft;
 pub mod knowledge;
 pub mod memory;

@@ -209,9 +209,8 @@ pub fn pick<'a>(
             .iter()
             .find(|m| m.id == id)
             .ok_or_else(|| BenchError::Failed(format!("model `{id}` is not in the manifest"))),
-        None => smallest(models, tiers).ok_or_else(|| {
-            BenchError::Failed(format!("the manifest has no model for {tiers:?}"))
-        }),
+        None => smallest(models, tiers)
+            .ok_or_else(|| BenchError::Failed(format!("the manifest has no model for {tiers:?}"))),
     }
 }
 
@@ -377,7 +376,10 @@ impl LocalModels {
         ctx.param("local.hardware", self.host.to_json());
         ctx.param("local.thinking", self.thinking.as_str());
         ctx.param("local.install_s", round2(self.install_s));
-        for (key, s) in [("local.chat", &self.chat), ("local.embedding", &self.embedding)] {
+        for (key, s) in [
+            ("local.chat", &self.chat),
+            ("local.embedding", &self.embedding),
+        ] {
             if let Some(s) = s {
                 ctx.param(
                     key,

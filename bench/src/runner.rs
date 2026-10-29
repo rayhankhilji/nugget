@@ -167,6 +167,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::perf::PerfBench),
         Box::new(suites::proactive::ProactiveBench),
         Box::new(suites::draft::DraftBench),
+        Box::new(suites::doubletap::DoubleTapBench),
         Box::new(suites::cua::CuaBench::default()),
         Box::new(suites::knowledge::KnowledgeBench),
     ]
@@ -323,13 +324,22 @@ mod tests {
         let names: Vec<&str> = registry().iter().map(|b| b.name()).collect();
         assert_eq!(
             names,
-            ["memory", "perf", "proactive", "draft", "cua", "knowledge"]
+            [
+                "memory",
+                "perf",
+                "proactive",
+                "draft",
+                "doubletap",
+                "cua",
+                "knowledge"
+            ]
         );
         assert!(find("proactive").is_some_and(|b| b.implemented()));
         assert!(find("knowledge").is_some_and(|b| b.implemented()));
         assert!(find("perf").is_some_and(|b| b.implemented()));
         assert!(find("memory").is_some_and(|b| b.implemented()));
         assert!(find("draft").is_some_and(|b| b.implemented()));
+        assert!(find("doubletap").is_some_and(|b| b.implemented()));
         assert!(find("cua").is_some_and(|b| b.implemented()));
         assert!(find("nope").is_none());
         for b in registry() {
