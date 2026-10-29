@@ -36,6 +36,14 @@ jobs:
       - name: Check the book against the code
         run: python3 docs/book/check-refs.py
 
+      # The README benchmarks table is generated from bench/results/latest.json by
+      # scripts/bench-readme.py; fail if someone changed one without regenerating the other.
+      - name: Check the README benchmarks table
+        run: python3 scripts/bench-readme.py --check
+
+      - name: Test the benchmark scripts
+        run: python3 -m unittest discover -s scripts/bench-tests -v
+
       # mdBook (MPL-2.0) is a build tool only; it is not linked into Nugget. Prebuilt, pinned.
       - name: Install mdBook and mdbook-linkcheck
         uses: taiki-e/install-action@v2

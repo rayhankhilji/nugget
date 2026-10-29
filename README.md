@@ -48,6 +48,17 @@ details.
 How this compares with Sentient OS, with sources for every claim:
 [docs/compare/sentient-os.md](docs/compare/sentient-os.md).
 
+## Benchmarks
+
+These numbers come from a release build on a GitHub-hosted Linux runner, with deterministic
+fixtures and seeds. Runs marked "fake model" or "in process" use in-process stand-ins instead of a
+real model, so they measure Nugget's own pipeline, not a frontier model. What each suite and metric
+means: [bench/README.md](bench/README.md).
+
+<!-- bench:begin -->
+_Not generated yet: run `python3 scripts/bench-readme.py` with `bench/results/latest.json` present._
+<!-- bench:end -->
+
 ## Architecture
 
 Solid lines run today; dashed lines are being wired in. The
