@@ -31,16 +31,19 @@ jobs:
   # ---- Linux Wayland ----
   # A private headless Wayland session (tests/fixtures/native/linux/wayland-session.sh): a session
   # bus, the compositor, the accessibility bus and the XDG portals, with a GTK 4 fixture app
-  # running natively on Wayland (GDK_BACKEND=wayland, no XWayland). Two compositors, because no
-  # single one on Ubuntu 24.04 covers both portal outcomes:
+  # running natively on Wayland (GDK_BACKEND=wayland, no XWayland). Two compositors, one per
+  # portal outcome (ubuntu-latest is Ubuntu 26.04):
   # - sway (wlroots headless): wlr-data-control, so the Wayland clipboard works; its portal
   #   backend (xdg-desktop-portal-wlr) has no GlobalShortcuts, so nugget-hotkey's documented
-  #   "portal unavailable" error is tested. GNOME's mutter is not used: Ubuntu 24.04 ships
-  #   GNOME 46, whose portal gains GlobalShortcuts only in 48, and it has no data control.
-  # - kwin (kwin_wayland --virtual + xdg-desktop-portal-kde 5.27): GlobalShortcuts exists, so
-  #   the real portal session is created and the bind requested. Plasma 5.27 answers the bind
-  #   by opening System Settings' shortcuts page for the user to assign the keys (the manual
-  #   step); the test checks everything up to it.
+  #   "portal unavailable" error is tested.
+  # - kwin (kwin_wayland --virtual as root, xdg-desktop-portal-kde): GlobalShortcuts exists.
+  #   xdg-desktop-portal 1.20 then refuses the session to the test process ("An app id is
+  #   required": it is neither sandboxed nor in a systemd app scope, and its host registration
+  #   is not resolved); the test checks the refusal and its reason. With an older portal
+  #   (Ubuntu 24.04, Plasma 5.27) the session is created and the bind answered, and the keys
+  #   are left to the user in System Settings: the manual step.
+  # GNOME (mutter --headless) is not used: no wlr-data-control, and its GlobalShortcuts bind
+  # needs a consent dialog anyway.
   # Both run nugget-a11y over AT-SPI on the GTK 4 app (crates/nugget-a11y/tests/linux_wayland.rs)
   # and Double Tap's read -> draft (scripted provider) -> insert -> read-back path
   # (crates/nugget-hotkey/tests/wayland_it.rs), with timings in the job summary.
@@ -121,7 +124,7 @@ jobs:
             echo "|---|---|---|---|---|---|---|---|---|---|---|"
             cat "$doubletap"
             echo
-            grep -h '^DOUBLETAP-WAYLAND\|^DOUBLETAP-A11Y\|MANUAL STEP' "$NUGGET_WAYLAND_LOGS/wayland_it.log" | sed 's/^/    /' || true
+            grep -h '^DOUBLETAP-WAYLAND\|^DOUBLETAP-A11Y\|MANUAL STEP\|^STOP:' "$NUGGET_WAYLAND_LOGS/wayland_it.log" | sed 's/^/    /' || true
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
