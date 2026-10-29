@@ -659,17 +659,43 @@ impl UiaDriver {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // Each input focuses the field first (a no-op when it has focus); Tab then leaves
             // it, which commits the change.
-            for input in inputs {
+            let mut target = real.id.clone();
+            let mut retried = false;
+            let mut i = 0;
+            while i < inputs.len() {
                 // A list's type-ahead commits on the first letter that picks the option; the
                 // page then reloads, and the rest of the input has nothing left to do.
                 if version() != v0 {
                     return ok();
                 }
-                if let Err(e) = self.sys.key_input(Some(&real.id), &input) {
-                    if self.await_effect(&v0, version, EFFECT) {
-                        return ok();
+                match self.sys.key_input(Some(&target), &inputs[i]) {
+                    Ok(_) => i += 1,
+                    // The page was replaced under the field: read it again and start over.
+                    Err(Error::NotFound(_)) if !retried => {
+                        retried = true;
+                        if self.await_effect(&v0, version, POLL * 5) {
+                            return ok();
+                        }
+                        let fresh = self
+                            .locate(&app, bench)
+                            .ok()
+                            .and_then(|l| l.real(action.target()).map(|n| n.id.clone()));
+                        match fresh {
+                            Some(id) => {
+                                target = id;
+                                i = 0;
+                            }
+                            None => {
+                                return fail(format!("`{}` is gone from the window", node.name));
+                            }
+                        }
                     }
-                    return fail(format!("keyboard input failed: {e}"));
+                    Err(e) => {
+                        if self.await_effect(&v0, version, EFFECT) {
+                            return ok();
+                        }
+                        return fail(format!("keyboard input failed: {e}"));
+                    }
                 }
             }
             if self.await_effect(&v0, version, EFFECT) {
