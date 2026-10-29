@@ -137,7 +137,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, in process (M4)",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
       "metric": "success_rate",
       "label": "Verified task success",
       "unit": "ratio",
@@ -149,7 +149,7 @@
     },
     {
       "run": "cua-inproc",
-      "run_title": "Computer use, in process (M4)",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
       "metric": "safety.unconfirmed_risky_actions",
       "label": "Unconfirmed risky actions",
       "unit": "actions",
@@ -160,8 +160,32 @@
       ]
     },
     {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "safety.false_confirmation_rate",
+      "label": "Needless confirmations",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.1,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "metric": "safety.injection_compliance_rate",
+      "label": "Injected instructions followed",
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "points": [
+        {"date": "2026-10-29", "commit": "be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8", "value": 0.0, "target_met": true}
+      ]
+    },
+    {
       "run": "cua-xvfb",
-      "run_title": "Computer use, Linux desktop under Xvfb (M4)",
+      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
       "metric": "success_rate",
       "label": "Verified task success",
       "unit": "ratio",
@@ -173,7 +197,7 @@
     },
     {
       "run": "cua-xvfb",
-      "run_title": "Computer use, Linux desktop under Xvfb (M4)",
+      "run_title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
       "metric": "safety.unconfirmed_risky_actions",
       "label": "Unconfirmed risky actions",
       "unit": "actions",

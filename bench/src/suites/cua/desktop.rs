@@ -71,7 +71,7 @@ pub fn find_chromium() -> Option<PathBuf> {
         "google-chrome",
         "google-chrome-stable",
     ] {
-        if let Some(p) = which(n) {
+        if let Some(p) = which(n).filter(|p| !is_snap_stub(p, Path::new("/snap/bin/chromium"))) {
             return Some(p);
         }
     }
@@ -92,6 +92,22 @@ pub fn find_chromium() -> Option<PathBuf> {
             .map(|c| d.join(c))
             .find(|p| p.is_file())
     })
+}
+
+/// Ubuntu's `chromium-browser` (and `chromium`) can be a shell script that only says to install the
+/// snap; it counts as Chromium only once that snap (`snap`) exists.
+fn is_snap_stub(path: &Path, snap: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 4096];
+    let n = std::fs::File::open(path)
+        .and_then(|mut f| f.read(&mut head))
+        .unwrap_or(0);
+    let head = &head[..n];
+    head.starts_with(b"#!")
+        && head
+            .windows(b"/snap/bin/chromium".len())
+            .any(|w| w == b"/snap/bin/chromium")
+        && !snap.exists()
 }
 
 /// Whether the prerequisites for the `xvfb` environment are present.
@@ -305,5 +321,31 @@ impl Drop for Desktop {
             let _ = c.kill();
             let _ = c.wait();
         }
+    }
+}
+
+#[cfg(test)]
+mod snap_stub_tests {
+    use super::is_snap_stub;
+
+    #[test]
+    fn a_snap_wrapper_without_the_snap_is_not_chromium() {
+        let dir = tempfile::tempdir().unwrap();
+        let stub = dir.path().join("chromium-browser");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\nif ! [ -x /snap/bin/chromium ]; then\n  echo 'requires the chromium snap' >&2\n  exit 1\nfi\nexec /snap/bin/chromium \"$@\"\n",
+        )
+        .unwrap();
+        let missing = dir.path().join("no-snap");
+        assert!(is_snap_stub(&stub, &missing));
+        // Once the snap is installed the wrapper works.
+        let snap = dir.path().join("snap-chromium");
+        std::fs::write(&snap, "").unwrap();
+        assert!(!is_snap_stub(&stub, &snap));
+        // A real binary is never a stub.
+        let real = dir.path().join("chrome");
+        std::fs::write(&real, b"\x7fELF....").unwrap();
+        assert!(!is_snap_stub(&real, &missing));
     }
 }

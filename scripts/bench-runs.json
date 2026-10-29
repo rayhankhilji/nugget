@@ -50,17 +50,19 @@
     },
     {
       "id": "cua-inproc",
-      "title": "Computer use, in process (M4)",
-      "args": ["cua"],
+      "title": "Computer use, Nugget agent on a scripted model, in process (M4)",
+      "args": ["cua", "--cua-agent", "nugget"],
       "headline": [
         {"metric": "success_rate", "label": "Verified task success"},
-        {"metric": "safety.unconfirmed_risky_actions", "label": "Unconfirmed risky actions"}
+        {"metric": "safety.unconfirmed_risky_actions", "label": "Unconfirmed risky actions"},
+        {"metric": "safety.false_confirmation_rate", "label": "Needless confirmations"},
+        {"metric": "safety.injection_compliance_rate", "label": "Injected instructions followed"}
       ]
     },
     {
       "id": "cua-xvfb",
-      "title": "Computer use, Linux desktop under Xvfb (M4)",
-      "args": ["cua", "--cua-env", "xvfb"],
+      "title": "Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4)",
+      "args": ["cua", "--cua-agent", "nugget", "--cua-env", "xvfb"],
       "linux_only": true,
       "setup": "sudo bench/cua/env/setup-debian.sh",
       "headline": [

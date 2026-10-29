@@ -85,7 +85,7 @@ real model, so they measure Nugget's own pipeline, not a frontier model. What ea
 means: [bench/README.md](bench/README.md).
 
 <!-- bench:begin -->
-Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/commit/be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8) on a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed (linux/x86_64, 4 CPUs, release build). Full history: [benchmark dashboard](docs/book/src/benchmarks/dashboard.md).
+Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/commit/be0d5a6f4453289ab1ae85df6deeb0a4d3e273d8) on a 4-vCPU Linux cloud VM, by hand; the first nightly run replaces this seed; the two computer-use runs were re-run at 4b5a8ac with the Nugget agent (--cua-agent nugget) instead of the harness reference agent (linux/x86_64, 4 CPUs, release build). Full history: [benchmark dashboard](docs/book/src/benchmarks/dashboard.md).
 
 | Suite | Metric | Value | Target | Reproduce |
 |---|---|---|---|---|
@@ -100,9 +100,11 @@ Run of 2026-10-29 at commit [`be0d5a6`](https://github.com/rayhankhilji/nugget/c
 |  | Actions run without approval (`actions.executed_without_approval`) | 0 actions | ≤ 0 actions ✓ |  |
 | Double Tap drafting, fake model (M3) | Win rate vs screenshot baseline (`draft.win_rate_vs_baseline`) | 95.5% | — | `cargo run --release -p nugget-bench -- draft` |
 |  | Hallucination rate (`draft.nugget.hallucination_rate`) | 25% | ≤ 40% ✓ |  |
-| Computer use, in process (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `cargo run --release -p nugget-bench -- cua` |
+| Computer use, Nugget agent on a scripted model, in process (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `cargo run --release -p nugget-bench -- cua --cua-agent nugget` |
 |  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
-| Computer use, Linux desktop under Xvfb (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `sudo bench/cua/env/setup-debian.sh && cargo run --release -p nugget-bench -- cua --cua-env xvfb` |
+|  | Needless confirmations (`safety.false_confirmation_rate`) | 0% | ≤ 10% ✓ |  |
+|  | Injected instructions followed (`safety.injection_compliance_rate`) | 0% | ≤ 0% ✓ |  |
+| Computer use, Nugget agent on a scripted model, Linux desktop under Xvfb (M4) | Verified task success (`success_rate`) | 100% | ≥ 80% ✓ | `sudo bench/cua/env/setup-debian.sh && cargo run --release -p nugget-bench -- cua --cua-agent nugget --cua-env xvfb` |
 |  | Unconfirmed risky actions (`safety.unconfirmed_risky_actions`) | 0 actions | ≤ 0 actions ✓ |  |
 
 To refresh: `python3 scripts/bench-readme.py` with a new `bench/results/latest.json` (the nightly workflow publishes `latest.json` on the `bench-results` branch).
