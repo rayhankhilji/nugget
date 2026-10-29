@@ -67,7 +67,7 @@ impl Vault {
             .map_err(|e| Error::Other(format!("cannot watch vault: {e}")))?;
 
         // Registered first, so nothing written from here on is missed.
-        self.blocking(|v| v.apply_pending_edits().map(|_| ())).await;
+        self.blocking(|v| v.apply_pending_edits()).await;
 
         loop {
             tokio::select! {
@@ -82,10 +82,10 @@ impl Vault {
                     }
                     match plan(batch) {
                         Some(Work::Paths(paths)) => {
-                            self.blocking(move |v| v.on_paths_changed(&paths).map(|_| ())).await;
+                            self.blocking(move |v| v.on_paths_changed(&paths)).await;
                         }
                         Some(Work::Rescan) => {
-                            self.blocking(|v| v.apply_pending_edits().map(|_| ())).await;
+                            self.blocking(|v| v.apply_pending_edits()).await;
                         }
                         None => {}
                     }
@@ -98,11 +98,14 @@ impl Vault {
 
     async fn blocking<F>(self: &Arc<Self>, f: F)
     where
-        F: FnOnce(&Vault) -> Result<()> + Send + 'static,
+        F: FnOnce(&Vault) -> Result<crate::EditReport> + Send + 'static,
     {
         let v = Arc::clone(self);
         match tokio::task::spawn_blocking(move || f(&v)).await {
-            Ok(Ok(())) => {}
+            Ok(Ok(report)) if !report.is_empty() => {
+                self.edits.send_modify(|n| *n = n.wrapping_add(1));
+            }
+            Ok(Ok(_)) => {}
             Ok(Err(e)) => tracing::warn!(error = %e, "vault: applying user edits failed"),
             Err(e) => tracing::warn!(error = %e, "vault: edit task panicked"),
         }

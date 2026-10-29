@@ -385,6 +385,21 @@ impl Inner {
         slot.running = Some(Running { cancel, ctl, join });
     }
 
+    /// [`start_source`](Self::start_source) on a blocking thread: building a connector can read
+    /// the keychain (through the settings resolver) or the file system.
+    async fn start_sources(&self, ids: Vec<SourceId>) {
+        let Ok(me) = self.arc() else { return };
+        let started = tokio::task::spawn_blocking(move || {
+            for id in &ids {
+                me.start_source(id);
+            }
+        })
+        .await;
+        if let Err(e) = started {
+            tracing::warn!(error = %join_err(e), "cannot start sources");
+        }
+    }
+
     /// Stop a source's supervisor and wait for it (and its worker) to exit.
     async fn stop_source(&self, id: &SourceId) {
         let running = lock(&self.slots).get_mut(id).and_then(|s| s.running.take());
@@ -531,9 +546,7 @@ impl IngestBuilder {
             }
         }
         let ids: Vec<SourceId> = lock(&inner.slots).keys().cloned().collect();
-        for id in &ids {
-            inner.start_source(id);
-        }
+        inner.start_sources(ids).await;
         inner.tracker.spawn(reembed::run(inner.clone()));
         Ok(Ingest { inner })
     }
@@ -661,7 +674,7 @@ impl Ingest {
             lock(&inner.slots).remove(&id);
             return Err(e);
         }
-        inner.start_source(&id);
+        inner.start_sources(vec![id.clone()]).await;
         let info = inner.source_info(&id).await?;
         inner.emit(IngestEvent::SourceChanged(info.clone()));
         Ok(info)
@@ -715,7 +728,7 @@ impl Ingest {
             Err(_) => old.enabled,
         };
         if start {
-            inner.start_source(&id);
+            inner.start_sources(vec![id.clone()]).await;
         }
         result?;
         let info = inner.source_info(&id).await?;
@@ -800,7 +813,7 @@ impl Ingest {
         if let Err(e) = inner.persist_async().await {
             slot.reconfiguring = false;
             lock(&inner.slots).insert(id.clone(), slot);
-            inner.start_source(id);
+            inner.start_sources(vec![id.clone()]).await;
             return Err(e);
         }
         // From now on the removed source's connectors cannot write credentials.
@@ -938,6 +951,13 @@ impl Ingest {
         self.inner.metrics.committed()
     }
 
+    /// Watch [`committed`](Self::committed): the receiver's `changed()` resolves after each
+    /// commit, so consumers need not poll (or rely on throttled progress events) to notice new
+    /// data.
+    pub fn subscribe_committed(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.inner.metrics.subscribe_committed()
+    }
+
     /// Start interactive authorization (`sources.auth.begin`). Show `url` to the user. The
     /// completion is also handled here: on success the source leaves `NeedsAuth`, re-syncs and a
     /// [`IngestEvent::SourceChanged`] is emitted; awaiting `done` is optional.
@@ -1011,7 +1031,7 @@ impl Ingest {
                     }
                     match inner.control(&id) {
                         Some(ctl) => ctl.sync_now(),
-                        None => inner.start_source(&id),
+                        None => inner.start_sources(vec![id.clone()]).await,
                     }
                     inner.emit_source(&id).await;
                 }
@@ -1071,7 +1091,7 @@ impl Ingest {
             .map_err(join_err)?;
         match inner.control(id) {
             Some(ctl) => ctl.sync_now(),
-            None => inner.start_source(id),
+            None => inner.start_sources(vec![id.clone()]).await,
         }
         Ok(())
     }
@@ -1093,7 +1113,7 @@ impl Ingest {
             s.connector = None;
             s.reconfiguring = false;
         }
-        inner.start_source(id);
+        inner.start_sources(vec![id.clone()]).await;
         Ok(())
     }
 

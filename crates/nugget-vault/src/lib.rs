@@ -206,6 +206,8 @@ pub struct Vault {
     items: Arc<dyn ItemLookup>,
     config: VaultConfig,
     state: Mutex<State>,
+    /// Counts batches of user edits [`Vault::watch`] applied (see [`Vault::subscribe_edits`]).
+    edits: tokio::sync::watch::Sender<u64>,
 }
 
 impl std::fmt::Debug for Vault {
@@ -259,7 +261,14 @@ impl Vault {
             items: store,
             config,
             state: Mutex::new(state),
+            edits: tokio::sync::watch::Sender::new(0),
         })
+    }
+
+    /// Changes each time [`Vault::watch`] has applied a batch of user edits to the graph, so a
+    /// caller can react (for example broadcast what changed) without polling the graph.
+    pub fn subscribe_edits(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.edits.subscribe()
     }
 
     /// The canonical vault root.
