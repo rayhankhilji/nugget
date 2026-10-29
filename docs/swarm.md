@@ -56,7 +56,7 @@ Briefs in `docs/waves/wave-x/`.
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | X1 | `x/safety-tuning` | session_01CTjRSrsidrNJCePPcDqeNS | fewer needless confirmations, injection detection |
-| X2 | `x/knowledge-ux` | session_01CTjRSuTbenvZTQvGqobCoo | graph view and entity page polish, W7 follow-ups |
+| X2 | `x/knowledge-ux` | session_01CTjRSuTbenvZTQvGqobCoo | graph view and entity page polish, W7 follow-ups (merged) |
 | X3 | `x/release` | session_01CTjRSuHipddEqZu3cBA7Wr | unsigned installer dry run on three OSes, AppImage smoke |
 | X4 | `x/wiring` | session_01CTjRSqHjCrA9Qxn9PCyqHN | reranker, conversational search, chat citations, W1/W4 gaps |
 | X5 | `x/perf` | session_01CTjRSsrJLKVRYFyVjzqDnH | daemon CPU/RSS/startup at 100k items, W9/W12 follow-ups |
