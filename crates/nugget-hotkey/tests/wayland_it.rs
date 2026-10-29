@@ -11,13 +11,14 @@
 //! ```
 //!
 //! What runs depends on the portal the session offers:
-//! - **GlobalShortcuts available** (KDE: kwin + xdg-desktop-portal-kde): a real portal session,
-//!   the shortcut bound through the portal, then activated through kglobalaccel's
-//!   `invokeShortcut` (the registry the KDE backend binds into: synthetic key presses cannot
-//!   reach a Wayland compositor's shortcut handling from a test). Plasma 5.27 binds without a
-//!   dialog; desktops that ask the user (GNOME 48+, Plasma 6.x) stop at the bind, and that
-//!   consent is the documented manual step.
-//! - **No GlobalShortcuts** (sway: xdg-desktop-portal-wlr; GNOME 46): `start` must fail fast
+//! - **GlobalShortcuts available** (KDE: kwin + xdg-desktop-portal-kde): a real portal session
+//!   and bind request. When the desktop binds the shortcut, it is activated through
+//!   kglobalaccel's `invokeShortcut` (synthetic key presses cannot reach a Wayland compositor's
+//!   shortcut handling from a test). Where it cannot get further, the test stops at the
+//!   documented point: xdg-desktop-portal 1.19+ refuses an unscoped host process ("An app id is
+//!   required"); Plasma 5.27 answers the bind by leaving the keys to the user in System
+//!   Settings (the manual step); GNOME 48+ and Plasma 6 ask in a dialog.
+//! - **No GlobalShortcuts** (sway: xdg-desktop-portal-wlr; GNOME before 48): `start` must fail fast
 //!   with the documented `Unsupported` error, and Double Tap is driven by a direct call (the
 //!   shell's fallback when no trigger can be registered is the tray / app button).
 
@@ -346,7 +347,29 @@ fn wayland_portal_chord() {
         return;
     }
 
-    let listener = r.unwrap_or_else(|e| panic!("portal session: {e}"));
+    // xdg-desktop-portal 1.19+ (Ubuntu 26.04) gives GlobalShortcuts only to an app it can name:
+    // a sandboxed app, an app in a systemd `app-<id>-*.scope`, or one whose host registration
+    // matches an installed desktop file it resolves. A headless test process launched from a
+    // shell has none of these, so the portal refuses the session; that refusal, with its reason,
+    // is where the automated path stops (an installed, desktop-launched Nugget gets its scope).
+    let listener = match r {
+        Ok(l) => l,
+        Err(Error::Unsupported(msg)) if msg.contains("app id") => {
+            println!("STOP: portal refused the session after {start_ms:.1} ms: {msg}");
+            assert!(start_ms < 6_000.0, "the portal took {start_ms:.0} ms");
+            assert!(
+                msg.contains("registering the app id"),
+                "reason missing: {msg}"
+            );
+            summary(&format!(
+                "| {} | chord {CHORD} via GlobalShortcuts | refused in {start_ms:.1} ms: the \
+                 portal needs an app id (unscoped host process) | - |",
+                compositor()
+            ));
+            return;
+        }
+        Err(e) => panic!("portal session: {e}"),
+    };
     println!("portal session created in {start_ms:.1} ms");
     assert!(
         start_ms < 6_000.0,
@@ -525,8 +548,14 @@ fn wayland_doubletap_into_gtk4() {
         // kglobalaccel); otherwise the listener is still started, as the shell does, and the
         // same path is driven by a direct call, as the tray/app button does.
         let (cb, direct) = split_callback(cb);
-        let listener =
-            has_portal.then(|| start(Trigger::Chord(CHORD.into()), cb).expect("portal chord"));
+        // A portal that refuses the session (no app id, see wayland_portal_chord) leaves the
+        // direct trigger too.
+        let listener = has_portal
+            .then(|| start(Trigger::Chord(CHORD.into()), cb))
+            .and_then(|r| {
+                r.map_err(|e| println!("portal chord unavailable: {e}"))
+                    .ok()
+            });
         let bound = listener
             .as_ref()
             .and_then(|_| support::wait_for(Duration::from_secs(5), find_kglobalaccel_shortcut));

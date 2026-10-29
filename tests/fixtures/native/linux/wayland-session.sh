@@ -11,8 +11,8 @@
 #                   (xdg-desktop-portal-wlr) has no GlobalShortcuts, which is what Nugget's
 #                   documented "portal unavailable" path is for.
 #   kwin            KDE's kwin_wayland --virtual, with xdg-desktop-portal-kde and kglobalaccel:
-#                   the one backend on Ubuntu 24.04 that implements GlobalShortcuts (GNOME's
-#                   portal gains it only in GNOME 48; Ubuntu 24.04 ships 46).
+#                   a backend that implements GlobalShortcuts and runs headless (Ubuntu 24.04:
+#                   Plasma 5.27; ubuntu-latest is 26.04: Plasma 6, xdg-desktop-portal 1.20).
 #
 # The command sees WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS,
 # XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP, and no DISPLAY. Logs go to
