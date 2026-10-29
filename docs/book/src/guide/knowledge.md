@@ -121,10 +121,9 @@ file and retries if it changed, so a render never overwrites an edit you just ma
 
 Deleting a fact line in the vault, or rejecting a fact on the **Knowledge** page, sets `rejected`.
 
-> **Status: being finished in wave W.** The graph and the vault already use the sticky `rejected`
-> status. The IPC contract still reports it as `retracted`; adding `rejected` to
-> `knowledge.claim.status` and showing it on the Knowledge page (with undo of a fact you asserted)
-> is being done in this wave.
+On the **Knowledge** page, rejecting a fact shows **Undo** for a moment, and a fact you added
+yourself can be withdrawn the same way. Over IPC, `knowledge.claim.status` sets and reports
+`rejected`.
 
 ## In the desktop app
 
@@ -133,6 +132,23 @@ opens the evidence, lets you merge duplicates and reject wrong facts, and opens 
 page. It also shows how many entities and facts there are and how many items are waiting for
 extraction. `knowledge.status` adds the last run, the model used for LLM extraction, and vault pages
 that failed validation or have merge conflicts. The **graph view** draws the neighbourhood of an entity, filtered by kind.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-dark.png">
+  <img src="../images/screenshots/knowledge-light.png" alt="The Knowledge page: the entity list, and Ada Wexford's details with her facts, each with a confidence, a Why? button and a Reject button" loading="lazy">
+</picture>
+
+**Why?** opens the evidence for a fact: the quoted passage and the item it came from.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/knowledge-why-dark.png">
+  <img src="../images/screenshots/knowledge-why-light.png" alt="A fact's evidence opened with Why?: a quote from the Wren Mobile usability test calendar event and a link to open it" loading="lazy">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/graph-dark.png">
+  <img src="../images/screenshots/graph-light.png" alt="The graph view: entities coloured by kind, linked by the facts between them, with a legend" loading="lazy">
+</picture>
 
 Over IPC: [`knowledge.*`](../reference/ipc.md#knowledge-graph), with `knowledge.changed`
 notifications after each run. Over [MCP](mcp.md): `find_entities`, `get_entity` and

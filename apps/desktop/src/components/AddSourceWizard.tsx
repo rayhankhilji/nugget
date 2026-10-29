@@ -32,10 +32,19 @@ const BOLD: Record<string, TagRenderer> = { b: (c) => <b>{c}</b> };
 const GOOGLE_CREDENTIALS_URL = "https://console.cloud.google.com/apis/credentials";
 
 /** Wizard for `sources.add`: pick a kind, fill in its settings, then connect. */
-export function AddSourceWizard({ onClose, onAdded }: { onClose: () => void; onAdded: (s: SourceInfo) => void }) {
+export function AddSourceWizard({
+  onClose,
+  onAdded,
+  initialKind,
+}: {
+  onClose: () => void;
+  onAdded: (s: SourceInfo) => void;
+  /** Open straight at this kind's form (Back still leads to the kind picker). */
+  initialKind?: ConnectorKind;
+}) {
   const t = useT();
-  const [kind, setKind] = useState<ConnectorKind>("files");
-  const [step, setStep] = useState<"kind" | "form">("kind");
+  const [kind, setKind] = useState<ConnectorKind>(initialKind ?? "files");
+  const [step, setStep] = useState<"kind" | "form">(initialKind ? "form" : "kind");
 
   const title = step === "kind" ? t("addSource.title") : t(isNewKind(kind) ? NEW_KIND_TITLE[kind] : ADD_TITLE[kind]);
 
@@ -155,7 +164,7 @@ function FormError({ error }: { error: unknown }) {
   const e = ApiError.from(error);
   return (
     <p className="note note-error" role="alert">
-      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.message}
+      {e.isMethodNotFound ? t("common.notAvailableSentence") : e.isOffline ? t("common.offlineHint") : e.message}
     </p>
   );
 }

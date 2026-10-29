@@ -1,14 +1,19 @@
 # Safety: rules, confirmations and the kill switch
 
-> **Status: being wired in (wave W).** The policy engine, the kill switch, the confirmation broker
-> and the hash-chained action log are built and tested in `nugget-policy`. The daemon methods
-> (`policy.get`, `policy.set`, `policy.approvals`, `policy.kill`, `policy.resume`), the **Safety**
-> page, the Escape ×3 hotkey and the tray item are being connected in this wave. This page
-> describes the behaviour of the built engine.
+> **Status:** the policy, confirmations, the kill switch and the action log work in the app: the
+> **Safety** page, Escape ×3 and the tray's **Stop all agents** item. The daemon serves
+> `policy.get`, `policy.set`, `policy.approvals`, `policy.kill`, `policy.resume` and
+> `policy.log.export`. Escape ×3 needs Accessibility permission on macOS and is not available on
+> Linux Wayland, where a chord is used instead.
 
 Everything that acts on your behalf (the [agent](agent.md), the browser extension and the actions
 on [Today cards](today.md)) asks one safety policy before every action. You manage it on the
 **Safety** page.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/safety-dark.png">
+  <img src="../images/screenshots/safety-light.png" alt="The Safety page: the kill switch, approvals waiting for you, your own rules and the built-in rules" loading="lazy">
+</picture>
 
 ## Risk classes
 

@@ -45,14 +45,14 @@ const doubletapStatus = {
 };
 
 /** Every command the shell handles without the daemon (`generate_handler!` in src-tauri/src/main.rs). */
-function shellCommands(socket) {
+function shellCommands(socket, { pickFolders = [] } = {}) {
   const conn = () => ({ connected: true, socket, error: null });
   return {
     connection_info: conn,
     start_daemon: conn,
     open_url: () => ({ err: { kind: "other", message: "opening links is not available in the e2e bridge" } }),
     open_mailto: () => null,
-    pick_folders: () => [],
+    pick_folders: (a) => (typeof pickFolders === "function" ? pickFolders(a) : pickFolders),
     pick_plugin_file: () => null,
     notify: () => null,
     chat_history_load: () => [],
@@ -127,9 +127,11 @@ function serveStatic(dist, req, res, shim) {
  * Start the bridge on 127.0.0.1 (`port` 0 picks a free one). `calls` records every command with
  * its outcome: `{ cmd, via: "shell" | "daemon", ok, code?, message? }`. With `shim`, index.html is
  * served with tauri-shim.js inlined, so any browser can open the app (the test injects it itself).
+ * `pickFolders` is what the native folder picker "chooses": an array of paths, or a function of
+ * the invoke args returning one (default: the user cancels, `[]`).
  */
-export function startBridge({ socket, dist = DIST, port = 0, shim = false }) {
-  const shell = shellCommands(socket);
+export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickFolders = [] }) {
+  const shell = shellCommands(socket, { pickFolders });
   const calls = [];
 
   async function invoke(cmd, args) {

@@ -2,38 +2,44 @@
 // Real-app end-to-end test: the real nuggetd indexes the fictional corpus in
 // bench/fixtures/knowledge/items, and the real desktop frontend (dist/) runs in headless Chromium
 // against it through bridge.mjs, which stands in for the Tauri shell. Every page of the PAGES
-// registry in src/App.tsx is opened and checked for real data and uncaught errors.
+// registry in src/App.tsx is opened and checked for real data and uncaught errors. A second
+// scenario (first-run.mjs) starts from an empty home, goes through onboarding and times how long
+// it takes from app start to a cited answer.
 //
 // usage: pnpm run e2e        (see e2e/README.md for the environment variables)
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { startBridge, METHOD_NOT_FOUND } from "./bridge.mjs";
 import { CORPUS, addCorpusSource, countFiles, locateNuggetd, rpc, startDaemon, waitForKnowledge } from "./daemon.mjs";
+import { firstRunScenario } from "./first-run.mjs";
+import {
+  check,
+  DESKTOP,
+  DIST,
+  expect,
+  expectNoErrorState,
+  INDEX_TIMEOUT_MS,
+  KEEP,
+  log,
+  newContext,
+  OUT,
+  results,
+  secs,
+  settle,
+  shot,
+  sinceStart,
+  sleep,
+  STEP_TIMEOUT_MS,
+  t,
+  until,
+} from "./harness.mjs";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(here, "..");
-const DIST = path.join(DESKTOP, "dist");
-const OUT = path.resolve(process.env.E2E_ARTIFACTS || path.join(here, "artifacts"));
-const KEEP = process.env.E2E_KEEP === "1";
-const INDEX_TIMEOUT_MS = Number(process.env.E2E_INDEX_TIMEOUT_MS || 180_000);
-const STEP_TIMEOUT_MS = Number(process.env.E2E_STEP_TIMEOUT_MS || 15_000);
+/** Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, and a first run. */
+const SCENARIOS = ["pages", "first-run"];
 
-const started = Date.now();
-const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
-const log = (...a) => console.log(`[e2e ${secs(Date.now() - started)}]`, ...a);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// ---- UI strings and the page registry, read from the app source so copy changes don't break this ----
-
-const en = JSON.parse(fs.readFileSync(path.join(DESKTOP, "src", "i18n", "locales", "en.json"), "utf8"));
-function t(key) {
-  const s = en[key];
-  if (typeof s !== "string") throw new Error(`no English string for ${key} in src/i18n/locales/en.json`);
-  return s;
-}
+// ---- the page registry, read from the app source so new pages are covered automatically ----
 
 function pageRegistry() {
   const src = fs.readFileSync(path.join(DESKTOP, "src", "App.tsx"), "utf8");
@@ -44,81 +50,7 @@ function pageRegistry() {
   return pages;
 }
 
-// ---- checks ----
-
-const results = [];
-let failed = 0;
-
-class CheckError extends Error {}
-function expect(cond, message) {
-  if (!cond) throw new CheckError(message);
-}
-
-/**
- * Poll `probe` (returning `[ok, observed]`) until ok, or fail with `what` and the last observation.
- * Playwright locators auto-wait for elements; this covers data that arrives after them.
- */
-async function until(what, probe, timeoutMs = STEP_TIMEOUT_MS) {
-  const deadline = Date.now() + timeoutMs;
-  let observed;
-  for (;;) {
-    let ok = false;
-    try {
-      [ok, observed] = await probe();
-    } catch (e) {
-      observed = `error: ${e.message.split("\n")[0]}`;
-    }
-    if (ok) return observed;
-    if (Date.now() > deadline) throw new CheckError(`${what}; after ${timeoutMs} ms saw: ${JSON.stringify(observed)}`);
-    await sleep(200);
-  }
-}
-
-async function check(name, fn) {
-  const t0 = Date.now();
-  try {
-    await fn();
-    results.push({ name, ok: true, ms: Date.now() - t0 });
-    log(`PASS ${name} (${secs(Date.now() - t0)})`);
-  } catch (e) {
-    failed++;
-    const message = e instanceof CheckError ? e.message : (e.stack ?? String(e));
-    results.push({ name, ok: false, ms: Date.now() - t0, error: message });
-    log(`FAIL ${name}: ${message}`);
-  }
-}
-
-// ---- browser helpers ----
-
 const ONBOARDED = { version: 1, step: "done", completed: [], skipped: [], ai: null, finished: true };
-
-let shotN = 0;
-async function shot(page, name) {
-  const file = path.join(OUT, `${String(++shotN).padStart(2, "0")}-${name}.png`);
-  await page.screenshot({ path: file }).catch((e) => log(`  screenshot ${name} failed: ${e.message}`));
-}
-
-/** Wait until the bridge has been quiet for a moment and nothing is marked busy. */
-async function settle(page) {
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  await page
-    .waitForFunction(() => !document.querySelector('[aria-busy="true"]'), null, { timeout: 5_000 })
-    .catch(() => {});
-}
-
-/** Visible error notes (`ErrorNote` and friends render `.note-error` / role=alert). */
-async function errorNotes(page) {
-  return page.evaluate(() =>
-    [...document.querySelectorAll("main .note-error, main [role=alert]")]
-      .filter((el) => el.getClientRects().length > 0 && el.textContent.trim())
-      .map((el) => el.textContent.trim().replace(/\s+/g, " ")),
-  );
-}
-
-async function expectNoErrorState(page, what) {
-  const notes = await errorNotes(page);
-  expect(notes.length === 0, `${what} shows an error state: ${JSON.stringify(notes)}`);
-}
 
 // ---- per-page assertions ----
 
@@ -270,37 +202,18 @@ function pageChecks({ expectedItems }) {
   };
 }
 
-// ---- main ----
+// ---- scenario: every page on an indexed home ----
 
-async function main() {
-  fs.rmSync(OUT, { recursive: true, force: true });
-  fs.mkdirSync(OUT, { recursive: true });
-
-  const require = createRequire(import.meta.url);
-  let chromium;
-  try {
-    ({ chromium } = require("playwright"));
-  } catch {
-    throw new Error("playwright is not installed: run `pnpm install` in apps/desktop (and `pnpm exec playwright install chromium` once)");
-  }
-
-  if (!fs.existsSync(path.join(DIST, "index.html")) || process.env.E2E_BUILD === "1") {
-    log("building the frontend (pnpm run build)…");
-    const r = spawnSync("pnpm", ["run", "build"], { cwd: DESKTOP, stdio: "inherit", shell: process.platform === "win32" });
-    if (r.status !== 0) throw new Error(`pnpm run build failed (exit ${r.status ?? r.error?.message})`);
-  }
-
+async function pagesScenario({ browser, bin }) {
   const pages = pageRegistry();
   const expectedItems = countFiles(CORPUS);
-  const bin = locateNuggetd(log);
-  log(`nuggetd: ${bin}`);
   log(`corpus: ${CORPUS} (${expectedItems} files)`);
 
   const tSetup = Date.now();
   const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "nuggetd.out.log") });
   log(`daemon ready, home ${daemon.home}, socket ${daemon.socket}`);
   let bridge;
-  let browser;
+  let ctx;
   const timings = {};
   try {
     const source = await addCorpusSource(daemon.socket);
@@ -313,16 +226,7 @@ async function main() {
 
     bridge = await startBridge({ socket: daemon.socket, dist: DIST });
     log(`bridge on ${bridge.url}`);
-    browser = await chromium.launch();
-    const ctx = await browser.newContext({
-      viewport: { width: 1360, height: 860 },
-      deviceScaleFactor: 1,
-      locale: "en-US",
-      timezoneId: "UTC",
-      colorScheme: "light",
-    });
-    ctx.setDefaultTimeout(STEP_TIMEOUT_MS);
-    await ctx.addInitScript({ path: path.join(here, "tauri-shim.js") });
+    ctx = await newContext(browser);
     await ctx.addInitScript(
       ([key, state]) => {
         localStorage.setItem(key, JSON.stringify(state));
@@ -405,23 +309,68 @@ async function main() {
     });
 
     const rpcErrors = bridge.calls.filter((c) => !c.ok);
-    fs.writeFileSync(
-      path.join(OUT, "summary.json"),
-      JSON.stringify({ results, timings, rpcErrors, pageErrors, consoleErrors, commands: [...new Set(bridge.calls.map((c) => c.cmd))].sort() }, null, 2),
-    );
     if (rpcErrors.length) log(`note: ${rpcErrors.length} command(s) returned errors (see summary.json): ${[...new Set(rpcErrors.map((c) => `${c.cmd}: ${c.message}`))].join("; ")}`);
     const consoleCount = Object.values(consoleErrors).flat().length;
     if (consoleCount) log(`note: ${consoleCount} console error(s) (see summary.json)`);
+    return { timings, rpcErrors, pageErrors, consoleErrors, commands: [...new Set(bridge.calls.map((c) => c.cmd))].sort() };
   } finally {
-    await browser?.close().catch(() => {});
+    await ctx?.close().catch(() => {});
     await bridge?.close().catch(() => {});
     fs.cpSync(daemon.logDir, path.join(OUT, "daemon-logs"), { recursive: true });
     await daemon.stop({ keep: KEEP });
     if (KEEP) log(`kept the daemon home: ${daemon.home}`);
   }
+}
 
-  const passed = results.length - failed;
-  log(`${passed}/${results.length} checks passed in ${secs(Date.now() - started)}; screenshots in ${OUT}`);
+// ---- main ----
+
+async function main() {
+  fs.rmSync(OUT, { recursive: true, force: true });
+  fs.mkdirSync(OUT, { recursive: true });
+
+  const wanted = (process.env.E2E_SCENARIOS || SCENARIOS.join(",")).split(",").map((s) => s.trim()).filter(Boolean);
+  const unknown = wanted.filter((s) => !SCENARIOS.includes(s));
+  if (unknown.length) throw new Error(`unknown E2E_SCENARIOS ${JSON.stringify(unknown)}; known: ${SCENARIOS.join(", ")}`);
+
+  const require = createRequire(import.meta.url);
+  let chromium;
+  try {
+    ({ chromium } = require("playwright"));
+  } catch {
+    throw new Error("playwright is not installed: run `pnpm install` in apps/desktop (and `pnpm exec playwright install chromium` once)");
+  }
+
+  if (!fs.existsSync(path.join(DIST, "index.html")) || process.env.E2E_BUILD === "1") {
+    log("building the frontend (pnpm run build)…");
+    const r = spawnSync("pnpm", ["run", "build"], { cwd: DESKTOP, stdio: "inherit", shell: process.platform === "win32" });
+    if (r.status !== 0) throw new Error(`pnpm run build failed (exit ${r.status ?? r.error?.message})`);
+  }
+
+  const bin = locateNuggetd(log);
+  log(`nuggetd: ${bin}`);
+
+  // E2E_CHROMIUM: a Chromium binary to use instead of Playwright's own download.
+  const browser = await chromium.launch(process.env.E2E_CHROMIUM ? { executablePath: process.env.E2E_CHROMIUM } : {});
+  const summary = { results };
+  try {
+    for (const name of wanted) {
+      log(`---- scenario: ${name} ----`);
+      try {
+        if (name === "pages") Object.assign(summary, await pagesScenario({ browser, bin }));
+        else summary.first_run = await firstRunScenario({ browser, bin });
+      } catch (e) {
+        // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
+        results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });
+        log(`FAIL scenario ${name}: ${e.stack ?? e}`);
+      }
+    }
+  } finally {
+    await browser.close().catch(() => {});
+    fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2));
+  }
+
+  const failed = results.filter((r) => !r.ok).length;
+  log(`${results.length - failed}/${results.length} checks passed in ${secs(sinceStart())}; screenshots in ${OUT}`);
   return failed === 0;
 }
 

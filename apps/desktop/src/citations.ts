@@ -38,3 +38,25 @@ export function withheldNotice(excluded: number | null | undefined, provider: st
   if (!excluded || excluded <= 0) return null;
   return t("search.withheld", { n: excluded, provider });
 }
+
+/** Code (fenced blocks and inline spans), where `[n]` is an index rather than a citation. */
+const CODE = /(```[\s\S]*?(?:```|$)|`[^`\n]*`)/;
+/**
+ * A run of `[n]` markers (`[1]`, `[2][3]`) with the blanks before it. Not a markdown link
+ * (`[1](url)`) or link definition (`[1]: url`), and not an index glued to a name (`arr[1]`).
+ */
+const MARKER_RUN = /(?:[ \t]+|(?<![\w\])]))(?:\[\d{1,4}\](?![(:]))+/g;
+/** Such a run opening a line, with the blanks after it. */
+const LINE_START_RUN = /^(?:\[\d{1,4}\](?![(:]))+[ \t]*/gm;
+
+/**
+ * `text` without its `[n]` citation markers. For an earlier reply sent back to the model as
+ * history: the numbers referred to that reply's own passages and would mislead a later answer.
+ * Code, links and other brackets (`[x]`, `[^1]`) are left alone.
+ */
+export function stripCitationMarkers(text: string): string {
+  return text
+    .split(CODE)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(LINE_START_RUN, "").replace(MARKER_RUN, "")))
+    .join("");
+}

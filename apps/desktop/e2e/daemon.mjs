@@ -25,6 +25,22 @@ emails = ["robin.ashgrove@glimmerfen.test", "robin@ashgrove.test"]
 http = false
 `;
 
+/**
+ * A first run: nothing the user would have to write by hand. Only what a test machine needs:
+ * no local model runtime (no models, nothing to start) and no MCP HTTP listener (a fixed port
+ * that parallel runs would fight over). No `[knowledge.me]`: onboarding doesn't ask for it.
+ */
+export const FIRST_RUN_CONFIG = `# Written by apps/desktop/e2e/daemon.mjs (first-run scenario).
+[runtime]
+enabled = false
+
+[mcp]
+http = false
+`;
+
+/** The config the all-pages scenario uses (the corpus owner set, so mail and calendar facts attach). */
+export const E2E_CONFIG = CONFIG;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Files under `dir`, recursively (the corpus item count). */
@@ -123,12 +139,13 @@ function readyLine(logDir) {
 
 /**
  * Start `bin` in a fresh temp home. Resolves once its log says "nuggetd ready" and the socket
- * answers `status`. `stderrPath` receives the daemon's stdout and stderr.
+ * answers `status`. `stderrPath` receives the daemon's stdout and stderr. `config` is the
+ * `config/config.toml` to write (default: the all-pages config; `null` writes none).
  */
-export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000 } = {}) {
+export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, config = CONFIG } = {}) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-"));
   fs.mkdirSync(path.join(home, "config"), { recursive: true });
-  fs.writeFileSync(path.join(home, "config", "config.toml"), CONFIG);
+  if (config !== null) fs.writeFileSync(path.join(home, "config", "config.toml"), config);
   const out = stderrPath ? fs.openSync(stderrPath, "w") : "ignore";
   const proc = spawn(bin, ["--home", home], {
     // No OS keychain in CI; the store key goes to a 0600 file in the temp home.

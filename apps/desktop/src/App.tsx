@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { api, events, errorMessage, type ConnectionInfo, type PageId } from "./api";
 import { useEvent } from "./hooks";
-import { requestNewChat, requestSearch } from "./hooks.nav";
+import { requestNewChat, requestSearch, usePendingPage } from "./hooks.nav";
 import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, letterOf, useKeydown, type Combo } from "./hooks.shortcuts";
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
@@ -25,6 +25,7 @@ import { DoubleTapPage } from "./pages/DoubleTap";
 import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
+import { migrateTriggerOnce } from "./onboarding/trigger";
 
 export interface PageDef {
   id: PageId;
@@ -88,9 +89,9 @@ export function App() {
   const [onboarding, setOnboarding] = useState(shouldShowOnboarding);
   const [palette, setPalette] = useState(false);
   const [help, setHelp] = useState(false);
-  const endOnboarding = useCallback(() => {
+  const endOnboarding = useCallback((to?: PageId) => {
     setOnboarding(false);
-    setPage("today");
+    setPage(to ?? "today");
   }, []);
   const mainRef = useRef<HTMLElement>(null);
   // Set when a shortcut or the palette navigates: focus moves to the new page once it renders.
@@ -142,6 +143,12 @@ export function App() {
 
   useEffect(() => startProactiveNotifications(), []);
 
+  // Apply a Double Tap trigger an older onboarding only kept locally (once; never throws).
+  useEffect(() => {
+    if (conn?.connected) void migrateTriggerOnce();
+  }, [conn?.connected]);
+
+  usePendingPage(jump);
   useEvent(events.onConnection, setConn);
   useEvent(events.onNavigate, (p) => {
     go(p);
