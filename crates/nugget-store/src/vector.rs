@@ -483,11 +483,8 @@ impl Store {
 
     fn search_vector_mode(&self, embedding: &[f32], limit: usize, mode: Mode) -> Result<Vec<Hit>> {
         validate_embedding(embedding).map_err(Error::Invalid)?;
-        // Vector search runs on the writer connection, not the reader pool: SQLite discards a
-        // connection's page cache when another connection writes, so after every write a reader
-        // would decrypt every vector page again (measured: 75 ms instead of 7 ms per search at
-        // 20k vectors), while the writer's cache stays warm.
-        let Some((dim, k)) = self.with_conn(|c| {
+        // Searches run on a reader connection; only the one-off index build takes the writer.
+        let Some((dim, k)) = self.with_read_conn(|c| {
             let Some(dim) = embedding_dim(c)? else {
                 return Ok(None);
             };
@@ -511,13 +508,13 @@ impl Store {
                 Mode::Approx => true,
                 Mode::Auto => {
                     quantizable(embedding) && {
-                        let n = self.with_conn(|c| vector_count(c))?;
+                        let n = self.with_read_conn(vector_count)?;
                         n >= ANN_MIN_VECTORS && n.saturating_mul(dim * 4) >= ANN_MIN_VECTOR_BYTES
                     }
                 }
             };
         let approx = wanted
-            && (self.with_conn(|c| ann_ready(c))?
+            && (self.with_read_conn(ann_ready)?
                 || match self.with_conn(|c| ensure_ann_ready(c, dim)) {
                     Ok(()) => true,
                     Err(e) if matches!(mode, Mode::Approx) => return Err(e),
@@ -529,7 +526,7 @@ impl Store {
                         false
                     }
                 });
-        self.with_conn(|c| {
+        self.with_read_conn(|c| {
             // vec0 kNN queries must stand alone (no joins or extra ORDER BY), so fetch the
             // neighbours first, then their chunk and item rows.
             let neighbours = if approx {
