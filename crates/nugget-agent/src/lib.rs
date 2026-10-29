@@ -14,6 +14,13 @@
 //!   timeout that counts as a denial / Deny back to the model), executed, and verified when it
 //!   mutates (`Edit` and above). Budgets on steps, wall clock, tokens and per-tool rate; the kill
 //!   switch and a cancellation token are checked before every step and action and while waiting.
+//!   Too many failed verifications in a row stop the run; a mutation whose tool returned an error
+//!   (it refused before acting) is noted to the model but does not count towards that streak.
+//! - Opt-in triage ([`AgentConfig::triage`]): before the first turn of a fresh run (not on
+//!   resume), one short tool-less call with a fixed system text judges the goal and trusted
+//!   context alone against a `proceed` / `refuse` JSON schema. `refuse` ends the run as
+//!   [`Outcome::Refused`] with nothing done; an error or unparsable reply falls through to the
+//!   normal loop. Its tokens count towards the budget; it is not a step.
 //! - "Done" means verified: `finish` takes `done`, `partial`, `cannot` or `refused` (older
 //!   `success` / `failure` are accepted as aliases), and `done` is reported as
 //!   [`Outcome::Succeeded`] only when every mutation passed verification; otherwise

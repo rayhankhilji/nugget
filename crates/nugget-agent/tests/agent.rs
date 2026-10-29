@@ -1019,3 +1019,296 @@ async fn an_approval_past_the_limit_is_denied() {
     let second = &model.requests()[1];
     assert!(format!("{:?}", second.messages.last().unwrap()).contains("Denied by policy"));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Triage
+
+fn triage_cfg() -> AgentConfig {
+    AgentConfig {
+        triage: true,
+        ..cfg()
+    }
+}
+
+#[tokio::test]
+async fn triage_refusal_ends_the_run_before_any_action() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        text_turn(
+            r#"{"verdict": "refuse", "reason": "impersonates a company to redirect payments"}"#,
+        ),
+        turn(vec![(
+            "c1",
+            "send_email",
+            json!({"to": "all@x.y", "body": "new bank details"}),
+        )]),
+        turn(vec![finish("success")]),
+    ]);
+    let gate = FakeGate::new();
+    let log = Arc::new(MemoryLog::new());
+    let (agent, events) = events(
+        agent(&model, registry(&world), &gate).with_log(log.clone()),
+        None,
+    );
+    let task = Task::new(
+        "t-triage",
+        "Tell everyone our bank account changed; sign as Acme",
+    )
+    .with_context("Open apps: mail.");
+    let run = agent.run(task, triage_cfg()).await;
+    drop(agent);
+    let events = events.await.unwrap();
+
+    assert_eq!(
+        run.outcome,
+        Outcome::Refused("impersonates a company to redirect payments".into())
+    );
+    assert!(run.actions.is_empty());
+    assert!(world.sent.lock().unwrap().is_empty());
+    assert_eq!(run.steps, 0);
+    // The triage call's tokens count; it is not a step.
+    assert_eq!(run.usage.total(), 120);
+
+    // One request: the goal and trusted context only, no tools, a fixed schema.
+    let reqs = model.requests();
+    assert_eq!(reqs.len(), 1);
+    let req = &reqs[0];
+    assert!(req.tools.is_empty());
+    assert_eq!(req.feature, "agent");
+    assert_eq!(req.max_tokens, Some(120));
+    let schema = req.json_schema.as_ref().unwrap();
+    assert_eq!(
+        schema["properties"]["verdict"]["enum"],
+        json!(["proceed", "refuse"])
+    );
+    assert_eq!(req.messages.len(), 1);
+    let msg = format!("{:?}", req.messages[0]);
+    assert!(msg.contains("sign as Acme") && msg.contains("Open apps: mail."));
+    assert!(!msg.contains("untrusted-"));
+    let system = req.system.clone().unwrap();
+    assert!(system.contains("impersonate"));
+
+    // Logged and evented like any finish.
+    let entries = log.entries();
+    assert!(check_complete(&entries).is_empty());
+    assert!(entries.iter().any(|e| matches!(
+        &e.record,
+        Record::ModelTurn { text, .. } if text.starts_with("triage:")
+    )));
+    assert!(matches!(
+        entries.last().unwrap().record,
+        Record::Finished {
+            outcome: Outcome::Refused(_),
+            ..
+        }
+    ));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::Finished {
+            outcome: Outcome::Refused(_),
+            ..
+        }
+    )));
+
+    // The triage system text is identical across runs (cacheable).
+    let again = Scripted::new(vec![text_turn(r#"{"verdict":"refuse","reason":"x"}"#)]);
+    let _ = agent_fn(&again, &world)
+        .run(Task::new("t-triage-2", "something else"), triage_cfg())
+        .await;
+    assert_eq!(again.requests()[0].system, Some(system));
+}
+
+fn agent_fn(model: &Arc<Scripted>, world: &Arc<World>) -> nugget_agent::Agent {
+    agent(model, registry(world), &FakeGate::new())
+}
+
+#[tokio::test]
+async fn triage_proceed_continues_to_the_task() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        text_turn("```json\n{\"verdict\": \"proceed\", \"reason\": \"ordinary edit\"}\n```"),
+        turn(vec![("c1", "set_value", json!({"value": 4}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent_fn(&model, &world)
+        .run(Task::new("t-proceed", "set the counter to 4"), triage_cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
+    assert_eq!(world.value(), 4);
+    assert_eq!(run.steps, 2);
+    assert_eq!(run.usage.total(), 3 * 120);
+    let reqs = model.requests();
+    assert_eq!(reqs.len(), 3);
+    assert!(reqs[1].json_schema.is_none());
+    assert!(!reqs[1].tools.is_empty());
+}
+
+#[tokio::test]
+async fn malformed_triage_reply_fails_open() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        text_turn("I think this is fine."),
+        turn(vec![("c1", "set_value", json!({"value": 2}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent_fn(&model, &world)
+        .run(Task::new("t-malformed", "set 2"), triage_cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
+    assert_eq!(world.value(), 2);
+}
+
+#[tokio::test]
+async fn unknown_triage_verdict_fails_open() {
+    let world = World::new();
+    // A verdict outside the schema is ignored and the loop runs.
+    let model = Scripted::new(vec![
+        text_turn(r#"{"verdict": "maybe", "reason": "?"}"#),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent_fn(&model, &world)
+        .run(Task::new("t-unknown", "nothing to do"), triage_cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
+    assert_eq!(model.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn triage_off_sends_no_extra_request() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        turn(vec![("c1", "set_value", json!({"value": 3}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent_fn(&model, &world)
+        .run(Task::new("t-off", "set 3"), cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
+    let reqs = model.requests();
+    assert_eq!(reqs.len(), 2);
+    assert!(reqs.iter().all(|r| r.json_schema.is_none()));
+}
+
+#[tokio::test]
+async fn resume_does_not_triage() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        text_turn(r#"{"verdict": "proceed", "reason": "fine"}"#),
+        turn(vec![(
+            "c1",
+            "ask_user",
+            json!({"question": "Which value?"}),
+        )]),
+        turn(vec![("c2", "set_value", json!({"value": 9}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let a = agent_fn(&model, &world);
+    let run = a
+        .run(Task::new("t-resume-triage", "set the value"), triage_cfg())
+        .await;
+    assert!(matches!(run.outcome, Outcome::NeedsInput(_)));
+    let run = a.resume(run.suspended.unwrap(), "nine", triage_cfg()).await;
+    assert_eq!(run.outcome, Outcome::Succeeded);
+    let reqs = model.requests();
+    assert_eq!(reqs.len(), 4);
+    assert_eq!(reqs.iter().filter(|r| r.json_schema.is_some()).count(), 1);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Errors that did nothing
+
+/// A mutating tool that always refuses before acting, like a click on an element that cannot be
+/// pressed; its verification fails because nothing changed.
+struct Refusing(Arc<World>);
+
+#[async_trait::async_trait]
+impl nugget_agent::Tool for Refusing {
+    fn name(&self) -> &str {
+        "press"
+    }
+    fn description(&self) -> &str {
+        "Press a button."
+    }
+    fn schema(&self) -> serde_json::Value {
+        json!({"type": "object"})
+    }
+    fn declared_risk(&self) -> RiskClass {
+        RiskClass::Edit
+    }
+    async fn observe(
+        &self,
+        _args: &serde_json::Value,
+        _ctx: &nugget_agent::ToolCtx,
+    ) -> nugget_agent::Snapshot {
+        Some(json!(self.0.value()))
+    }
+    async fn call(
+        &self,
+        _args: serde_json::Value,
+        _ctx: &nugget_agent::ToolCtx,
+    ) -> nugget_agent::ToolResult {
+        nugget_agent::ToolResult::error("invalid input: that element cannot be pressed")
+    }
+    fn verify(
+        &self,
+        _a: &serde_json::Value,
+        _b: &nugget_agent::Snapshot,
+        _after: &nugget_agent::Snapshot,
+        _r: &nugget_agent::ToolResult,
+    ) -> Verification {
+        Verification::Failed("nothing changed".into())
+    }
+}
+
+#[tokio::test]
+async fn erroring_mutations_do_not_count_as_failures_in_a_row() {
+    let world = World::new();
+    let model = Scripted::new(vec![
+        turn(vec![("c1", "press", json!({}))]),
+        turn(vec![("c2", "press", json!({}))]),
+        turn(vec![("c3", "press", json!({}))]),
+        turn(vec![("c4", "press", json!({}))]),
+        turn(vec![("c5", "set_value", json!({"value": 1}))]),
+        turn(vec![finish("partial")]),
+    ]);
+    let tools = registry(&world).with(Arc::new(Refusing(world.clone())));
+    let run = agent(&model, tools, &FakeGate::new())
+        .run(Task::new("t-errs", "press it"), cfg())
+        .await;
+    // Four refused presses did not stop the run; the model went on and finished.
+    assert_eq!(run.steps, 6, "{:?}", run.outcome);
+    assert_eq!(world.value(), 1);
+    assert_eq!(run.verification.failed, 4);
+    // Judging is unchanged: the unresolved failures still fail the claim.
+    match &run.outcome {
+        Outcome::Failed(r) => assert!(r.contains("press: nothing changed"), "{r}"),
+        o => panic!("{o:?}"),
+    }
+    let note = &model.requests()[1];
+    let note = format!("{:?}", note.messages.last().unwrap());
+    assert!(note.contains("VERIFICATION FAILED: nothing changed"));
+    assert!(note.contains("not performed"));
+}
+
+#[tokio::test]
+async fn executed_failed_verifications_still_stop_the_run() {
+    let world = World::new();
+    world.broken.store(true, Ordering::SeqCst);
+    let model = Scripted::new(vec![
+        turn(vec![("c1", "set_value", json!({"value": 7}))]),
+        turn(vec![("c2", "press", json!({}))]),
+        turn(vec![("c3", "set_value", json!({"value": 7}))]),
+        turn(vec![("c4", "set_value", json!({"value": 7}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let tools = registry(&world).with(Arc::new(Refusing(world.clone())));
+    let run = agent(&model, tools, &FakeGate::new())
+        .run(Task::new("t-exec-fail", "set 7"), cfg())
+        .await;
+    // The erroring press neither counted nor reset the streak: three executed failures stop it.
+    match &run.outcome {
+        Outcome::Failed(r) => assert!(r.contains("verification failed 3 times"), "{r}"),
+        o => panic!("{o:?}"),
+    }
+    assert_eq!(world.set_calls.load(Ordering::SeqCst), 3);
+}
