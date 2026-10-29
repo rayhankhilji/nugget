@@ -272,11 +272,13 @@ pub fn match_tree(bench: &Node, real: &UiNode) -> Match {
             last_end = last_end.max(flat[i].end);
         }
     }
+    // The window's own title (AX shows it as text after the page) is not a status line.
+    let title = norm(real.name.as_deref().unwrap_or(""));
     m.trailing = flat[last_end.min(flat.len())..]
         .iter()
         .filter(|f| f.node.children.is_empty() && real_class(f.node) == Class::Other)
         .filter_map(|f| f.node.name.as_deref().map(norm))
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && *s != title)
         .collect();
     m
 }
@@ -437,6 +439,17 @@ fn chord(key: Key) -> KeyChord {
     KeyChord {
         key,
         modifiers: Modifiers::default(),
+    }
+}
+
+/// Typing an option's text into a closed list. On macOS each character goes as its own key
+/// press: a list's type-ahead reads key presses, and the text input path sends a string per
+/// event.
+fn type_ahead(option: &str) -> KeyInput {
+    if cfg!(target_os = "macos") {
+        KeyInput::Keys(option.chars().map(|c| chord(Key::Char(c))).collect())
+    } else {
+        KeyInput::Text(option.to_owned())
     }
 }
 
@@ -623,7 +636,7 @@ impl UiaDriver {
                 KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
             Action::Select { option, .. } => Some(vec![
-                KeyInput::Text(option.clone()),
+                type_ahead(option),
                 KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
         };

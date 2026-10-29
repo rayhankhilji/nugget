@@ -209,6 +209,14 @@ impl FakeEdge {
         })
     }
 
+    fn is_combo(&self, target: &str) -> bool {
+        self.stage
+            .with(|w| w.observe())
+            .ok()
+            .and_then(|o| o.find(target).map(|n| n.role == Role::ComboBox))
+            .unwrap_or(false)
+    }
+
     fn win(&self, i: usize, app: &str) -> WindowInfo {
         let (title, _) = self.page(app);
         WindowInfo {
@@ -286,6 +294,14 @@ impl ComputerUse for FakeEdge {
         match (what, action) {
             (Real::Control(t), UiAction::Press) => self.post(Action::Click { target: t }),
             (Real::Control(_), UiAction::SetValue { .. }) if self.ignore_set_value => done(),
+            (Real::Control(t), UiAction::SetValue { .. }) if self.is_combo(&t) => {
+                if self.ax {
+                    // Chrome takes the value and fires no `change`: the page never posts it.
+                    done()
+                } else {
+                    Err(Error::Unsupported("fake".into()))
+                }
+            }
             (Real::Control(t), UiAction::SetValue { value }) => self.post(Action::Type {
                 target: t,
                 text: value.clone(),
@@ -320,7 +336,28 @@ impl ComputerUse for FakeEdge {
                 let Some(Real::Control(t)) = self.ids.lock().unwrap().get(&id).cloned() else {
                     return Err(Error::Invalid("not a field".into()));
                 };
+                if self.is_combo(&t) {
+                    return self.post(Action::Select {
+                        target: t,
+                        option: text,
+                    });
+                }
                 self.post(Action::Type { target: t, text })
+            }
+            // Type-ahead: one key press per character.
+            KeyInput::Keys(k) if k.iter().all(|c| matches!(c.key, Key::Char(_))) => {
+                let mut typed = self.typed.lock().unwrap();
+                let t = typed.entry(id).or_default();
+                t.extend(k.iter().filter_map(|c| match c.key {
+                    Key::Char(ch) => Some(ch),
+                    Key::Named(_) => None,
+                }));
+                Ok(ActionOutcome {
+                    verified: true,
+                    detail: String::new(),
+                    before: None,
+                    after: None,
+                })
             }
             KeyInput::Keys(_) => Ok(ActionOutcome {
                 verified: true,
@@ -337,10 +374,17 @@ impl ComputerUse for FakeEdge {
 
 /// A UIA-style fake tree as Chrome shows it over AX on macOS (after the AX backend has named
 /// labelled controls from their AXTitleUIElement): static text in `AXValue`, `aria-label`s as
-/// descriptions, a `<select>` as an `AXPopUpButton` (a button) whose options are menu items
-/// to press, switches as `AXCheckBox`/`AXSwitch`.
+/// descriptions, a `<select>` as an `AXPopUpButton` (a button) that shows only its selected
+/// option (an unnamed menu item with the text as its value) and ignores a set value, switches
+/// as `AXCheckBox`/`AXSwitch`.
 fn axify(n: &mut UiNode, in_combo: bool) {
     let combo = n.role == A11yRole::ComboBox;
+    if combo {
+        let current = n.value.clone();
+        for list in &mut n.children {
+            list.children.retain(|o| o.name == current);
+        }
+    }
     let raw = match n.role {
         A11yRole::StaticText => {
             n.value = n.name.take();
@@ -359,7 +403,7 @@ fn axify(n: &mut UiNode, in_combo: bool) {
         A11yRole::Button => "AXButton",
         A11yRole::ComboBox => {
             n.role = A11yRole::Button;
-            n.actions = vec![K::Press, K::Focus, K::Expand];
+            n.actions = vec![K::Press, K::SetValue, K::Focus, K::Expand];
             "AXPopUpButton"
         }
         A11yRole::List if in_combo => {
@@ -368,6 +412,8 @@ fn axify(n: &mut UiNode, in_combo: bool) {
         }
         A11yRole::ListItem if in_combo => {
             n.role = A11yRole::MenuItem;
+            n.value = n.name.take();
+            n.states.selected = true;
             n.actions = vec![K::Press];
             "AXMenuItem"
         }
@@ -513,16 +559,17 @@ fn matching_reads_chrome_over_ax() {
     assert_eq!(m.nodes["forms.news"].states.checked, Some(true));
     assert_eq!(m.nodes["forms.country"].role, A11yRole::ComboBox);
     assert_eq!(m.nodes["forms.recent"].name.as_deref(), Some("Recent"));
-    assert_eq!(m.options.len(), 2);
-    assert_eq!(m.options["forms.country.opt0"].raw_role, "AXMenuItem");
+    // Chrome shows a closed list's selected option only, unnamed.
+    assert!(m.options.is_empty());
     let tree = present(&bench, &m, None);
     let country = tree.find(&ElementId("forms-country".into())).unwrap();
     assert_eq!(country.role, A11yRole::ComboBox);
+    assert_eq!(country.children.len(), 2);
     assert!(country.children[1].states.selected);
 }
 
 #[test]
-fn driver_selects_a_chrome_option_by_pressing_it() {
+fn driver_selects_a_chrome_option_by_type_ahead() {
     let (t, stage, driver) = setup("forms-fill-basic", |s| FakeEdge {
         ax: true,
         ..FakeEdge::new(s)
@@ -553,7 +600,8 @@ fn driver_selects_a_chrome_option_by_pressing_it() {
         })
         .unwrap();
     assert!(r.ok, "{r:?}");
-    assert_eq!(driver.fallbacks.load(Ordering::Relaxed), 0);
+    // The set value changed nothing; the keyboard did it.
+    assert_eq!(driver.fallbacks.load(Ordering::Relaxed), 1);
     let now = stage.with(|w| w.observe()).unwrap();
     assert_eq!(now.find(&combo.id).unwrap().value.as_deref(), Some(&*want));
 }

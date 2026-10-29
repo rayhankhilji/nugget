@@ -412,6 +412,32 @@ fn scroll_wheel(el: &AxEl, direction: ScrollDirection, amount: u32) -> Result<()
     Ok(())
 }
 
+/// How long [`bring_to_front`] waits for the app to become frontmost.
+const ACTIVATE_WAIT: Duration = Duration::from_millis(1500);
+
+/// Make the element's app frontmost and its window main. Key events are posted to the
+/// frontmost app, so focusing an element in a background app would send the keys that
+/// follow somewhere else. AX `AXFrontmost` works from a background process, where
+/// `NSRunningApplication.activate` may be refused (macOS 14+). Best effort.
+fn bring_to_front(el: &AxEl) {
+    let Some(pid) = ax::pid(&el.0) else {
+        return;
+    };
+    if let Some(w) = el.get("AXWindow").and_then(AxEl::element) {
+        let _ = perform_named(&w, "AXRaise");
+        let _ = set_bool(&w, "AXMain", true);
+    }
+    if frontmost_pid() == Some(pid) {
+        return;
+    }
+    let app = AxEl(ax::application(pid));
+    let _ = set_bool(&app, "AXFrontmost", true);
+    let t0 = std::time::Instant::now();
+    while frontmost_pid() != Some(pid) && t0.elapsed() < ACTIVATE_WAIT {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 pub(super) fn perform(el: &AxEl, action: &UiAction) -> Result<()> {
     match action {
         UiAction::Press => {
@@ -458,7 +484,10 @@ pub(super) fn perform(el: &AxEl, action: &UiAction) -> Result<()> {
             }
             Err(Error::Unsupported("the element cannot be selected".into()))
         }
-        UiAction::Focus => set_bool(el, "AXFocused", true),
+        UiAction::Focus => {
+            bring_to_front(el);
+            set_bool(el, "AXFocused", true)
+        }
         UiAction::Scroll { amount: 0, .. } => perform_named(el, "AXScrollToVisible"),
         UiAction::Scroll { direction, amount } => scroll_wheel(el, *direction, *amount),
         UiAction::Expand { expand } => {
