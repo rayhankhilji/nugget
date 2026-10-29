@@ -96,6 +96,7 @@
   "format.tier.synthesis": "統合",
   "format.tier.agentic": "エージェント",
   "format.tier.embedding": "埋め込み",
+  "format.tier.rerank": "再ランキング",
   "format.sourceKind.files": "フォルダ",
   "format.sourceKind.obsidian": "Obsidian保管庫",
   "format.sourceKind.gmail": "Gmail",

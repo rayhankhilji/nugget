@@ -45,6 +45,21 @@ fn recommends_by_ram_and_tier_from_shipped_manifest() {
         Some("nomic-embed-text-v1.5-q8")
     );
     assert_eq!(pick(&m, 20, Tier::Embedding), None);
+
+    // The reranker is recommended only for its own tier, never for chat or embeddings.
+    for ram in [40, 80, 160, 640, 10240] {
+        for t in Tier::ROUTED {
+            assert_ne!(
+                pick(&m, ram, t).as_deref(),
+                Some("bge-reranker-v2-m3-q4km"),
+                "{t:?} at {ram}"
+            );
+        }
+    }
+    assert_eq!(
+        pick(&m, 40, Tier::Rerank).as_deref(),
+        Some("bge-reranker-v2-m3-q4km")
+    );
 }
 
 #[test]

@@ -96,6 +96,7 @@
   "format.tier.synthesis": "综合",
   "format.tier.agentic": "智能体",
   "format.tier.embedding": "嵌入",
+  "format.tier.rerank": "重排序",
   "format.sourceKind.files": "文件夹",
   "format.sourceKind.obsidian": "Obsidian 仓库",
   "format.sourceKind.gmail": "Gmail",

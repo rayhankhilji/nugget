@@ -59,7 +59,7 @@ The local model chosen for each tier, by manifest id (as listed on the Models pa
 
 The on-device runtime: `nuggetd` runs installed models with a pinned, verified `llama-server` on
 `127.0.0.1`, as the providers `local-chat` (triage, light, synthesis) and `local-embedding`
-(embedding).
+(embedding), plus `local-rerank` (rerank) when `rerank_model` is set.
 
 <!-- check-refs: config.runtime -->
 | Key | Type | Default | Description |
@@ -67,7 +67,7 @@ The on-device runtime: `nuggetd` runs installed models with a pinned, verified `
 | `enabled` | bool | `true` | Run selected, installed models locally |
 | `chat_model` | model id | unset | Chat model. Unset: `models.selected.triage`, then the manifest's recommendation for this machine (triage tier, else synthesis) |
 | `embedding_model` | model id | unset | Embedding model. Unset: `models.selected.embedding`, then the recommendation |
-| `rerank_model` | model id | unset | Reranker for search, served as `local-rerank` with `llama-server --reranking` (never used for chat or embeddings). Unset: none; it is never chosen automatically. `[retrieve.reranker]` takes precedence |
+| `rerank_model` | model id | unset | Reranker for search, served as `local-rerank` with `llama-server --reranking`. Must be a manifest model with the `rerank` tier, such as `bge-reranker-v2-m3-q4km` (install it on the **Models** page). Rerankers are never used for chat or embeddings. Unset: none; it is never chosen automatically. `[retrieve.reranker]` takes precedence |
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
@@ -277,7 +277,7 @@ file order, then the managed runtime, then cloud providers in file order. See
 | `base_url` | URL | per kind | API root. `anthropic`: without `/v1`, default `https://api.anthropic.com`. `openai_responses`: default `https://api.openai.com/v1`. `openai_compatible`: required, including the version prefix, for example `http://127.0.0.1:11434/v1`. Plain `http` to an internet host is refused |
 | `model` | string | required | The provider's model name |
 | `api_key` | `env:VAR` or `keychain:NAME` | none | Omit for local servers that need no key |
-| `tiers` | array of `triage`, `light`, `synthesis`, `agentic`, `embedding` | `[]` | Tiers this provider serves |
+| `tiers` | array of `triage`, `light`, `synthesis`, `agentic`, `embedding` | `[]` | Tiers this provider serves. `rerank` is refused: use `[retrieve.reranker]` |
 | `locality` | `on_device`, `local_network` or `cloud` | from the host | Treat the endpoint as further away than its address suggests (for a local gateway that forwards to the cloud). It can only raise the classification, never lower it |
 | `context_tokens` | integer | unset | Context window, if known |
 | `max_output_tokens` | integer | unset | Output cap when a request sets none. Anthropic requires one and falls back to 16000 |

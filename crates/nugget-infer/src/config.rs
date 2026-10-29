@@ -417,6 +417,12 @@ impl ProviderConfig {
         if self.model.trim().is_empty() {
             return Err(Error::Invalid(format!("provider {id}: model is empty")));
         }
+        if self.tiers.contains(&Tier::Rerank) {
+            return Err(Error::Invalid(format!(
+                "provider {id}: `rerank` is not a routing tier; point search at a reranker with \
+                 [retrieve.reranker] or set [runtime] rerank_model"
+            )));
+        }
         let url = self.base_url()?;
         if let Some(socket) = &self.socket_path {
             if !cfg!(unix) {
@@ -621,6 +627,19 @@ mod tests {
         assert_eq!(c.effective_locality().unwrap(), Locality::Cloud);
         assert_eq!(c.tiers, vec![Tier::Synthesis, Tier::Agentic]);
         assert_eq!(c.api_key, Some(ApiKeyRef::Env("K".into())));
+    }
+
+    #[test]
+    fn the_rerank_tier_is_not_a_provider_tier() {
+        let err = cfg(r#"
+            id = "a"
+            kind = "openai_compatible"
+            base_url = "http://127.0.0.1:8080/v1"
+            model = "m"
+            tiers = ["light", "rerank"]
+        "#)
+        .unwrap_err();
+        assert!(err.to_string().contains("rerank"), "{err}");
     }
 
     #[test]

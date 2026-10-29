@@ -12,8 +12,8 @@ use nugget_core::ipc::{
     self, AskRequest, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone, ChatStarted,
     ContextRequest, ContextResponse, EgressRecentRequest, ModelInfo, ModelInstallRequest,
     ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
-    SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec, SourceSync,
-    SourceUpdate, StatusResponse, method, notification,
+    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
+    SourceSync, SourceUpdate, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -52,14 +52,6 @@ const MAX_SECRET_BYTES: usize = 4096;
 /// [`nugget_ingest::AUTH_TIMEOUT`]).
 const AUTH_RESULT_WAIT: std::time::Duration =
     nugget_ingest::AUTH_TIMEOUT.saturating_add(std::time::Duration::from_secs(30));
-
-const ALL_TIERS: [Tier; 5] = [
-    Tier::Triage,
-    Tier::Light,
-    Tier::Synthesis,
-    Tier::Agentic,
-    Tier::Embedding,
-];
 
 pub(crate) struct RpcHandler {
     pub(crate) state: Arc<State>,
@@ -192,7 +184,12 @@ impl RpcHandler {
                     kind: meta.kind.as_str().to_string(),
                     model: meta.model,
                     locality: meta.locality,
-                    tiers: router.tiers_of(s.id()),
+                    // The rerank slot is not a router provider; report the tier it serves.
+                    tiers: if s.role() == RuntimeRole::Rerank {
+                        s.tiers().to_vec()
+                    } else {
+                        router.tiers_of(s.id())
+                    },
                     capabilities: router.capabilities(s.id()),
                     error: local.slot_error(s),
                 }
@@ -703,7 +700,8 @@ impl RpcHandler {
         let models = self.state.models.clone();
         let installed = blocking(move || models.installed()).await?;
         let hw = self.state.hardware;
-        let recommended: HashSet<&str> = ALL_TIERS
+        // Rerankers are opt-in (`[runtime] rerank_model`), so never marked recommended.
+        let recommended: HashSet<&str> = Tier::ROUTED
             .iter()
             .filter_map(|t| recommend(manifest, &hw, *t))
             .map(|e| e.id.as_str())

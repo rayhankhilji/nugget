@@ -13,7 +13,7 @@ export const PROTOCOL_VERSION = 1;
 
 // ---- nugget_core types ----
 
-export type Tier = "triage" | "light" | "synthesis" | "agentic" | "embedding";
+export type Tier = "triage" | "light" | "synthesis" | "agentic" | "embedding" | "rerank";
 export const CHAT_TIERS: readonly Tier[] = ["light", "synthesis", "agentic", "triage"];
 
 export type Locality = "on_device" | "local_network" | "cloud";

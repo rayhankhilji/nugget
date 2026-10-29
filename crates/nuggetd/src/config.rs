@@ -289,9 +289,9 @@ pub struct RuntimeConfig {
     /// Manifest id of the embedding model (served as `local-embedding`). Unset:
     /// `models.selected.embedding`, then the recommendation for the Embedding tier.
     pub embedding_model: Option<String>,
-    /// Manifest id of a cross-encoder reranker (served as `local-rerank`, used by search only,
-    /// never routed for a tier). Unset (default): no local reranker; there is no automatic
-    /// recommendation. `[retrieve.reranker]` takes precedence.
+    /// Manifest id of a cross-encoder reranker, an entry with the `rerank` tier (served as
+    /// `local-rerank`, used by search only, never routed). Unset (default): no local reranker;
+    /// there is no automatic recommendation. `[retrieve.reranker]` takes precedence.
     pub rerank_model: Option<String>,
     /// Stop a server after this many minutes without requests; 0 keeps it running. A stopped
     /// server starts again on the next request.
@@ -511,13 +511,7 @@ fn msg(e: Error) -> String {
 }
 
 pub(crate) fn tier_name(t: Tier) -> &'static str {
-    match t {
-        Tier::Triage => "triage",
-        Tier::Light => "light",
-        Tier::Synthesis => "synthesis",
-        Tier::Agentic => "agentic",
-        Tier::Embedding => "embedding",
-    }
+    t.as_str()
 }
 
 /// Create the config file without clobbering one that appeared concurrently.

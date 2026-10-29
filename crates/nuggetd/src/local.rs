@@ -9,10 +9,11 @@
 //!
 //! - Until its model is installed a slot fails fast with `Unsupported`, so the router falls
 //!   back to the next candidate.
-//! - The `rerank` role (`local-rerank`, only with `[runtime] rerank_model`) is a slot too, so it
-//!   is installed, started and reported like the others, but it never joins the router: no tier
-//!   lists it and it is not a router provider. Retrieval reaches it through
-//!   [`crate::rerank`].
+//! - The `rerank` role (`local-rerank`, only with `[runtime] rerank_model` naming a manifest
+//!   entry with the `rerank` tier) is a slot too, so it is installed, started and reported like
+//!   the others, but it never joins the router: `Tier::Rerank` is not a routed tier and the slot
+//!   is not a router provider. Retrieval reaches it through [`crate::rerank`]. Rerankers are
+//!   never selected for chat or embeddings.
 //! - A slot is routable for nothing (empty capabilities) until its server first became ready,
 //!   so neither chat, triage nor embeddings pick it before then. Once ready, the role's known
 //!   capabilities are set (chat streams and follows JSON schemas, embedding embeds) and stay
@@ -40,14 +41,6 @@ use nugget_models::{Hardware, Manifest, ModelEntry, recommend};
 use nugget_runtime::{Runtime, provider_id};
 
 use crate::config::Config;
-
-const ALL_TIERS: [Tier; 5] = [
-    Tier::Triage,
-    Tier::Light,
-    Tier::Synthesis,
-    Tier::Agentic,
-    Tier::Embedding,
-];
 
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
@@ -82,10 +75,10 @@ pub(crate) fn selected_models(
         &[Tier::Triage, Tier::Synthesis],
     );
     if let Some(m) = chat {
-        if m.tiers.iter().any(|t| *t != Tier::Embedding) {
+        if m.tiers.iter().any(|t| t.is_chat()) {
             out.push((RuntimeRole::Chat, m));
         } else {
-            tracing::warn!(model = %m.id, "runtime.chat_model is an embedding-only model; no local chat");
+            tracing::warn!(model = %m.id, "runtime.chat_model serves no chat tier; no local chat");
         }
     }
     let embedding = pick(
@@ -100,10 +93,15 @@ pub(crate) fn selected_models(
             tracing::warn!(model = %m.id, "runtime.embedding_model does not embed; no local embeddings");
         }
     }
-    // Only when configured: no tier marks rerankers, so nothing is recommended.
+    // Only when configured: a reranker is opt-in, never recommended.
     if let Some(id) = &cfg.runtime.rerank_model {
         match manifest.get(id) {
-            Some(m) => out.push((RuntimeRole::Rerank, m.clone())),
+            Some(m) if m.tiers.contains(&Tier::Rerank) => {
+                out.push((RuntimeRole::Rerank, m.clone()));
+            }
+            Some(m) => {
+                tracing::warn!(model = %m.id, "runtime.rerank_model is not a reranker; no local reranker");
+            }
             None => {
                 tracing::warn!(model = %id, "runtime.rerank_model is not in the manifest; no local reranker");
             }
@@ -116,12 +114,13 @@ pub(crate) fn selected_models(
 pub(crate) fn slot_tiers(role: RuntimeRole, model: &ModelEntry) -> Vec<Tier> {
     match role {
         RuntimeRole::Embedding => vec![Tier::Embedding],
-        // Retrieval calls the reranker directly; it serves no tier.
-        RuntimeRole::Rerank => Vec::new(),
+        // Retrieval calls the reranker directly: the slot never joins the router (see
+        // `LocalRuntime::routed`), the tier is only reported by `providers.list`.
+        RuntimeRole::Rerank => vec![Tier::Rerank],
         RuntimeRole::Chat => {
             let mut t: Vec<Tier> = CHAT_TIERS.to_vec();
             for x in &model.tiers {
-                if *x != Tier::Embedding && !t.contains(x) {
+                if x.is_chat() && !t.contains(x) {
                     t.push(*x);
                 }
             }
@@ -155,7 +154,7 @@ pub(crate) fn tier_map(
     local: &[(ProviderId, Vec<Tier>)],
 ) -> TierMap {
     let mut map = TierMap::new();
-    for tier in ALL_TIERS {
+    for tier in Tier::ROUTED {
         let user = |cloud: bool| {
             configured
                 .iter()
@@ -211,6 +210,15 @@ impl RuntimeSlot {
 
     pub fn id(&self) -> &ProviderId {
         &self.id
+    }
+
+    pub fn role(&self) -> RuntimeRole {
+        self.role
+    }
+
+    /// Tiers the slot serves (for the rerank slot, which is not routed, only `rerank`).
+    pub fn tiers(&self) -> &[Tier] {
+        &self.tiers
     }
 
     pub fn is_installed(&self) -> bool {
@@ -551,6 +559,48 @@ mod tests {
         nugget_models::default_manifest().unwrap()
     }
 
+    fn reranker(m: &Manifest) -> ModelEntry {
+        m.models
+            .iter()
+            .find(|e| e.tiers.contains(&Tier::Rerank))
+            .expect("the shipped manifest has a reranker")
+            .clone()
+    }
+
+    #[test]
+    fn a_reranker_is_never_selected_for_chat_or_embeddings() {
+        let m = manifest();
+        let rerank = reranker(&m);
+        // Recommendations never pick it, whatever the RAM.
+        for gb in [4, 8, 16, 64, 1024] {
+            for t in Tier::ROUTED {
+                assert_ne!(
+                    recommend(&m, &hw(gb), t).map(|e| e.id.as_str()),
+                    Some(rerank.id.as_str())
+                );
+            }
+        }
+        // Configured explicitly for chat or embeddings (or via models.selected): refused.
+        for toml in [
+            format!("[runtime]\nchat_model = \"{}\"\n", rerank.id),
+            format!("[runtime]\nembedding_model = \"{}\"\n", rerank.id),
+            format!(
+                "[models.selected]\ntriage = \"{0}\"\nembedding = \"{0}\"\n",
+                rerank.id
+            ),
+        ] {
+            let cfg = Config::parse(&toml).unwrap();
+            for (role, e) in selected_models(&cfg, &m, &hw(64)) {
+                assert_ne!(e.id, rerank.id, "{toml}: {role:?}");
+            }
+        }
+        assert!(
+            slot_tiers(RuntimeRole::Chat, &rerank)
+                .iter()
+                .all(|t| t.is_chat())
+        );
+    }
+
     fn hw(gb: u64) -> Hardware {
         Hardware {
             total_ram: gb << 30,
@@ -597,16 +647,24 @@ mod tests {
         // No automatic recommendation.
         let sel = selected_models(&Config::parse("").unwrap(), &m, &hw(64));
         assert!(sel.iter().all(|(r, _)| *r != RuntimeRole::Rerank));
-        // Configured: the manifest entry (any entry, as no tier marks rerankers yet).
-        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
-        let cfg = Config::parse(&format!("[runtime]\nrerank_model = \"{}\"\n", emb.id)).unwrap();
+        // Configured: the manifest's reranker.
+        let rerank = reranker(&m);
+        let cfg = Config::parse(&format!("[runtime]\nrerank_model = \"{}\"\n", rerank.id)).unwrap();
         let sel = selected_models(&cfg, &m, &hw(64));
         let rr: Vec<_> = sel
             .iter()
             .filter(|(r, _)| *r == RuntimeRole::Rerank)
             .collect();
         assert_eq!(rr.len(), 1);
-        assert_eq!(rr[0].1.id, emb.id);
+        assert_eq!(rr[0].1.id, rerank.id);
+        // A model without the rerank tier is refused for the role.
+        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        let cfg = Config::parse(&format!("[runtime]\nrerank_model = \"{}\"\n", emb.id)).unwrap();
+        assert!(
+            selected_models(&cfg, &m, &hw(64))
+                .iter()
+                .all(|(r, _)| *r != RuntimeRole::Rerank)
+        );
         // Not in the manifest: no reranker.
         let cfg = Config::parse("[runtime]\nrerank_model = \"not-in-manifest\"\n").unwrap();
         assert!(
@@ -614,7 +672,7 @@ mod tests {
                 .iter()
                 .all(|(r, _)| *r != RuntimeRole::Rerank)
         );
-        assert!(slot_tiers(RuntimeRole::Rerank, &emb).is_empty());
+        assert_eq!(slot_tiers(RuntimeRole::Rerank, &rerank), vec![Tier::Rerank]);
         assert_eq!(
             known_capabilities(
                 RuntimeRole::Rerank,
@@ -642,7 +700,7 @@ mod tests {
             runtime,
             vec![
                 (RuntimeRole::Embedding, emb.clone()),
-                (RuntimeRole::Rerank, emb.clone()),
+                (RuntimeRole::Rerank, reranker(&m)),
             ],
             &|_| true,
             egress,
@@ -656,7 +714,8 @@ mod tests {
         assert_eq!(routes.len(), 1);
         let router = Arc::new(Router::new(providers, tier_map(&[], &routes)));
         local.attach(&router);
-        for t in ALL_TIERS {
+        assert!(router.tiers().get(&Tier::Rerank).is_none());
+        for t in Tier::ALL {
             assert!(!router.tiers_of(rerank.id()).contains(&t));
         }
         assert!(router.provider(rerank.id()).is_none());
@@ -749,12 +808,12 @@ mod tests {
     fn chat_slot_serves_the_core_chat_tiers() {
         let m = manifest();
         for e in &m.models {
-            if e.tiers.iter().any(|t| *t != Tier::Embedding) {
+            if e.tiers.iter().any(|t| t.is_chat()) {
                 let t = slot_tiers(RuntimeRole::Chat, e);
                 for c in CHAT_TIERS {
                     assert!(t.contains(&c), "{}: {t:?}", e.id);
                 }
-                assert!(!t.contains(&Tier::Embedding));
+                assert!(t.iter().all(|t| t.is_chat()), "{}: {t:?}", e.id);
             }
         }
     }
