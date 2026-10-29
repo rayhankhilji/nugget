@@ -6,10 +6,12 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
-It runs two scenarios, each with its own daemon and temp home:
+It runs three scenarios:
 
 - **pages**: a home with the corpus already indexed; every page is opened and checked.
-- **first-run**: an empty home; the test goes through onboarding like a new user, connects the
+- **i18n**: on the same indexed home (indexed once, shared with pages), every page is opened in
+  the pseudo-locale, German, Japanese and Arabic and checked for text that doesn't fit.
+- **first-run**: its own empty home; the test goes through onboarding like a new user, connects the
   corpus folder, and times app start to a cited answer on Search. It fails above a budget
   (2 minutes by default), the promise of "useful search in under two minutes from install".
 
@@ -28,7 +30,7 @@ pnpm run e2e
 
 It builds the frontend first when `dist/` is missing, and runs `cargo build --locked -p nuggetd`
 (a no-op when up to date) unless `NUGGETD` names a binary. A run takes about 35 s once both are
-built. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
+built, plus about 60 s for the i18n scenario. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -39,7 +41,8 @@ built. Linux and macOS only, because the bridge speaks to the daemon's Unix sock
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,first-run` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run` | Which scenarios to run, comma-separated. |
+| `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
 | `E2E_FIRST_RUN_BUDGET_MS` | 120000 | First run: the most app start to a cited answer may take. |
 | `E2E_FIRST_RUN_NO_CONFIG=1` | off | First run: write no `config.toml` at all (binds MCP HTTP on its fixed port 7319 and starts the local runtime). |
 | `E2E_CHROMIUM` | Playwright's | Path to a Chromium binary to launch instead of Playwright's download. |
@@ -110,12 +113,43 @@ paste), and a model's streamed answer needs Tauri events the bridge doesn't deli
 clicks as fast as the UI allows, so the time is the software's share of the two minutes, not a
 person's reading time.
 
+## What happens: i18n
+
+`i18n.mjs` checks that translations fit the layout. For each locale in `E2E_I18N_LOCALES`
+(default `en-XA`, the pseudo-locale: English accented and about 35% longer, built by
+`src/i18n/pseudo.ts`; `de`, long compound words; `ja`, no spaces to break at; `ar`, right to
+left) and each page of the `PAGES` registry, it sets `localStorage` `nugget.locale` (plus the
+finished onboarding and `nugget.page`), waits for `<html lang>` to switch and the page to settle,
+writes `i18n-<locale>-<page>.png`, and measures every visible labelled element: buttons, links,
+nav items, headings, labels, `legend`, `summary`, `th`, `dt`, `select`, tabs, options, menu
+items, badges, chips, pills and anything else with an `aria-label` and text (landmarks and
+lists excepted). An element is an offender when, by more than 1px:
+
+| Kind | Meaning |
+| --- | --- |
+| `clipped` | it, or an element inside it, clips (`overflow: hidden`/`clip`, which ellipsis needs) and its content is wider or taller than its box |
+| `escapes` | a `white-space: nowrap` element inside it is wider than its nearest block container |
+| `spills` | it, a box inside it, or its nearest block/flex/grid ancestor doesn't clip and its content is wider than it (a hint pushed out of its button, a button row past its card) |
+| `page-scrolls` | the window scrolls sideways |
+
+Scroll containers (`overflow: auto`/`scroll`) end the search: scrolling, as in a wide table's
+wrapper, is intended. Places where overflow is intended are allow-listed by selector in `ALLOW`
+in `i18n.mjs`, each with its reason (the graph canvas, `pre`/`code`, chat history titles and
+palette labels cut with an ellipsis on purpose, screen-reader-only text, form fields). Each
+locale and page is one check that fails with its offenders; in Arabic it also checks
+`<html dir="rtl">`. `summary.json` has `i18n.offenders` (`{ locale, page, kind, path, text,
+scrollWidth, clientWidth, … }`), also written to `i18n-offenders.json`.
+
+To fix an offender, let the text wrap (`min-width: 0` on flex items, `flex-wrap: wrap`,
+`overflow-wrap: anywhere`, no fixed widths); cut it with `text-overflow: ellipsis` and a `title`
+only where truncation is acceptable, and then add the selector to `ALLOW` with the reason.
+
 ## Artifacts
 
 `e2e/artifacts/` (git-ignored; CI uploads it as `desktop-e2e`): a numbered screenshot per page and
-per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboarding step),
+per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboarding step, `i18n-<locale>-<page>.png` per locale and page),
 `summary.json` (checks with timings, every command that returned an error, console errors per page,
-the commands the UI called, and `first_run`), `daemon-logs/`, `nuggetd.out.log`, the first run's
+the commands the UI called, `i18n` and `first_run`), `daemon-logs/`, `nuggetd.out.log`, the first run's
 `first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`.
 
 `harness.mjs` holds what both scenarios share: settings from the environment, the log, `t(key)`

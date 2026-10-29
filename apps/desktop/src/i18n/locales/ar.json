@@ -922,7 +922,7 @@
   "knowledge.tab.browse": "تصفّح",
   "knowledge.tab.graph": "الرسم البياني",
   "knowledge.chooseTitle": "اختر كيانًا",
-  "knowledge.chooseBody": "اختر شخصًا أو شيئًا على اليسار لترى ما يعرفه Nugget ولماذا.",
+  "knowledge.chooseBody": "اختر شخصًا أو شيئًا من القائمة لترى ما يعرفه Nugget ولماذا.",
   "knowledge.entitiesLabel": "الكيانات",
   "knowledge.searchLabel": "البحث في الكيانات",
   "knowledge.searchPlaceholder": "ابحث عن أشخاص ومشاريع وأماكن…",

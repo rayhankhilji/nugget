@@ -90,7 +90,7 @@ right to left. Two tools catch layout problems before a translator or user does:
 
 - **The pseudo-locale.** In a development build (`pnpm dev`) the Language menu also offers
   *Pseudo (en-XA)*: English with accented letters, padded about 35% longer, such as
-  `[Śéáŕçĥ ýóúŕ śóúŕçéś !!!]`. Text that is cut off, overflows, or shows up unaccented (it bypasses
+  `[Šéáŕçĥ ýóúŕ šóúŕçéš ļóŕéḿ]`. Text that is cut off, overflows, or shows up unaccented (it bypasses
   the catalog) is easy to spot.
 - **The overflow test.** `pnpm run e2e` (see `apps/desktop/e2e/README.md`) opens every page of the
   real app in the pseudo-locale, German, Japanese and Arabic, takes a screenshot of each, and fails

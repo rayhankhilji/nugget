@@ -2010,6 +2010,16 @@ h3.token-heading:focus {
   color: var(--text);
 }
 
+/* Long translations wrap the label; the shortcut hint never shrinks below its text. */
+.palette-trigger > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.palette-trigger > kbd {
+  flex: none;
+}
+
 .palette {
   width: min(560px, calc(100vw - 32px));
   margin-top: 12vh;
