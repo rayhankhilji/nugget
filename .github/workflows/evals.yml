@@ -59,7 +59,12 @@ jobs:
             args: doubletap
             args2: doubletap --local-threads 4
           - suite: draft
-            args: draft --draft-judge model --draft-dump eval-results/draft-drafts.jsonl
+            # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
+            # agentic-tier model rather than the drafting model (AA3).
+            args: >-
+              draft --draft-grounding both --draft-temperature 0 --draft-judge model
+              --draft-judge-model qwen3-8b-q4km --draft-judge-timeout-s 240
+              --draft-dump eval-results/draft-drafts.jsonl
           - suite: cua
             args: cua --cua-agent nugget --cua-env inproc
           # The manifest's agentic-tier model, which the app routes the agent to on 16 GB.
