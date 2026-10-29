@@ -342,6 +342,8 @@ export interface EvidenceView {
   quote?: string | null;
   title?: string | null;
   url?: string | null;
+  /** RFC 3339: when the source said it (the item's modified time), if the daemon sends it. */
+  observed_at?: string | null;
 }
 
 export interface EntityLink {
@@ -364,6 +366,8 @@ export interface ClaimView {
   confidence: number;
   status: ClaimStatus;
   evidence: EvidenceView[];
+  /** RFC 3339: when the fact last changed, if the daemon sends it. */
+  updated_at?: string | null;
 }
 
 export interface MentionView {

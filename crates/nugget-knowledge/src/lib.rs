@@ -43,6 +43,7 @@ pub mod llm;
 mod resolve;
 mod session;
 mod spec;
+mod splits;
 mod state;
 mod text;
 

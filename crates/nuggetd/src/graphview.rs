@@ -30,6 +30,8 @@ pub(crate) struct ItemInfo {
     pub url: Option<String>,
     /// `nugget_retrieve::is_sensitive` of the item; missing items count as sensitive.
     pub sensitive: bool,
+    /// Source modification time, else when the item was indexed.
+    pub observed_at: Option<time::OffsetDateTime>,
 }
 
 /// Per-request cache of item and entity lookups.
@@ -58,6 +60,7 @@ impl<'a> Lookups<'a> {
             Some(it) => ItemInfo {
                 url: item_url(&it.metadata),
                 sensitive: nugget_retrieve::is_sensitive(&it.metadata),
+                observed_at: Some(it.source_modified_at.unwrap_or(it.created_at)),
                 title: it.title,
             },
             None => ItemInfo {
@@ -190,6 +193,7 @@ pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
             quote: ev.quote.clone(),
             title: info.title,
             url: info.url,
+            observed_at: info.observed_at,
         });
     }
     Ok(ClaimView {
@@ -201,6 +205,7 @@ pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
         confidence: c.confidence,
         status: status_str(c.status),
         evidence,
+        updated_at: Some(c.updated_at),
     })
 }
 
@@ -270,21 +275,14 @@ pub(crate) fn overview(
             all.truncate(limit);
             scan_cut || cut
         }
-        // Most connected first, so stop once `limit` supported entities are found.
+        // One query for the supported set; most connected first, so stop once `limit`
+        // supported entities are found.
         Some(src) => {
-            let mut kept = Vec::with_capacity(limit.min(all.len()));
-            let mut cut = false;
-            for e in all {
-                if !supported_by(graph, &e.id, src)? {
-                    continue;
-                }
-                if kept.len() == limit {
-                    cut = true;
-                    break;
-                }
-                kept.push(e);
-            }
-            all = kept;
+            let supported: HashSet<EntityId> =
+                graph.entities_supported_by(src)?.into_iter().collect();
+            all.retain(|e| supported.contains(&e.id));
+            let cut = all.len() > limit;
+            all.truncate(limit);
             scan_cut || cut
         }
     };

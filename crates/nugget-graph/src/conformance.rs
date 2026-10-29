@@ -30,6 +30,8 @@ pub fn run(make: &dyn Fn() -> Box<dyn GraphStore>) {
     split_failures_change_nothing(make().as_ref());
     prune_orphans_removes_only_orphans(make().as_ref());
     batches_apply_in_order_and_atomically(make().as_ref());
+    // X2 additions.
+    entities_supported_by_a_source(make().as_ref());
 }
 
 fn item(key: &str) -> ItemRef {
@@ -981,4 +983,122 @@ fn batches_apply_in_order_and_atomically(g: &dyn GraphStore) {
         "a failed batch leaves no change-feed entries"
     );
     assert!(g.apply_batch(&GraphBatch::new()).unwrap().is_empty());
+}
+
+fn src_item(source: &str, key: &str) -> ItemRef {
+    ItemRef {
+        source: SourceId::new(source),
+        key: ItemKey::new(key),
+    }
+}
+
+fn src_ev(source: &str, key: &str) -> Evidence {
+    Evidence {
+        item: src_item(source, key),
+        chunk_id: None,
+        quote: None,
+    }
+}
+
+fn entities_supported_by_a_source(g: &dyn GraphStore) {
+    let mail = SourceId::new("mail");
+    let notes = SourceId::new("notes");
+    assert!(g.entities_supported_by(&mail).unwrap().is_empty());
+    let alice = person(g, "Alice");
+    let bob = person(g, "Bob");
+    let carol = person(g, "Carol");
+    let dave = person(g, "Dave");
+    let erin = person(g, "Erin");
+    let acme = g
+        .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
+        .unwrap();
+    let alias = person(g, "A. Lice");
+    let lonely = person(g, "Lonely");
+
+    // An active entity-to-entity claim from mail supports both ends.
+    g.add_claim(&claim(
+        &alice,
+        "works_at",
+        ClaimObject::Entity(acme.clone()),
+        vec![src_ev("mail", "m1")],
+    ))
+    .unwrap();
+    // A literal claim from notes supports only its subject.
+    g.add_claim(&claim(
+        &bob,
+        "born",
+        ClaimObject::Literal("1990".into()),
+        vec![src_ev("notes", "n1")],
+    ))
+    .unwrap();
+    // A mention alone is support.
+    g.add_mention(&Mention {
+        entity: carol.clone(),
+        item: src_item("mail", "m2"),
+        chunk_id: None,
+        surface: "Carol".into(),
+        confidence: 0.9,
+    })
+    .unwrap();
+    // A rejected claim from mail supports nobody.
+    let rejected = g
+        .add_claim(&claim(
+            &dave,
+            "knows",
+            ClaimObject::Entity(erin.clone()),
+            vec![src_ev("mail", "m3")],
+        ))
+        .unwrap();
+    g.set_claim_status(rejected, ClaimStatus::Rejected).unwrap();
+    // A user-asserted claim with mail evidence supports both ends.
+    let asserted = g
+        .add_claim(&claim(
+            &bob,
+            "knows",
+            ClaimObject::Entity(lonely.clone()),
+            vec![src_ev("mail", "m4")],
+        ))
+        .unwrap();
+    g.set_claim_status(asserted, ClaimStatus::UserAsserted)
+        .unwrap();
+    // A claim whose only mail evidence is retracted no longer counts.
+    g.add_claim(&claim(
+        &erin,
+        "knows",
+        ClaimObject::Entity(dave.clone()),
+        vec![src_ev("mail", "m5")],
+    ))
+    .unwrap();
+    g.retract_item(&src_item("mail", "m5")).unwrap();
+    // Mentions of a merged entity count for the survivor, never for the tombstone.
+    g.add_mention(&Mention {
+        entity: alias.clone(),
+        item: src_item("notes", "n2"),
+        chunk_id: None,
+        surface: "A. Lice".into(),
+        confidence: 0.9,
+    })
+    .unwrap();
+    g.merge(&alice, &alias).unwrap();
+
+    let mut want_mail = vec![alice.clone(), acme.clone(), carol, bob.clone(), lonely];
+    want_mail.sort();
+    let got_mail = g.entities_supported_by(&mail).unwrap();
+    assert_eq!(got_mail, want_mail, "mail support, ascending by id");
+    let mut want_notes = vec![bob, alice];
+    want_notes.sort();
+    assert_eq!(g.entities_supported_by(&notes).unwrap(), want_notes);
+    assert!(
+        g.entities_supported_by(&SourceId::new("cal"))
+            .unwrap()
+            .is_empty()
+    );
+    // Agrees with the definition the default implementation scans.
+    for s in [&mail, &notes] {
+        assert_eq!(
+            g.entities_supported_by(s).unwrap(),
+            crate::entities_supported_by_scan(g, s).unwrap(),
+            "{s}"
+        );
+    }
 }

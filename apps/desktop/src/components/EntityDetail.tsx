@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   api,
   changeAffects,
@@ -30,20 +30,25 @@ import {
   type FactActionPlan,
 } from "../knowledge";
 import type { MessageKey } from "../i18n";
+import { claimTime, evidenceTime, groupClaimsByRecency, hasClaimTimes, sourceKindOf } from "../recency";
 import { MergeDialog } from "./MergeDialog";
+import { RelativeTime } from "./RelativeTime";
+import { SourceIcon } from "./SourceIcon";
 import { SplitDialog } from "./SplitDialog";
 import { Badge, ErrorNote, Spinner } from "./ui";
 
 const MENTIONS_SHOWN = 20;
 
 /**
- * One entity: name, kind, aliases, facts grouped by predicate (each with confidence, status and
- * expandable evidence), mentions, and actions (open the vault page, show in graph, merge).
+ * One entity: name, kind, aliases, facts grouped by recency (or by predicate when the daemon
+ * sends no timestamps; each with confidence, status, when it was last seen and expandable
+ * evidence), mentions, and actions (open the vault page, show in graph, merge, split).
  */
 export function EntityDetailPanel({
   id,
   vaultRoot,
   sourceNames,
+  sourceKinds,
   onSelect,
   onShowInGraph,
   onMerged,
@@ -52,6 +57,8 @@ export function EntityDetailPanel({
   id: string;
   vaultRoot: string | null;
   sourceNames: ReadonlyMap<string, string>;
+  /** Source id → kind, for evidence icons (guessed from the id when missing). */
+  sourceKinds?: ReadonlyMap<string, string>;
   /** Open another entity (a fact's object, a merge result). */
   onSelect: (id: string) => void;
   onShowInGraph?: (id: string) => void;
@@ -196,11 +203,12 @@ export function EntityDetailPanel({
             overrides={overrides}
             busyClaim={busyClaim}
             sourceNames={sourceNames}
+            sourceKinds={sourceKinds}
             onSelect={onSelect}
             onOpen={opener.open}
             onAct={(c, plan, prev) => void act(c, plan, prev)}
           />
-          <Mentions mentions={d.mentions} sourceNames={sourceNames} onOpen={opener.open} />
+          <Mentions mentions={d.mentions} sourceNames={sourceNames} sourceKinds={sourceKinds} onOpen={opener.open} />
           {merging && (
             <MergeDialog
               target={d}
@@ -325,6 +333,7 @@ function Facts({
   overrides,
   busyClaim,
   sourceNames,
+  sourceKinds,
   onSelect,
   onOpen,
   onAct,
@@ -333,13 +342,19 @@ function Facts({
   overrides: Record<number, ClaimStatus>;
   busyClaim: number | null;
   sourceNames: ReadonlyMap<string, string>;
+  sourceKinds?: ReadonlyMap<string, string>;
   onSelect: (id: string) => void;
   onOpen: (url: string, label: string) => Promise<void>;
   onAct: (c: ClaimView, plan: FactActionPlan, prev: ClaimStatus) => void;
 }) {
   const t = useT();
   const claims = detail.claims.map((c) => (overrides[c.id] ? { ...c, status: overrides[c.id]! } : c));
-  const groups = groupClaims(claims);
+  // One clock per load, so groups and "3 days ago" agree and don't shift while reading.
+  const now = useMemo(() => Date.now(), [detail]);
+  // Recency when the daemon sends timestamps; by predicate otherwise.
+  const groups = hasClaimTimes(claims)
+    ? groupClaimsByRecency(claims, now).map((g) => ({ key: g.bucket, label: t(g.label), claims: g.claims, recency: true }))
+    : groupClaims(claims).map((g) => ({ key: g.predicate, label: g.label, claims: g.claims, recency: false }));
   const headingId = useId();
   return (
     <section aria-labelledby={headingId}>
@@ -352,7 +367,7 @@ function Facts({
       </h3>
       {groups.length === 0 && <p className="muted small">{t("entity.noFacts", { name: detail.name })}</p>}
       {groups.map((g) => (
-        <div key={g.predicate} className="fact-group">
+        <div key={g.key} className={g.recency ? "fact-group fact-group-recency" : "fact-group"}>
           <h4 className="fact-predicate">{g.label}</h4>
           <ul className="facts">
             {g.claims.map((c) => (
@@ -362,6 +377,8 @@ function Facts({
                 original={detail.claims.find((x) => x.id === c.id)?.status ?? c.status}
                 busy={busyClaim === c.id}
                 sourceNames={sourceNames}
+                sourceKinds={sourceKinds}
+                now={now}
                 selfId={detail.id}
                 onSelect={onSelect}
                 onOpen={onOpen}
@@ -380,6 +397,8 @@ function Fact({
   original,
   busy,
   sourceNames,
+  sourceKinds,
+  now,
   selfId,
   onSelect,
   onOpen,
@@ -390,6 +409,8 @@ function Fact({
   original: ClaimStatus;
   busy: boolean;
   sourceNames: ReadonlyMap<string, string>;
+  sourceKinds?: ReadonlyMap<string, string>;
+  now: number;
   selfId: string;
   onSelect: (id: string) => void;
   onOpen: (url: string, label: string) => Promise<void>;
@@ -408,6 +429,7 @@ function Fact({
         ? [t("entity.unassert"), t("entity.unassertLabel", { text })]
         : [t("entity.reject"), t("entity.rejectLabel", { text })];
   const other = c.object.entity && c.object.entity.id !== selfId ? c.object.entity : null;
+  const seen = claimTime(c);
   return (
     <li className={`fact${retracted ? " fact-retracted" : ""}${c.status === "superseded" ? " fact-superseded" : ""}`}>
       <p className="fact-text">
@@ -426,6 +448,12 @@ function Fact({
         </Badge>
         {!isCurrentStatus(c.status) && (
           <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
+        )}
+        {seen && (
+          <span className="muted small fact-seen">
+            <span className="visually-hidden">{t("entity.lastSeen")} </span>
+            <RelativeTime ts={seen} now={now} />
+          </span>
         )}
         {other && (
           <button type="button" className="btn btn-ghost btn-small" onClick={() => onSelect(other.id)}>
@@ -454,6 +482,7 @@ function Fact({
           <ul className="evidence">
             {c.evidence.map((ev, i) => {
               const e = formatEvidence(ev, sourceNames);
+              const at = evidenceTime(ev);
               return (
                 <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${ev.chunk_id ?? i}`}>
                   {e.quote ? (
@@ -464,8 +493,10 @@ function Fact({
                     <p className="muted small">{t("entity.noQuote")}</p>
                   )}
                   <div className="evidence-source">
+                    <SourceIcon kind={sourceKindOf(ev.item.source, sourceKinds)} size={16} />
                     <span className="evidence-title">{e.title}</span>
                     <span className="muted small">{e.source}</span>
+                    {at && <RelativeTime ts={at} now={now} className="muted small" />}
                     {e.openUrl && (
                       <button type="button" className="btn btn-small" onClick={() => void onOpen(e.openUrl!, e.title)}>
                         {t("entity.open")}
@@ -485,10 +516,12 @@ function Fact({
 function Mentions({
   mentions,
   sourceNames,
+  sourceKinds,
   onOpen,
 }: {
   mentions: MentionView[];
   sourceNames: ReadonlyMap<string, string>;
+  sourceKinds?: ReadonlyMap<string, string>;
   onOpen: (url: string, label: string) => Promise<void>;
 }) {
   const t = useT();
@@ -510,6 +543,7 @@ function Mentions({
           const e = formatEvidence({ item: m.item, chunk_id: m.chunk_id, title: m.title, url: m.url, quote: null }, sourceNames);
           return (
             <li key={`${m.item.source}\u0000${m.item.key}\u0000${m.chunk_id ?? ""}\u0000${i}`}>
+              <SourceIcon kind={sourceKindOf(m.item.source, sourceKinds)} size={14} />
               <span className="mention-surface">{t("entity.mentionSurface", { surface: m.surface })}</span>
               <span className="mention-title">{e.title}</span>
               <span className="muted small">{e.source}</span>

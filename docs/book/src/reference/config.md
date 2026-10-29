@@ -240,6 +240,9 @@ The MCP server that lets AI apps read your knowledge with a per-app token. See
 | `http` | bool | `true` | Also listen for streamable HTTP on `127.0.0.1` |
 | `port` | integer | `7319` | HTTP port on `127.0.0.1`; `0` picks a free port. If the port is taken, HTTP is skipped (with a warning) and stdio still works |
 | `allowed_origins` | array of origins | `[]` | Exact `Origin` values allowed on HTTP requests, such as `http://localhost:6274` for the MCP Inspector. Empty: any request with an `Origin` header (a browser page) is refused |
+| `max_connections` | integer | `64` | HTTP connections served at once (1–4096); others wait |
+| `header_timeout_ms` | integer | `10000` | Close a connection whose request headers (or the next request) don't arrive in time (1–600000) |
+| `body_timeout_ms` | integer | `30000` | Answer 408 when a request body doesn't arrive in time (1–600000) |
 
 ## `[[providers]]`
 
