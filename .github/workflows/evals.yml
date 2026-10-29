@@ -56,9 +56,11 @@ jobs:
         include:
           - suite: doubletap
             args: doubletap
-          # Same, with llama-server on every logical core (its default is the physical ones).
-          - suite: doubletap-threads4
-            args: doubletap --local-threads 4
+          # A/B on one runner: llama-server's default threads (the physical cores), then every
+          # logical core.
+          - suite: doubletap-threads
+            args: doubletap
+            args2: doubletap --local-threads 4
           - suite: draft
             args: draft --draft-judge model --draft-dump eval-results/draft-drafts.jsonl
           - suite: cua
@@ -89,6 +91,7 @@ jobs:
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
 
       - name: Build the bench
+        if: github.event_name != 'push' || matrix.suite == 'doubletap-threads'  # TEMPORARY
         run: cargo build --release --locked -p nugget-bench
 
       - name: Record hardware
@@ -104,6 +107,7 @@ jobs:
           } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
 
       - name: Run ${{ matrix.suite }}
+        if: github.event_name != 'push' || matrix.suite == 'doubletap-threads'  # TEMPORARY
         run: |
           extra=()
           if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
@@ -111,6 +115,10 @@ jobs:
           fi
           ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
             "${extra[@]}" --out-dir "$RESULTS"
+          if [ -n "${{ matrix.args2 }}" ]; then
+            ./target/release/nugget-bench ${{ matrix.args2 }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS"
+          fi
 
       # The metrics and the local-model parameters of every report, in the log.
       - name: Summary
