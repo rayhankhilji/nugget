@@ -110,12 +110,16 @@ while let line = readLine() {
         let titles = ((attr(axApp, kAXWindowsAttribute) as? [AXUIElement]) ?? []).map { (attr($0, kAXTitleAttribute) as? String) ?? "" }
         reply(["ok": true, "windows": wins, "ax_titles": titles])
     case "front":
-        let sys = AXUIElementCreateSystemWide()
-        guard let focused = attr(sys, kAXFocusedApplicationAttribute) else { reply(["ok": true, "pid": 0, "bundle": "", "name": ""]); continue }
+        // The system-wide focused app; when Accessibility does not answer that (it can fail for
+        // an app without a bundle), the frontmost app as Launch Services sees it.
         var pid: pid_t = 0
-        AXUIElementGetPid(focused as! AXUIElement, &pid)
+        if let focused = attr(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute) {
+            AXUIElementGetPid(focused as! AXUIElement, &pid)
+        } else if let front = NSWorkspace.shared.frontmostApplication {
+            pid = front.processIdentifier
+        }
         let running = NSRunningApplication(processIdentifier: pid)
-        let window = attr(focused as! AXUIElement, kAXFocusedWindowAttribute)
+        let window = pid == 0 ? nil : attr(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute)
         let title = window.flatMap { attr($0 as! AXUIElement, kAXTitleAttribute) as? String } ?? ""
         reply(["ok": true, "pid": Int(pid), "bundle": running?.bundleIdentifier ?? "", "name": running?.localizedName ?? "", "window": title])
     case "activate":

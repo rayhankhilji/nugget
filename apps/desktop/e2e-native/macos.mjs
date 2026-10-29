@@ -64,7 +64,7 @@ export const macos = {
   /** "<app name> | <focused window title> [pid N]". */
   async foreground() {
     const f = await helper.call("front");
-    return `${f.name} | ${f.window} [pid ${f.pid}]`;
+    return `${f.name ?? ""} | ${f.window ?? ""} [pid ${f.pid ?? 0}]`;
   },
 
   overlayIsForeground(fg) {
