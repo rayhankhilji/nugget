@@ -21,8 +21,13 @@ export XDG_SESSION_TYPE=x11
 # The overlay's WebKitGTK must not try GPU paths Xvfb lacks.
 export WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1
 
-exec dbus-run-session -- bash -c '
+# Not `exec`, so the trap stops Xvfb; openbox is stopped with the session.
+dbus-run-session -- bash -c '
   openbox >/dev/null 2>&1 &
+  wm=$!
   sleep 1
   node "$0/run.mjs" "$@"
+  status=$?
+  kill "$wm" 2>/dev/null
+  exit "$status"
 ' "$here" "$@"
