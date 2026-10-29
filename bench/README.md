@@ -1297,6 +1297,20 @@ What changed, by offender:
   own in isolation, live for the daemon's lifetime); knowledge's own share after a run is about
   180 MiB (SQLite caches and allocator retention). Not fixed here: it belongs to the drafting
   feature.
+  **Follow-up (voice profile):** the profile held every message's text and a term map per
+  message, and its snapshot (all texts, read as one `serde_json::Value`) took ~3.5 s to load. It
+  now keeps per message only its features, recipients, date and content terms as ids into one
+  vocabulary (LEB128-packed, ~2 bytes per word), and reads exemplar texts back from the store
+  for the few a draft gets; the snapshot (format v2, ~60 MB at 100k) is deserialized straight
+  from its JSON text. The daemon loads it 5 s after startup (`[draft] voice_load_delay_ms`) or at
+  the first draft / `voice.status`. Measured with `cargo run --release -p nugget-voice --example
+  voice_memory` (100k items: 90k Markdown notes of ~120 words like the daemon profile's corpus,
+  10k sent mails; RSS added by `VoiceProfile::load_or_build`, one process per phase):
+  restart (load) **978 → 106 MiB** in **3.5 → 0.7 s** (73 MiB of it the profile's own; the rest
+  is SQLite's 32 MiB page cache filled by reading the snapshot), first build 1,397 → 134 MiB
+  (peak 1,742 → 323 MiB) in 29.6 → 21.7 s, voice work per draft ~190 ms → ~0 (what remains, ~300
+  ms, is the store's full-text search). Exemplars, stats and sign-offs are unchanged (checked
+  against the previous algorithm in `profile::tests`).
 
 W9 follow-ups: the IPC in-flight cap no longer pauses reading (which could deadlock a handler
 waiting for a later request on the same connection); over the cap a request gets `SERVER_BUSY`

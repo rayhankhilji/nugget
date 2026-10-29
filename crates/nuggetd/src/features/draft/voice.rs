@@ -1,8 +1,11 @@
-//! The voice profile behind Double Tap: loaded (or built) once at startup on a blocking thread,
-//! then refreshed incrementally after ingest commits and draft feedback.
+//! The voice profile behind Double Tap: loaded (or built) once on a blocking thread, a few
+//! seconds after startup or as soon as a draft or `voice.status` asks for it, then refreshed
+//! incrementally after ingest commits and draft feedback.
 //!
 //! Until the first load finishes, drafts get neutral hints and `voice.status` reports zero
-//! samples, so daemon startup never waits for the profile.
+//! samples, so daemon startup never waits for the profile. The profile holds per message only
+//! its features, recipients and term ids (see `nugget_voice`): about 70 MB at 100k messages,
+//! loaded from its snapshot in well under a second.
 
 use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
@@ -24,6 +27,8 @@ pub(crate) struct SharedVoice {
     profile: RwLock<Option<VoiceProfile>>,
     /// Wakes the refresher without an ingest event (draft feedback stored a sample).
     kick: Notify,
+    /// Starts the first load before its delay: someone asked for the profile.
+    wanted: Notify,
 }
 
 impl SharedVoice {
@@ -64,17 +69,23 @@ impl VoiceSource for SharedVoice {
     fn hints(&self, query: &VoiceQuery) -> VoiceHints {
         match &*self.profile.read().unwrap_or_else(PoisonError::into_inner) {
             Some(p) => VoiceSource::hints(p, query),
-            None => VoiceHints {
-                channel: Some(query.channel),
-                ..Default::default()
-            },
+            None => {
+                self.wanted.notify_one();
+                VoiceHints {
+                    channel: Some(query.channel),
+                    ..Default::default()
+                }
+            }
         }
     }
 
     fn status(&self) -> VoiceStatus {
         match &*self.profile.read().unwrap_or_else(PoisonError::into_inner) {
             Some(p) => VoiceSource::status(p),
-            None => VoiceStatus::default(),
+            None => {
+                self.wanted.notify_one();
+                VoiceStatus::default()
+            }
         }
     }
 }
@@ -205,17 +216,32 @@ pub(crate) async fn refresh_loop<F, Fut>(
     }
 }
 
+/// When [`run`] loads and refreshes.
+pub(crate) struct Timing {
+    /// Quiet time after a change before a refresh.
+    pub(crate) debounce: Duration,
+    /// Wait before the first load, unless the profile is asked for sooner.
+    pub(crate) load_delay: Duration,
+}
+
 /// Load the saved profile (refreshing it incrementally) or build it, then keep it current.
-/// `events` must be subscribed before the daemon can commit anything this task should see.
+/// The load starts after `timing.load_delay`, or as soon as a draft or `voice.status` asks
+/// for the profile, so it stays off the daemon's startup path. `events` must be subscribed
+/// before the daemon can commit anything this task should see.
 pub(crate) async fn run(
     voice: Arc<SharedVoice>,
     store: Store,
     me: MeIdentity,
     config: VoiceConfig,
     events: broadcast::Receiver<IngestEvent>,
-    debounce: Duration,
+    timing: Timing,
     stop: CancellationToken,
 ) {
+    tokio::select! {
+        () = stop.cancelled() => return,
+        () = voice.wanted.notified() => {}
+        () = tokio::time::sleep(timing.load_delay) => {}
+    }
     let started = std::time::Instant::now();
     let load = blocking(move || VoiceProfile::load_or_build(&store, me, config));
     let profile = tokio::select! {
@@ -228,6 +254,8 @@ pub(crate) async fn run(
             tracing::info!(
                 samples = status.samples,
                 channels = ?status.channels,
+                read = p.last_refresh().fetched,
+                held_kib = p.approx_heap_bytes() / 1024,
                 took_ms = started.elapsed().as_millis() as u64,
                 "voice profile ready"
             );
@@ -240,7 +268,7 @@ pub(crate) async fn run(
         }
     }
     let shared = voice.clone();
-    refresh_loop(events, &voice.kick, debounce, stop, move || {
+    refresh_loop(events, &voice.kick, timing.debounce, stop, move || {
         let v = shared.clone();
         async move {
             match blocking(move || v.refresh_blocking()).await {
@@ -329,6 +357,53 @@ mod tests {
 
         stop.cancel();
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn loads_after_the_delay_or_when_asked() {
+        let (_tx, rx) = broadcast::channel(4);
+        let stop = CancellationToken::new();
+        let start = |delay: Duration| {
+            let voice = Arc::new(SharedVoice::default());
+            let task = tokio::spawn(run(
+                voice.clone(),
+                Store::open_in_memory().unwrap(),
+                MeIdentity::default(),
+                VoiceConfig::default(),
+                rx.resubscribe(),
+                Timing {
+                    debounce: Duration::from_millis(50),
+                    load_delay: delay,
+                },
+                stop.clone(),
+            ));
+            (voice, task)
+        };
+        let loaded = |v: Arc<SharedVoice>| async move {
+            for _ in 0..200 {
+                if v.is_loaded() {
+                    return true;
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            false
+        };
+
+        // Not before the delay...
+        let (lazy, lazy_task) = start(Duration::from_secs(3600));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!lazy.is_loaded());
+        // ...unless asked for.
+        assert_eq!(lazy.status(), VoiceStatus::default());
+        assert!(loaded(lazy.clone()).await);
+
+        // After the delay without anyone asking.
+        let (timed, timed_task) = start(Duration::from_millis(100));
+        assert!(loaded(timed).await);
+
+        stop.cancel();
+        lazy_task.await.unwrap();
+        timed_task.await.unwrap();
     }
 
     #[test]
