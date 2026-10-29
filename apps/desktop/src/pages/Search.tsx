@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   api,
   errorMessage,
@@ -14,8 +14,9 @@ import {
 } from "../api";
 import { useAsync, useEvent, useOpener } from "../hooks";
 import { usePendingSearch } from "../hooks.nav";
-import { splitCitations, withheldNotice } from "../citations";
+import { citedNumbers, splitCitations, withheldNotice } from "../citations";
 import { sourceKindLabel } from "../format";
+import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { SourceIcon } from "../components/SourceIcon";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
@@ -235,6 +236,7 @@ function AskPanel({
   // Chat events can arrive before `chat` returns the stream id; buffer them by id.
   const streams = useRef(new Map<string, { text: string; done: ChatDone | null }>());
   const listRef = useRef<HTMLOListElement>(null);
+  const [announcement, announce] = useAnnouncer();
 
   const valid = useMemo(() => new Set((ctx?.citations ?? []).map((c) => c.n)), [ctx]);
   const byN = useMemo(() => new Map((ctx?.citations ?? []).map((c) => [c.n, c])), [ctx]);
@@ -282,6 +284,7 @@ function AskPanel({
     if (!ctx) return;
     streams.current.clear();
     setAnswer({ ...NO_ANSWER, error: null });
+    announce(t("announce.answering"));
     try {
       // The daemon picks the model first and packs the context for it: sensitive passages are
       // withheld from cloud models, and the cited items are recorded in the egress ledger.
@@ -316,6 +319,17 @@ function AskPanel({
   const withheld = answer?.provider ? withheldNotice(answer.excludedSensitive, answer.provider) : null;
 
   const streaming = answer !== null && answer.done === null && answer.error === null;
+
+  // The answer streams outside any live region; announce once it is complete (a failure shows
+  // as an alert, which announces itself).
+  const finished = answer !== null && answer.streamId !== null && answer.done !== null && answer.error === null;
+  const finishedText = finished ? answer.text : null;
+  useEffect(() => {
+    if (finishedText === null) return;
+    announce(t("announce.answerReady", { count: citedNumbers(finishedText, answerValid).size }));
+    // Once per finished answer: the text and citations are final by then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finished, answer?.streamId]);
 
   return (
     <section id="ask-panel" className="ask-panel" aria-labelledby="ask-title">
@@ -366,7 +380,7 @@ function AskPanel({
       )}
 
       {answer && (
-        <div className="answer" aria-live="polite" aria-busy={streaming}>
+        <div className="answer" aria-busy={streaming}>
           <h3 className="ask-sub">
             {t("search.answer")}
             {answer.provider && (
@@ -406,6 +420,7 @@ function AskPanel({
           )}
         </div>
       )}
+      <Announce message={announcement} />
     </section>
   );
 }

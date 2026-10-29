@@ -2,6 +2,12 @@
   "wave": "Z2",
   "note": "Machine-translated in wave Z2; a native speaker should review these keys.",
   "keys": [
+    "announce.answerReady",
+    "announce.answering",
+    "announce.indexFailed",
+    "announce.indexed",
+    "announce.indexing",
+    "app.sidebarLabel",
     "chat.generalAnswer",
     "chat.sourcesMore",
     "knowledge.emptyNoSources",

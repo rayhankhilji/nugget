@@ -4,6 +4,12 @@
   "keys": [
     "addSource.microsoft.clientId",
     "addSource.saas.clientId",
+    "announce.answerReady",
+    "announce.answering",
+    "announce.indexFailed",
+    "announce.indexed",
+    "announce.indexing",
+    "app.sidebarLabel",
     "chat.generalAnswer",
     "chat.sourcesMore",
     "knowledge.emptyNoSources",

@@ -39,7 +39,8 @@ export function AppSettings() {
 
   return (
     <>
-      <h2>{t("appSettings.title")}</h2>
+      {/* A subsection of the Updates card (Status page). */}
+      <h3 className="ask-sub">{t("appSettings.title")}</h3>
       {!status ? (
         error ? null : <Spinner />
       ) : status.supported ? (
