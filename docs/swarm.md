@@ -68,6 +68,6 @@ Briefs in `docs/waves/wave-y/`.
 |---|---|---|---|
 | Y1 | `y/real-os` | session_01CTjRSrWcPgzD1WCLwMPhhi | installer smoke, accessibility, Double Tap and computer use on real macOS/Windows runners |
 | Y2 | `y/real-models` | session_01CTjRSswimZrnz747s9AdLp | benches with real local models; latency, drafting, computer use, extraction |
-| Y3 | `y/trust` | session_01CTjRSrvKuQh87zTMFfWoXZ | manifest rollback protection, release key, signed update feed, reproducible builds |
+| Y3 | `y/trust` | session_01CTjRSrvKuQh87zTMFfWoXZ | manifest rollback protection, release key, signed update feed, reproducible builds (merged) |
 | Y4 | `y/first-run` | session_01CTjRSr8rCA1mYQCUBBFN8z | measured time to first value, empty/error states, X4 gaps, screenshots (merged) |
 | Y5 | `y/dashboards` | session_01CTjRSuGsEKLz91CWSGSx6H | nightly benches, dashboard, generated README numbers, PLAN status (merged) |
