@@ -1,0 +1,225 @@
+/* Display preferences: reduced motion, more contrast, forced colours (Windows High Contrast) and
+   narrow windows, as at 200% zoom. Loaded after every other sheet, so these rules win at equal
+   specificity. Checked in the real app by the e2e scenario "prefs" (e2e/prefs.mjs). */
+
+/* ---- prefers-reduced-motion ----
+   styles.css already shortens every animation and transition to nothing; here each moving part
+   is stopped by name, so it never starts at all, and keeps a still shape: a spinner stays a
+   (dotted) ring next to its busy text, skeleton lines stay grey bars. */
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .spinner,
+  .state-spinner {
+    animation: none;
+    border-style: dotted;
+    border-color: currentColor;
+  }
+
+  .caret,
+  .ob-panel,
+  .pg-skeleton,
+  .state-skeleton {
+    animation: none;
+  }
+
+  .pg-stale,
+  .switch-track,
+  .switch-track::after,
+  .btn,
+  .chip,
+  .nav-item {
+    transition: none;
+  }
+}
+
+/* ---- prefers-contrast: more ----
+   Dividers become as strong as control borders, controls stronger still; muted text, links and
+   the focus ring darken (lighten in dark mode); the focus ring is thicker; placeholders are as
+   readable as muted text. */
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: #8a8478;
+    --control-border: #57524a;
+    --muted: #4d4840;
+    --link: #0f4aa3;
+    --focus: #0b4fb3;
+    --graph-edge: rgb(60 54 45 / 0.55);
+  }
+
+  :focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  .switch input:focus-visible + .switch-track {
+    outline-width: 3px;
+  }
+
+  ::placeholder {
+    color: var(--muted);
+    opacity: 1;
+  }
+
+  .btn,
+  .chip,
+  input,
+  select,
+  textarea {
+    border-color: var(--control-border);
+  }
+
+  .btn-primary {
+    border-color: var(--accent-strong);
+  }
+
+  .tab[aria-selected="true"] {
+    border-block-end-width: 3px;
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --border: #78726a;
+    --control-border: #b4aea3;
+    --muted: #cfc9be;
+    --link: #a9cbff;
+    --focus: #a8caff;
+    --graph-edge: rgb(236 232 225 / 0.45);
+  }
+}
+
+/* ---- forced-colors: active ----
+   The system palette replaces ours. Backgrounds and box shadows are dropped, so anything they
+   carried (selection, focus, a switch's state, a spinner's moving arc) gets a border or outline
+   in a system colour; colour swatches keep their colour, since the colour is the content. */
+
+@media (forced-colors: active) {
+  :focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible,
+  .switch input:focus-visible + .switch-track {
+    outline-color: Highlight;
+  }
+
+  /* Its focus cue is an inset shadow, which forced colours drop. */
+  .palette-input:focus-within {
+    outline: 2px solid Highlight;
+  }
+
+  /* Buttons keep a visible edge even when their normal style has none. */
+  button:not(.tab):not(.nav-item),
+  [role="button"] {
+    border: 1px solid ButtonText;
+  }
+
+  .nav-item[aria-current="page"] {
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
+  }
+
+  .nav-item:focus-visible {
+    outline: 2px solid Highlight;
+  }
+
+  .tab[aria-selected="true"] {
+    border-block-end-color: Highlight;
+  }
+
+  svg [fill]:not([fill="none"]) {
+    fill: currentColor;
+  }
+
+  svg [stroke]:not([stroke="none"]) {
+    stroke: currentColor;
+  }
+
+  .switch-track {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .switch-track::after {
+    background: CanvasText;
+    box-shadow: none;
+  }
+
+  .switch input:checked + .switch-track {
+    background: Highlight;
+  }
+
+  .switch input:checked + .switch-track::after {
+    background: HighlightText;
+  }
+
+  .spinner,
+  .state-spinner {
+    forced-color-adjust: none;
+    border-color: GrayText;
+    border-block-start-color: Highlight;
+  }
+
+  .kind-dot,
+  .conn .dot {
+    forced-color-adjust: none;
+    border: 1px solid CanvasText;
+  }
+}
+
+/* ---- narrow windows (200% zoom: 680 CSS px of a 1360 px window) ----
+   styles.css turns the sidebar into a top bar below 720px; here it wraps instead of scrolling
+   sideways, stays compact, and never takes more than about half a short window (it scrolls
+   itself beyond that), so the page below keeps room. */
+
+@media (max-width: 720px) {
+  .sidebar {
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    padding-block: 6px;
+    padding-inline: 8px;
+    overflow-x: visible;
+    overflow-y: auto;
+    max-block-size: 45vh;
+  }
+
+  .brand {
+    flex: none;
+  }
+
+  .palette-trigger {
+    flex: 1 1 12em;
+    inline-size: auto;
+    min-inline-size: 0;
+  }
+
+  .sidebar nav {
+    flex: 1 1 100%;
+    min-inline-size: 0;
+    order: 1;
+  }
+
+  .sidebar nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+  }
+
+  .nav-item {
+    inline-size: auto;
+    padding-block: 4px;
+    padding-inline: 8px;
+  }
+
+  .sidebar-settings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-block-start: 0;
+  }
+}
