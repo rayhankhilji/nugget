@@ -243,6 +243,8 @@ const VALUE_ROLES: &[&str] = &[
     "AXTextField",
     "AXTextArea",
     "AXComboBox",
+    // A web `<select>` (Chromium) takes its option's text as the value.
+    "AXPopUpButton",
     "AXSlider",
     "AXIncrementor",
     "AXDateField",

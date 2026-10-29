@@ -400,7 +400,24 @@ impl Session for NativeSession<'_> {
         };
         let stage = self.stage.clone();
         let version = move || stage.version();
-        Ok(self.driver.perform(action, &obs, &version, &bench))
+        let r = self.driver.perform(action, &obs, &version, &bench);
+        if !r.ok {
+            eprintln!(
+                "cua native: {action:?} failed: {}",
+                r.message.as_deref().unwrap_or("-")
+            );
+            if let Some(dir) = std::env::var_os("NUGGET_CUA_DUMP") {
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or_default();
+                dump_windows(
+                    &**self.driver.sys(),
+                    &Path::new(&dir).join(format!("fail-{at}")),
+                );
+            }
+        }
+        Ok(r)
     }
 
     fn confirm(&mut self, action: &ActionDescriptor) -> Result<bool, EnvError> {

@@ -591,16 +591,17 @@ impl UiaDriver {
                     .iter()
                     .position(|o| o == option)
                     .and_then(|i| located.matched.options.get(&option_id(target, i)));
+                let has = |n: &UiNode, k: UiActionKind| n.actions.contains(&k);
                 match opt {
-                    // AX exposes a closed `<select>`'s options as menu items to press.
-                    Some(o)
-                        if !o.actions.contains(&UiActionKind::Select)
-                            && o.actions.contains(&UiActionKind::Press) =>
-                    {
-                        self.sys.act(&o.id, &UiAction::Press)
+                    Some(o) if has(o, UiActionKind::Select) => {
+                        self.sys.act(&o.id, &UiAction::Select)
                     }
-                    Some(o) => self.sys.act(&o.id, &UiAction::Select),
-                    None => self.sys.act(
+                    // AX may expose a closed `<select>`'s options as menu items to press.
+                    Some(o) if has(o, UiActionKind::Press) => self.sys.act(&o.id, &UiAction::Press),
+                    Some(o) if !has(&real, UiActionKind::SetValue) => {
+                        self.sys.act(&o.id, &UiAction::Select)
+                    }
+                    _ => self.sys.act(
                         &real.id,
                         &UiAction::SetValue {
                             value: option.clone(),
