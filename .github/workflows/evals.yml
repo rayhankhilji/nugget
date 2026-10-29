@@ -65,8 +65,10 @@ jobs:
           # The manifest's agentic-tier model, which the app routes the agent to on 16 GB.
           - suite: cua-8b
             args: cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
+          # Before/after on one runner (AA3): the extractor at `base_ref` first, then this commit.
           - suite: knowledge
             args: knowledge
+            base_ref: 50e9b75
     steps:
       - uses: actions/checkout@v5
         with:
@@ -90,6 +92,16 @@ jobs:
       - name: Build the bench
         run: cargo build --release --locked -p nugget-bench
 
+      # A/B jobs: build the bench at `base_ref` in a worktree, so "before" and "after" run on
+      # the same runner (CPU generations differ between runners).
+      - name: Build the bench at ${{ matrix.base_ref }}
+        if: matrix.base_ref != ''
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ matrix.base_ref }}"
+          git worktree add --detach "$RUNNER_TEMP/base" FETCH_HEAD
+          cargo build --release --locked -p nugget-bench \
+            --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir "$RUNNER_TEMP/base-target"
+
       - name: Record hardware
         run: |
           mkdir -p "$RESULTS"
@@ -108,6 +120,12 @@ jobs:
           if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
             extra+=(--local-chat-model "$CHAT_MODEL")
           fi
+          if [ -n "${{ matrix.base_ref }}" ]; then
+            mkdir -p "$RESULTS/before"
+            (cd "$RUNNER_TEMP/base" && "$RUNNER_TEMP/base-target/release/nugget-bench" \
+              ${{ matrix.base_args || matrix.args }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS/before")
+          fi
           ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
             "${extra[@]}" --out-dir "$RESULTS"
           if [ -n "${{ matrix.args2 }}" ]; then
@@ -119,7 +137,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          for f in "$RESULTS"/*.json; do
+          for f in "$RESULTS"/*.json "$RESULTS"/before/*.json; do
             [ -e "$f" ] || continue
             echo "== $f"
             jq -c '{suite, status, message, duration_ms, git: .git_commit,
