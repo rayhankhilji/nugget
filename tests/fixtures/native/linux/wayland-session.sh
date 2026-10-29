@@ -54,6 +54,13 @@ dump_logs() {
     done
 }
 
+# The desktop name decides which portal backends the front end uses (kde-portals.conf,
+# sway-portals.conf). Set before the bus starts: KWin activates the portal front end itself.
+case "$compositor" in
+sway) export XDG_CURRENT_DESKTOP=sway ;;
+kwin) export XDG_CURRENT_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=5 ;;
+esac
+
 # KWin 5.27 only starts as root without a logind seat: as an ordinary user it crashes before it
 # parses its arguments (a segfault on ubuntu-latest, a refused QPA plugin elsewhere). Where
 # password-less sudo exists (CI runners) it runs as root; its socket is then opened to the
@@ -85,7 +92,6 @@ export DBUS_SESSION_BUS_ADDRESS
 
 case "$compositor" in
 sway)
-    export XDG_CURRENT_DESKTOP=sway
     cat >"$runtime/sway.conf" <<'EOF'
 output HEADLESS-1 resolution 1280x800
 xwayland disable
@@ -97,7 +103,6 @@ EOF
     pids+=($!)
     ;;
 kwin)
-    export XDG_CURRENT_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=5
     # kwin_wayland carries a file capability (cap_sys_nice), which a no_new_privs container
     # refuses to exec ("Operation not permitted"); a plain copy has none and runs there.
     cp "$(command -v kwin_wayland)" "$runtime/kwin_wayland"
