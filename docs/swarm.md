@@ -26,7 +26,7 @@ The orchestrator merges each branch into `claude/inspiring-wozniak-z3gg3n`, rege
 | M6-E | `m6/microsoft` | session_01CTjRSqh5PtecX1ahjUxQV7 | Outlook mail and calendar, OneDrive |
 | M6-F | `m6/saas` | session_01CTjRSrQY2KnVUFW2SW5ex3 | Slack, Notion, GitHub, Linear |
 
-## Wave W (wiring M3–M6 into the product): cloud sessions, each a swarm lead with subagents
+## Wave W (wiring M3–M6 into the product): cloud sessions, each a swarm lead with subagents — all merged
 Briefs: `docs/waves/wave-w/`. Daemon features plug in through `crates/nuggetd/src/features/`.
 
 | WP | Branch | Session | Scope |
@@ -47,3 +47,5 @@ Briefs: `docs/waves/wave-w/`. Daemon features plug in through `crates/nuggetd/sr
 ## Merged
 All M0–M6 wave-1 branches above, and the local M2-F (knowledge bench), M2-G1 (daemon wiring for
 knowledge, vault and MCP) and M2-G2 (graph contract upgrades) agents.
+All twelve wave W packages, plus the local X4 real-app end-to-end test (`apps/desktop/e2e`, run in
+CI by `.github/workflows/e2e.yml`).
