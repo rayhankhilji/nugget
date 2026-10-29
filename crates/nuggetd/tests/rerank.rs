@@ -280,11 +280,12 @@ async fn the_local_rerank_runtime_is_used_once_installed() {
         .secrets()
         .resolve(&nugget_runtime::api_key_ref(RuntimeRole::Rerank))
         .unwrap();
-    let mut b = reqwest::Client::builder().no_proxy();
+    let b = reqwest::Client::builder().no_proxy();
     #[cfg(unix)]
-    if let Some(sock) = &cfg.socket_path {
-        b = b.unix_socket(sock.clone());
-    }
+    let b = match &cfg.socket_path {
+        Some(sock) => b.unix_socket(sock.clone()),
+        None => b,
+    };
     let base = cfg.base_url.clone().unwrap();
     let metrics = b
         .build()
