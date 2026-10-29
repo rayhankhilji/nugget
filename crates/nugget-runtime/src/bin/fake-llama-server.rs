@@ -14,7 +14,8 @@
 //!
 //! Test controls (extra arguments):
 //! - `--fake-start-delay-ms N`: report "loading" for N ms;
-//! - `--fake-crash-after-ms N`: exit with code 3 after N ms;
+//! - `--fake-crash-after-ms N`: exit with code 3 N ms after the first healthy `/health` answer
+//!   (so the crash always comes after the supervisor saw the server ready, however slow the host);
 //! - `--fake-crash-once PATH`: with `--fake-crash-after-ms`, crash only if PATH does not exist
 //!   (and create it), so the restarted instance stays up;
 //! - `--fake-exit-immediately CODE`: exit at once (start-up failure);
@@ -33,12 +34,15 @@
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+/// Set once `/health` has answered 200; `--fake-crash-after-ms` counts from then.
+static SERVED_HEALTHY: AtomicBool = AtomicBool::new(false);
 
 /// A connection, over TCP or a Unix socket.
 trait Conn: AsyncRead + AsyncWrite + Unpin + Send {}
@@ -248,6 +252,9 @@ async fn main() -> ExitCode {
         };
         if armed {
             tokio::spawn(async move {
+                while !SERVED_HEALTHY.load(Ordering::SeqCst) {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
                 tokio::time::sleep(after).await;
                 eprintln!("fake: simulated crash");
                 std::process::exit(3);
@@ -433,6 +440,7 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
         let (code, body) = if loading {
             error(503, "Loading model")
         } else {
+            SERVED_HEALTHY.store(true, Ordering::SeqCst);
             (200, json!({"status": "ok"}))
         };
         return respond(&mut conn, code, &body).await;
