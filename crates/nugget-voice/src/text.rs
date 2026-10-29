@@ -395,7 +395,8 @@ fn is_closing(line: &str) -> bool {
         && CLOSINGS.iter().any(|c| starts_with_word(lower, c))
 }
 
-fn name_line(line: &str, my_names: &[String]) -> Option<String> {
+/// The dash prefix and the lowercase rest of a line that may be the user's name (`- Alex`).
+fn name_candidate(line: &str) -> Option<(String, String)> {
     let prefix: String = line
         .chars()
         .take_while(|c| matches!(c, '-' | '–' | '—' | '~' | ' '))
@@ -405,11 +406,26 @@ fn name_line(line: &str, my_names: &[String]) -> Option<String> {
     if core.is_empty() || core.chars().count() > 30 {
         return None;
     }
-    let lower = core.to_lowercase();
-    if my_names.contains(&lower) {
-        return Some(format!("{prefix}{MY_NAME}"));
+    Some((prefix, core.to_lowercase()))
+}
+
+fn name_line(line: &str, my_names: &[String]) -> Option<String> {
+    let (prefix, lower) = name_candidate(line)?;
+    my_names
+        .contains(&lower)
+        .then(|| format!("{prefix}{MY_NAME}"))
+}
+
+/// What the sign-off of `text` depends on the user's names through: the lowercase last line
+/// (without dashes and trailing punctuation) when it could be a name. For two name lists that
+/// both contain it, or both do not (or when this is `None`), [`normalize_signoff`] gives the
+/// same result.
+pub(crate) fn signoff_name_key(text: &str) -> Option<String> {
+    let lines = non_empty_lines(text);
+    if lines.len() < 2 {
+        return None;
     }
-    None
+    name_candidate(lines.last()?).map(|(_, lower)| lower)
 }
 
 /// The sign-off of a message (its last line or two), normalised: the user's name becomes
@@ -590,13 +606,30 @@ pub(crate) fn formality(text: &str) -> f32 {
     score.clamp(0.0, 1.0)
 }
 
-/// ISO 639-3 code of the text's language (`eng`, `deu`, ...), when detection is confident.
-pub(crate) fn language(text: &str) -> Option<String> {
+/// An ISO 639-3 language code (`eng`, `deu`, ...) as `whatlang` names it: static, so a
+/// message's features hold no string for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Lang(pub &'static str);
+
+impl serde::Serialize for Lang {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(self.0)
+    }
+}
+
+/// A language code as [`language`] returns it (codes `whatlang` does not know are dropped).
+fn de_language<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Lang>, D::Error> {
+    let code: Option<String> = serde::Deserialize::deserialize(d)?;
+    Ok(code.and_then(|c| whatlang::Lang::from_code(c).map(|l| Lang(l.code()))))
+}
+
+/// The text's language, when detection is confident.
+pub(crate) fn language(text: &str) -> Option<Lang> {
     if words(text).len() < 4 {
         return None;
     }
     let info = whatlang::detect(text)?;
-    (info.is_reliable() || info.confidence() >= 0.5).then(|| info.lang().code().to_owned())
+    (info.is_reliable() || info.confidence() >= 0.5).then(|| Lang(info.lang().code()))
 }
 
 /// Lowercase content terms (no stopwords, at least 3 characters) with their counts.
@@ -615,6 +648,8 @@ pub(crate) fn terms(text: &str) -> HashMap<String, f32> {
     out
 }
 
+/// Cosine of two term maps (the profile computes it on term ids; this is its reference).
+#[cfg(test)]
 pub(crate) fn cosine(a: &HashMap<String, f32>, b: &HashMap<String, f32>) -> f32 {
     let (small, large) = if a.len() <= b.len() { (a, b) } else { (b, a) };
     let dot: f32 = small
@@ -685,7 +720,8 @@ pub(crate) struct Features {
     pub emoji: u32,
     pub exclamations: u32,
     pub lowercase_start: bool,
-    pub language: Option<String>,
+    #[serde(deserialize_with = "de_language", default)]
+    pub language: Option<Lang>,
 }
 
 impl Features {
@@ -770,6 +806,41 @@ mod tests {
     }
 
     #[test]
+    fn signoffs_depend_on_names_only_through_the_name_key() {
+        let texts = [
+            "Sure thing.\n\nCheers,\nAlex",
+            "Sure thing.\n- A.",
+            "Sure thing.\n-- alex morgan!",
+            "Sure thing.\nThanks!",
+            "Sure thing.\nBest,\nJordan",
+            "Alex",
+            "Ok.\nSee the doc.",
+            "Ok.\n—— Am",
+        ];
+        let names: [&[&str]; 4] = [
+            &[],
+            &["alex morgan", "alex", "am", "a"],
+            &["jordan"],
+            &["x"],
+        ];
+        for t in texts {
+            let key = signoff_name_key(t);
+            for a in names {
+                for b in names {
+                    let a: Vec<String> = a.iter().map(|s| s.to_string()).collect();
+                    let b: Vec<String> = b.iter().map(|s| s.to_string()).collect();
+                    let same = key.as_ref().is_none_or(|k| a.contains(k) == b.contains(k));
+                    if same {
+                        assert_eq!(normalize_signoff(t, &a), normalize_signoff(t, &b), "{t}");
+                    }
+                }
+            }
+        }
+        assert_eq!(signoff_name_key("Ok.\n- Alex!").as_deref(), Some("alex"));
+        assert_eq!(signoff_name_key("Alex"), None);
+    }
+
+    #[test]
     fn cleans_leftover_quotes_and_signatures() {
         let body = "Works for me.\n\nOn Tue, Sam wrote:\n> can we move it?\n> thanks";
         assert_eq!(clean_body(body, None), "Works for me.");
@@ -801,14 +872,12 @@ mod tests {
     #[test]
     fn detects_language() {
         assert_eq!(
-            language("Thanks for the update, I will review the document tomorrow morning.")
-                .as_deref(),
-            Some("eng")
+            language("Thanks for the update, I will review the document tomorrow morning."),
+            Some(Lang("eng"))
         );
         assert_eq!(
-            language("Vielen Dank für die Nachricht, ich melde mich morgen früh bei dir.")
-                .as_deref(),
-            Some("deu")
+            language("Vielen Dank für die Nachricht, ich melde mich morgen früh bei dir."),
+            Some(Lang("deu"))
         );
         assert_eq!(language("ok"), None);
     }
