@@ -128,6 +128,20 @@ code {
   word-break: break-all;
 }
 
+/* Code, paths and key combos read left-to-right in every locale; isolate them so they don't
+   reorder the surrounding right-to-left text. */
+code,
+pre,
+kbd {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* Icons whose meaning depends on reading direction (back/next arrows, chevrons, send). */
+[dir="rtl"] .flip-rtl {
+  transform: scaleX(-1);
+}
+
 .muted {
   color: var(--muted);
 }
@@ -1659,7 +1673,8 @@ h4.fact-predicate {
 .evidence {
   display: grid;
   gap: 8px;
-  margin: 8px 0 4px 2px;
+  margin: 8px 0 4px;
+  margin-inline-start: 2px;
 }
 
 .evidence li {
@@ -1861,7 +1876,8 @@ h4.fact-predicate {
 .scope-options {
   display: grid;
   gap: 6px;
-  margin: 4px 0 4px 24px;
+  margin: 4px 0;
+  margin-inline-start: 24px;
   padding: 8px 10px;
   border-inline-start: 2px solid var(--border);
 }
@@ -1957,7 +1973,8 @@ h3.token-heading:focus {
   }
 
   .conn {
-    margin: 0 0 0 auto;
+    margin: 0;
+    margin-inline-start: auto;
   }
 
   .field-grid {
@@ -1977,7 +1994,8 @@ h3.token-heading:focus {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  padding: 5px 8px 5px 10px;
+  padding: 5px 8px;
+  padding-inline-start: 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-small);
   background: var(--surface);
@@ -1990,6 +2008,16 @@ h3.token-heading:focus {
 
 .palette-trigger:hover {
   color: var(--text);
+}
+
+/* Long translations wrap the label; the shortcut hint never shrinks below its text. */
+.palette-trigger > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.palette-trigger > kbd {
+  flex: none;
 }
 
 .palette {

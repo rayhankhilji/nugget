@@ -17,7 +17,7 @@ export function ShortcutsHelp({ rows, onClose }: { rows: readonly ShortcutRow[];
         {rows.map((r) => (
           <div key={`${r.combo.mod ? "mod-" : ""}${r.combo.key}-${r.label}`} className="shortcut-row">
             <dt>
-              <kbd>{comboLabel(r.combo)}</kbd>
+              <kbd dir="ltr">{comboLabel(r.combo)}</kbd>
             </dt>
             <dd>{r.label}</dd>
           </div>

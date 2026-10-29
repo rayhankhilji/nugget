@@ -8,8 +8,8 @@ export function LanguagePicker({ className }: { className?: string }) {
   const id = useId();
   const [choice, setChoice] = useState<string>(() => savedLocale() ?? "");
   const system = localeInfo(matchLocale(systemLanguages(), LOCALES.filter((l) => !l.stub)));
-  // Stub catalogs (e.g. the RTL layout check) are only offered in development builds.
-  const offered = LOCALES.filter((l) => !l.stub || import.meta.env.DEV || l.code === current.code);
+  // Stub catalogs (e.g. the RTL layout check) and pseudo-locales are only offered in development builds.
+  const offered = LOCALES.filter((l) => !(l.stub || l.pseudo) || import.meta.env.DEV || l.code === current.code);
 
   return (
     <div className={className ?? "field-inline"}>

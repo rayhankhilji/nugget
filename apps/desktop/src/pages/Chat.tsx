@@ -499,7 +499,7 @@ export function ChatPage() {
                         onClick={() => open(c)}
                         title={title}
                       >
-                        {title}
+                        <span dir="auto">{title}</span>
                       </button>
                       <button
                         type="button"
@@ -586,6 +586,7 @@ export function ChatPage() {
               id="chat-input"
               ref={inputRef}
               rows={3}
+              dir="auto"
               value={input}
               placeholder={t("chat.placeholder")}
               onChange={(e) => setInput(e.target.value)}
@@ -649,9 +650,11 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         )}
       </div>
       {turn.role === "user" ? (
-        <div className="msg-body">{turn.text}</div>
+        <div className="msg-body" dir="auto">
+          {turn.text}
+        </div>
       ) : (
-        <div className="msg-body msg-md">
+        <div className="msg-body msg-md" dir="auto">
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
           {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
@@ -670,7 +673,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
                 <li key={c.n} id={citeId(turn.id, c.n)} tabIndex={-1} className="citation">
                   <span className="cite-n">[{c.n}]</span>
                   <span className="citation-body">
-                    <span className="citation-title">{title}</span>
+                    <span className="citation-title" dir="auto">
+                      {title}
+                    </span>
                   </span>
                   {isOpenableUrl(c.url) && (
                     <button

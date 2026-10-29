@@ -1,0 +1,25 @@
+{
+  "wave": "Z2",
+  "note": "Machine-translated in wave Z2; a native speaker should review these keys.",
+  "keys": [
+    "addSource.microsoft.clientId",
+    "addSource.saas.clientId",
+    "chat.generalAnswer",
+    "knowledge.emptyNoSources",
+    "knowledge.emptyPending",
+    "search.failingSources",
+    "search.indexingHint",
+    "search.indexingTitle",
+    "sources.errorHint",
+    "sources.errorHintAuth",
+    "sources.errorNoDetail",
+    "sources.lastError",
+    "sources.loading",
+    "sources.problemSummary",
+    "status.errorsHint",
+    "status.noSourcesBody",
+    "status.noSourcesTitle",
+    "today.noSourcesBody",
+    "today.noSourcesTitle"
+  ]
+}

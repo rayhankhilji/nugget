@@ -283,7 +283,7 @@ function SourceRow({
       </div>
       <div className="source-body">
         <div className="source-head">
-          <h2 id={headingId} className="source-name">
+          <h2 id={headingId} className="source-name" dir="auto">
             {s.name}
           </h2>
           <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>
