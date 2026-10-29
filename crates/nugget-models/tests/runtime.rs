@@ -273,8 +273,19 @@ fn file_written_through_an_in_archive_symlink_cannot_land_outside() {
         T::Dir("real/"),
     ]);
     let (tmp, res) = extract(&bytes, ArchiveFormat::TarGz, ExtractLimits::default());
-    assert!(res.is_err());
-    assert_clean_failure(tmp.path());
+    #[cfg(unix)]
+    {
+        assert!(res.is_err());
+        assert_clean_failure(tmp.path());
+    }
+    // Where links are copied (Windows) there is no link to write through: a link to a directory
+    // is skipped, and `sub/x` stays a real file inside the destination.
+    #[cfg(not(unix))]
+    {
+        res.unwrap();
+        assert!(tmp.path().join("out/sub/x").is_file());
+        assert!(tmp.path().join("out/real").is_dir());
+    }
 }
 
 #[test]
