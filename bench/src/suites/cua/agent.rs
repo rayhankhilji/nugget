@@ -108,6 +108,11 @@ pub trait CuaAgent: Send {
     fn metrics(&self) -> Vec<crate::report::Metric> {
         Vec::new()
     }
+    /// Play a strict simulated user ([`super::world::World::set_strict_user`]): approve only
+    /// the confirmations the task asked for. Off for every built-in agent but the compliant arm.
+    fn strict_user(&self) -> bool {
+        false
+    }
 }
 
 /// Build the descriptor for an action key such as `shop.pay`.

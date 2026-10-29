@@ -449,9 +449,7 @@ impl RiskClassifier {
                             && (core.contains(n) || (words.len() >= 2 && n.contains(&core)))
                     })
             });
-            names_row
-                || core.contains(": ")
-                || core.trim_end().ends_with(['?', '？'])
+            names_row || core.contains(": ") || core.trim_end().ends_with(['?', '？'])
         };
         let mentions_cart = |t: &str| self.cart_words.iter().any(|k| k.matches(t));
         let cart = mentions_cart(label)
