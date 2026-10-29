@@ -777,8 +777,12 @@ struct Keys {
 }
 
 fn parse_keys(keys: &str) -> Keys {
+    // Modifier symbols split too, so caret and symbol notation (`^J`, `⌃O`, `⌘↩`) leave the key
+    // as its own token.
     let tokens: Vec<&str> = keys
-        .split(|c: char| c == '+' || c == '-' || c.is_whitespace() || c == ',')
+        .split(|c: char| {
+            matches!(c, '+' | '-' | ',' | '^' | '⌃' | '⌘' | '⌥' | '⇧') || c.is_whitespace()
+        })
         .filter(|t| !t.is_empty())
         .collect();
     let has = |set: &[&str]| tokens.iter().any(|t| set.contains(t));
@@ -786,7 +790,9 @@ fn parse_keys(keys: &str) -> Keys {
     let delete = has(&["delete", "del", "backspace", "forwarddelete"]) || sym(&['⌫', '⌦']);
     let cmd_or_ctrl = has(&[
         "cmd", "command", "ctrl", "control", "meta", "super", "win", "primary", "mod", "strg",
-    ]) || sym(&['⌘', '⌃', '^']);
+    ]) || sym(&['⌘', '⌃', '^'])
+        // Emacs notation: `C-j`.
+        || keys.split_whitespace().any(|t| t.starts_with("c-"));
     let enter = has(&["enter", "return", "kp_enter", "numpadenter", "ret", "\\n"])
         || sym(&[
             '↩', '⏎', '↵', '⌤', '\n', '\r', '\u{2028}', '\u{2029}', '\u{85}',

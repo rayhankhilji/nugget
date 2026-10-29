@@ -1,0 +1,21 @@
+From: bob@example.com
+To: alice@example.com
+Subject: =?UTF-8?B?UmU6IEx1bmNo?=
+In-Reply-To: <1@example.com>
+List-Id: <team.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Sure, caf=C3=A9 at noon.
+
+On Mon, Alice wrote:
+> Are you free for lunch on Friday?
+--b1
+Content-Type: text/html
+
+<p>Sure, <b>caf&eacute;</b> at noon.</p>
+--b1--

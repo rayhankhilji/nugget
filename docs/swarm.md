@@ -80,4 +80,13 @@ Briefs in `docs/waves/wave-z/`.
 | Z1 | `z/desktop-coverage` | session_01CTjRSpodmRHxnXjWF2CDXH | Wayland, the Double Tap overlay on three OSes, computer use on macOS |
 | Z2 | `z/i18n` | session_01CTjRSspNzvkrF5GkeK22rE | complete all catalogs, Arabic and RTL, overflow checks (merged) |
 | Z3 | `z/ai-setup` | session_01CTjRSrXicS94EepP69WwKH | onboarding model install to cited answer, key validation, ask fallback (merged) |
-| Z4 | `z/hardening` | session_01CTjRStVNmwX45S5GjXvhm3 | open security-review rows, fuzzing, context gaps, strict reproducibility |
+| Z4 | `z/hardening` | session_01CTjRStVNmwX45S5GjXvhm3 | open security-review rows, fuzzing, context gaps, strict reproducibility (merged) |
+
+## Wave AA (real-model quality): cloud sessions from 31ec850
+Briefs in `docs/waves/wave-aa/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| AA1 | `aa/doubletap-latency` | session_01CTjRSuDx768RtwbJTaiHvE | local Double Tap under 3 s: prompt budget, prefix cache, Apple Silicon numbers |
+| AA2 | `aa/agent-quality` | session_01CTjRSpmAvmjUGCE3Js3Ytu | computer use with small local models: success ≥ 0.8, false confirmations ≤ 0.10 |
+| AA3 | `aa/grounding` | session_01CTjRSseja8BUetk34ePA1G | drafts without hallucinations, extraction F1 ≥ 0.8 with real models |

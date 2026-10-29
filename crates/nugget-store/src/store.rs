@@ -258,7 +258,15 @@ impl Store {
 
     /// The sync cursor stored for `source`, if any.
     pub fn get_cursor(&self, source: &SourceId) -> Result<Option<Value>> {
-        let raw: Option<String> = self.with_read_conn(|c| {
+        self.get_cursor_json(source)?
+            .map(|s| serde_json::from_str(&s).map_err(Error::from))
+            .transpose()
+    }
+
+    /// The sync cursor stored for `source` as its JSON text, for callers that deserialize a
+    /// large cursor straight into their own types (no [`Value`] tree in between).
+    pub fn get_cursor_json(&self, source: &SourceId) -> Result<Option<String>> {
+        self.with_read_conn(|c| {
             c.query_row(
                 "SELECT value FROM cursors WHERE source = ?1",
                 [source.as_str()],
@@ -266,14 +274,23 @@ impl Store {
             )
             .optional()
             .db("read cursor")
-        })?;
-        raw.map(|s| serde_json::from_str(&s).map_err(Error::from))
-            .transpose()
+        })
     }
 
     /// Store (replace) the sync cursor for `source`.
     pub fn set_cursor(&self, source: &SourceId, value: Value) -> Result<()> {
-        let json = serde_json::to_string(&value)?;
+        self.set_cursor_from(source, &value)
+    }
+
+    /// Store (replace) the sync cursor for `source`, serialized from `value` directly (no
+    /// [`Value`] tree in between). Read it back with [`Store::get_cursor`] or
+    /// [`Store::get_cursor_json`].
+    pub fn set_cursor_from<T: serde::Serialize + ?Sized>(
+        &self,
+        source: &SourceId,
+        value: &T,
+    ) -> Result<()> {
+        let json = serde_json::to_string(value)?;
         let now = format_time(time::OffsetDateTime::now_utc())?;
         self.with_conn(|c| {
             c.execute(

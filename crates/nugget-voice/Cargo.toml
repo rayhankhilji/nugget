@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = "0.22"
 nugget-core.workspace = true
 nugget-store.workspace = true
 serde.workspace = true
