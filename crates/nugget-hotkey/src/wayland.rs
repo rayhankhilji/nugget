@@ -21,6 +21,10 @@ use tokio::sync::oneshot;
 use crate::chord::Chord;
 use crate::engine::Fire;
 
+/// The desktop app's id (the Tauri `identifier`, which names its `.desktop` file): the name the
+/// portal shows the user and keys its permissions by.
+const APP_ID: &str = "dev.nugget.desktop";
+
 /// How long [`start_chord`] waits for the portal to answer before giving up.
 const PORTAL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -102,6 +106,15 @@ async fn run(
         let conn = ashpd::zbus::Connection::session()
             .await
             .map_err(portal_err)?;
+        // xdg-desktop-portal 1.19+ refuses GlobalShortcuts to an unsandboxed app it cannot
+        // name ("An app id is required"). A host app names itself through the host Registry,
+        // first thing on its connection. Older portals lack it, and a sandbox (Flatpak) or a
+        // systemd scope already gives the app id: failure here is not an error.
+        if let Ok(app_id) = APP_ID.parse::<ashpd::AppID>()
+            && let Err(e) = ashpd::register_host_app_with_connection(conn.clone(), app_id).await
+        {
+            tracing::debug!(error = %e, "nugget-hotkey: host portal registration skipped");
+        }
         let portal = GlobalShortcuts::with_connection(conn)
             .await
             .map_err(portal_err)?;

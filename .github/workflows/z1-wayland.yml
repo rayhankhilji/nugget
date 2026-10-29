@@ -73,6 +73,7 @@ jobs:
           fi
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends $common $extra
+          dpkg-query -W xdg-desktop-portal xdg-desktop-portal-kde xdg-desktop-portal-wlr sway kwin-wayland 2>/dev/null || true
           /usr/bin/python3 -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; print('GTK', Gtk.get_major_version(), Gtk.get_minor_version())"
 
       - name: Install Rust toolchain
