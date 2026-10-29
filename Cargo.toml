@@ -164,3 +164,6 @@ debug = false
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Drop debug info (mostly std's) from shipped binaries; symbol names stay so panic backtraces
+# remain readable in bug reports.
+strip = "debuginfo"
