@@ -2,6 +2,7 @@
 
 Headless UI tests for the desktop app: React components run in jsdom against a mocked daemon
 (the Tauri IPC is replaced by `@tauri-apps/api/mocks`). No browser, no network, no Rust.
+For the real-app test (real `nuggetd`, headless Chromium, `pnpm run e2e`) see `../e2e/README.md`.
 
 - `src/**/*.test.ts(x)`: unit and component tests, next to the code.
 - `tests/flows/*.test.tsx`: user flows through the full `<App/>` (onboarding, search, sources,
