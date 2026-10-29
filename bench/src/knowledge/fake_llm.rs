@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use futures::stream;
-use nugget_core::capability::{Capabilities, Locality, Tier};
+use nugget_core::capability::Locality;
 use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -201,23 +201,7 @@ impl ScriptedLlm {
     /// A router with this fake as the probed `Synthesis` (and `Light`) tier, which is where
     /// `nugget-knowledge` sends LLM extraction.
     pub fn router(self: &Arc<Self>) -> Router {
-        let p: Arc<dyn Provider> = self.clone();
-        let router = Router::new(
-            vec![p],
-            HashMap::from([
-                (Tier::Synthesis, vec![self.id.clone()]),
-                (Tier::Light, vec![self.id.clone()]),
-            ]),
-        );
-        router.set_capabilities(
-            &self.id,
-            Capabilities {
-                streaming: true,
-                json_schema: true,
-                ..Default::default()
-            },
-        );
-        router
+        super::system::synthesis_router(self.clone())
     }
 }
 
@@ -258,6 +242,7 @@ impl Provider for ScriptedLlm {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nugget_core::capability::{Capabilities, Tier};
     use nugget_infer::{ChatResponse, Message, Role};
 
     fn request(system: &str, text: &str, items: Vec<ItemRef>) -> ChatRequest {

@@ -16,6 +16,7 @@ pub mod env_native;
 pub mod env_uia;
 pub mod nugget;
 pub mod nugget_env;
+pub mod nugget_model;
 pub mod server;
 pub mod session;
 pub mod task;
@@ -528,17 +529,43 @@ impl Benchmark for CuaBench {
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
         let all = task::load_all().map_err(BenchError::Failed)?;
-        let tasks = select(all, self.options.filter.as_deref());
+        let local_opts = ctx.config.local.clone();
+        let local_run = local_opts.local_models && self.options.agent == CuaAgentKind::Nugget;
+        // A real local model takes seconds per step: without a task filter, run the subset for
+        // the scale.
+        let subset = (local_run && self.options.filter.is_none())
+            .then(|| local_subset(ctx.scale()).join(","))
+            .filter(|s| !s.is_empty());
+        let filter = subset.as_deref().or(self.options.filter.as_deref());
+        let tasks = select(all, filter);
         if tasks.is_empty() {
-            return Err(BenchError::Failed(format!(
-                "no task matches {:?}",
-                self.options.filter
-            )));
+            return Err(BenchError::Failed(format!("no task matches {filter:?}")));
         }
+        if let Some(s) = &subset {
+            ctx.param("task_subset", s.as_str());
+        }
+        // Keeps the local servers up for the run; dropped (servers stopped) when it returns.
+        let mut local = None;
         let mut agent: Box<dyn CuaAgent> = match self.options.agent {
-            // A real provider when `NUGGET_BENCH_CUA_MODEL` is set.
             CuaAgentKind::Nugget => {
-                Box::new(nugget::NuggetAgent::from_env(&tasks).map_err(BenchError::Failed)?)
+                let timeout = task_timeout()?;
+                let a = if local_run {
+                    let lm = crate::local::LocalModels::start(
+                        &local_opts,
+                        &[nugget_core::ipc::RuntimeRole::Chat],
+                    )?;
+                    lm.record(ctx);
+                    let cfg = lm.chat_config(lm.thinking).ok_or_else(|| {
+                        BenchError::Failed("no local chat model was started".into())
+                    })?;
+                    let a = nugget::NuggetAgent::local(&tasks, lm.chat_label(), cfg, lm.secrets());
+                    local = Some(lm);
+                    a
+                } else {
+                    // A real provider when `NUGGET_BENCH_CUA_MODEL` is set.
+                    nugget::NuggetAgent::from_env(&tasks).map_err(BenchError::Failed)?
+                };
+                Box::new(a.with_task_timeout(timeout))
             }
             kind => make_agent(kind, &tasks),
         };
@@ -594,7 +621,55 @@ impl Benchmark for CuaBench {
                 m.extend(compliant_metrics(&eps, &compliant.metrics()));
             }
         }
+        drop(agent);
+        drop(local);
         Ok(m)
+    }
+}
+
+/// Tasks for `--local-models` without `--cua-tasks`, by scale. Each subset has easy tasks on
+/// several apps, a decline, an ask, a refusal and adversarial tasks (so injection compliance is
+/// measured); `standard` and `full` run everything.
+pub fn local_subset(scale: crate::runner::Scale) -> Vec<&'static str> {
+    const SMOKE: &[&str] = &[
+        "settings-dark-mode",
+        "mail-delete-newsletter",
+        "mail-refuse-bank-phish",
+        "settings-inject-remote-access",
+        "shop-inject-banner-pay",
+    ];
+    const QUICK: &[&str] = &[
+        "files-empty-trash",
+        "calendar-cancel-gym",
+        "settings-firewall-decline",
+        "mail-ask-two-sams",
+        "mail-inject-prize-delete",
+        "calendar-inject-cleanup",
+        "files-inject-notes-wipe",
+    ];
+    match scale {
+        crate::runner::Scale::Smoke => SMOKE.to_vec(),
+        crate::runner::Scale::Quick => SMOKE.iter().chain(QUICK).copied().collect(),
+        crate::runner::Scale::Standard | crate::runner::Scale::Full => Vec::new(),
+    }
+}
+
+/// The per-task wall-clock timeout: [`nugget::TASK_TIMEOUT_ENV`] seconds, else the default.
+fn task_timeout() -> Result<Duration, BenchError> {
+    match std::env::var(nugget::TASK_TIMEOUT_ENV) {
+        Ok(v) if !v.trim().is_empty() => v
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .map(Duration::from_secs_f64)
+            .ok_or_else(|| {
+                BenchError::Failed(format!(
+                    "{}: expected a positive number of seconds, got {v:?}",
+                    nugget::TASK_TIMEOUT_ENV
+                ))
+            }),
+        _ => Ok(nugget::DEFAULT_TASK_TIMEOUT),
     }
 }
 
@@ -652,6 +727,8 @@ pub fn reference_metrics(episodes: &[Episode]) -> Vec<Metric> {
     prefixed("reference", "Reference agent", metrics(episodes), HEADLINE)
 }
 
+#[cfg(test)]
+mod nugget_real_tests;
 #[cfg(test)]
 mod nugget_tests;
 #[cfg(test)]

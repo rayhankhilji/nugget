@@ -439,6 +439,16 @@ impl<'a> BaselineArm<'a> {
     }
 
     pub fn prompt(&self, task: &Task) -> Result<Prompt, BenchError> {
+        Ok(self.prompt_within(task, None)?.0)
+    }
+
+    /// The prompt, cut to `budget` estimated tokens when one is given (a model whose context
+    /// window cannot hold the whole vault). Returns whether anything was cut.
+    pub fn prompt_within(
+        &self,
+        task: &Task,
+        budget: Option<usize>,
+    ) -> Result<(Prompt, bool), BenchError> {
         let persona = self.world.persona(&task.persona)?;
         let ctx = &task.context;
         let (recipient, _) = incoming(ctx);
@@ -466,8 +476,53 @@ impl<'a> BaselineArm<'a> {
                 })
                 .collect(),
         };
-        Ok(prompt::render(persona, &parts))
+        Ok(match budget {
+            Some(budget) => fit_to_budget(persona, parts, budget),
+            None => (prompt::render(persona, &parts), false),
+        })
     }
+}
+
+/// Render `parts`, cutting what Sentient's whole-vault design would cut to fit a model's
+/// window (its 600 KB cap plays the same role): the tail of `CONTEXT` first (at a line break
+/// when one is near), then the oldest writing samples. The thread and the instructions are
+/// kept whole; if they alone exceed the budget the prompt is sent anyway (and may fail, which
+/// the suite counts). Returns whether anything was cut.
+pub fn fit_to_budget(persona: &Persona, mut parts: PromptParts, budget: usize) -> (Prompt, bool) {
+    let full = prompt::render(persona, &parts);
+    if full.tokens() <= budget {
+        return (full, false);
+    }
+    let context = std::mem::take(&mut parts.context);
+    let base = prompt::render(persona, &parts).tokens();
+    if base < budget {
+        // About four bytes per estimated token; shrink until the rendered prompt fits.
+        let mut keep = ((budget - base) * 4).min(context.len());
+        loop {
+            while !context.is_char_boundary(keep) {
+                keep -= 1;
+            }
+            let prefix = &context[..keep];
+            let cut = match prefix.rfind('\n') {
+                Some(nl) if nl >= keep / 2 => &prefix[..=nl],
+                _ => prefix,
+            };
+            parts.context = cut.to_owned();
+            let p = prompt::render(persona, &parts);
+            if p.tokens() <= budget {
+                return (p, true);
+            }
+            if keep == 0 {
+                break;
+            }
+            keep = keep * 19 / 20;
+        }
+    }
+    parts.context.clear();
+    while !parts.samples.is_empty() && prompt::render(persona, &parts).tokens() > budget {
+        parts.samples.pop();
+    }
+    (prompt::render(persona, &parts), true)
 }
 
 #[cfg(test)]
@@ -539,5 +594,39 @@ mod tests {
                     .contains(&world.corpus.secrets[0].value)
             );
         }
+    }
+
+    #[test]
+    fn baseline_is_cut_to_the_budget_keeping_the_thread() {
+        let corpus = Corpus::load().unwrap();
+        let world = World::build(corpus).unwrap();
+        let base = BaselineArm::new(&world, 42);
+        let task = &world.corpus.tasks[0];
+        let (whole, cut) = base.prompt_within(task, None).unwrap();
+        assert!(!cut);
+        let (same, cut) = base.prompt_within(task, Some(whole.tokens())).unwrap();
+        assert!(!cut);
+        assert_eq!(same, whole);
+        for budget in [whole.tokens() * 3 / 4, whole.tokens() / 2] {
+            let (p, cut) = base.prompt_within(task, Some(budget)).unwrap();
+            assert!(cut, "{budget}");
+            assert!(p.tokens() <= budget, "{} > {budget}", p.tokens());
+            let s = prompt::sections(&p.user);
+            assert!(!s[prompt::CONTEXT].trim().is_empty(), "{budget}");
+            // The thread is intact.
+            assert_eq!(
+                s[prompt::THREAD],
+                prompt::sections(&whole.user)[prompt::THREAD]
+            );
+            // A prefix of the vault, nothing invented.
+            assert!(base.vault.starts_with(s[prompt::CONTEXT].trim_end()));
+        }
+        // A budget below the thread itself: context and samples go, the thread stays.
+        let (p, cut) = base.prompt_within(task, Some(10)).unwrap();
+        assert!(cut);
+        let s = prompt::sections(&p.user);
+        assert!(s[prompt::CONTEXT].trim().is_empty());
+        assert!(!s.contains_key(prompt::WRITING_SAMPLES));
+        assert!(s[prompt::THREAD].contains(task.context.thread[0].text.trim()));
     }
 }

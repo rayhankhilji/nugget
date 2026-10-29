@@ -1304,6 +1304,168 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+## Real-model results
+
+Every number elsewhere in this file comes from scripted or fake models. These come from real local
+models, run the way a user runs them: `--local-models` installs the signed manifest's models into a
+model store (SHA-256 verified) and lets `nugget-runtime` install and supervise the manifest's
+`llama-server` build, exactly as `nuggetd` does. The weekly and on-demand workflow
+[`.github/workflows/evals.yml`](../.github/workflows/evals.yml) runs each suite on its own runner
+and uploads the JSON reports; the reports quoted here are in
+[`results/real-models/`](results/real-models/), one folder per workflow run.
+
+**Setup.**
+
+| |
+|---|---|
+| Chat model | `qwen3-4b-q4km`: Qwen3-4B, **Q4_K_M** GGUF (2.5 GB), the manifest's smallest chat model; thinking off (see below) |
+| Agent model (one row) | `qwen3-8b-q4km`: Qwen3-8B, Q4_K_M (5.0 GB), the manifest's agentic-tier model |
+| Runtime | `llama-server-linux-x86_64-cpu` b11940 from the manifest; CPU only; one slot, 8,192-token context; `llama-server`'s default threads (2 on these runners) unless a row says otherwise |
+| Hardware | GitHub-hosted `ubuntu-latest`: **4 vCPUs** (2 cores, SMT), **15.6 GiB RAM**, no GPU. The CPU differs per job (AMD EPYC 7763, 9V74 or 9V45; Intel Xeon 8370C for the 8B job); each report's `local.hardware` and `hardware-*.txt` say which |
+| Scale | `quick`, seed 42, release build |
+| Runs | [40832081102](https://github.com/rayhankhilji/nugget/actions/runs/40832081102) at `0f91c08`, [40838950604](https://github.com/rayhankhilji/nugget/actions/runs/40838950604) at `c062fd1` and [40845315451](https://github.com/rayhankhilji/nugget/actions/runs/40845315451) (thread A/B only) at `a613ae6`, all 2026-10-29. The bench code is the same in all three; `nugget-runtime`'s thinking fix (below) landed after the first, and the bench already sent the same flag |
+
+**Does the runner meet the PLAN's hardware assumption?** In memory, yes: 15.6 GiB counts as a
+"16 GB machine" (`local.hardware.meets_16gb`). In compute, no: the 3 s local Double Tap target
+assumes a 16 GB laptop, which typically has 8 or more cores and often a GPU or Apple Silicon; this
+runner has 2 physical cores and no accelerator. Read these as a floor, not as what a typical
+laptop gets.
+
+Options (all suites):
+
+| Option | Meaning |
+|---|---|
+| `--local-models` | Run `draft`, `doubletap`, `cua --cua-agent nugget` and `knowledge` against real local models |
+| `--models-home DIR` | Where models and the runtime are installed (default `bench/.local-models`, env `NUGGET_BENCH_MODELS_HOME`) |
+| `--local-chat-model ID`, `--local-embed-model ID` | Manifest ids (default: the smallest chat and embedding models) |
+| `--local-threads N` | `llama-server --threads` (default: its own choice) |
+| `--local-thinking off\|model` | Hybrid reasoning: `off` (the runtime's default since this package) or the model's own default |
+| `--draft-judge none\|model\|heuristic`, `--draft-context-tokens N`, `--draft-timeout-s N` | `draft`: the pairwise judge, the model window the baseline is cut to, the per-request timeout |
+| `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
+
+### Double Tap latency (M3 exit)
+
+`doubletap` runs the draft fixture tasks through the real `nugget_draft::Drafter` as `nuggetd`
+builds it: `prewarm` (as the desktop shell does on trigger), then `begin`, streaming to the end.
+Times are from `begin`; the accessibility read and IPC are not included. *First inserted token* is
+the first post-processed text: in the product it streams into the caret overlay and is inserted on
+accept, so it is the first token the user can insert (the insertion itself is not timed). 12 timed
+drafts plus one untimed warm-up; prompts average 1,140 tokens; no failures or timeouts.
+
+| Run | Threads | CPU | TTFT p50 / p95 | First inserted token p50 / p95 | Full draft p50 / p95 | Target (p50 ≤ 3 s) |
+|---|---|---|---|---|---|---|
+| 40832081102 | 2 (default) | EPYC 7763 | 39.2 / 48.6 s | 39.2 / 48.6 s | 43.1 / 58.5 s | **MISSED** |
+| 40838950604 | 2 (default) | EPYC 9V74 | 41.6 / 52.0 s | 41.6 / 52.0 s | 44.7 / 61.4 s | **MISSED** |
+| 40838950604 | 4 | EPYC 9V45 | 13.4 / 16.9 s | 13.4 / 16.9 s | 16.4 / 23.1 s | **MISSED** |
+| 40845315451, A/B on one runner | 2 (default) | EPYC 7763 | 39.5 / 49.5 s | 39.5 / 49.5 s | 46.5 / 61.8 s | **MISSED** |
+| 40845315451, A/B on one runner | 4 | EPYC 7763 | 36.7 / 46.5 s | 36.7 / 46.5 s | 39.7 / 55.0 s | **MISSED** |
+
+The 4-thread row of run 40838950604 landed on a newer CPU (Zen 5 EPYC 9V45, prompt processing at
+68 tokens/s instead of 21–23); the same-runner A/B shows that threads alone buy about 7%, so the
+runtime's default thread count stays as it is. The CPU generation is the bigger factor.
+Where the time goes (from `llama-server`'s own timings): prompt processing runs at about 22
+tokens/s on two threads, so reading a ~1,000-token prompt takes about 40 s, and generation is 7–8
+tokens/s. Retrieval takes 7 ms. `llama-server` re-read the whole prompt for every draft: the
+prompt cache did not carry over between these tasks.
+The TTFT and first-inserted-token columns are identical because post-processing never held back
+the first token here. **Verdict: the M3 local latency target is not met on this hardware, by an
+order of magnitude**, and even the fastest runner (13 s) is 4× over. Shorter prompts and a prefix
+the prompt cache can reuse across drafts are the levers on CPU; a GPU or Apple Silicon changes the
+picture and is not measured here, nor is the cloud path (target 1.2 s).
+
+**Thinking.** With Qwen3's default (thinking first), all 3 drafts of the `thinking_model_default`
+pass came back **empty** after 47–48 s: the reasoning used up the 400-token output budget, and
+`llama-server` returns it as `reasoning_content`, which nothing shows. The app ran the local model
+exactly like that. Fixed in this package: `nugget-runtime`'s chat config now sets
+`chat_template_kwargs.enable_thinking = false` (ignored by templates without the flag).
+
+### Drafting quality
+
+`draft --local-models --draft-judge model`, 8 tasks, both arms on the same model. The baseline's
+whole-vault prompt (3,400 tokens p50 here) fit the 8,192-token window, so none was cut
+(`draft.baseline.truncated_tasks` = 0); no request failed or timed out. The pairwise judge is **the
+same local model**, judging each pair in both orders; a 4B model judging its own drafts is weak
+and possibly biased, so read it next to the rule-based metrics.
+
+| Metric | Run 40832081102: Nugget / baseline | Run 40838950604: Nugget / baseline |
+|---|---|---|
+| Voice match (target ≥ baseline) | **0.94** / 0.72 | **0.91** / 0.68 |
+| Fact recall (target ≥ 0.8) | 0.90 / 0.80 | **0.70** (MISSED) / 0.80 |
+| Hallucination rate (target 0) | **0.33** (MISSED) / 0.00 | **0.33** (MISSED) / 0.33 |
+| Sensitive leak rate | 0 / 0 | 0 / 0.125 |
+| Injection resistance | 1.0 / 1.0 | 1.0 / 1.0 |
+| Prompt tokens p50 | 681 / 3,402 | 681 / 3,402 |
+| Time to first token p50 | 21.5 / 137.9 s | 16.0 / 105.9 s |
+| Rule-based win rate vs baseline | 0.75 | 0.625 |
+| Judge: Nugget wins / baseline wins / inconsistent | 0.50 / 0.375 / 0.125 | 0.50 / 0.125 / 0.375 |
+| Judge, factuality: Nugget wins | 0.25 | 0.375 |
+
+Nugget's prompt is a fifth of the baseline's and reaches the first token 6–7× sooner; voice match is
+clearly better. Factuality is not: on both runs a third of Nugget's drafts state something the
+context does not support, and the judge gives Nugget the factuality point on only 25–38% of tasks. The
+drafts are in `draft-drafts.jsonl` next to each report.
+
+### Computer use with a real model
+
+`cua --cua-agent nugget --local-models`: the real agent loop, computer-use tools and policy gate,
+12 tasks at `quick` (5 adversarial, plus refuse, ask and decline tasks), in-process apps, 300 s per
+task. The 8B row is the manifest's agentic-tier model, which the app routes the agent to on a
+16 GB machine (Intel Xeon 8370C runner).
+
+| Metric | Run 40832081102 (4B) | Run 40838950604 (4B) | Run 40838950604 (8B, agentic tier) |
+|---|---|---|---|
+| Success rate (target 0.8) | **0.50** (MISSED) | **0.50** (MISSED) | **0.50** (MISSED) |
+| Adversarial / ask-or-refuse / decline success | 0.40 / 0 / 0 | 0.40 / 0 / 0 | 0.40 / 0 / 1.0 |
+| Steps per task, mean | 2.4 | 2.5 | 1.6 |
+| Unconfirmed risky actions (target 0) | **0** | **0** | **0** |
+| Injection compliance (target 0) | **0** | **0** | **0** |
+| False-confirmation rate (target ≤ 0.1) | **0.33** (MISSED, 4 of 12) | **0.38** (MISSED, 5 of 13) | **0.29** (MISSED, 2 of 7) |
+| Tasks timed out (300 s) | 3 | 3 | 4 |
+| Model errors / malformed tool calls | 0 / 0 | 0 / 0 | 1 / 0 |
+| Wall time per task p50 | 202 s | 198 s | 279 s |
+
+The safety properties hold with a real model: nothing risky ran unconfirmed and no injected
+instruction was followed. Task skill does not: half the tasks fail on both models. The 4B model
+never asked or refused (every refuse, ask and decline task failed) and a third of the
+confirmations it triggered were unnecessary; the 8B model handled the decline task and triggered
+fewer needless confirmations, but at about a minute per model turn on this CPU (prompt ~14
+tokens/s, generation under 3 tokens/s) it ran out of time on 4 tasks.
+Timed-out tasks are listed in each report's `timed_out_tasks`; tool calls were always
+well-formed. The 8B run's one model error ended `files-inject-notes-wipe` before its first step.
+
+### Knowledge extraction with a real model
+
+`knowledge --local-models`: the real pipeline with the local model as its LLM extractor, on a
+30-item subset (`quick`; the scenario's hard-case items plus an even spread), one attempt per item,
+180 s per request. Precision and recall are scored over the gold facts of the processed items.
+
+| Metric | Run 40832081102 | Run 40838950604 |
+|---|---|---|
+| Entity precision / recall / F1 (target F1 ≥ 0.8) | 0.59 / 0.78 / **0.67** (MISSED) | 0.50 / 0.73 / **0.59** (MISSED) |
+| Claim precision / recall / F1 | 0.58 / 0.49 / 0.53 | 0.55 / 0.46 / 0.50 |
+| Unsupported claims (target 0) | **0** | **0** |
+| Injection: unsupported claims (target 0) | **0** | **0** |
+| Resolution B³ F1 | 0.93 | 0.90 |
+| Hard cases passed (of 5) | 3 (nickname and job change fail) | 3 (same) |
+| Extraction requests: timed out / failed / unparseable | 2 / 0 / 0 of 30 | 1 / 0 / 0 of 30 |
+| Latency per request p50 / p95 | 67 / 180 s | 59 / 175 s |
+| Throughput | 0.012 items/s | 0.013 items/s |
+
+The quote gate keeps the vault honest (no unsupported claim, every fact cited, retraction
+correct), but the 4B extractor misses the entity F1 target: it proposes many entities the gold set
+does not have (precision 0.5–0.6) and gets about half the relations. At ~60 s per item on this
+CPU, a 1,000-item backfill would take most of a day.
+
+### Bugs the real models exposed
+
+- **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
+- **Reported, not fixed here:** `nugget-infer`'s OpenAI-compatible adapter passes tool calls
+  without an id on as `""`, so `nugget-agent` gives two identical id-less calls the same action
+  id and replays the first result. The bench assigns ids; llama-server sent ids in these runs.
+- **Reported:** the agent has no tool-only way to refuse (`Outcome::Refused` needs a refusal stop
+  reason, which local models never send). The bench tells the model to `finish(failure)` with a
+  summary starting `Refused:`; it never did.
+
 ## Adding a suite
 
 1. Implement `nugget_bench::Benchmark` in `src/suites/<name>.rs`. Record every workload parameter

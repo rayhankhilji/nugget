@@ -3,9 +3,11 @@
 //! - **Graph:** `nugget-store`'s SQLite graph ([`Store::graph`]) in the store the corpus was
 //!   ingested into, so deleting an item retracts its provenance in the same transaction.
 //! - **Extraction:** `nugget_knowledge::Knowledge` over that store, deterministic extractors plus
-//!   the LLM extractor, with the scripted fake as its `Synthesis` provider (on-device), and the
-//!   user's name and addresses configured. `extract` and `items_deleted` are one
-//!   `run_once(RunBudget::unlimited())` each (the pipeline diffs the store against its ledger).
+//!   the LLM extractor, with [`SystemContext::llm`] as its `Synthesis` provider (on-device: the
+//!   scripted fake, or a real local model with `--local-models`), the user's name and addresses
+//!   configured, and the context's LLM overrides (timeout, attempts) applied. `extract` and
+//!   `items_deleted` are one `run_once(RunBudget::unlimited())` each (the pipeline diffs the
+//!   store against its ledger).
 //! - **Vault:** `nugget_vault::Vault` in the suite's temporary directory: `render_all` (three-way
 //!   merging user edits on the second call) and `validate`. The suite's view of each page (its
 //!   facts, footnotes and the evidence behind them) is parsed from the files, independently of the
@@ -71,7 +73,7 @@ mod real {
 
     use super::super::system::{
         ContextAnswer, KnowledgeSystem, McpProbe, RenderedFact, RenderedPage, RenderedVault,
-        SystemContext,
+        SystemContext, synthesis_router,
     };
     use crate::runner::BenchError;
 
@@ -84,6 +86,7 @@ mod real {
     const CONTEXT_PASSAGES: usize = 8;
 
     pub struct Wired {
+        llm_label: String,
         store: Store,
         graph: Arc<SqliteGraph>,
         knowledge: Knowledge,
@@ -101,8 +104,8 @@ mod real {
                     .build()?,
             );
             let graph = Arc::new(ctx.store.graph());
-            let router = Arc::new(ctx.llm.router());
-            let config = KnowledgeConfig {
+            let router = Arc::new(synthesis_router(ctx.llm.clone()));
+            let mut config = KnowledgeConfig {
                 me: MeConfig {
                     name: Some(ctx.me_name.clone()),
                     emails: ctx.me_emails.clone(),
@@ -111,6 +114,12 @@ mod real {
                 extra_freemail_domains: ctx.webmail_domains.clone(),
                 ..KnowledgeConfig::default()
             };
+            if let Some(t) = ctx.llm_settings.timeout {
+                config.llm.timeout_ms = u64::try_from(t.as_millis()).unwrap_or(u64::MAX).max(1);
+            }
+            if let Some(n) = ctx.llm_settings.max_attempts {
+                config.llm.max_attempts = n;
+            }
             let knowledge = Knowledge::new(
                 ctx.store.clone(),
                 graph.clone() as Arc<dyn GraphStore>,
@@ -139,6 +148,7 @@ mod real {
                 last_used: None,
             };
             Ok(Self {
+                llm_label: ctx.llm_label.clone(),
                 store: ctx.store.clone(),
                 graph,
                 knowledge,
@@ -164,8 +174,9 @@ mod real {
     impl KnowledgeSystem for Wired {
         fn label(&self) -> String {
             format!(
-                "nugget-knowledge + nugget-vault + nugget-mcp {} (SQLite graph, deterministic + scripted LLM extractors, extractor v{})",
+                "nugget-knowledge + nugget-vault + nugget-mcp {} (SQLite graph, deterministic + {} LLM extractors, extractor v{})",
                 env!("CARGO_PKG_VERSION"),
+                self.llm_label,
                 nugget_knowledge::EXTRACTOR_VERSION
             )
         }

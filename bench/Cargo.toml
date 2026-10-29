@@ -56,6 +56,9 @@ nugget-vault = { workspace = true, optional = true }
 nugget-mcp = { workspace = true, optional = true }
 # `proactive --backend real`: the proactive engine under test.
 nugget-proactive.workspace = true
+# `--local-models`: the signed manifest, model store and llama-server supervisor the app uses.
+nugget-models.workspace = true
+nugget-runtime.workspace = true
 
 [dev-dependencies]
 # `draft` against a mocked OpenAI-compatible provider.

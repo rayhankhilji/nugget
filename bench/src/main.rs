@@ -5,6 +5,7 @@
 //! cargo run --release -p nugget-bench -- memory --backend real --scale quick --strict
 //! cargo run -p nugget-bench -- all --scale smoke --no-write
 //! cargo run -p nugget-bench -- knowledge --strict
+//! cargo run --release -p nugget-bench -- doubletap --local-models --scale quick
 //! cargo run -p nugget-bench -- --list
 //! cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict
 //! ```
@@ -30,7 +31,8 @@ const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results"
     about = "Run Nugget benchmark suites and write JSON reports"
 )]
 struct Cli {
-    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`), or `all`.
+    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`),
+    /// or `all`.
     #[arg(value_name = "SUITE")]
     suites: Vec<String>,
 
@@ -67,6 +69,9 @@ struct Cli {
 
     #[command(flatten)]
     draft: nugget_bench::suites::draft::DraftOptions,
+
+    #[command(flatten)]
+    local: nugget_bench::local::LocalOptions,
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
     #[arg(long, value_enum, default_value_t = CuaAgentKind::Reference)]
@@ -234,6 +239,7 @@ fn main() -> ExitCode {
         embed_url: cli.embed_url.clone(),
         embed_model: cli.embed_model.clone(),
         draft: cli.draft.clone(),
+        local: cli.local.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;
@@ -392,11 +398,27 @@ mod tests {
         assert_eq!(names(&["perf"]).unwrap(), ["perf"]);
         assert_eq!(
             names(&["all"]).unwrap(),
-            ["memory", "perf", "proactive", "draft", "cua", "knowledge"]
+            [
+                "memory",
+                "perf",
+                "proactive",
+                "draft",
+                "doubletap",
+                "cua",
+                "knowledge"
+            ]
         );
         assert_eq!(
             names(&["perf", "all", "perf"]).unwrap(),
-            ["perf", "memory", "proactive", "draft", "cua", "knowledge"]
+            [
+                "perf",
+                "memory",
+                "proactive",
+                "draft",
+                "doubletap",
+                "cua",
+                "knowledge"
+            ]
         );
         assert!(names(&[]).is_err());
         assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));

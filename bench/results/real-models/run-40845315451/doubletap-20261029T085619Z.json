@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "suite": "doubletap",
+  "status": "ok",
+  "started_at": "2026-10-29T08:56:19.329552402Z",
+  "finished_at": "2026-10-29T09:08:07.336039514Z",
+  "duration_ms": 708006,
+  "harness_version": "0.0.1",
+  "git_commit": "a613ae656dfc89e09c80f085e6e1faa2986f1aaa",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "quick",
+    "seed": 42,
+    "params": {
+      "engine": "nugget_draft::Drafter (DraftConfig::default)",
+      "local.chat": {
+        "file": "Qwen3-4B-Q4_K_M.gguf",
+        "id": "qwen3-4b-q4km",
+        "load_s": 3.92,
+        "quantisation": "Q4_K_M",
+        "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+        "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "size_bytes": 2497280256
+      },
+      "local.hardware": {
+        "arch": "x86_64",
+        "cpu_model": "AMD EPYC 7763 64-Core Processor",
+        "gpu": "Unknown",
+        "logical_cores": 4,
+        "meets_16gb": true,
+        "os": "linux",
+        "total_ram_gib": 15.6
+      },
+      "local.install_s": 0.0,
+      "local.runtime": "llama-server-linux-x86_64-cpu (b11940)",
+      "local.thinking": "off",
+      "main_pass_s": 557.447,
+      "meets_16gb": true,
+      "model": "qwen3-4b-q4km (Qwen3-4B-Q4_K_M.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940), thinking off)",
+      "model.locality": "OnDevice",
+      "prewarm": "Drafter::prewarm with an app-only hint before begin, as apps/desktop doubletap/flow.rs (connection warm-up; retrieval starts in begin)",
+      "prompt_budget_tokens": 1500,
+      "retrieval": "nugget-retrieve text-only (no embedder), default RetrieveConfig, fixed reference time; one in-memory store per persona (draft fixture knowledge items + the persona's sent messages)",
+      "target.first_inserted_token.p50_s": 3.0,
+      "tasks": 12,
+      "tasks.available": 66,
+      "thinking_pass": "3 drafts, thinking at the model's default",
+      "thinking_tasks": [
+        "jules-t21",
+        "jules-t20",
+        "jules-t19"
+      ],
+      "timed_from": "Drafter::begin (a11y read and IPC not included)",
+      "timeout_s": 180.0,
+      "voice": "persona sent messages: recipient (>= 3 messages) or channel style statistics + 3 exemplars (recipient first, then most recent)",
+      "warmup_task": "jules-t22"
+    }
+  },
+  "metrics": [
+    {
+      "name": "doubletap.ttft.p50",
+      "value": 39.484,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.ttft.p95",
+      "value": 49.542,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_token.p50",
+      "value": 39.485,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": 3.0,
+      "target_met": false,
+      "description": "p50 time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_token.p95",
+      "value": 49.542,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.total.p50",
+      "value": 46.548,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from Drafter::begin until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.total.p95",
+      "value": 61.81,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.retrieval.p50",
+      "value": 0.007,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median time Drafter::begin waited for retrieval and the voice lookup"
+    },
+    {
+      "name": "doubletap.requests",
+      "value": 12.0,
+      "unit": "drafts",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Timed drafts attempted"
+    },
+    {
+      "name": "doubletap.completed",
+      "value": 12.0,
+      "unit": "drafts",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts whose stream finished"
+    },
+    {
+      "name": "doubletap.failures",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts that failed (begin refused or errored, or the stream errored)"
+    },
+    {
+      "name": "doubletap.timeouts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts that took longer than 180 s end to end (cancelled)"
+    },
+    {
+      "name": "doubletap.empty_drafts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Completed drafts with no visible text"
+    },
+    {
+      "name": "doubletap.retrieval_skipped",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Completed drafts whose retrieval timed out or failed (drafted without context)"
+    },
+    {
+      "name": "doubletap.output_tokens_per_s",
+      "value": 6.578188113098674,
+      "unit": "tokens/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Provider-reported output tokens over the time from the first insertable token to the end of the stream (drafts with usage only)"
+    },
+    {
+      "name": "doubletap.prompt_tokens.mean",
+      "value": 1139.1666666666667,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Mean provider-reported prompt tokens (12 drafts with usage)"
+    },
+    {
+      "name": "doubletap.cold.first_inserted_token",
+      "value": 42.392,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the first insertable token"
+    },
+    {
+      "name": "doubletap.cold.ttft",
+      "value": 42.392,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the provider's first event"
+    },
+    {
+      "name": "doubletap.cold.total",
+      "value": 45.093,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the end of the stream"
+    },
+    {
+      "name": "doubletap.thinking_model_default.ttft.p50",
+      "value": 51.177,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking left at the model's default (Qwen3: thinks first): median ttft over 3 completed drafts"
+    },
+    {
+      "name": "doubletap.thinking_model_default.total.p50",
+      "value": 51.177,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking left at the model's default (Qwen3: thinks first): median total over 3 completed drafts"
+    },
+    {
+      "name": "doubletap.thinking_model_default.requests",
+      "value": 3.0,
+      "unit": "drafts",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts attempted"
+    },
+    {
+      "name": "doubletap.thinking_model_default.empty_drafts",
+      "value": 3.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Completed drafts with no visible text (the output budget went to thinking)"
+    },
+    {
+      "name": "doubletap.thinking_model_default.failures",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts that failed"
+    },
+    {
+      "name": "doubletap.thinking_model_default.timeouts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts that timed out"
+    }
+  ],
+  "targets": [
+    {
+      "metric": "doubletap.first_inserted_token.p50",
+      "comparison": "at_most",
+      "target": 3.0,
+      "value": 39.485,
+      "pass": false
+    }
+  ],
+  "message": null
+}

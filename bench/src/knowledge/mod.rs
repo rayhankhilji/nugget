@@ -5,6 +5,7 @@
 pub mod eval;
 pub mod fake_llm;
 pub mod fixture;
+pub mod metered;
 pub mod system;
 pub mod wired;
 
