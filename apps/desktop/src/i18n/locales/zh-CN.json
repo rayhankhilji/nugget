@@ -399,6 +399,7 @@
   "status.localRuntimes": "本地运行时",
   "status.role.embedding": "嵌入",
   "status.role.chat": "聊天",
+  "status.role.rerank": "重排序",
   "status.knowledge": "知识",
   "status.entities": "实体",
   "status.facts": "事实",

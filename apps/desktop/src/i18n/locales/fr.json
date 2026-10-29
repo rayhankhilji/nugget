@@ -399,6 +399,7 @@
   "status.localRuntimes": "Moteurs locaux",
   "status.role.embedding": "Vectorisation",
   "status.role.chat": "Discussion",
+  "status.role.rerank": "Reclassement",
   "status.knowledge": "Connaissances",
   "status.entities": "Entités",
   "status.facts": "Faits",

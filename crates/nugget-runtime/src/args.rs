@@ -76,7 +76,7 @@ pub struct Tuning {
     pub gpu_layers: Option<GpuLayers>,
     /// CPU threads (`--threads`); llama-server picks when unset.
     pub threads: Option<u32>,
-    /// Embedding role only.
+    /// Embedding role only (the rerank role always pools by rank).
     pub pooling: Option<Pooling>,
     /// Extra arguments appended verbatim. Flags that would change the listen address, the API
     /// key or make llama-server fetch models from the network are refused.
@@ -130,7 +130,8 @@ pub struct LaunchPlan {
     pub ctx_per_slot: u32,
     pub parallel: u32,
     pub gpu_layers: GpuLayers,
-    /// `--batch-size` and `--ubatch-size` (embedding role: a whole input must fit one ubatch).
+    /// `--batch-size` and `--ubatch-size` (embedding and rerank roles: a whole input must fit
+    /// one ubatch).
     pub batch_size: Option<u32>,
     pub pooling: Pooling,
     pub threads: Option<u32>,
@@ -170,6 +171,9 @@ impl LaunchPlan {
                 (ctx, parallel, false)
             }
             RuntimeRole::Embedding => (2048, (cores / 2).clamp(1, 4), true),
+            // A query and one passage per sequence (the reranker gets at most ~2000 characters
+            // of each passage); like embeddings, a whole sequence must fit one ubatch.
+            RuntimeRole::Rerank => (2048, (cores / 2).clamp(1, 4), true),
         };
         let ctx_per_slot = tuning.ctx_per_slot.unwrap_or(ctx_default).max(256);
         let parallel = tuning.parallel.unwrap_or(parallel_default).clamp(1, 64);
@@ -187,6 +191,8 @@ impl LaunchPlan {
             batch_size: batch.then_some(ctx_per_slot),
             pooling: match role {
                 RuntimeRole::Embedding => tuning.pooling.unwrap_or(Pooling::Model),
+                // `--reranking` implies rank pooling; a pooling override would break scoring.
+                RuntimeRole::Rerank => Pooling::Rank,
                 RuntimeRole::Chat => Pooling::Model,
             },
             threads: tuning.threads,
@@ -230,11 +236,16 @@ impl LaunchPlan {
         if let Some(t) = self.threads {
             push("--threads", Some(t.to_string()));
         }
-        if self.role == RuntimeRole::Embedding {
-            push("--embedding", None);
-            if let Some(p) = self.pooling.as_arg() {
-                push("--pooling", Some(p.into()));
+        match self.role {
+            RuntimeRole::Embedding => {
+                push("--embedding", None);
+                if let Some(p) = self.pooling.as_arg() {
+                    push("--pooling", Some(p.into()));
+                }
             }
+            // Serves `/v1/rerank`; sets embedding mode and rank pooling itself.
+            RuntimeRole::Rerank => push("--reranking", None),
+            RuntimeRole::Chat => {}
         }
         if let Some(b) = self.batch_size {
             push("--batch-size", Some(b.to_string()));

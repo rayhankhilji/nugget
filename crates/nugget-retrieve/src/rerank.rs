@@ -86,6 +86,10 @@ pub struct HttpRerankerConfig {
     /// Treat the endpoint as at least this remote (e.g. `local_network` for a server on another
     /// machine reached through a tunnel). Can only widen what the URL says, never narrow it.
     pub locality: Option<Locality>,
+    /// Connect to this Unix-domain socket instead of the URL's host (the URL then only names the
+    /// path, e.g. `http://localhost`): a local runtime server on a private socket. Unix only;
+    /// the endpoint is then on this device.
+    pub socket_path: Option<std::path::PathBuf>,
 }
 
 impl Default for HttpRerankerConfig {
@@ -99,6 +103,7 @@ impl Default for HttpRerankerConfig {
             max_passage_chars: 2_000,
             allow_cloud: false,
             locality: None,
+            socket_path: None,
         }
     }
 }
@@ -155,7 +160,11 @@ impl HttpReranker {
                 "reranker base_url must not carry credentials".into(),
             ));
         }
-        let mut locality = classify_url(base.as_str())?;
+        let mut locality = match &config.socket_path {
+            // Traffic stays on this machine whatever the URL's host says.
+            Some(_) => Locality::OnDevice,
+            None => classify_url(base.as_str())?,
+        };
         if let Some(l) = config.locality
             && remoteness(l) > remoteness(locality)
         {
@@ -190,6 +199,18 @@ impl HttpReranker {
             .redirect(reqwest::redirect::Policy::none());
         if locality != Locality::Cloud {
             builder = builder.no_proxy();
+        }
+        if let Some(path) = &config.socket_path {
+            // Every connection goes to the socket: no DNS, no proxy, no TCP.
+            #[cfg(unix)]
+            {
+                builder = builder.unix_socket(path.clone());
+            }
+            #[cfg(not(unix))]
+            return Err(Error::Unsupported(format!(
+                "reranker socket {} (Unix-domain sockets) is not supported on this platform",
+                path.display()
+            )));
         }
         if let Some(host) = base.host_str()
             && host.trim_end_matches('.').eq_ignore_ascii_case("localhost")
@@ -446,6 +467,70 @@ mod tests {
         c.locality = Some(Locality::OnDevice);
         let r = HttpReranker::new(&c, None, egress).unwrap();
         assert_eq!(r.locality(), Locality::LocalNetwork);
+    }
+
+    /// A runtime server on a private Unix socket: on-device whatever the URL says.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_socket_endpoint_is_on_device_and_reached_through_the_socket() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let sock =
+            std::env::temp_dir().join(format!("nugget-rerank-{}-{nanos}.sock", std::process::id()));
+        let listener = tokio::net::UnixListener::bind(&sock).unwrap();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut got = Vec::new();
+            // Read the head and the body (content-length), then answer.
+            loop {
+                let n = conn.read(&mut buf).await.unwrap();
+                got.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&got).to_string();
+                if let Some(end) = text.find("\r\n\r\n") {
+                    let len: usize = text
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if got.len() >= end + 4 + len {
+                        break;
+                    }
+                }
+                assert!(n > 0, "connection closed early");
+            }
+            let body = r#"{"results":[{"index":0,"relevance_score":0.1},{"index":1,"relevance_score":0.9}]}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            conn.write_all(resp.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&got).to_string()
+        });
+        let c = HttpRerankerConfig {
+            base_url: "http://localhost".into(),
+            socket_path: Some(sock.clone()),
+            ..Default::default()
+        };
+        let r = HttpReranker::new(&c, Some(Secret::new("k".to_string())), Arc::new(NullEgress))
+            .unwrap();
+        assert_eq!(r.locality(), Locality::OnDevice);
+        let scores = r.rerank("q", &["a".into(), "b".into()]).await.unwrap();
+        assert_eq!(scores, vec![0.1, 0.9]);
+        let request = server.await.unwrap();
+        let _ = std::fs::remove_file(&sock);
+        assert!(request.starts_with("POST /v1/rerank "), "{request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer k")
+        );
     }
 
     #[test]

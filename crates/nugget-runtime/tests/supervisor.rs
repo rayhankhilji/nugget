@@ -23,6 +23,7 @@ fn with_extra(role: RuntimeRole, args: &[&str]) -> RuntimeOptions {
     match role {
         RuntimeRole::Chat => o.chat = t,
         RuntimeRole::Embedding => o.embedding = t,
+        RuntimeRole::Rerank => o.rerank = t,
     }
     o
 }
@@ -203,6 +204,55 @@ async fn configs_work_with_nugget_infer_providers() {
     .unwrap();
     assert!(built.is_err());
     rt.shutdown().await;
+}
+
+#[tokio::test]
+async fn rerank_role_serves_the_rerank_endpoint_and_no_tier() {
+    let e = env().await;
+    let rt = e.runtime(common::opts());
+    let cfg = rt.ensure(RuntimeRole::Rerank, &e.embed).await.unwrap();
+    assert_eq!(cfg.id.as_str(), nugget_runtime::RERANK_PROVIDER_ID);
+    assert_eq!(cfg.id.as_str(), "local-rerank");
+    assert!(cfg.tiers.is_empty(), "never routed: {:?}", cfg.tiers);
+    #[cfg(unix)]
+    assert_eq!(
+        cfg.socket_path.as_deref(),
+        Some(e.paths.data.join("run").join("rerank.sock").as_path())
+    );
+    let a = addr(&cfg);
+    let k = key(&rt, RuntimeRole::Rerank);
+    let resp = a
+        .client()
+        .post(a.url("/v1/rerank"))
+        .bearer_auth(&k)
+        .header("content-type", "application/json")
+        .body(
+            serde_json::json!({
+                "model": "m", "query": "red fox",
+                "documents": ["a blue whale", "the red fox jumps"], "top_n": 2
+            })
+            .to_string(),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let v: serde_json::Value = serde_json::from_str(&resp.text().await.unwrap()).unwrap();
+    let score = |i: usize| v["results"][i]["relevance_score"].as_f64().unwrap();
+    assert!(score(1) > score(0), "{v}");
+    let (_, info) = get(&a, "/fake/info", Some(&k)).await;
+    assert!(info.contains("--reranking"), "{info}");
+    let d = rt.details(RuntimeRole::Rerank).unwrap();
+    assert_eq!(d.info.state, RuntimeState::Ready);
+    assert_eq!(d.info.provider.as_str(), "local-rerank");
+    assert!(rt.status().iter().any(|i| i.role == RuntimeRole::Rerank));
+    // Its key is its own.
+    assert_ne!(k, key(&rt, RuntimeRole::Chat));
+    rt.shutdown().await;
+    assert_eq!(
+        rt.details(RuntimeRole::Rerank).unwrap().info.state,
+        RuntimeState::Stopped
+    );
 }
 
 #[tokio::test]

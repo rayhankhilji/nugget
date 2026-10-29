@@ -396,7 +396,13 @@ function RuntimeCard({
                         <th scope="row">
                           <code>{r.model_id}</code>
                         </th>
-                        <td>{r.role === "embedding" ? t("status.role.embedding") : t("status.role.chat")}</td>
+                        <td>
+                          {r.role === "embedding"
+                            ? t("status.role.embedding")
+                            : r.role === "rerank"
+                              ? t("status.role.rerank")
+                              : t("status.role.chat")}
+                        </td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>
                           {r.error && <div className="note note-error small">{r.error}</div>}

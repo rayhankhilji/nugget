@@ -399,6 +399,7 @@
   "status.localRuntimes": "Entornos de ejecución locales",
   "status.role.embedding": "Embeddings",
   "status.role.chat": "Chat",
+  "status.role.rerank": "Reordenación",
   "status.knowledge": "Conocimiento",
   "status.entities": "Entidades",
   "status.facts": "Datos",

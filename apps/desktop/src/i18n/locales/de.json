@@ -399,6 +399,7 @@
   "status.localRuntimes": "Lokale Laufzeitumgebungen",
   "status.role.embedding": "Embeddings",
   "status.role.chat": "Chat",
+  "status.role.rerank": "Reranking",
   "status.knowledge": "Wissen",
   "status.entities": "Entitäten",
   "status.facts": "Fakten",

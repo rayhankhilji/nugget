@@ -495,6 +495,9 @@ pub struct AskStarted {
 pub enum RuntimeRole {
     Chat,
     Embedding,
+    /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
+    /// routed for a model tier.
+    Rerank,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

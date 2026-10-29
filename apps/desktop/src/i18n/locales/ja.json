@@ -399,6 +399,7 @@
   "status.localRuntimes": "ローカルランタイム",
   "status.role.embedding": "埋め込み",
   "status.role.chat": "チャット",
+  "status.role.rerank": "再ランキング",
   "status.knowledge": "ナレッジ",
   "status.entities": "エンティティ",
   "status.facts": "事実",

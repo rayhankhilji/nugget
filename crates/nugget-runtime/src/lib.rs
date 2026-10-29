@@ -1,6 +1,6 @@
 //! `nugget-runtime`: local inference through llama.cpp's `llama-server`.
 //!
-//! [`Runtime`] supervises one server per [`RuntimeRole`] (chat, embedding):
+//! [`Runtime`] supervises one server per [`RuntimeRole`] (chat, embedding, rerank):
 //!
 //! 1. **Install.** The `llama-server` build comes from the signed manifest (`runtimes`), picked
 //!    for this OS, CPU and GPU ([`nugget_models::runtime_candidates_for`]), downloaded and
@@ -9,7 +9,8 @@
 //! 2. **Spawn**, on Unix listening on a Unix socket in a private directory
 //!    (`data/run/<role>.sock`, mode 0700; see [`RuntimeOptions::unix_socket`]), elsewhere on
 //!    `127.0.0.1:<free port>`, with arguments derived from the role and hardware
-//!    ([`LaunchPlan`]): context size, GPU layers, parallel slots, `--embedding` for embeddings.
+//!    ([`LaunchPlan`]): context size, GPU layers, parallel slots, `--embedding` for embeddings,
+//!    `--reranking` (rank pooling, `/v1/rerank`) for the reranker.
 //!    The child gets a scrubbed environment, runs in its own process group (Unix) or a
 //!    kill-on-close job object (Windows), and its stdout/stderr go to a rolling log under
 //!    `data/logs/`.
@@ -18,7 +19,9 @@
 //!    `127.0.0.1:<port>` must belong to the child's process group (see *Security*).
 //!    [`Runtime::ensure`] then returns an `openai_compatible` [`nugget_infer::ProviderConfig`]
 //!    (`socket_path` = the socket and `http://localhost/v1`, or `http://127.0.0.1:<port>/v1`; the
-//!    model id as alias, tiers by role, locality `on_device`). The start runs as a detached
+//!    model id as alias, tiers by role (none for the reranker, which is not a router provider:
+//!    `nuggetd` points retrieval's HTTP reranker at it, as `local-rerank`), locality
+//!    `on_device`). The start runs as a detached
 //!    task: a caller that gives up (a timeout dropping its `ensure` future) does not cancel it,
 //!    and later calls join it.
 //! 4. **Supervise.** Restart with exponential backoff after a crash (same port when still
@@ -68,8 +71,8 @@ mod supervisor;
 pub use args::{GpuLayers, LaunchPlan, Pooling, Tuning};
 pub use secrets::{RuntimeSecrets, api_key_ref};
 pub use supervisor::{
-    CHAT_PROVIDER_ID, EMBEDDING_PROVIDER_ID, Runtime, RuntimeDetails, RuntimeOptions, choose_port,
-    provider_id,
+    CHAT_PROVIDER_ID, EMBEDDING_PROVIDER_ID, RERANK_PROVIDER_ID, Runtime, RuntimeDetails,
+    RuntimeOptions, choose_port, provider_id,
 };
 
 pub use nugget_core::ipc::{RuntimeInfo, RuntimeRole, RuntimeState};

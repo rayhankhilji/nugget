@@ -440,6 +440,14 @@ impl Daemon {
         let hub = Arc::new(Hub::default());
         let tasks = TaskTracker::new();
         let shutdown = CancellationToken::new();
+        let retriever = crate::rerank::attach(
+            retriever,
+            &config.retrieve,
+            local.as_deref(),
+            egress.clone(),
+            &tasks,
+            &shutdown,
+        );
 
         // Knowledge graph and vault.
         let default_vault = opts

@@ -399,6 +399,7 @@
   "status.localRuntimes": "लोकल रनटाइम",
   "status.role.embedding": "एम्बेडिंग",
   "status.role.chat": "चैट",
+  "status.role.rerank": "री-रैंकिंग",
   "status.knowledge": "नॉलेज",
   "status.entities": "एंटिटी",
   "status.facts": "तथ्य",

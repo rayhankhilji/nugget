@@ -24,7 +24,10 @@
 //!    local llama-server rerank endpoint via [`HttpReranker`]) scores the top
 //!    [`RetrieveConfig::rerank_pool`] items; its scores are blended into relevance
 //!    ([`RetrieveConfig::rerank_weight`]). Errors and timeouts keep the first-stage order
-//!    ([`SearchResults::reranked`] is then false).
+//!    ([`SearchResults::reranked`] is then false). The daemon builds one from
+//!    [`RetrieveConfig::reranker`] (`[retrieve.reranker]`, a server you run, e.g.
+//!    `llama-server --reranking`), else from its local `rerank` runtime when
+//!    `[runtime] rerank_model` is set; with neither, there is no reranking.
 //! 7. **MMR diversity** over the top items: cosine similarity of the passages' stored embeddings
 //!    (read back from the store, not re-embedded) when the query was embedded, token-set Jaccard
 //!    otherwise.
