@@ -860,6 +860,11 @@ impl<'a> Session<'a> {
         let ok = run.requests > run.failed_requests;
         let mut extra = run.extraction;
         fold_first_names(ex, &mut extra);
+        crate::llm::fold_first_names_in_graph(
+            self.inner.graph.as_ref(),
+            self.state.me.as_ref(),
+            &mut extra,
+        );
         ex.absorb(extra);
         if !ok && run.requests > 0 {
             LLM_PENDING + attempts + 1

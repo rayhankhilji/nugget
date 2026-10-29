@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::{StreamExt, stream};
-use nugget_core::ids::ProviderId;
+use nugget_core::ids::{ItemRef, ProviderId};
 use nugget_core::{Error, Result};
 use nugget_infer::{ChatEvent, ChatRequest, ChatStream, Provider, ProviderMeta, StopReason};
 use serde_json::{Value, json};
@@ -67,6 +67,33 @@ impl Meter {
     }
 }
 
+/// One request as the model saw and answered it, for the suite's diagnostic dump.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RequestLog {
+    /// The items the request is about (its egress provenance).
+    pub items: Vec<ItemRef>,
+    /// The `[chunk N]` numbers in the prompt.
+    pub chunk_ords: Vec<u32>,
+    /// `ok`, `failure`, `timeout`, `unparseable` or `schema_invalid`.
+    pub outcome: &'static str,
+    pub latency_s: f64,
+    pub input_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    /// The answer text (empty for failures and timeouts).
+    pub answer: String,
+}
+
+/// The `[chunk N]` numbers in a prompt.
+fn chunk_ords(prompt: &str) -> Vec<u32> {
+    prompt
+        .match_indices("[chunk ")
+        .filter_map(|(at, m)| {
+            let rest = &prompt[at + m.len()..];
+            rest[..rest.find(']')?].trim().parse().ok()
+        })
+        .collect()
+}
+
 /// How one request ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Outcome {
@@ -77,10 +104,23 @@ enum Outcome {
     SchemaInvalid,
 }
 
+impl Outcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Outcome::Ok => "ok",
+            Outcome::Failure => "failure",
+            Outcome::Timeout => "timeout",
+            Outcome::Unparseable => "unparseable",
+            Outcome::SchemaInvalid => "schema_invalid",
+        }
+    }
+}
+
 pub struct MeteredProvider {
     inner: Arc<dyn Provider>,
     timeout: Duration,
     meter: Mutex<Meter>,
+    log: Mutex<Vec<RequestLog>>,
 }
 
 impl MeteredProvider {
@@ -89,7 +129,23 @@ impl MeteredProvider {
             inner,
             timeout,
             meter: Mutex::new(Meter::default()),
+            log: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Every request so far, in order.
+    pub fn requests(&self) -> Vec<RequestLog> {
+        self.log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    fn log(&self, entry: RequestLog) {
+        self.log
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(entry);
     }
 
     pub fn timeout(&self) -> Duration {
@@ -185,6 +241,36 @@ impl Provider for MeteredProvider {
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
         let schema = req.json_schema.clone();
+        let items = req.items.clone();
+        let ords = req
+            .messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|p| match p {
+                nugget_infer::Part::Text { text } => Some(chunk_ords(text)),
+                _ => None,
+            })
+            .flatten()
+            .collect::<Vec<u32>>();
+        let entry = |outcome: Outcome, elapsed: Duration, done: Option<&ChatEvent>, answer| {
+            let (input_tokens, output_tokens) = match done {
+                Some(ChatEvent::Done {
+                    input_tokens,
+                    output_tokens,
+                    ..
+                }) => (*input_tokens, *output_tokens),
+                _ => (None, None),
+            };
+            RequestLog {
+                items: items.clone(),
+                chunk_ords: ords.clone(),
+                outcome: outcome.as_str(),
+                latency_s: elapsed.as_secs_f64(),
+                input_tokens,
+                output_tokens,
+                answer,
+            }
+        };
         let started = Instant::now();
         let inner = self.inner.clone();
         let res = tokio::time::timeout(self.timeout, async move {
@@ -204,6 +290,7 @@ impl Provider for MeteredProvider {
         match res {
             Err(_) => {
                 self.record(Outcome::Timeout, elapsed, None);
+                self.log(entry(Outcome::Timeout, elapsed, None, String::new()));
                 Err(Error::Provider(format!(
                     "{}: no answer within the bench timeout of {} s",
                     self.inner.id(),
@@ -212,6 +299,7 @@ impl Provider for MeteredProvider {
             }
             Ok(Err(e)) => {
                 self.record(Outcome::Failure, elapsed, None);
+                self.log(entry(Outcome::Failure, elapsed, None, String::new()));
                 Err(e)
             }
             Ok(Ok(events)) => {
@@ -221,6 +309,14 @@ impl Provider for MeteredProvider {
                     .filter_map(|e| e.as_ref().ok())
                     .find(|e| matches!(e, ChatEvent::Done { .. }));
                 self.record(outcome, elapsed, done);
+                let text: String = events
+                    .iter()
+                    .filter_map(|e| match e {
+                        Ok(ChatEvent::TextDelta(t)) => Some(t.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                self.log(entry(outcome, elapsed, done, text));
                 Ok(Box::pin(stream::iter(events)))
             }
         }
@@ -326,6 +422,12 @@ mod tests {
         assert_eq!(m.lost(), 6);
         assert_eq!(m.latencies_s.len(), 8);
         assert_eq!(m.output_tokens, 20);
+        let log = p.requests();
+        assert_eq!(log.len(), 8);
+        assert_eq!(log[0].outcome, "ok");
+        assert!(log[0].answer.contains("\"a\""));
+        assert_eq!(log[7].outcome, "timeout");
+        assert_eq!(chunk_ords("x [chunk 0]\na\n[chunk 12]\nb"), [0, 12]);
         assert_eq!(p.id().as_str(), "canned");
     }
 }

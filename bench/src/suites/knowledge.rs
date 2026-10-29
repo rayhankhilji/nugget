@@ -26,6 +26,13 @@
 //! ([`Fixture::subset`]). Each item gets one LLM attempt (`max_attempts = 1`), so the deletion
 //! run does not quietly re-extract items whose request failed. The scripted-only metrics
 //! (`llm.calls`, `llm.unmatched`) are replaced by the real model's (`llm.requests`, ...).
+//! `--knowledge-items N` overrides the scale's subset size (all ~93 items with a large `N`).
+//!
+//! **`--knowledge-dump FILE`** ([`diagnose`]): writes the false-positive and false-negative
+//! entities and claims (with kind, items, a reason, and whether the deterministic extractors
+//! alone produce them: a second, LLM-less extraction of the same items) and, with a real model,
+//! every request with its answer and the quote gate's verdicts, as JSONL. Metrics are
+//! unchanged; the path and a summary go into the parameters (`knowledge_dump`).
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -38,6 +45,7 @@ use nugget_infer::Provider;
 use nugget_store::Store;
 use serde_json::json;
 
+use crate::knowledge::diagnose::{self, Baseline};
 use crate::knowledge::eval::{
     self, GoldIndex, Snapshot, distinct_identities, edits_preserved, gold_triples,
     injection_unsupported, match_entities, same_identity, score_claims, score_entities,
@@ -68,6 +76,21 @@ pub const PIPELINE_TIMEOUT_MARGIN: Duration = Duration::from_secs(30);
 /// the whole corpus). The scripted run always uses the whole corpus.
 pub fn real_items(scale: crate::runner::Scale) -> usize {
     scale.pick(8, 30, usize::MAX, usize::MAX)
+}
+
+/// `knowledge` options (flattened into the CLI).
+#[derive(Debug, Clone, Default, PartialEq, Eq, clap::Args)]
+pub struct KnowledgeOptions {
+    /// `knowledge --local-models`: items to extract with the real model instead of the scale's
+    /// subset (`smoke` 8, `quick` 30, `standard` all). The scenario's items are always kept;
+    /// a number at or above the corpus size (93) runs everything.
+    #[arg(long, value_name = "N")]
+    pub knowledge_items: Option<usize>,
+    /// `knowledge`: write the false-positive / false-negative entities and claims, and (with a
+    /// real model) every extraction request with its answer and the quote gate's verdicts, to
+    /// this JSONL file.
+    #[arg(long, value_name = "FILE")]
+    pub knowledge_dump: Option<std::path::PathBuf>,
 }
 
 /// The LLM behind the pipeline's extractor in a run.
@@ -105,6 +128,7 @@ impl Benchmark for KnowledgeBench {
         if ctx.config.local.local_models {
             return run_local(ctx, &fx);
         }
+        let baseline = baseline_if_dumping(ctx, &fx)?;
         let store = Store::open_in_memory()?;
         let ing = prepare(ctx, &fx, &store)?;
         let llm = Arc::new(ScriptedLlm::new(&fx));
@@ -116,12 +140,42 @@ impl Benchmark for KnowledgeBench {
             LlmSettings::default(),
         )?;
         match wired::build(&sctx)? {
-            Wiring::Ready(system) => {
-                run_with_system(ctx, &fx, &store, &ing, LlmUnderTest::Scripted(&llm), system)
-            }
+            Wiring::Ready(system) => run_with_system_and_baseline(
+                ctx,
+                &fx,
+                &store,
+                &ing,
+                LlmUnderTest::Scripted(&llm),
+                system,
+                baseline.as_ref(),
+            ),
             Wiring::Unavailable(why) => Err(BenchError::NotImplemented(why.into())),
         }
     }
+}
+
+/// With `--knowledge-dump`: what the deterministic extractors alone make of `fx` (a separate
+/// store, an LLM that answers nothing), to attribute errors to their source.
+fn baseline_if_dumping(ctx: &RunContext, fx: &Fixture) -> Result<Option<Baseline>, BenchError> {
+    if ctx.config.knowledge.knowledge_dump.is_none() {
+        return Ok(None);
+    }
+    let store = Store::open_in_memory()?;
+    let _ing = fixture::ingest(&store, fx)?;
+    let sctx = system_context(
+        fx,
+        &store,
+        diagnose::empty_llm(),
+        "none (deterministic baseline)".into(),
+        LlmSettings::default(),
+    )?;
+    let Wiring::Ready(mut system) = wired::build(&sctx)? else {
+        return Ok(None);
+    };
+    let refs: Vec<ItemRef> = fx.items.iter().map(|i| i.item_ref()).collect();
+    system.extract(&refs)?;
+    let snap = Snapshot::take(system.graph())?;
+    Ok(Some(Baseline::new(&GoldIndex::new(fx), &snap)))
 }
 
 fn system_context(
@@ -170,13 +224,21 @@ pub fn run_real_model(
     label: &str,
     timeout: Duration,
 ) -> Result<Vec<Metric>, BenchError> {
-    let keep = full.select_items(real_items(ctx.scale()));
+    let n = ctx
+        .config
+        .knowledge
+        .knowledge_items
+        .unwrap_or_else(|| real_items(ctx.scale()));
+    let keep = full.select_items(n);
     let fx = if keep.len() < full.items.len() {
         full.subset(&keep)
     } else {
         full.clone()
     };
     ctx.param("corpus_items", full.items.len());
+    if let Some(n) = ctx.config.knowledge.knowledge_items {
+        ctx.param("knowledge_items", n);
+    }
     ctx.param(
         "subset",
         json!({
@@ -187,9 +249,18 @@ pub fn run_real_model(
             "ids": if keep.len() < full.items.len() { json!(keep) } else { json!("all") },
         }),
     );
+    let baseline = baseline_if_dumping(ctx, &fx)?;
     let store = Store::open_in_memory()?;
     let ing = prepare_corpus(ctx, &fx, &store, Some(label))?;
     ctx.param("llm_timeout_s", timeout.as_secs_f64());
+    #[cfg(feature = "pipeline")]
+    ctx.param(
+        "llm_limits",
+        json!({
+            "note": "nugget-knowledge LlmConfig defaults; `local` applies to on-device providers",
+            "config": serde_json::to_value(nugget_knowledge::LlmConfig::default()).unwrap_or_default(),
+        }),
+    );
     ctx.param("llm_max_attempts", 1);
     ctx.param(
         "targets_note",
@@ -208,9 +279,15 @@ pub fn run_real_model(
         },
     )?;
     match wired::build(&sctx)? {
-        Wiring::Ready(system) => {
-            run_with_system(ctx, &fx, &store, &ing, LlmUnderTest::Real(&metered), system)
-        }
+        Wiring::Ready(system) => run_with_system_and_baseline(
+            ctx,
+            &fx,
+            &store,
+            &ing,
+            LlmUnderTest::Real(&metered),
+            system,
+            baseline.as_ref(),
+        ),
         Wiring::Unavailable(why) => Err(BenchError::NotImplemented(why.into())),
     }
 }
@@ -281,7 +358,20 @@ pub fn run_with_system(
     store: &Store,
     ing: &Ingested,
     llm: LlmUnderTest<'_>,
+    system: Box<dyn KnowledgeSystem>,
+) -> Result<Vec<Metric>, BenchError> {
+    run_with_system_and_baseline(ctx, fx, store, ing, llm, system, None)
+}
+
+/// [`run_with_system`], with a deterministic baseline for `--knowledge-dump`'s attribution.
+pub fn run_with_system_and_baseline(
+    ctx: &mut RunContext,
+    fx: &Fixture,
+    store: &Store,
+    ing: &Ingested,
+    llm: LlmUnderTest<'_>,
     mut system: Box<dyn KnowledgeSystem>,
+    baseline: Option<&Baseline>,
 ) -> Result<Vec<Metric>, BenchError> {
     use Direction::{HigherIsBetter as Up, Info, LowerIsBetter as Down};
     ctx.param("system", system.label());
@@ -319,6 +409,28 @@ pub fn run_with_system(
             .current
             .iter()
             .all(|id| sys1.contains_key(&gt.by_id[id]));
+
+    if let Some(path) = ctx.config.knowledge.knowledge_dump.clone() {
+        let requests = match llm {
+            LlmUnderTest::Real(p) => request_lines(fx, store, ing, &p.requests()),
+            LlmUnderTest::Scripted(_) => Vec::new(),
+        };
+        let lines = diagnose::lines(&diagnose::DumpInput {
+            gold: &gold,
+            gt: &gt,
+            snap: &snap,
+            matching: &matching,
+            sys: &sys1,
+            ing,
+            baseline,
+            requests,
+        });
+        diagnose::write(&path, &lines)?;
+        ctx.param(
+            "knowledge_dump",
+            json!({"path": path.display().to_string(), "summary": lines[0]["counts"]}),
+        );
+    }
 
     out.push(
         m("entities.f1", ents.overall.f1(), "ratio", Up,
@@ -714,6 +826,42 @@ pub fn run_with_system(
         }
     }
     Ok(out)
+}
+
+/// `request` lines of the dump: each logged request with the quote gate's verdicts on its answer
+/// (re-run on the chunks it was sent, which are still in the store before the deletions).
+fn request_lines(
+    fx: &Fixture,
+    store: &Store,
+    ing: &Ingested,
+    log: &[crate::knowledge::metered::RequestLog],
+) -> Vec<serde_json::Value> {
+    let me = fx.entity(&fx.scenario.me).map(|e| e.name.clone());
+    log.iter()
+        .map(|r| {
+            let item = r.items.first();
+            let id = item.and_then(|i| ing.by_ref(i)).map(|s| s.id.clone());
+            #[cfg(feature = "pipeline")]
+            let verdicts = item.filter(|_| !r.answer.is_empty()).and_then(|i| {
+                let it = store.get_item(i).ok()??;
+                let chunks = store.get_chunks_by_ord(i, &r.chunk_ords).ok()?;
+                let v = nugget_knowledge::llm::review(
+                    &r.answer,
+                    &it,
+                    &chunks,
+                    &nugget_knowledge::LlmConfig::default(),
+                    me.as_deref(),
+                );
+                serde_json::to_value(v).ok()
+            });
+            #[cfg(not(feature = "pipeline"))]
+            let verdicts = {
+                let _ = (store, &me);
+                None
+            };
+            diagnose::request_line(r, id.as_deref(), verdicts)
+        })
+        .collect()
 }
 
 /// The hard cases the (possibly subset) corpus can decide: all of them on the full corpus.
@@ -1262,5 +1410,225 @@ mod tests {
         assert_eq!(get(&ms, "hard_cases.job_change"), 0.0);
         assert_eq!(get(&ms, "claims.superseded_active"), 3.0);
         assert!(get(&ms, "claims.precision") < 1.0);
+    }
+}
+
+/// A small local model's habits, simulated on top of the scripted answers: names as written
+/// (first names, nicknames), the user as a plain person, preferences and commitments as literal
+/// objects, and junk entities the text does contain (dates, an address, generic nouns).
+/// The pipeline's normalisation has to keep the entity precision up without losing what the
+/// gate must hold: no unsupported claim.
+#[cfg(all(test, feature = "pipeline"))]
+mod noisy_model_tests {
+    use super::*;
+    use crate::runner::{RunConfig, Scale};
+    use nugget_infer::{ChatEvent, ChatRequest, ChatStream, Part, ProviderMeta, StopReason};
+    use serde_json::Value;
+
+    struct NoisyLlm {
+        id: nugget_core::ids::ProviderId,
+        script: ScriptedLlm,
+        user: String,
+    }
+
+    fn prompt_text(req: &ChatRequest) -> String {
+        req.messages
+            .iter()
+            .flat_map(|m| &m.content)
+            .filter_map(|p| match p {
+                Part::Text { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Junk the document contains: a "day Month" date, an address, generic nouns.
+    fn junk(text: &str) -> Vec<Value> {
+        let body = text.split("[chunk ").skip(1).collect::<Vec<_>>().join(" ");
+        let words: Vec<&str> = body.split_whitespace().collect();
+        let mut out = Vec::new();
+        const MONTHS: &[&str] = &[
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        ];
+        for w in words.windows(2) {
+            let m = w[1].trim_matches(|c: char| !c.is_alphanumeric());
+            if w[0].chars().all(|c| c.is_ascii_digit()) && MONTHS.contains(&m) {
+                out.push(json!({"name": format!("{} {m}", w[0]), "kind": "event"}));
+                break;
+            }
+        }
+        if let Some(addr) = words.iter().find(|w| w.contains('@') && w.contains('.')) {
+            let a = addr.trim_matches(|c: char| !c.is_alphanumeric());
+            out.push(json!({"name": a, "kind": "person"}));
+        }
+        for g in ["meeting", "team", "update", "budget", "call"] {
+            if words
+                .iter()
+                .any(|w| w.trim_matches(|c: char| !c.is_alphanumeric()) == g)
+            {
+                out.push(json!({"name": g, "kind": "event"}));
+                out.push(json!({"name": g, "kind": "organization"}));
+            }
+        }
+        out
+    }
+
+    #[async_trait::async_trait]
+    impl Provider for NoisyLlm {
+        fn id(&self) -> &nugget_core::ids::ProviderId {
+            &self.id
+        }
+
+        fn meta(&self) -> ProviderMeta {
+            ProviderMeta {
+                kind: nugget_infer::ProviderKind::OpenaiCompatible,
+                model: "noisy-local".into(),
+                locality: nugget_core::capability::Locality::OnDevice,
+                context_tokens: Some(32_768),
+            }
+        }
+
+        async fn chat(&self, req: ChatRequest) -> nugget_core::Result<ChatStream> {
+            let mut v = self.script.response_for(&req);
+            assert!(
+                v["claims"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|c| c.get("quote").is_some()),
+                "the pipeline asks for the compact shape"
+            );
+            // Names as written: the surface form replaces the full name everywhere.
+            let mut rename: Vec<(String, String)> = Vec::new();
+            let mut literal_kinds: Vec<String> = Vec::new();
+            let mut ents = Vec::new();
+            for e in v["entities"].as_array().unwrap() {
+                let name = e["name"].as_str().unwrap().to_owned();
+                let shown = e["aliases"][0].as_str().map_or(name.clone(), str::to_owned);
+                if matches!(e["kind"].as_str(), Some("preference" | "commitment")) {
+                    literal_kinds.push(shown.clone());
+                } else {
+                    ents.push(json!({"name": shown, "kind": e["kind"]}));
+                }
+                rename.push((name, shown));
+            }
+            ents.push(json!({"name": self.user, "kind": "person"}));
+            ents.extend(junk(&prompt_text(&req)));
+            let mut claims = Vec::new();
+            for c in v["claims"].as_array().unwrap() {
+                let mut c = c.clone();
+                for key in ["subject", "object"] {
+                    let s = c[key].as_str().unwrap_or_default().to_owned();
+                    if s == "user" {
+                        c[key] = json!(self.user);
+                    } else if let Some((_, shown)) = rename.iter().find(|(n, _)| *n == s) {
+                        c[key] = json!(shown);
+                    }
+                }
+                claims.push(c);
+            }
+            v = json!({"entities": ents, "claims": claims});
+            let events = vec![
+                Ok(ChatEvent::TextDelta(v.to_string())),
+                Ok(ChatEvent::Done {
+                    stop_reason: StopReason::EndTurn,
+                    input_tokens: None,
+                    output_tokens: None,
+                }),
+            ];
+            Ok(Box::pin(futures::stream::iter(events)))
+        }
+
+        async fn embed(&self, _: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
+            Err(nugget_core::Error::Unsupported("no".into()))
+        }
+    }
+
+    fn get(ms: &[Metric], name: &str) -> f64 {
+        ms.iter().find(|m| m.name == name).unwrap().value
+    }
+
+    #[test]
+    fn a_noisy_local_model_keeps_entity_precision_and_adds_nothing_unsupported() {
+        let full = Fixture::builtin().unwrap();
+        let dump = tempfile::tempdir().unwrap();
+        let path = dump.path().join("dump.jsonl");
+        let mut ctx = RunContext::new(RunConfig {
+            scale: Scale::Quick,
+            knowledge: KnowledgeOptions {
+                knowledge_dump: Some(path.clone()),
+                knowledge_items: Some(40),
+            },
+            ..RunConfig::default()
+        });
+        let user = full.entity(&full.scenario.me).unwrap().name.clone();
+        let noisy = NoisyLlm {
+            id: nugget_core::ids::ProviderId::new("noisy"),
+            script: ScriptedLlm::new(&full),
+            user,
+        };
+        let ms = run_real_model(
+            &mut ctx,
+            &full,
+            Arc::new(noisy),
+            "noisy local model",
+            Duration::from_secs(60),
+        )
+        .unwrap();
+        let p = ctx.params();
+        assert_eq!(p["subset"]["items"], 40);
+        assert_eq!(p["knowledge_items"], 40);
+        assert!(p["llm_limits"]["config"]["local"]["max_entities_per_request"].is_u64());
+        for (n, min) in [
+            ("entities.precision", 0.85),
+            ("entities.recall", 0.9),
+            ("entities.f1", ENTITY_F1_TARGET),
+            ("claims.precision", 0.85),
+            ("claims.recall", 0.8),
+        ] {
+            assert!(get(&ms, n) >= min, "{n} = {}", get(&ms, n));
+        }
+        assert_eq!(get(&ms, "claims.unsupported_rate"), 0.0);
+        assert_eq!(get(&ms, "injection.unsupported_claims"), 0.0);
+        assert_eq!(get(&ms, "llm.schema_invalid"), 0.0);
+
+        // The dump: a summary, the errors, and every request with the gate's verdicts.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert_eq!(lines[0]["type"], "summary");
+        assert_eq!(p["knowledge_dump"]["summary"], lines[0]["counts"]);
+        let requests: Vec<&Value> = lines.iter().filter(|l| l["type"] == "request").collect();
+        assert_eq!(requests.len() as f64, get(&ms, "llm.requests"));
+        let dropped: Vec<&str> = requests
+            .iter()
+            .flat_map(|r| r["verdicts"].as_array().unwrap())
+            .filter(|v| v["kept"] == false)
+            .filter_map(|v| v["reason"].as_str())
+            .collect();
+        for why in ["date or amount", "generic noun", "address or domain"] {
+            assert!(dropped.contains(&why), "{why}");
+        }
+        assert!(
+            lines
+                .iter()
+                .filter(|l| l["type"] == "entity_fp" || l["type"] == "claim_fp")
+                .all(|l| l["source"].is_string()),
+            "errors are attributed against the deterministic baseline"
+        );
     }
 }

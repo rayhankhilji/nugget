@@ -385,7 +385,8 @@ without it the suite reports `not_implemented`):
 2. *Extract.* `nugget_knowledge::Knowledge` over that store and its SQLite graph, with the user's
    name and addresses and the webmail domains configured, the LLM extractor on, and
    `ScriptedLlm` (`src/knowledge/fake_llm.rs`, an on-device `Provider`) as the only `Synthesis`
-   provider. It answers in the extractor's JSON schema, keyed by the request's item reference.
+   provider. It answers in the shape the request schema asks for (the compact one), keyed by the
+   request's item reference.
    One `run_once` over all items is timed for throughput (model time is nil, so this is the
    pipeline's own cost).
 3. *Score the graph* (below).
@@ -448,8 +449,20 @@ labels (`src/knowledge/oracle.rs`): the oracle meets every target, and each inje
 (trusting the model, ignoring deletes, overwriting edits, dropping citations, keeping the old
 job) fails exactly the metrics it should.
 
-Not covered yet: a real local model (the LLM is scripted, so extraction quality beyond the
-script is not measured), embedding-based resolution, the daemon's change-feed path (wave 2), the
+**Diagnostic dump** (`--knowledge-dump FILE`, `src/knowledge/diagnose.rs`): one JSON object per
+line. The first is a `summary` (counts by type, kind or predicate, reason and source); then
+`entity_fp` / `entity_fn` / `claim_fp` / `claim_fn` lines with the items involved and a reason
+(`duplicate`, `kind_mismatch`, `not_in_gold`; `superseded`, `subject_unmatched`,
+`object_unmatched`, `wrong_object`, `wrong_predicate`; for misses `subject_missing`,
+`object_missing`, `absent`), and, with `--local-models`, one `request` line per extraction request
+(latency, tokens, the model's answer, and the quote gate's verdict on each proposed entity and
+claim, from `nugget_knowledge::llm::review`). When dumping, the suite also extracts the same
+items once more with an LLM that answers nothing, so every false positive says whether the
+deterministic extractors already produce it (`source: deterministic`) or only the LLM run does
+(`llm`), and every miss whether the deterministic run found it (`in_baseline`). Metric names and
+values are unchanged; `params.knowledge_dump` holds the path and the summary.
+
+Not covered yet: embedding-based resolution, the daemon's change-feed path (wave 2), the
 encrypted on-disk store, and graded or partial claim matching.
 
 ### `proactive` (M5)
@@ -1352,6 +1365,8 @@ Options (all suites):
 | `--draft-judge-model ID` | `draft`: judge with this manifest model on a second local server next to the drafting one (same `--models-home`), instead of the drafting model; implies `--draft-judge model` (`params.judge.model`, `judge.same_model_as_drafts`) |
 | `--draft-judge-timeout-s N` | `draft`: per-request timeout of the model judge (default 240 with `--draft-judge-model`, else the draft timeout; `params.judge.timeout_s`) |
 | `--draft-judge-grounding` | `draft`: also judge the grounded Nugget arm against the ungrounded one (`draft.judge_grounding.*`; needs `--draft-grounding both`; doubles the judge requests) |
+| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` all 93); the scenario items are always kept |
+| `--knowledge-dump FILE` | `knowledge` (any LLM): write false positives / negatives and, with a real model, every request with its answer and gate verdicts, as JSONL (see the `knowledge` section) |
 | `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
 
 ### Double Tap latency (M3 exit)
@@ -1468,6 +1483,38 @@ The quote gate keeps the vault honest (no unsupported claim, every fact cited, r
 correct), but the 4B extractor misses the entity F1 target: it proposes many entities the gold set
 does not have (precision 0.5–0.6) and gets about half the relations. At ~60 s per item on this
 CPU, a 1,000-item backfill would take most of a day.
+
+**Error analysis (AA3)**, from the scoring rules, the fixtures and a deterministic-only run of the
+same 30 items (an LLM that answers nothing): the deterministic extractors alone score entity
+P 1.00 / R 0.60 (35 entities) and claim P 0.92 / R 0.44. Every gold person is already found from
+headers, attendees and notes; what is left for the LLM is 8 projects, 4 places, 5 preferences, 3
+commitments, 1 event and 1 organisation, and `has_role` (10), `works_on` (10), `prefers` (5),
+`committed_to` / `due_on` (3 each), `part_of` and `leads` (3 each) claims. The real model added
+~48 entities of which only ~7 matched, and claims at about half precision. The causes, as far as
+the reports show: people written by first name or nickname as a new entity (a duplicate is a false
+positive), short project and organisation names ("Lodestar"), the user as an ordinary person,
+dates, times, amounts, addresses and generic nouns as entities, topics (gold topics are tags
+only: topic F1 0.19), commitments and preferences named differently from the text or given as
+literal objects (both F1 0), `due_on` dates as written ("Friday 30 October" is not
+`2026-10-30`), titles with articles ("our Senior Data Scientist"), predicates outside the gold
+vocabulary (33 out-of-vocabulary triples), and no way to tell who "I" is (mail bodies carry no
+headers). The gate dropped 63 of the 108 claims it was offered (36 quotes rejected).
+
+Changes: the model now answers in a compact schema (entities `{name, kind, aliases?}`, claims
+`{subject, predicate, object, quote}` by name; no `ref`, `text`, `confidence`, quote list or
+identifiers), with a 25-predicate enum aligned to the gold vocabulary, no `topic` kind, and
+`maxItems` 12 entities / 10 claims for local providers; about a third fewer output characters for
+the same content, and less over-production. A local provider gets at most 2 chunks / 4,000
+characters per request, 4 requests per item and 1,024 output tokens. The prompt names the kinds to
+extract and not to extract, gives one made-up example, puts the From/To/Cc display names (the user
+marked) before the document, and keeps the system prompt identical across requests (prompt cache).
+The pipeline normalises what comes back (honorifics, punctuation, possessives, legal suffixes,
+commitment phrasing, title articles, ISO dates; the user, dates, amounts, addresses, generic and
+lower-case names dropped; commitments and preferences only with an accepted claim; a first name or
+short name folded into the one matching entity in the item or graph), with the quote gate
+unchanged. A scripted "noisy local model" test (names as written, the user as a person, literal
+preferences, junk entities) scores entity P 0.89 / R 1.00 and no unsupported claim on 40 items.
+These changes are not yet measured with the real model.
 
 ### Bugs the real models exposed
 
