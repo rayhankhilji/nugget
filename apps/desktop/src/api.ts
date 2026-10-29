@@ -1289,8 +1289,8 @@ export const proactiveApi = {
   metrics: () => call<ProactiveMetrics>("proactive_metrics"),
   refresh: () => call<CardsChanged>("proactive_refresh"),
   remindersList: () => call<ReminderView[]>("reminders_list"),
-  /** OS notification, shown by the Rust shell. */
-  notify: (title: string, body: string) => call<void>("notify", { title, body }),
+  /** OS notification, shown by the Rust shell. With `openToday`, clicking it opens Today. */
+  notify: (title: string, body: string, openToday = false) => call<void>("notify", { title, body, openToday }),
   /** Open a drafted reply (`mailto:` only) in the default mail app. */
   openMailto: (url: string) => call<void>("open_mailto", { url }),
 };

@@ -42,7 +42,7 @@
 //! max_exemplars = 6
 //! ```
 
-mod voice;
+pub(super) mod voice;
 
 use std::collections::HashMap;
 use std::sync::Arc;

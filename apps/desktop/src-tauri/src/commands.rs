@@ -687,9 +687,6 @@ pub async fn pick_folders(app: AppHandle, multiple: bool) -> Result<Vec<String>>
 /// Card ids and dismiss reasons are short; free-text dismiss reasons stay modest.
 const MAX_CARD_ID_LEN: usize = 256;
 const MAX_REASON_TEXT_LEN: usize = 2_000;
-/// Notification text the UI composes (a title and one or two lines).
-const MAX_NOTIFY_TITLE_LEN: usize = 200;
-const MAX_NOTIFY_BODY_LEN: usize = 2_000;
 
 const CARD_FEEDBACK: &[&str] = &["accept", "dismiss", "snooze", "seen", "done"];
 const DISMISS_REASONS: &[&str] = &[
@@ -813,18 +810,16 @@ pub async fn reminders_list(
         .await
 }
 
-/// Show an OS notification (morning brief, due reminder). Text is shown as plain text.
+/// Show an OS notification (morning brief, due reminder). Text is shown as plain text. With
+/// `open_today`, clicking it opens the Today page (see `notify.rs`).
 #[tauri::command]
-pub async fn notify(app: AppHandle, title: String, body: String) -> Result<()> {
-    use tauri_plugin_notification::NotificationExt;
-    let title: String = title.chars().take(MAX_NOTIFY_TITLE_LEN).collect();
-    let body: String = body.chars().take(MAX_NOTIFY_BODY_LEN).collect();
-    app.notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .map_err(|e| CmdError::Other(format!("couldn't show the notification: {e}")))
+pub async fn notify(
+    app: AppHandle,
+    title: String,
+    body: String,
+    open_today: Option<bool>,
+) -> Result<()> {
+    crate::notify::show(&app, &title, &body, open_today.unwrap_or(false)).map_err(CmdError::Other)
 }
 
 /// Opens a `mailto:` link (a drafted reply) in the default mail app. Nothing else is accepted.

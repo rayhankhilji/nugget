@@ -39,14 +39,16 @@ pub mod judge;
 pub mod score;
 pub mod text;
 
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use nugget_core::{Error, Result};
 use nugget_graph::GraphStore;
 use nugget_store::Store;
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 
 pub use actions::{
     APPROVAL_KEY_LEN, Action, ActionPreview, ActionRunner, Approval, ArchiveThread,
@@ -93,6 +95,9 @@ pub struct Proactive {
     store: Store,
     graph: Option<Arc<dyn GraphStore>>,
     cfg: ProactiveConfig,
+    /// The user's current UTC offset in seconds; replaces `cfg.utc_offset` (see
+    /// [`Proactive::set_utc_offset`]).
+    utc_offset: AtomicI32,
     cards: Arc<dyn CardStore>,
     judge: Option<Arc<dyn Judge>>,
     /// Serialises load-modify-save of the card state.
@@ -108,6 +113,7 @@ impl Proactive {
             graph: Some(Arc::new(store.graph())),
             cards: Arc::new(StoreCardStore::new(store.clone())),
             store,
+            utc_offset: AtomicI32::new(cfg.utc_offset.whole_seconds()),
             cfg,
             judge: None,
             lock: Mutex::new(()),
@@ -130,12 +136,40 @@ impl Proactive {
         self
     }
 
+    /// The configuration given to [`Proactive::new`]; its `utc_offset` is the initial one (see
+    /// [`Proactive::utc_offset`]).
     pub fn config(&self) -> &ProactiveConfig {
         &self.cfg
     }
 
+    /// The user's current UTC offset (for "today" and floating calendar times).
+    pub fn utc_offset(&self) -> UtcOffset {
+        UtcOffset::from_whole_seconds(self.utc_offset.load(Ordering::Relaxed))
+            .unwrap_or(self.cfg.utc_offset)
+    }
+
+    /// Change the user's UTC offset (a daylight-saving change while running). Takes effect from
+    /// the next call.
+    pub fn set_utc_offset(&self, offset: UtcOffset) {
+        self.utc_offset
+            .store(offset.whole_seconds(), Ordering::Relaxed);
+    }
+
+    /// The configuration with the current UTC offset.
+    fn cfg_now(&self) -> Cow<'_, ProactiveConfig> {
+        let offset = self.utc_offset();
+        if offset == self.cfg.utc_offset {
+            Cow::Borrowed(&self.cfg)
+        } else {
+            Cow::Owned(ProactiveConfig {
+                utc_offset: offset,
+                ..self.cfg.clone()
+            })
+        }
+    }
+
     pub fn corpus(&self) -> Result<Corpus> {
-        Corpus::load(&self.store, &self.cfg)
+        Corpus::load(&self.store, &self.cfg_now())
     }
 
     /// Run the deterministic generators (no scoring, no state change).
@@ -149,7 +183,7 @@ impl Proactive {
             corpus,
             graph: self.graph.as_deref(),
             store: Some(&self.store),
-            cfg: &self.cfg,
+            cfg: &self.cfg_now(),
             now,
         })
     }
@@ -461,7 +495,7 @@ impl Proactive {
     pub fn brief(&self, now: OffsetDateTime) -> Result<MorningBrief> {
         let corpus = self.corpus()?;
         let state = self.cards.load()?;
-        Ok(brief::compose(&state, &corpus, &self.cfg, now))
+        Ok(brief::compose(&state, &corpus, &self.cfg_now(), now))
     }
 }
 
