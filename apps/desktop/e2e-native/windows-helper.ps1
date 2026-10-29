@@ -98,19 +98,35 @@ function Find-Window([string]$substring) {
 function Read-Text([IntPtr]$hwnd) {
     $A = [System.Windows.Automation.AutomationElement]
     $root = $A::FromHandle($hwnd)
+    $seen = @()
     foreach ($type in @([System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::Edit)) {
         $cond = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, $type)
-        $el = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
-        if ($null -eq $el) { continue }
-        $p = $null
-        if ($el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$p)) {
-            return $p.DocumentRange.GetText(-1)
-        }
-        if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$p)) {
-            return $p.Current.Value
+        foreach ($el in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) {
+            $seen += "$($el.Current.ControlType.ProgrammaticName):$($el.Current.ClassName)"
+            $t = Text-Of $el
+            if ($null -ne $t) { return $t }
         }
     }
-    throw "no document or edit control in the window"
+    # Else the focused element, when it is in the same process (the insertion left focus there).
+    $focused = $A::FocusedElement
+    if ($null -ne $focused -and $focused.Current.ProcessId -eq $root.Current.ProcessId) {
+        $seen += "focused $($focused.Current.ControlType.ProgrammaticName):$($focused.Current.ClassName)"
+        $t = Text-Of $focused
+        if ($null -ne $t) { return $t }
+    }
+    throw "no document or edit control with text in $($root.Current.ClassName) '$($root.Current.Name)' (seen: $($seen -join ', '))"
+}
+
+function Text-Of($el) {
+    $p = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$p)) {
+        return $p.DocumentRange.GetText(-1)
+    }
+    $p = $null
+    if ($el.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$p)) {
+        return $p.Current.Value
+    }
+    return $null
 }
 
 while ($true) {
@@ -156,9 +172,15 @@ while ($true) {
                 Reply @{ ok = [NuggetE2E]::SetForegroundWindow($h) }
             }
             'read' {
-                $h = Find-Window $arg
-                if ($h -eq [IntPtr]::Zero) { throw "no window titled *$arg*" }
-                Reply @{ ok = $true; text = (Read-Text $h) }
+                # Every visible window with that title (Notepad can have more than one).
+                $errors = @()
+                $text = $null
+                foreach ($h in [NuggetE2E]::Windows()) {
+                    if (-not [NuggetE2E]::IsWindowVisible($h) -or -not ([NuggetE2E]::Title($h)).Contains($arg)) { continue }
+                    try { $text = Read-Text $h; break } catch { $errors += $_.Exception.Message }
+                }
+                if ($null -eq $text) { throw "no window titled *$arg* has text: $($errors -join '; ')" }
+                Reply @{ ok = $true; text = $text }
             }
             'screenshot' {
                 $a = $arg.Split(' ')
