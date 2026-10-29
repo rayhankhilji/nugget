@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "空きディスク容量が足りません: {disk} 必要ですが、空きは {free} です。",
   "onboarding.byok.heading": "自分のAPIキーを使う",
   "onboarding.byok.never": "Nuggetはキーをファイルに保存しません。下に貼り付けると、Nuggetがプロバイダで確認してからOSのキーチェーンに保管します。設定ファイルにはその場所だけが記載されます。以下の手順で自分で設定することもできます。",
+  "onboarding.byok.manual": "または手動で設定する",
   "onboarding.byok.provider": "プロバイダ",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

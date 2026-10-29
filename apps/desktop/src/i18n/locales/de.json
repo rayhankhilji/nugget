@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "Nicht genug freier Speicherplatz: {disk} benötigt, {free} frei.",
   "onboarding.byok.heading": "Eigenen API-Schlüssel verwenden",
   "onboarding.byok.never": "Nugget speichert Schlüssel nie in Dateien. Fügen Sie unten einen ein: Nugget prüft ihn beim Anbieter und legt ihn dann im Schlüsselbund Ihres Betriebssystems ab; die Konfigurationsdatei gibt nur an, wo er zu finden ist. Oder richten Sie ihn mit den folgenden Schritten selbst ein.",
+  "onboarding.byok.manual": "Oder von Hand einrichten",
   "onboarding.byok.provider": "Anbieter",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

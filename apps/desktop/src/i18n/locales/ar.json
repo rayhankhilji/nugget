@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "لا توجد مساحة كافية على القرص: المطلوب {disk}، والمتاح {free}.",
   "onboarding.byok.heading": "استخدم مفتاح API الخاص بك",
   "onboarding.byok.never": "لن يطلب منك Nugget أبدًا لصق مفتاح في هذه النافذة. تبقى المفاتيح في سلسلة مفاتيح نظام التشغيل أو في متغير بيئة، ولا يذكر ملف الإعدادات إلا مكان العثور عليها.",
+  "onboarding.byok.manual": "أو اضبطه يدويًا",
   "onboarding.byok.provider": "المزود",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

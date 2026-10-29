@@ -305,41 +305,44 @@ function ByokGuide() {
         </select>
       </div>
       <ByokForm kind={kind} />
-      <ol className="ob-guide">
-        <li>
-          <h3>{t("onboarding.byok.step1")}</h3>
-          {guide.key ? (
-            <>
-              <p>{t("onboarding.byok.step1.keychain")}</p>
-              <Snippet text={keychainCommand(os, guide.key.name)} what={t("onboarding.byok.copyKeychain")} />
-              <p>{t("onboarding.byok.step1.env")}</p>
-              <Snippet text={envCommand(os, guide.key.env)} what={t("onboarding.byok.copyEnv")} />
-            </>
-          ) : (
-            <p>{t("onboarding.byok.step1.noKey")}</p>
-          )}
-        </li>
-        <li>
-          <h3>{t("onboarding.byok.step2")}</h3>
-          <p>
-            <Trans k="onboarding.byok.step2.where" args={{ path: configPath(os) }} tags={{ code: (c) => <code>{c}</code> }} />
-          </p>
-          <Snippet text={guide.config} what={t("onboarding.byok.copyConfig")} />
-          {guide.key && (
-            <p className="muted small">
-              <Trans
-                k="onboarding.byok.step2.envSwap"
-                args={{ ref: `env:${guide.key.env}` }}
-                tags={{ code: (c) => <code>{c}</code> }}
-              />
+      <details className="ob-manual">
+        <summary>{t("onboarding.byok.manual")}</summary>
+        <ol className="ob-guide">
+          <li>
+            <h3>{t("onboarding.byok.step1")}</h3>
+            {guide.key ? (
+              <>
+                <p>{t("onboarding.byok.step1.keychain")}</p>
+                <Snippet text={keychainCommand(os, guide.key.name)} what={t("onboarding.byok.copyKeychain")} />
+                <p>{t("onboarding.byok.step1.env")}</p>
+                <Snippet text={envCommand(os, guide.key.env)} what={t("onboarding.byok.copyEnv")} />
+              </>
+            ) : (
+              <p>{t("onboarding.byok.step1.noKey")}</p>
+            )}
+          </li>
+          <li>
+            <h3>{t("onboarding.byok.step2")}</h3>
+            <p>
+              <Trans k="onboarding.byok.step2.where" args={{ path: configPath(os) }} tags={{ code: (c) => <code>{c}</code> }} />
             </p>
-          )}
-        </li>
-        <li>
-          <h3>{t("onboarding.byok.step3")}</h3>
-          <p>{t("onboarding.byok.step3.body")}</p>
-        </li>
-      </ol>
+            <Snippet text={guide.config} what={t("onboarding.byok.copyConfig")} />
+            {guide.key && (
+              <p className="muted small">
+                <Trans
+                  k="onboarding.byok.step2.envSwap"
+                  args={{ ref: `env:${guide.key.env}` }}
+                  tags={{ code: (c) => <code>{c}</code> }}
+                />
+              </p>
+            )}
+          </li>
+          <li>
+            <h3>{t("onboarding.byok.step3")}</h3>
+            <p>{t("onboarding.byok.step3.body")}</p>
+          </li>
+        </ol>
+      </details>
       <p className="muted small">{t("onboarding.byok.egress")}</p>
     </section>
   );

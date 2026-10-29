@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "No hay suficiente espacio libre en disco: se necesitan {disk} y hay {free} libres.",
   "onboarding.byok.heading": "Usa tu propia clave de API",
   "onboarding.byok.never": "Nugget nunca guarda claves en archivos. Pega una abajo y Nugget la comprobará con el proveedor y la guardará en el llavero del sistema; el archivo de configuración solo indica dónde encontrarla. O configúrala tú mismo con los pasos siguientes.",
+  "onboarding.byok.manual": "O configúralo a mano",
   "onboarding.byok.provider": "Proveedor",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

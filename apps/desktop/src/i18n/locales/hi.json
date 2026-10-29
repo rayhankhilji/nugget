@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "डिस्क में पर्याप्त खाली जगह नहीं है: {disk} चाहिए, {free} खाली है।",
   "onboarding.byok.heading": "अपनी API कुंजी इस्तेमाल करें",
   "onboarding.byok.never": "Nugget कुंजियों को कभी फ़ाइलों में नहीं रखता। नीचे कुंजी पेस्ट करें: Nugget प्रोवाइडर से उसकी जाँच करके उसे आपके OS कीचेन में रखता है; कॉन्फ़िग फ़ाइल में सिर्फ़ यह लिखा होता है कि उसे कहाँ ढूँढना है। या आगे दिए गए चरणों से इसे ख़ुद सेट करें।",
+  "onboarding.byok.manual": "या इसे स्वयं सेट अप करें",
   "onboarding.byok.provider": "प्रोवाइडर",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

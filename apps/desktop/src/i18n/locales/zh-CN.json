@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "可用磁盘空间不足：需要 {disk}，可用 {free}。",
   "onboarding.byok.heading": "使用自己的 API 密钥",
   "onboarding.byok.never": "Nugget 从不把密钥写入文件。在下方粘贴密钥，Nugget 会先向提供商验证，再保存到系统钥匙串中；配置文件里只记录在哪里找到它。你也可以按照后面的步骤自行设置。",
+  "onboarding.byok.manual": "或手动设置",
   "onboarding.byok.provider": "提供商",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

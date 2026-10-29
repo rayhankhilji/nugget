@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "Not enough free disk space: {disk} needed, {free} free.",
   "onboarding.byok.heading": "Use your own API key",
   "onboarding.byok.never": "Nugget keeps keys out of files. Paste one below and Nugget checks it with the provider, then stores it in your OS keychain; the config file only says where to find it. Or set it up yourself with the steps that follow.",
+  "onboarding.byok.manual": "Or set it up by hand",
   "onboarding.byok.provider": "Provider",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",

@@ -5,6 +5,7 @@
     "chat.generalAnswer",
     "knowledge.emptyNoSources",
     "knowledge.emptyPending",
+    "onboarding.byok.manual",
     "search.failingSources",
     "search.indexingHint",
     "search.indexingTitle",

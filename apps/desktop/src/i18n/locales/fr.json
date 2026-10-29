@@ -218,6 +218,7 @@
   "onboarding.models.fit.diskTooSmall": "Espace disque insuffisant : {disk} nécessaires, {free} libres.",
   "onboarding.byok.heading": "Utiliser votre propre clé API",
   "onboarding.byok.never": "Nugget ne garde jamais de clé dans un fichier. Collez-en une ci-dessous : Nugget la vérifie auprès du fournisseur, puis la range dans le trousseau de votre système ; le fichier de configuration indique seulement où la trouver. Vous pouvez aussi suivre vous-même les étapes ci-dessous.",
+  "onboarding.byok.manual": "Ou configurez-le à la main",
   "onboarding.byok.provider": "Fournisseur",
   "onboarding.byok.provider.anthropic": "Anthropic",
   "onboarding.byok.provider.openai": "OpenAI",
