@@ -102,6 +102,7 @@ struct DraftSection {
     retrieval_timeout_ms: u64,
     voice_timeout_ms: u64,
     prewarm_ttl_ms: u64,
+    grounding: bool,
     voice_refresh_debounce_ms: u64,
     voice: VoiceSection,
 }
@@ -122,6 +123,7 @@ impl Default for DraftSection {
             retrieval_timeout_ms: d.retrieval_timeout_ms,
             voice_timeout_ms: d.voice_timeout_ms,
             prewarm_ttl_ms: d.prewarm_ttl_ms,
+            grounding: d.grounding,
             voice_refresh_debounce_ms: 5_000,
             voice: VoiceSection::default(),
         }
@@ -183,6 +185,7 @@ impl DraftSection {
             retrieval_timeout_ms: self.retrieval_timeout_ms,
             voice_timeout_ms: self.voice_timeout_ms,
             prewarm_ttl_ms: self.prewarm_ttl_ms,
+            grounding: self.grounding,
             ..DraftConfig::default()
         }
     }
