@@ -261,12 +261,10 @@ impl<'a> Extractor<'a> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        // Mode bits when the archive has them; archives made on Windows carry none, and there
-        // a program is what its extension says.
-        let executable = match mode {
-            Some(m) => m & 0o111 != 0,
-            None => rel.to_ascii_lowercase().ends_with(".exe"),
-        };
+        // Execute bits, or a `.exe` name: archives made on Windows carry no real mode (zip
+        // readers synthesise 0644 for them), and there a program is what its extension says.
+        let executable =
+            mode.is_some_and(|m| m & 0o111 != 0) || rel.to_ascii_lowercase().ends_with(".exe");
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create_new(true);
         #[cfg(unix)]
