@@ -73,6 +73,11 @@ async fn ensure_spawns_on_loopback_and_returns_an_on_device_provider_config() {
         "embedding tier dropped for chat"
     );
     assert_eq!(cfg.effective_locality().unwrap(), Locality::OnDevice);
+    // Hybrid reasoning models answer without thinking first.
+    assert_eq!(
+        cfg.extra_body.as_ref().unwrap()["chat_template_kwargs"]["enable_thinking"],
+        false
+    );
     // A reference to this server's key generation, resolved only by the runtime.
     assert!(
         matches!(&cfg.api_key, Some(ApiKeyRef::Env(n)) if n.starts_with("NUGGET_RUNTIME_API_KEY_CHAT_")),
@@ -157,6 +162,10 @@ async fn configs_work_with_nugget_infer_providers() {
     let emb_cfg = rt.ensure(RuntimeRole::Embedding, &e.embed).await.unwrap();
     assert_ne!(addr(&chat_cfg), addr(&emb_cfg), "one listener per role");
     assert_eq!(emb_cfg.tiers, vec![Tier::Embedding]);
+    assert_eq!(
+        emb_cfg.extra_body, None,
+        "only chat requests carry template flags"
+    );
     assert_eq!(emb_cfg.id.as_str(), "local-embedding");
 
     let egress = Arc::new(common::VecSink::default());

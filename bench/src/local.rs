@@ -12,9 +12,10 @@
 //!   `--local-embed-model` pick others by manifest id.
 //! - **Thinking.** Hybrid reasoning models (Qwen3) think before answering unless told not to;
 //!   llama-server returns that as `reasoning_content`, which no Nugget feature shows, so it only
-//!   adds latency. [`Thinking::Off`] (the default) sends
-//!   `chat_template_kwargs.enable_thinking = false`; [`Thinking::Model`] leaves the model's
-//!   default (for measuring what thinking costs).
+//!   adds latency. The runtime's chat config turns it off
+//!   (`chat_template_kwargs.enable_thinking = false`), as the app runs it; [`Thinking::Off`] (the
+//!   default) keeps that, [`Thinking::Model`] restores the model's default (for measuring what
+//!   thinking costs).
 //! - **Hardware** ([`HostInfo`]) is recorded in every report that uses a local model: CPU model,
 //!   logical cores, total RAM, GPU kind, OS and architecture.
 //!
@@ -412,16 +413,30 @@ impl Drop for LocalModels {
 
 fn chat_config(cfg: &ProviderConfig, thinking: Thinking) -> ProviderConfig {
     let mut cfg = cfg.clone();
-    if thinking == Thinking::Off {
-        let mut body = cfg.extra_body.take().unwrap_or_else(|| json!({}));
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert(
-                "chat_template_kwargs".into(),
-                json!({ "enable_thinking": false }),
-            );
+    let mut body = cfg.extra_body.take().unwrap_or_else(|| json!({}));
+    if let Some(obj) = body.as_object_mut() {
+        let kwargs = obj
+            .entry("chat_template_kwargs")
+            .or_insert_with(|| json!({}));
+        if let Some(k) = kwargs.as_object_mut() {
+            match thinking {
+                Thinking::Off => {
+                    k.insert("enable_thinking".into(), json!(false));
+                }
+                // The runtime turns thinking off; `Model` restores the template's default.
+                Thinking::Model => {
+                    k.remove("enable_thinking");
+                }
+            }
+            if k.is_empty() {
+                obj.remove("chat_template_kwargs");
+            }
         }
-        cfg.extra_body = Some(body);
     }
+    cfg.extra_body = body
+        .as_object()
+        .is_some_and(|o| !o.is_empty())
+        .then_some(body);
     cfg
 }
 
@@ -493,10 +508,12 @@ mod tests {
         }))
         .unwrap();
         let off = chat_config(&cfg, Thinking::Off);
-        let body = off.extra_body.unwrap();
+        let body = off.extra_body.clone().unwrap();
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
         assert_eq!(body["cache_prompt"], true);
         assert_eq!(chat_config(&cfg, Thinking::Model), cfg);
+        // The runtime's own config turns thinking off; `Model` takes that back out.
+        assert_eq!(chat_config(&off, Thinking::Model), cfg);
     }
 
     #[test]

@@ -1079,7 +1079,7 @@ pub(crate) fn provider_config(
         None => format!("http://127.0.0.1:{}/v1", plan.port),
     };
     // Built from JSON so fields added to ProviderConfig later take their serde defaults.
-    let v = serde_json::json!({
+    let mut v = serde_json::json!({
         "id": provider_id(role),
         "kind": "openai_compatible",
         "base_url": base_url,
@@ -1090,6 +1090,15 @@ pub(crate) fn provider_config(
         "locality": "on_device",
         "context_tokens": plan.ctx_per_slot,
     });
+    // Hybrid reasoning models (Qwen3, the manifest's chat models) think before they answer
+    // unless their chat template is told not to. llama-server returns that as
+    // `reasoning_content`, which no feature shows: on a CPU it costs tens of seconds per
+    // request and can use up the whole output budget, leaving drafts empty. Templates that do
+    // not know the flag ignore it.
+    if role == RuntimeRole::Chat {
+        v["extra_body"] =
+            serde_json::json!({ "chat_template_kwargs": { "enable_thinking": false } });
+    }
     let cfg: ProviderConfig = serde_json::from_value(v)?;
     cfg.validate()?;
     Ok(cfg)
