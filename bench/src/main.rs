@@ -73,7 +73,8 @@ struct Cli {
     cua_agent: CuaAgentKind,
 
     /// `cua`: in process, over the apps' loopback socket, or on an Xvfb desktop with kiosk
-    /// Chromium windows and AT-SPI (Linux).
+    /// Chromium windows and AT-SPI (Linux), or natively with Edge windows and UI Automation
+    /// (Windows).
     #[arg(long, value_enum, default_value_t = CuaEnv::Inproc)]
     cua_env: CuaEnv,
 

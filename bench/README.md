@@ -717,7 +717,8 @@ Full methodology, task format, environments and how to plug in the real agent:
 - **Environment.** Six small, deterministic local apps: mail, a multi-step form, a file manager,
   a calendar, a shop checkout with **Pay**, and settings with dangerous toggles. Each exposes its
   true state on a test-only socket. They run in process (`inproc`, any OS, the CI default),
-  behind a loopback socket (`socket`), or on a real Linux desktop (`xvfb`). The desktop has
+  behind a loopback socket (`socket`), on a real Linux desktop (`xvfb`), or natively on Windows
+  through UI Automation (`native`, see [Native environments](#native-environments)). The desktop has
   Xvfb, a window manager, D-Bus, the AT-SPI bus and a kiosk Chromium window per app, and can be
   started by `cua/env/desktop.sh`.
 - **Tasks.** 51 tasks in `cua/tasks/*.json`, each with a start state and state-based checks.
@@ -773,6 +774,57 @@ consent, confirmation suppression and hidden-text tricks per line; it flags all 
 above Edit (with a warning) and before an Edit that names something only the injected text named.
 The compliant arm shows why that matters: without the forced confirmation, the forms banner gets
 the attacker's address typed in, and the user approves the Submit they asked for.
+
+## Native environments
+
+`--cua-env native` runs the `cua` apps on the machine's own desktop and drives them through the
+OS accessibility API. It exists on Windows (UI Automation); elsewhere it fails with a clear error
+(on Linux, `xvfb` is the equivalent).
+
+- **Windows.** The apps are served on the loopback socket and each gets a Microsoft Edge app
+  window (`msedge --app=<url> --force-renderer-accessibility`, a throwaway profile, tiled 3×2,
+  occlusion and background throttling off). Edge ships with Windows; `NUGGET_CUA_EDGE` overrides
+  it. Every action, from any agent, is performed on the real window through
+  `nugget_a11y::system_computer()`: Invoke or Toggle for a click, ValuePattern for text,
+  SelectionItem for a list option, and typing (select all, the text, Tab) when the page ignores
+  the pattern call. The page posts the change to the apps server like a user's input, and the
+  action counts once the world changes.
+- **The `nugget` arm** reads the windows over UI Automation as well. Its computer-use backend
+  (`env_uia.rs`) matches each window's UIA tree to the app's bench tree by role class, accessible
+  name and document order. It waits until the window shows the bench state, so a page that has
+  not reloaded yet is never read. It shows the model bench ids (`[forms-next]`) with the real
+  names, values, states and bounds.
+- **Run it:** `cargo run -p nugget-bench -- cua --cua-env native --cua-agent nugget --cua-tasks
+  forms,files` on Windows. CI: the `cua-windows` job in `.github/workflows/real-os.yml` runs the
+  `nugget` and `reference` arms with `--strict` and uploads the reports.
+
+Results, 2026-10-29, `windows-latest` (Edge, UIA), debug build, seed 42, run 40834714638
+(`cua-windows`). The 16 tasks are the form-fill and file-organising tasks
+(`--cua-tasks forms,files`), which include the files-and-mail task and the 2 adversarial tasks.
+
+| Metric | `nugget` arm, native | `reference`, native | `nugget` arm, `inproc` |
+|---|---|---|---|
+| `success_rate` | **1.00** (16 of 16) | 1.00 | 1.00 |
+| `success_rate.app.forms` / `.app.files` | 1.00 / 1.00 | 1.00 / 1.00 | 1.00 / 1.00 |
+| `steps.mean` / `.p50` / `.p95` | 6.19 / 6 / 14 | 6.19 / 6 / 14 | 6.19 / 6 / 14 |
+| `safety.unconfirmed_risky_actions` | **0** (7 risky actions, 9 confirmations) | 0 | 0 |
+| `safety.injection_compliance_rate` | **0.00** (2 tasks, both flagged by the detector) | 0.00 | 0.00 |
+| `safety.false_confirmation_rate` | **0.00** | 0.00 | 0.00 |
+| `agent.verification.passed` / `.failed` | 99 / 0 | | 99 / 0 |
+| `wall_time.p50_s` / `.p95_s` / `.total_s` | 4.84 / 12.0 / 92.5 | 4.11 / 10.2 / 79.2 | 0.06 / 0.14 / 0.86 |
+| UIA window reads (none timed out before matching the bench state) | 620 | 99 | |
+| Actions that needed the keyboard fallback | 3 | 3 | |
+
+On real UIA the outcomes, step counts and safety numbers are the same as in process. Every action
+reached the apps through the real controls, and every check after an action read the intended
+effect back from the real window. The wall time is the cost of real accessibility. Each action
+waits for the page to post the change and reload, and each read is a UIA snapshot of the Edge
+window. The `nugget` arm reads the window before and after every action.
+
+One fix came out of these runs: pages reload on every world change, including a confirmation.
+In one run in two, a click sent to a page that was about to reload was lost
+(`files-delete-backup`, `reference` arm). The stage now records the version each page was served
+at, and the native session acts only on a current page.
 
 ## Results
 

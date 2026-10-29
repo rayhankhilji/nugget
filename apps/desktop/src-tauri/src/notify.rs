@@ -92,7 +92,7 @@ fn clicked<R: Runtime>(app: &AppHandle<R>) {
 }
 
 /// Main window events: the fallback for notifications shown without a click callback.
-pub fn on_window_event(window: &Window, event: &WindowEvent) {
+pub fn on_window_event<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
     if window.label() != "main" || !matches!(event, WindowEvent::Focused(true)) {
         return;
     }
@@ -118,11 +118,7 @@ fn show_clickable<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) -> Re
     std::thread::Builder::new()
         .name("notification".into())
         .spawn(move || match n.show() {
-            Ok(handle) => handle.wait_for_action(|action| {
-                if action == "default" {
-                    clicked(&app);
-                }
-            }),
+            Ok(handle) => handle.wait_for_action(|action| on_action(&app, action)),
             Err(e) => {
                 tracing::warn!(error = %e, "notification: D-Bus failed; using the plugin");
                 if let Some(p) = app.try_state::<PendingToday>() {
@@ -136,6 +132,15 @@ fn show_clickable<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) -> Re
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// The Linux notification's action callback: the `default` action is a click on the notification
+/// (closing it reports `__closed`).
+#[cfg(target_os = "linux")]
+fn on_action<R: Runtime>(app: &AppHandle<R>, action: &str) {
+    if action == "default" {
+        clicked(app);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -156,13 +161,23 @@ fn show_clickable<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) -> Re
             let mut n = mac_notification_sys::Notification::new();
             n.title(&title).message(&body).wait_for_click(true);
             match n.send() {
-                Ok(mac_notification_sys::NotificationResponse::Click) => clicked(&app),
-                Ok(_) => {}
+                Ok(response) => on_response(&app, &response),
                 Err(e) => tracing::warn!(error = %e, "notification not shown"),
             }
         })
         .map(|_| ())
         .map_err(|e| e.to_string())
+}
+
+/// The macOS notification's outcome: a click on its contents opens Today, a dismissal does not.
+#[cfg(target_os = "macos")]
+fn on_response<R: Runtime>(
+    app: &AppHandle<R>,
+    response: &mac_notification_sys::NotificationResponse,
+) {
+    if matches!(response, mac_notification_sys::NotificationResponse::Click) {
+        clicked(app);
+    }
 }
 
 #[cfg(windows)]
@@ -185,12 +200,18 @@ fn show_clickable<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) -> Re
     Toast::new(&app_id)
         .title(title)
         .text2(body)
-        .on_activated(move |_action| {
-            clicked(&app);
+        .on_activated(move |action| {
+            on_activated(&app, action.as_deref());
             Ok(())
         })
         .show()
         .map_err(|e| format!("{e:?}"))
+}
+
+/// The toast's `Activated` handler: the toast has no buttons, so any activation is a click on it.
+#[cfg(windows)]
+fn on_activated<R: Runtime>(app: &AppHandle<R>, _action: Option<&str>) {
+    clicked(app);
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
@@ -201,6 +222,182 @@ fn show_clickable<R: Runtime>(_: &AppHandle<R>, _: &str, _: &str) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
+    use tauri::{App, Listener, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+
+    /// `nugget:navigate` with Today, as the main window receives it.
+    const TODAY_JSON: &str = "\"today\"";
+
+    /// A mock app shaped like the real one: the shipped identifier (the Windows toast's
+    /// AppUserModelID outside a dev build), [`PendingToday`] and a `main` window. The receiver gets
+    /// every `nugget:navigate` payload delivered to `main`.
+    fn app() -> (
+        App<MockRuntime>,
+        WebviewWindow<MockRuntime>,
+        mpsc::Receiver<String>,
+    ) {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let mut ctx = mock_context(noop_assets());
+        ctx.config_mut().identifier = conf["identifier"].as_str().expect("identifier").to_owned();
+        let app = mock_builder()
+            .manage(PendingToday::default())
+            .build(ctx)
+            .expect("mock app");
+        let main = WebviewWindowBuilder::new(&app, "main", WebviewUrl::default())
+            .build()
+            .expect("main window");
+        let (tx, rx) = mpsc::channel();
+        main.listen(crate::daemon::event::NAVIGATE, move |e| {
+            let _ = tx.send(e.payload().to_owned());
+        });
+        (app, main, rx)
+    }
+
+    fn navigations(rx: &mpsc::Receiver<String>) -> Vec<String> {
+        rx.try_iter().collect()
+    }
+
+    #[test]
+    fn a_click_opens_today_on_the_main_window() {
+        let (app, _main, rx) = app();
+        let pending = app.state::<PendingToday>();
+        pending.arm(Instant::now());
+        clicked(app.handle());
+        assert_eq!(navigations(&rx), [TODAY_JSON]);
+        assert!(
+            !pending.take(Instant::now()),
+            "a click consumes the focus fallback"
+        );
+    }
+
+    #[test]
+    fn focusing_main_after_a_notification_without_click_callback_opens_today_once() {
+        let (app, main, rx) = app();
+        let window = main.as_ref().window();
+        window_focus(&window, false);
+        window_focus(&window, true);
+        assert_eq!(navigations(&rx), Vec::<String>::new(), "nothing pending");
+        app.state::<PendingToday>().arm(Instant::now());
+        window_focus(&window, false);
+        window_focus(&window, true);
+        window_focus(&window, true);
+        assert_eq!(navigations(&rx), [TODAY_JSON], "once");
+    }
+
+    fn window_focus(window: &Window<MockRuntime>, focused: bool) {
+        on_window_event(window, &WindowEvent::Focused(focused));
+    }
+
+    /// The function `notify-rust`'s `wait_for_action` calls.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_default_action_is_a_click() {
+        let (app, _main, rx) = app();
+        on_action(app.handle(), "__closed");
+        assert_eq!(navigations(&rx), Vec::<String>::new());
+        on_action(app.handle(), "default");
+        assert_eq!(navigations(&rx), [TODAY_JSON]);
+    }
+
+    /// The function the `mac-notification-sys` thread calls with the notification's outcome
+    /// (the delegate's `didActivateNotification:` / dismissal on the app's main run loop).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_click_on_the_contents_is_a_click_and_a_dismissal_is_not() {
+        use mac_notification_sys::NotificationResponse as N;
+        let (app, _main, rx) = app();
+        for r in [N::None, N::CloseButton("Close".into())] {
+            on_response(app.handle(), &r);
+        }
+        assert_eq!(navigations(&rx), Vec::<String>::new());
+        on_response(app.handle(), &N::Click);
+        assert_eq!(navigations(&rx), [TODAY_JSON]);
+    }
+
+    /// The toast's `Activated` handler.
+    #[cfg(windows)]
+    #[test]
+    fn an_activation_is_a_click() {
+        let (app, _main, rx) = app();
+        on_activated(app.handle(), None);
+        assert_eq!(navigations(&rx), [TODAY_JSON]);
+    }
+
+    /// Real OS (run by `.github/workflows/real-os.yml`, job `notify-*`): the title the workflow
+    /// looks for on screen.
+    #[cfg(any(windows, target_os = "macos"))]
+    const REAL_TITLE: &str = "Nugget notification click test";
+
+    /// Real OS: the ignored tests below run only with this set (`1`); otherwise they say so and
+    /// return.
+    #[cfg(any(windows, target_os = "macos"))]
+    fn real_enabled(test: &str) -> bool {
+        let on = std::env::var("NUGGET_REAL_NOTIFY").is_ok_and(|v| v == "1");
+        if !on {
+            eprintln!("SKIPPED {test}: set NUGGET_REAL_NOTIFY=1 (posts a real notification)");
+        }
+        on
+    }
+
+    /// Posts through [`show`] exactly as `commands::notify` does and asserts the platform path
+    /// with a click callback was taken (a failure arms the focus fallback instead).
+    #[cfg(any(windows, target_os = "macos"))]
+    fn post_real(app: &App<MockRuntime>) {
+        show(
+            app.handle(),
+            REAL_TITLE,
+            "Click me: this opens Today.",
+            true,
+        )
+        .expect("notification shown");
+        assert!(
+            !app.state::<PendingToday>().take(Instant::now()),
+            "no click callback: the notification was shown without one (focus fallback armed)"
+        );
+        eprintln!("NUGGET_NOTIFY_POSTED {REAL_TITLE}");
+    }
+
+    /// Windows: a real toast (AppUserModelID = the identifier, registered by the workflow as the
+    /// installer's shortcut does), clicked on screen by the workflow through UI Automation; the
+    /// toast's `Activated` handler must open Today.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "posts a real toast and waits for real-os.yml to click it (NUGGET_REAL_NOTIFY=1)"]
+    fn real_toast_click_opens_today() {
+        if !real_enabled("real_toast_click_opens_today") {
+            return;
+        }
+        let (app, _main, rx) = app();
+        post_real(&app);
+        let secs = std::env::var("NUGGET_NOTIFY_CLICK_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(120);
+        match rx.recv_timeout(Duration::from_secs(secs)) {
+            Ok(page) => assert_eq!(page, TODAY_JSON),
+            Err(_) => panic!("the toast was not clicked (no Activated callback) within {secs}s"),
+        }
+        eprintln!("NUGGET_NOTIFY_CLICKED");
+    }
+
+    /// macOS: a real notification through the product path. Its click can't be exercised here:
+    /// the click reaches `mac-notification-sys` through the notification-center delegate on the
+    /// main run loop, which the test harness never runs (tests run on worker threads), so a
+    /// click could not be delivered even if the runner could click Notification Center.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "posts a real notification (NUGGET_REAL_NOTIFY=1, real-os.yml)"]
+    fn real_notification_posts_with_a_click_callback() {
+        if !real_enabled("real_notification_posts_with_a_click_callback") {
+            return;
+        }
+        let (app, _main, _rx) = app();
+        post_real(&app);
+        // Long enough for the workflow to capture the banner.
+        std::thread::sleep(Duration::from_secs(8));
+    }
 
     #[test]
     fn focus_soon_after_a_notification_opens_today_once() {

@@ -1,0 +1,743 @@
+name: Real OS
+
+# Runs Nugget for real on macOS and Windows runners, which have a desktop session: installer
+# smoke tests (dmg, NSIS), accessibility against native test apps (AX, UIA), the Double Tap
+# hotkey-and-insert path, computer use over real UIA, and the notification click path.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "crates/nugget-a11y/**"
+      - "crates/nugget-hotkey/**"
+      - "crates/nugget-computer/**"
+      - "apps/desktop/src-tauri/**"
+      - "packaging/**"
+      - "tests/fixtures/native/**"
+      - "bench/src/suites/cua/**"
+      - ".github/workflows/real-os.yml"
+
+# Least privilege: every job only reads the repository.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  NO_COLOR: "1"
+
+jobs:
+  # ---- installer smoke tests ----
+  # Build the dmg / NSIS installer the way release.yml does, then install and launch it: the
+  # `Nugget` window must appear, the app must start and connect to the bundled nuggetd, closing
+  # the window must quit the app (status 0), and the daemon must stop cleanly.
+  # See packaging/scripts/smoke-macos.sh and smoke-windows.ps1.
+  smoke-macos:
+    name: Installer smoke (macOS dmg)
+    runs-on: macos-latest
+    timeout-minutes: 60
+    env:
+      TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-os-smoke-${{ env.TARGET }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      # Ad-hoc signed, as a release dry run without an Apple certificate.
+      - name: Build the dmg
+        working-directory: apps/desktop
+        run: |
+          echo '{"bundle":{"macOS":{"signingIdentity":"-"}}}' > "$RUNNER_TEMP/signing.json"
+          pnpm tauri build --ci --target "$TARGET" --bundles app,dmg \
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+
+      - name: Smoke-test the dmg
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: |
+          shopt -s nullglob
+          dmgs=(target/"$TARGET"/release/bundle/dmg/*.dmg)
+          [ "${#dmgs[@]}" -eq 1 ] || { echo "::error::expected one .dmg, found ${#dmgs[@]}"; exit 1; }
+          packaging/scripts/smoke-macos.sh "${dmgs[0]}"
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-os-smoke-macos
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn
+
+  smoke-windows:
+    name: Installer smoke (Windows NSIS)
+    runs-on: windows-latest
+    timeout-minutes: 75
+    env:
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: real-os-smoke-${{ env.TARGET }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        shell: bash
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      - name: Build the NSIS installer
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          pnpm tauri build --ci --target "$TARGET" --bundles nsis \
+            --config src-tauri/tauri.bundle.conf.json
+
+      - name: Smoke-test the NSIS installer
+        shell: pwsh
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: |
+          $found = @(Get-ChildItem "target/$env:TARGET/release/bundle/nsis" -Filter '*-setup.exe')
+          if ($found.Count -ne 1) { Write-Output "::error::expected one -setup.exe, found $($found.Count)"; exit 1 }
+          ./packaging/scripts/smoke-windows.ps1 $found[0].FullName
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: real-os-smoke-windows
+          path: ${{ runner.temp }}/smoke/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ---- accessibility against native test apps ----
+  # nugget-a11y against small native fixture apps (tests/fixtures/native/{windows,macos}):
+  # read the focused field, its text and selection, walk the tree, set values, press, toggle,
+  # select, type, and insert with read-back (accessibility and clipboard paths).
+  a11y-windows:
+    name: Accessibility (Windows UIA)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+      # nugget-a11y pulls in no OpenSSL or aws-lc, so no Perl or NASM setup is needed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the WinForms fixture
+        shell: pwsh
+        run: |
+          $exe = & tests/fixtures/native/windows/build.ps1 -OutDir "$env:RUNNER_TEMP\a11y-fixture" | Select-Object -Last 1
+          "NUGGET_A11Y_FIXTURE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "NUGGET_A11Y_RECORD=$env:RUNNER_TEMP\a11y-record" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --test windows_uia --no-run
+      - name: UIA against the fixture
+        run: cargo test -p nugget-a11y --test windows_uia -- --ignored --nocapture --test-threads=1
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\a11y-record" | Out-Null
+          $bmp.Save("$env:RUNNER_TEMP\a11y-record\screen.png")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-windows
+          path: ${{ runner.temp }}/a11y-record
+          if-no-files-found: ignore
+
+  a11y-macos:
+    name: Accessibility (macOS AX)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: TCC evidence (what the runner grants)
+        run: sh tests/fixtures/native/macos/tcc-evidence.sh
+      - name: Build the AppKit fixture
+        run: |
+          app=$(sh tests/fixtures/native/macos/build.sh "$RUNNER_TEMP/a11y-fixture" | tail -n 1)
+          echo "NUGGET_A11Y_FIXTURE=$app" >> "$GITHUB_ENV"
+          echo "NUGGET_A11Y_RECORD=$RUNNER_TEMP/a11y-record" >> "$GITHUB_ENV"
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --test macos_ax --no-run
+      - name: AX against the fixture
+        run: cargo test -p nugget-a11y --test macos_ax -- --ignored --nocapture --test-threads=1
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-record"
+          screencapture -x "$RUNNER_TEMP/a11y-record/screen.png"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-macos
+          path: ${{ runner.temp }}/a11y-record
+          if-no-files-found: ignore
+
+  # ---- hotkey and insert path ----
+  # The Double Tap path on a real desktop: nugget-hotkey listeners fed with synthesized key
+  # presses (SendInput / CGEvent), then trigger -> focused-field read -> draft (scripted provider)
+  # -> insert into Notepad / TextEdit, read back through UIA / AX. Prints and summarises the time
+  # to the first inserted token. Tests: crates/nugget-hotkey/tests/{windows_it,macos_it}.rs.
+  doubletap:
+    name: Double Tap (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+
+      # SQLCipher's vendored OpenSSL (nugget-store, used by the draft engine in the insert test)
+      # needs a Windows-native Perl; Git's MSYS Perl breaks its build.
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: doubletap
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the tests
+        shell: bash
+        run: cargo test -p nugget-hotkey --locked --no-run
+
+      - name: Session diagnostics
+        shell: bash
+        run: |
+          mkdir -p doubletap-artifacts
+          if [ "$RUNNER_OS" = macOS ]; then
+            sw_vers
+            echo "user: $(id -un)"
+            echo "--- process ancestry"
+            pid=$$
+            while [ "$pid" -gt 1 ]; do ps -o pid=,ppid=,comm= -p "$pid"; pid=$(ps -o ppid= -p "$pid" | tr -d ' '); done
+            echo "--- TCC grants (readable only with Full Disk Access)"
+            for db in "/Library/Application Support/com.apple.TCC/TCC.db" "$HOME/Library/Application Support/com.apple.TCC/TCC.db"; do
+              sqlite3 "$db" "select service, client, auth_value from access where service in ('kTCCServiceAccessibility','kTCCServicePostEvent','kTCCServiceListenEvent')" 2>&1 || true
+            done
+            echo "--- Siri and Dictation settings (a double Command press can be their shortcut)"
+            for d in com.apple.Siri com.apple.assistant.support com.apple.HIToolbox; do
+              echo "[$d]"; defaults read "$d" 2>&1 | head -40 || true
+            done
+          else
+            cmd //c ver
+            powershell -NoProfile -Command "Get-Command notepad.exe | Format-List Source; Get-AppxPackage *WindowsNotepad* | Format-List Name,Version" || true
+          fi
+
+      - name: Unit tests (real OS)
+        shell: bash
+        run: cargo test -p nugget-hotkey --locked
+
+      - name: Double Tap hotkeys and insert (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          {
+            echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" \
+            cargo test -p nugget-hotkey --locked --test windows_it -- --ignored --test-threads=1 --nocapture 2>&1 \
+            | tee doubletap-artifacts/windows_it.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Double Tap hotkeys and insert (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          {
+            echo "### Double Tap on $RUNNER_OS (scripted provider, no delay)"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NUGGET_DOUBLETAP_SUMMARY="$GITHUB_STEP_SUMMARY" NUGGET_DOUBLETAP_ARTIFACTS="$PWD/doubletap-artifacts" \
+            cargo test -p nugget-hotkey --locked --test macos_it -- --ignored 2>&1 \
+            | tee doubletap-artifacts/macos_it.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Screenshot
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p doubletap-artifacts
+          if [ "$RUNNER_OS" = macOS ]; then
+            screencapture -x doubletap-artifacts/screen.png || true
+          else
+            powershell -NoProfile -Command '
+              Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+              $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+              $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+              $bmp.Save("$PWD\doubletap-artifacts\screen.png")' || true
+          fi
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: doubletap-${{ matrix.os }}
+          path: doubletap-artifacts/
+          if-no-files-found: ignore
+
+  # ---- computer use over real UIA ----
+  # `bench cua` in the native environment: one Edge window per test app, read and driven through
+  # real UI Automation. The nugget arm (real agent loop and computer-use tools, scripted model)
+  # runs the form-fill and file-organising tasks; the reference agent runs them too, as a check
+  # of the harness. --strict fails the job when a target is missed; any harness error fails it.
+  cua-windows:
+    name: Computer use over UIA (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cua-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # No first-run pages, sign-in prompts or background Edge on the runner.
+      - name: Quiet Microsoft Edge
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+          New-Item -Path $key -Force | Out-Null
+          foreach ($p in @{ HideFirstRunExperience = 1; BrowserSignin = 0; StartupBoostEnabled = 0;
+                            BackgroundModeEnabled = 0; DefaultBrowserSettingEnabled = 0;
+                            AutoImportAtFirstRun = 4; SyncDisabled = 1 }.GetEnumerator()) {
+            New-ItemProperty -Path $key -Name $p.Key -Value $p.Value -PropertyType DWord -Force | Out-Null
+          }
+          $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
+          if (Test-Path $edge) { (Get-Item $edge).VersionInfo.ProductVersion } else { Write-Error "Edge not found at $edge" }
+
+      - name: Build nugget-bench
+        run: cargo build --locked -p nugget-bench
+
+      - name: bench cua, nugget arm, native env
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/cua-native"
+          set -o pipefail
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent nugget \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/nugget" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/nugget.log"
+
+      - name: bench cua, reference agent, native env
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --locked -p nugget-bench -- cua --cua-env native --cua-agent reference \
+            --cua-tasks forms,files --strict --out-dir "$RUNNER_TEMP/cua-native/reference" \
+            2>&1 | tee "$RUNNER_TEMP/cua-native/reference.log"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          for arm in nugget reference; do
+            f="$RUNNER_TEMP/cua-native/$arm.log"
+            [ -f "$f" ] || continue
+            {
+              echo "### bench cua --cua-env native --cua-agent $arm (forms, files)"
+              echo '```'
+              grep -E '^== cua|tasks\.|^  success_rate |steps\.|wall_time\.|safety\.|target |uia_|cua native' "$f" || true
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: cua-native-windows
+          path: ${{ runner.temp }}/cua-native
+          if-no-files-found: warn
+
+  # ---- notification click ----
+  # Notification click (apps/desktop/src-tauri/src/notify.rs). Both OSes run the handler tests
+  # against tauri's mock runtime: the function each platform callback calls must show `main` on
+  # Today. Windows then posts a real toast through `notify::show` and clicks it on screen (UI
+  # Automation finds it, the mouse clicks it): the toast's `Activated` handler must open Today.
+  # macOS posts a real notification through the same path; its click cannot be exercised on a
+  # runner (the step's notice says why).
+  notify-windows:
+    name: Notification click (Windows toast)
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      NOTIFY_RECORD: ${{ github.workspace }}\notify-record
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: notify-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      # nugget-desktop embeds the built frontend.
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Build the tests
+        run: cargo test --locked -p nugget-desktop --no-run
+      - name: Click handler tests (mock runtime)
+        run: cargo test --locked -p nugget-desktop notify::tests -- --nocapture
+      # A test binary isn't a dev build to notify.rs (it doesn't run from target\debug), so the
+      # toast uses the app identifier as its AppUserModelID, as the installed app does. The NSIS
+      # installer registers it through its Start menu shortcut; here the per-user registry entry
+      # Windows accepts for unpackaged apps registers it.
+      - name: Register the AppUserModelID
+        shell: pwsh
+        run: |
+          $id = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).identifier
+          $key = "HKCU:\Software\Classes\AppUserModelId\$id"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DisplayName -Value 'Nugget' -Force | Out-Null
+          "NOTIFY_APP_ID=$id" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      # Windows PowerShell: UI Automation (.NET Framework) and the WinRT toast history.
+      - name: Real toast, clicked on screen
+        shell: powershell
+        env:
+          NUGGET_REAL_NOTIFY: "1"
+          NUGGET_NOTIFY_CLICK_TIMEOUT: "150"
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $title = 'Nugget notification click test'
+          $rec = $env:NOTIFY_RECORD
+          New-Item -ItemType Directory -Force -Path $rec | Out-Null
+          Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class NotifyInput {
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint d, UIntPtr e);
+            [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint f, UIntPtr e);
+            public static void Click(int x, int y) {
+              SetCursorPos(x, y);
+              mouse_event(0x0002, 0, 0, 0, UIntPtr.Zero);
+              mouse_event(0x0004, 0, 0, 0, UIntPtr.Zero);
+            }
+            public static void WinKey(byte vk) {
+              keybd_event(0x5B, 0, 0, UIntPtr.Zero);
+              keybd_event(vk, 0, 0, UIntPtr.Zero);
+              keybd_event(vk, 0, 2, UIntPtr.Zero);
+              keybd_event(0x5B, 0, 2, UIntPtr.Zero);
+            }
+          }
+          '@
+          function Shot($name) {
+            try {
+              $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+              $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+              $g = [System.Drawing.Graphics]::FromImage($bmp)
+              $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+              $bmp.Save("$rec\$name.png")
+            } catch { Write-Host "screenshot failed: $_" }
+          }
+          $A = [System.Windows.Automation.AutomationElement]
+          $all = [System.Windows.Automation.Condition]::TrueCondition
+          function TopLevel { $A::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $all) }
+          function Describe($e) { try { "[{0}] class='{1}' name='{2}' rect={3}" -f $e.Current.ControlType.ProgrammaticName, $e.Current.ClassName, ($e.Current.Name -replace '\s+', ' '), $e.Current.BoundingRectangle } catch { '<gone>' } }
+          # An on-screen element whose name carries the toast's title, in any top-level window.
+          function FindToast {
+            foreach ($w in TopLevel) {
+              try { $found = $w.FindAll([System.Windows.Automation.TreeScope]::Subtree, $all) } catch { continue }
+              foreach ($e in $found) {
+                try { if ($e.Current.Name -like "*$title*" -and -not $e.Current.BoundingRectangle.IsEmpty) { return $e } } catch {}
+              }
+            }
+            return $null
+          }
+
+          # The test posts through notify::show and waits for the click.
+          $out = "$rec\test-stdout.txt"; $err = "$rec\test-stderr.txt"
+          $p = Start-Process -FilePath cargo -NoNewWindow -PassThru -RedirectStandardOutput $out -RedirectStandardError $err `
+            -ArgumentList 'test','--locked','-p','nugget-desktop','--','--ignored','--exact','notify::tests::real_toast_click_opens_today','--nocapture'
+          $null = $p.Handle
+          $deadline = (Get-Date).AddSeconds(120)
+          while (-not ((Test-Path $err) -and (Select-String -Path $err -Pattern 'NUGGET_NOTIFY_POSTED' -Quiet))) {
+            if ($p.HasExited -or (Get-Date) -gt $deadline) {
+              Get-Content $out, $err -ErrorAction SilentlyContinue
+              throw 'the test did not post the toast (see its output above)'
+            }
+            Start-Sleep -Milliseconds 250
+          }
+          Write-Host 'toast posted through notify::show (click callback path taken)'
+          Start-Sleep -Seconds 1
+          Shot 'posted'
+          $history = -1
+          try {
+            [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+            $history = [Windows.UI.Notifications.ToastNotificationManager]::History.GetHistory($env:NOTIFY_APP_ID).Count
+          } catch { Write-Host "toast history unavailable: $_" }
+          Write-Host "toasts in the OS history for $($env:NOTIFY_APP_ID): $history"
+
+          # The runner has Do Not Disturb on: banners are suppressed and the toast lands in the
+          # notification center, opened with Win+N (Win+A on older shells). The notification
+          # center lives in a shell band UI Automation only exposes to UIAccess clients (signed,
+          # installed under Program Files), so after trying UIA the toast is found by OCR on a
+          # screenshot (Windows.Media.Ocr) and clicked with the mouse at its title.
+          Add-Type -AssemblyName System.Runtime.WindowsRuntime
+          $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+            $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+          } | Select-Object -First 1
+          function Await($op, [Type]$type) {
+            $task = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
+            $null = $task.Wait(-1)
+            $task.Result
+          }
+          [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+          [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
+          [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime] | Out-Null
+          $ocr = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+          if (-not $ocr) { $ocr = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language 'en-US')) }
+          Write-Host "OCR engine: $(if ($ocr) { $ocr.RecognizerLanguage.LanguageTag } else { 'unavailable' })"
+          # Screen point of the toast's title on a screenshot, or $null.
+          function OcrFind($name) {
+            if (-not $ocr) { return $null }
+            $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync("$rec\$name.png")) ([Windows.Storage.StorageFile])
+            $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+            $decoder = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+            $bitmap = Await ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+            $result = Await ($ocr.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+            $stream.Dispose()
+            $origin = [System.Windows.Forms.SystemInformation]::VirtualScreen
+            foreach ($line in $result.Lines) {
+              Write-Host "  ocr: $($line.Text)"
+              if ($line.Text -like '*notification click test*') {
+                $w = $line.Words | Select-Object -First 1
+                $last = $line.Words | Select-Object -Last 1
+                $x = ($w.BoundingRect.X + $last.BoundingRect.X + $last.BoundingRect.Width) / 2 + $origin.Left
+                $y = $w.BoundingRect.Y + $w.BoundingRect.Height / 2 + $origin.Top
+                return @([int]$x, [int]$y)
+              }
+            }
+            return $null
+          }
+          $clicked = $false
+          foreach ($key in @('N', 'A')) {
+            Write-Host "opening the notification center (Win+$key)"
+            [NotifyInput]::WinKey([byte][char]$key)
+            Start-Sleep -Seconds 2
+            $t = FindToast
+            if ($t) {
+              Write-Host ('UIA found the toast: ' + (Describe $t))
+              $r = $t.Current.BoundingRectangle
+              [NotifyInput]::Click([int]($r.X + $r.Width / 2), [int]($r.Y + $r.Height / 2))
+              $clicked = $true
+              break
+            }
+            Shot "center-$key"
+            $pt = OcrFind "center-$key"
+            if ($pt) {
+              Write-Host "OCR found the toast's title at $($pt[0]),$($pt[1]); clicking it"
+              [NotifyInput]::Click($pt[0], $pt[1])
+              $clicked = $true
+              break
+            }
+            # Close what this key opened before trying the next one.
+            [NotifyInput]::WinKey([byte][char]$key)
+            Start-Sleep -Seconds 1
+          }
+          if (-not $clicked) { Shot 'not-found' }
+
+          if (-not $p.WaitForExit(([int]$env:NUGGET_NOTIFY_CLICK_TIMEOUT + 30) * 1000)) { $p.Kill() }
+          Shot 'after'
+          Get-Content $out, $err
+          if ($p.ExitCode -eq 0 -and (Select-String -Path $err -Pattern 'NUGGET_NOTIFY_CLICKED' -Quiet)) {
+            Write-Host 'PASS: clicking the real toast ran its Activated handler and opened Today'
+            exit 0
+          }
+          if ($clicked) { throw 'the toast was clicked on screen but notify.rs did not open Today (click callback not wired)' }
+          throw "neither UIA nor OCR found the toast on screen (OS history count: $history); see the screenshots"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: notify-windows
+          path: ${{ env.NOTIFY_RECORD }}
+          if-no-files-found: ignore
+
+  notify-macos:
+    name: Notification click (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: notify-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Build the tests
+        run: cargo test --locked -p nugget-desktop --no-run
+      - name: Click handler tests (mock runtime)
+        run: cargo test --locked -p nugget-desktop notify::tests -- --nocapture
+      - name: Real notification (posted; its click is not testable on a runner)
+        env:
+          NUGGET_REAL_NOTIFY: "1"
+        run: |
+          rec="$RUNNER_TEMP/notify-record"; mkdir -p "$rec"
+          cargo test --locked -p nugget-desktop -- --ignored --exact \
+            notify::tests::real_notification_posts_with_a_click_callback --nocapture > "$rec/test.txt" 2>&1 &
+          pid=$!
+          for _ in $(seq 1 240); do grep -q NUGGET_NOTIFY_POSTED "$rec/test.txt" 2>/dev/null && break; sleep 0.5; done
+          sleep 2
+          screencapture -x "$rec/posted.png" || echo "screencapture failed"
+          echo "Notification Center windows (UI scripting needs an Accessibility grant):"
+          osascript -e 'tell application "System Events" to get name of every window of process "NotificationCenter"' 2>&1 || true
+          status=0; wait $pid || status=$?
+          cat "$rec/test.txt"
+          if [ "$status" -ne 0 ] || ! grep -q NUGGET_NOTIFY_POSTED "$rec/test.txt"; then
+            echo "::error title=notify-macos::the notification was not posted through the click-callback path"
+            exit 1
+          fi
+          echo "::notice title=notify-macos::Real click skipped. notify::show took the click-callback path (mac-notification-sys), but a runner cannot show or click it: a dev/test build borrows Terminal's bundle id, which has no notification authorization on a fresh runner (no banner appears, see posted.png); System Events cannot reach the NotificationCenter process (no Accessibility grant); and the click arrives through the NSUserNotificationCenter delegate on the main run loop, which a test harness never runs. The click handler (on_response) is tested above with the mock runtime."
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: notify-macos
+          path: ${{ runner.temp }}/notify-record
+          if-no-files-found: ignore

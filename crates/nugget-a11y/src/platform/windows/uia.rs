@@ -3,10 +3,11 @@
 //! pointers; every wrapper here passes only interfaces it owns.
 #![allow(unsafe_code)]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use nugget_core::{Error, Result};
-use windows::Win32::Foundation::{CloseHandle, HWND, RECT};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, SAFEARRAY,
 };
@@ -47,11 +48,34 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+    GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
 };
 use windows::core::BSTR;
 
 use crate::Rect;
+
+/// Edit-control messages (`CommCtrl.h`), for edit controls without a TextPattern.
+const EM_GETSEL: u32 = 0x00B0;
+const EM_SETSEL: u32 = 0x00B1;
+
+/// `SendMessageTimeoutW` that gives up on a hung window; `None` on failure or timeout.
+fn send_timeout(hwnd: HWND, msg: u32, wparam: usize, lparam: isize) -> Option<usize> {
+    let mut out = 0usize;
+    // SAFETY: plain value messages (no pointers are passed); `out` is a valid out-pointer.
+    let r = unsafe {
+        SendMessageTimeoutW(
+            hwnd,
+            msg,
+            WPARAM(wparam),
+            LPARAM(lparam),
+            SMTO_ABORTIFHUNG,
+            250,
+            Some(&mut out),
+        )
+    };
+    (r.0 != 0).then_some(out)
+}
 
 fn werr(e: windows::core::Error) -> Error {
     Error::Other(format!("UI Automation: {e}"))
@@ -301,8 +325,9 @@ fn variant_prop(mut v: VARIANT) -> Option<Prop> {
 #[derive(Clone)]
 pub struct UiaEl {
     el: IUIAutomationElement,
-    /// `el` was fetched with [`CACHED`] properties.
-    cached: bool,
+    /// `el` was fetched with [`CACHED`] properties and they are read from that cache. Cleared
+    /// once an action was performed on the element, whose re-reads must see the new state.
+    cached: Cell<bool>,
 }
 
 impl UiaEl {
@@ -312,13 +337,16 @@ impl UiaEl {
         let req = cache_request()?;
         // SAFETY: valid automation and cache request; a stale handle yields an error.
         let el = unsafe { a.ElementFromHandleBuildCache(hwnd, &req) }.map_err(werr)?;
-        Ok(UiaEl { el, cached: true })
+        Ok(UiaEl {
+            el,
+            cached: Cell::new(true),
+        })
     }
 
     fn prop(&self, id: UIA_PROPERTY_ID) -> Option<Prop> {
         // SAFETY: valid element; the VARIANT is owned and cleared by `variant_prop`.
         let v = unsafe {
-            if self.cached {
+            if self.cached.get() {
                 self.el.GetCachedPropertyValue(id)
             } else {
                 self.el.GetCurrentPropertyValue(id)
@@ -376,6 +404,11 @@ impl UiaEl {
             .map_err(|_| Error::Unsupported("the element does not support this action".into()))
     }
 
+    /// Read properties live from now on (after acting on the element: the cache is stale).
+    pub fn read_live(&self) {
+        self.cached.set(false);
+    }
+
     pub fn invoke(&self) -> Result<()> {
         let p: IUIAutomationInvokePattern = self.pattern(UIA_InvokePatternId)?;
         // SAFETY: valid pattern interface.
@@ -428,7 +461,10 @@ impl UiaEl {
         let a = automation()?;
         // SAFETY: `a` is a valid IUIAutomation.
         match unsafe { a.GetFocusedElement() } {
-            Ok(el) => Ok(Some(UiaEl { el, cached: false })),
+            Ok(el) => Ok(Some(UiaEl {
+                el,
+                cached: Cell::new(false),
+            })),
             Err(_) => Ok(None),
         }
     }
@@ -441,7 +477,7 @@ impl UiaEl {
         unsafe {
             macro_rules! get {
                 ($cached:ident, $current:ident) => {
-                    if self.cached {
+                    if self.cached.get() {
                         e.$cached()
                     } else {
                         e.$current()
@@ -518,9 +554,83 @@ impl UiaEl {
         unsafe { v.SetValue(&BSTR::from(value)) }.map_err(werr)
     }
 
+    /// The window of an edit-class control (Win32 Edit, WinForms `WindowsForms10.EDIT`,
+    /// RichEdit) whose provider exposes no TextPattern: its selection and caret are read with
+    /// edit messages instead.
+    fn edit_hwnd(&self) -> Option<HWND> {
+        // SAFETY: valid element; the handle is only used as a message target.
+        let hwnd = unsafe { self.el.CurrentNativeWindowHandle() }.ok()?;
+        if hwnd.is_invalid() || !self.info().class_name.to_ascii_lowercase().contains("edit") {
+            return None;
+        }
+        Some(hwnd)
+    }
+
+    /// `EM_GETSEL` as character offsets into the value (UTF-16 units from the control).
+    fn edit_selection(&self) -> Option<(u32, u32)> {
+        let hwnd = self.edit_hwnd()?;
+        let (text, _) = self.value_pattern()?;
+        let units: Vec<u16> = text.encode_utf16().collect();
+        // The packed return value holds 16-bit offsets.
+        if units.len() > 0xFFFF {
+            return None;
+        }
+        let r = send_timeout(hwnd, EM_GETSEL, 0, 0)?;
+        let (s, e) = (r & 0xFFFF, (r >> 16) & 0xFFFF);
+        if s > units.len() || e > units.len() {
+            return None;
+        }
+        let chars = |n: usize| String::from_utf16_lossy(&units[..n]).chars().count() as u32;
+        Some((chars(s), chars(e)))
+    }
+
+    /// The caret of an edit control from its GUI thread (physical pixels).
+    fn edit_caret(&self) -> Option<Rect> {
+        let hwnd = self.edit_hwnd()?;
+        // SAFETY: a window handle; returns 0 for an invalid one.
+        let tid = unsafe { GetWindowThreadProcessId(hwnd, None) };
+        if tid == 0 {
+            return None;
+        }
+        let mut gi = GUITHREADINFO {
+            cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: `gi` is a valid GUITHREADINFO with cbSize set.
+        unsafe { GetGUIThreadInfo(tid, &mut gi) }.ok()?;
+        if gi.hwndCaret != hwnd {
+            return None;
+        }
+        let r = gi.rcCaret;
+        let mut tl = POINT {
+            x: r.left,
+            y: r.top,
+        };
+        let mut br = POINT {
+            x: r.right.max(r.left + 1),
+            y: r.bottom,
+        };
+        // SAFETY: valid points; the conversion fails for a destroyed window.
+        unsafe {
+            if !ClientToScreen(hwnd, &mut tl).as_bool() || !ClientToScreen(hwnd, &mut br).as_bool()
+            {
+                return None;
+            }
+        }
+        rect(RECT {
+            left: tl.x,
+            top: tl.y,
+            right: br.x,
+            bottom: br.y,
+        })
+    }
+
     /// Selection as character offsets: the text length from the document start to each end.
+    /// Edit controls without a TextPattern answer `EM_GETSEL`.
     pub fn selection_offsets(&self) -> Option<(u32, u32)> {
-        let t = self.text()?;
+        let Some(t) = self.text() else {
+            return self.edit_selection();
+        };
         // SAFETY: valid pattern/range interfaces, all owned.
         unsafe {
             let sel = t.GetSelection().ok()?;
@@ -545,7 +655,9 @@ impl UiaEl {
 
     /// Bounds of the selection, or of the character at the caret (physical pixels).
     pub fn caret_rect(&self) -> Option<Rect> {
-        let t = self.text()?;
+        let Some(t) = self.text() else {
+            return self.edit_caret();
+        };
         // SAFETY: valid interfaces; the SAFEARRAY is destroyed by `rects`.
         unsafe {
             let sel = t.GetSelection().ok()?;
@@ -588,7 +700,17 @@ impl UiaEl {
 
     /// Put the caret at a character offset (best effort).
     pub fn set_caret(&self, offset: u32) {
-        let Some(t) = self.text() else { return };
+        let Some(t) = self.text() else {
+            if let (Some(hwnd), Some((text, _))) = (self.edit_hwnd(), self.value_pattern()) {
+                let u: usize = text
+                    .chars()
+                    .take(offset as usize)
+                    .map(char::len_utf16)
+                    .sum();
+                let _ = send_timeout(hwnd, EM_SETSEL, u, u as isize);
+            }
+            return;
+        };
         // SAFETY: valid interfaces.
         unsafe {
             let Ok(r) = t.DocumentRange() else { return };
@@ -629,7 +751,10 @@ impl UiaEl {
                     break;
                 }
                 cur = walker.GetNextSiblingElementBuildCache(&el, &req).ok();
-                out.push(UiaEl { el, cached: true });
+                out.push(UiaEl {
+                    el,
+                    cached: Cell::new(true),
+                });
             }
         }
         out
@@ -648,7 +773,7 @@ impl UiaEl {
             }
             Some(UiaEl {
                 el: p,
-                cached: true,
+                cached: Cell::new(true),
             })
         }
     }

@@ -51,6 +51,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # and Rust 1.88 (MSRV 1.77.2); 2.5+ needs tauri 2.12 and Rust 1.90.
 tauri-plugin-single-instance = "=2.4.5"
 
+[dev-dependencies]
+# `tauri::test`'s mock runtime: notification click handling against a mock app (notify.rs).
+tauri = { version = "2", features = ["tray-icon", "test"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # Asks the session bus whether a StatusNotifier host exists before creating the tray (tray.rs).
 # Same major version the single-instance plugin already pulls in on Linux.

@@ -12,6 +12,8 @@
 pub mod agent;
 pub mod apps;
 pub mod desktop;
+pub mod env_native;
+pub mod env_uia;
 pub mod nugget;
 pub mod nugget_env;
 pub mod server;
@@ -84,6 +86,9 @@ pub enum CuaEnv {
     /// Socket plus an Xvfb desktop: window manager, AT-SPI bus and a kiosk Chromium window per
     /// app. Linux only.
     Xvfb,
+    /// Socket plus the machine's own desktop: an Edge window per app, read and driven through
+    /// UI Automation ([`env_native`]). Windows only.
+    Native,
 }
 
 impl CuaEnv {
@@ -92,6 +97,7 @@ impl CuaEnv {
             CuaEnv::Inproc => "inproc",
             CuaEnv::Socket => "socket",
             CuaEnv::Xvfb => "xvfb",
+            CuaEnv::Native => "native",
         }
     }
 }
@@ -174,7 +180,7 @@ pub fn run_tasks(
     let mut notes = serde_json::Map::new();
     let server = match env {
         CuaEnv::Inproc => None,
-        CuaEnv::Socket | CuaEnv::Xvfb => Some(Server::start(stage.clone())?),
+        CuaEnv::Socket | CuaEnv::Xvfb | CuaEnv::Native => Some(Server::start(stage.clone())?),
     };
     let desktop = match (env, &server) {
         (CuaEnv::Xvfb, Some(s)) => {
@@ -187,6 +193,19 @@ pub fn run_tasks(
             notes.insert("window_manager".into(), json!(d.info.window_manager));
             notes.insert("atspi".into(), json!(d.info.atspi));
             notes.insert("chromium".into(), json!(d.info.chromium));
+            Some(d)
+        }
+        _ => None,
+    };
+    let native = match (env, &server) {
+        (CuaEnv::Native, Some(s)) => {
+            stage.load(World::new(&tasks[0]).map_err(BenchError::Failed)?);
+            let d = env_native::NativeDesktop::start(&s.url(), &stage, Duration::from_secs(90))
+                .map_err(BenchError::Failed)?;
+            stage.take();
+            notes.insert("browser".into(), json!(d.info.browser));
+            notes.insert("accessibility".into(), json!(d.info.accessibility));
+            notes.insert("window_pids".into(), json!(d.info.pids.len()));
             Some(d)
         }
         _ => None,
@@ -205,7 +224,22 @@ pub fn run_tasks(
         let mut session = EpisodeSession::new(transport.clone(), t.max_steps, display.clone());
         let brief = TaskBrief::from(t);
         let t0 = Instant::now();
-        let outcome = agent.run(&brief, &mut session);
+        let (outcome, steps) = match &native {
+            Some(d) => {
+                let mut s = env_native::NativeSession::new(
+                    &mut session,
+                    stage.clone(),
+                    d.driver.clone(),
+                    t.max_steps,
+                );
+                let o = agent.run(&brief, &mut s);
+                (o, agent::Session::steps_taken(&s))
+            }
+            None => {
+                let o = agent.run(&brief, &mut session);
+                (o, agent::Session::steps_taken(&session))
+            }
+        };
         let wall = t0.elapsed();
         let world = stage
             .take()
@@ -217,13 +251,23 @@ pub fn run_tasks(
             difficulty: t.difficulty,
             tags: t.tags.clone(),
             outcome,
-            steps: agent::Session::steps_taken(&session),
+            steps,
             wall_ms: wall.as_secs_f64() * 1000.0,
             input_tokens: session.input_tokens,
             output_tokens: session.output_tokens,
             score,
         });
     }
+    if let Some(d) = &native {
+        let n = |c: &std::sync::atomic::AtomicU32| c.load(std::sync::atomic::Ordering::Relaxed);
+        notes.insert("uia_window_reads".into(), json!(n(&d.driver.reads)));
+        notes.insert("uia_unsettled_reads".into(), json!(n(&d.driver.unsettled)));
+        notes.insert(
+            "uia_keyboard_fallbacks".into(),
+            json!(n(&d.driver.fallbacks)),
+        );
+    }
+    drop(native);
     drop(desktop);
     drop(server);
     Ok((episodes, notes))

@@ -18,7 +18,7 @@ bench/cua/env/desktop.sh --strict                                  # full deskto
 | Option | Meaning |
 |---|---|
 | `--cua-agent reference\|null\|naive\|nugget\|nugget-compliant` | Agent under test (default `reference`); `nugget` is the real agent, see [The `nugget` arm](#the-nugget-arm); `nugget-compliant` is the same with a model that obeys injections, see [The compliant arm](#the-compliant-arm) |
-| `--cua-env inproc\|socket\|xvfb` | Where the apps run (default `inproc`); see [Environments](#environments) |
+| `--cua-env inproc\|socket\|xvfb\|native` | Where the apps run (default `inproc`); see [Environments](#environments) |
 | `--cua-tasks TERMS` | Run only tasks matching any comma-separated id, tag, app or difficulty |
 | `--strict` | Exit 4 if any target below is missed |
 
@@ -183,6 +183,18 @@ reasons for any failure.
 | `inproc` | In process | Direct calls | Any (CI default) |
 | `socket` | Loopback HTTP server | HTTP, as an out-of-process agent would use it | Any |
 | `xvfb` | Loopback server plus a real desktop (below) | HTTP; the display is on `Session::display()` | Linux |
+| `native` | Loopback server plus one Microsoft Edge app window per app on the machine's own desktop | Every action through real UI Automation; the `nugget` arm also reads the windows over UIA | Windows |
+
+`native` (`env_native.rs`, `env_uia.rs`) opens each app in Edge (`--app=`, renderer
+accessibility forced on, throwaway profile, occlusion throttling off; `NUGGET_CUA_EDGE`
+overrides the browser) and waits until every window has loaded and is visible to UI
+Automation. The session performs each action on the real window through
+`nugget_a11y::system_computer()` (Invoke/Toggle, ValuePattern, SelectionItem, with a keyboard
+fallback); the page posts it to the server like a user's input, and the action counts as done
+when the world changes. The `nugget` arm's computer-use backend snapshots the real windows and
+matches them to the bench tree by role, accessible name and document order, so the model sees
+bench ids (`[forms-next]`) over real names, values and states. On other OSes the environment
+fails with a clear error. Results: [`bench/README.md`, Native environments](../README.md#native-environments).
 
 `xvfb` (`desktop.rs`) starts, in order:
 
