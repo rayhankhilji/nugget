@@ -15,7 +15,7 @@ use tokio::sync::broadcast;
 
 use crate::config::{KnowledgeConfig, RunBudget};
 use crate::feed::ItemFeed;
-use crate::session::{Session, plan};
+use crate::session::{Plan, Session, plan};
 use crate::state::{SourceLedger, State};
 
 /// Counters for one [`Knowledge::run_once`].
@@ -89,6 +89,11 @@ pub(crate) struct Inner {
     pub cfg: KnowledgeConfig,
     pub emb_cache: Mutex<HashMap<String, Vec<f32>>>,
     run_lock: tokio::sync::Mutex<()>,
+    /// What a budget-cut run left of its plan (and whether the LLM was ready when planning),
+    /// picked up by the next run instead of planning again: re-planning diffs every item
+    /// against the ledger, which at scale costs more than the run's own work. Only runs (under
+    /// `run_lock`) write the pipeline state, so the carried state equals what is persisted.
+    carry: Mutex<Option<(bool, Plan)>>,
     status: Mutex<KnowledgeStatus>,
     tx: broadcast::Sender<Vec<EntityId>>,
 }
@@ -141,6 +146,7 @@ impl Knowledge {
                 cfg: config,
                 emb_cache: Mutex::new(HashMap::new()),
                 run_lock: tokio::sync::Mutex::new(()),
+                carry: Mutex::new(None),
                 status: Mutex::new(status),
                 tx,
             }),
@@ -187,11 +193,24 @@ impl Knowledge {
                 !r.candidates(Tier::Synthesis, &crate::llm::json_caps())
                     .is_empty()
             });
-        let feed = self.inner.feed.clone();
-        let attempts = self.inner.cfg.llm.max_attempts;
-        let p = tokio::task::spawn_blocking(move || plan(feed.as_ref(), llm_ready, attempts))
-            .await
-            .map_err(|e| Error::Other(format!("knowledge plan task failed: {e}")))??;
+        // Taken, so a failed run leaves nothing behind and the next one plans afresh.
+        let carried = self
+            .inner
+            .carry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .filter(|(ready, _)| *ready == llm_ready);
+        let mut p = match carried {
+            Some((_, p)) => p,
+            None => {
+                let feed = self.inner.feed.clone();
+                let attempts = self.inner.cfg.llm.max_attempts;
+                tokio::task::spawn_blocking(move || plan(feed.as_ref(), llm_ready, attempts))
+                    .await
+                    .map_err(|e| Error::Other(format!("knowledge plan task failed: {e}")))??
+            }
+        };
         let total = (p.deletes.len() + p.upserts.len()) as u64;
         let mut s = Session::new(
             &self.inner,
@@ -201,7 +220,7 @@ impl Knowledge {
             budget.max_llm_requests,
         );
         s.stats.planned = total;
-        let mut done = 0u64;
+        let (mut deletes_done, mut upserts_done) = (0usize, 0usize);
         let mut spent = 0usize;
         for item in &p.deletes {
             if spent >= budget.max_items || s.out_of_time(deadline) {
@@ -209,7 +228,7 @@ impl Knowledge {
             }
             s.process_delete(item)?;
             spent += 1;
-            done += 1;
+            deletes_done += 1;
         }
         for w in &p.upserts {
             if spent >= budget.max_items || s.out_of_time(deadline) {
@@ -218,8 +237,9 @@ impl Knowledge {
             if s.process_upsert(w).await? {
                 spent += 1;
             }
-            done += 1;
+            upserts_done += 1;
         }
+        let done = (deletes_done + upserts_done) as u64;
         s.resolve_pending_links()?;
         if s.retracted_any {
             // Retractions may leave entities with nothing behind them. Every batch is applied
@@ -242,7 +262,25 @@ impl Knowledge {
         if !s.touched.is_empty() {
             let _ = self.inner.tx.send(s.touched.iter().cloned().collect());
         }
-        Ok((s.stats.clone(), s.state.clone()))
+        let Session {
+            state,
+            notes,
+            ledgers,
+            stats,
+            ..
+        } = s;
+        if stats.remaining > 0 {
+            p.deletes.drain(..deletes_done);
+            p.upserts.drain(..upserts_done);
+            let rest = Plan {
+                state: state.clone(),
+                notes,
+                ledgers,
+                ..p
+            };
+            *self.inner.carry.lock().unwrap_or_else(|p| p.into_inner()) = Some((llm_ready, rest));
+        }
+        Ok((stats, state))
     }
 
     /// Current status (cheap).
@@ -264,6 +302,11 @@ impl Knowledge {
     /// re-extraction replaces each item's evidence.
     pub async fn reset(&self) -> Result<()> {
         let _guard = self.inner.run_lock.lock().await;
+        self.inner
+            .carry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take();
         let feed = self.inner.feed.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             let mut state = State::load(feed.as_ref())?;

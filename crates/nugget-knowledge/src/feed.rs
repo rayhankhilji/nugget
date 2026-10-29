@@ -15,8 +15,11 @@ use nugget_store::{Chunk, Item, ItemChange, Store};
 use serde_json::Value;
 use time::OffsetDateTime;
 
-/// Chunk positions requested per `get_chunks_by_ord` call.
+/// Chunk positions requested per `get_chunks_by_ord` call at most.
 const ORD_PAGE: u32 = 128;
+/// Chunk positions requested by the first call; each next call asks for twice as many (up to
+/// [`ORD_PAGE`]). Each position is one lookup and most items have few chunks.
+const FIRST_ORD_PAGE: u32 = 4;
 
 /// Read access to items plus a small key/value area for pipeline state.
 pub trait ItemFeed: Send + Sync {
@@ -84,15 +87,17 @@ impl ItemFeed for Store {
     fn chunks(&self, item: &ItemRef, limit: usize) -> Result<Vec<Chunk>> {
         let mut out = Vec::new();
         let mut from = 0u32;
+        let mut want = FIRST_ORD_PAGE;
         while out.len() < limit {
-            let ords: Vec<u32> = (from..from.saturating_add(ORD_PAGE)).collect();
+            let ords: Vec<u32> = (from..from.saturating_add(want)).collect();
             let page = self.get_chunks_by_ord(item, &ords)?;
             let n = page.len();
             out.extend(page);
-            if n < ORD_PAGE as usize {
+            if n < want as usize {
                 break;
             }
-            from = from.saturating_add(ORD_PAGE);
+            from = from.saturating_add(want);
+            want = (want * 2).min(ORD_PAGE);
         }
         out.truncate(limit);
         Ok(out)

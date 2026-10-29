@@ -2,10 +2,16 @@
 //!
 //! - `knowledge`: [`State`] (extractor version, the user's entity and learned addresses, the
 //!   sources seen, the item change-log cursor and retry hints, unresolved wikilinks);
-//! - `knowledge/l/<bucket>/<source>`: the **ledger**, one entry per processed item (connector
+//! - `knowledge/lb/<bucket>/<source>`: the **ledger**, one entry per processed item (connector
 //!   version, content fingerprint, LLM status), sharded into [`BUCKETS`] buckets per source so a
-//!   flush rewrites only what changed;
-//! - `knowledge/notes`: the notes index used to resolve wikilinks.
+//!   flush rewrites only what changed (a flush of `flush_every` items dirties about that many
+//!   buckets, so the buckets must be many and small for a flush to cost much less than the
+//!   whole ledger);
+//! - `knowledge/nb/<bucket>`: the notes index used to resolve wikilinks, sharded the same way.
+//!
+//! Earlier versions kept the ledger in [`LEGACY_BUCKETS`] buckets (`knowledge/l/<bucket>/...`)
+//! and the notes under one key (`knowledge/notes`); both are read, merged and moved to the
+//! current layout by the next flush.
 //!
 //! The ledger is written only after an item's extraction is fully applied, so a crash or a
 //! budget cut resumes where it stopped; re-processing an item is idempotent (its evidence is
@@ -23,9 +29,12 @@ use crate::feed::ItemFeed;
 /// Bump to re-extract everything after extractor changes.
 pub const EXTRACTOR_VERSION: u32 = 1;
 pub(crate) const STATE_KEY: &str = "knowledge";
+/// The pre-sharding notes index (read for migration, cleared once moved).
 pub(crate) const NOTES_KEY: &str = "knowledge/notes";
 pub(crate) const LINKS_KEY: &str = "knowledge/links";
-pub(crate) const BUCKETS: usize = 64;
+pub(crate) const BUCKETS: usize = 1024;
+/// Bucket count of the previous ledger layout.
+pub(crate) const LEGACY_BUCKETS: usize = 64;
 /// Unresolved wikilinks kept at most (oldest dropped).
 pub(crate) const MAX_PENDING_LINKS: usize = 20_000;
 
@@ -107,40 +116,86 @@ pub(crate) struct Entry {
 }
 
 /// Ledger of one source.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct SourceLedger {
     buckets: Vec<BTreeMap<String, Entry>>,
     dirty: HashSet<usize>,
+    /// Entries were read from the legacy layout, whose keys the next flush clears.
+    legacy: bool,
 }
 
-fn bucket_of(key: &str) -> usize {
+impl Default for SourceLedger {
+    fn default() -> Self {
+        Self {
+            buckets: vec![BTreeMap::new(); BUCKETS],
+            dirty: HashSet::new(),
+            legacy: false,
+        }
+    }
+}
+
+fn hash_bucket(key: &str, buckets: usize) -> usize {
     // FNV-1a: stable across runs and platforms.
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in key.as_bytes() {
         h ^= u64::from(*b);
         h = h.wrapping_mul(0x0100_0000_01b3);
     }
-    (h % BUCKETS as u64) as usize
+    (h % buckets as u64) as usize
+}
+
+fn bucket_of(key: &str) -> usize {
+    hash_bucket(key, BUCKETS)
 }
 
 fn bucket_key(source: &SourceId, bucket: usize) -> String {
+    format!("knowledge/lb/{bucket:04}/{}", source.as_str())
+}
+
+fn legacy_bucket_key(source: &SourceId, bucket: usize) -> String {
     format!("knowledge/l/{bucket:02}/{}", source.as_str())
+}
+
+/// Buckets read from `key(b)` for `b < n`, decoded (an undecodable bucket reads as empty).
+fn load_buckets<T: serde::de::DeserializeOwned>(
+    feed: &dyn ItemFeed,
+    n: usize,
+    key: impl Fn(usize) -> String,
+) -> Result<Vec<Option<BTreeMap<String, T>>>> {
+    (0..n)
+        .map(|b| {
+            Ok(feed
+                .get_state(&key(b))?
+                .map(|v| serde_json::from_value(v).unwrap_or_default()))
+        })
+        .collect()
 }
 
 impl SourceLedger {
     pub fn load(feed: &dyn ItemFeed, source: &SourceId) -> Result<Self> {
-        let mut buckets = Vec::with_capacity(BUCKETS);
-        for b in 0..BUCKETS {
-            let map = match feed.get_state(&bucket_key(source, b))? {
-                Some(v) => serde_json::from_value(v).unwrap_or_default(),
-                None => BTreeMap::new(),
-            };
-            buckets.push(map);
+        let mut me = Self::default();
+        for (b, map) in load_buckets(feed, BUCKETS, |b| bucket_key(source, b))?
+            .into_iter()
+            .enumerate()
+        {
+            me.buckets[b] = map.unwrap_or_default();
         }
-        Ok(Self {
-            buckets,
-            dirty: HashSet::new(),
-        })
+        // Entries of the legacy layout not in the current one move over (current wins: it was
+        // written later), and their old keys go at the next flush.
+        for map in load_buckets::<Entry>(feed, LEGACY_BUCKETS, |b| legacy_bucket_key(source, b))?
+            .into_iter()
+            .flatten()
+        {
+            me.legacy = true;
+            for (k, e) in map {
+                let b = bucket_of(&k);
+                if let std::collections::btree_map::Entry::Vacant(v) = me.buckets[b].entry(k) {
+                    v.insert(e);
+                    me.dirty.insert(b);
+                }
+            }
+        }
+        Ok(me)
     }
 
     pub fn get(&self, key: &ItemKey) -> Option<&Entry> {
@@ -179,6 +234,12 @@ impl SourceLedger {
                 feed.set_state(&key, serde_json::to_value(&self.buckets[b])?)?;
             }
         }
+        if self.legacy {
+            for b in 0..LEGACY_BUCKETS {
+                feed.clear_state(&legacy_bucket_key(source, b))?;
+            }
+            self.legacy = false;
+        }
         Ok(())
     }
 
@@ -200,43 +261,89 @@ pub(crate) struct NoteEntry {
     pub subjects: Vec<EntityId>,
 }
 
-#[derive(Debug, Default)]
+/// Notes index, sharded into [`BUCKETS`] buckets by note id like the ledger.
+#[derive(Debug)]
 pub(crate) struct Notes {
-    /// `source \u{1f} key` → entry.
-    entries: BTreeMap<String, NoteEntry>,
+    /// Per bucket: `source \u{1f} key` → entry.
+    buckets: Vec<BTreeMap<String, NoteEntry>>,
+    /// Name → note ids, built on the first lookup and kept up to date by `set` and `remove`.
     by_name: Option<HashMap<String, Vec<String>>>,
-    pub dirty: bool,
+    dirty: HashSet<usize>,
+    /// Entries were read from the legacy single key, which the next save clears.
+    legacy: bool,
 }
 
 fn note_id(item: &ItemRef) -> String {
     format!("{}\u{1f}{}", item.source.as_str(), item.key.as_str())
 }
 
+fn notes_key(bucket: usize) -> String {
+    format!("knowledge/nb/{bucket:04}")
+}
+
 impl Notes {
     pub fn load(feed: &dyn ItemFeed) -> Result<Self> {
-        let entries = match feed.get_state(NOTES_KEY)? {
-            Some(v) => serde_json::from_value(v).unwrap_or_default(),
-            None => BTreeMap::new(),
+        let mut buckets: Vec<BTreeMap<String, NoteEntry>> = load_buckets(feed, BUCKETS, notes_key)?
+            .into_iter()
+            .map(Option::unwrap_or_default)
+            .collect();
+        let mut dirty = HashSet::new();
+        let legacy = match feed.get_state(NOTES_KEY)? {
+            Some(v) => {
+                let old: BTreeMap<String, NoteEntry> =
+                    serde_json::from_value(v).unwrap_or_default();
+                for (id, e) in old {
+                    let b = bucket_of(&id);
+                    if let std::collections::btree_map::Entry::Vacant(v) = buckets[b].entry(id) {
+                        v.insert(e);
+                        dirty.insert(b);
+                    }
+                }
+                true
+            }
+            None => false,
         };
         Ok(Self {
-            entries,
+            buckets,
             by_name: None,
-            dirty: false,
+            dirty,
+            legacy,
         })
     }
 
     pub fn save(&mut self, feed: &dyn ItemFeed) -> Result<()> {
-        if self.dirty {
-            feed.set_state(NOTES_KEY, serde_json::to_value(&self.entries)?)?;
-            self.dirty = false;
+        let mut dirty: Vec<usize> = self.dirty.drain().collect();
+        dirty.sort_unstable();
+        for b in dirty {
+            let key = notes_key(b);
+            if self.buckets[b].is_empty() {
+                feed.clear_state(&key)?;
+            } else {
+                feed.set_state(&key, serde_json::to_value(&self.buckets[b])?)?;
+            }
+        }
+        if self.legacy {
+            feed.clear_state(NOTES_KEY)?;
+            self.legacy = false;
         }
         Ok(())
     }
 
     pub fn remove(&mut self, item: &ItemRef) {
-        if self.entries.remove(&note_id(item)).is_some() {
-            self.dirty = true;
-            self.by_name = None;
+        let id = note_id(item);
+        let b = bucket_of(&id);
+        if let Some(old) = self.buckets[b].remove(&id) {
+            self.dirty.insert(b);
+            if let Some(index) = self.by_name.as_mut() {
+                for n in &old.names {
+                    if let Some(ids) = index.get_mut(n) {
+                        ids.retain(|i| i != &id);
+                        if ids.is_empty() {
+                            index.remove(n);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -248,26 +355,33 @@ impl Notes {
             .collect();
         ns.sort();
         ns.dedup();
+        // Drops the old entry and its names from the index.
+        self.remove(item);
         if subjects.is_empty() || ns.is_empty() {
-            self.remove(item);
             return;
         }
-        self.entries.insert(
-            note_id(item),
+        let id = note_id(item);
+        if let Some(index) = self.by_name.as_mut() {
+            for n in &ns {
+                index.entry(n.clone()).or_default().push(id.clone());
+            }
+        }
+        let b = bucket_of(&id);
+        self.buckets[b].insert(
+            id,
             NoteEntry {
                 names: ns,
                 subjects,
             },
         );
-        self.dirty = true;
-        self.by_name = None;
+        self.dirty.insert(b);
     }
 
     /// Subjects of the one note called `name`; empty if none or ambiguous.
     pub fn lookup(&mut self, name: &str) -> Vec<EntityId> {
         let index = self.by_name.get_or_insert_with(|| {
             let mut m: HashMap<String, Vec<String>> = HashMap::new();
-            for (id, e) in &self.entries {
+            for (id, e) in self.buckets.iter().flatten() {
                 for n in &e.names {
                     m.entry(n.clone()).or_default().push(id.clone());
                 }
@@ -275,8 +389,84 @@ impl Notes {
             m
         });
         match index.get(&normalize_name(name)).map(Vec::as_slice) {
-            Some([one]) => self.entries[one].subjects.clone(),
+            Some([one]) => self.buckets[bucket_of(one)][one].subjects.clone(),
             _ => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nugget_store::Store;
+    use serde_json::json;
+
+    fn item(key: &str) -> ItemRef {
+        ItemRef {
+            source: SourceId::new("notes"),
+            key: ItemKey::new(key),
+        }
+    }
+
+    fn entry(f: &str) -> Entry {
+        Entry {
+            version: None,
+            fingerprint: f.into(),
+            llm: LLM_NONE,
+            failures: 0,
+        }
+    }
+
+    #[test]
+    fn a_legacy_ledger_is_read_and_moved_to_the_current_layout() {
+        let feed = Store::open_in_memory().unwrap();
+        let source = SourceId::new("notes");
+        let old = legacy_bucket_key(&source, hash_bucket("a", LEGACY_BUCKETS));
+        feed.set_state(&old, json!({"a": {"f": "fp-a"}})).unwrap();
+        let mut l = SourceLedger::load(&feed, &source).unwrap();
+        assert_eq!(l.get(&ItemKey::new("a")), Some(&entry("fp-a")));
+        l.set(&ItemKey::new("b"), entry("fp-b"));
+        l.flush(&feed, &source).unwrap();
+        assert_eq!(feed.get_state(&old).unwrap(), None, "legacy bucket cleared");
+        let l = SourceLedger::load(&feed, &source).unwrap();
+        assert_eq!(l.get(&ItemKey::new("a")), Some(&entry("fp-a")));
+        assert_eq!(l.get(&ItemKey::new("b")), Some(&entry("fp-b")));
+        assert_eq!(l.keys().count(), 2);
+    }
+
+    #[test]
+    fn a_legacy_notes_index_is_read_and_moved_to_buckets() {
+        let feed = Store::open_in_memory().unwrap();
+        let id = EntityId::new("ent_1");
+        feed.set_state(
+            NOTES_KEY,
+            json!({note_id(&item("a.md")): {"names": ["alpha"], "subjects": [id]}}),
+        )
+        .unwrap();
+        let mut notes = Notes::load(&feed).unwrap();
+        assert_eq!(notes.lookup("Alpha"), vec![id.clone()]);
+        notes.save(&feed).unwrap();
+        assert_eq!(feed.get_state(NOTES_KEY).unwrap(), None);
+        assert_eq!(Notes::load(&feed).unwrap().lookup("alpha"), vec![id]);
+    }
+
+    #[test]
+    fn the_name_index_follows_set_and_remove() {
+        let feed = Store::open_in_memory().unwrap();
+        let mut notes = Notes::load(&feed).unwrap();
+        let (x, y) = (EntityId::new("ent_x"), EntityId::new("ent_y"));
+        notes.set(&item("a.md"), &["Alpha".into()], vec![x.clone()]);
+        assert_eq!(notes.lookup("alpha"), vec![x.clone()]);
+        notes.set(&item("b.md"), &["Alpha".into()], vec![y.clone()]);
+        assert!(notes.lookup("alpha").is_empty(), "ambiguous");
+        notes.remove(&item("a.md"));
+        assert_eq!(notes.lookup("alpha"), vec![y.clone()]);
+        notes.set(&item("b.md"), &["Beta".into()], vec![y.clone()]);
+        assert!(notes.lookup("alpha").is_empty());
+        assert_eq!(notes.lookup("beta"), vec![y.clone()]);
+        notes.save(&feed).unwrap();
+        let mut again = Notes::load(&feed).unwrap();
+        assert_eq!(again.lookup("beta"), vec![y]);
+        assert!(again.lookup("alpha").is_empty());
     }
 }
