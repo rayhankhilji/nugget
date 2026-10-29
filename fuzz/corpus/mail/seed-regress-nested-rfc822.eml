@@ -1,0 +1,19 @@
+From: carol@example.com
+Subject: Notes
+Content-Type: multipart/mixed; boundary=X
+
+--X
+Content-EncodinroFom: d@esposition=
+-2X
+Content-Type: message/rfc822
+
+From: d@example.com
+SÊubject: inneAAECAwQ=
+-2X
+Content-Type: message/rfc822
+
+From: d@example.com
+SÊubject: inner
+
+ForWaFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFrdecontd body.
+--X--

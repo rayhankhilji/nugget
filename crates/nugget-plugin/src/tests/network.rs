@@ -206,3 +206,132 @@ async fn plugins_cannot_reach_private_addresses_by_default() {
     // Refused before sending, like an undeclared host: nothing in the ledger.
     assert!(egress.0.lock().unwrap().is_empty());
 }
+
+/// A fake resolver: `name -> addresses`, counting lookups. Names it does not know fail.
+fn fake_dns(
+    table: &'static [(&'static str, &'static [&'static str])],
+) -> (NetGuard, Arc<std::sync::atomic::AtomicUsize>) {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = calls.clone();
+    let guard = NetGuard::with_lookup(Arc::new(move |name: &str| {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        table
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, ips)| ips.iter().map(|ip| ip.parse().unwrap()).collect())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no such name"))
+    }));
+    (guard, calls)
+}
+
+/// PM-1..3 review, PM-3 (DNS rebinding): an approved public-looking name whose DNS answer is
+/// loopback, private, link-local, ULA or metadata is refused, even when only one of its
+/// addresses is non-public, and nothing is pinned for it.
+#[tokio::test]
+async fn names_resolving_to_private_addresses_are_refused() {
+    let (guard, _) = fake_dns(&[
+        ("loop.example", &["127.0.0.1"]),
+        ("lan.example", &["192.168.1.1"]),
+        ("meta.example", &["169.254.169.254"]),
+        ("cgnat.example", &["100.64.0.1"]),
+        ("v6loop.example", &["::1"]),
+        ("ula.example", &["fd00::1"]),
+        ("mapped.example", &["::ffff:10.0.0.1"]),
+        ("mixed.example", &["1.1.1.1", "10.0.0.1"]),
+        ("public.example", &["1.1.1.1", "2606:4700:4700::1111"]),
+    ]);
+    for name in [
+        "loop.example",
+        "lan.example",
+        "meta.example",
+        "cgnat.example",
+        "v6loop.example",
+        "ula.example",
+        "mapped.example",
+        "mixed.example",
+        // A trailing dot is the same name.
+        "loop.example.",
+    ] {
+        let url = Url::parse(&format!("http://{name}:8080/")).unwrap();
+        match guard.check(&url).await {
+            Err(NetRefusal::Blocked(m)) => assert!(m.contains("private or local"), "{m}"),
+            other => panic!("{name}: expected a refusal, got {other:?}"),
+        }
+        assert!(guard.pinned(name).is_none(), "{name} must not be pinned");
+        // The client's resolver refuses it too (a connection that skipped the check).
+        assert!(
+            guard.resolve(name.parse().unwrap()).await.is_err(),
+            "{name}"
+        );
+    }
+    // An unknown name is a network error, not a denial.
+    let url = Url::parse("http://nxdomain.example/").unwrap();
+    assert!(matches!(
+        guard.check(&url).await,
+        Err(NetRefusal::Unresolved(_))
+    ));
+    // A public name passes and is pinned to exactly the checked addresses.
+    guard
+        .check(&Url::parse("https://public.example/").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        guard.pinned("public.example").unwrap(),
+        vec![v4("1.1.1.1"), v6("2606:4700:4700::1111")]
+    );
+}
+
+/// PM-3: after the check, the connection uses the checked addresses, so a DNS answer that
+/// changes to loopback between the check and the connect (rebinding) is never used.
+#[tokio::test]
+async fn a_rebinding_name_connects_only_to_the_checked_addresses() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = calls.clone();
+    // First answer public, every later answer loopback.
+    let guard = NetGuard::with_lookup(Arc::new(move |_: &str| {
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(vec![if n == 0 {
+            v4("1.1.1.1")
+        } else {
+            v4("127.0.0.1")
+        }])
+    }));
+    guard
+        .check(&Url::parse("http://rebind.example/").unwrap())
+        .await
+        .unwrap();
+    let addrs: Vec<IpAddr> = guard
+        .resolve("rebind.example".parse().unwrap())
+        .await
+        .unwrap()
+        .map(|a| a.ip())
+        .collect();
+    assert_eq!(addrs, vec![v4("1.1.1.1")]);
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+/// The review's PM-3 PoC, inverted: an HTTP client built like the host's (redirects off, the
+/// guard as its resolver) does not reach a loopback server through a name that resolves there.
+#[tokio::test]
+async fn the_guarded_client_does_not_reach_loopback_through_a_name() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("local secret"))
+        .mount(&server)
+        .await;
+    let (guard, _) = fake_dns(&[("evil.example", &["127.0.0.1"])]);
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .no_proxy()
+        .dns_resolver(guard)
+        .build()
+        .unwrap();
+    let port = server.address().port();
+    let err = client
+        .get(format!("http://evil.example:{port}/"))
+        .send()
+        .await
+        .expect_err("a name resolving to loopback must not connect");
+    assert!(err.is_connect() || err.is_request(), "{err:?}");
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

@@ -916,7 +916,7 @@ impl Tool for ComputerTool {
                 if secret {
                     "[hidden: secret field]".to_string()
                 } else {
-                    truncate(t, PREVIEW_MAX)
+                    typed_preview(t)
                 }
             })
         };
@@ -1114,5 +1114,49 @@ impl Tool for ComputerTool {
             }
             Kind::Observe | Kind::Scroll | Kind::WaitFor => Verification::Unverifiable,
         }
+    }
+}
+
+/// The policy preview of typed text, cut to `PREVIEW_MAX`. A line break past the cut still
+/// matters (in a chat it sends, in a terminal it runs), so when the full text has one and the
+/// preview does not, the preview keeps a trailing newline for the classifier to see.
+fn typed_preview(text: &str) -> String {
+    // The same line breaks nugget-policy's classifier treats as submitting.
+    const BREAKS: [char; 5] = ['\n', '\r', '\u{2028}', '\u{2029}', '\u{85}'];
+    let mut preview = truncate(text, PREVIEW_MAX);
+    if !preview.contains(BREAKS) && text.contains(BREAKS) {
+        preview.push('\n');
+    }
+    preview
+}
+
+#[cfg(test)]
+mod typed_preview_tests {
+    use super::{PREVIEW_MAX, typed_preview};
+
+    #[test]
+    fn a_line_break_past_the_cut_is_kept() {
+        let long = format!("{}\nrm -rf ~", "a".repeat(PREVIEW_MAX * 2));
+        let p = typed_preview(&long);
+        assert!(p.ends_with('\n'), "{p:?}");
+        assert!(
+            !p.contains("rm -rf"),
+            "the cut part itself stays out: {p:?}"
+        );
+        let cr = format!("{}\r", "b".repeat(PREVIEW_MAX * 2));
+        assert!(typed_preview(&cr).ends_with('\n'));
+        for sep in ['\u{2028}', '\u{2029}', '\u{85}'] {
+            let t = format!("{}{sep}send", "d".repeat(PREVIEW_MAX * 2));
+            assert!(typed_preview(&t).ends_with('\n'), "{sep:?}");
+        }
+    }
+
+    #[test]
+    fn text_without_a_line_break_is_unchanged() {
+        assert_eq!(typed_preview("hello"), "hello");
+        let long = "c".repeat(PREVIEW_MAX * 2);
+        assert!(!typed_preview(&long).contains('\n'));
+        // A break inside the preview is left as it is.
+        assert_eq!(typed_preview("hi\nthere"), "hi\nthere");
     }
 }

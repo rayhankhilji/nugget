@@ -1,0 +1,102 @@
+name: Fuzz
+
+# cargo-fuzz (libFuzzer) over the parsers that read untrusted input: mail and calendar files from
+# the files connector, IPC JSON-RPC framing, the signed model manifest and plugin manifests. Each
+# target starts from its handmade seed corpus (fuzz/corpus/<target>/seed-*) and runs for a fixed
+# time; a crash fails the job and its reproducer is uploaded. See fuzz/README.md.
+
+on:
+  schedule:
+    - cron: "41 4 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds to fuzz each target"
+        required: false
+        default: "300"
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - "crates/nugget-core/**"
+      - "crates/nugget-extract/**"
+      - "crates/nugget-connector-files/**"
+      - "crates/nugget-ipc/**"
+      - "crates/nugget-models/**"
+      - "crates/nugget-plugin/src/**"
+      - "crates/nugget-plugin/Cargo.toml"
+      - ".github/workflows/fuzz.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  CARGO_FUZZ_VERSION: "0.13.2"
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [mail, calendar, ipc_frame, model_manifest, plugin_manifest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Only this job needs nightly (libFuzzer's sanitizer flags); rust-toolchain.toml keeps
+      # stable as the default, so every cargo call below names +nightly.
+      - name: Install Rust toolchains
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup toolchain install nightly --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+          key: fuzz-${{ matrix.target }}
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version "$CARGO_FUZZ_VERSION"
+
+      # Fails if fuzz/Cargo.lock is out of date, like --locked elsewhere.
+      - name: Fetch dependencies
+        working-directory: fuzz
+        run: cargo +nightly fetch --locked
+
+      - name: Fuzz ${{ matrix.target }}
+        working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_PR: "60"
+          SECONDS_INPUT: ${{ inputs.seconds }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            secs="$SECONDS_PR"
+          else
+            secs="${SECONDS_INPUT:-300}"
+          fi
+          case "$secs" in ''|*[!0-9]*) echo "seconds must be a whole number" >&2; exit 1 ;; esac
+          cargo +nightly fuzz run -O "$TARGET" -- -max_total_time="$secs" -rss_limit_mb=4096 -timeout=10
+
+      - name: Upload the crash reproducers
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          retention-days: 30
+          if-no-files-found: ignore

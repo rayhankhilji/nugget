@@ -1,0 +1,22 @@
+From: carol@example.com
+Subject: Notes
+Content-Type: multipart/mixed; boundary=X
+
+--X
+Content-Type: text/plain
+
+See attached.
+--X
+Content-Type: application/octet-stream; name="n.bin"
+Content-Disposition: attachment; filename="n.bin"
+Content-Transfer-Encoding: base64
+
+AAECAwQ=
+--X
+Content-Type: message/rfc822
+
+From: d@example.com
+Subject: inner
+
+Forwarded body.
+--X--
