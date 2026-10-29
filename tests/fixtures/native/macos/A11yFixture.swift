@@ -30,7 +30,29 @@ final class Fixture: NSObject, NSApplicationDelegate, NSTableViewDataSource, NST
         self.statePath = statePath
     }
 
+    /// The standard app and Edit menus: AppKit routes Cmd+V (the paste fallback) and the other
+    /// editing shortcuts through the Edit menu's key equivalents, as in every real app.
+    func installMenus() {
+        let main = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        main.addItem(appItem)
+        let editItem = NSMenuItem()
+        let edit = NSMenu(title: "Edit")
+        edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editItem.submenu = edit
+        main.addItem(editItem)
+        NSApp.mainMenu = main
+    }
+
     func applicationDidFinishLaunching(_ note: Notification) {
+        installMenus()
         window = NSWindow(
             contentRect: NSRect(x: 120, y: 200, width: 520, height: 420),
             styleMask: [.titled, .closable, .resizable],
