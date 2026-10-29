@@ -496,6 +496,74 @@ fn is_password(e: &ElementInfo) -> bool {
     e.sensitive == Some(Sensitive::Password) || e.input_type.as_deref() == Some("password")
 }
 
+/// What `latest` shows around `action` (`None` for a snapshot): the page URL (the destination
+/// for navigate), the tab title, and for the target element its role, whether it submits its
+/// form, whether it is a password field, and the fields of its form. The agent tools give it to
+/// the loop's gate and the [`BrowserController`] to its own re-check, so both judge the same
+/// context.
+pub(crate) fn action_context(
+    action: Option<&BrowserAction>,
+    latest: Option<&PageSnapshot>,
+) -> ActionContext {
+    let mut ctx = ActionContext::default();
+    if let Some(s) = latest {
+        if !s.url.is_empty() {
+            ctx = ctx.with_url(cap_text(&s.url, CONTEXT_URL_MAX));
+        }
+        if !s.title.is_empty() {
+            ctx = ctx.with_window_title(cap_text(&s.title, CONTEXT_TEXT_MAX));
+        }
+    }
+    let Some(action) = action else {
+        return ctx;
+    };
+    if let BrowserAction::Navigate { url } = action {
+        // The action happens on the destination, not the page being left.
+        let dest = crate::action::resolve_url(url, latest.map(|s| s.url.as_str()))
+            .map(|u| u.to_string())
+            .unwrap_or_else(|_| url.clone());
+        ctx.url = Some(cap_text(&dest, CONTEXT_URL_MAX));
+        ctx.window_title = None;
+        return ctx;
+    }
+    let (Some(snap), Some(id)) = (latest, action.element()) else {
+        return ctx;
+    };
+    let Some(e) = snap.element(id) else {
+        return ctx;
+    };
+    ctx = ctx.with_role(element_role(e));
+    if matches!(action, BrowserAction::Submit { .. }) {
+        ctx = ctx.with_submits(true);
+    } else if matches!(e.role.as_str(), "button" | "menuitem") {
+        ctx = ctx.with_submits(submits_form(e));
+    }
+    ctx = ctx.with_secure_field(is_password(e));
+    let mut fields: Vec<String> = Vec::new();
+    let mut push = |f: String| {
+        if !f.is_empty() && !fields.contains(&f) && fields.len() < CONTEXT_FIELDS_MAX {
+            fields.push(f);
+        }
+    };
+    let form_mates: Vec<&ElementInfo> = match e.form.as_deref() {
+        Some(form) => snap.form_elements(form).collect(),
+        None => vec![e],
+    };
+    for f in form_mates {
+        push(cap_text(f.name.trim(), CONTEXT_TEXT_MAX));
+        // The extension marks sensitive fields whatever their visible label says; name them in
+        // the classifier's vocabulary so a form with an unlabelled card field still reads as a
+        // payment form.
+        match f.sensitive {
+            Some(Sensitive::Payment) => push("cc-number".into()),
+            Some(Sensitive::Password) => push("password".into()),
+            None if is_password(f) => push("password".into()),
+            None => {}
+        }
+    }
+    ctx.with_form_fields(fields)
+}
+
 const NOT_PERFORMED: &str = "The action was not performed. Do not retry it; choose another approach, ask the user, or finish.";
 
 impl BrowserAgentTool {
@@ -554,66 +622,11 @@ impl BrowserAgentTool {
 
     /// What the latest snapshot shows around this call (see [`Tool::context`]).
     fn context_on(&self, args: &Value, latest: Option<&PageSnapshot>) -> ActionContext {
-        let mut ctx = ActionContext::default();
-        if let Some(s) = latest {
-            if !s.url.is_empty() {
-                ctx = ctx.with_url(cap_text(&s.url, CONTEXT_URL_MAX));
-            }
-            if !s.title.is_empty() {
-                ctx = ctx.with_window_title(cap_text(&s.title, CONTEXT_TEXT_MAX));
-            }
-        }
-        if self.kind() == Kind::Snapshot {
-            return ctx;
-        }
-        let Ok(action) = to_action(self.kind(), args.clone()) else {
-            return ctx;
+        let action = match self.kind() {
+            Kind::Snapshot => None,
+            kind => to_action(kind, args.clone()).ok(),
         };
-        if let BrowserAction::Navigate { url } = &action {
-            // The action happens on the destination, not the page being left.
-            let dest = crate::action::resolve_url(url, latest.map(|s| s.url.as_str()))
-                .map(|u| u.to_string())
-                .unwrap_or_else(|_| url.clone());
-            ctx.url = Some(cap_text(&dest, CONTEXT_URL_MAX));
-            ctx.window_title = None;
-            return ctx;
-        }
-        let (Some(snap), Some(id)) = (latest, action.element()) else {
-            return ctx;
-        };
-        let Some(e) = snap.element(id) else {
-            return ctx;
-        };
-        ctx = ctx.with_role(element_role(e));
-        if self.kind() == Kind::Submit {
-            ctx = ctx.with_submits(true);
-        } else if matches!(e.role.as_str(), "button" | "menuitem") {
-            ctx = ctx.with_submits(submits_form(e));
-        }
-        ctx = ctx.with_secure_field(is_password(e));
-        let mut fields: Vec<String> = Vec::new();
-        let mut push = |f: String| {
-            if !f.is_empty() && !fields.contains(&f) && fields.len() < CONTEXT_FIELDS_MAX {
-                fields.push(f);
-            }
-        };
-        let form_mates: Vec<&ElementInfo> = match e.form.as_deref() {
-            Some(form) => snap.form_elements(form).collect(),
-            None => vec![e],
-        };
-        for f in form_mates {
-            push(cap_text(f.name.trim(), CONTEXT_TEXT_MAX));
-            // The extension marks sensitive fields whatever their visible label says; name
-            // them in the classifier's vocabulary so a form with an unlabelled card field
-            // still reads as a payment form.
-            match f.sensitive {
-                Some(Sensitive::Payment) => push("cc-number".into()),
-                Some(Sensitive::Password) => push("password".into()),
-                None if is_password(f) => push("password".into()),
-                None => {}
-            }
-        }
-        ctx.with_form_fields(fields)
+        action_context(action.as_ref(), latest)
     }
 
     fn remember(&self, args: &Value, target: &ActionTarget, risk: RiskClass) {

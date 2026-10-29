@@ -110,8 +110,9 @@ jobs:
       - name: Compare
         working-directory: one
         env:
-          # true: also fail when only symbol names differ (see the known gap below).
-          STRICT: "false"
+          # true: also fail when only symbol names differ. nugget-plugin used to cause that (wasmtime's
+          # bindgen! with `path:` embeds the WIT files' absolute path); it now passes the WIT inline.
+          STRICT: "true"
         run: |
           a="$RUNNER_TEMP/compare/nuggetd-1"
           b="$RUNNER_TEMP/compare/nuggetd-2"
@@ -145,9 +146,9 @@ jobs:
                 "$RUNNER_TEMP/stripped-$n"
             done
             if cmp -s "$RUNNER_TEMP/stripped-1" "$RUNNER_TEMP/stripped-2"; then
-              # Known gap: wasmtime's bindgen! (nugget-plugin) puts the absolute path of the WIT
-              # files into the crate's source, which changes ThinLTO's `.llvm.<hash>` suffix on
-              # that crate's local symbols. Strict mode fails on it; it is off until that is fixed.
+              # Typically a path or other build-directory input reaching a crate's hash, which
+              # changes ThinLTO's `.llvm.<hash>` suffix on local symbols (as wasmtime's bindgen!
+              # with `path:` did in nugget-plugin). Strict mode fails on it.
               msg="the two nuggetd builds differ only in symbol names and the build id (code and data are identical); see docs/security/reproducible-builds.md"
               echo "**Symbol names differ; code and data identical.**" >> "$GITHUB_STEP_SUMMARY"
               if [ "$STRICT" = true ]; then status=1; echo "::error::$msg"; else echo "::warning::$msg"; fi

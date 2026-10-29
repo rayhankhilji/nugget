@@ -71,7 +71,22 @@ fn is_invisible(c: char) -> bool {
             | '\u{FE00}'..='\u{FE0F}'
             | '\u{FEFF}'
             | '\u{FFA0}'
+            | '\u{1D173}'..='\u{1D17A}'
+            // Tag characters: invisible copies of ASCII ("ASCII smuggling").
+            | '\u{E0000}'..='\u{E007F}'
     )
+}
+
+/// Combining marks removed (`ign\u{301}ore`, `ignóre` → `ignore`). For scanners matching
+/// ASCII phrases, as an extra pass after [`normalize`]: it would merge distinct words in
+/// languages that use diacritics.
+///
+/// Public as [`crate::strip_text_marks`].
+pub fn strip_marks(s: &str) -> String {
+    s.nfd()
+        .filter(|&c| !unicode_normalization::char::is_combining_mark(c))
+        .nfc()
+        .collect()
 }
 
 /// Map Cyrillic and Greek letters that look like Latin ones to Latin, so "dеlete" with a
@@ -105,6 +120,11 @@ pub fn fold_confusables(s: &str) -> String {
             'α' => 'a',
             'ε' => 'e',
             'η' => 'n',
+            // Latin look-alikes outside ASCII.
+            'ɑ' => 'a',
+            'ɡ' => 'g',
+            'ı' | 'ɩ' => 'i',
+            'ȷ' => 'j',
             other => other,
         })
         .collect()
@@ -224,6 +244,17 @@ mod tests {
     #[test]
     fn confusables_fold_to_latin() {
         assert_eq!(fold_confusables(&normalize("Dеlеtе")), "delete");
+        assert_eq!(fold_confusables(&normalize("ıɡnore")), "ignore");
+    }
+
+    #[test]
+    fn tag_characters_are_invisible_and_marks_strip() {
+        assert_eq!(normalize("De\u{E0041}lete"), "delete");
+        assert_eq!(
+            normalize_spaced("ignore\u{E0020}previous"),
+            "ignore previous"
+        );
+        assert_eq!(strip_marks(&normalize("ign\u{301}óre")), "ignore");
     }
 
     #[test]

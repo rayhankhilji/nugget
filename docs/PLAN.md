@@ -24,9 +24,9 @@ What remains for v1 is mostly [wave Y](waves/wave-y/README.md), which produces t
 
 Also open, outside wave Y:
 - Double Tap p50 against a cloud model (target under 1.2 s) has never been measured; it needs a provider key.
-- The [M3–M6 security review](reviews/security-m3-m6.md) still lists 14 findings as Open. Code has regression tests for PA-1, PA-2, PA-3, PA-4, PA-6 and BR-9; PA-5, PA-7 and PM-1 to PM-6 show no fix yet. The table needs reconciling.
+- The [M3–M6 security review](reviews/security-m3-m6.md) is reconciled (Z4): 13 findings Fixed with their commits and regression tests, PM-4 Mitigated (an HTTP MCP client can still send its token to a port squatter while nuggetd is down; the stdio bridge avoids it).
 - The `memory --backend real` recall gate misses at standard scale by 0.002 (1 query of 500) with the hash embedder; it waits on a re-run with a real embedding model.
-- Battery cost per 1k items and idle overhead are not measured yet (`bench/perf` plan).
+- Battery cost per 1k items is not measured yet (idle overhead is, in X5: `perf.yml`).
 - The book's [What works today](book/src/status.md) page still describes wave W.
 
 ### v1 checklist

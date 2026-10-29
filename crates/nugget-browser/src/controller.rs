@@ -5,13 +5,14 @@
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
+use nugget_policy::{ActionContext, ActionDescriptor, Decision, PolicyGate, RiskClass};
 use serde::{Deserialize, Serialize};
 
 use crate::action::{BrowserAction, ValidationError, Verification, verify};
 use crate::bridge::{BridgeError, BrowserBridge};
 use crate::protocol::{ActResult, ErrorCode, HostRequest, SnapshotOptions};
 use crate::snapshot::{PageSnapshot, SnapshotDiff};
+use crate::tool::action_context;
 
 /// Asks the user to approve an action the policy marked `Confirm`. Fails closed: anything but
 /// an explicit yes is a no.
@@ -123,9 +124,15 @@ impl BrowserController {
         Ok(())
     }
 
-    /// Ask the gate (and the user, if needed) about `descriptor`.
-    async fn authorize(&self, descriptor: &ActionDescriptor) -> Result<(), BrowserError> {
-        match self.gate.evaluate(descriptor) {
+    /// Ask the gate (and the user, if needed) about `descriptor`, seen in `context` (built from
+    /// the snapshot the action is checked against, the same way the agent tools build it for
+    /// the loop's gate).
+    async fn authorize(
+        &self,
+        descriptor: &ActionDescriptor,
+        context: &ActionContext,
+    ) -> Result<(), BrowserError> {
+        match self.gate.evaluate_with_context(descriptor, context) {
             Decision::Allow => Ok(()),
             Decision::Deny(reason) => Err(BrowserError::Denied(reason)),
             Decision::Confirm(reason) => {
@@ -133,10 +140,11 @@ impl BrowserController {
                     // Approval can take a while; the user may have hit Stop meanwhile.
                     self.check_halt().await?;
                     // An approved action still counts against the task's rate limit.
-                    if !self
-                        .gate
-                        .record_approved(descriptor, descriptor.declared_risk)
-                    {
+                    if !self.gate.record_approved_with_context(
+                        descriptor,
+                        descriptor.declared_risk,
+                        context,
+                    ) {
                         return Err(BrowserError::Denied(format!(
                             "rate limit reached for {} actions in this task",
                             descriptor.declared_risk
@@ -176,7 +184,11 @@ impl BrowserController {
             declared_risk: RiskClass::Observe,
             task_id: task_id.to_owned(),
         };
-        self.authorize(&descriptor).await?;
+        // Reading judges the site (`target_app`) only. No page context: the classifier would
+        // read a checkout page's URL and title as a purchase being committed, and a read
+        // commits nothing.
+        self.authorize(&descriptor, &ActionContext::default())
+            .await?;
         self.lock().latest = Some(snap.clone());
         Ok(snap)
     }
@@ -197,7 +209,8 @@ impl BrowserController {
             );
         }
         // `target_app` is the current page's host, or the destination for `navigate`.
-        self.authorize(&descriptor).await?;
+        let context = action_context(Some(&action), latest.as_ref());
+        self.authorize(&descriptor, &context).await?;
 
         self.show_overlay().await;
         let value = self
