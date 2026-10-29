@@ -494,11 +494,21 @@ fn build_document(
         _ => nugget_extract::detect_mime(Some(path), &head[..n]),
     };
 
+    // Mail and calendar files name themselves (Subject, SUMMARY), which extraction reads; their
+    // file names (`mail-010.eml`) are not titles. Everything else is titled by its file name.
+    let self_titled = matches!(
+        mime.as_str(),
+        "message/rfc822"
+            | "message/global"
+            | "text/calendar"
+            | "application/ics"
+            | "text/x-vcalendar"
+    );
     let mut doc = Document::new(key, mime, Content::File(open_path));
     doc.title = path
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
-        .filter(|s| !s.is_empty());
+        .filter(|s| !s.is_empty() && !self_titled);
     doc.version = Some(version.to_string());
     doc.modified_at = md.modified().ok().map(OffsetDateTime::from);
     let furl = file_url(path);

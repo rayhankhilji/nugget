@@ -57,7 +57,7 @@ built. Linux and macOS only, because the bridge speaks to the daemon's Unix sock
 | every page | the page and its heading render, no uncaught page errors, no error notes (`.note-error`, `role=alert`) |
 | Status | the Items card shows 93 (the number of files in the corpus) |
 | Search | "Tidewater budget": the first hit mentions Tidewater and a "Tidewater…" title is in the top three |
-| Knowledge | at least 60 entities; Ada Wexford shows facts; "Why?" shows a quoted source from `cal-011`; the Graph tab draws a canvas with nodes |
+| Knowledge | at least 60 entities; Ada Wexford shows facts; "Why?" shows a quoted source titled by its calendar SUMMARY (`cal-011.ics`: "Wren Mobile usability test"); the Graph tab draws a canvas with nodes |
 | Sources | the `files-…` source lists more than 0 items |
 | Safety | the built-in rules table has rows |
 | Agent | the empty task history |

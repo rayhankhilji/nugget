@@ -175,7 +175,7 @@ function pageChecks({ expectedItems }) {
       await settle(page);
       await shot(page, "knowledge-entity");
 
-      // Open each fact's evidence until the cal-011 calendar item shows up with a quote.
+      // Open each fact's evidence until the "Wren Mobile usability test" calendar item (cal-011.ics) shows up with a quote.
       const quoted = async () =>
         detail.locator("ul.evidence > li").evaluateAll((lis) =>
           lis.map((li) => ({
@@ -187,14 +187,14 @@ function pageChecks({ expectedItems }) {
         const b = why.nth(i);
         if ((await b.getAttribute("aria-expanded")) !== "true") await b.click();
         const ev = await quoted();
-        if (ev.some((e) => e.title.includes("cal-011") && e.quote)) break;
+        if (ev.some((e) => e.title.includes("Wren Mobile usability test") && e.quote)) break;
       }
-      const ev = await until('"Why?" shows a quoted source from cal-011', async () => {
+      const ev = await until('"Why?" shows a quoted source from the Wren Mobile usability test event', async () => {
         const ev = await quoted();
-        return [ev.some((e) => e.title.includes("cal-011") && e.quote.length > 0), ev.map((e) => e.title)];
+        return [ev.some((e) => e.title.includes("Wren Mobile usability test") && e.quote.length > 0), ev.map((e) => e.title)];
       });
       log(`  evidence sources: ${[...new Set(ev)].join(", ")}`);
-      const cal = detail.locator("ul.evidence > li", { has: page.locator(".evidence-title", { hasText: "cal-011" }) }).first();
+      const cal = detail.locator("ul.evidence > li", { has: page.locator(".evidence-title", { hasText: "Wren Mobile usability test" }) }).first();
       await cal.scrollIntoViewIfNeeded();
       await shot(page, "knowledge-why");
 
