@@ -13,6 +13,7 @@
     "test:watch": "vitest",
     "test:flows": "vitest run tests",
     "e2e": "node e2e/run.mjs",
+    "screenshots": "node e2e/screenshots.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

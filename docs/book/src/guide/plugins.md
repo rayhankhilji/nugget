@@ -1,11 +1,11 @@
 # Plugins
 
-> **Status: being wired in (wave W).** The plugin host (`nugget-plugin`: WebAssembly components,
-> capabilities, limits, signed packages, the plugin store) and its guest SDK are built and tested.
-> The daemon methods (`plugins.list`, `plugins.inspect`, `plugins.install`, `plugins.approve`,
-> `plugins.remove`, `plugins.enable`), plugin sources in the Sources wizard, plugin tools for the
-> agent and the **Plugins** page are being connected in this wave. This page describes the
-> behaviour of the built host.
+> **Status:** you install, approve, enable and remove plugins on the **Plugins** page, and plugin
+> tools are available to the [agent](agent.md) as soon as a plugin is enabled. The daemon serves
+> `plugins.list`, `plugins.inspect`, `plugins.install`, `plugins.approve`, `plugins.remove` and
+> `plugins.enable`. Two gaps: a connector plugin becomes a source kind only after Nugget restarts,
+> and the **Add source** wizard does not list plugin kinds yet, so a plugin source is added through
+> [`sources.add`](../reference/ipc.md).
 
 Plugins add **connectors** (new kinds of source, such as an RSS or Atom feed) and **read-only tools**
 for the [agent](agent.md). They are WebAssembly components that run in a sandbox inside the daemon,
@@ -22,8 +22,8 @@ On the **Plugins** page:
 2. Nugget checks its **signature** before reading anything else in it, and shows the plugin's name,
    version, publisher key and the **capabilities** it asks for.
 3. Approve the capabilities, or cancel.
-4. Enable the plugin. A connector plugin then appears as a new kind in the Sources wizard
-   (`plugin:<id>`); a tool plugin's tools become available to the agent.
+4. Enable the plugin. A tool plugin's tools become available to the agent at once. A connector
+   plugin adds a source kind `plugin:<id>` after Nugget restarts (see the status note above).
 
 You can disable or remove a plugin at any time. Installs, approvals and removals are in the audit
 log.
@@ -55,7 +55,8 @@ There is no filesystem, no sockets, no environment variables and no access to ot
 store or your other sources. Tools are read-only: during a tool call a plugin may only make `GET` and
 `HEAD` requests and read its store and secrets.
 
-Blocking declared hosts that resolve to a private or loopback address is being added in this wave.
+A declared host that is, or resolves to, a loopback, private, link-local or other non-public address
+is refused, and the request connects only to the addresses that were checked.
 
 ## Limits
 

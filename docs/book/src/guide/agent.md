@@ -1,11 +1,10 @@
 # The agent and computer use
 
-> **Status: being wired in (wave W).** The agent loop (`nugget-agent`), the safety policy
-> (`nugget-policy`) and the browser bridge (`nugget-browser` and the browser extension) are built
-> and tested as libraries. The daemon methods (`agent.run`, `agent.cancel`, `agent.confirm`,
-> `agent.list`, `agent.get`), the **Agent** page and the desktop computer-use tools are being
-> connected in this wave. Nothing runs an agent in the shipped app yet. This page describes the
-> behaviour of the built pieces.
+> **Status:** the agent runs from the **Agent** page, with browser tools (through the Nugget browser
+> extension), computer-use tools for desktop apps and tools from your plugins, all under the
+> [safety policy](safety.md). The daemon serves `agent.run`, `agent.cancel`, `agent.confirm`,
+> `agent.answer`, `agent.list` and `agent.get`. A task that was waiting for your answer when the
+> daemon stopped is not resumed; it shows as interrupted.
 
 The agent carries out a multi-step task for you: you give it a goal, and it works through your apps
 and your browser one step at a time, under a [safety policy](safety.md) that you control.
@@ -29,7 +28,7 @@ what was asked, every action, every decision and how each change verified.
 |---|---|
 | Built-in | `finish` (end the task, saying whether it succeeded), `ask_user` (ask you a question), `note` (keep a working note) |
 | Browser | Snapshot a page, click, type, select, scroll, navigate, submit a form, wait for an element. Only on sites you have allowed in the Nugget browser extension |
-| Computer use | Reading and acting on desktop apps through the accessibility APIs (being built in this wave) |
+| Computer use | Reading and acting on desktop apps through the accessibility APIs: observe a window, click, type, press a key, set a value, scroll, open an app, wait for an element. It acts on elements, never on screen coordinates. On by default; `computer_use = false` under `[agent]` turns it off |
 | Plugins | Read-only tools from installed [plugins](plugins.md) |
 
 ### The browser extension
