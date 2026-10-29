@@ -646,7 +646,15 @@ impl UiaDriver {
             // Each input focuses the field first (a no-op when it has focus); Tab then leaves
             // it, which commits the change.
             for input in inputs {
+                // A list's type-ahead commits on the first letter that picks the option; the
+                // page then reloads, and the rest of the input has nothing left to do.
+                if version() != v0 {
+                    return ok();
+                }
                 if let Err(e) = self.sys.key_input(Some(&real.id), &input) {
+                    if self.await_effect(&v0, version, EFFECT) {
+                        return ok();
+                    }
                     return fail(format!("keyboard input failed: {e}"));
                 }
             }
