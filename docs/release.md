@@ -70,6 +70,32 @@ A local build has no updater key (see §4), so it shows "this build can't update
 the update path, generate a throwaway key (`pnpm tauri signer generate -w /tmp/test.key`) and export
 `NUGGET_UPDATER_PUBKEY="$(cat /tmp/test.key.pub)"` before building.
 
+### Sizes and sidecar layout
+
+Installer sizes from the unsigned dry-run bundles (§3, *Dry run*). Signed builds differ by a few
+KB (signatures, notarization ticket). Each `bundle-report-<target>` also lists where `nuggetd`
+ended up inside the bundle; it should match the table above.
+
+<!-- sizes:begin -->
+| Platform | Installer | Size | Notes |
+|---|---|---|---|
+| macOS Apple silicon | `Nugget_<v>_aarch64.dmg` | 26.5 MiB | `.app` is 67.8 MiB on disk: `nugget-desktop` 15.3 MiB, `nuggetd` 52.4 MiB |
+| macOS Intel | `Nugget_<v>_x64.dmg` | 28.9 MiB | `.app` is 76.4 MiB on disk: `nugget-desktop` 16.2 MiB, `nuggetd` 59.5 MiB |
+| macOS (both) | `Nugget_<v>_<arch>.app.tar.gz` (updater payload) | 26.5 / 29.0 MiB | aarch64 / x64 |
+| Windows x64 | `Nugget_<v>_x64-setup.exe` (NSIS) | 19.4 MiB | LZMA solid; unpacks to 76.7 MiB (`nugget-desktop.exe` 17.8, `nuggetd.exe` 58.8) |
+| Windows x64 | `Nugget_<v>_x64_en-US.msi` | 28.1 MiB | installs to `Program Files\Nugget\{nugget-desktop,nuggetd}.exe` |
+| Linux x64 | `Nugget_<v>_amd64.AppImage` | 105.4 MiB | carries its own GTK/WebKitGTK libraries; `usr/bin/{nugget-desktop,nuggetd,xdg-open}` |
+| Linux x64 | `Nugget_<v>_amd64.deb` | 34.1 MiB | `/usr/bin/nugget-desktop` 23.4 MiB, `/usr/bin/nuggetd` 71.1 MiB |
+| Linux x64 | `Nugget-<v>-1.x86_64.rpm` | 34.1 MiB | same layout as the `.deb` |
+| Linux arm64 | AppImage / `.deb` / `.rpm` | 102.6 / 33.2 / 33.2 MiB | `nuggetd` 64.1 MiB |
+
+Measured from release dry run [40812638488](https://github.com/rayhankhilji/nugget/actions/runs/40812638488)
+(version 0.0.1) on 2026-10-29. Every installer puts `nuggetd` next to `nugget-desktop`, as in
+§2. `nuggetd` is three quarters of every bundle; the release profile keeps symbol tables
+(no `strip`), so `strip = "symbols"` in `[profile.release]` is the first thing to try if size
+matters. Each dry run writes the same tables to its job summary (`bundle-report-<target>`).
+<!-- sizes:end -->
+
 ## 3. Release workflow
 
 `.github/workflows/release.yml`, top-level `permissions: {}`. Each job asks for only what it needs,
@@ -111,8 +137,8 @@ and every action is pinned to a commit SHA.
    if it is not a prerelease. It only moves a feed forward (semver), so publishing an old patch
    release never pulls anyone back.
 
-A `workflow_dispatch` run is a dry run: unsigned bundles from any ref, uploaded as workflow
-artifacts, with no release created.
+A `workflow_dispatch` run with `dry_run: true` (the default) builds unsigned bundles from any ref,
+uploads them as workflow artifacts, and creates no release; see *Dry run* below.
 
 ### Repository setup (once)
 
@@ -125,6 +151,187 @@ artifacts, with no release created.
   publish it in this file (below) so anyone can check a payload by hand.
 - **Tag protection** (repository rules): only maintainers may create `v*` tags, and tags require
   signatures.
+
+Put every signing secret in its **environment**, never at repository level. A repository secret
+is readable by any workflow on any branch; an environment secret only by a job that deploys to
+that environment, which the `v*` tag rule limits to release tags.
+
+### Secrets and variables checklist
+
+| Name | Kind, where | Read by | What it is, how to make it | When absent |
+|---|---|---|---|---|
+| `APPLE_CERTIFICATE` | secret, `release-build` | `build` (macOS) | *Developer ID Application* certificate with its private key, exported from Keychain Access as `.p12`, then `base64 -i cert.p12` | Ad-hoc signed (`signingIdentity: "-"`), not notarized, warning in the log. Gatekeeper blocks it on users' machines. |
+| `APPLE_CERTIFICATE_PASSWORD` | secret, `release-build` | `build` (macOS) | The password set on the `.p12` export | Needed whenever `APPLE_CERTIFICATE` is set; the import fails without it. |
+| `APPLE_SIGNING_IDENTITY` | secret, `release-build` | `build` (macOS) | e.g. `Developer ID Application: Name (TEAMID)`; list with `security find-identity -v -p codesigning` | Optional in the workflow; set it if Tauri can't pick the identity from the imported certificate. |
+| `APPLE_API_ISSUER` | secret, `release-build` | `build` (macOS) | App Store Connect → Users and Access → Integrations → Team Keys: the Issuer ID | Signed but not notarized, warning. All three API values are needed to notarize. |
+| `APPLE_API_KEY_ID` | secret, `release-build` | `build` (macOS) | The Key ID of a team API key (role *Developer* is enough) | As above. |
+| `APPLE_API_KEY_P8` | secret, `release-build` | `build` (macOS) | The text of `AuthKey_<id>.p8` (plain PEM, not base64). It can be downloaded only once. | As above. |
+| `WINDOWS_CERTIFICATE` | secret, `release-build` | `build` (Windows) | Authenticode code-signing certificate with private key as `.pfx`, then `base64 -w0 cert.pfx` | Installers, app and sidecar unsigned, warning. SmartScreen warns users. |
+| `WINDOWS_CERTIFICATE_PASSWORD` | secret, `release-build` | `build` (Windows) | The `.pfx` password | Needed whenever `WINDOWS_CERTIFICATE` is set; the import fails without it. |
+| `TAURI_SIGNING_PRIVATE_KEY` | secret, `release` | `sign` | Updater minisign key, from the key ceremony (§4) | The draft is created without `.sig` files or `latest.json` (warning); `channels` then leaves the feeds unchanged, so installed apps never see the release. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret, `release` | `sign` | The password chosen at `signer generate` | With the key set, `tauri signer sign` fails and the job stops. |
+| `NUGGET_UPDATER_PUBKEY` | repository variable | `build` (tag pushes only), `sign` | The text of `nugget-updater.key.pub` | `build`: the app is compiled with no updater ("this build can't update itself"). `sign`: treated like a missing key. |
+| `GITHUB_TOKEN` | automatic | `sign`, `channels` | Scoped by each job's `permissions` | n/a |
+
+`NUGGET_UPDATER_FEED` is an optional build-time variable that overrides the feed base URL
+(`updater.rs`); CI doesn't set it, so release builds use the `updater-feed` release.
+
+**Windows certificate caveat.** Since mid-2023, CAs issue OV and EV code-signing keys only on
+hardware (a USB token or an HSM), so an exportable `.pfx` is no longer the normal case. The
+realistic options for CI are a cloud signing service (Azure Trusted Signing, DigiCert KeyLocker,
+SSL.com eSigner and similar), which needs a custom `bundle.windows.signCommand` instead of the
+`.pfx` import above. That path isn't implemented. An EV certificate no longer skips SmartScreen
+reputation either; new publishers see warnings until downloads build reputation.
+
+**Manifest signing keys.** Besides the updater key, the repository has two ed25519 signing
+schemes. Neither uses a CI secret today:
+
+- **Model and runtime manifest** (`manifests/default.json` + `default.json.sig`, verified by
+  `nugget-models`). The manifest is compiled into `nuggetd` (`include_bytes!`) and checked at
+  daemon start against the keys returned by `trusted_keys()`, which is only the **development**
+  public key `DEV_PUBLIC_KEY_HEX` in `crates/nugget-models/src/manifest.rs`. A maintainer signs it
+  locally whenever the manifest changes:
+
+  ```sh
+  cargo run -p nugget-models --example sign-manifest -- --generate-key ~/.config/nugget/manifest-dev.key  # once
+  NUGGET_MANIFEST_SIGNING_KEY_FILE=~/.config/nugget/manifest-dev.key \
+    cargo run -p nugget-models --example sign-manifest -- manifests/default.json
+  cargo run -p nugget-models --example sign-manifest -- --verify manifests/default.json
+  ```
+
+  (`NUGGET_MANIFEST_SIGNING_KEY`, 64 hex chars, works instead of the file.) A stale or wrong
+  signature fails the `nugget-models` tests in CI, and at runtime the daemon logs "bundled model
+  manifest failed verification" and offers no model downloads. There is **no release manifest
+  key** yet: releases ship trusting the development key (see §8).
+- **Plugin packages** (`plugin.sig`, `nugget-plugin`). There is no project-wide plugin key. Users
+  list the publishers they trust in `[plugins] trusted_keys`; authors sign with
+  `cargo run -p nugget-plugin --example sign-plugin` and `NUGGET_PLUGIN_SIGNING_KEY` (or
+  `_FILE`). Nothing in the release pipeline touches plugin keys.
+
+The channel feeds (`beta.json`, `stable.json`) and `latest.json` are not signed as a whole; only
+the payloads they point at are (§8).
+
+### Dry run
+
+Use it to check that installers build, before a tag or after changing packaging.
+
+```sh
+gh workflow run release.yml --ref <branch> -f dry_run=true
+```
+
+or Actions → **Release** → *Run workflow*, pick the branch, leave *dry_run* ticked.
+
+With `dry_run: true` (the default) the workflow, from any branch:
+
+- builds every target in the matrix (§1) with the `nuggetd` sidecar: macOS `.app`/`.dmg` (ad-hoc
+  signed), Windows NSIS and MSI (unsigned), Linux AppImage, `.deb` and `.rpm`;
+- uploads each target's installers as the workflow artifact `bundle-<target>` (kept 14 days),
+  plus `bundle-report-<target>`, a size and sidecar-layout report that also appears in the job
+  summary;
+- runs the AppImage smoke test (below) on Linux x64;
+- never enters the `release-build` or `release` environment, never reads a signing secret or
+  `NUGGET_UPDATER_PUBKEY`, and never signs, notarizes, drafts or publishes anything. The apps it
+  builds have no updater.
+
+`dry_run: false` is accepted only on a `v*` tag ref. It re-runs a real release for that tag, with
+the same environments, approvals and draft as a tag push. On any other ref the workflow fails at
+the start.
+
+Installing a dry-run build by hand:
+
+- **macOS:** Gatekeeper says the app is from an *unidentified developer* (or "is damaged" for a
+  downloaded quarantined copy). Right-click the app → *Open* → *Open*, or clear the quarantine flag:
+  `xattr -dr com.apple.quarantine /Applications/Nugget.app`.
+- **Windows:** SmartScreen shows *Windows protected your PC*: *More info* → *Run anyway*.
+- **Linux:** no prompt; `chmod +x` the AppImage.
+
+### Smoke test
+
+`.github/workflows/package-smoke.yml` runs `packaging/scripts/smoke-appimage.sh` on pull requests
+that touch `apps/desktop/`, `crates/` or `packaging/`, and the release dry run runs the same script
+on Linux x64 against the AppImage that run uploads. The workflow builds the AppImage with the
+sidecar staged as in §2; the script then:
+
+1. starts it with throwaway `HOME`, XDG and `NUGGET_HOME` directories (`NUGGET_TRAY=off`);
+2. runs it under Xvfb with the openbox window manager;
+3. waits, with a time limit, for a window named `Nugget`, the app log line `connected to nuggetd`
+   and the daemon's own log (`nuggetd ready`). The app must log `starting nuggetd` itself: it starts
+   the bundled sidecar at launch when no daemon answers;
+4. closes the window through the window manager (`wmctrl`, a `WM_DELETE_WINDOW` request, like a
+   user clicking ×) and expects the app to exit with status 0;
+5. sends SIGTERM to the daemon it started.
+
+Any step that times out fails the job. macOS and Windows installers have no automated launch
+test yet.
+
+### Cutting a release
+
+1. **Dry run first** on the commit you intend to tag (above). All required targets green, smoke
+   test passed, sizes sane.
+2. **Bump the version** in one PR: `version` in `apps/desktop/src-tauri/tauri.conf.json`,
+   `[workspace.package] version` in the root `Cargo.toml` and the internal crate versions under
+   `[workspace.dependencies]` next to it (`cargo-deny` needs them in step), and
+   `apps/desktop/package.json`. Run `cargo update -w` so `Cargo.lock` follows. Merge.
+3. **Tag** the merge commit with an annotated, signed tag. The message is the release notes:
+
+   ```sh
+   git tag -s v0.1.0 -m "Nugget 0.1.0
+
+   - what changed, for users"
+   git push origin v0.1.0
+   ```
+
+   Use `vX.Y.Z-beta.N` for a beta. A hyphen makes the release a prerelease, which only the beta
+   channel receives.
+4. **Watch `build` and `sbom`.** The macOS jobs log whether they signed and notarized, and Windows
+   whether it signed; a warning there means a missing secret. Linux arm64 may fail without
+   blocking.
+5. **Approve `sign`.** A second maintainer (not the tagger) reviews the run and approves the
+   `release` environment.
+6. **Review the draft** on the Releases page: every installer is attached with its `.sig`,
+   `latest.json` lists each platform, `SHA256SUMS` matches (`sha256sum -c SHA256SUMS` after
+   downloading), the notes are right, and an installer from it installs and starts on at least
+   one OS. Check one provenance attestation with `gh attestation verify`.
+7. **Publish.** That triggers `channels`, which moves the feeds. Check the run log for
+   `beta -> vX` (and `stable -> vX`).
+
+### How the update feed moves
+
+```
+tag push ─► build ─► sign (approved) ─► draft release ─► Publish ─► channels ─► updater-feed/beta.json
+                                                                              └► updater-feed/stable.json (not prereleases)
+```
+
+- Nothing reaches users before *Publish*. A draft never triggers `channels`.
+- `channels` downloads the published release's `latest.json` and, for each channel it applies to,
+  runs `updater_manifest.py promote latest.json current.json`. That prints the new version only if
+  it is **strictly newer** (SemVer 2.0 precedence; build metadata ignored) than the version the
+  feed already holds, or if the feed is empty. Otherwise the feed stays as it is and the job logs
+  `keeping <current>: <new> is not newer`. So publishing an older patch, or re-publishing the same
+  version, never moves a feed.
+- A release without `latest.json` (no updater key) leaves both feeds unchanged.
+- Installed apps also refuse to go backwards: the updater only offers a version newer than the one
+  running.
+
+**Pulling a bad release.** Neither the pipeline nor the app can downgrade anyone, so the fix for
+people who already installed it is always a **newer** release. To stop it spreading meanwhile:
+
+1. Point the feed back at the last good release by hand. `promote` would refuse this, so
+   upload directly:
+
+   ```sh
+   gh release download vGOOD -p latest.json -O stable.json
+   gh release upload updater-feed --clobber stable.json      # likewise beta.json if needed
+   ```
+
+   Apps still on the good version then see no update. Apps already on the bad version stay on it.
+2. Mark the bad release as a prerelease or take it back to draft (`gh release edit vBAD --draft`)
+   so nobody downloads it from the Releases page. Don't delete its assets while a feed still
+   points at them, or updates fail with a download error instead.
+3. Fix, bump to the next patch version and release as usual. `promote` accepts it because it is
+   newer than both the bad and the restored version.
+
+If the bad release was signed with a compromised key, follow *Rotation* in §4 instead.
 
 ## 4. Updater key: the two-person process
 
@@ -249,3 +456,11 @@ ones extracted from the installer, ignoring signature sections.
 - The `updater-feed` manifests are unsigned JSON, as Tauri designs it. A forged feed can only point
   at payloads, and those still need a valid signature. A forged feed could withhold updates
   (freeze attack); manifest signing would close that.
+- No release key for the model manifest: `trusted_keys()` returns only the development key, so a
+  release build trusts whoever holds that key. A release key, held offline like the updater
+  key, should replace it before 1.0. The `version` serial in the manifest is documented as
+  rollback protection, but since the manifest is only ever bundled, nothing checks it yet.
+- Windows signing only supports an exportable `.pfx`. Hardware-backed and cloud signing (the normal
+  case for new certificates) needs a `signCommand` path that isn't written.
+- No automated launch test for the macOS or Windows installers; only the Linux AppImage is
+  smoke-tested.

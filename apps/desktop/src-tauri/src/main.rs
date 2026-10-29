@@ -147,10 +147,14 @@ fn main() {
             app.manage(window_state);
             autostart::reconcile(app.handle());
             agent::setup(app);
-            // Connect early so the tray reflects the daemon state before the window asks.
+            // Connect early so the tray reflects the daemon state before the window asks, starting
+            // the bundled nuggetd if none is answering (the Offline screen offers a retry).
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let daemon = handle.state::<daemon::Daemon>();
+                if let Err(e) = daemon.start(&handle).await {
+                    tracing::warn!(error = %e, "couldn't start nuggetd");
+                }
                 let _ = daemon.connection_info(&handle).await;
             });
             updater::spawn_background_checks(app.handle());
@@ -176,6 +180,9 @@ fn main() {
                     if tray::has_tray(window.app_handle()) {
                         api.prevent_close();
                         let _ = window.hide();
+                    } else {
+                        // Hidden helper windows (the Double Tap overlay) would keep the app alive.
+                        window.app_handle().exit(0);
                     }
                 }
                 _ => {}

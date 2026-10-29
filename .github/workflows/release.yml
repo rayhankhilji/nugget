@@ -18,8 +18,15 @@ on:
     tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
   release:
     types: [published]
-  # Dry run: build unsigned bundles from any ref; nothing is signed or released.
+  # Dry run (the default): build unsigned bundles from any ref and upload them as workflow
+  # artifacts; no signing secret is read and nothing is signed, notarised or released.
+  # `dry_run: false` re-runs a real release and is accepted only on a `v*` tag ref.
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: unsigned installers as workflow artifacts, nothing published"
+        type: boolean
+        default: true
 
 permissions: {}
 
@@ -34,14 +41,48 @@ env:
   RUSTUP_MAX_RETRIES: "10"
 
 jobs:
+  # Decides once whether this run is a real release; every later job reads `needs.mode`.
+  mode:
+    name: Release or dry run
+    if: github.event_name != 'release'
+    runs-on: ubuntu-22.04
+    permissions: {}
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.mode.outputs.release }}
+    steps:
+      - id: mode
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          release=false
+          if [ "$EVENT" = push ]; then
+            release=true
+          elif [ "$DRY_RUN" = false ]; then
+            case "$GITHUB_REF" in
+              refs/tags/v[0-9]*) release=true ;;
+              *) echo "::error::dry_run=false needs a v* tag ref, not $GITHUB_REF"; exit 1 ;;
+            esac
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          if [ "$release" = true ]; then
+            echo "Real release of $GITHUB_REF_NAME" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Dry run of $GITHUB_REF_NAME: unsigned installers as workflow artifacts; nothing is signed or published." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   build:
     name: Build (${{ matrix.target }})
-    if: github.event_name != 'release'
+    needs: mode
     runs-on: ${{ matrix.os }}
     # OS signing secrets live in this environment, which only `v*` tags may use. Dry runs get none.
-    environment: ${{ github.event_name == 'push' && 'release-build' || '' }}
+    environment: ${{ needs.mode.outputs.release == 'true' && 'release-build' || '' }}
     permissions:
       contents: read
+    env:
+      RELEASE: ${{ needs.mode.outputs.release }}
     timeout-minutes: 120
     # Linux arm64 runners are newer; a failure there must not hold back the other platforms.
     continue-on-error: ${{ matrix.experimental }}
@@ -70,7 +111,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Check the tag matches the app version
-        if: github.event_name == 'push'
+        if: env.RELEASE == 'true'
         shell: bash
         run: |
           app=$(python3 -c "import json;print(json.load(open('apps/desktop/src-tauri/tauri.conf.json'))['version'])")
@@ -127,12 +168,13 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          # A dry run never reads the signing secrets, even repository-level ones.
+          APPLE_CERTIFICATE: ${{ env.RELEASE == 'true' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ env.RELEASE == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ env.RELEASE == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_API_ISSUER: ${{ env.RELEASE == 'true' && secrets.APPLE_API_ISSUER || '' }}
+          APPLE_API_KEY_ID: ${{ env.RELEASE == 'true' && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_KEY_P8: ${{ env.RELEASE == 'true' && secrets.APPLE_API_KEY_P8 || '' }}
         # Tauri treats a variable that is set but empty as configured, so each one is exported
         # to the build step only when its secret exists.
         run: |
@@ -163,8 +205,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'signing.json'
           if (-not $env:WINDOWS_CERTIFICATE) {
@@ -190,7 +232,7 @@ jobs:
         shell: bash
         env:
           # Public key only: the app verifies updates against it. Set as a repository variable.
-          NUGGET_UPDATER_PUBKEY: ${{ github.event_name == 'push' && vars.NUGGET_UPDATER_PUBKEY || '' }}
+          NUGGET_UPDATER_PUBKEY: ${{ env.RELEASE == 'true' && vars.NUGGET_UPDATER_PUBKEY || '' }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
           pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
@@ -223,9 +265,40 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Installer sizes and where the sidecar lands, in the job summary and as an artifact.
+      - name: Size and layout report
+        shell: bash
+        run: |
+          packaging/scripts/bundle-report.sh "${{ matrix.target }}" "$RUNNER_TEMP/out" \
+            "target/${{ matrix.target }}/release/bundle" > "$RUNNER_TEMP/bundle-report.md"
+          cat "$RUNNER_TEMP/bundle-report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bundle-report-${{ matrix.target }}
+          path: ${{ runner.temp }}/bundle-report.md
+          retention-days: 14
+
+      # The real AppImage this run produced: window, sidecar spawn and connect, clean quit.
+      - name: AppImage smoke test
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb openbox wmctrl xdotool imagemagick dbus-x11
+          packaging/scripts/smoke-appimage.sh "$RUNNER_TEMP"/out/*.AppImage
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        with:
+          name: smoke-${{ matrix.target }}
+          path: ${{ runner.temp }}/smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
   sbom:
     name: SBOMs
-    if: github.event_name != 'release'
+    needs: mode
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -266,8 +339,8 @@ jobs:
 
   sign:
     name: Sign updates and draft the release
-    needs: [build, sbom]
-    if: github.event_name == 'push'
+    needs: [mode, build, sbom]
+    if: needs.mode.outputs.release == 'true'
     runs-on: ubuntu-22.04
     # Required reviewers (a second maintainer, self-review prevented) and a `v*` tag rule.
     # The updater private key exists only in this environment's secrets.
