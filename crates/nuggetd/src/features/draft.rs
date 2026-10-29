@@ -206,6 +206,12 @@ impl DraftSection {
     }
 }
 
+/// The engine config for the `[draft]` table `table`, exactly as Double Tap builds it (an
+/// invalid table is an error, as for the draft feature).
+pub(crate) fn draft_config_from_table(table: &toml::Table) -> Result<DraftConfig> {
+    Ok(section::<DraftSection>("draft", table)?.draft_config())
+}
+
 /// Opens the provider's connection (and starts a stopped local server) on trigger.
 struct ProviderWarmer;
 
