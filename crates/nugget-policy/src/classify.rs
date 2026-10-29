@@ -237,10 +237,12 @@ impl RiskClassifier {
 
         // 4. Context: what a generic affirmative, an icon-only button, a submit or Enter inherits.
         let context = self.context_risk(action, ctx, &apps);
-        let label_is_dismissive = label
+        // Compared without a leading role word, so a browser's `button "OK"` reads as "OK".
+        let bare = label.as_deref().map(|l| lead_words(l).join(" "));
+        let label_is_dismissive = bare
             .as_deref()
             .is_some_and(|l| self.dismissives.contains(trim_label(l)));
-        let generic = label
+        let generic = bare
             .as_deref()
             .is_none_or(|l| trim_label(l).is_empty() || self.affirmatives.contains(trim_label(l)))
             || ctx

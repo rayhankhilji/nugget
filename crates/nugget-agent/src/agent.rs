@@ -667,9 +667,8 @@ impl Agent {
         });
 
         let t0 = Instant::now();
-        let mut decision = self
-            .gate
-            .evaluate_with_context(&descriptor, &tool.context(&args));
+        let action_ctx = tool.context(&args);
+        let mut decision = self.gate.evaluate_with_context(&descriptor, &action_ctx);
         let mut forced = false;
         // After a suspected injection: anything above Edit asks, and so does an Edit that acts on
         // something only the injected text named (an address, an item); other edits go ahead.
@@ -735,7 +734,11 @@ impl Agent {
                     // An approval counts against the task's rate limit for its risk class; past
                     // the limit the action is denied even though the user approved it.
                     Ok(ConfirmAnswer::Approved)
-                        if !self.gate.record_approved(&descriptor, risk) =>
+                        if !self.gate.record_approved_with_context(
+                            &descriptor,
+                            risk,
+                            &action_ctx,
+                        ) =>
                     {
                         GateOutcome::Denied {
                             reason: format!(

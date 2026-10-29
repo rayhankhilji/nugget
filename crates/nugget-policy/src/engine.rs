@@ -1,7 +1,7 @@
 //! [`PolicyEngine`]: the [`PolicyGate`] every executor consults.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -13,7 +13,7 @@ use crate::log::{ActionLog, LogEvent};
 use crate::redact::RedactedAction;
 use crate::rules::{Effect, MatchInput, PolicyConfig, Rule, target_sets};
 use crate::store::PolicyStore;
-use crate::text::cap;
+use crate::text::{Keyword, cap, fold_confusables, normalize, trim_label};
 use crate::{ActionContext, ActionDescriptor, Decision, PolicyGate, RiskClass};
 
 /// A standing approval inside one task ("allow sending in this task").
@@ -275,13 +275,36 @@ impl PolicyEngine {
             .unwrap_or(0)
     }
 
-    /// Classify an action without deciding (no side effects).
+    /// Classify an action without deciding (no side effects): the [`RiskClassifier`], plus the
+    /// engine's remote-access rule (see [`remote_access`]).
     pub fn classify(
         &self,
         action: &ActionDescriptor,
         ctx: &ActionContext,
     ) -> crate::Classification {
-        self.classifier.classify_with_context(action, ctx)
+        let mut c = self.classifier.classify_with_context(action, ctx);
+        if let Some(why) = remote_access(action, ctx) {
+            if c.risk < RiskClass::Security {
+                c.risk = RiskClass::Security;
+                c.reasons.insert(0, why);
+            } else {
+                c.reasons.push(why);
+            }
+        }
+        c
+    }
+
+    /// [`PolicyGate::record_approved_with_context`] on the engine: counts the approval against
+    /// the task's limit for the effective risk (the larger of `risk` and what
+    /// [`PolicyEngine::classify`] makes of `action` in `ctx`), like [`PolicyEngine::consume`].
+    pub fn record_approved_in(
+        &self,
+        action: &ActionDescriptor,
+        risk: RiskClass,
+        ctx: &ActionContext,
+    ) -> bool {
+        let classified = self.classify(action, ctx).risk;
+        self.consume(&action.task_id, risk.max(classified))
     }
 
     /// Decide on an action, with context. An `Allow` consumes one unit of the task's rate limit
@@ -343,7 +366,8 @@ impl PolicyEngine {
         ctx: &ActionContext,
         rate_limited: bool,
     ) -> Assessment {
-        let classification = self.classifier.classify_with_context(action, ctx);
+        let remote = remote_access(action, ctx).is_some();
+        let classification = self.classify(action, ctx);
         let risk = classification.risk;
         let mut out = Assessment {
             decision: Decision::Allow,
@@ -428,6 +452,13 @@ impl PolicyEngine {
                     }
                 })
         };
+        // Enabling or changing remote access is confirmed every time: no user or default Allow
+        // rule ("trusted app"), and no per-task approval, lets it through unasked.
+        let (effect, rule_id) = if remote && effect == Effect::Allow {
+            (Effect::Confirm, "remote-access".to_string())
+        } else {
+            (effect, rule_id)
+        };
         out.rule = Some(rule_id);
 
         // Rate limit.
@@ -496,14 +527,22 @@ impl PolicyGate for PolicyEngine {
         self.assess(action, context).decision
     }
 
-    /// Counts the approval against the task's limit for the effective risk (the larger of
-    /// `risk` and what the classifier makes of `action`), like [`PolicyEngine::consume`].
+    /// Like [`PolicyGate::record_approved_with_context`] with an empty context. Callers that
+    /// know the context should use that one.
     fn record_approved(&self, action: &ActionDescriptor, risk: RiskClass) -> bool {
-        let classified = self
-            .classifier
-            .classify_with_context(action, &ActionContext::default())
-            .risk;
-        self.consume(&action.task_id, risk.max(classified))
+        self.record_approved_in(action, risk, &ActionContext::default())
+    }
+
+    /// Counts the approval against the task's limit for the effective risk (the larger of
+    /// `risk` and what the classifier makes of `action` in `context`), like
+    /// [`PolicyEngine::consume`].
+    fn record_approved_with_context(
+        &self,
+        action: &ActionDescriptor,
+        risk: RiskClass,
+        context: &ActionContext,
+    ) -> bool {
+        self.record_approved_in(action, risk, context)
     }
 }
 
@@ -533,6 +572,15 @@ impl PolicyGate for RecheckGate {
     fn record_approved(&self, _action: &ActionDescriptor, _risk: RiskClass) -> bool {
         true
     }
+
+    fn record_approved_with_context(
+        &self,
+        _action: &ActionDescriptor,
+        _risk: RiskClass,
+        _context: &ActionContext,
+    ) -> bool {
+        true
+    }
 }
 
 /// The most specific matching Allow/Confirm rule; ties go to Confirm, then to the earlier rule.
@@ -558,6 +606,296 @@ fn duplicate_id(rules: &[Rule]) -> Option<String> {
         .iter()
         .find(|r| !seen.insert(r.id.as_str()))
         .map(|r| r.id.clone())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Remote access. Turning on Remote Login (SSH), Screen Sharing, Remote Management, Remote
+// Desktop, VNC or a remote-support agent hands the machine to someone else. The settings-app rule
+// only sees System Settings; this one applies wherever the control is (a settings app, a router's
+// web page, a third-party app, a typed command), raises the action to Security and forces a
+// confirmation that no Allow rule or task approval skips.
+// ---------------------------------------------------------------------------------------------
+
+/// Phrases that name remote access, in a label or around a toggle.
+const REMOTE_ACCESS_PHRASES: &[&str] = &[
+    // English
+    "remote login",
+    "remote desktop",
+    "remote access",
+    "remote management",
+    "remote administration",
+    "remote assistance",
+    "remote support",
+    "remote control",
+    "remote apple events",
+    "remote connection*",
+    "remote shell",
+    "remote session*",
+    "allow remote",
+    "screen sharing",
+    "desktop sharing",
+    "share this computer",
+    "unattended access",
+    "vnc server",
+    "vnc access",
+    "enable vnc",
+    "enable rdp",
+    "allow rdp",
+    "ssh server",
+    "ssh access",
+    "ssh login",
+    "enable ssh",
+    "openssh server",
+    "secure shell server",
+    "secure shell access",
+    "teamviewer",
+    "anydesk",
+    "rustdesk",
+    "chrome remote desktop",
+    "remotedesktop",
+    // German / French / Spanish / Portuguese / Italian / Dutch
+    "entfernte anmeldung",
+    "entfernte verwaltung",
+    "bildschirmfreigabe",
+    "fernzugriff",
+    "fernwartung",
+    "remoteanmeldung",
+    "session à distance",
+    "accès à distance",
+    "bureau à distance",
+    "partage d’écran",
+    "partage d'écran",
+    "partage de l’écran",
+    "acceso remoto",
+    "escritorio remoto",
+    "inicio de sesión remoto",
+    "compartir pantalla",
+    "acesso remoto",
+    "área de trabalho remota",
+    "compartilhamento de tela",
+    "accesso remoto",
+    "desktop remoto",
+    "condivisione schermo",
+    "extern bureaublad",
+    "externe toegang",
+    "schermdeling",
+    // Russian / CJK
+    "удаленный доступ",
+    "удалённый доступ",
+    "удаленный рабочий стол",
+    "удалённый рабочий стол",
+    "远程桌面",
+    "远程登录",
+    "远程访问",
+    "远程管理",
+    "屏幕共享",
+    "遠端桌面",
+    "遠端登入",
+    "螢幕共享",
+    "リモートデスクトップ",
+    "リモートログイン",
+    "リモートマネージメント",
+    "画面共有",
+    "원격 데스크톱",
+    "원격 로그인",
+    "원격 관리",
+    "화면 공유",
+];
+
+/// Deep-link and URL fragments of remote-access settings pages, matched on the URL with every
+/// separator removed.
+const REMOTE_ACCESS_URLS: &[&str] = &[
+    "remotelogin",
+    "remotedesktop",
+    "remotemanagement",
+    "remoteaccess",
+    "remoteassistance",
+    "screensharing",
+    "sharingservices",
+    "preferencessharing",
+    "gnomecontrolcentersharing",
+];
+
+/// Commands that turn remote access on, matched on typed or run text.
+const REMOTE_ACCESS_COMMANDS: &[&str] = &[
+    "setremotelogin",
+    "kickstart -activate",
+    "ardagent",
+    "screensharing.plist",
+    "ssh.plist",
+    "systemctl enable ssh",
+    "systemctl enable --now ssh",
+    "systemctl start ssh",
+    "systemctl enable sshd",
+    "systemctl enable --now sshd",
+    "systemctl start sshd",
+    "service ssh start",
+    "grdctl",
+    "gnome-remote-desktop",
+    "x11vnc",
+    "vncserver",
+    "fdenytsconnections",
+    "enable-psremoting",
+    "winrm quickconfig",
+    "add-windowscapability -online -name openssh.server",
+    "openssh.server",
+    "start-service sshd",
+];
+
+/// Bare toggle labels that mean a remote-access service (Raspberry Pi, router and NAS panels).
+const REMOTE_SERVICE_TOGGLES: &[&str] = &["ssh", "sshd", "vnc", "rdp", "telnet", "sharing"];
+
+/// Labels that say nothing beyond "change this": what they change is in the context.
+const GENERIC_TOGGLE_LABELS: &[&str] = &[
+    "", "on", "off", "enable", "enabled", "disable", "disabled", "turn on", "turn off", "allow",
+    "ok", "apply", "save", "yes", "start", "activate", "switch", "toggle", "done",
+];
+
+const TOGGLE_ROLE_KEYS: &[&str] = &[
+    "checkbox",
+    "switch",
+    "togglebutton",
+    "toggle",
+    "radio",
+    "radiobutton",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "checkboxmenuitem",
+];
+
+/// Verbs that only look or move around (navigating to a settings page is not changing it).
+const PASSIVE_VERBS: &[&str] = &[
+    "snapshot",
+    "screenshot",
+    "observe",
+    "read",
+    "get",
+    "find",
+    "list",
+    "wait",
+    "waitfor",
+    "inspect",
+    "scroll",
+    "hover",
+    "focus",
+    "zoom",
+    "move",
+    "mousemove",
+    "navigate",
+    "open",
+    "openurl",
+    "openapp",
+    "goto",
+    "go",
+    "visit",
+    "load",
+    "browse",
+    "launch",
+];
+
+fn remote_phrases() -> &'static [Keyword] {
+    static K: OnceLock<Vec<Keyword>> = OnceLock::new();
+    K.get_or_init(|| {
+        REMOTE_ACCESS_PHRASES
+            .iter()
+            .map(|p| Keyword::new(p))
+            .collect()
+    })
+}
+
+fn phrase_in(text: &str) -> Option<&'static str> {
+    let n = normalize(text);
+    let folded = fold_confusables(&n);
+    // Separators as spaces too, so `Remote_Login` and `remote-desktop` read as words.
+    let spaced = normalize(&n.replace(['_', '-', '.', '/', ':', '?', '&', '='], " "));
+    remote_phrases()
+        .iter()
+        .find(|k| k.matches(&n) || k.matches(&folded) || k.matches(&spaced))
+        .map(Keyword::as_str)
+}
+
+fn compact(s: &str) -> String {
+    normalize(s)
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect()
+}
+
+/// A label with a leading role word (`checkbox "Remote Login"`) and quotes removed.
+fn bare_label(label: &str) -> String {
+    let n = normalize(label);
+    let mut words = n.split(' ').peekable();
+    if words.peek().is_some_and(|w| {
+        TOGGLE_ROLE_KEYS.contains(w) || matches!(*w, "button" | "link" | "menuitem" | "option")
+    }) {
+        words.next();
+    }
+    trim_label(&words.collect::<Vec<_>>().join(" ")).to_string()
+}
+
+/// Why `action` enables or changes remote access, if it does (see the section comment).
+pub(crate) fn remote_access(action: &ActionDescriptor, ctx: &ActionContext) -> Option<String> {
+    let verb: String = action
+        .verb
+        .to_lowercase()
+        .replace(['_', '-', '.', ':', '/'], " ");
+    let compact_verb: String = verb.chars().filter(|c| !c.is_whitespace()).collect();
+    let first = verb.split_whitespace().next().unwrap_or("");
+    if PASSIVE_VERBS.contains(&compact_verb.as_str()) || PASSIVE_VERBS.contains(&first) {
+        return None;
+    }
+    // A command typed or run anywhere.
+    if let Some(p) = action.text_preview.as_deref() {
+        let p = normalize(p);
+        if let Some(cmd) = REMOTE_ACCESS_COMMANDS.iter().find(|c| p.contains(*c)) {
+            return Some(format!("turns on remote access (command “{cmd}”)"));
+        }
+    }
+    // The target names remote access itself ("Remote Login", "Enable Remote Desktop").
+    let label = action.target_label.as_deref().unwrap_or("");
+    if let Some(word) = phrase_in(label) {
+        return Some(format!("changes remote access (“{word}”)"));
+    }
+    // A toggle or a generic control whose surroundings are about remote access.
+    let role = ctx
+        .role
+        .as_deref()
+        .map(|r| {
+            r.chars()
+                .filter(|c| !matches!(c, '_' | '-' | ' '))
+                .flat_map(char::to_lowercase)
+                .collect::<String>()
+        })
+        .unwrap_or_default();
+    let toggle = TOGGLE_ROLE_KEYS.contains(&role.as_str());
+    let bare = bare_label(label);
+    let generic = GENERIC_TOGGLE_LABELS.contains(&bare.as_str());
+    if !(toggle || generic) {
+        return None;
+    }
+    // A switch named after the service ("SSH", "VNC"; GNOME's Sharing panel master switch).
+    if toggle && REMOTE_SERVICE_TOGGLES.contains(&bare.as_str()) {
+        return Some(format!("changes remote access (the “{bare}” switch)"));
+    }
+    let around = [ctx.window_title.as_deref(), ctx.dialog_text.as_deref()]
+        .into_iter()
+        .flatten()
+        .chain(ctx.ancestors.iter().filter_map(|a| a.name.as_deref()));
+    for text in around {
+        if let Some(word) = phrase_in(text) {
+            return Some(format!("changes remote access (“{word}”)"));
+        }
+        if toggle && trim_label(&normalize(text)) == "sharing" {
+            return Some("changes remote access (the Sharing panel)".into());
+        }
+    }
+    if let Some(url) = ctx.url.as_deref() {
+        let c = compact(url);
+        if let Some(u) = REMOTE_ACCESS_URLS.iter().find(|u| c.contains(*u)) {
+            return Some(format!("changes remote access (page “{u}”)"));
+        }
+    }
+    None
 }
 
 /// A sentence the user can act on: what will happen, where, with what, and why we ask.
@@ -1222,5 +1560,282 @@ mod tests {
         assert!(is_deny(&e.evaluate_with_context(&a, &ctx)));
         let gate: &dyn PolicyGate = &e;
         assert!(is_deny(&gate.evaluate_with_context(&a, &ctx)));
+    }
+
+    // ---- record_approved with context ----
+
+    #[test]
+    fn record_approved_with_context_counts_the_contextual_risk() {
+        let e = Arc::new(engine());
+        e.update_config("limit", |c| {
+            c.rate_limits.insert(RiskClass::Spend, 1);
+        })
+        .unwrap();
+        // A generic "Continue" in a card form is a payment only in context.
+        let cont = act("shop.example", "click", Some("Continue"), RiskClass::Edit);
+        let ctx = ActionContext::default()
+            .with_role("button")
+            .with_form_fields(["Card number", "CVC", "Name on card"]);
+        assert_eq!(
+            e.classify(&cont, &ActionContext::default()).risk,
+            RiskClass::Edit
+        );
+        assert_eq!(e.classify(&cont, &ctx).risk, RiskClass::Spend);
+
+        let gate: &dyn PolicyGate = e.as_ref();
+        // Without the context the approval is counted as an Edit.
+        assert!(gate.record_approved(&cont, RiskClass::Edit));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 0);
+        assert_eq!(e.used("task-1", RiskClass::Edit), 1);
+        // With it, against the Spend limit, which then runs out.
+        assert!(gate.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
+        assert!(!gate.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
+
+        // A recheck gate never counts, with or without context.
+        let re = RecheckGate(Arc::clone(&e));
+        assert!(re.record_approved_with_context(&cont, RiskClass::Spend, &ctx));
+        assert_eq!(e.used("task-1", RiskClass::Spend), 1);
+
+        // A gate that only implements `record_approved` still gets the call.
+        struct Old(AtomicUsize);
+        impl PolicyGate for Old {
+            fn evaluate(&self, _: &ActionDescriptor) -> Decision {
+                Decision::Allow
+            }
+            fn halted(&self) -> bool {
+                false
+            }
+            fn record_approved(&self, _: &ActionDescriptor, _: RiskClass) -> bool {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                false
+            }
+        }
+        let old = Old(AtomicUsize::new(0));
+        assert!(!old.record_approved_with_context(&cont, RiskClass::Edit, &ctx));
+        assert_eq!(old.0.load(Ordering::SeqCst), 1);
+    }
+
+    // ---- remote access ----
+
+    /// An engine where the user trusts every app with everything (the worst case for the
+    /// remote-access rule).
+    fn trusting_engine() -> PolicyEngine {
+        let e = engine();
+        e.upsert_rule(
+            Rule::new("trust-all", Effect::Allow)
+                .targets(["*"])
+                .risks(RiskClass::ALL),
+        )
+        .unwrap();
+        e
+    }
+
+    fn toggle(app: &str, label: &str) -> ActionDescriptor {
+        act(app, "toggle", Some(label), RiskClass::Edit)
+    }
+
+    fn assert_remote(e: &PolicyEngine, a: &ActionDescriptor, ctx: &ActionContext) {
+        let r = e.assess(a, ctx);
+        assert_eq!(r.risk, RiskClass::Security, "{a:?} {ctx:?}");
+        assert!(is_confirm(&r.decision), "{a:?} {ctx:?}: {:?}", r.decision);
+        assert!(
+            r.reasons.iter().any(|w| w.contains("remote access")),
+            "{:?}",
+            r.reasons
+        );
+    }
+
+    #[test]
+    fn remote_access_toggles_in_settings_apps_always_confirm() {
+        let e = trusting_engine();
+        let switch = ActionContext::default().with_role("switch");
+        // macOS System Settings > General > Sharing.
+        for label in ["Remote Login", "Screen Sharing", "Remote Management"] {
+            assert_remote(&e, &toggle("com.apple.systempreferences", label), &switch);
+        }
+        // Windows Settings > System > Remote Desktop.
+        assert_remote(
+            &e,
+            &toggle("windows.immersivecontrolpanel", "Remote Desktop"),
+            &ActionContext::default().with_role("ToggleSwitch"),
+        );
+        assert_remote(
+            &e,
+            &act(
+                "systempropertiesremote.exe",
+                "click",
+                Some("Allow remote connections to this computer"),
+                RiskClass::Edit,
+            ),
+            &ActionContext::default().with_role("radio_button"),
+        );
+        // GNOME Settings > System > Remote Desktop, and the Sharing panel's master switch.
+        assert_remote(&e, &toggle("org.gnome.Settings", "Remote Desktop"), &switch);
+        assert_remote(&e, &toggle("gnome-control-center", "Sharing"), &switch);
+        // An unnamed switch on a remote-access pane, found by its window title or deep link.
+        assert_remote(
+            &e,
+            &act("org.gnome.Settings", "click", None, RiskClass::Edit),
+            &switch.clone().with_window_title("Remote Desktop"),
+        );
+        assert_remote(
+            &e,
+            &act(
+                "ms-settings:remotedesktop",
+                "click",
+                Some("On"),
+                RiskClass::Edit,
+            ),
+            &ActionContext::default()
+                .with_role("button")
+                .with_url("ms-settings:remotedesktop"),
+        );
+        // Per-task approvals do not skip it either (Security cannot be task-approved, and
+        // the forced confirmation sits after them).
+        let r = e.assess(
+            &toggle("com.apple.systempreferences", "Remote Login"),
+            &switch,
+        );
+        assert_eq!(r.rule.as_deref(), Some("remote-access"));
+    }
+
+    #[test]
+    fn remote_access_outside_settings_apps() {
+        let e = trusting_engine();
+        // A router's admin page in the browser.
+        assert_remote(
+            &e,
+            &act(
+                "192.168.1.1",
+                "click",
+                Some("checkbox \"Enable Remote Management\""),
+                RiskClass::Edit,
+            ),
+            &ActionContext::default()
+                .with_role("checkbox")
+                .with_url("http://192.168.1.1/admin/advanced.html"),
+        );
+        // A NAS panel with a bare "SSH" switch.
+        assert_remote(
+            &e,
+            &act(
+                "nas.local",
+                "click",
+                Some("switch \"SSH\""),
+                RiskClass::Edit,
+            ),
+            &ActionContext::default().with_role("switch"),
+        );
+        // Third-party remote-support apps.
+        assert_remote(
+            &e,
+            &toggle("com.teamviewer.TeamViewer", "Grant easy access"),
+            &ActionContext::default()
+                .with_role("checkbox")
+                .with_window_title("TeamViewer Options"),
+        );
+        assert_remote(
+            &e,
+            &toggle("com.philandro.anydesk", "Enable unattended access"),
+            &ActionContext::default().with_role("checkbox"),
+        );
+        // A generic "Turn on" in a dialog about remote desktop.
+        assert_remote(
+            &e,
+            &act(
+                "remotedesktop.google.com",
+                "click",
+                Some("Turn on"),
+                RiskClass::Edit,
+            ),
+            &ActionContext::default()
+                .with_role("button")
+                .with_dialog_text("Set up Chrome Remote Desktop on this computer"),
+        );
+        // A command typed into a terminal (or run by any shell tool).
+        let mut cmd = act("com.apple.terminal", "type", Some("Shell"), RiskClass::Edit);
+        cmd.text_preview = Some("sudo systemsetup -setremotelogin on".into());
+        assert_remote(&e, &cmd, &ActionContext::default());
+        // Localized labels.
+        assert_remote(
+            &e,
+            &toggle("com.apple.systempreferences", "Bildschirmfreigabe"),
+            &ActionContext::default().with_role("switch"),
+        );
+        assert_remote(
+            &e,
+            &toggle("com.apple.systempreferences", "远程登录"),
+            &ActionContext::default().with_role("switch"),
+        );
+    }
+
+    #[test]
+    fn unrelated_toggles_and_navigation_are_not_remote_access() {
+        let e = trusting_engine();
+        let switch = ActionContext::default().with_role("switch");
+        // Still Security (a settings app), but the user's Allow rule applies.
+        let dark = toggle("com.apple.systempreferences", "Dark Mode");
+        let r = e.assess(&dark, &switch);
+        assert_eq!(r.risk, RiskClass::Security);
+        assert_eq!(r.decision, Decision::Allow);
+        assert!(remote_access(&dark, &switch).is_none());
+        // A toggle elsewhere, a generic button on an unrelated page.
+        for (a, ctx) in [
+            (
+                toggle("com.apple.mail", "Show previews"),
+                switch.clone().with_window_title("Mail Settings"),
+            ),
+            (
+                act("shop.example", "click", Some("OK"), RiskClass::Edit),
+                ActionContext::default()
+                    .with_role("button")
+                    .with_url("https://shop.example/account/sharing-preferences"),
+            ),
+            (
+                act(
+                    "docs.example",
+                    "click",
+                    Some("link \"SSH\""),
+                    RiskClass::Edit,
+                ),
+                ActionContext::default().with_role("link"),
+            ),
+            (
+                act("com.apple.notes", "type", Some("Body"), RiskClass::Edit),
+                ActionContext::default(),
+            ),
+        ] {
+            assert!(remote_access(&a, &ctx).is_none(), "{a:?} {ctx:?}");
+            assert_eq!(e.assess(&a, &ctx).decision, Decision::Allow, "{a:?}");
+        }
+        // Looking at or opening the Sharing pane changes nothing.
+        let open = act(
+            "com.apple.systempreferences",
+            "open_url",
+            Some("x-apple.systempreferences:com.apple.preferences.sharing?Services_RemoteLogin"),
+            RiskClass::Observe,
+        );
+        assert!(remote_access(&open, &ActionContext::default()).is_none());
+        let read = act(
+            "com.apple.systempreferences",
+            "read",
+            Some("Remote Login"),
+            RiskClass::Observe,
+        );
+        assert!(remote_access(&read, &switch).is_none());
+    }
+
+    #[test]
+    fn remote_access_deny_rules_still_win() {
+        let e = trusting_engine();
+        e.upsert_rule(Rule::new("no-router", Effect::Deny).targets(["192.168.1.1"]))
+            .unwrap();
+        let a = toggle("192.168.1.1", "Remote Management");
+        assert!(is_deny(
+            &e.assess(&a, &ActionContext::default().with_role("checkbox"))
+                .decision
+        ));
     }
 }
