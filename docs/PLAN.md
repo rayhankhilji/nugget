@@ -56,7 +56,7 @@ Also open, outside wave Y:
 | Target: needless confirmations ≤ 0.10 | `cua`: `safety.false_confirmation_rate` 0.00 after X1 | done |
 | Target: no secrets sent to cloud models in drafts | `draft`: `sensitive_prompt_exposure_rate` and `sensitive_leak_rate` 0 (fake model, cloud-marked) | done |
 | Target: proactive precision@5 ≥ 0.7, recall ≥ 0.8 | `proactive --backend real`: 0.849 and 0.997 | done |
-| Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; battery not measured | in progress (X5) |
+| Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; battery not measured; X5 at 100k items: idle CPU 0.03%, 0 idle wakeups in the bench window, startup 74 ms, first search 83 ms, RSS after idle 1472 MiB (mostly the draft voice profile), [perf.yml](../.github/workflows/perf.yml) | done (battery not measured; voice-profile memory to cut) |
 | Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in [Y1](waves/wave-y/Y1.md); installers, accessibility, Double Tap and computer use exercised on real macOS and Windows runners in [real-os.yml](../.github/workflows/real-os.yml) | done |
 | Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | done (Y5) |
 
