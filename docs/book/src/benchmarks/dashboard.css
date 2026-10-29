@@ -1,0 +1,37 @@
+/* Benchmark dashboard. Colours come from the mdBook theme, so light and dark themes both work. */
+.bench-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.bench-card {
+  margin: 0;
+  padding: 10px 12px 8px;
+  border: 1px solid var(--quote-border, #ccc);
+  border-radius: 6px;
+  background: var(--bg);
+  min-width: 0;
+}
+.bench-card figcaption {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.bench-label { font-weight: 600; }
+.bench-latest { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.bench-meta { font-size: 0.8em; opacity: 0.75; margin: 2px 0 4px; overflow-wrap: anywhere; }
+.bench-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.bench-grid { stroke: var(--quote-border, #ddd); stroke-width: 1; }
+.bench-axis, .bench-empty { fill: var(--fg); opacity: 0.7; font-size: 11px; font-variant-numeric: tabular-nums; }
+.bench-empty { font-size: 13px; }
+.bench-target { stroke: var(--fg); stroke-opacity: 0.6; stroke-width: 1.5; stroke-dasharray: 5 4; }
+.bench-line { fill: none; stroke: var(--links); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.bench-hit { fill: transparent; }
+.bench-dot { fill: var(--links); stroke: var(--bg); stroke-width: 2; }
+.bench-point { cursor: pointer; }
+.bench-point:hover .bench-dot, a:focus .bench-dot { r: 5.5; }
+.bench-card details { font-size: 0.85em; }
+.bench-card details table { margin: 4px 0; }
+.bench-note { opacity: 0.8; font-style: italic; }
+.bench-run h2 code { font-size: 0.7em; opacity: 0.7; font-weight: normal; }

@@ -1,0 +1,157 @@
+{
+  "format": 1,
+  "generated_from": 0,
+  "repository": "https://github.com/rayhankhilji/nugget",
+  "series": [
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "claims.f1",
+      "label": "Claim extraction F1",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "claims.unsupported_rate",
+      "label": "Unsupported claims",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "knowledge",
+      "run_title": "Knowledge graph (M2)",
+      "metric": "mcp.get_context.p50_ms",
+      "label": "MCP get_context p50",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "memory",
+      "run_title": "Memory, real stack (M1)",
+      "metric": "freshness.p95_s",
+      "label": "Change to searchable p95",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "memory",
+      "run_title": "Memory, real stack (M1)",
+      "metric": "retrieval.eval.hybrid.recall@10",
+      "label": "Eval-set hybrid recall@10",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "perf",
+      "run_title": "Store and retriever performance",
+      "metric": "query.retriever.search.latency.p95_us",
+      "label": "Retriever search p95",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "perf",
+      "run_title": "Store and retriever performance",
+      "metric": "ingest.items_per_s",
+      "label": "Ingest throughput",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "proactive",
+      "run_title": "Proactive cards, real crate (M5)",
+      "metric": "cards.accepted_precision",
+      "label": "Accepted-card precision",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "proactive",
+      "run_title": "Proactive cards, real crate (M5)",
+      "metric": "actions.executed_without_approval",
+      "label": "Actions run without approval",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "draft",
+      "run_title": "Double Tap drafting, fake model (M3)",
+      "metric": "draft.win_rate_vs_baseline",
+      "label": "Win rate vs screenshot baseline",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "draft",
+      "run_title": "Double Tap drafting, fake model (M3)",
+      "metric": "draft.nugget.hallucination_rate",
+      "label": "Hallucination rate",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, in process (M4)",
+      "metric": "success_rate",
+      "label": "Verified task success",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "cua-inproc",
+      "run_title": "Computer use, in process (M4)",
+      "metric": "safety.unconfirmed_risky_actions",
+      "label": "Unconfirmed risky actions",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "cua-xvfb",
+      "run_title": "Computer use, Linux desktop under Xvfb (M4)",
+      "metric": "success_rate",
+      "label": "Verified task success",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    },
+    {
+      "run": "cua-xvfb",
+      "run_title": "Computer use, Linux desktop under Xvfb (M4)",
+      "metric": "safety.unconfirmed_risky_actions",
+      "label": "Unconfirmed risky actions",
+      "unit": null,
+      "direction": null,
+      "target": null,
+      "points": []
+    }
+  ]
+}
