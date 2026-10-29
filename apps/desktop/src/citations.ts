@@ -60,3 +60,57 @@ export function stripCitationMarkers(text: string): string {
     .map((part, i) => (i % 2 === 1 ? part : part.replace(LINE_START_RUN, "").replace(MARKER_RUN, "")))
     .join("");
 }
+
+/**
+ * The `[n]` numbers `text` actually cites, out of `valid`. Markers inside code and markdown links
+ * (`[1](url)`) don't count, as they don't render as citations.
+ */
+export function citedNumbers(text: string, valid: ReadonlySet<number>): Set<number> {
+  const out = new Set<number>();
+  text.split(CODE).forEach((part, i) => {
+    if (i % 2 === 1) return;
+    for (const m of part.matchAll(/\[(\d{1,4})\](?!\()/g)) {
+      const n = Number(m[1]);
+      if (valid.has(n)) out.add(n);
+    }
+  });
+  return out;
+}
+
+/** One source under an answer: an item with every `[n]` that points at it. */
+export interface SourceEntry<C> {
+  /** `source` + `key` of the item. */
+  key: string;
+  /** Markers shown for it: the cited ones when it is cited, else all of them. */
+  ns: number[];
+  /** Every passage of the item the model saw, in marker order. */
+  citations: C[];
+  cited: boolean;
+}
+
+/**
+ * The sources under an answer, one entry per item (an item retrieved as several passages shows
+ * once). Items the answer cites come first, in the order of their first marker; the rest follow,
+ * in marker order.
+ */
+export function groupSources<C extends { n: number; item: { source: string; key: string } }>(
+  citations: readonly C[],
+  cited: ReadonlySet<number>,
+): { cited: SourceEntry<C>[]; uncited: SourceEntry<C>[] } {
+  const byItem = new Map<string, C[]>();
+  for (const c of [...citations].sort((a, b) => a.n - b.n)) {
+    const key = `${c.item.source}\u0000${c.item.key}`;
+    const list = byItem.get(key);
+    if (list) list.push(c);
+    else byItem.set(key, [c]);
+  }
+  const yes: SourceEntry<C>[] = [];
+  const no: SourceEntry<C>[] = [];
+  for (const [key, cs] of byItem) {
+    const hits = cs.filter((c) => cited.has(c.n)).map((c) => c.n);
+    if (hits.length > 0) yes.push({ key, ns: hits, citations: cs, cited: true });
+    else no.push({ key, ns: cs.map((c) => c.n), citations: cs, cited: false });
+  }
+  yes.sort((a, b) => a.ns[0]! - b.ns[0]!);
+  return { cited: yes, uncited: no };
+}

@@ -25,8 +25,10 @@ use crate::config::Config;
 use crate::daemon::State;
 
 mod agent;
+mod ai_keys;
 mod browser;
 mod draft;
+mod model_fit;
 pub(crate) mod plugins;
 mod policy;
 mod proactive;
@@ -123,6 +125,8 @@ pub(crate) async fn build(cx: &FeatureContext<'_>) -> Features {
         "proactive",
         proactive::start(cx, safety.as_ref()).await,
     );
+    start(&mut list, "ai_keys", ai_keys::start(cx)); // Z3: bring your own key
+    start(&mut list, "model_fit", model_fit::start(cx)); // Z3: explained recommendation
     let features = Features::new(std::mem::take(&mut list));
     tracing::info!(features = ?features.names(), "features started");
     features

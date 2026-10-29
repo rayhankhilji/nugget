@@ -43,6 +43,7 @@ mod download;
 mod hardware;
 mod manifest;
 mod preflight;
+mod recommend;
 mod runtime;
 mod runtime_store;
 mod store;
@@ -58,6 +59,7 @@ pub use manifest::{
     verify_manifest_with_key,
 };
 pub use preflight::{DiskSpace, GIB, SystemDiskSpace, check_disk_space, required_bytes};
+pub use recommend::{FitReason, ModelFit, accel_hint, explain, model_fit, nominal_ram_gb};
 pub use runtime::{
     ArchiveFormat, MAX_RUNTIME_ARCHIVE_BYTES, RuntimeAccel, RuntimeEntry, accel_preference,
     current_arch, current_os, runtime_candidates_for, select_runtime,

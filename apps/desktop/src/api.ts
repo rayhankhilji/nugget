@@ -274,6 +274,8 @@ export interface AskStarted {
   excluded_sensitive?: number;
   /** The standalone query actually searched, when a follow-up was rewritten. */
   query_rewrite?: string | null;
+  /** Nothing relevant in the sources: the daemon answers as an ordinary chat (Z3). */
+  general?: boolean;
 }
 
 // ---- local runtime ----
@@ -1933,3 +1935,103 @@ export function askInConversation(
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
   });
 }
+
+// ---- Z3: bring your own key ----
+
+/** The `kind` of a `[[providers]]` table a key is for. */
+export type AiKeyKind = "openai_compatible" | "openai_responses" | "anthropic";
+
+/** Why a key check (or save) did not succeed; `ok` when it did. */
+export type AiKeyReason = "ok" | "bad_key" | "wrong_url" | "no_network" | "server_error" | "exists";
+
+/** `ai.key.test` params. The key is sent to the daemon only; it is never stored by this call. */
+export interface AiKeyTestRequest {
+  kind: AiKeyKind;
+  /** Required for `openai_compatible`; defaults to the provider's own API otherwise. */
+  base_url?: string | null;
+  api_key: string;
+  model?: string | null;
+}
+
+export interface AiKeyTestResult {
+  ok: boolean;
+  reason: AiKeyReason;
+  /** Plain-English explanation from the daemon (never contains the key). */
+  message: string;
+  /** Model ids the provider listed. */
+  models: string[];
+}
+
+/** `ai.key.save` params: the key goes to the OS keychain, a `keychain:NAME` reference to config.toml. */
+export interface AiKeySaveRequest {
+  /** Provider id: 1–32 of `a-z 0-9 _ -`. */
+  name: string;
+  kind: AiKeyKind;
+  base_url?: string | null;
+  api_key: string;
+  model: string;
+}
+
+export interface AiKeySaveResult extends AiKeyTestResult {
+  saved: boolean;
+  provider_id: string | null;
+  /** The daemon reads providers at start: always true. */
+  restart_required: boolean;
+}
+
+export const aiKeyApi = {
+  /** Check a key against the provider's model list. Validation outcomes are results, not errors. */
+  aiKeyTest: (request: AiKeyTestRequest) => call<AiKeyTestResult>("ai_key_test", { request }),
+  /** Check, then save the key (keychain) and add the provider to config.toml. */
+  aiKeySave: (request: AiKeySaveRequest) => call<AiKeySaveResult>("ai_key_save", { request }),
+};
+
+// ---- Z3: model fit ----
+
+/** Coarse GPU class the daemon detected (`unknown`: could not tell, or none). */
+export type GpuKind = "apple_silicon" | "nvidia" | "amd" | "intel" | "unknown";
+
+/** Why a model is (or is not) recommended for this machine. */
+export type FitReason =
+  | "ram_fits_largest"
+  | "ram_fits"
+  | "ram_too_small"
+  | "rerank_opt_in"
+  | "needs_newer_app"
+  | "gpu_accelerated"
+  | "cpu_only_slower";
+
+/** How one manifest model fits this machine (`models.fit`). */
+export interface ModelFit {
+  id: string;
+  /** Same answer as `models.list`'s `recommended`. */
+  recommended: boolean;
+  tiers: Tier[];
+  size_bytes: number;
+  /** Nominal RAM the model needs, in GB. */
+  min_ram_gb: number;
+  /** Free disk space a fresh install needs (size + 10% + 1 GiB). */
+  disk_needed_bytes: number;
+  fits_ram: boolean;
+  /** Whether the models folder has room; `null` when free space could not be read. */
+  fits_disk: boolean | null;
+  /** This machine's memory as a nominal figure in GB. */
+  machine_ram_gb: number;
+  gpu: GpuKind;
+  /** Expected compute backend: `metal`, `cuda`, `vulkan` or `cpu`. */
+  accel: string;
+  reasons: FitReason[];
+}
+
+export interface FitReport {
+  hardware: { total_ram: number; available_ram: number; cpu_cores: number; gpu: GpuKind };
+  /** Nominal memory in GB (16 for a "16 GB" machine). */
+  ram_gb: number;
+  free_disk_bytes: number | null;
+  models: ModelFit[];
+}
+
+export const modelFitApi = {
+  /** Why each model is recommended and what it needs. Older daemons answer "method not found". */
+  modelsFit: () => call<FitReport>("models_fit"),
+};

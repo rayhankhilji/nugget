@@ -1,5 +1,6 @@
 /** Display helpers for the knowledge graph: labels, facts, evidence and vault links. */
 import { formatNumber, t, type MessageKey } from "./i18n";
+import { formatDatesInText } from "./format";
 import {
   isOpenableUrl,
   type ClaimDecision,
@@ -55,11 +56,14 @@ export function claimObjectText(claim: ClaimView): string {
   return claim.object.entity?.name ?? claim.object.literal ?? "";
 }
 
-/** What to show for a fact: its sentence, else `predicate object`. */
+/**
+ * What to show for a fact: its sentence, else `predicate object`, with ISO dates in it written
+ * for the reader's locale (the stored claim keeps them as they are).
+ */
 export function claimText(claim: ClaimView): string {
   const text = claim.text.trim();
-  if (text) return text;
-  return `${predicateLabel(claim.predicate)} ${claimObjectText(claim)}`.trim();
+  if (text) return formatDatesInText(text);
+  return formatDatesInText(`${predicateLabel(claim.predicate)} ${claimObjectText(claim)}`.trim());
 }
 
 const STATUS_RANK: Record<ClaimStatus, number> = { user_asserted: 0, active: 0, superseded: 1, retracted: 2, rejected: 2 };

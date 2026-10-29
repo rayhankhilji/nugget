@@ -114,6 +114,15 @@ describe("Onboarding", () => {
     expect(row.textContent).toContain("notes: 93 items indexed. Search works now.");
   });
 
+  it("offers one language picker on the welcome step, labelled, in the header", async () => {
+    mockDaemon();
+    const { container } = await render(<Onboarding connected onExit={() => {}} />);
+    expect(heading(container)).toBe("Welcome to Nugget");
+    const selects = [...container.querySelectorAll("select")].filter((s) => s.labels?.[0]?.textContent === "Language");
+    expect(selects).toHaveLength(1);
+    expect(selects[0]!.closest("header.ob-top")).not.toBeNull();
+  });
+
   it("finishes to the default page when nothing is searchable yet", async () => {
     mockDaemon({ sources_list: [] });
     const onExit = vi.fn();
@@ -157,12 +166,16 @@ describe("Onboarding", () => {
     expect(container.textContent).toContain("isn't running");
   });
 
-  it("guides bring-your-own-key without ever asking for the key", async () => {
+  it("takes a key in a masked field only, and still shows the manual setup", async () => {
     mockDaemon();
     const { container } = await render(<Onboarding connected onExit={() => {}} />);
     await click(button(container, "Continue"));
     await click(container.querySelector<HTMLInputElement>('input[value="byok"]'));
-    expect(container.querySelector('input[type="password"], input[type="text"], textarea')).toBeNull();
+    // The key goes in a password field that the browser won't remember.
+    const key = container.querySelectorAll<HTMLInputElement>('input[type="password"]');
+    expect(key).toHaveLength(1);
+    expect(key[0]!.autocomplete).toBe("off");
+    expect(container.querySelector("textarea")).toBeNull();
     expect(container.textContent).toContain('api_key = "keychain:anthropic"');
     expect(container.textContent).toContain("dev.nugget.Nugget");
   });
