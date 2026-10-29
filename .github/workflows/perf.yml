@@ -1,0 +1,76 @@
+name: Perf
+
+# The daemon and store at real scale: `nugget-bench perf --backend real --scale full` seeds 100k
+# items, launches the release `nuggetd` and measures startup, search, knowledge extraction, the
+# vault render, idle CPU and wakeups, RSS and ingest (see bench/README.md). Too slow for every
+# push: run it by hand, and weekly to catch drift.
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: Workload size (smoke, quick, standard, full)
+        required: false
+        default: full
+        type: choice
+        options: [smoke, quick, standard, full]
+  schedule:
+    # Mondays 04:17 UTC.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  perf:
+    name: Perf, real backend (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-perf
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Both in the same release profile: the bench finds `nuggetd` next to its own executable.
+      - name: Build release binaries
+        run: cargo build --locked --release -p nuggetd -p nugget-bench
+
+      - name: Bench perf, real backend
+        shell: bash
+        env:
+          SCALE: ${{ inputs.scale || 'full' }}
+          NUGGET_BENCH_NUGGETD: ${{ github.workspace }}/target/release/nuggetd
+        run: |
+          target/release/nugget-bench perf --backend real --scale "$SCALE" \
+            --out-dir "$RUNNER_TEMP/bench-results"
+
+      - name: Validate bench reports against the schema
+        shell: bash
+        run: pipx run check-jsonschema --schemafile bench/schema/report.schema.json "$RUNNER_TEMP"/bench-results/*.json
+
+      - name: Upload bench reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-perf-real-${{ inputs.scale || 'full' }}
+          path: ${{ runner.temp }}/bench-results/
+          retention-days: 90
+          if-no-files-found: error

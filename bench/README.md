@@ -273,6 +273,44 @@ The same code runs the 100k-item scale test (`tests/scale.rs`, ignored by defaul
 - Also measure time to first value: from first launch to a useful search result while backfill
   continues. The target is under 2 minutes.
 
+### Daemon profile (`perf --backend real`, `daemon.*`, X5)
+
+After the store-level run, `perf --backend real` profiles the real `nuggetd` binary
+(`$NUGGET_BENCH_NUGGETD`, else `nuggetd` next to `nugget-bench`; skipped, with
+`config.params.daemon = "skipped: …"`, when there is none). Build both in the same profile:
+`cargo build --release -p nuggetd -p nugget-bench && target/release/nugget-bench perf --backend real --scale full`.
+The code is `src/suites/perf_daemon.rs`.
+
+**Seeding.** A temporary `NUGGET_HOME` with a key file (`NUGGET_KEYCHAIN=off`, no OS keychain)
+and an encrypted store written directly (`Store::upsert_item_with_chunks`): N synthetic items
+(300 / 2k / 10k / 100k for smoke / quick / standard / full), one chunk each with a 384-d
+deterministic vector, typed as Markdown with frontmatter (project, two people, a topic tag) so
+the deterministic extractors find entities. Config: no model providers (text-only search,
+deterministic extraction, no LLM), `[runtime]` and `[mcp]` off, everything else default.
+
+**First start (vault off).** `daemon.startup_ms`: spawn until the first answered `status`.
+`daemon.first_search_ms`: the first `search` call (the startup knowledge run is usually going).
+`daemon.knowledge.extract_s` / `items_per_s`: from the first `status` until `knowledge.status`
+shows a finished run with nothing pending. Then warm searches (`daemon.search.latency.*`,
+`daemon.search.recall@10` as a sanity check) and a graceful stop (`daemon.shutdown_ms`).
+
+**Second start (vault on, never rendered).** `daemon.restart.startup_ms`;
+`daemon.vault.render_s`: until `knowledge.status` reports the first full render
+(`daemon.vault.pages`). After a settle period (1 / 5 / 10 / 15 s), an idle window with no IPC
+traffic (3 / 5 / 10 / 30 s): `daemon.idle.cpu_percent` (CPU time of all threads over wall time,
+share of one core) and `daemon.idle.wakeups_per_s` (voluntary + involuntary context switches of
+all threads per second). Then ingest through the daemon: a files source on an empty folder, M
+Markdown files dropped in (50 / 200 / 500 / 2k), timed until all are indexed (`ingest.status`)
+and the last is found by `search` (`daemon.ingest.files_per_s`, `daemon.ingest.wall_s`).
+
+**Memory.** `daemon.rss_mib.after_{startup,first_search,extract,idle,ingest}` (VmRSS) and
+`daemon.rss_mib.peak_first_start` / `peak` (VmHWM of each start).
+
+Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from `ps` (no
+wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
+Linux on demand (`workflow_dispatch`, with a `scale` input) and weekly, and uploads the reports;
+it is not part of push/PR CI. A run at `full` takes about 30 minutes on 4 vCPUs.
+
 ### `knowledge` (M2)
 
 The knowledge graph, measured end to end on a labelled fixture corpus
@@ -904,6 +942,16 @@ Ingest and resources:
   0.905 text-only) pass. Ranking was not tuned further against this synthetic corpus, because its
   hash embedder has no semantic signal and tuning to it would overfit; the gap is tracked for a
   re-run with a real embedding model (`--embed-url`).
+  **Per-query diagnosis (X5, `NUGGET_BENCH_DUMP_MISSES=<path>`):** the real and fake hybrids
+  differ on 15 of 500 queries (real-only 7, fake-only 8; the net −1 is the gap). Each flip is
+  decided by RRF: a target found by only one leg (at best 1/61) loses to any document both legs
+  find in their top 40 (at least 2/100), and the hash embedders give the vector leg almost no
+  signal, so which targets survive depends on each embedder's incidental overlaps. BM25 differs
+  only through FTS5's idf, which is zero for terms in more than half of the documents (the
+  corpus's most frequent synthetic words; the fake floors idf at `ln(1 + …)`), and slightly
+  through Porter stemming: swapping the fake's idf for FTS5's reproduces the real BM25 rank on 488
+  of 500 queries. No retrieval bug; the gap is baseline noise and stays tracked for a
+  real-embedder run.
 - **Two retrieval fixes came out of this benchmark.** The first run at quick scale had hybrid
   R@10 at 0.855, below the fake's 0.930. The retriever over-fetched candidates (8×) and the store
   over-fetched again (4×) for rank fusion, so each list fed 320 hits into RRF for 10 results.
@@ -1175,6 +1223,86 @@ The hybrid recall@10 target was already missed by one query before W12.
 
 `perf --scale standard` (fake index, harness only): BM25 / vector / hybrid query p50 173 / 1,800 /
 2,118 us after (188 / 1,780 / 2,230 before). It does not touch the store.
+
+### X5: daemon performance at real scale
+
+Before/after for the X5 work, `perf --backend real --scale full --seed 42` (store run: 50,000
+items; daemon profile: 100,000 items), release builds, same dev container (Linux x86_64, 4 vCPUs,
+nothing else running), 2026-10-29. "Before" is the integration branch at `fed1fd3` with only the
+daemon profile added to the bench; "after" is `x/perf` merged with the integration branch.
+
+**Daemon, 100k items:**
+
+| Metric | Before | After |
+|---|---|---|
+| `daemon.startup_ms` / `restart.startup_ms` | 93 / 54 | 74 / 58 |
+| `daemon.first_search_ms` | 108 | 83 |
+| `daemon.knowledge.extract_s` (startup extraction of 100k items) | 1,204 (83 items/s) | **570 (175 items/s)** |
+| `daemon.knowledge.entities` / `claims` | 3,040 / 40,801 | 3,040 / 40,801 |
+| `daemon.vault.render_s` (3,040 pages) | 9.4 | 10.4 |
+| `daemon.idle.cpu_percent` | 0.48 % | **0.00 %** |
+| `daemon.idle.wakeups_per_s` / `idle.threads` | 114 / 16 | **0.0 / 10** |
+| `daemon.search.latency.p50_us` / `p95_us` (during and after extraction) | 38,966 / 103,848 | 45,937 / 111,599 |
+| `daemon.ingest.files_per_s` (2k files through a watched folder) | 513 | 463 |
+| `daemon.rss_mib.after_startup` | 36 | 50 |
+| `daemon.rss_mib.peak_first_start` / `after_extract` | 2,266 / 2,267 | 2,391 / 1,896 |
+| `daemon.rss_mib.after_idle` (second start) | 1,610 | 1,472 |
+| `daemon.shutdown_ms` | 191 | 128 |
+
+Idle in a small home with a watched files source (50 notes, 60 s window, measured separately
+with a script reading `/proc`): **127.8 → 1.4 wakeups/s, 0.40 % → 0.03 % CPU**, 17 → 13
+threads (the bench's own idle window runs before its files source is added and reads 0.0). The store-level rows of the
+same run (ingest 695 vs 681 items/s, text / vector / hybrid / `Retriever::search` p50 21 / 308 /
+374 / 394 ms vs 21 / 316 / 383 / 403 ms, recall unchanged, edit freshness p50 686 vs 729 ms) are
+within run-to-run noise: the bench's sparse hash embeddings never take the approximate vector
+path, so the store changes below don't show there. Search through the daemon and ingest throughput
+moved within noise too (searches overlap the extraction run).
+
+What changed, by offender:
+
+- **Polling loops (idle CPU and wakeups).** The knowledge worker ticked every 500 ms; it now
+  sleeps until an ingest commit (`Ingest::subscribe_committed`), a vault edit
+  (`Vault::subscribe_edits`), a wake, its debounce or interval deadline, or shutdown. The
+  wasmtime epoch thread ticked every 10 ms even with no plugins (about 100 wakeups/s, 80 % of the
+  total); it now ticks only while a plugin call runs. The file debouncers (files connector, vault)
+  woke four times per timeout with nothing to do; now once.
+- **Knowledge extraction (super-linear).** Each 500-item run got slower than the last (2.9 s →
+  9 s per run at 100k): every flush rewrote the whole notes index (one ~15 MB cursor value) and
+  ~63 % of the 64-bucket ledger, and every budget-cut run re-planned from scratch. The notes index
+  and ledger are now 1,024 buckets each, written only when changed, and a budget-cut plan is carried
+  to the next run. What is left is a constant per-item cost in SQLite writes (about 1.7 ms per
+  `apply_batch`, mostly WAL frames and checkpoints); `PRAGMA wal_autocheckpoint = 10000` measured
+  another 11 % in isolation and is not applied.
+- **N+1 queries.** `Retriever` loads candidates with one batched `Store::get_items` (300 items at
+  100k: 10.1 → 1.8 ms) and the date filter checks every candidate's dates with one
+  `Store::item_dates` call before loading the ones it keeps (`item_dates` itself: one query per
+  500 items on a reader instead of one per item on the writer). `Store::source_counts`
+  (`sources.list`, `ingest.status`, every source state change) aggregated every chunk: 54–77 ms
+  warm at 100k, now a trigger-maintained row per source, 21 µs (schema v10).
+- **Blocking work on the async runtime.** Plugin loading (wasm compilation), the model store and
+  connector construction (which can read the keychain) moved to the blocking pool.
+- **Approximate vector index (W12 follow-ups).** The first search past the threshold built the
+  index inside the call, holding the writer for ~4.5 s at 100k dense vectors; it now builds on a
+  background thread in batches of 128, each its own short writer transaction (searches stay exact
+  until it is complete). `vector_ann`, 100k × 384-d with an upsert loop running: longest upsert wait
+  **4.3 s → 91 ms**, upserts completed during the build 345 → 6,277, first search 4.5 s → 0.69 s
+  (the build itself takes ~10 s in the background). Query results once built are unchanged
+  (recall@10 0.997 at 13.7 ms). The index is dropped when the store falls below half the
+  threshold. "A kNN on the writer slows reader full-text search" (the W12 note above) did **not**
+  reproduce at the store level (`vector::tests::writer_knn_vs_reader_fts`, 100k items, 40 rounds:
+  reader FTS 21.7 ms with kNN on the writer vs 22.3 ms on a reader; no pinned snapshot, WAL at its
+  checkpoint size, no open writer statement); searches stay on the reader pool regardless.
+- **Unbounded or oversized memory.** Most of the daemon's 1.5 GB idle RSS at 100k is the draft
+  voice profile (`features/draft/voice.rs`), built over every item at startup (944 MiB on its
+  own in isolation, live for the daemon's lifetime); knowledge's own share after a run is about
+  180 MiB (SQLite caches and allocator retention). Not fixed here: it belongs to the drafting
+  feature.
+
+W9 follow-ups: the IPC in-flight cap no longer pauses reading (which could deadlock a handler
+waiting for a later request on the same connection); over the cap a request gets `SERVER_BUSY`
+(-32010) at once, and cancel/confirm/answer-style control methods keep 16 reserved slots. Egress
+rows now record the store handle that wrote them, and a second process opening the store marks
+only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
 ## Adding a suite
 

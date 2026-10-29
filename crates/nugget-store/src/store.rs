@@ -47,6 +47,9 @@ pub(crate) struct Db {
     /// `None` for in-memory stores (a second connection would open a different database).
     readers: Option<ReadPool>,
     encrypted: bool,
+    /// Held while the approximate vector index is built or dropped (see `vector::build_ann`),
+    /// so one runs at a time. Shared with the build thread, which holds `Db` only weakly.
+    pub(crate) ann_build: Arc<Mutex<()>>,
 }
 
 impl Db {
@@ -185,6 +188,7 @@ impl Store {
             conn: Mutex::new(conn),
             readers,
             encrypted: file.is_some(),
+            ann_build: Arc::default(),
         });
         let egress = EgressWriter::spawn(db.clone())?;
         let audit = crate::audit::AuditState::ephemeral()?;
@@ -219,6 +223,12 @@ impl Store {
     /// A read on a pooled read-only connection; see [`Db::with_read_conn`].
     pub(crate) fn with_read_conn<T>(&self, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         self.inner.db.with_read_conn(f)
+    }
+
+    /// The shared connections (for work that must outlive a borrowed `Store`, holding them
+    /// weakly).
+    pub(crate) fn db(&self) -> &Arc<Db> {
+        &self.inner.db
     }
 
     pub(crate) fn egress_writer(&self) -> &EgressWriter {

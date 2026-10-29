@@ -37,6 +37,8 @@ nugget-connector.workspace = true
 nugget-connector-files.workspace = true
 nugget-infer.workspace = true
 tokio.workspace = true
+# `perf --backend real`: drives the `nuggetd` binary over its IPC (see src/suites/perf_daemon.rs).
+nugget-ipc.workspace = true
 # Temporary NUGGET_HOME and watched folder for the real backend.
 tempfile = "3"
 # `draft`: contract types of the drafting and voice crates, token estimates, provider streams.

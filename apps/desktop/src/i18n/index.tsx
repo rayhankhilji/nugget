@@ -12,6 +12,7 @@
 import { Fragment, useSyncExternalStore, type ReactNode } from "react";
 import en from "./locales/en.json";
 import { format, formatParts, numberFormat, dateFormat, type Args } from "./icu";
+import { pseudoCatalog } from "./pseudo";
 
 export type Messages = typeof en;
 export type MessageKey = keyof Messages;
@@ -25,6 +26,11 @@ export interface LocaleInfo {
   dir: "ltr" | "rtl";
   /** A partial catalog kept to check layout (not offered unless `?dev`); missing keys show English. */
   stub?: boolean;
+  /**
+   * A pseudo-locale built from English by `./pseudo.ts` (no catalog file), to spot hard-coded
+   * strings and layouts that can't grow. Never detected; offered only in development builds.
+   */
+  pseudo?: boolean;
 }
 
 // i18n-ignore-block: endonyms are shown untranslated, in their own language.
@@ -37,7 +43,8 @@ export const LOCALES: readonly LocaleInfo[] = [
   { code: "zh-CN", name: "简体中文", dir: "ltr" },
   { code: "ja", name: "日本語", dir: "ltr" },
   { code: "hi", name: "हिन्दी", dir: "ltr" },
-  { code: "ar", name: "العربية", dir: "rtl", stub: true },
+  { code: "ar", name: "العربية", dir: "rtl" },
+  { code: "en-XA", name: "Pseudo (en-XA)", dir: "ltr", pseudo: true },
 ];
 // i18n-ignore-end
 
@@ -55,7 +62,7 @@ function loaderFor(code: string) {
  * the same language (`pt-PT` → `pt-BR`, `zh-TW` → `zh-CN`, `es-MX` → `es`), else English.
  */
 export function matchLocale(preferred: readonly string[], available: readonly LocaleInfo[] = LOCALES): string {
-  const codes = available.map((l) => l.code);
+  const codes = available.filter((l) => !l.pseudo).map((l) => l.code);
   for (const tag of preferred) {
     let canonical: string;
     try {
@@ -122,7 +129,9 @@ function applyDocument(code: string) {
 export async function loadLocale(code: string): Promise<void> {
   const info = LOCALES.find((l) => l.code === code);
   let catalog: Catalog = en;
-  if (info && code !== DEFAULT_LOCALE) {
+  if (info?.pseudo) {
+    catalog = pseudoCatalog(en);
+  } else if (info && code !== DEFAULT_LOCALE) {
     const load = loaderFor(code);
     if (load) catalog = (await load()).default;
   }

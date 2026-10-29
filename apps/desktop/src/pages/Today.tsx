@@ -244,7 +244,9 @@ function BriefList({ title, items }: { title: string; items: BriefCardView[] }) 
       <ul className="today-brief-list">
         {items.map((c) => (
           <li key={c.card_id}>
-            <span className="today-brief-title">{c.title}</span>
+            <span className="today-brief-title" dir="auto">
+              {c.title}
+            </span>
             {c.summary && <span className="muted small block">{c.summary}</span>}
             {c.due && (
               <span className="muted small" title={formatTime(c.due)}>
@@ -268,7 +270,9 @@ function MeetingItem({ meeting: m }: { meeting: BriefMeetingView }) {
   };
   return (
     <li>
-      <span className="today-brief-title">{m.title}</span>
+      <span className="today-brief-title" dir="auto">
+        {m.title}
+      </span>
       <span className="muted small block">
         {when}
         {m.location ? ` · ${m.location}` : ""}
@@ -321,7 +325,7 @@ function CardItem({
   return (
     <li className="card today-card" id={cardDomId(card.id)} tabIndex={-1} aria-labelledby={titleId}>
       <div className="card-head">
-        <h3 id={titleId} className="card-title today-card-title">
+        <h3 id={titleId} className="card-title today-card-title" dir="auto">
           {card.title}
         </h3>
         <span className="badges">

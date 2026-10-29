@@ -487,19 +487,22 @@ impl Retriever {
         };
         let keep = pool_len.max(rerank_len);
         let (mut cands, items_meta) = match range {
-            // Date filter: by source modification time, else the store's update time.
+            // Date filter: by source modification time, else the store's update time. Filters on
+            // the dates alone (one batched lookup), then loads only the items that are kept.
             Some(range) => {
-                let metas = self.load_items(&cands)?;
-                cands
+                let refs: Vec<_> = cands.iter().map(|c| c.item.clone()).collect();
+                let dates = self.store.item_dates(&refs)?;
+                let kept: Vec<Candidate> = cands
                     .into_iter()
-                    .zip(metas)
-                    .filter(|(_, m)| {
-                        m.as_ref().is_some_and(|i| {
-                            range.contains(i.source_modified_at.unwrap_or(i.updated_at))
+                    .filter(|c| {
+                        dates.get(&c.item).is_some_and(|d| {
+                            range.contains(d.source_modified_at.unwrap_or(d.updated_at))
                         })
                     })
                     .take(keep)
-                    .unzip()
+                    .collect();
+                let metas = self.load_items(&kept)?;
+                (kept, metas)
             }
             None => {
                 cands.truncate(keep);
@@ -774,7 +777,8 @@ impl Retriever {
     }
 
     fn load_items(&self, cands: &[Candidate]) -> Result<Vec<Option<Item>>> {
-        cands.iter().map(|c| self.store.get_item(&c.item)).collect()
+        let refs: Vec<_> = cands.iter().map(|c| c.item.clone()).collect();
+        self.store.get_items(&refs)
     }
 
     fn chunks_by_id(&self, ids: &[ChunkId]) -> Result<HashMap<ChunkId, Chunk>> {
