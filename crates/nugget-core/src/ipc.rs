@@ -469,6 +469,11 @@ pub struct AskRequest {
     pub provider: Option<ProviderId>,
     #[serde(default = "default_ask_tier")]
     pub tier: Tier,
+    /// Earlier turns of the conversation, oldest first, for a follow-up question: the query
+    /// is rewritten into a standalone one for retrieval (by a local model only) and the turns
+    /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
+    #[serde(default)]
+    pub history: Vec<ChatMessage>,
 }
 
 fn default_ask_tier() -> Tier {
@@ -486,6 +491,9 @@ pub struct AskStarted {
     /// Relevant sensitive items withheld because the provider is a cloud model.
     #[serde(default)]
     pub excluded_sensitive: u32,
+    /// The standalone query actually searched, when the follow-up was rewritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_rewrite: Option<String>,
 }
 
 // ---- local runtime ----
@@ -495,6 +503,9 @@ pub struct AskStarted {
 pub enum RuntimeRole {
     Chat,
     Embedding,
+    /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
+    /// routed for a model tier.
+    Rerank,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

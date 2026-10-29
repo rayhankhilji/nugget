@@ -618,6 +618,32 @@ mod tests {
     }
 
     #[test]
+    fn onboarding_choices_validate() {
+        // Onboarding saves through `doubletap_settings_set`: its chords and tap speeds must pass.
+        for chord in ["Alt+Space", "CmdOrCtrl+Shift+Space", "CmdOrCtrl+Alt+K"] {
+            let s = DoubleTapSettings {
+                trigger: TriggerSpec::Chord {
+                    chord: chord.into(),
+                },
+                ..DoubleTapSettings::default()
+            };
+            assert!(s.validated().is_ok(), "{chord}");
+        }
+        for window_ms in [250, 350, 500] {
+            for modifier in ModifierId::ALL {
+                let s = DoubleTapSettings {
+                    trigger: TriggerSpec::DoubleTap {
+                        modifier,
+                        window_ms,
+                    },
+                    ..DoubleTapSettings::default()
+                };
+                assert!(s.validated().is_ok(), "{modifier:?} {window_ms}");
+            }
+        }
+    }
+
+    #[test]
     fn excluded_matching() {
         let list = default_excluded();
         assert!(is_excluded(

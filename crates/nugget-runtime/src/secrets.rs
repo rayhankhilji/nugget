@@ -14,7 +14,8 @@ use nugget_core::{Error, Result};
 use nugget_infer::{ApiKeyRef, Secret, SecretResolver, SystemSecrets};
 
 /// The `api_key` reference for `role`'s *current* key, whatever its generation:
-/// `env:NUGGET_RUNTIME_API_KEY_CHAT` or `env:NUGGET_RUNTIME_API_KEY_EMBEDDING`.
+/// `env:NUGGET_RUNTIME_API_KEY_CHAT`, `env:NUGGET_RUNTIME_API_KEY_EMBEDDING` or
+/// `env:NUGGET_RUNTIME_API_KEY_RERANK`.
 ///
 /// Configs returned by [`crate::Runtime::ensure`] carry a generation-specific reference instead
 /// (this name plus `_<n>`), which stops resolving once the server restarts with a new key.
@@ -35,10 +36,15 @@ fn api_key_var(role: RuntimeRole) -> &'static str {
     match role {
         RuntimeRole::Chat => "NUGGET_RUNTIME_API_KEY_CHAT",
         RuntimeRole::Embedding => "NUGGET_RUNTIME_API_KEY_EMBEDDING",
+        RuntimeRole::Rerank => "NUGGET_RUNTIME_API_KEY_RERANK",
     }
 }
 
-const ROLES: [RuntimeRole; 2] = [RuntimeRole::Chat, RuntimeRole::Embedding];
+const ROLES: [RuntimeRole; 3] = [
+    RuntimeRole::Chat,
+    RuntimeRole::Embedding,
+    RuntimeRole::Rerank,
+];
 
 /// 256 random bits, hex encoded.
 pub(crate) fn random_key() -> Result<Secret> {
@@ -64,7 +70,7 @@ struct Slot {
 /// [`nugget_infer::build_provider_with`]. Clones share the keys, so they see every rotation.
 #[derive(Clone)]
 pub struct RuntimeSecrets {
-    keys: Arc<[Mutex<Slot>; 2]>,
+    keys: Arc<[Mutex<Slot>; 3]>,
     fallback: Arc<dyn SecretResolver>,
 }
 
@@ -78,11 +84,12 @@ fn slot_idx(role: RuntimeRole) -> usize {
     match role {
         RuntimeRole::Chat => 0,
         RuntimeRole::Embedding => 1,
+        RuntimeRole::Rerank => 2,
     }
 }
 
 impl RuntimeSecrets {
-    pub(crate) fn new(chat: Secret, embedding: Secret) -> Self {
+    pub(crate) fn new(chat: Secret, embedding: Secret, rerank: Secret) -> Self {
         Self {
             keys: Arc::new([
                 Mutex::new(Slot {
@@ -92,6 +99,10 @@ impl RuntimeSecrets {
                 Mutex::new(Slot {
                     generation: 0,
                     key: embedding,
+                }),
+                Mutex::new(Slot {
+                    generation: 0,
+                    key: rerank,
                 }),
             ]),
             fallback: Arc::new(SystemSecrets),
@@ -161,7 +172,11 @@ mod tests {
 
     #[test]
     fn rotation_retires_old_generations() {
-        let s = RuntimeSecrets::new(random_key().unwrap(), random_key().unwrap());
+        let s = RuntimeSecrets::new(
+            random_key().unwrap(),
+            random_key().unwrap(),
+            random_key().unwrap(),
+        );
         let (g0, k0) = s.current(RuntimeRole::Chat);
         let r0 = api_key_ref_gen(RuntimeRole::Chat, g0);
         assert_eq!(s.resolve(&r0).unwrap().expose(), k0.expose());
@@ -175,6 +190,10 @@ mod tests {
         let cur = s.resolve(&api_key_ref(RuntimeRole::Chat)).unwrap();
         assert_eq!(cur.expose(), k1.expose());
         assert_eq!(s.current(RuntimeRole::Embedding).0, 0);
+        // Each role has its own key, the rerank role included.
+        let rr = s.resolve(&api_key_ref(RuntimeRole::Rerank)).unwrap();
+        assert_eq!(rr.expose(), s.current(RuntimeRole::Rerank).1.expose());
+        assert_ne!(rr.expose(), k1.expose());
         // Garbage generations fail closed instead of reaching the environment.
         let bad = ApiKeyRef::Env("NUGGET_RUNTIME_API_KEY_CHAT_x".into());
         assert!(s.resolve(&bad).is_err());

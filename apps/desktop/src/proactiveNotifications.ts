@@ -1,7 +1,10 @@
 /**
  * App-wide OS notifications for the proactive layer: the morning brief (`brief.ready`) and due
  * reminders (`reminder.due`). Registered once by `App`, whichever page is open. Notification
- * text is plain text composed here; the Rust shell shows it (`notify` command).
+ * text is plain text composed here; the Rust shell shows it (`notify` command). Clicking one
+ * opens Today: the shell shows the window and emits `nugget:navigate` with `"today"` (on
+ * platforms without a click callback, when the window is focused soon after; see
+ * `src-tauri/src/notify.rs`).
  */
 import { proactiveApi, proactiveEvents, type BriefView, type ReminderView } from "./api";
 import { t } from "./i18n";
@@ -41,7 +44,7 @@ export function startProactiveNotifications(): () => void {
       })
       .catch(() => {});
   const show = ({ title, body }: { title: string; body: string }) => {
-    proactiveApi.notify(title, body).catch(() => {});
+    proactiveApi.notify(title, body, true).catch(() => {});
   };
   void keep(proactiveEvents.onBriefReady((b) => show(briefNotification(b))));
   void keep(proactiveEvents.onReminderDue((r) => show(reminderNotification(r))));

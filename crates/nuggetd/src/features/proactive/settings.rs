@@ -8,7 +8,8 @@
 //! judge = "local"         # "local" | "cloud" | "off": where the optional LLM judge may run
 //! refresh_minutes = 30    # periodic refresh
 //! debounce_secs = 60      # quiet time after ingest/knowledge runs before refreshing
-//! # utc_offset = "+02:00" # default: the machine's offset at daemon start
+//! # utc_offset = "+02:00" # default: the machine's offset, asked again every 15 minutes and
+//!                         # before the brief fires (daylight saving changes while running)
 //!
 //! [proactive.engine]      # nugget_proactive::ProactiveConfig (thresholds, inbox size, ...)
 //! max_inbox = 12
@@ -16,9 +17,12 @@
 //! ```
 //!
 //! `engine.utc_offset` and `engine.judge_allow_cloud` are derived from `utc_offset` and `judge`
-//! and any value given there is replaced.
+//! and any value given there is replaced. An explicit `utc_offset` stays fixed; otherwise
+//! [`LocalOffset`] follows the machine's.
 
-use std::time::Duration;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use nugget_core::{Error, Result};
 use nugget_proactive::ProactiveConfig;
@@ -73,7 +77,10 @@ pub(crate) struct Settings {
     pub judge: JudgeMode,
     pub refresh: Duration,
     pub debounce: Duration,
+    /// The offset at start: `utc_offset`, else the machine's then (see [`LocalOffset`]).
     pub offset: UtcOffset,
+    /// `utc_offset` was given: the offset never follows the machine's.
+    pub offset_fixed: bool,
     /// Engine config, with `utc_offset` and `judge_allow_cloud` filled in.
     pub engine: ProactiveConfig,
 }
@@ -106,6 +113,7 @@ impl Settings {
             refresh: Duration::from_secs(section.refresh_minutes * 60),
             debounce: Duration::from_secs(section.debounce_secs),
             offset,
+            offset_fixed: section.utc_offset.is_some(),
             engine,
         })
     }
@@ -118,27 +126,33 @@ impl Settings {
         )
     }
 
-    /// The user's local date at `now`.
-    pub fn local_date(&self, now: OffsetDateTime) -> Date {
-        now.to_offset(self.offset).date()
+    /// The user's local date at `now` in `offset` (the current one, see [`LocalOffset`]).
+    pub fn local_date(&self, now: OffsetDateTime, offset: UtcOffset) -> Date {
+        now.to_offset(offset).date()
     }
 
     /// Default end of a snooze: tomorrow (local) at the brief time.
-    pub fn default_snooze_until(&self, now: OffsetDateTime) -> OffsetDateTime {
-        let tomorrow = self.local_date(now).next_day().unwrap_or(Date::MAX);
-        local_at(tomorrow, self.brief_time, self.offset)
+    pub fn default_snooze_until(&self, now: OffsetDateTime, offset: UtcOffset) -> OffsetDateTime {
+        let tomorrow = self.local_date(now, offset).next_day().unwrap_or(Date::MAX);
+        local_at(tomorrow, self.brief_time, offset)
     }
 
-    /// When the brief should fire next. `last_fired` is the local date it last fired. When today's
-    /// brief time has passed without a brief today, that is now (catch up after a late start).
-    pub fn next_brief_at(&self, now: OffsetDateTime, last_fired: Option<Date>) -> OffsetDateTime {
-        let today = self.local_date(now);
-        let at_today = local_at(today, self.brief_time, self.offset);
+    /// When the brief should fire next, in `offset`. `last_fired` is the local date it last fired.
+    /// When today's brief time has passed without a brief today, that is now (catch up after a
+    /// late start).
+    pub fn next_brief_at(
+        &self,
+        now: OffsetDateTime,
+        last_fired: Option<Date>,
+        offset: UtcOffset,
+    ) -> OffsetDateTime {
+        let today = self.local_date(now, offset);
+        let at_today = local_at(today, self.brief_time, offset);
         if last_fired.is_some_and(|d| d >= today) {
             local_at(
                 today.next_day().unwrap_or(Date::MAX),
                 self.brief_time,
-                self.offset,
+                offset,
             )
         } else if now < at_today {
             at_today
@@ -185,8 +199,81 @@ pub(crate) fn parse_offset(s: &str) -> Option<UtcOffset> {
     UtcOffset::from_hms(sign * h, sign * m, 0).ok()
 }
 
+/// How long a machine offset read by [`LocalOffset`] is trusted before it is asked again.
+pub(crate) const OFFSET_RECHECK: Duration = Duration::from_secs(15 * 60);
+
+/// Reads the machine's UTC offset (blocking); `None` when it cannot.
+pub(crate) type OffsetSource = Arc<dyn Fn() -> Option<UtcOffset> + Send + Sync>;
+
+/// The user's current UTC offset. Fixed when `utc_offset` is configured; otherwise the machine's,
+/// asked again ([`LocalOffset::recheck`]) at most every `recheck` unless forced, so a
+/// daylight-saving change while the daemon runs moves the brief and "today".
+pub(crate) struct LocalOffset {
+    /// Whole seconds east of UTC.
+    current: AtomicI32,
+    /// `None`: fixed.
+    source: Option<OffsetSource>,
+    recheck: Duration,
+    checked: Mutex<Option<Instant>>,
+}
+
+impl LocalOffset {
+    pub fn fixed(offset: UtcOffset) -> Self {
+        Self {
+            current: AtomicI32::new(offset.whole_seconds()),
+            source: None,
+            recheck: Duration::MAX,
+            checked: Mutex::new(None),
+        }
+    }
+
+    /// Follow `source`, starting from `initial` (just read from it, so the first recheck waits
+    /// `recheck` unless forced).
+    pub fn following(initial: UtcOffset, source: OffsetSource, recheck: Duration) -> Self {
+        Self {
+            current: AtomicI32::new(initial.whole_seconds()),
+            source: Some(source),
+            recheck,
+            checked: Mutex::new(Some(Instant::now())),
+        }
+    }
+
+    /// Fixed for an explicit `utc_offset`, else following the machine's (from the OS).
+    pub fn for_settings(settings: &Settings) -> Self {
+        if settings.offset_fixed {
+            Self::fixed(settings.offset)
+        } else {
+            Self::following(settings.offset, Arc::new(os_offset), OFFSET_RECHECK)
+        }
+    }
+
+    /// The offset as last read.
+    pub fn current(&self) -> UtcOffset {
+        UtcOffset::from_whole_seconds(self.current.load(Ordering::Relaxed))
+            .unwrap_or(UtcOffset::UTC)
+    }
+
+    /// Ask the source again when the last read is older than `recheck` (or `force`). Returns the
+    /// new offset when it changed. Blocking (it may run a process): call it off the async
+    /// workers. A failed read keeps the current offset.
+    pub fn recheck(&self, force: bool) -> Option<UtcOffset> {
+        let source = self.source.as_ref()?;
+        {
+            let mut checked = self.checked.lock().unwrap_or_else(PoisonError::into_inner);
+            let now = Instant::now();
+            if !force && checked.is_some_and(|at| now.duration_since(at) < self.recheck) {
+                return None;
+            }
+            *checked = Some(now);
+        }
+        let read = source()?;
+        let before = self.current.swap(read.whole_seconds(), Ordering::Relaxed);
+        (before != read.whole_seconds()).then_some(read)
+    }
+}
+
 /// The machine's current UTC offset, asked from the OS (`date +%z` on Unix, PowerShell on
-/// Windows); UTC (logged) when that fails. Blocking: call it once, off the async workers.
+/// Windows); UTC (logged) when that fails. Blocking: call it off the async workers.
 ///
 /// `time`'s own lookup is not used: it refuses to answer in a multi-threaded process on Unix.
 pub(crate) fn detect_local_offset() -> UtcOffset {
@@ -305,6 +392,7 @@ mod tests {
         assert_eq!(s.refresh, Duration::from_secs(1800));
         assert_eq!(s.debounce, Duration::from_secs(60));
         assert_eq!(s.offset, off(2, 0));
+        assert!(!s.offset_fixed);
         assert_eq!(s.engine.utc_offset, off(2, 0));
         assert!(!s.engine.judge_allow_cloud);
         assert_eq!(s.engine.max_inbox, ProactiveConfig::default().max_inbox);
@@ -335,6 +423,7 @@ mod tests {
         assert_eq!(s.refresh, Duration::from_secs(300));
         assert_eq!(s.debounce, Duration::ZERO);
         assert_eq!(s.offset, off(-5, 0));
+        assert!(s.offset_fixed);
         assert_eq!(s.engine.utc_offset, off(-5, 0));
         assert_eq!(s.engine.max_inbox, 3);
         assert_eq!(s.engine.user_addresses, ["me@example.com"]);
@@ -377,18 +466,21 @@ mod tests {
         // 08:00 at UTC+2 is 06:00 UTC.
         let s = settings("utc_offset = \"+02:00\"", UtcOffset::UTC).unwrap();
         let before = utc(2026, 3, 10, 5, 0);
-        assert_eq!(s.next_brief_at(before, None), utc(2026, 3, 10, 6, 0));
+        assert_eq!(
+            s.next_brief_at(before, None, s.offset),
+            utc(2026, 3, 10, 6, 0)
+        );
         // Past the time and not fired today: catch up now.
         let after = utc(2026, 3, 10, 9, 0);
-        assert_eq!(s.next_brief_at(after, None), after);
+        assert_eq!(s.next_brief_at(after, None, s.offset), after);
         assert_eq!(
-            s.next_brief_at(after, Some(date(2026, 3, 9))),
+            s.next_brief_at(after, Some(date(2026, 3, 9)), s.offset),
             after,
             "yesterday's brief does not count"
         );
         // Fired today: tomorrow.
         assert_eq!(
-            s.next_brief_at(after, Some(date(2026, 3, 10))),
+            s.next_brief_at(after, Some(date(2026, 3, 10)), s.offset),
             utc(2026, 3, 11, 6, 0)
         );
     }
@@ -398,9 +490,9 @@ mod tests {
         // 23:30 UTC on the 10th is already the 11th at UTC+2 (01:30 local).
         let s = settings("utc_offset = \"+02:00\"", UtcOffset::UTC).unwrap();
         let now = utc(2026, 3, 10, 23, 30);
-        assert_eq!(s.local_date(now), date(2026, 3, 11));
+        assert_eq!(s.local_date(now, s.offset), date(2026, 3, 11));
         assert_eq!(
-            s.next_brief_at(now, Some(date(2026, 3, 10))),
+            s.next_brief_at(now, Some(date(2026, 3, 10)), s.offset),
             utc(2026, 3, 11, 6, 0)
         );
         // West of UTC: 03:00 UTC on the 11th is 22:00 on the 10th at UTC-5; the 21:00 brief
@@ -411,13 +503,67 @@ mod tests {
         )
         .unwrap();
         let now = utc(2026, 3, 11, 3, 0);
-        assert_eq!(s.local_date(now), date(2026, 3, 10));
+        assert_eq!(s.local_date(now, s.offset), date(2026, 3, 10));
         assert_eq!(
-            s.next_brief_at(now, Some(date(2026, 3, 10))),
+            s.next_brief_at(now, Some(date(2026, 3, 10)), s.offset),
             utc(2026, 3, 12, 2, 0)
         );
         // Snooze default: tomorrow (local) at the brief time.
-        assert_eq!(s.default_snooze_until(now), utc(2026, 3, 12, 2, 0));
+        assert_eq!(
+            s.default_snooze_until(now, s.offset),
+            utc(2026, 3, 12, 2, 0)
+        );
+    }
+
+    #[test]
+    fn a_dst_change_between_briefs_moves_the_next_one() {
+        // Brief at 08:00; fired on the 28th at UTC+2 (06:00 UTC).
+        let s = settings("", off(2, 0)).unwrap();
+        let after = utc(2026, 3, 28, 7, 0);
+        let fired = Some(date(2026, 3, 28));
+        assert_eq!(
+            s.next_brief_at(after, fired, off(1, 0)),
+            utc(2026, 3, 29, 7, 0),
+            "08:00 at UTC+1"
+        );
+        assert_eq!(
+            s.next_brief_at(after, fired, off(2, 0)),
+            utc(2026, 3, 29, 6, 0),
+            "08:00 at UTC+2"
+        );
+    }
+
+    #[test]
+    fn local_offset_follows_the_machine_unless_fixed() {
+        let machine = Arc::new(AtomicI32::new(3600));
+        let m = machine.clone();
+        let source: OffsetSource = Arc::new(move || {
+            let secs = m.load(Ordering::Relaxed);
+            (secs != i32::MIN).then(|| UtcOffset::from_whole_seconds(secs).unwrap())
+        });
+        let o = LocalOffset::following(off(1, 0), source.clone(), Duration::ZERO);
+        assert_eq!(o.current(), off(1, 0));
+        assert_eq!(o.recheck(false), None, "unchanged");
+        machine.store(7200, Ordering::Relaxed);
+        assert_eq!(o.recheck(false), Some(off(2, 0)));
+        assert_eq!(o.current(), off(2, 0));
+        // A failed read keeps the last offset.
+        machine.store(i32::MIN, Ordering::Relaxed);
+        assert_eq!(o.recheck(true), None);
+        assert_eq!(o.current(), off(2, 0));
+
+        // Throttled: not asked again before `recheck` unless forced.
+        machine.store(3600, Ordering::Relaxed);
+        let o = LocalOffset::following(off(2, 0), source, Duration::from_secs(3600));
+        assert_eq!(o.recheck(false), None);
+        assert_eq!(o.current(), off(2, 0));
+        assert_eq!(o.recheck(true), Some(off(1, 0)));
+
+        // An explicit `utc_offset` never moves.
+        let s = settings("utc_offset = \"+05:30\"", off(1, 0)).unwrap();
+        let o = LocalOffset::for_settings(&s);
+        assert_eq!(o.recheck(true), None);
+        assert_eq!(o.current(), off(5, 30));
     }
 
     #[test]

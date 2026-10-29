@@ -40,7 +40,11 @@ fn val(args: &[String], flag: &str) -> Option<String> {
 
 #[test]
 fn every_plan_binds_loopback_and_never_carries_a_key() {
-    for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+    for role in [
+        RuntimeRole::Chat,
+        RuntimeRole::Embedding,
+        RuntimeRole::Rerank,
+    ] {
         for accel in [
             RuntimeAccel::Cpu,
             RuntimeAccel::Metal,
@@ -164,6 +168,45 @@ fn embedding_role_enables_embeddings_and_sizes_batches() {
     // Pooling is ignored for chat.
     let a = strs(&plan(RuntimeRole::Chat, RuntimeAccel::Cpu, &hw(16, 8), &t).args());
     assert!(val(&a, "--pooling").is_none());
+}
+
+#[test]
+fn rerank_role_enables_reranking_with_rank_pooling_and_whole_ubatches() {
+    let p = plan(
+        RuntimeRole::Rerank,
+        RuntimeAccel::Cpu,
+        &hw(16, 8),
+        &Tuning::default(),
+    );
+    assert_eq!(p.pooling, Pooling::Rank);
+    let a = strs(&p.args());
+    assert!(a.contains(&"--reranking".to_string()));
+    // `--reranking` sets embedding mode and rank pooling itself.
+    assert!(!a.contains(&"--embedding".to_string()));
+    assert!(val(&a, "--pooling").is_none());
+    // A query and passage must fit one micro-batch.
+    assert_eq!(val(&a, "--batch-size").as_deref(), Some("2048"));
+    assert_eq!(val(&a, "--ubatch-size").as_deref(), Some("2048"));
+    assert_eq!(val(&a, "--parallel").as_deref(), Some("4"));
+
+    // A pooling override cannot break rank pooling; other tuning applies.
+    let t = Tuning {
+        pooling: Some(Pooling::Mean),
+        ctx_per_slot: Some(4096),
+        parallel: Some(1),
+        ..Tuning::default()
+    };
+    let p = plan(RuntimeRole::Rerank, RuntimeAccel::Cpu, &hw(16, 8), &t);
+    assert_eq!(p.pooling, Pooling::Rank);
+    let a = strs(&p.args());
+    assert!(val(&a, "--pooling").is_none());
+    assert_eq!(val(&a, "--ubatch-size").as_deref(), Some("4096"));
+    assert_eq!(val(&a, "--ctx-size").as_deref(), Some("4096"));
+    // Neither chat nor embedding plans rerank.
+    for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+        let a = strs(&plan(role, RuntimeAccel::Cpu, &hw(16, 8), &Tuning::default()).args());
+        assert!(!a.contains(&"--reranking".to_string()));
+    }
 }
 
 #[test]

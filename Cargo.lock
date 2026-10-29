@@ -4010,6 +4010,8 @@ name = "nugget-desktop"
 version = "0.0.1"
 dependencies = [
  "futures",
+ "mac-notification-sys",
+ "notify-rust",
  "nugget-a11y",
  "nugget-core",
  "nugget-hotkey",
@@ -4024,6 +4026,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tauri-winrt-notification",
  "thiserror 2.0.21",
  "tokio",
  "tracing",

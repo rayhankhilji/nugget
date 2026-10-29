@@ -6,8 +6,10 @@
 //!   that indexed something, a removed source and knowledge runs (debounced by `debounce_secs`),
 //!   and every `refresh_minutes`. A refresh that changed the card set broadcasts `cards.changed`.
 //! - **Clock**: once a day at `brief_time` (local) a refresh then `brief.ready`; the date it last
-//!   fired is kept in the store so a restart does not fire it twice. Every minute, due reminders
-//!   are broadcast as `reminder.due`.
+//!   fired is kept in the store so a restart does not fire it twice. Unless `utc_offset` is set,
+//!   the machine's offset is asked again every 15 minutes and before the brief fires, so a
+//!   daylight-saving change while running moves the brief and "today" (also in the engine).
+//!   Every minute, due reminders are broadcast as `reminder.due`.
 //! - **Methods**: `cards.list`, `cards.feedback`, `cards.preview`, `cards.execute`, `brief.get`,
 //!   `proactive.metrics`, `proactive.refresh`, `reminders.list` (see the
 //!   `---- Proactive (M5) ----` block of `nugget_core::ipc`). Executing an action needs the digest
@@ -45,12 +47,12 @@ use nugget_proactive::{
 };
 use nugget_store::Store;
 use serde_json::{Value, json};
-use time::{Date, OffsetDateTime};
+use time::{Date, OffsetDateTime, UtcOffset};
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use self::settings::{Debounce, JudgeMode, Settings};
+use self::settings::{Debounce, JudgeMode, LocalOffset, Settings};
 use super::policy::Safety;
 use super::{Feature, FeatureContext};
 use crate::daemon::{State, blocking};
@@ -88,7 +90,8 @@ pub(crate) async fn start(
     let table = cx.config.proactive.clone();
     let settings = blocking(move || Settings::parse(&table, settings::detect_local_offset)).await?;
 
-    let exec = exec::Exec::new(&state)?;
+    let identity = exec::Identity::from_config(&settings.engine.user_addresses, &cx.config.draft);
+    let exec = exec::Exec::new(&state, &cx.config.draft, identity)?;
     let executors = exec.executors();
     let policy = policy_gate(safety);
     let store = state.store.clone();
@@ -330,6 +333,8 @@ impl Previews {
 /// Everything the methods and background tasks share; independent of the daemon's `State`.
 pub(crate) struct Core {
     settings: Settings,
+    /// The user's current UTC offset (fixed, or following the machine's).
+    offset: Arc<LocalOffset>,
     engine: Arc<Proactive>,
     runner: Arc<ActionRunner>,
     exec: Arc<dyn ExecApi>,
@@ -351,6 +356,7 @@ impl Core {
         store: Store,
     ) -> Self {
         Self {
+            offset: Arc::new(LocalOffset::for_settings(&settings)),
             settings,
             engine,
             runner,
@@ -361,6 +367,22 @@ impl Core {
             refreshing: tokio::sync::Mutex::new(()),
             refreshes: AtomicU64::new(0),
         }
+    }
+
+    /// The user's current UTC offset (as last read).
+    fn offset(&self) -> UtcOffset {
+        self.offset.current()
+    }
+
+    /// Read the machine's UTC offset again (see [`LocalOffset::recheck`]); a change is handed to
+    /// the engine. Returns the current offset.
+    async fn sync_offset(&self, force: bool) -> UtcOffset {
+        let offset = self.offset.clone();
+        if let Ok(Some(new)) = blocking(move || Ok(offset.recheck(force))).await {
+            tracing::info!(utc_offset = %new, "the local UTC offset changed");
+            self.engine.set_utc_offset(new);
+        }
+        self.offset()
     }
 
     fn previews(&self) -> std::sync::MutexGuard<'_, Previews> {
@@ -488,7 +510,7 @@ impl Core {
             )?),
             "snooze" => Op::Snooze(
                 req.until
-                    .unwrap_or_else(|| self.settings.default_snooze_until(now)),
+                    .unwrap_or_else(|| self.settings.default_snooze_until(now, self.offset())),
             ),
             "seen" => Op::Seen,
             "done" => Op::Done,
@@ -586,7 +608,7 @@ impl Core {
     async fn brief(&self, now: OffsetDateTime) -> Result<BriefView> {
         if !self.settings.enabled {
             return Ok(BriefView {
-                date: convert::iso_date(self.settings.local_date(now)),
+                date: convert::iso_date(self.settings.local_date(now, self.offset())),
                 generated_at: now,
                 top: Vec::new(),
                 meetings: Vec::new(),
@@ -650,10 +672,16 @@ impl Core {
     }
 
     /// Fire the morning brief if it is due at `now` (refresh, then `brief.ready`). Returns when it
-    /// is due next.
+    /// is due next. The local offset is read again first (throttled) and, when the brief looks
+    /// due, once more so a daylight-saving change never fires it an hour early.
     async fn brief_tick(&self, now: OffsetDateTime) -> OffsetDateTime {
         let last = self.brief_mark().await;
-        let next = self.settings.next_brief_at(now, last);
+        let offset = self.sync_offset(false).await;
+        let mut next = self.settings.next_brief_at(now, last, offset);
+        if next <= now && !self.settings.offset_fixed {
+            let offset = self.sync_offset(true).await;
+            next = self.settings.next_brief_at(now, last, offset);
+        }
         if next > now {
             return next;
         }
@@ -667,12 +695,13 @@ impl Core {
                         serde_json::to_value(&view).unwrap_or(Value::Null),
                     );
                 }
-                let today = self.settings.local_date(now);
+                let offset = self.offset();
+                let today = self.settings.local_date(now, offset);
                 if let Err(e) = self.set_brief_mark(today).await {
                     tracing::warn!(error = %e, "cannot record that the brief fired");
                 }
                 tracing::info!(date = %view.date, cards = view.top.len(), "morning brief ready");
-                self.settings.next_brief_at(now, Some(today))
+                self.settings.next_brief_at(now, Some(today), offset)
             }
             Err(e) => {
                 tracing::warn!(error = %e, "cannot compose the morning brief; retrying");
@@ -893,15 +922,13 @@ impl Core {
 mod tests {
     use std::collections::BTreeMap;
 
+    use super::*;
     use nugget_policy::PolicyEngine;
     use nugget_proactive::cards::STATE_VERSION;
     use nugget_proactive::{
         CandidateKind, Card, CardStore, Executors, Features, MemCardStore, ProactiveState,
         Reminder, ReminderExecutor,
     };
-    use time::UtcOffset;
-
-    use super::*;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<(&'static str, Value)>>);
@@ -1236,7 +1263,7 @@ mod tests {
         assert_eq!(v.state, "snoozed");
         assert_eq!(
             v.snoozed_until,
-            Some(f.core.settings.default_snooze_until(t0()))
+            Some(f.core.settings.default_snooze_until(t0(), UtcOffset::UTC))
         );
         let changed: CardsChanged =
             serde_json::from_value(f.out.take(proactive_notification::CARDS_CHANGED).remove(0))
@@ -1514,6 +1541,60 @@ mod tests {
         assert_eq!(f.core.fire_due_reminders(later).await, 1);
         assert_eq!(f.out.take(proactive_notification::REMINDER_DUE).len(), 1);
         assert_eq!(f.core.fire_due_reminders(later).await, 0);
+    }
+
+    #[tokio::test]
+    async fn a_dst_change_between_briefs_moves_the_brief_and_today() {
+        use std::sync::atomic::AtomicI32;
+        let mut f = fixture("brief_time = \"08:00\"", &[]);
+        let machine = Arc::new(AtomicI32::new(3600));
+        let m = machine.clone();
+        f.core.offset = Arc::new(LocalOffset::following(
+            UtcOffset::UTC,
+            Arc::new(move || UtcOffset::from_whole_seconds(m.load(Ordering::Relaxed)).ok()),
+            Duration::ZERO,
+        ));
+        let hours = |h| t0() + time::Duration::hours(h);
+        // 09:00 UTC is 10:00 at UTC+1: today's brief fires now; the next is 08:00 UTC+1 tomorrow.
+        assert_eq!(f.core.brief_tick(t0()).await, hours(22));
+        assert_eq!(
+            f.core.engine.utc_offset(),
+            UtcOffset::from_hms(1, 0, 0).unwrap()
+        );
+        // Clocks go forward: 08:00 tomorrow is now 06:00 UTC.
+        machine.store(7200, Ordering::Relaxed);
+        assert_eq!(f.core.brief_tick(hours(3)).await, hours(21));
+        assert_eq!(
+            f.core.engine.utc_offset(),
+            UtcOffset::from_hms(2, 0, 0).unwrap()
+        );
+        // 22:30 UTC is already tomorrow at UTC+2.
+        let late = f
+            .core
+            .brief(t0() + time::Duration::minutes(13 * 60 + 30))
+            .await;
+        assert_eq!(late.unwrap().date, "2026-03-11");
+        // Clocks go back before it fires: 08:00 is 07:00 UTC again, not due at 06:30.
+        machine.store(3600, Ordering::Relaxed);
+        assert_eq!(
+            f.core
+                .brief_tick(t0() + time::Duration::minutes(21 * 60 + 30))
+                .await,
+            hours(22)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_explicit_offset_stays_fixed() {
+        let f = fixture("utc_offset = \"+01:00\"", &[]);
+        assert_eq!(
+            f.core.sync_offset(true).await,
+            UtcOffset::from_hms(1, 0, 0).unwrap()
+        );
+        assert_eq!(
+            f.core.brief_tick(t0()).await,
+            t0() + time::Duration::hours(22)
+        );
     }
 
     #[tokio::test]

@@ -10,7 +10,7 @@ import {
   type ProviderInfo,
   type TriggerSpec,
 } from "../api";
-import { useAsync } from "../hooks";
+import { useAsync, useEvent } from "../hooks";
 import { formatRelative } from "../format";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
@@ -47,6 +47,15 @@ export function DoubleTapPage() {
   useEffect(() => {
     if (saved.data && form === null) setForm(saved.data);
   }, [saved.data, form]);
+
+  // Saved elsewhere (onboarding, another window): show it, unless there are unsaved edits.
+  const savedRef = useRef(saved.data);
+  savedRef.current = saved.data;
+  useEvent(doubletapApi.onSettings, (next) => {
+    setForm((f) => (f === null || (savedRef.current !== undefined && sameSettings(f, savedRef.current)) ? next : f));
+    saved.reload();
+    status.reload();
+  });
 
   const dirty = form !== null && saved.data !== undefined && !sameSettings(form, saved.data);
   const invalid = form !== null && triggerError(form.trigger) !== null;

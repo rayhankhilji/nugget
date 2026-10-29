@@ -9,6 +9,8 @@
 //! - `GET /v1/models`;
 //! - `POST /v1/chat/completions` (JSON or SSE stream; refused with `--embedding`);
 //! - `POST /v1/embeddings` (deterministic 8-dim unit vectors; needs `--embedding`);
+//! - `POST /v1/rerank` (also `/rerank`, `/v1/reranking`; needs `--reranking`): each document
+//!   scores the number of distinct query words it contains, Jina/Cohere response shape;
 //! - `GET /metrics` (needs `--metrics`);
 //! - `GET /fake/info`: argv and environment variable *names*; `POST /fake/crash`: exit 42.
 //!
@@ -55,6 +57,7 @@ struct Opts {
     alias: String,
     model: String,
     embedding: bool,
+    reranking: bool,
     metrics: bool,
     start_delay: Duration,
     crash_after: Option<Duration>,
@@ -90,6 +93,7 @@ const FLAGS_WITH_VALUE: &[&str] = &[
 ];
 const SWITCHES: &[&str] = &[
     "--embedding",
+    "--reranking",
     "--no-webui",
     "--offline",
     "--no-slots",
@@ -110,6 +114,7 @@ fn parse(args: &[String]) -> Result<Opts, String> {
         if SWITCHES.contains(&a.as_str()) {
             match a.as_str() {
                 "--embedding" => o.embedding = true,
+                "--reranking" => o.reranking = true,
                 "--metrics" => o.metrics = true,
                 "--fake-print-key" => o.print_key = true,
                 "--fake-sleeper" => o.sleeper = true,
@@ -498,8 +503,40 @@ async fn handle(mut conn: Box<dyn Conn>, srv: &Server) -> std::io::Result<()> {
                 "usage": {"prompt_tokens": tokens, "total_tokens": tokens}});
             respond(&mut conn, 200, &b).await
         }
+        ("POST", "/v1/rerank" | "/rerank" | "/v1/reranking") => {
+            if !srv.opts.reranking {
+                let (c, b) = error(
+                    501,
+                    "This server does not support reranking. Start it with `--reranking`",
+                );
+                return respond(&mut conn, c, &b).await;
+            }
+            let (Some(query), Some(Value::Array(docs))) = (
+                body.get("query").and_then(Value::as_str),
+                body.get("documents"),
+            ) else {
+                let (c, b) = error(400, "\"query\" and \"documents\" are required");
+                return respond(&mut conn, c, &b).await;
+            };
+            let words: std::collections::BTreeSet<String> =
+                query.split_whitespace().map(str::to_lowercase).collect();
+            let results: Vec<Value> = docs
+                .iter()
+                .enumerate()
+                .map(|(i, d)| {
+                    let text = d.as_str().unwrap_or_default().to_lowercase();
+                    let hits = words.iter().filter(|w| text.contains(w.as_str())).count();
+                    json!({"index": i, "relevance_score": hits as f64})
+                })
+                .collect();
+            srv.prompt_tokens
+                .fetch_add(docs.len() as u64, Ordering::Relaxed);
+            let b = json!({"model": srv.opts.alias, "object": "list", "results": results,
+                "usage": {"prompt_tokens": docs.len(), "total_tokens": docs.len()}});
+            respond(&mut conn, 200, &b).await
+        }
         ("POST", "/v1/chat/completions") => {
-            if srv.opts.embedding {
+            if srv.opts.embedding || srv.opts.reranking {
                 let (c, b) = error(
                     501,
                     "This server does not support completions. Start it without `--embeddings`",

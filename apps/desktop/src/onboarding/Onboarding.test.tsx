@@ -6,6 +6,7 @@ import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } fr
 import { Onboarding } from "./Onboarding";
 import { loadState, STORAGE_KEY } from "./machine";
 import { TRIGGER_KEY } from "./trigger";
+import type { DoubleTapSettings } from "../api";
 
 beforeEach(() => {
   installDomShims();
@@ -17,7 +18,17 @@ const button = (c: HTMLElement, text: string | RegExp) => byText(c, "button", te
 
 describe("Onboarding", () => {
   it("walks every step, saving progress, and exits when finished", async () => {
-    mockDaemon();
+    let dt: DoubleTapSettings = {
+      enabled: true,
+      trigger: { kind: "double_tap", modifier: "right_control", window_ms: 350 },
+      app_providers: {},
+      excluded_apps: [],
+      allow_terminals: false,
+    };
+    mockDaemon({
+      doubletap_settings_get: () => dt,
+      doubletap_settings_set: (args: unknown) => (dt = (args as { settings: DoubleTapSettings }).settings),
+    });
     const onExit = vi.fn();
     const { container } = await render(<Onboarding connected onExit={onExit} />);
     expect(heading(container)).toBe("Welcome to Nugget");
@@ -55,6 +66,8 @@ describe("Onboarding", () => {
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Choose your Double Tap trigger");
     await click(container.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!);
+    // Saved where Double Tap reads it (and cached locally).
+    expect(dt.trigger).toMatchObject({ kind: "chord" });
     expect(JSON.parse(localStorage.getItem(TRIGGER_KEY)!)).toMatchObject({ kind: "chord" });
 
     await click(button(container, "Continue"));

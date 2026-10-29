@@ -31,12 +31,16 @@ use crate::socket;
 pub const CHAT_PROVIDER_ID: &str = "local-chat";
 /// Provider id of the local embedding server (`local-embedding`).
 pub const EMBEDDING_PROVIDER_ID: &str = "local-embedding";
+/// Provider id of the local reranker (`local-rerank`). Not a router provider: retrieval calls
+/// the reranker directly.
+pub const RERANK_PROVIDER_ID: &str = "local-rerank";
 
 /// Provider id the router knows a role's server by.
 pub fn provider_id(role: RuntimeRole) -> ProviderId {
     ProviderId::new(match role {
         RuntimeRole::Chat => CHAT_PROVIDER_ID,
         RuntimeRole::Embedding => EMBEDDING_PROVIDER_ID,
+        RuntimeRole::Rerank => RERANK_PROVIDER_ID,
     })
 }
 
@@ -44,15 +48,21 @@ fn role_name(role: RuntimeRole) -> &'static str {
     match role {
         RuntimeRole::Chat => "chat",
         RuntimeRole::Embedding => "embedding",
+        RuntimeRole::Rerank => "rerank",
     }
 }
 
-const ROLES: [RuntimeRole; 2] = [RuntimeRole::Chat, RuntimeRole::Embedding];
+const ROLES: [RuntimeRole; 3] = [
+    RuntimeRole::Chat,
+    RuntimeRole::Embedding,
+    RuntimeRole::Rerank,
+];
 
 fn idx(role: RuntimeRole) -> usize {
     match role {
         RuntimeRole::Chat => 0,
         RuntimeRole::Embedding => 1,
+        RuntimeRole::Rerank => 2,
     }
 }
 
@@ -91,6 +101,7 @@ pub struct RuntimeOptions {
     pub unix_socket: bool,
     pub chat: Tuning,
     pub embedding: Tuning,
+    pub rerank: Tuning,
 }
 
 impl Default for RuntimeOptions {
@@ -111,6 +122,7 @@ impl Default for RuntimeOptions {
             unix_socket: true,
             chat: Tuning::default(),
             embedding: Tuning::default(),
+            rerank: Tuning::default(),
         }
     }
 }
@@ -120,6 +132,7 @@ impl RuntimeOptions {
         match role {
             RuntimeRole::Chat => &self.chat,
             RuntimeRole::Embedding => &self.embedding,
+            RuntimeRole::Rerank => &self.rerank,
         }
     }
 
@@ -192,7 +205,7 @@ struct State {
     install: Arc<tokio::sync::Mutex<()>>,
     secrets: RuntimeSecrets,
     client: reqwest::Client,
-    roles: [Arc<RoleState>; 2],
+    roles: [Arc<RoleState>; 3],
 }
 
 impl Drop for State {
@@ -457,7 +470,7 @@ impl Runtime {
         if killed > 0 {
             tracing::warn!(killed, "cleaned up orphaned local runtime servers");
         }
-        let secrets = RuntimeSecrets::new(random_key()?, random_key()?);
+        let secrets = RuntimeSecrets::new(random_key()?, random_key()?, random_key()?);
         let mk = |role: RuntimeRole| {
             Arc::new(RoleState {
                 role,
@@ -493,7 +506,11 @@ impl Runtime {
                 install: Arc::new(tokio::sync::Mutex::new(())),
                 secrets,
                 client: loopback_client()?,
-                roles: [mk(RuntimeRole::Chat), mk(RuntimeRole::Embedding)],
+                roles: [
+                    mk(RuntimeRole::Chat),
+                    mk(RuntimeRole::Embedding),
+                    mk(RuntimeRole::Rerank),
+                ],
             }),
         })
     }
@@ -1022,6 +1039,8 @@ fn check_role(role: RuntimeRole, model: &ModelEntry) -> Result<()> {
             "model `{}` is an embedding-only model",
             model.id
         ))),
+        // No manifest tier marks rerankers yet: the rerank role runs whatever model was
+        // explicitly configured for it (`llama-server --reranking` refuses non-rerankers).
         _ => Ok(()),
     }
 }
@@ -1035,6 +1054,8 @@ pub(crate) fn provider_config(
 ) -> Result<ProviderConfig> {
     let tiers: Vec<Tier> = match role {
         RuntimeRole::Embedding => vec![Tier::Embedding],
+        // Never routed for a tier.
+        RuntimeRole::Rerank => Vec::new(),
         RuntimeRole::Chat => model
             .tiers
             .iter()

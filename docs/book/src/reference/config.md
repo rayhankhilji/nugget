@@ -67,6 +67,7 @@ The on-device runtime: `nuggetd` runs installed models with a pinned, verified `
 | `enabled` | bool | `true` | Run selected, installed models locally |
 | `chat_model` | model id | unset | Chat model. Unset: `models.selected.triage`, then the manifest's recommendation for this machine (triage tier, else synthesis) |
 | `embedding_model` | model id | unset | Embedding model. Unset: `models.selected.embedding`, then the recommendation |
+| `rerank_model` | model id | unset | Reranker for search, served as `local-rerank` with `llama-server --reranking` (never used for chat or embeddings). Unset: none; it is never chosen automatically. `[retrieve.reranker]` takes precedence |
 | `idle_stop_minutes` | integer, 0 to 10080 | `30` | Stop a server after this many idle minutes; `0` keeps it running. It restarts on the next request |
 
 ## `[ingest]`
@@ -130,6 +131,7 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 | `rerank_pool` | integer | `30` | Top grouped candidates scored by a reranker, when one is configured, before MMR |
 | `rerank_weight` | float, 0 to 1 | `0.7` | Share of the reranker's score in relevance; 1.0 replaces the first-stage score |
 | `rerank_timeout_ms` | integer | `2500` | After this, reranking is skipped and the first-stage order kept |
+| `reranker` | table | unset | A reranker you run yourself, below |
 | `dates` | bool | `true` | Parse date phrases ("last week", "in march") and keep items modified in that range, falling back to unfiltered results when none match |
 | `date_utc_offset_minutes` | integer | `0` | UTC offset used to resolve date phrases (clamped to ±18 h) |
 | `rewrite_followups` | bool | `true` | Rewrite follow-up questions into standalone queries from chat history, with a local model only |
@@ -148,6 +150,23 @@ required.
 |---|---|---|---|
 | `half_life_days` | float | `30` | Age at which the boost halves |
 | `weight` | float | `0.2` | Size of the boost for a brand-new item |
+
+### `[retrieve.reranker]`
+
+Off unless present. Search sends its top candidates to a reranking server you run, for example
+`llama-server --reranking -m <reranker>.gguf --port 8013`, at `<base_url>/v1/rerank`. Only servers
+on this device or your network are accepted unless `allow_cloud = true` (https only); requests
+that leave the device are recorded in the egress ledger.
+
+```toml
+[retrieve.reranker]
+base_url = "http://127.0.0.1:8013"   # required
+# path = "v1/rerank"
+# timeout_ms = 2000
+```
+
+Without it, search uses the local runtime's reranker when `[runtime] rerank_model` is set, and
+otherwise does not rerank. A reranker that is not running is skipped at once.
 
 ## `[knowledge]`
 

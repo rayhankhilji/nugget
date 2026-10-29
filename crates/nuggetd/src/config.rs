@@ -54,6 +54,11 @@ enabled = true
 # Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
 # chat_model = "qwen3-4b-q4km"
 # embedding_model = "nomic-embed-text-v1.5-q8"
+# A reranker that reorders search results (served as `local-rerank`; never chosen automatically).
+# rerank_model = "bge-reranker-v2-m3-q4km"
+# Or one you run yourself (`llama-server --reranking ...`), which takes precedence:
+# [retrieve.reranker]
+# base_url = "http://127.0.0.1:8013"
 # Stop a server after this many idle minutes (0 = keep running); it restarts on the next request.
 idle_stop_minutes = 30
 
@@ -284,6 +289,10 @@ pub struct RuntimeConfig {
     /// Manifest id of the embedding model (served as `local-embedding`). Unset:
     /// `models.selected.embedding`, then the recommendation for the Embedding tier.
     pub embedding_model: Option<String>,
+    /// Manifest id of a cross-encoder reranker (served as `local-rerank`, used by search only,
+    /// never routed for a tier). Unset (default): no local reranker; there is no automatic
+    /// recommendation. `[retrieve.reranker]` takes precedence.
+    pub rerank_model: Option<String>,
     /// Stop a server after this many minutes without requests; 0 keeps it running. A stopped
     /// server starts again on the next request.
     pub idle_stop_minutes: u64,
@@ -295,6 +304,7 @@ impl Default for RuntimeConfig {
             enabled: true,
             chat_model: None,
             embedding_model: None,
+            rerank_model: None,
             idle_stop_minutes: 30,
         }
     }
@@ -383,6 +393,7 @@ impl Config {
         for (field, id) in [
             ("chat_model", &self.runtime.chat_model),
             ("embedding_model", &self.runtime.embedding_model),
+            ("rerank_model", &self.runtime.rerank_model),
         ] {
             if let Some(id) = id
                 && !is_model_id(id)
@@ -391,6 +402,20 @@ impl Config {
                     "runtime.{field}: `{id}` is not a model id"
                 )));
             }
+        }
+        if let Some(r) = &self.retrieve.reranker {
+            if r.base_url.trim().is_empty() {
+                return Err(Error::Invalid(
+                    "retrieve.reranker.base_url is required".into(),
+                ));
+            }
+            // Same checks as at start-up (URL, local only unless allow_cloud), reported early.
+            nugget_retrieve::HttpReranker::new(
+                r,
+                None,
+                std::sync::Arc::new(nugget_core::egress::NullEgress),
+            )
+            .map_err(|e| Error::Invalid(format!("retrieve.reranker: {e}")))?;
         }
         if self.runtime.idle_stop_minutes > 7 * 24 * 60 {
             return Err(Error::Invalid(
@@ -673,6 +698,7 @@ mod tests {
         assert!(!cfg.runtime.enabled);
         assert_eq!(cfg.runtime.chat_model.as_deref(), Some("qwen3-4b-q4km"));
         assert_eq!(cfg.runtime.embedding_model, None);
+        assert_eq!(cfg.runtime.rerank_model, None);
         assert_eq!(cfg.runtime.idle_stop_minutes, 0);
         assert_eq!(cfg.ingest.queue_capacity, 8);
         assert!(!cfg.ingest.allow_cloud_embeddings);
@@ -680,6 +706,45 @@ mod tests {
         assert!(!cfg.retrieve.allow_cloud_embedding);
         let empty = Config::parse("").unwrap();
         assert_eq!(empty.runtime, RuntimeConfig::default());
+        assert_eq!(empty.retrieve.reranker, None);
+    }
+
+    #[test]
+    fn parses_the_rerank_model_and_an_external_reranker() {
+        let cfg = Config::parse(
+            "[runtime]\nrerank_model = \"bge-reranker-v2-m3-q4km\"\n\
+             [retrieve]\nrerank_pool = 20\n[retrieve.reranker]\nbase_url = \"http://127.0.0.1:8013\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            cfg.runtime.rerank_model.as_deref(),
+            Some("bge-reranker-v2-m3-q4km")
+        );
+        assert_eq!(cfg.retrieve.rerank_pool, 20);
+        let r = cfg.retrieve.reranker.unwrap();
+        assert_eq!(r.base_url, "http://127.0.0.1:8013");
+        assert_eq!(r.timeout_ms, 2_000, "unset fields keep their defaults");
+        for (text, needle) in [
+            (
+                "[runtime]\nrerank_model = \"Bad Id\"",
+                "runtime.rerank_model",
+            ),
+            (
+                "[retrieve.reranker]\ntimeout_ms = 5",
+                "base_url is required",
+            ),
+            (
+                "[retrieve.reranker]\nbase_url = \"not a url\"",
+                "retrieve.reranker",
+            ),
+            (
+                "[retrieve.reranker]\nbase_url = \"https://rerank.example.com\"",
+                "not on this device",
+            ),
+        ] {
+            let err = Config::parse(text).unwrap_err().to_string();
+            assert!(err.contains(needle), "{text:?}: {err}");
+        }
     }
 
     #[test]

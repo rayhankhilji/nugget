@@ -10,6 +10,7 @@ mod daemon;
 mod doubletap;
 mod history;
 mod login;
+mod notify;
 mod open;
 mod settings;
 mod tray;
@@ -42,6 +43,7 @@ fn main() {
         // Driven from `commands::notify` only; the webview has no `notification:` permission.
         .plugin(tauri_plugin_notification::init())
         .manage(daemon::Daemon::new())
+        .manage(notify::PendingToday::default())
         .invoke_handler(tauri::generate_handler![
             commands::connection_info,
             commands::start_daemon,
@@ -157,6 +159,7 @@ fn main() {
         })
         .on_window_event(|window, event| {
             doubletap::on_window_event(window, event);
+            notify::on_window_event(window, event);
             // Events can arrive before `setup` has managed the state.
             let Some(state) = window.try_state::<window_state::WindowState>() else {
                 return;

@@ -6,7 +6,9 @@
 //!   ([`mailto`]). Nothing is ever sent or written to the mailbox.
 //! - **CreateEvent**: `PUT` of a VEVENT to the first enabled CalDAV source's default calendar;
 //!   without one (or if the server refuses) an RFC 5545 `.ics` file ([`ics`]) under
-//!   `<data>/proactive/events/` that the desktop opens with the OS.
+//!   `<data>/proactive/events/` that the desktop opens with the OS. The user is the event's
+//!   `ORGANIZER` ([`Inner::organizer`]: the CalDAV account, else a configured address, else a
+//!   mail or calendar account's); see [`ics`] for when it is written.
 //! - **Reminder**: stored ([`records`]); the daemon fires `reminder.due` from
 //!   [`Exec::take_due_reminders`] and the desktop shows the OS notification.
 //! - **ArchiveThread**: IMAP `UID MOVE` to the archive mailbox, or Gmail `messages.modify`
@@ -55,6 +57,40 @@ const NOTES_FOLDER: &str = "Notes";
 /// Where `.ics` files go, under the data dir.
 const EVENTS_DIR: &str = "proactive/events";
 
+/// Who the user is, as configured: `[proactive.engine] user_addresses` then `[draft.voice]`
+/// `emails`, and the first `[draft.voice]` name.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Identity {
+    pub emails: Vec<String>,
+    pub name: Option<String>,
+}
+
+impl Identity {
+    /// From the engine's `user_addresses` and the raw `[draft]` table (read leniently: the draft
+    /// feature validates it).
+    pub(crate) fn from_config(user_addresses: &[String], draft: &toml::Table) -> Self {
+        let voice = draft.get("voice").and_then(toml::Value::as_table);
+        let strings = |key: &str| -> Vec<String> {
+            voice
+                .and_then(|v| v.get(key))
+                .and_then(toml::Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(toml::Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut emails = user_addresses.to_vec();
+        emails.extend(strings("emails"));
+        Self {
+            emails,
+            name: strings("names").into_iter().find(|n| !n.trim().is_empty()),
+        }
+    }
+}
+
 /// What the executors need to know about a configured source.
 #[derive(Debug, Clone, PartialEq)]
 struct SourceLite {
@@ -97,6 +133,7 @@ struct Inner {
     egress: Arc<dyn EgressSink>,
     /// Snapshot of the configured sources, kept current from ingest events.
     sources: RwLock<BTreeMap<SourceId, SourceLite>>,
+    identity: Identity,
     drafts: records::DraftStore,
     reminders: records::ReminderStore,
     /// Cancelled at daemon shutdown.
@@ -117,19 +154,21 @@ struct Parts {
     secrets: Arc<dyn SecretStore>,
     egress: Arc<dyn EgressSink>,
     drafter: Option<Arc<dyn Drafter>>,
+    identity: Identity,
     cancel: CancellationToken,
 }
 
 impl Exec {
     /// Build the executors from the daemon's state (store, sources, vault, router, secrets).
     /// Keeps a snapshot of the configured sources current in a background task.
-    pub(crate) fn new(state: &Arc<State>) -> Result<Self> {
-        let engine = nugget_draft::Drafter::new(
+    /// `draft` is the `[draft]` table (the voice profile drafts are written in); `identity` is
+    /// the user (the organizer of events).
+    pub(crate) fn new(state: &Arc<State>, draft: &toml::Table, identity: Identity) -> Result<Self> {
+        let engine = draft::EngineDrafter::new(
             state.store.clone(),
             state.retriever.clone(),
             state.router.clone(),
-            Arc::new(nugget_draft::NoVoice),
-            nugget_draft::DraftConfig::default(),
+            draft,
         );
         let exec = Self::from_parts(Parts {
             store: state.store.clone(),
@@ -137,7 +176,8 @@ impl Exec {
             vault: state.knowledge.vault.clone(),
             secrets: state.secrets.clone(),
             egress: Arc::new(state.store.clone()),
-            drafter: Some(Arc::new(draft::EngineDrafter::new(engine))),
+            drafter: Some(Arc::new(engine)),
+            identity,
             cancel: state.shutdown.child_token(),
         });
         exec.spawn_source_watch(state);
@@ -157,6 +197,7 @@ impl Exec {
                 secrets: p.secrets,
                 egress: p.egress,
                 sources: RwLock::new(BTreeMap::new()),
+                identity: p.identity,
                 cancel: p.cancel,
             }),
             drafter: p.drafter,
@@ -349,6 +390,40 @@ impl Inner {
             .map(|(id, s)| (id.clone(), s.settings.clone()))
     }
 
+    /// The user as an event's organizer: the CalDAV account when it is an address (`caldav`, the
+    /// server schedules for its owner), else the first configured address, else the first
+    /// enabled mail or calendar account that is one. `None` when nothing is known.
+    fn organizer(&self, caldav: Option<&Value>) -> Option<ics::Organizer> {
+        let name = self.identity.name.as_deref();
+        let account = |settings: &Value, key: &str| {
+            settings
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|a| ics::Organizer::new(a, name))
+        };
+        if let Some(o) = caldav.and_then(|c| account(c, "username")) {
+            return Some(o);
+        }
+        if let Some(o) = self
+            .identity
+            .emails
+            .iter()
+            .find_map(|e| ics::Organizer::new(e, name))
+        {
+            return Some(o);
+        }
+        self.sources_ref()
+            .values()
+            .filter(|s| s.enabled)
+            .find_map(|s| match s.kind.as_str() {
+                nugget_connector_imap::KIND | nugget_connector_caldav::KIND => {
+                    account(&s.settings, "username")
+                }
+                // Google and Microsoft accounts.
+                _ => account(&s.settings, "account_hint"),
+            })
+    }
+
     async fn put_caldav(
         &self,
         id: &SourceId,
@@ -463,7 +538,8 @@ impl CalendarExecutor for Inner {
         let uid = format!("{short}@nugget");
         let now = OffsetDateTime::now_utc();
         if let Some((id, settings)) = self.caldav() {
-            let ics = ics::render(event, &uid, now, None);
+            let organizer = self.organizer(Some(&settings));
+            let ics = ics::render(event, &uid, now, None, organizer.as_ref());
             match self
                 .put_caldav(&id, &settings, &format!("{short}.ics"), &ics)
                 .await
@@ -475,7 +551,8 @@ impl CalendarExecutor for Inner {
                 }
             }
         }
-        let ics = ics::render(event, &uid, now, Some("PUBLISH"));
+        let organizer = self.organizer(None);
+        let ics = ics::render(event, &uid, now, Some("PUBLISH"), organizer.as_ref());
         self.write_ics(&event.title, &short[..8], ics).await
     }
 }
@@ -561,6 +638,7 @@ mod tests {
             secrets: Arc::new(MemorySecrets::new()),
             egress: Arc::new(store.clone()),
             drafter: Some(Arc::new(Fixed)),
+            identity: Identity::default(),
             cancel: CancellationToken::new(),
         });
         Fx {
@@ -642,7 +720,11 @@ mod tests {
 
     #[tokio::test]
     async fn events_without_caldav_become_ics_files() {
-        let f = fixture(false);
+        let mut f = fixture(false);
+        Arc::get_mut(&mut f.exec.inner).unwrap().identity = Identity {
+            emails: vec!["alex@morgan.example".into()],
+            name: Some("Alex Morgan".into()),
+        };
         let ev = CreateEvent {
             title: "Acme / pilot kickoff".into(),
             start: OffsetDateTime::now_utc(),
@@ -660,6 +742,7 @@ mod tests {
         assert!(text.starts_with("BEGIN:VCALENDAR\r\n"));
         assert!(text.contains("SUMMARY:Acme / pilot kickoff\r\n"));
         assert!(text.contains("mailto:ana@acme.io"));
+        assert!(text.contains("\r\nORGANIZER;CN=Alex Morgan:mailto:alex@morgan.example\r\n"));
         let art = f.exec.artifact(&Action::CreateEvent(ev), &path).unwrap();
         assert_eq!(art.kind, "file");
         assert_eq!(art.path.as_deref(), Some(path.as_str()));
@@ -678,6 +761,58 @@ mod tests {
             .unwrap();
         assert_eq!(ev_art.kind, "event");
         assert_eq!(ev_art.url.as_deref(), Some("https://dav.example/cal/x.ics"));
+    }
+
+    #[test]
+    fn the_organizer_is_the_best_known_address() {
+        let draft: toml::Table = toml::from_str(
+            "[voice]\nemails = [\"voice@me.example\"]\nnames = [\"\", \"Alex Morgan\"]",
+        )
+        .unwrap();
+        let id = Identity::from_config(&["engine@me.example".into()], &draft);
+        assert_eq!(id.emails, ["engine@me.example", "voice@me.example"]);
+        assert_eq!(id.name.as_deref(), Some("Alex Morgan"));
+        assert_eq!(
+            Identity::from_config(&[], &toml::Table::new()),
+            Identity::default()
+        );
+
+        // Nothing known.
+        let mut f = fixture(false);
+        assert_eq!(f.exec.inner.organizer(None), None);
+        // A mail account; a disabled source or a non-address does not count.
+        add_source(
+            &f.exec,
+            "a-imap-off",
+            "imap",
+            false,
+            json!({"username": "off@me.example"}),
+        );
+        add_source(&f.exec, "b-imap", "imap", true, json!({"username": "alex"}));
+        add_source(
+            &f.exec,
+            "c-gmail",
+            "gmail",
+            true,
+            json!({"account_hint": "gm@me.example"}),
+        );
+        let o = f.exec.inner.organizer(None).unwrap();
+        assert_eq!((o.email.as_str(), o.name), ("gm@me.example", None));
+        // A configured address wins over accounts; the CalDAV account wins over both.
+        Arc::get_mut(&mut f.exec.inner).unwrap().identity = id;
+        let o = f.exec.inner.organizer(None).unwrap();
+        assert_eq!(o.email, "engine@me.example");
+        assert_eq!(o.name.as_deref(), Some("Alex Morgan"));
+        let dav = json!({"url": "https://dav.example", "username": "dav@me.example"});
+        assert_eq!(
+            f.exec.inner.organizer(Some(&dav)).unwrap().email,
+            "dav@me.example"
+        );
+        let dav = json!({"url": "https://dav.example", "username": "alex"});
+        assert_eq!(
+            f.exec.inner.organizer(Some(&dav)).unwrap().email,
+            "engine@me.example"
+        );
     }
 
     #[tokio::test]
