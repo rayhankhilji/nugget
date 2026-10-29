@@ -299,8 +299,10 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     // Facts carry evidence with titles from the store.
     let detail = h
         .wait_detail(&alice.id, |d| {
+            // The vault renders right after extraction; wait for both.
             d.claims.iter().any(|c| c.predicate == "works_at")
                 && d.claims.iter().any(|c| c.predicate == "works_on")
+                && d.vault_path.is_some()
         })
         .await;
     let works_at = detail
@@ -315,8 +317,8 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
         Some("Acme")
     );
     let ev = &works_at.evidence[0];
-    // Files items are titled by their file name.
-    assert_eq!(ev.title.as_deref(), Some("lunch"), "{ev:?}");
+    // Mail files are titled by their Subject (other files by their file name).
+    assert_eq!(ev.title.as_deref(), Some("Lunch on Friday"), "{ev:?}");
     assert!(
         ev.url.as_deref().is_some_and(|u| u.starts_with("file:")),
         "{ev:?}"
@@ -336,7 +338,7 @@ async fn knowledge_graph_vault_and_edits_end_to_end() {
     assert!(text.contains(alice.id.as_str()), "{text}");
     assert!(text.contains("[^1]: "), "citation footnotes: {text}");
     assert!(
-        text.contains("[lunch]("),
+        text.contains("[Lunch on Friday]("),
         "cited by title with a link: {text}"
     );
 
@@ -680,7 +682,10 @@ async fn mcp_http_scopes_revocation_and_audit() {
     let out = tool(&c, "get_entity", json!({"id": alice.id})).await;
     assert!(out.contains("Alice Smith"), "{out}");
     assert!(out.contains("Acme"), "{out}");
-    assert!(out.contains("\"lunch\""), "evidence titles: {out}");
+    assert!(
+        out.contains("\"Lunch on Friday\""),
+        "evidence titles: {out}"
+    );
     let out = tool(&c, "find_entities", json!({"text": "acme"})).await;
     assert!(out.contains("Acme"), "{out}");
     let out = tool(
