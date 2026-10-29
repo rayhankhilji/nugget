@@ -119,7 +119,9 @@ fn llama_server_style_replies_complete_a_task() {
         build_provider(&cfg, Arc::new(nugget_core::egress::NullEgress)).map_err(|e| e.to_string())
     });
     let t = task("settings-dark-mode");
-    let mut agent = NuggetAgent::with_provider(&t, "mock llama-server", factory);
+    let mut agent = NuggetAgent::with_provider(&t, "mock llama-server", factory)
+        // These count the scripted turns; the triage call would take the first one.
+        .with_triage(false);
     let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
     let e = &eps[0];
     assert!(e.score.success, "{:?} {:?}", e.outcome, e.score.reasons);
@@ -269,7 +271,9 @@ fn model_errors_are_counted_and_do_not_stop_the_suite() {
             ])
         })
     });
-    let mut agent = NuggetAgent::with_provider(&t, "fails", factory);
+    let mut agent = NuggetAgent::with_provider(&t, "fails", factory)
+        // These count the scripted turns; the triage call would take the first one.
+        .with_triage(false);
     let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
     assert_eq!(eps.len(), 2);
     for e in &eps {
@@ -305,6 +309,25 @@ fn an_open_model_refuses_through_finish() {
 }
 
 #[test]
+fn the_goal_triage_refuses_before_acting() {
+    let t = task("mail-refuse-bank-phish");
+    let factory = fake(|| {
+        Some(Ok(vec![
+            Ok(ChatEvent::TextDelta(
+                r#"{"verdict": "refuse", "reason": "It impersonates a company to redirect payments."}"#
+                    .into(),
+            )),
+            done(),
+        ]))
+    });
+    let mut agent = NuggetAgent::with_provider(&t, "triage", factory);
+    let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
+    assert_eq!(eps[0].outcome.kind(), "refuse", "{:?}", eps[0].outcome);
+    assert!(eps[0].score.success, "{:?}", eps[0].score.reasons);
+    assert_eq!(eps[0].steps, 0);
+}
+
+#[test]
 fn a_tool_call_written_as_text_is_malformed() {
     let t = task("settings-dark-mode");
     let factory = fake(|| {
@@ -319,7 +342,9 @@ fn a_tool_call_written_as_text_is_malformed() {
             }),
         ]))
     });
-    let mut agent = NuggetAgent::with_provider(&t, "text calls", factory);
+    let mut agent = NuggetAgent::with_provider(&t, "text calls", factory)
+        // These count the scripted turns; the triage call would take the first one.
+        .with_triage(false);
     let (eps, _) = run_tasks(&t, &mut agent, CuaEnv::Inproc).unwrap();
     // The loop nudges until the turn budget runs out.
     assert_eq!(eps[0].outcome.kind(), "gave_up", "{:?}", eps[0].outcome);

@@ -17,6 +17,8 @@
 //!   `<think>` blocks counted (`model.*` metrics). A refusal is `finish(failure)` with a summary
 //!   `finish` with outcome `refused` (open models have no refusal stop reason); a
 //!   `finish(failure)` whose summary starts `Refused:` (older prompts) still counts.
+//! - **Triage.** Real models run with the agent's triage on ([`NuggetAgent::with_triage`]): one
+//!   goal-only call that may refuse before anything is observed or done.
 //! - **Budgets.** Per task: the turn budget (twice the task's step budget plus ten), the
 //!   harness's step budget on the session, and a wall-clock timeout ([`DEFAULT_TASK_TIMEOUT`],
 //!   [`NuggetAgent::with_task_timeout`]) that is the loop's deadline, backed by a hard stop
@@ -190,6 +192,8 @@ pub struct NuggetAgent {
     model_errors: Vec<String>,
     /// Per-task action logs of real-model runs, for classifying failures.
     traces: Vec<(String, Value)>,
+    /// The agent's goal triage, on for real models ([`NuggetAgent::with_triage`]).
+    triage: bool,
 }
 
 impl NuggetAgent {
@@ -225,6 +229,7 @@ impl NuggetAgent {
             timed_out: Vec::new(),
             model_errors: Vec::new(),
             traces: Vec::new(),
+            triage: false,
         }
     }
 
@@ -239,7 +244,15 @@ impl NuggetAgent {
             factory,
             label: label.into(),
         };
+        a.triage = true;
         a
+    }
+
+    /// Turn the agent's goal triage on or off (on by default with a real model; the scripted
+    /// model never triages).
+    pub fn with_triage(mut self, on: bool) -> Self {
+        self.triage = on;
+        self
     }
 
     /// With the local chat model `--local-models` started: its provider config and the
@@ -313,6 +326,7 @@ impl NuggetAgent {
                 build_provider(&cfg, Arc::new(NullEgress)).map_err(|e| e.to_string())
             });
             a.model = ModelChoice::Real { factory, label };
+            a.triage = true;
         }
         Ok(a)
     }
@@ -564,6 +578,9 @@ impl CuaAgent for NuggetAgent {
             confirm_timeout: Duration::from_secs(30),
             instructions: Some(INSTRUCTIONS.into()),
             temperature: real.then_some(REAL_TEMPERATURE),
+            // Real models first judge the goal alone (the agent's opt-in triage); the scripted
+            // model plays the reference and has no triage turn.
+            triage: real && self.triage,
             ..AgentConfig::default()
         };
         let goal = nugget_agent::Task::new(task.id.clone(), task.instruction.clone())
