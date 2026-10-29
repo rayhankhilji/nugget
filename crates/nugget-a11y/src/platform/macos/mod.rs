@@ -327,6 +327,9 @@ impl Platform for AxPlatform {
                     let n = l.read_node();
                     n.value.or(n.name)
                 })
+                // AppKit's `accessibilityLabel` (what VoiceOver reads for a field) is the
+                // element's AXDescription.
+                .or_else(|| node.description.clone())
         } else {
             None
         };
