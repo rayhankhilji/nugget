@@ -54,7 +54,7 @@ pub(crate) fn aggregate<'a>(features: impl IntoIterator<Item = &'a Features>) ->
         exclamations_per_message: fs.iter().map(|f| f.exclamations as f32).sum::<f32>() / n,
         lowercase_start_rate: fs.iter().filter(|f| f.lowercase_start).count() as f32 / n,
         languages: if detected > 0.0 {
-            shares(fs.iter().filter_map(|f| f.language.as_deref()), detected)
+            shares(fs.iter().filter_map(|f| f.language.map(|l| l.0)), detected)
         } else {
             Vec::new()
         },
@@ -159,7 +159,7 @@ pub(crate) fn distance_with(
             1.0 - stats
                 .languages
                 .iter()
-                .find(|(x, _)| x == l)
+                .find(|(x, _)| x == l.0)
                 .map_or(0.0, |(_, s)| *s)
         }
         _ => 0.0,

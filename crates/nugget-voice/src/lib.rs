@@ -16,6 +16,8 @@
 //!   [`VoiceProfile::save`] keeps a snapshot inside the encrypted store (never a plain file) and
 //!   [`VoiceProfile::load_or_build`] restores it at startup, so a restart only reads what
 //!   changed. `refresh` does not save: call `save` when [`RefreshReport::changed`] is true.
+//!   The profile does not hold message texts: per message it keeps features, recipients and
+//!   content-term ids, and reads the few exemplar texts a draft gets back from the store.
 //! - [`StyleStats`] per channel and per frequent recipient (see [`stats`] for definitions).
 //! - [`VoiceSource::hints`] returns stats plus 3–6 short exemplars, chosen by recipient, then
 //!   channel, then topic similarity to the current thread (hybrid store search restricted to

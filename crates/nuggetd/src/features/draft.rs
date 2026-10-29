@@ -10,7 +10,8 @@
 //!   read or sent, with a stable error: `data.refused` is `"secure"`, `"excluded_app"` or
 //!   `"not_draftable"` or `"terminal"` (`"disabled"` when `[draft] enabled = false`). See [`refusal_error`].
 //! - **Voice.** The profile is loaded from its encrypted snapshot (or built) on a blocking
-//!   thread after startup, then refreshed incrementally after ingest commits and draft
+//!   thread a few seconds after startup (`voice_load_delay_ms`, or at the first draft or
+//!   `voice.status` if sooner), then refreshed incrementally after ingest commits and draft
 //!   feedback, debounced ([`voice`]).
 //! - **Prompt cache.** Every `draft.prewarm` (the trigger's first tap) warms the exact system
 //!   prefix of the coming draft on a non-cloud provider (connection only for cloud ones). With
@@ -37,6 +38,7 @@
 //! voice_timeout_ms = 500
 //! prewarm_ttl_ms = 30000
 //! voice_refresh_debounce_ms = 5000      # quiet time after ingest commits before a refresh
+//! voice_load_delay_ms = 5000            # wait after startup before loading the voice profile
 //! prewarm_on_start = false        # cache the drafting rules on the local server at start
 //!
 //! [draft.local]                   # smaller prompts for on-device and LAN providers
@@ -115,6 +117,7 @@ struct DraftSection {
     voice_timeout_ms: u64,
     prewarm_ttl_ms: u64,
     voice_refresh_debounce_ms: u64,
+    voice_load_delay_ms: u64,
     voice: VoiceSection,
     local: LocalSection,
     /// Warm the default local provider's prompt cache with the drafting rules at start.
@@ -158,6 +161,7 @@ impl Default for DraftSection {
             voice_timeout_ms: d.voice_timeout_ms,
             prewarm_ttl_ms: d.prewarm_ttl_ms,
             voice_refresh_debounce_ms: 5_000,
+            voice_load_delay_ms: 5_000,
             voice: VoiceSection::default(),
             local: LocalSection::default(),
             prewarm_on_start: false,
@@ -325,7 +329,10 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
         cfg.me(),
         cfg.voice_config(),
         events,
-        Duration::from_millis(cfg.voice_refresh_debounce_ms),
+        voice::Timing {
+            debounce: Duration::from_millis(cfg.voice_refresh_debounce_ms),
+            load_delay: Duration::from_millis(cfg.voice_load_delay_ms),
+        },
         state.shutdown.clone(),
     ));
     // Opt-in: cache the drafting rules on the default (non-cloud) provider now.
