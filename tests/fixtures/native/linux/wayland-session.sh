@@ -141,7 +141,10 @@ if [ "$compositor" = kwin ]; then
     # and wait for it before the portal front end looks for backends.
     xdpk="$(ls /usr/lib/*/libexec/xdg-desktop-portal-kde /usr/libexec/xdg-desktop-portal-kde 2>/dev/null | head -n 1)"
     if [ -n "$xdpk" ]; then
-        "$xdpk" >"$logs/portal-kde.log" 2>&1 &
+        # Offscreen: it needs no window for GlobalShortcuts, and on ubuntu-latest its Wayland
+        # platform plugin finds no shell integration and aborts.
+        env -u QT_PLUGIN_PATH -u QT_QPA_PLATFORM_PLUGIN_PATH QT_QPA_PLATFORM=offscreen "$xdpk" \
+            >"$logs/portal-kde.log" 2>&1 &
         pids+=($!)
         for _ in $(seq 1 100); do
             gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
