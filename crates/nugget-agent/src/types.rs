@@ -9,13 +9,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "outcome", content = "detail", rename_all = "snake_case")]
 pub enum Outcome {
-    /// `finish(success)` and every change was verified (or there were no changes).
+    /// `finish(done)` and every change was verified (or there were no changes).
     Succeeded,
-    /// `finish(success)`, but some changes could not be verified. The string says which.
+    /// `finish(done)`, but some changes could not be verified. The string says which.
     Unverified(String),
     /// `finish(partial)` with no failed verification.
     Partial,
-    /// `finish(failure)`, a failed verification the model did not fix, or too many failures.
+    /// `finish(cannot)`, a failed verification the model did not fix, or too many failures.
     Failed(String),
     /// Suspended by `ask_user`; resume with the answer.
     NeedsInput(String),
@@ -24,7 +24,7 @@ pub enum Outcome {
     /// The run's cancellation token fired.
     Cancelled,
     BudgetExhausted(Budget),
-    /// The model or provider declined.
+    /// `finish(refused)`, or the provider declined (a refusal or content-filter stop).
     Refused(String),
     /// A provider or action-log failure.
     Error(String),

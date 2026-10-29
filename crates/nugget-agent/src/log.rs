@@ -414,6 +414,7 @@ fn claim_label(c: Claim) -> &'static str {
         Claim::Success => "success",
         Claim::Partial => "partial",
         Claim::Failure => "failure",
+        Claim::Refused => "refused",
     }
 }
 

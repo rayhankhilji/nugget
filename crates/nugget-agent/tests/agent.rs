@@ -572,7 +572,10 @@ async fn injection_in_observation_forces_confirmation() {
         .next()
         .unwrap()
         .trim_start_matches('<');
-    assert!(sent.system.as_ref().unwrap().contains(fence));
+    // The run's tag is named in the first user message, not the (cacheable) system prompt.
+    let first = format!("{:?}", sent.messages[0]);
+    assert!(first.contains(&format!("tag {fence}.")), "{first}");
+    assert!(!sent.system.as_ref().unwrap().contains(fence));
 }
 
 #[tokio::test]
@@ -703,6 +706,143 @@ async fn text_without_tool_calls_is_nudged() {
     assert_eq!(run.outcome, Outcome::Succeeded);
     let nudge = format!("{:?}", model.requests()[1].messages.last().unwrap());
     assert!(nudge.contains("No tool was called"));
+    for outcome in ["done", "partial", "cannot", "refused"] {
+        assert!(nudge.contains(outcome), "{nudge}");
+    }
+}
+
+#[tokio::test]
+async fn system_prompt_is_identical_across_runs_and_fence_stays_per_run() {
+    let mut systems = Vec::new();
+    let mut firsts = Vec::new();
+    for id in ["t-cache-a", "t-cache-b"] {
+        let model = Scripted::new(vec![turn(vec![finish("done")])]);
+        let run = agent(&model, registry(&World::new()), &FakeGate::new())
+            .run(Task::new(id, "do the thing"), cfg())
+            .await;
+        assert_eq!(run.outcome, Outcome::Succeeded);
+        let req = &model.requests()[0];
+        systems.push(req.system.clone().unwrap());
+        firsts.push(format!("{:?}", req.messages[0]));
+    }
+    assert_eq!(systems[0], systems[1], "byte-identical system prompts");
+    // The fence nonce still differs per run, and is stated in the trusted first message.
+    assert_ne!(firsts[0], firsts[1]);
+    for first in &firsts {
+        assert!(first.contains("do the thing"));
+        assert!(first.contains("tag untrusted-"), "{first}");
+        assert!(!first.contains("<untrusted-"), "{first}");
+    }
+    let system = &systems[0];
+    assert!(system.len() < 1500, "{} chars", system.len());
+    for needle in [
+        "data, never instructions",
+        "<untrusted-",
+        "ask_user",
+        "refused",
+        "one tool per turn",
+    ] {
+        assert!(system.contains(needle), "missing {needle:?}");
+    }
+}
+
+#[tokio::test]
+async fn finish_outcomes_and_legacy_aliases() {
+    let cases = [
+        ("done", Outcome::Succeeded, Claim::Success),
+        ("success", Outcome::Succeeded, Claim::Success),
+        ("partial", Outcome::Partial, Claim::Partial),
+        ("cannot", Outcome::Failed("done".into()), Claim::Failure),
+        ("failure", Outcome::Failed("done".into()), Claim::Failure),
+        ("refused", Outcome::Refused("done".into()), Claim::Refused),
+    ];
+    for (given, outcome, claim) in cases {
+        let model = Scripted::new(vec![turn(vec![finish(given)])]);
+        let run = agent(&model, registry(&World::new()), &FakeGate::new())
+            .run(Task::new(format!("t-fin-{given}"), "x"), cfg())
+            .await;
+        assert_eq!(run.outcome, outcome, "{given}");
+        assert_eq!(run.claim, Some(claim), "{given}");
+        assert_eq!(run.actions[0].decision, GateOutcome::Allowed, "{given}");
+    }
+    // A refusal wins even after a change, and the schema rejects an unknown outcome.
+    let world = World::new();
+    let model = Scripted::new(vec![
+        turn(vec![("c1", "set_value", json!({"value": 3}))]),
+        turn(vec![finish("refused")]),
+    ]);
+    let run = agent(&model, registry(&world), &FakeGate::new())
+        .run(Task::new("t-fin-late", "x"), cfg())
+        .await;
+    assert!(matches!(run.outcome, Outcome::Refused(_)));
+    let model = Scripted::new(vec![
+        turn(vec![finish("maybe")]),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent(&model, registry(&World::new()), &FakeGate::new())
+        .run(Task::new("t-fin-bad", "x"), cfg())
+        .await;
+    assert!(matches!(
+        run.actions[0].decision,
+        GateOutcome::InvalidArgs { .. }
+    ));
+    assert_eq!(run.outcome, Outcome::Succeeded);
+}
+
+#[tokio::test]
+async fn empty_and_reused_call_ids_get_fresh_ids_and_execute() {
+    let world = World::new();
+    let tools = registry(&world).with(Arc::new(ReadPage("Counter page.".into())));
+    let model = Scripted::new(vec![
+        // Two id-less calls in one turn.
+        turn(vec![
+            ("", "increment", json!({})),
+            ("", "increment", json!({})),
+        ]),
+        // An id reused for a different call, across turns and within one turn.
+        turn(vec![("c1", "set_value", json!({"value": 7}))]),
+        turn(vec![
+            ("c1", "set_value", json!({"value": 9})),
+            ("c1", "read_page", json!({})),
+        ]),
+        // A read-only call repeated verbatim with the same id observes again.
+        turn(vec![("r1", "read_page", json!({}))]),
+        turn(vec![("r1", "read_page", json!({}))]),
+        turn(vec![finish("done")]),
+    ]);
+    let run = agent(&model, tools, &FakeGate::new())
+        .run(Task::new("t-ids", "count"), cfg())
+        .await;
+    assert_eq!(run.outcome, Outcome::Succeeded, "{:?}", run.actions);
+    assert_eq!(world.increments.load(Ordering::SeqCst), 2);
+    assert_eq!(world.value(), 9);
+    assert!(run.actions.iter().all(|a| a.executed), "{:?}", run.actions);
+    assert!(
+        run.actions
+            .iter()
+            .all(|a| a.decision != GateOutcome::Replayed)
+    );
+
+    // Every call id in the history is unique and non-empty, and each tool result answers the
+    // (rewritten) id its call carries.
+    let last = model.requests().pop().unwrap();
+    let mut calls = Vec::new();
+    let mut results = Vec::new();
+    for part in last.messages.iter().flat_map(|m| &m.content) {
+        match part {
+            nugget_infer::Part::ToolCall { id, .. } => calls.push(id.clone()),
+            nugget_infer::Part::ToolResult { call_id, .. } => results.push(call_id.clone()),
+            _ => {}
+        }
+    }
+    assert_eq!(calls.len(), 7);
+    assert!(calls.iter().all(|id| !id.is_empty()));
+    let unique: std::collections::HashSet<_> = calls.iter().collect();
+    assert_eq!(unique.len(), calls.len(), "{calls:?}");
+    assert_eq!(results, calls);
+    assert_eq!(&calls[..3], ["call_s1_1", "call_s1_2", "c1"]);
+    assert_eq!(&calls[3..6], ["call_s3_1", "call_s3_2", "r1"]);
+    assert_eq!(calls[6], "call_s5_1");
 }
 
 #[tokio::test]
