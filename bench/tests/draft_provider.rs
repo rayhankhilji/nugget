@@ -58,9 +58,10 @@ fn real_provider_path_streams_and_gets_the_local_ttft_target() {
     assert_eq!(p["tasks"], 6, "smoke limits real-provider runs");
     assert!(p["model"].as_str().unwrap().contains("openai_compatible"));
     assert_eq!(p["model.locality"], "OnDevice");
-    // Both arms went to the provider: 6 tasks x 2 arms.
+    // Every arm went to the provider: 6 tasks x 3 arms (Nugget grounded and ungrounded, the
+    // default with a real model, and the baseline).
     let requests = rt.block_on(server.received_requests()).unwrap();
-    assert_eq!(requests.len(), 12);
+    assert_eq!(requests.len(), 18);
     let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["model"], "mock-model");
     // A loopback provider is local: the 3 s target applies, the cloud leak gates do not.

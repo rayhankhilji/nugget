@@ -658,9 +658,13 @@ sections.
 | Thread | Instruction-like sentences in the thread and context are replaced with `[instruction-like text removed]` | Raw |
 | Screenshot | None | None. Sentient also sends a screenshot, which is not reproducible. Leaving it out makes the baseline prompt smaller and cleaner, which is **generous to the baseline** |
 
-The report says which Nugget path ran (`params.nugget_path`). Until `nugget-draft` (M3-C) and
-`nugget-voice` (M3-D) land, it is `in_suite`: the pipeline above, built in
-`src/suites/draft/arms.rs` against those crates' contract types.
+The report says which Nugget path ran (`params.nugget_path`). With the fake model it is
+`in_suite`: the pipeline above, built in `src/suites/draft/arms.rs` against those crates'
+contract types (the fake model reads that section format). With a real model it is `engine`: the
+Nugget arm drafts through the real `nugget_draft::Drafter` (`src/suites/draft/engine.rs`) over the
+same persona stores, with `DraftConfig::default()` except `grounding` and `temperature`, and the
+prompt it sent is scored like the baseline's. `--draft-grounding both` (the default with a real
+model) runs that arm twice, grounded and not, on the same tasks.
 
 **Fake model** (`src/suites/draft/fake.rs`; the default, used in CI). It is deterministic and
 scripted, and it never knows which arm wrote a prompt.
@@ -698,6 +702,8 @@ possible. **Its numbers are not model quality.** The exit criterion has to be co
 | `ttft.p50_s` / `.p95_s`, `total.p50_s` / `.p95_s` | From the trigger (prompt building and retrieval included) to the first streamed token and to the complete draft |
 | `draft.win_rate_vs_baseline` | Share of tasks where Nugget scores higher on voice match + recall − hallucination − leak (ties count half) |
 | `draft.field_kind_accuracy` | `nugget_draft::classify` against each task's expected kind |
+| `draft.nugget_ungrounded.*` | The per-arm metrics above for the second Nugget arm (`--draft-grounding both`: grounding off); no targets |
+| `draft.judge.*`, `draft.judge_heuristic.*`, `draft.judge_grounding.*` | Pairwise judge (`--draft-judge`): Nugget vs baseline by the chosen judge; the same pair by the rule-based judge (whenever a judge runs); grounded vs ungrounded Nugget (`--draft-judge-grounding`: `grounded_win_rate`, `ungrounded_win_rate`, `tie_rate`, `inconsistent_rate`, `voice.grounded_win_rate`, `factuality.grounded_win_rate`, `failures`) |
 
 **Targets.**
 
@@ -1341,6 +1347,11 @@ Options (all suites):
 | `--local-threads N` | `llama-server --threads` (default: its own choice) |
 | `--local-thinking off\|model` | Hybrid reasoning: `off` (the runtime's default since this package) or the model's own default |
 | `--draft-judge none\|model\|heuristic`, `--draft-context-tokens N`, `--draft-timeout-s N` | `draft`: the pairwise judge, the model window the baseline is cut to, the per-request timeout |
+| `--draft-grounding on\|off\|both` | `draft`: run the Nugget arm with `DraftConfig::grounding` on, off, or both on the same tasks (default `both` with a real model, `on` with the fake one); `draft.nugget.*` is the grounded arm, `draft.nugget_ungrounded.*` the other (with `off`, `draft.nugget.*` is the ungrounded arm) |
+| `--draft-temperature T` | `draft`: sampling temperature of every draft request, both arms (default 0 with a real model; `params.sampling.temperature`). No seed is sent: `ChatRequest` has none (`params.sampling.seed`) |
+| `--draft-judge-model ID` | `draft`: judge with this manifest model on a second local server next to the drafting one (same `--models-home`), instead of the drafting model; implies `--draft-judge model` (`params.judge.model`, `judge.same_model_as_drafts`) |
+| `--draft-judge-timeout-s N` | `draft`: per-request timeout of the model judge (default 240 with `--draft-judge-model`, else the draft timeout; `params.judge.timeout_s`) |
+| `--draft-judge-grounding` | `draft`: also judge the grounded Nugget arm against the ungrounded one (`draft.judge_grounding.*`; needs `--draft-grounding both`; doubles the judge requests) |
 | `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
 
 ### Double Tap latency (M3 exit)
@@ -1385,7 +1396,9 @@ exactly like that. Fixed in this package: `nugget-runtime`'s chat config now set
 whole-vault prompt (3,400 tokens p50 here) fit the 8,192-token window, so none was cut
 (`draft.baseline.truncated_tasks` = 0); no request failed or timed out. The pairwise judge is **the
 same local model**, judging each pair in both orders; a 4B model judging its own drafts is weak
-and possibly biased, so read it next to the rule-based metrics.
+and possibly biased, so read it next to the rule-based metrics. Since AA3 the judge can be a
+different, larger local model (`--draft-judge-model`, `params.judge.model`), and the rule-based
+judge is always reported next to it (`draft.judge_heuristic.*`).
 
 | Metric | Run 40832081102: Nugget / baseline | Run 40838950604: Nugget / baseline |
 |---|---|---|
