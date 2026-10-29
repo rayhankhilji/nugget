@@ -25,6 +25,9 @@ import {
   isSourceState,
   mergeSources,
   METHOD_NOT_FOUND,
+  BUSY_BACKOFF_MS,
+  SERVER_BUSY,
+  withBusyRetry,
   sourcesFromChange,
   type SourceInfo,
 } from "./api";
@@ -317,5 +320,54 @@ describe("plugin capabilities", () => {
     expect(isPluginInfo({ ...p, signature: "Trusted" })).toBe(false);
     expect(isPluginInfo({ ...p, enabled: "yes" })).toBe(false);
     expect(isPluginInfo(null)).toBe(false);
+  });
+});
+
+describe("withBusyRetry", () => {
+  const busy = { kind: "rpc", code: SERVER_BUSY, message: "too many requests in flight" };
+
+  it("retries a busy daemon with a bounded backoff, then succeeds", async () => {
+    const waits: number[] = [];
+    let n = 0;
+    const r = await withBusyRetry(
+      async () => {
+        if (++n < 3) throw busy;
+        return "ok";
+      },
+      async (ms) => void waits.push(ms),
+    );
+    expect(r).toBe("ok");
+    expect(n).toBe(3);
+    expect(waits).toEqual([100, 300]);
+  });
+
+  it("gives up after the last retry with the busy error", async () => {
+    const waits: number[] = [];
+    let n = 0;
+    const err = await withBusyRetry(
+      async () => {
+        n++;
+        throw busy;
+      },
+      async (ms) => void waits.push(ms),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).isBusy).toBe(true);
+    expect(n).toBe(BUSY_BACKOFF_MS.length + 1);
+    expect(waits).toEqual([...BUSY_BACKOFF_MS]);
+    expect(waits.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1000);
+  });
+
+  it("does not retry other errors", async () => {
+    let n = 0;
+    const err = await withBusyRetry(
+      async () => {
+        n++;
+        throw { kind: "rpc", code: METHOD_NOT_FOUND, message: "no" };
+      },
+      async () => {},
+    ).catch((e: unknown) => e);
+    expect((err as ApiError).isMethodNotFound).toBe(true);
+    expect(n).toBe(1);
   });
 });
