@@ -13,7 +13,7 @@ for the plan and its v1 checklist.
 | Daemon | `nuggetd` runs on macOS, Windows and Linux, in the foreground or as a per-user service. See [the CLI](reference/cli.md). |
 | Encrypted store | SQLCipher database with full-text (FTS5) and vector (`sqlite-vec`) search, an egress ledger and a hash-chained audit log. |
 | Models | Local models from a signed, pinned manifest, served by a supervised `llama-server` on loopback; or any OpenAI-compatible server (Ollama, LM Studio, vLLM); or Anthropic and OpenAI with your own key. |
-| Sources | Folders, Obsidian vaults, Gmail, Google Calendar, IMAP and CalDAV, with live updates and deletes. |
+| Sources | Folders, Obsidian vaults, Gmail, Google Calendar, Google Drive (not yet tried against a live account), IMAP and CalDAV, with live updates and deletes. |
 | Search | Hybrid full-text plus vector search, one hit per item, with a link back to the original. |
 | Ask | A question answered from retrieved passages, each cited as `[n]`. Sensitive items are withheld from cloud models. |
 | Knowledge graph | People, organisations, projects, commitments and other entities with cited facts, extracted after indexing (deterministic extractors always; an LLM extractor on local models, or cloud for sources you allow). See [The knowledge graph and vault](guide/knowledge.md). |

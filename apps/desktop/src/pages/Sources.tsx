@@ -16,7 +16,7 @@ import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Dialog } from "../components/Dialog";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
 import { DeviceSignInDialog } from "../sources/auth";
-import { connectMode, isSaasKind } from "../sources/kinds";
+import { connectMode, isGoogleKind, isSaasKind } from "../sources/kinds";
 import { KindIcon } from "../sources/KindIcon";
 import { TOKEN_LABEL } from "../sources/SaasForm";
 
@@ -308,6 +308,7 @@ function SourceRow({
           <div className="note note-error small" role="status">
             <span>{s.last_error ? t("sources.lastError", { error: s.last_error }) : t("sources.errorNoDetail")}</span>
             <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
+            {isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
         )}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
