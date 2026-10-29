@@ -288,8 +288,23 @@ jobs:
           sudo apt-get install -y --no-install-recommends xvfb openbox wmctrl xdotool imagemagick dbus-x11
           packaging/scripts/smoke-appimage.sh "$RUNNER_TEMP"/out/*.AppImage
 
+      # The same for the dmg (copied out of the disk image) and the NSIS installer (silent
+      # install and uninstall).
+      - name: dmg smoke test
+        if: matrix.target == 'aarch64-apple-darwin'
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: packaging/scripts/smoke-macos.sh "$RUNNER_TEMP"/out/*.dmg
+
+      - name: NSIS smoke test
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        env:
+          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+        run: ./packaging/scripts/smoke-windows.ps1 (Get-ChildItem "$env:RUNNER_TEMP/out" -Filter '*-setup.exe')[0].FullName
+
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: always() && matrix.target == 'x86_64-unknown-linux-gnu'
+        if: always() && contains(fromJSON('["x86_64-unknown-linux-gnu","aarch64-apple-darwin","x86_64-pc-windows-msvc"]'), matrix.target)
         with:
           name: smoke-${{ matrix.target }}
           path: ${{ runner.temp }}/smoke/
