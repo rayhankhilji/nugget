@@ -5,31 +5,33 @@ indexes your files, notes, mail and calendars continuously into an encrypted sto
 builds a knowledge graph in which every fact cites its source, and answers questions with `[n]`
 citations, using local models or your own API keys. Every request that leaves your device is recorded
 where you can see it. Other AI apps can read your knowledge through a local MCP server, with a scoped
-token per app. Drafting in any app, an agent that operates your computer under a safety policy,
-proactive cards and plugins are being wired in now.
+token per app. It drafts in your voice in any app (Double Tap), runs an agent that operates your
+computer under a safety policy, prepares proactive cards for your approval, and takes WebAssembly
+plugins.
 
 ## Status
 
-Built from source; there are no installers or signed releases yet.
+Pre-release. Everything below runs in the daemon and the desktop app on the integration branch, with
+CI green on macOS, Windows and Linux. There is no signed release yet: unsigned installers for all three
+OSes come out of the release workflow's dry run, and you can build from source.
 
 | Area | State |
 |---|---|
-| Daemon (`nuggetd`), per-user service, local IPC | Runs today (M0) |
-| Encrypted store: SQLCipher, full-text and vector search, egress ledger, hash-chained audit log | Runs today (M0) |
-| Models: local `llama-server` from a signed manifest, any OpenAI-compatible server, or Anthropic and OpenAI with your key | Runs today (M0–M1) |
-| Sources: folders, Obsidian, Gmail, Google Calendar, IMAP, CalDAV, with live edits and deletes | Runs today (M1) |
-| Search and Ask with citations | Runs today (M1) |
-| Knowledge graph and Markdown vault | Runs today (M2) |
-| MCP server (stdio and loopback HTTP, scoped per-client tokens) | Runs today (M2) |
-| Double Tap: drafting in any text field | Being wired in (M3) |
-| Agent, computer use and the safety policy engine | Being wired in (M4) |
-| Proactive cards and the morning brief (Today) | Being wired in (M5) |
-| WASM plugins; Microsoft 365, Slack, Notion, GitHub and Linear connectors | Being wired in (M6) |
-| Installers, signed releases, auto-update | Not started |
+| Daemon (`nuggetd`), per-user service, local IPC | Runs |
+| Encrypted store: SQLCipher, full-text and vector search, egress ledger, hash-chained audit log | Runs |
+| Models: local `llama-server` from a signed manifest (chat, embeddings, reranking), any OpenAI-compatible server, or Anthropic and OpenAI with your key | Runs |
+| Sources: folders, Obsidian, Gmail, Google Calendar, IMAP, CalDAV, with live edits and deletes | Runs |
+| Search, Ask and Chat with citations | Runs |
+| Knowledge graph and Markdown vault | Runs |
+| MCP server (stdio and loopback HTTP, scoped per-client tokens) | Runs |
+| Double Tap: drafting in any text field | Runs; tested on Linux, macOS and Windows desktop runs in progress |
+| Agent, computer use and the safety policy engine | Runs; computer use tested on Linux (AT-SPI), macOS and Windows runs in progress |
+| Proactive cards and the morning brief (Today) | Runs |
+| WASM plugins; Microsoft 365, Slack, Notion, GitHub and Linear connectors | Runs; connectors not yet tried against live accounts |
+| Installers, signed releases, auto-update | Unsigned installers build for all three OSes; signing needs release keys |
 
-"Being wired in" means the crates exist and are tested, and the daemon and app integration is in
-progress. Do not rely on them yet. The book's [What works today](docs/book/src/status.md) page has the
-details.
+Benchmark numbers so far come from scripted or fake models (labelled below); runs with real local
+models are in progress. The book's [What works today](docs/book/src/status.md) page has the details.
 
 ## Why Nugget
 
@@ -41,7 +43,7 @@ details.
   from its source. The Markdown vault is yours to edit; edits merge back.
 - **Safe sharing with other AI apps.** Local MCP only, one revocable token per app, scoped by source
   and tool, every call audited, no secrets in URLs.
-- **Built for actions with guard rails.** The agent (being wired in) runs behind a policy engine with
+- **Built for actions with guard rails.** The agent runs behind a policy engine with
   risk classes, confirmations, budgets, a kill switch and a hash-chained action log.
 - **Cross-platform and permissive.** macOS, Windows and Linux; Apache-2.0.
 
@@ -108,13 +110,13 @@ To refresh: `python3 scripts/bench-readme.py` with a new `bench/results/latest.j
 
 ## Architecture
 
-Solid lines run today; dashed lines are being wired in. The
+The
 [architecture overview](docs/book/src/architecture/overview.md) has the full diagram and a walk-through.
 
 ```mermaid
 flowchart LR
   sources["Sources<br/>files, Obsidian, Gmail, GCal,<br/>IMAP, CalDAV"] --> ingest
-  more["Microsoft 365, Slack,<br/>Notion, GitHub, Linear"] -.-> ingest
+  more["Microsoft 365, Slack,<br/>Notion, GitHub, Linear"] --> ingest
   subgraph nuggetd["nuggetd (daemon)"]
     ingest["ingest<br/>extract, PII scan, chunk, embed"] --> store[("encrypted store<br/>SQLCipher, FTS5, sqlite-vec")]
     store --> knowledge["knowledge graph<br/>+ Markdown vault"] --> store
@@ -126,7 +128,7 @@ flowchart LR
     ingest --> infer
     retrieve --> infer
     features["features: Double Tap, agent + policy,<br/>proactive, plugins"]
-    ipc -.-> features
+    ipc --> features
   end
   infer --> llama["local llama-server"]
   infer -- "egress ledger" --> cloud["cloud providers (your key)"]
