@@ -1,0 +1,42 @@
+/* ---- knowledge graph: legend (the rest of the graph styles live in styles.css) ---- */
+
+.graph-legend {
+  position: absolute;
+  bottom: 8px;
+  inset-inline-start: 8px;
+  max-width: min(220px, calc(100% - 16px));
+  max-height: calc(100% - 56px);
+  overflow: auto;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.graph-legend summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.graph-legend ul {
+  list-style: none;
+  margin: 4px 0 2px;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.graph-legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.graph-legend-count {
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}

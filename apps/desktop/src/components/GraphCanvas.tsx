@@ -2,19 +2,26 @@ import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type M
 import type { Simulation } from "d3-force";
 import {
   createSimulation,
+  cycleIndex,
   fitTransform,
-  LARGE_GRAPH,
+  isSettled,
+  nearestInDirection,
+  nearestTo,
   nodeAt,
+  preTicks,
   toWorld,
   zoomAt,
+  type Direction,
   type PreparedGraph,
   type SimLink,
   type SimNode,
   type ViewTransform,
 } from "../graph";
+import { edgeAlpha, LabelPlacer, labelEligible, labelMinZoom, labelPriority, newCandidate, WidthCache, type LabelCandidate } from "../graphLabels";
 import { ENTITY_KINDS } from "../api";
-import { useT } from "../i18n";
-import { kindLabel } from "../knowledge";
+import { formatNumber, useT } from "../i18n";
+import { kindLabel, kindPlural } from "../knowledge";
+import "./graph.css";
 
 /** Theme colours, read from CSS custom properties so the canvas follows light/dark mode. */
 interface Palette {
@@ -50,11 +57,18 @@ function readPalette(el: Element): Palette {
 const MAX_LABELS = 400;
 const LABEL_CHARS = 28;
 const PAN_STEP = 60;
+const LABEL_FONT = `12px system-ui, -apple-system, "Segoe UI", sans-serif`;
+const LABEL_FONT_BOLD = `600 12px system-ui, -apple-system, "Segoe UI", sans-serif`;
+const LABEL_HEIGHT = 14;
+/** Opacity of nodes outside the highlighted neighbourhood. */
+const DIM_NODE_ALPHA = 0.35;
 
 function shortName(s: string): string {
   const chars = Array.from(s);
   return chars.length > LABEL_CHARS ? `${chars.slice(0, LABEL_CHARS - 1).join("")}…` : s;
 }
+
+const ARROWS: Record<string, Direction> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" };
 
 type Gesture =
   | { kind: "node"; node: SimNode; startX: number; startY: number; moved: boolean }
@@ -62,8 +76,10 @@ type Gesture =
 
 /**
  * Force-directed graph on a `<canvas>`. Drag nodes, drag the background to pan, wheel to zoom,
- * click to open, double-click to centre. Keyboard: arrows pan, + / − zoom, 0 fits, N / P move
- * between entities, Enter opens, C centres, Escape clears. The list view is the accessible
+ * click to open, double-click to centre. Keyboard: arrows move to the nearest entity in that
+ * direction (Shift+arrows pan), Tab / Shift+Tab and N / P step through entities, Enter opens,
+ * C centres, Escape clears, + / − zoom, F or 0 fits. Labels are placed without overlaps (most
+ * connected first; hovered, selected and focused always). The list view is the accessible
  * alternative for everything here.
  */
 export function GraphCanvas({
@@ -96,6 +112,11 @@ export function GraphCanvas({
   const rafRef = useRef(0);
   const reducedMotion = useRef(false);
   const settled = useRef(false);
+  // Label placement state, reused across frames (no allocations in the draw loop).
+  const placerRef = useRef<LabelPlacer | null>(null);
+  const widthsRef = useRef<WidthCache | null>(null);
+  const boldWidthsRef = useRef<WidthCache | null>(null);
+  const candsRef = useRef<LabelCandidate[]>([]);
   const [announce, setAnnounce] = useState("");
   const helpId = useId();
 
@@ -105,6 +126,7 @@ export function GraphCanvas({
 
   const index = useMemo(() => {
     const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+    const pos = new Map(graph.nodes.map((n, i) => [n.id, i]));
     const adj = new Map<string, Set<string>>();
     for (const l of graph.links) {
       const a = typeof l.source === "string" ? l.source : l.source.id;
@@ -115,18 +137,31 @@ export function GraphCanvas({
       adj.get(b)!.add(a);
     }
     const byKind = new Map<string, SimNode[]>();
+    let maxDegree = 0;
     for (const n of graph.nodes) {
       const list = byKind.get(n.kind);
       if (list) list.push(n);
       else byKind.set(n.kind, [n]);
+      maxDegree = Math.max(maxDegree, n.degree);
     }
-    return { byId, adj, byKind };
+    const labels = graph.nodes.map((n) => shortName(n.name));
+    const minZoom = Float32Array.from(graph.nodes, (n) => labelMinZoom(n.degree, maxDegree, graph.nodes.length));
+    return { byId, pos, adj, byKind, labels, minZoom };
   }, [graph]);
   const indexRef = useRef(index);
   indexRef.current = index;
   // Listeners registered once (wheel, resize, theme) reach the draw loop through refs only.
   const graphRef = useRef(graph);
   graphRef.current = graph;
+
+  const legend = useMemo(() => {
+    const known = ENTITY_KINDS.filter((k) => index.byKind.has(k)).map((k) => ({ kind: k, count: index.byKind.get(k)!.length }));
+    const extra = [...index.byKind.keys()]
+      .filter((k) => !(ENTITY_KINDS as readonly string[]).includes(k))
+      .sort()
+      .map((k) => ({ kind: k, count: index.byKind.get(k)!.length }));
+    return [...known, ...extra];
+  }, [index]);
 
   const draw = () => {
     const canvas = canvasRef.current;
@@ -136,13 +171,16 @@ export function GraphCanvas({
     const pal = paletteRef.current;
     const { w, h, dpr } = sizeRef.current;
     const tf = tRef.current;
-    const { byId, adj, byKind } = indexRef.current;
+    const { byId, adj, byKind, labels, minZoom } = indexRef.current;
     const graph = graphRef.current;
     const { selected: sel, focused: foc } = live.current;
-    const hl = hoverRef.current ?? foc ?? sel;
+    const hover = hoverRef.current;
+    const hl = hover ?? foc ?? sel;
     const hlNbrs = hl ? adj.get(hl) : undefined;
+    const lit = (n: SimNode) => n.id === hl || (hlNbrs !== undefined && hlNbrs.has(n.id));
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
     ctx.fillStyle = pal.bg;
     ctx.fillRect(0, 0, w, h);
 
@@ -162,18 +200,24 @@ export function GraphCanvas({
     const y1 = (h - tf.y) / tf.k;
     const visible = (n: SimNode) => n.x + n.r >= x0 && n.x - n.r <= x1 && n.y + n.r >= y0 && n.y - n.r <= y1;
 
-    // Edges: one path for all, then the highlighted node's edges on top.
+    // Edges: one faded path for all (fainter when dense, zoomed out or something is highlighted),
+    // then the highlighted node's edges on top.
     ctx.lineWidth = 1 / tf.k;
     ctx.strokeStyle = pal.edge;
     ctx.beginPath();
+    let drawn = 0;
     for (const l of graph.links) {
       const s = l.source as SimNode;
       const d = l.target as SimNode;
       if ((s.x < x0 && d.x < x0) || (s.x > x1 && d.x > x1) || (s.y < y0 && d.y < y0) || (s.y > y1 && d.y > y1)) continue;
+      if (hl && (s.id === hl || d.id === hl)) continue;
       ctx.moveTo(s.x, s.y);
       ctx.lineTo(d.x, d.y);
+      drawn++;
     }
+    ctx.globalAlpha = edgeAlpha(drawn, tf.k, hl !== null);
     ctx.stroke();
+    ctx.globalAlpha = 1;
     if (hl) {
       ctx.lineWidth = 2 / tf.k;
       ctx.strokeStyle = pal.edgeHi;
@@ -188,17 +232,22 @@ export function GraphCanvas({
       ctx.stroke();
     }
 
-    // Nodes: one fill per kind.
-    for (const [kind, nodes] of byKind) {
-      ctx.fillStyle = pal.kinds[kind] ?? pal.other;
-      ctx.beginPath();
-      for (const n of nodes) {
-        if (!visible(n)) continue;
-        ctx.moveTo(n.x + n.r, n.y);
-        ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    // Nodes: one fill per kind; with a highlight, everything outside its neighbourhood is dimmed.
+    for (let pass = hl ? 0 : 1; pass < 2; pass++) {
+      ctx.globalAlpha = pass === 0 ? DIM_NODE_ALPHA : 1;
+      for (const [kind, nodes] of byKind) {
+        ctx.fillStyle = pal.kinds[kind] ?? pal.other;
+        ctx.beginPath();
+        for (const n of nodes) {
+          if (!visible(n)) continue;
+          if (hl && (pass === 1) !== lit(n)) continue;
+          ctx.moveTo(n.x + n.r, n.y);
+          ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+        }
+        ctx.fill();
       }
-      ctx.fill();
     }
+    ctx.globalAlpha = 1;
 
     const ring = (id: string | null, color: string, width: number, gap: number) => {
       const n = id ? byId.get(id) : undefined;
@@ -211,38 +260,71 @@ export function GraphCanvas({
     };
     ring(graph.center, pal.accent, 2.5, 2);
     ring(sel, pal.text, 2, 3.5);
-    ring(hoverRef.current, pal.muted, 1.5, 2);
+    ring(hover, pal.muted, 1.5, 2);
     ring(foc, pal.focus, 2.5, 6);
 
-    // Labels: everything when few or zoomed in, else just the nodes that matter right now.
-    const large = graph.nodes.length > LARGE_GRAPH;
-    const showAll = graph.nodes.length <= 150 || tf.k >= (large ? 2.2 : 1.2);
-    const labelled: SimNode[] = [];
-    const seen = new Set<string>();
-    const add = (n: SimNode | undefined) => {
-      if (n && !seen.has(n.id) && labelled.length < MAX_LABELS && visible(n)) {
-        seen.add(n.id);
-        labelled.push(n);
-      }
+    // Labels, in screen space at a constant size: candidates are the visible nodes whose zoom
+    // threshold (by degree) is met, plus the highlighted neighbourhood; pinned ones always.
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.font = LABEL_FONT;
+    const widths = (widthsRef.current ??= new WidthCache());
+    const boldWidths = (boldWidthsRef.current ??= new WidthCache());
+    const placer = (placerRef.current ??= new LabelPlacer());
+    const pool = candsRef.current;
+    // Only called on a cache miss; the font is restored after the loop.
+    const measure = (s: string) => {
+      ctx.font = LABEL_FONT;
+      return ctx.measureText(s).width;
     };
-    for (const id of [graph.center, sel, foc, hoverRef.current]) if (id) add(byId.get(id));
-    if (hlNbrs) for (const id of hlNbrs) add(byId.get(id));
-    if (showAll) for (const n of graph.nodes) add(n);
-    else if (graph.nodes.length <= 600) for (const n of graph.nodes) if (n.depth <= 1) add(n);
+    const measureBold = (s: string) => {
+      ctx.font = LABEL_FONT_BOLD;
+      return ctx.measureText(s).width;
+    };
+    let count = 0;
+    const nodes = graph.nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const n = nodes[i]!;
+      if (!visible(n)) continue;
+      const pinned = n.id === hover || n.id === sel || n.id === foc || n.id === graph.center;
+      const nbr = hlNbrs !== undefined && hlNbrs.has(n.id);
+      if (!nbr && !labelEligible(tf.k, minZoom[i]!, pinned)) continue;
+      if (count === pool.length) pool.push(newCandidate());
+      const c = pool[count++]!;
+      c.node = i;
+      c.x = n.x * tf.k + tf.x;
+      c.y = n.y * tf.k + tf.y;
+      c.r = n.r * tf.k;
+      c.w = pinned ? boldWidths.get(labels[i]!, LABEL_FONT_BOLD, measureBold) : widths.get(labels[i]!, LABEL_FONT, measure);
+      c.h = LABEL_HEIGHT;
+      c.pinned = pinned;
+      c.priority = labelPriority(n.degree, n.depth, nbr);
+    }
+    placer.place(pool, count, w, h, MAX_LABELS);
 
-    ctx.font = `${12 / tf.k}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    ctx.textAlign = "center";
+    ctx.font = LABEL_FONT;
+    ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.lineJoin = "round";
-    ctx.lineWidth = 3 / tf.k;
+    ctx.lineWidth = 3;
     ctx.strokeStyle = pal.bg;
     ctx.fillStyle = pal.text;
-    for (const n of labelled) {
-      const label = shortName(n.name);
-      const y = n.y + n.r + 3 / tf.k;
-      ctx.strokeText(label, n.x, y);
-      ctx.fillText(label, n.x, y);
+    for (let pass = 0; pass < 2; pass++) {
+      if (pass === 1) ctx.font = LABEL_FONT_BOLD;
+      for (let i = 0; i < count; i++) {
+        const c = pool[i]!;
+        if (!c.placed || c.pinned !== (pass === 1)) continue;
+        const label = labels[c.node]!;
+        ctx.strokeText(label, c.left, c.top + 1);
+        ctx.fillText(label, c.left, c.top + 1);
+      }
     }
+  };
+
+  /** Fit the whole graph in view (until the user pans or zooms again). */
+  const fitNow = () => {
+    const { w, h } = sizeRef.current;
+    userMoved.current = false;
+    tRef.current = fitTransform(graphRef.current.nodes, w, h);
   };
 
   const frame = () => {
@@ -258,8 +340,10 @@ export function GraphCanvas({
       } else {
         sim.tick(graph.nodes.length > 1000 ? 1 : 2);
       }
-      again = sim.alpha() > sim.alphaMin() || gestureRef.current?.kind === "node";
-      if (!again) settled.current = true;
+      const dragging = gestureRef.current?.kind === "node";
+      // Stop as soon as nodes stop moving, not only when alpha runs out.
+      if (!dragging && sim.alpha() < 0.3 && isSettled(graph.nodes)) sim.alpha(0);
+      again = sim.alpha() > sim.alphaMin() || dragging;
       // Keep the whole graph in view while it settles, until the user pans or zooms.
       if (!userMoved.current && gestureRef.current === null) {
         const { w, h } = sizeRef.current;
@@ -268,6 +352,7 @@ export function GraphCanvas({
         const f = reducedMotion.current || !again ? 1 : 0.2;
         tRef.current = { k: cur.k + (target.k - cur.k) * f, x: cur.x + (target.x - cur.x) * f, y: cur.y + (target.y - cur.y) * f };
       }
+      if (!again && !settled.current) settled.current = true;
     }
     draw();
     if (again) schedule();
@@ -277,16 +362,17 @@ export function GraphCanvas({
     if (!rafRef.current) rafRef.current = requestAnimationFrame(frame);
   };
 
-  // New graph: new simulation.
+  // New graph: new simulation, pre-ticked off-screen so the first paint is already near its
+  // final shape, then fitted to the view.
   useEffect(() => {
     reducedMotion.current = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     settled.current = false;
     userMoved.current = false;
     hoverRef.current = null;
     const sim = createSimulation(graph, seed);
+    if (!reducedMotion.current) sim.tick(preTicks(graph.nodes.length));
     simRef.current = sim;
-    const { w, h } = sizeRef.current;
-    tRef.current = { k: 1, x: w / 2, y: h / 2 };
+    fitNow();
     schedule();
     return () => {
       sim.stop();
@@ -441,11 +527,8 @@ export function GraphCanvas({
     }
   };
 
-  const moveFocus = (step: 1 | -1) => {
-    const nodes = graph.nodes;
-    if (nodes.length === 0) return;
-    const i = focused ? nodes.findIndex((n) => n.id === focused) : -1;
-    const next = nodes[(i + step + nodes.length) % nodes.length]!;
+  /** Move keyboard focus to `next`, keep it on screen and announce it. */
+  const focusNode = (next: SimNode) => {
     onFocusChange(next.id);
     reveal(next);
     const links = index.adj.get(next.id)?.size ?? 0;
@@ -453,72 +536,103 @@ export function GraphCanvas({
     schedule();
   };
 
+  const focusedIndex = () => (focused ? (index.pos.get(focused) ?? -1) : -1);
+
+  const moveFocus = (step: 1 | -1) => {
+    const nodes = graph.nodes;
+    if (nodes.length === 0) return;
+    const i = focusedIndex();
+    focusNode(nodes[(i + step + nodes.length) % nodes.length]!);
+  };
+
+  /** Arrow keys: the nearest entity that way, or (nothing focused yet) the one nearest the middle. */
+  const moveDirection = (dir: Direction) => {
+    const from = focused ? index.byId.get(focused) : undefined;
+    if (!from) {
+      const { w, h } = sizeRef.current;
+      const mid = toWorld(tRef.current, w / 2, h / 2);
+      const n = nearestTo(graph.nodes, mid.x, mid.y);
+      if (n) focusNode(n);
+      return;
+    }
+    const next = nearestInDirection(graph.nodes, from, dir);
+    if (next) focusNode(next);
+    else setAnnounce(t("graph.noneThatWay"));
+  };
+
   const onKeyDown = (e: KeyboardEvent<HTMLCanvasElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey) return;
     const { w, h } = sizeRef.current;
     const tf = tRef.current;
     let handled = true;
-    switch (e.key) {
-      case "ArrowLeft":
-        tRef.current = { ...tf, x: tf.x + PAN_STEP };
-        break;
-      case "ArrowRight":
-        tRef.current = { ...tf, x: tf.x - PAN_STEP };
-        break;
-      case "ArrowUp":
-        tRef.current = { ...tf, y: tf.y + PAN_STEP };
-        break;
-      case "ArrowDown":
-        tRef.current = { ...tf, y: tf.y - PAN_STEP };
-        break;
-      case "+":
-      case "=":
-        tRef.current = zoomAt(tf, 1.25, w / 2, h / 2);
-        break;
-      case "-":
-      case "_":
-        tRef.current = zoomAt(tf, 0.8, w / 2, h / 2);
-        break;
-      case "0":
-        userMoved.current = false;
-        tRef.current = fitTransform(graph.nodes, w, h);
-        break;
-      case "n":
-      case "N":
-        moveFocus(e.shiftKey ? -1 : 1);
-        break;
-      case "p":
-      case "P":
-        moveFocus(-1);
-        break;
-      case "Enter":
-      case " ":
-        if (focused) onOpen(focused);
-        else handled = false;
-        break;
-      case "c":
-      case "C":
-        if (focused) onCenter(focused);
-        else handled = false;
-        break;
-      case "Escape":
-        if (focused) onFocusChange(null);
-        else handled = false;
-        break;
-      default:
-        handled = false;
+    const dir = ARROWS[e.key];
+    if (dir && e.shiftKey) {
+      // Shift+arrows pan.
+      const dx = dir === "left" ? PAN_STEP : dir === "right" ? -PAN_STEP : 0;
+      const dy = dir === "up" ? PAN_STEP : dir === "down" ? -PAN_STEP : 0;
+      tRef.current = { ...tf, x: tf.x + dx, y: tf.y + dy };
+      userMoved.current = true;
+    } else if (dir) {
+      moveDirection(dir);
+    } else {
+      switch (e.key) {
+        case "Tab": {
+          // Steps through entities once one is focused; leaves the canvas at either end or when
+          // nothing is focused (Escape first), so Tab never traps.
+          const next = cycleIndex(focusedIndex(), e.shiftKey ? -1 : 1, graph.nodes.length);
+          if (next === null) handled = false;
+          else focusNode(graph.nodes[next]!);
+          break;
+        }
+        case "+":
+        case "=":
+          tRef.current = zoomAt(tf, 1.25, w / 2, h / 2);
+          userMoved.current = true;
+          break;
+        case "-":
+        case "_":
+          tRef.current = zoomAt(tf, 0.8, w / 2, h / 2);
+          userMoved.current = true;
+          break;
+        case "0":
+        case "f":
+        case "F":
+          fitNow();
+          break;
+        case "n":
+        case "N":
+          moveFocus(e.shiftKey ? -1 : 1);
+          break;
+        case "p":
+        case "P":
+          moveFocus(-1);
+          break;
+        case "Enter":
+        case " ":
+          if (focused) onOpen(focused);
+          else handled = false;
+          break;
+        case "c":
+        case "C":
+          if (focused) onCenter(focused);
+          else handled = false;
+          break;
+        case "Escape":
+          if (focused) onFocusChange(null);
+          else handled = false;
+          break;
+        default:
+          handled = false;
+      }
     }
     if (handled) {
       e.preventDefault();
-      if (e.key.startsWith("Arrow") || "+=-_".includes(e.key)) userMoved.current = true;
       schedule();
     }
   };
 
   const fit = () => {
-    const { w, h } = sizeRef.current;
-    userMoved.current = false;
-    tRef.current = fitTransform(graph.nodes, w, h);
+    fitNow();
     schedule();
   };
 
@@ -550,10 +664,24 @@ export function GraphCanvas({
           }}
         />
         <div className="graph-overlay">
-          <button type="button" className="btn btn-small" onClick={fit}>
+          <button type="button" className="btn btn-small" onClick={fit} title={t("graph.fitTitle")} aria-keyshortcuts="F 0">
             {t("graph.fit")}
           </button>
         </div>
+        {legend.length > 0 && (
+          <details className="graph-legend" open>
+            <summary>{t("graph.legend")}</summary>
+            <ul>
+              {legend.map(({ kind, count }) => (
+                <li key={kind}>
+                  <span className={`kind-dot kind-${kind}`} aria-hidden="true" />
+                  <span>{kindPlural(kind)}</span>
+                  <span className="graph-legend-count">{formatNumber(count)}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </div>
       <p id={helpId} className="muted small graph-help">
         {t("graph.help")}

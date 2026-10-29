@@ -23,6 +23,7 @@ export function KnowledgePage() {
   const status = useAsync(api.knowledgeStatus);
   const sources = useAsync(() => api.sourcesList().catch(() => [] as SourceInfo[]));
   const sourceNames = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.name])), [sources.data]);
+  const sourceKinds = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s.kind])), [sources.data]);
   const sourceOptions = useMemo(() => graphSourceOptions(sources.data ?? []), [sources.data]);
   const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({ browse: null, graph: null });
 
@@ -55,6 +56,7 @@ export function KnowledgePage() {
       id={selected}
       vaultRoot={vaultRoot}
       sourceNames={sourceNames}
+      sourceKinds={sourceKinds}
       onSelect={setSelected}
       onShowInGraph={(id) => {
         setCenter(id);
