@@ -161,7 +161,10 @@ impl Element for UiaEl {
     }
 
     fn perform(&self, action: &UiAction) -> Result<()> {
-        computer::perform(self, action)
+        let r = computer::perform(self, action);
+        // The caller re-reads this element to verify the action: no stale cached properties.
+        self.read_live();
+        r
     }
 }
 

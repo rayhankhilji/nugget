@@ -14,6 +14,21 @@ mod native;
 use nugget_a11y::Permission;
 use nugget_a11y::clipboard::ClipboardSnapshot;
 
+/// `CGPreflightPostEventAccess`: whether this process may post synthetic events (the paste
+/// keystroke and key input), which TCC grants separately from AX (`kTCCServicePostEvent`).
+fn may_post_events() -> bool {
+    #[allow(unsafe_code)]
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGPreflightPostEventAccess() -> bool;
+    }
+    // SAFETY: no arguments, no preconditions; a documented CoreGraphics query.
+    #[allow(unsafe_code)]
+    unsafe {
+        CGPreflightPostEventAccess()
+    }
+}
+
 /// The chain of parent processes, for the TCC "responsible process" diagnosis.
 fn ancestry() -> String {
     let mut out = Vec::new();
@@ -47,6 +62,7 @@ fn ax_native_fixture() {
         exe.display()
     );
     eprintln!("process ancestry: {}", ancestry());
+    eprintln!("CGPreflightPostEventAccess: {}", may_post_events());
     if perm != Permission::Granted {
         let why = format!(
             "AXIsProcessTrusted() is false for {} (process chain: {}): TCC grants \

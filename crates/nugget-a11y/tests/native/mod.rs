@@ -160,11 +160,13 @@ pub fn wait_focus(
             eprintln!("focus reached {label:?} after {:?}", start.elapsed());
             return f.clone();
         }
-        if !nudged && start.elapsed() > Duration::from_secs(8) {
+        if !nudged && start.elapsed() > Duration::from_secs(3) {
             nudged = true;
             eprintln!(
-                "focus not in the fixture yet ({got:?}); fixture state {:?}; open_app: {:?}",
+                "focus not in the fixture yet ({got:?}); fixture state {:?}; frontmost app {:?}; \
+                 open_app: {:?}",
                 fx.state(),
+                cu.apps().map(|a| a.into_iter().next()),
                 cu.open_app(APP)
             );
         }
@@ -344,7 +346,12 @@ pub fn run<P: Platform>(os: Os<P>) {
     });
     let out = pa.insert(" pasted").expect("clipboard insert");
     assert_eq!(out.method, InsertMethod::Clipboard);
-    assert!(out.verified, "paste verified by read-back");
+    assert!(
+        out.verified,
+        "paste not verified by read-back: {out:?}; fixture state {:?}; focused() {:?}",
+        fx.state(),
+        a.focused()
+    );
     fx.expect("composer", "Hello there ✓ pasted");
     let after = clip.snapshot().expect("clipboard snapshot");
     assert_eq!(
@@ -431,12 +438,14 @@ pub fn run<P: Platform>(os: Os<P>) {
 
     // --- act: toggle the check box ---
     let out = cu.act(&check.id, &UiAction::Press).expect("toggle");
+    eprintln!("toggle: {out:?}");
     assert!(out.verified, "toggle not verified: {}", out.detail);
+    fx.expect("checked", true);
     assert_eq!(
         out.after.as_ref().and_then(|n| n.states.checked),
-        Some(true)
+        Some(true),
+        "the re-read check box shows the new state"
     );
-    fx.expect("checked", true);
 
     // --- act: select a list item ---
     let cherry = find_item(&snap(cu.as_ref(), &sel), "Cherry").id.clone();

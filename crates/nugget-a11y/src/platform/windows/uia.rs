@@ -3,7 +3,7 @@
 //! pointers; every wrapper here passes only interfaces it owns.
 #![allow(unsafe_code)]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 
 use nugget_core::{Error, Result};
 use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, POINT, RECT, WPARAM};
@@ -325,8 +325,9 @@ fn variant_prop(mut v: VARIANT) -> Option<Prop> {
 #[derive(Clone)]
 pub struct UiaEl {
     el: IUIAutomationElement,
-    /// `el` was fetched with [`CACHED`] properties.
-    cached: bool,
+    /// `el` was fetched with [`CACHED`] properties and they are read from that cache. Cleared
+    /// once an action was performed on the element, whose re-reads must see the new state.
+    cached: Cell<bool>,
 }
 
 impl UiaEl {
@@ -336,13 +337,16 @@ impl UiaEl {
         let req = cache_request()?;
         // SAFETY: valid automation and cache request; a stale handle yields an error.
         let el = unsafe { a.ElementFromHandleBuildCache(hwnd, &req) }.map_err(werr)?;
-        Ok(UiaEl { el, cached: true })
+        Ok(UiaEl {
+            el,
+            cached: Cell::new(true),
+        })
     }
 
     fn prop(&self, id: UIA_PROPERTY_ID) -> Option<Prop> {
         // SAFETY: valid element; the VARIANT is owned and cleared by `variant_prop`.
         let v = unsafe {
-            if self.cached {
+            if self.cached.get() {
                 self.el.GetCachedPropertyValue(id)
             } else {
                 self.el.GetCurrentPropertyValue(id)
@@ -400,6 +404,11 @@ impl UiaEl {
             .map_err(|_| Error::Unsupported("the element does not support this action".into()))
     }
 
+    /// Read properties live from now on (after acting on the element: the cache is stale).
+    pub fn read_live(&self) {
+        self.cached.set(false);
+    }
+
     pub fn invoke(&self) -> Result<()> {
         let p: IUIAutomationInvokePattern = self.pattern(UIA_InvokePatternId)?;
         // SAFETY: valid pattern interface.
@@ -452,7 +461,10 @@ impl UiaEl {
         let a = automation()?;
         // SAFETY: `a` is a valid IUIAutomation.
         match unsafe { a.GetFocusedElement() } {
-            Ok(el) => Ok(Some(UiaEl { el, cached: false })),
+            Ok(el) => Ok(Some(UiaEl {
+                el,
+                cached: Cell::new(false),
+            })),
             Err(_) => Ok(None),
         }
     }
@@ -465,7 +477,7 @@ impl UiaEl {
         unsafe {
             macro_rules! get {
                 ($cached:ident, $current:ident) => {
-                    if self.cached {
+                    if self.cached.get() {
                         e.$cached()
                     } else {
                         e.$current()
@@ -739,7 +751,10 @@ impl UiaEl {
                     break;
                 }
                 cur = walker.GetNextSiblingElementBuildCache(&el, &req).ok();
-                out.push(UiaEl { el, cached: true });
+                out.push(UiaEl {
+                    el,
+                    cached: Cell::new(true),
+                });
             }
         }
         out
@@ -758,7 +773,7 @@ impl UiaEl {
             }
             Some(UiaEl {
                 el: p,
-                cached: true,
+                cached: Cell::new(true),
             })
         }
     }
