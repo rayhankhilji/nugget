@@ -1,5 +1,6 @@
 //! Store read paths and open cost at 100k items in an encrypted store: batched item loads
-//! (`get_items`, `item_dates`) against per-item lookups, and `Store::open` on a large database.
+//! (`get_items`, `item_dates`) against per-item lookups, `source_counts`, and `Store::open` on a
+//! large database.
 //! Ignored by default (it writes 100k items); run with
 //!
 //! ```text
@@ -91,6 +92,15 @@ fn read_paths_at_100k_items() {
     println!(
         "dates of {CANDIDATES} items: one call per item {dates_per_item:?}, one call {dates_batched:?}"
     );
+
+    let counts = time(ROUNDS, || s.source_counts().unwrap());
+    let got = s.source_counts().unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        (got[0].items, got[0].chunks),
+        (ITEMS as u64, 2 * ITEMS as u64)
+    );
+    println!("source_counts: {counts:?}");
 
     assert!(batched < Duration::from_secs(1));
     assert!(dates_batched < Duration::from_secs(1));

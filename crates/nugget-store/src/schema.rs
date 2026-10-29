@@ -389,6 +389,64 @@ const MIGRATIONS: &[&str] = &[
     // of another process (the daemon) that still has the database open. `egress.owner` is added
     // by `ADDED_COLUMNS`; rows written before it have none and count as orphaned.
     "",
+    // v10: per-source item and chunk counts kept by triggers, so `Store::source_counts` reads a
+    // row per source instead of aggregating every chunk (tens to hundreds of milliseconds at
+    // 100k items, on every source state change). Backfilled from the tables.
+    //
+    // Chunk deletes count against their item's source. When an item is deleted, its chunks go
+    // by `ON DELETE CASCADE` after the item row is gone, so their trigger finds no source and
+    // does nothing; the item's `BEFORE DELETE` trigger subtracts its chunks instead. Rows whose
+    // counts drop to zero stay (readers skip sources without items).
+    r#"
+    CREATE TABLE IF NOT EXISTS source_stats (
+        source TEXT PRIMARY KEY,
+        items  INTEGER NOT NULL DEFAULT 0,
+        chunks INTEGER NOT NULL DEFAULT 0
+    ) WITHOUT ROWID;
+    DELETE FROM source_stats;
+    INSERT INTO source_stats (source, items, chunks)
+        SELECT i.source, count(*), 0 FROM items i GROUP BY i.source;
+    UPDATE source_stats SET chunks = (
+        SELECT count(*) FROM chunks c JOIN items i ON i.id = c.item_id
+        WHERE i.source = source_stats.source
+    );
+    CREATE TRIGGER IF NOT EXISTS items_stats_ai AFTER INSERT ON items BEGIN
+        INSERT INTO source_stats (source, items) VALUES (new.source, 1)
+            ON CONFLICT (source) DO UPDATE SET items = items + 1;
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_stats_bd BEFORE DELETE ON items BEGIN
+        UPDATE source_stats
+            SET items = items - 1,
+                chunks = chunks - (SELECT count(*) FROM chunks WHERE item_id = old.id)
+            WHERE source = old.source;
+    END;
+    CREATE TRIGGER IF NOT EXISTS items_stats_au AFTER UPDATE OF source ON items
+        WHEN old.source IS NOT new.source BEGIN
+        UPDATE source_stats
+            SET items = items - 1,
+                chunks = chunks - (SELECT count(*) FROM chunks WHERE item_id = new.id)
+            WHERE source = old.source;
+        INSERT INTO source_stats (source, items, chunks)
+            VALUES (new.source, 1, (SELECT count(*) FROM chunks WHERE item_id = new.id))
+            ON CONFLICT (source) DO UPDATE
+                SET items = items + 1, chunks = chunks + excluded.chunks;
+    END;
+    CREATE TRIGGER IF NOT EXISTS chunks_stats_ai AFTER INSERT ON chunks BEGIN
+        UPDATE source_stats SET chunks = chunks + 1
+            WHERE source = (SELECT source FROM items WHERE id = new.item_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS chunks_stats_ad AFTER DELETE ON chunks BEGIN
+        UPDATE source_stats SET chunks = chunks - 1
+            WHERE source = (SELECT source FROM items WHERE id = old.item_id);
+    END;
+    CREATE TRIGGER IF NOT EXISTS chunks_stats_au AFTER UPDATE OF item_id ON chunks
+        WHEN old.item_id IS NOT new.item_id BEGIN
+        UPDATE source_stats SET chunks = chunks - 1
+            WHERE source = (SELECT source FROM items WHERE id = old.item_id);
+        UPDATE source_stats SET chunks = chunks + 1
+            WHERE source = (SELECT source FROM items WHERE id = new.item_id);
+    END;
+    "#,
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
@@ -553,6 +611,45 @@ mod tests {
             conn.pragma_update(None, "user_version", idx as u32 + 1)
                 .unwrap();
         }
+    }
+
+    /// v10 backfills the per-source counts from existing items and chunks.
+    #[test]
+    fn v9_database_migrates_to_v10_with_backfilled_source_counts() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate_to(&mut conn, 9);
+        for i in 0..20 {
+            conn.execute(
+                "INSERT INTO items (source, key, content_hash, created_at, updated_at)
+                 VALUES (?1, ?2, 'h', 'x', 'x')",
+                [format!("src{}", i % 3), format!("k{i}")],
+            )
+            .unwrap();
+            let id = conn.last_insert_rowid();
+            for ord in 0..(i % 4) {
+                conn.execute(
+                    "INSERT INTO chunks (item_id, ord, text) VALUES (?1, ?2, 't')",
+                    [id, ord],
+                )
+                .unwrap();
+            }
+        }
+        migrate(&mut conn).unwrap();
+        let read = |sql: &str| -> Vec<(String, i64, i64)> {
+            let mut stmt = conn.prepare(sql).unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let kept = read("SELECT source, items, chunks FROM source_stats ORDER BY source");
+        let aggregate = read(
+            "SELECT i.source, COUNT(DISTINCT i.id), COUNT(c.id)
+             FROM items i LEFT JOIN chunks c ON c.item_id = i.id
+             GROUP BY i.source ORDER BY i.source",
+        );
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept, aggregate);
     }
 
     #[test]
