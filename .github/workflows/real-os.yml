@@ -60,7 +60,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: real-os-smoke-${{ env.TARGET }}
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
@@ -132,7 +132,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: real-os-smoke-${{ env.TARGET }}
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
@@ -196,7 +196,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: a11y-windows
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the WinForms fixture
         shell: pwsh
         run: |
@@ -240,7 +240,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: a11y-macos
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: TCC evidence (what the runner grants)
         run: sh tests/fixtures/native/macos/tcc-evidence.sh
       - name: Build the AppKit fixture
@@ -304,7 +304,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: doubletap
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build the tests
         shell: bash
@@ -419,7 +419,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: cua-windows
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # No first-run pages, sign-in prompts or background Edge on the runner.
       - name: Quiet Microsoft Edge
@@ -508,7 +508,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: notify-windows
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           package_json_file: apps/desktop/package.json
@@ -715,7 +715,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: notify-macos
-          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/y/real-os' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           package_json_file: apps/desktop/package.json
