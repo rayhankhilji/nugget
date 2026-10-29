@@ -384,6 +384,11 @@ const MIGRATIONS: &[&str] = &[
         layout  BLOB NOT NULL
     );
     "#,
+    // v9: egress rows record their owner, the store handle that wrote them (see `egress`), so
+    // opening the store only marks `interrupted` the `open` rows whose owner is gone, not those
+    // of another process (the daemon) that still has the database open. `egress.owner` is added
+    // by `ADDED_COLUMNS`; rows written before it have none and count as orphaned.
+    "",
 ];
 
 /// Columns a migration adds, as `(version, table, column, type)`. Added from Rust only when
@@ -397,6 +402,7 @@ const ADDED_COLUMNS: &[(u32, &str, &str, &str)] = &[
         "state",
         "TEXT NOT NULL DEFAULT 'done' CHECK (state IN ('open', 'done', 'interrupted'))",
     ),
+    (9, "egress", "owner", "TEXT"),
 ];
 
 /// Idempotent statements a migration runs after its `ADDED_COLUMNS` (they use those columns).

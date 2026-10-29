@@ -14,7 +14,7 @@ use rusqlite::{OptionalExtension, params};
 
 use crate::Store;
 use crate::error::{DbExt, parse_time};
-use crate::items::item_ref;
+use crate::items::{LOOKUP_BATCH, WANTED_ITEMS_JOIN, item_ref, refs_json};
 use crate::types::{ItemChange, ItemDates};
 
 fn sql_limit(limit: usize) -> i64 {
@@ -33,7 +33,7 @@ impl Store {
     /// deletion since schema v5.
     pub fn items_changed_since(&self, cursor: u64, limit: usize) -> Result<(Vec<ItemChange>, u64)> {
         let from = i64::try_from(cursor).unwrap_or(i64::MAX);
-        self.with_conn(|c| {
+        self.with_read_conn(|c| {
             let mut stmt = c
                 .prepare_cached(
                     "SELECT ch.source, ch.key, ch.seq, ch.deleted, i.version
@@ -63,7 +63,7 @@ impl Store {
     /// The seq of the latest item change (0 when nothing was ever stored): a cursor that skips
     /// everything already in the store.
     pub fn item_changes_head(&self) -> Result<u64> {
-        self.with_conn(|c| {
+        self.with_read_conn(|c| {
             let head: Option<i64> = c
                 .query_row("SELECT max(seq) FROM item_changes", [], |r| r.get(0))
                 .optional()
@@ -74,44 +74,51 @@ impl Store {
     }
 
     /// The dates of each stored item in `items` (unknown items are left out), without loading
-    /// text or metadata. One indexed lookup per item under a single lock.
+    /// text or metadata. Looked up in batches of [`LOOKUP_BATCH`] items, one query each, on a
+    /// read connection (so a date-filtered search never waits on, or holds up, ingest).
     pub fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, ItemDates>> {
-        if items.is_empty() {
-            return Ok(HashMap::new());
-        }
-        self.with_conn(|c| {
-            let mut stmt = c
-                .prepare_cached(
-                    "SELECT CASE WHEN json_type(metadata, '$.extracted.date') = 'text'
-                                 THEN json_extract(metadata, '$.extracted.date') END,
-                            source_modified_at, created_at, updated_at
-                     FROM items WHERE source = ?1 AND key = ?2",
-                )
-                .db("prepare item_dates")?;
-            let mut out = HashMap::with_capacity(items.len());
-            for item in items {
-                if out.contains_key(item) {
-                    continue;
-                }
-                let row: Option<(Option<String>, Option<String>, String, String)> = stmt
-                    .query_row(params![item.source.as_str(), item.key.as_str()], |r| {
-                        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        type Row = (usize, Option<String>, Option<String>, String, String);
+        let mut out = HashMap::with_capacity(items.len());
+        for batch in items.chunks(LOOKUP_BATCH) {
+            let refs = refs_json(batch)?;
+            let rows: Vec<Row> = self.with_read_conn(|c| {
+                let mut stmt = c
+                    .prepare_cached(&format!(
+                        "SELECT want.key,
+                                CASE WHEN json_type(i.metadata, '$.extracted.date') = 'text'
+                                     THEN json_extract(i.metadata, '$.extracted.date') END,
+                                i.source_modified_at, i.created_at, i.updated_at
+                         {WANTED_ITEMS_JOIN}"
+                    ))
+                    .db("prepare item_dates")?;
+                let rows = stmt
+                    .query_map([&refs], |r| {
+                        Ok((
+                            r.get::<_, i64>(0)? as usize,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                        ))
                     })
-                    .optional()
-                    .db("read item_dates")?;
-                if let Some((extracted, modified, created, updated)) = row {
-                    out.insert(
-                        item.clone(),
-                        ItemDates {
-                            extracted_date: extracted,
-                            source_modified_at: modified.as_deref().map(parse_time).transpose()?,
-                            created_at: parse_time(&created)?,
-                            updated_at: parse_time(&updated)?,
-                        },
-                    );
-                }
+                    .db("query item_dates")?;
+                rows.collect::<rusqlite::Result<_>>().db("read item_dates")
+            })?;
+            for (idx, extracted, modified, created, updated) in rows {
+                let Some(item) = batch.get(idx) else {
+                    continue;
+                };
+                out.insert(
+                    item.clone(),
+                    ItemDates {
+                        extracted_date: extracted,
+                        source_modified_at: modified.as_deref().map(parse_time).transpose()?,
+                        created_at: parse_time(&created)?,
+                        updated_at: parse_time(&updated)?,
+                    },
+                );
             }
-            Ok(out)
-        })
+        }
+        Ok(out)
     }
 }

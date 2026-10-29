@@ -73,6 +73,106 @@ fn find_item(conn: &Connection, item: &ItemRef) -> Result<Option<ItemRow>> {
     .db("read item")
 }
 
+/// Items looked up per query by the batched reads ([`Store::get_items`],
+/// [`Store::item_dates`]). The refs travel as one JSON parameter, so this bounds the work (and
+/// the time a read connection is held) per query, not a bound-parameter limit.
+pub(crate) const LOOKUP_BATCH: usize = 500;
+
+/// `FROM` clause joining the refs in `?1` (a [`refs_json`] array) to their items: `want.key` is
+/// a ref's index in the array, `i` the item. `CROSS JOIN` keeps the refs as the outer loop, so
+/// each one is a lookup on the `(source, key)` index.
+pub(crate) const WANTED_ITEMS_JOIN: &str = "FROM json_each(?1) AS want
+     CROSS JOIN items i ON i.source = json_extract(want.value, '$[0]')
+                       AND i.key = json_extract(want.value, '$[1]')";
+
+/// Chunk texts of the items whose ids are in `?1` (a JSON array). `CROSS JOIN` keeps the ids as
+/// the outer loop (an `IN (SELECT ...)` made SQLite scan `chunks` with a bloom filter).
+const LAYOUT_CHUNKS_SQL: &str = "SELECT c.item_id, c.ord, c.text
+     FROM json_each(?1) AS want CROSS JOIN chunks c ON c.item_id = want.value";
+
+/// `refs` as the JSON array of `[source, key]` pairs that [`WANTED_ITEMS_JOIN`] reads.
+pub(crate) fn refs_json(refs: &[ItemRef]) -> Result<String> {
+    let pairs: Vec<[&str; 2]> = refs
+        .iter()
+        .map(|r| [r.source.as_str(), r.key.as_str()])
+        .collect();
+    Ok(serde_json::to_string(&pairs)?)
+}
+
+/// Run `f` in a read transaction, so its statements see one snapshot (an item row and the
+/// chunks its layout points at agree).
+fn read_snapshot<T>(c: &Connection, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    c.execute_batch("BEGIN DEFERRED").db("begin read")?;
+    let res = f(c);
+    let end = c.execute_batch("COMMIT").db("end read");
+    match res {
+        Ok(v) => end.map(|()| v),
+        Err(e) => {
+            let _ = c.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// The items for a [`refs_json`] array, with their texts, as `(index in the array, row, text)`.
+fn find_items(c: &Connection, refs: &str) -> Result<Vec<(usize, ItemRow, Option<String>)>> {
+    let rows: Vec<(usize, ItemRow)> = {
+        let mut stmt = c
+            .prepare_cached(&format!(
+                "SELECT i.id, i.title, i.content_hash, i.mime, i.text, i.metadata,
+                        i.source_modified_at, i.created_at, i.updated_at, i.version,
+                        (SELECT layout FROM item_text WHERE item_id = i.id), want.key
+                 {WANTED_ITEMS_JOIN}"
+            ))
+            .db("prepare get_items")?;
+        let rows = stmt
+            .query_map([refs], |r| {
+                Ok((r.get::<_, i64>(11)? as usize, read_item_row(r)?))
+            })
+            .db("query get_items")?;
+        rows.collect::<rusqlite::Result<_>>().db("read get_items")?
+    };
+    // Chunk texts for every item whose text is a layout, in one query.
+    let layout_ids: Vec<i64> = rows
+        .iter()
+        .filter(|(_, r)| r.text.is_none() && r.layout.is_some())
+        .map(|(_, r)| r.id)
+        .collect();
+    let mut chunks: HashMap<i64, HashMap<u64, String>> = HashMap::new();
+    if !layout_ids.is_empty() {
+        let ids = serde_json::to_string(&layout_ids)?;
+        let mut stmt = c
+            .prepare_cached(LAYOUT_CHUNKS_SQL)
+            .db("prepare chunk texts")?;
+        let mut q = stmt.query([&ids]).db("query chunk texts")?;
+        while let Some(r) = q.next().db("read chunk texts")? {
+            chunks
+                .entry(r.get(0).db("read chunk texts")?)
+                .or_default()
+                .insert(
+                    r.get::<_, i64>(1).db("read chunk texts")? as u64,
+                    r.get(2).db("read chunk texts")?,
+                );
+        }
+    }
+    rows.into_iter()
+        .map(|(idx, row)| {
+            let text = match (&row.text, &row.layout) {
+                (None, Some(l)) => {
+                    let empty = HashMap::new();
+                    let texts = chunks.get(&row.id).unwrap_or(&empty);
+                    Some(
+                        text_layout::decode(l, |ord| texts.get(&ord).map(String::as_str))
+                            .map_err(|e| Error::Integrity(format!("item {}: {e}", row.id)))?,
+                    )
+                }
+                (text, _) => text.clone(),
+            };
+            Ok((idx, row, text))
+        })
+        .collect()
+}
+
 /// Texts of an item's chunks by `ord`.
 fn chunk_texts(conn: &Connection, item_id: i64) -> Result<HashMap<u64, String>> {
     let mut stmt = conn
@@ -92,6 +192,26 @@ fn decode_layout(conn: &Connection, item_id: i64, layout: &[u8]) -> Result<Strin
 }
 
 impl ItemRow {
+    /// The public item for this row, with its (already resolved) text.
+    fn into_item(self, item: ItemRef, text: Option<String>) -> Result<Item> {
+        Ok(Item {
+            item,
+            title: self.title,
+            content_hash: self.content_hash,
+            mime: self.mime,
+            text,
+            metadata: serde_json::from_str(&self.metadata)?,
+            source_modified_at: self
+                .source_modified_at
+                .as_deref()
+                .map(parse_time)
+                .transpose()?,
+            version: self.version,
+            created_at: parse_time(&self.created_at)?,
+            updated_at: parse_time(&self.updated_at)?,
+        })
+    }
+
     /// The item's text as the caller wrote it, wherever it is stored.
     fn text(&self, conn: &Connection) -> Result<Option<String>> {
         match (&self.text, &self.layout) {
@@ -447,25 +567,35 @@ impl Store {
             }
             None => Ok(None),
         })?;
-        let Some((row, text)) = found else {
-            return Ok(None);
-        };
-        Ok(Some(Item {
-            item: item.clone(),
-            title: row.title,
-            content_hash: row.content_hash,
-            mime: row.mime,
-            text,
-            metadata: serde_json::from_str(&row.metadata)?,
-            source_modified_at: row
-                .source_modified_at
-                .as_deref()
-                .map(parse_time)
-                .transpose()?,
-            version: row.version,
-            created_at: parse_time(&row.created_at)?,
-            updated_at: parse_time(&row.updated_at)?,
-        }))
+        found
+            .map(|(row, text)| row.into_item(item.clone(), text))
+            .transpose()
+    }
+
+    /// Fetch many items at once: `out[i]` is `items[i]` (`None` when unknown; duplicates are
+    /// fine). One query per [`LOOKUP_BATCH`] items plus one for the chunk texts their stored
+    /// layouts need, each batch read in one snapshot on a read connection, instead of one or two
+    /// queries per item as with [`Self::get_item`].
+    pub fn get_items(&self, items: &[ItemRef]) -> Result<Vec<Option<Item>>> {
+        let mut out: Vec<Option<Item>> = Vec::with_capacity(items.len());
+        for batch in items.chunks(LOOKUP_BATCH) {
+            let refs = refs_json(batch)?;
+            let found = self.with_read_conn(|c| read_snapshot(c, |c| find_items(c, &refs)))?;
+            let mut rows: Vec<Option<(ItemRow, Option<String>)>> =
+                std::iter::repeat_with(|| None).take(batch.len()).collect();
+            for (idx, row, text) in found {
+                if let Some(slot) = rows.get_mut(idx) {
+                    *slot = Some((row, text));
+                }
+            }
+            for (item, row) in batch.iter().zip(rows) {
+                out.push(
+                    row.map(|(row, text)| row.into_item(item.clone(), text))
+                        .transpose()?,
+                );
+            }
+        }
+        Ok(out)
     }
 
     /// Delete an item with its chunks, full-text entries and vectors. Returns whether it existed.
@@ -606,6 +736,76 @@ fn ensure_vec_table(conn: &Connection, dim: usize) -> Result<()> {
             )
             .db("record embedding dimension")?;
             Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Long enough that storing it as a layout over its chunk pays off.
+    const BODY: &str = "a body long enough to be kept once, as a layout over its single chunk, \
+                        rather than twice (in the item row and in the chunk)";
+
+    fn plan(c: &Connection, sql: &str) -> Vec<String> {
+        let mut stmt = c.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+        let nulls = vec![rusqlite::types::Null; stmt.parameter_count()];
+        stmt.query_map(rusqlite::params_from_iter(nulls), |r| r.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    /// The batched lookups reach `items` and `chunks` through their indexes, once per wanted
+    /// ref, never with a table scan (also after `ANALYZE`, when the planner has statistics).
+    #[test]
+    fn batched_lookups_use_indexes() {
+        let s = Store::open_in_memory().unwrap();
+        for i in 0..50 {
+            let it = NewItem::new("src", format!("k{i}"), format!("h{i}")).with_text(BODY);
+            s.upsert_item_with_chunks(&it, &[NewChunk::text(BODY)])
+                .unwrap();
+        }
+        let statements = [
+            format!("SELECT i.id, want.key {WANTED_ITEMS_JOIN}"),
+            LAYOUT_CHUNKS_SQL.to_owned(),
+        ];
+        let layouts: i64 = s
+            .with_conn(|c| {
+                c.query_row("SELECT count(*) FROM item_text", [], |r| r.get(0))
+                    .db("count layouts")
+            })
+            .unwrap();
+        assert_eq!(layouts, 50, "texts are stored as layouts");
+        let refs: Vec<ItemRef> = (0..50)
+            .map(|i| ItemRef {
+                source: SourceId::new("src"),
+                key: ItemKey::new(format!("k{i}")),
+            })
+            .collect();
+        let items = s.get_items(&refs).unwrap();
+        assert!(
+            items
+                .iter()
+                .all(|i| i.as_ref().unwrap().text.as_deref() == Some(BODY))
+        );
+        for analyze in [false, true] {
+            s.with_conn(|c| {
+                if analyze {
+                    c.execute_batch("ANALYZE;").db("analyze")?;
+                }
+                for sql in &statements {
+                    let steps = plan(c, sql);
+                    let scans: Vec<_> = steps
+                        .iter()
+                        .filter(|d| d.starts_with("SCAN ") && !d.contains("VIRTUAL TABLE"))
+                        .collect();
+                    assert!(scans.is_empty(), "{sql}: {steps:#?}");
+                }
+                Ok(())
+            })
+            .unwrap();
         }
     }
 }

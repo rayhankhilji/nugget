@@ -3807,6 +3807,7 @@ dependencies = [
  "nugget-graph",
  "nugget-infer",
  "nugget-ingest",
+ "nugget-ipc",
  "nugget-knowledge",
  "nugget-mcp",
  "nugget-policy",
@@ -4380,6 +4381,7 @@ dependencies = [
 name = "nugget-store"
 version = "0.0.1"
 dependencies = [
+ "fs4",
  "getrandom 0.3.4",
  "hex",
  "hmac",
