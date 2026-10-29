@@ -87,13 +87,15 @@ kwin)
     as_root=()
     if [ "$(id -u)" != 0 ]; then
         if sudo -n true 2>/dev/null; then
-            as_root=(sudo -n --preserve-env)
+            as_root=(sudo -n)
         else
             echo "wayland-session: kwin needs root here (sudo -n failed)" >&2
         fi
     fi
     # No GPU: composite with QPainter rather than through EGL.
-    "${as_root[@]}" env KWIN_COMPOSE=Q "$runtime/kwin_wayland" --virtual --no-lockscreen \
+    "${as_root[@]}" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+        XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland HOME="$runtime" KWIN_COMPOSE=Q \
+        "$runtime/kwin_wayland" --virtual --no-lockscreen \
         --width 1280 --height 800 --socket wayland-1 >"$logs/kwin.log" 2>&1 &
     pids+=($!)
     # Qt clients started later (the KDE portal backend) connect to it.
