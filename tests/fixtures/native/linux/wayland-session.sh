@@ -30,11 +30,19 @@ export XDG_SESSION_TYPE=wayland
 unset DISPLAY WAYLAND_DISPLAY
 
 pids=()
+as_root=()
 cleanup() {
-    for ((i = ${#pids[@]} - 1; i >= 0; i--)); do kill "${pids[i]}" 2>/dev/null; done
+    for ((i = ${#pids[@]} - 1; i >= 0; i--)); do
+        # The sudo wrapper forwards the signal to a compositor running as root.
+        kill "${pids[i]}" 2>/dev/null
+    done
     [ -n "${bus_pid:-}" ] && kill "$bus_pid" 2>/dev/null
     sleep 0.3
-    rm -rf "$runtime"
+    if [ "${#as_root[@]}" -gt 0 ]; then
+        "${as_root[@]}" rm -rf "$runtime"
+    else
+        rm -rf "$runtime"
+    fi
 }
 trap cleanup EXIT
 
@@ -71,14 +79,22 @@ kwin)
     export XDG_CURRENT_DESKTOP=KDE KDE_FULL_SESSION=true KDE_SESSION_VERSION=5
     # kwin_wayland carries a file capability (cap_sys_nice), which a no_new_privs container
     # refuses to exec ("Operation not permitted"); a plain copy has none and runs there.
-    kwin="$(command -v kwin_wayland)"
-    if ! "$kwin" --version >/dev/null 2>&1; then
-        cp "$kwin" "$runtime/kwin_wayland"
-        kwin="$runtime/kwin_wayland"
+    cp "$(command -v kwin_wayland)" "$runtime/kwin_wayland"
+    # KWin 5.27 only starts as root without a logind seat: as an ordinary user it crashes
+    # before it parses its arguments (a segfault on ubuntu-latest, a refused QPA plugin
+    # elsewhere). On a CI runner with password-less sudo it runs as root; its socket is then
+    # opened to the session's user, and the session bus admits root.
+    as_root=()
+    if [ "$(id -u)" != 0 ]; then
+        if sudo -n true 2>/dev/null; then
+            as_root=(sudo -n --preserve-env)
+        else
+            echo "wayland-session: kwin needs root here (sudo -n failed)" >&2
+        fi
     fi
     # No GPU: composite with QPainter rather than through EGL.
-    KWIN_COMPOSE=Q "$kwin" --virtual --no-lockscreen --width 1280 --height 800 \
-        --socket wayland-1 >"$logs/kwin.log" 2>&1 &
+    "${as_root[@]}" env KWIN_COMPOSE=Q "$runtime/kwin_wayland" --virtual --no-lockscreen \
+        --width 1280 --height 800 --socket wayland-1 >"$logs/kwin.log" 2>&1 &
     pids+=($!)
     # Qt clients started later (the KDE portal backend) connect to it.
     export QT_QPA_PLATFORM=wayland
@@ -100,6 +116,9 @@ if [ -z "${sock:-}" ]; then
     exit 1
 fi
 export WAYLAND_DISPLAY="$(basename "$sock")"
+if [ "${#as_root[@]}" -gt 0 ]; then
+    "${as_root[@]}" chmod 0777 "$sock"
+fi
 
 # D-Bus activated services (portals, the accessibility bus) inherit this environment.
 dbus-update-activation-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE \
