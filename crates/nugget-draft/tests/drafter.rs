@@ -13,12 +13,12 @@ use nugget_core::ipc::{
 };
 use nugget_core::{Error, Result};
 use nugget_draft::{
-    DraftConfig, Drafter, FEATURE_DRAFT, FeedbackOutcome, FeedbackRecord, FeedbackSink, NoVoice,
-    RetrievalRunner, VoiceQuery, VoiceSource,
+    DraftConfig, Drafter, FEATURE_DRAFT, FeedbackOutcome, FeedbackRecord, FeedbackSink,
+    LocalBudget, NoVoice, RetrievalRunner, VoiceQuery, VoiceSource, Warmer,
 };
 use nugget_infer::{
-    ChatEvent, ChatRequest, ChatStream, Part, Provider, ProviderKind, ProviderMeta, Router,
-    StopReason,
+    CacheHint, ChatEvent, ChatRequest, ChatStats, ChatStream, Part, Provider, ProviderKind,
+    ProviderMeta, Router, StopReason,
 };
 use nugget_retrieve::{RetrieveConfig, Retriever};
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
@@ -30,6 +30,8 @@ struct Fake {
     script: Vec<String>,
     delay: Duration,
     fail: bool,
+    /// Sent just before `Done`, as the built-in adapters do.
+    stats: Option<ChatStats>,
     requests: Mutex<Vec<ChatRequest>>,
 }
 
@@ -41,6 +43,7 @@ impl Fake {
             script: script.iter().map(|s| (*s).to_owned()).collect(),
             delay: Duration::ZERO,
             fail: false,
+            stats: None,
             requests: Mutex::new(Vec::new()),
         })
     }
@@ -93,6 +96,9 @@ impl Provider for Fake {
             .iter()
             .map(|s| Ok(ChatEvent::TextDelta(s.clone())))
             .collect();
+        if let Some(stats) = &self.stats {
+            events.push(Ok(ChatEvent::Stats(stats.clone())));
+        }
         events.push(Ok(ChatEvent::Done {
             stop_reason: StopReason::EndTurn,
             input_tokens: Some(10),
@@ -304,6 +310,10 @@ async fn retrieval_budget_is_respected() {
     let local = Fake::new("local", Locality::OnDevice, &["ok"]);
     let config = DraftConfig {
         budget_tokens: 40,
+        local: LocalBudget {
+            enabled: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
@@ -852,4 +862,311 @@ async fn voice_drives_prompt_prefix_and_length_band() {
         .await
         .unwrap();
     assert_eq!(cloud.last().system.unwrap(), system);
+}
+
+fn context_of(req: &ChatRequest) -> String {
+    user_text(req)
+        .split("<context>\n")
+        .nth(1)
+        .and_then(|t| t.split("\n</context>").next())
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn local_off() -> DraftConfig {
+    DraftConfig {
+        local: LocalBudget {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn local_budget_keeps_the_best_snippets_and_matching_citations() {
+    let ask = "Can you send the Q3 numbers?";
+    // Local budget off: every relevant passage, as for cloud budgets.
+    let full = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![full.clone()], local_off(), Arc::new(NoVoice));
+    let (wide, _st) = s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    assert!(wide.citations.len() >= 2, "{:?}", keys(&wide));
+
+    // One snippet: the best passage only, and the citations and egress items say so.
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let config = DraftConfig {
+        local: LocalBudget {
+            max_snippets: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
+    let (started, _st) = s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    assert_eq!(keys(&started), keys(&wide)[..1].to_vec());
+    let req = local.last();
+    let items: Vec<&str> = req.items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(items, keys(&started));
+    let ctx = context_of(&req);
+    assert!(ctx.starts_with("[1] "), "{ctx}");
+    assert!(!ctx.contains("[2] "), "{ctx}");
+    assert!(user_text(&req).len() < user_text(&full.last()).len());
+}
+
+#[tokio::test]
+async fn local_budget_caps_retrieval_tokens() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let config = DraftConfig {
+        budget_tokens: 5_000,
+        local: LocalBudget {
+            budget_tokens: 12,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
+    s.drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    let ctx = context_of(&local.last());
+    assert!(ctx.split_whitespace().count() <= 12, "{ctx}");
+}
+
+#[tokio::test]
+async fn cloud_requests_ignore_the_local_budget() {
+    let ask = "Can you send the Q3 numbers?";
+    let voice = || Arc::new(Voice(Mutex::new(Vec::new())));
+    let a = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let s = setup(vec![a.clone()], DraftConfig::default(), voice());
+    s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    let b = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let tiny = DraftConfig {
+        local: LocalBudget {
+            budget_tokens: 1,
+            max_snippets: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let s = setup(vec![b.clone()], tiny, voice());
+    s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    let (ra, rb) = (a.last(), b.last());
+    assert_eq!(ra, rb);
+    assert!(
+        ra.cache.is_none(),
+        "cloud draft requests carry no cache hint"
+    );
+    let off = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let s = setup(vec![off.clone()], local_off(), voice());
+    s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    assert_eq!(off.last(), ra);
+}
+
+#[tokio::test]
+async fn local_prompts_are_smaller_with_a_terse_voice_and_a_cache_hint() {
+    let ask = "Can you send the Q3 numbers?";
+    let voice = || Arc::new(Voice(Mutex::new(Vec::new())));
+    let small = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![small.clone()], DraftConfig::default(), voice());
+    s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    let big = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![big.clone()], local_off(), voice());
+    s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    let (small, big) = (small.last(), big.last());
+    let (ss, bs) = (small.system.clone().unwrap(), big.system.clone().unwrap());
+    assert!(ss.starts_with(nugget_draft::prompt::SYSTEM_RULES));
+    assert!(ss.len() < bs.len(), "{ss}");
+    assert!(!ss.contains("Emoji") && bs.contains("Emoji"), "{ss}");
+    assert!(ss.contains("Learned from 30") && bs.contains("Learned from 30"));
+    assert!(ss.contains("<example>\nyep, on it\n</example>"));
+    assert_eq!(small.cache, Some(CacheHint::keyed("draft:chat")));
+    assert_eq!(big.cache, Some(CacheHint::keyed("draft:chat")));
+}
+
+#[derive(Default)]
+struct Rec {
+    warms: Mutex<Vec<ProviderId>>,
+    prefixes: Mutex<Vec<(ProviderId, ChatRequest)>>,
+}
+
+#[async_trait]
+impl Warmer for Rec {
+    async fn warm(&self, provider: Arc<dyn Provider>) {
+        self.warms.lock().unwrap().push(provider.id().clone());
+    }
+
+    async fn warm_prefix(&self, provider: Arc<dyn Provider>, prefix: ChatRequest) {
+        self.prefixes
+            .lock()
+            .unwrap()
+            .push((provider.id().clone(), prefix));
+    }
+}
+
+/// Wait (bounded) until `f` holds.
+async fn until(mut f: impl FnMut() -> bool) {
+    for _ in 0..500 {
+        if f() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("condition not met in time");
+}
+
+#[tokio::test]
+async fn prewarm_sends_the_exact_prefix_begin_sends_to_local_providers() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let rec = Arc::new(Rec::default());
+    let mut s = setup(
+        vec![local.clone()],
+        DraftConfig::default(),
+        Arc::new(Voice(Mutex::new(Vec::new()))),
+    );
+    s.drafter = s.drafter.with_warmer(rec.clone());
+    let mut ctx = slack_ctx("Can you send the Q3 numbers?");
+    ctx.recipients = vec!["Sam Lee <sam@example.com>".into()];
+    s.drafter.prewarm(&ctx).unwrap();
+    until(|| !rec.prefixes.lock().unwrap().is_empty()).await;
+    let (id, prefix) = rec.prefixes.lock().unwrap()[0].clone();
+    assert_eq!(id.as_str(), "local");
+    assert!(rec.warms.lock().unwrap().is_empty());
+
+    s.drafter.begin(request(ctx)).await.unwrap();
+    let req = local.last();
+    assert_eq!(prefix.system, req.system);
+    assert_eq!(prefix.cache, req.cache);
+    assert_eq!(prefix.feature, FEATURE_DRAFT);
+    assert!(prefix.messages.is_empty() && prefix.items.is_empty());
+    // What a llama-server prewarm evaluates is what the draft starts with.
+    let begin_prefix = req.cache_prefix().unwrap();
+    assert_eq!(prefix.cache_prefix().unwrap().system, begin_prefix.system);
+    let system = prefix.system.unwrap();
+    assert!(!system.contains("Q3") && !system.contains("Sam") && !system.contains("Slack"));
+}
+
+#[tokio::test]
+async fn prewarm_only_opens_the_connection_for_cloud_providers() {
+    let cloud = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let rec = Arc::new(Rec::default());
+    let mut s = setup(
+        vec![cloud.clone()],
+        DraftConfig::default(),
+        Arc::new(NoVoice),
+    );
+    s.drafter = s.drafter.with_warmer(rec.clone());
+    s.drafter
+        .prewarm(&slack_ctx("Can you send the Q3 numbers?"))
+        .unwrap();
+    until(|| !rec.warms.lock().unwrap().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(rec.prefixes.lock().unwrap().is_empty());
+    assert!(s.drafter.prewarm_idle().is_none());
+    assert!(cloud.requests().is_empty());
+}
+
+#[tokio::test]
+async fn prewarm_idle_caches_the_rules_on_the_default_local_provider() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(
+        vec![local.clone()],
+        DraftConfig::default(),
+        Arc::new(NoVoice),
+    );
+    // No warmer: nothing to do.
+    assert!(s.drafter.prewarm_idle().is_none());
+    let rec = Arc::new(Rec::default());
+    let drafter = s.drafter.clone().with_warmer(rec.clone());
+    assert_eq!(drafter.prewarm_idle().unwrap().as_str(), "local");
+    until(|| !rec.prefixes.lock().unwrap().is_empty()).await;
+    let (_, prefix) = rec.prefixes.lock().unwrap()[0].clone();
+    let system = prefix.system.unwrap();
+    assert!(system.starts_with(nugget_draft::prompt::SYSTEM_RULES));
+    assert!(prefix.messages.is_empty() && prefix.items.is_empty());
+    // A chat draft with no voice samples starts with exactly this prefix.
+    drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    assert_eq!(local.last().system.unwrap(), system);
+}
+
+#[tokio::test]
+async fn timings_report_prompt_and_cached_tokens() {
+    let local = Arc::new(Fake {
+        stats: Some(ChatStats {
+            input_tokens: Some(420),
+            cached_input_tokens: Some(380),
+            ..Default::default()
+        }),
+        ..Arc::into_inner(Fake::new("local", Locality::OnDevice, &["ok"])).unwrap()
+    });
+    let s = setup(vec![local], DraftConfig::default(), Arc::new(NoVoice));
+    let (_, stream) = s
+        .drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    let mut stream = stream;
+    let mut saw_stats = false;
+    while let Some(e) = stream.next().await {
+        saw_stats |= matches!(e, Ok(ChatEvent::Stats(_)));
+    }
+    assert!(saw_stats, "stats still pass through");
+    let t = stream.timings();
+    assert_eq!(t.prompt_tokens, Some(420));
+    assert_eq!(t.cached_prompt_tokens, Some(380));
+
+    // Without stats, `Done`'s input tokens.
+    let plain = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![plain], DraftConfig::default(), Arc::new(NoVoice));
+    let (_, stream) = s
+        .drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    let mut stream = stream;
+    while stream.next().await.is_some() {}
+    let t = stream.timings();
+    assert_eq!(t.prompt_tokens, Some(10));
+    assert_eq!(t.cached_prompt_tokens, None);
+}
+
+#[tokio::test]
+async fn prewarm_skips_a_prefix_the_provider_already_holds() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let rec = Arc::new(Rec::default());
+    let s = setup(
+        vec![local.clone()],
+        DraftConfig::default(),
+        Arc::new(NoVoice),
+    );
+    let drafter = s.drafter.clone().with_warmer(rec.clone());
+    let ctx = slack_ctx("Can you send the Q3 numbers?");
+    // A draft was sent: its prefix (and thread) sit in the server's cache.
+    drafter.begin(request(ctx.clone())).await.unwrap();
+    assert!(drafter.prewarm_idle().is_none(), "the rules are cached");
+
+    // A repeat trigger in the same thread: warming the same prefix would cut that cache back.
+    drafter.prewarm(&ctx).unwrap();
+    until(|| !rec.warms.lock().unwrap().is_empty()).await;
+    assert!(rec.prefixes.lock().unwrap().is_empty());
+
+    // Another channel has another prefix: warmed once, then skipped.
+    let mut email = ctx.clone();
+    email.app = AppInfo {
+        id: Some("com.apple.mail".into()),
+        name: "Mail".into(),
+        ..Default::default()
+    };
+    email.field.placeholder = None;
+    email.subject = Some("Q3".into());
+    drafter.prewarm(&email).unwrap();
+    until(|| rec.prefixes.lock().unwrap().len() == 1).await;
+    let (_, prefix) = rec.prefixes.lock().unwrap()[0].clone();
+    assert_eq!(prefix.cache, Some(CacheHint::keyed("draft:email")));
+    drafter.prewarm(&email).unwrap();
+    until(|| rec.warms.lock().unwrap().len() == 2).await;
+    assert_eq!(rec.prefixes.lock().unwrap().len(), 1);
 }

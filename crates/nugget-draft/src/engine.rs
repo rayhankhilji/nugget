@@ -14,7 +14,7 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{ContextResponse, DraftContext, DraftFeedback, DraftRequest, DraftStarted};
 use nugget_core::{Error, Result};
-use nugget_infer::{ChatEvent, ChatStream, Provider, Router, StopReason};
+use nugget_infer::{CacheHint, ChatEvent, ChatRequest, ChatStream, Provider, Router, StopReason};
 use nugget_retrieve::{ContextOptions, PackedContext, Retriever};
 use nugget_store::{AuditEntry, Store};
 use nugget_voice::{Channel, VoiceHints};
@@ -26,7 +26,8 @@ use crate::FieldKind;
 use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
 use crate::prompt::{
-    LengthBand, PromptInput, PromptLimits, build_request, channel_for, split_value,
+    LengthBand, PromptInput, PromptLimits, SYSTEM_RULES, build_request, cache_key, channel_for,
+    prefix_request, split_value,
 };
 
 /// Upper bound on the retrieval budget, whatever the config says.
@@ -130,6 +131,13 @@ pub trait FeedbackSink: Send + Sync {
 #[async_trait]
 pub trait Warmer: Send + Sync {
     async fn warm(&self, provider: Arc<dyn Provider>);
+
+    /// Warm the provider's prompt cache with a draft's stable prefix (rules and voice; see
+    /// [`nugget_infer::Provider::prewarm_prefix`]). The default only opens the connection.
+    async fn warm_prefix(&self, provider: Arc<dyn Provider>, prefix: ChatRequest) {
+        let _ = prefix;
+        self.warm(provider).await;
+    }
 }
 
 /// Runs a draft's retrieval job (store and index calls that block between awaits). Without one
@@ -166,6 +174,34 @@ pub struct DraftConfig {
     pub prewarm_ttl_ms: u64,
     #[serde(skip)]
     pub limits: PromptLimits,
+    /// Smaller prompts for on-device and LAN providers ([`LocalBudget`]); cloud providers keep
+    /// `budget_tokens` and `limits`.
+    pub local: LocalBudget,
+}
+
+/// The prompt budget for non-cloud providers, whose prompt reading dominates Double Tap latency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalBudget {
+    /// Off: local providers get the cloud budget and limits.
+    pub enabled: bool,
+    /// Retrieval context budget, in tokens.
+    pub budget_tokens: u32,
+    /// Retrieved snippets kept (the best first).
+    pub max_snippets: usize,
+    #[serde(skip, default = "PromptLimits::local")]
+    pub limits: PromptLimits,
+}
+
+impl Default for LocalBudget {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            budget_tokens: 300,
+            max_snippets: 3,
+            limits: PromptLimits::local(),
+        }
+    }
 }
 
 impl Default for DraftConfig {
@@ -185,6 +221,7 @@ impl Default for DraftConfig {
             voice_timeout_ms: 500,
             prewarm_ttl_ms: 30_000,
             limits: PromptLimits::default(),
+            local: LocalBudget::default(),
         }
     }
 }
@@ -207,6 +244,12 @@ pub struct DraftTimings {
     pub total_ms: Option<u64>,
     /// Providers tried (more than one after a fallback).
     pub attempts: u32,
+    /// Prompt tokens of the request, cached or not (from the provider's stats).
+    #[serde(default)]
+    pub prompt_tokens: Option<u64>,
+    /// Prompt tokens served from the provider's prompt cache (llama-server `cache_n`).
+    #[serde(default)]
+    pub cached_prompt_tokens: Option<u64>,
 }
 
 fn ms(d: Duration) -> u64 {
@@ -289,6 +332,10 @@ struct Inner {
     config: DraftConfig,
     sessions: Mutex<Sessions>,
     cache: Mutex<Cache>,
+    /// Per provider, the system prompt of the last draft request sent or prefix warmed. A
+    /// llama-server slot holds that prompt's cache; warming the same prefix again would only cut
+    /// the cache back to it (losing a repeat draft's thread), so such warms are skipped.
+    last_prefix: Mutex<HashMap<ProviderId, String>>,
 }
 
 /// The Double Tap drafting engine. Cheap to clone.
@@ -334,6 +381,7 @@ impl Drafter {
                 config,
                 sessions: Mutex::new(Sessions::default()),
                 cache: Mutex::new(Cache::default()),
+                last_prefix: Mutex::new(HashMap::new()),
             }),
         }
     }
@@ -374,9 +422,14 @@ impl Drafter {
     }
 
     /// Start work as soon as the trigger fires, before the full context is read: resolve the
-    /// provider, open its connection (with a [`Warmer`]), and start retrieval and the voice
-    /// lookup from whatever the hint already has. `begin` reuses the results when its context
-    /// gives the same retrieval query. Returns `None` when drafting would be refused.
+    /// provider, start retrieval and the voice lookup from whatever the hint already has, and
+    /// with a [`Warmer`] get the provider ready. For a cloud provider that only opens the
+    /// connection; for a non-cloud one, once the voice lookup is in (bounded by
+    /// `voice_timeout_ms`), it warms the prompt cache with the exact system prefix `begin` will
+    /// send ([`Warmer::warm_prefix`]), unless that is the system prompt of the last request sent
+    /// or warmed on that provider (already cached; warming it again would cut a llama-server
+    /// slot's cache back to the prefix), when it only opens the connection. `begin` reuses the
+    /// results when its context gives the same retrieval query. Returns `None` when drafting would be refused.
     pub fn prewarm(&self, hint: &DraftContext) -> Option<Prewarm> {
         let kind = gate_with(
             hint,
@@ -387,29 +440,115 @@ impl Drafter {
         let (candidates, _) = self.candidates(hint, None).ok()?;
         let provider = candidates.into_iter().next()?;
         let cloud = provider.meta().locality == Locality::Cloud;
-        let warmer = self
-            .inner
-            .warmer
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if let Some(w) = warmer {
-            let p = provider.clone();
-            tokio::spawn(async move { w.warm(p).await });
-        }
+        let warmer = self.warmer();
         let query = retrieval_query(hint);
         let retrieval = !query.is_empty();
         if retrieval {
             let (fut, _) = self.context_future(&query, cloud);
             tokio::spawn(fut);
         }
-        let fut = self.voice_future(voice_query(hint, kind, &query, cloud));
-        tokio::spawn(fut);
+        let voice = self.voice_future(voice_query(hint, kind, &query, cloud));
+        tokio::spawn(voice.clone());
+        if let Some(w) = warmer {
+            let p = provider.clone();
+            if cloud {
+                // Connection only: no prompt content leaves before the draft itself.
+                tokio::spawn(async move { w.warm(p).await });
+            } else {
+                // The same system prefix `begin` will send for this field, once the voice is in.
+                // Skipped (connection only) when it is the provider's last prefix: it is cached.
+                let limits = self.limits_for(false);
+                let timeout = Duration::from_millis(self.inner.config.voice_timeout_ms);
+                let inner = self.inner.clone();
+                tokio::spawn(async move {
+                    let prefix = match tokio::time::timeout(timeout, voice).await {
+                        Ok(v) => {
+                            let band = LengthBand::for_draft(kind, &v);
+                            Some(prefix_request(kind, &v, &band, &limits))
+                        }
+                        Err(_) => None,
+                    };
+                    match prefix {
+                        Some(prefix) if note_prefix(&inner, p.id(), prefix.system.as_deref()) => {
+                            w.warm_prefix(p, prefix).await;
+                        }
+                        _ => w.warm(p).await,
+                    }
+                });
+            }
+        }
         Some(Prewarm {
             provider: provider.id().clone(),
             locality: provider.meta().locality,
             retrieval,
         })
+    }
+
+    /// Warm the prompt cache of the provider drafts route to by default with the fixed drafting
+    /// rules, ahead of any trigger (when Double Tap is enabled or the local server is ready).
+    /// Only non-cloud providers are warmed this way: the prefix is the rules and a neutral chat
+    /// voice block, so at least the rules are cached. Returns the provider warmed; `None` when
+    /// there is no warmer, no tokio runtime, the default provider is a cloud one, or a draft or
+    /// warm on it already sent the rules.
+    pub fn prewarm_idle(&self) -> Option<ProviderId> {
+        let warmer = self.warmer()?;
+        let handle = tokio::runtime::Handle::try_current().ok()?;
+        let provider = self
+            .inner
+            .router
+            .candidates(self.inner.config.tier, &Capabilities::default())
+            .into_iter()
+            .next()?;
+        if provider.meta().locality == Locality::Cloud {
+            return None;
+        }
+        // Any earlier draft or warm on this provider already cached the rules.
+        let rules_cached = self
+            .inner
+            .last_prefix
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(provider.id())
+            .is_some_and(|s| s.starts_with(SYSTEM_RULES));
+        if rules_cached {
+            return None;
+        }
+        let prefix = idle_prefix(&self.limits_for(false));
+        note_prefix(&self.inner, provider.id(), prefix.system.as_deref());
+        let id = provider.id().clone();
+        handle.spawn(async move { warmer.warm_prefix(provider, prefix).await });
+        Some(id)
+    }
+
+    fn warmer(&self) -> Option<Arc<dyn Warmer>> {
+        self.inner
+            .warmer
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Prompt caps for a provider locality ([`LocalBudget`] for non-cloud ones when enabled).
+    fn limits_for(&self, cloud: bool) -> PromptLimits {
+        let c = &self.inner.config;
+        if !cloud && c.local.enabled {
+            c.local.limits
+        } else {
+            c.limits
+        }
+    }
+
+    /// Retrieval budget (tokens) and snippet cap for a provider locality.
+    fn budget_for(&self, cloud: bool) -> (usize, Option<usize>) {
+        let c = &self.inner.config;
+        if !cloud && c.local.enabled {
+            (
+                c.local.budget_tokens.min(MAX_BUDGET_TOKENS) as usize,
+                Some(c.local.max_snippets),
+            )
+        } else {
+            (c.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize, None)
+        }
     }
 
     /// Start a draft. Refuses secure fields, excluded apps and search boxes; picks the provider
@@ -459,14 +598,20 @@ impl Drafter {
                 instruction: req.instruction.as_deref(),
                 screenshot,
                 band,
-                limits: config.limits,
+                limits: self.limits_for(cloud),
             };
             let max_tokens = req
                 .max_tokens
                 .unwrap_or_else(|| band.max_tokens())
                 .clamp(16, 4_096);
-            let chat = build_request(&input, max_tokens, config.temperature);
+            let mut chat = build_request(&input, max_tokens, config.temperature);
+            if !cloud {
+                // Routes llama-server requests sharing this prefix (with `slot_affinity`); cloud
+                // requests stay exactly as they were.
+                chat = chat.with_cache(CacheHint::keyed(cache_key(kind)));
+            }
 
+            note_prefix(&self.inner, provider.id(), chat.system.as_deref());
             match open_stream(provider.as_ref(), chat).await {
                 Ok(stream) => {
                     self.inner.router.report_success(provider.id());
@@ -662,7 +807,8 @@ impl Drafter {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        let budget = self.inner.config.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize;
+        // The cache key's `cloud` decides the budget too, so each locality gets its own packing.
+        let (budget, max_snippets) = self.budget_for(cloud);
         let q = query.to_owned();
         let fut = async move {
             let started = Instant::now();
@@ -675,7 +821,13 @@ impl Drafter {
                 None => job.await,
             };
             let ctx = match packed {
-                Ok(p) => Some(p.response),
+                Ok(p) => {
+                    let mut r = p.response;
+                    if let Some(max) = max_snippets {
+                        keep_best_snippets(&mut r, max);
+                    }
+                    Some(r)
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "draft: retrieval failed; drafting without context");
                     None
@@ -967,6 +1119,70 @@ fn voice_query(ctx: &DraftContext, kind: FieldKind, topic: &str, for_cloud: bool
     }
 }
 
+/// Record `system` as `provider`'s last prefix; returns whether it differs from the one before.
+fn note_prefix(inner: &Inner, provider: &ProviderId, system: Option<&str>) -> bool {
+    let system = system.unwrap_or_default();
+    let mut last = inner.last_prefix.lock().unwrap_or_else(|e| e.into_inner());
+    if last.get(provider).is_some_and(|s| s == system) {
+        return false;
+    }
+    last.insert(provider.clone(), system.to_owned());
+    true
+}
+
+/// The prefix [`Drafter::prewarm_idle`] warms: the rules and a neutral chat voice block.
+fn idle_prefix(limits: &PromptLimits) -> ChatRequest {
+    let kind = FieldKind::ChatMessage;
+    let voice = VoiceHints {
+        channel: Some(channel_for(kind)),
+        ..Default::default()
+    };
+    let band = LengthBand::for_draft(kind, &voice);
+    prefix_request(kind, &voice, &band, limits)
+}
+
+/// Keep the first `max` passages (the packer numbers them in rank order, best first) of a packed
+/// context, with their citations, so the prompt, the citations and the egress items agree.
+fn keep_best_snippets(ctx: &mut ContextResponse, max: usize) {
+    if ctx.citations.len() <= max {
+        return;
+    }
+    if max == 0 {
+        ctx.text.clear();
+        ctx.citations.clear();
+        return;
+    }
+    let next = &ctx.citations[max];
+    // `nugget_retrieve` renders each passage under a `[n] Title (source)` header line, with a
+    // blank line between passages.
+    let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let title = next
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(next.item.key.as_str());
+    let source = next.url.as_deref().unwrap_or(next.item.source.as_str());
+    let header = format!(
+        "\n\n[{}] {} ({})\n",
+        next.n,
+        one_line(title),
+        one_line(source)
+    );
+    let cut = ctx
+        .text
+        .find(&header)
+        .or_else(|| ctx.text.find(&format!("\n\n[{}] ", next.n)));
+    match cut {
+        Some(i) => {
+            ctx.text.truncate(i);
+            ctx.citations.truncate(max);
+        }
+        // Not the packer's layout: keep it whole rather than cite what was dropped.
+        None => tracing::warn!("draft: cannot split packed context; keeping every passage"),
+    }
+}
+
 /// Open a chat and wait for its first event, so a provider that fails early can be skipped.
 async fn open_stream(p: &dyn Provider, req: nugget_infer::ChatRequest) -> Result<ChatStream> {
     let mut stream = p.chat(req).await?;
@@ -1035,6 +1251,10 @@ impl PumpState {
                     input_tokens,
                     output_tokens,
                 })) => {
+                    if let Some(n) = input_tokens {
+                        let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
+                        t.prompt_tokens.get_or_insert(u64::from(n));
+                    }
                     let tail = self.post.finish();
                     self.emit(Emit {
                         text: tail,
@@ -1048,7 +1268,18 @@ impl PumpState {
                     }));
                 }
                 // Usage and timing stats (cache hits, first-token time) pass through unchanged.
-                Some(Ok(stats @ ChatEvent::Stats(_))) => self.pending.push_back(Ok(stats)),
+                Some(Ok(ChatEvent::Stats(stats))) => {
+                    {
+                        let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(n) = stats.input_tokens {
+                            t.prompt_tokens = Some(u64::from(n));
+                        }
+                        if let Some(n) = stats.cached_input_tokens {
+                            t.cached_prompt_tokens = Some(u64::from(n));
+                        }
+                    }
+                    self.pending.push_back(Ok(ChatEvent::Stats(stats)));
+                }
                 Some(Ok(ChatEvent::ToolCall { .. } | ChatEvent::Opaque { .. })) => {}
                 Some(Err(e)) => {
                     self.finish();
@@ -1160,5 +1391,104 @@ impl Stream for DraftStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.as_mut().poll_next(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+    use nugget_core::ipc::Citation;
+
+    fn cite(n: u32, key: &str, title: Option<&str>) -> Citation {
+        Citation {
+            n,
+            item: ItemRef {
+                source: SourceId::new("notes"),
+                key: ItemKey::new(key),
+            },
+            chunk_id: i64::from(n),
+            title: title.map(str::to_owned),
+            url: None,
+            sensitive: false,
+        }
+    }
+
+    fn packed() -> ContextResponse {
+        ContextResponse {
+            // The second passage quotes a fake third header; the real one follows it.
+            text: "[1] Alpha (notes)\nfirst\n\n[2] Beta title (notes)\nsecond\n\n[3] x\n\n\
+[3] Gamma (notes)\nthird"
+                .into(),
+            citations: vec![
+                cite(1, "a", Some("Alpha")),
+                cite(2, "b", Some("Beta  title")),
+                cite(3, "c", Some("Gamma")),
+            ],
+            excluded_sensitive: 2,
+        }
+    }
+
+    #[test]
+    fn keep_best_snippets_trims_text_and_citations_together() {
+        let mut c = packed();
+        keep_best_snippets(&mut c, 3);
+        assert_eq!(c, packed());
+
+        keep_best_snippets(&mut c, 2);
+        assert_eq!(
+            c.text,
+            "[1] Alpha (notes)\nfirst\n\n[2] Beta title (notes)\nsecond\n\n[3] x"
+        );
+        assert_eq!(c.citations.len(), 2);
+        assert_eq!(c.excluded_sensitive, 2);
+
+        let mut c = packed();
+        keep_best_snippets(&mut c, 1);
+        assert_eq!(c.text, "[1] Alpha (notes)\nfirst");
+        assert_eq!(c.citations.len(), 1);
+
+        let mut c = packed();
+        keep_best_snippets(&mut c, 0);
+        assert!(c.text.is_empty() && c.citations.is_empty());
+
+        // Not the packer's layout: nothing is cut, so nothing is cited that isn't there.
+        let mut c = packed();
+        c.text = "free text".into();
+        keep_best_snippets(&mut c, 1);
+        assert_eq!(c.citations.len(), 3);
+    }
+
+    #[test]
+    fn idle_prefix_is_rules_and_a_neutral_voice() {
+        let p = idle_prefix(&PromptLimits::local());
+        let system = p.system.as_deref().unwrap();
+        assert!(system.starts_with(crate::prompt::SYSTEM_RULES));
+        assert!(system.contains("No writing samples yet"));
+        assert_eq!(p.cache, Some(CacheHint::keyed("draft:chat")));
+        assert_eq!(p.feature, crate::FEATURE_DRAFT);
+    }
+
+    #[test]
+    fn timings_serialize_prompt_tokens_and_accept_old_json() {
+        let t: DraftTimings = serde_json::from_str(r#"{"prewarmed":true,"attempts":1}"#).unwrap();
+        assert_eq!(t.prompt_tokens, None);
+        let v = serde_json::to_value(DraftTimings {
+            prompt_tokens: Some(5),
+            cached_prompt_tokens: Some(3),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(v["prompt_tokens"], 5);
+        assert_eq!(v["cached_prompt_tokens"], 3);
+    }
+
+    #[test]
+    fn local_budget_config_parses_with_defaults() {
+        let c: DraftConfig = serde_json::from_str(r#"{"local":{"budget_tokens":200}}"#).unwrap();
+        assert!(c.local.enabled);
+        assert_eq!(c.local.budget_tokens, 200);
+        assert_eq!(c.local.max_snippets, 3);
+        assert_eq!(c.local.limits, PromptLimits::local());
     }
 }

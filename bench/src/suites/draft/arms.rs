@@ -189,12 +189,20 @@ pub struct NuggetNotes {
 pub struct NuggetArm<'a> {
     world: &'a World,
     retrievers: BTreeMap<String, Retriever>,
+    /// `--draft-local-budget on` with a non-cloud model: the engine's smaller local budget.
+    local: Option<nugget_draft::LocalBudget>,
 }
 
 impl<'a> NuggetArm<'a> {
     pub fn new(world: &'a World) -> Self {
+        Self::with_local_budget(world, None)
+    }
+
+    /// With `local`, the context budget, snippet count, exemplars and thread caps of
+    /// [`nugget_draft::LocalBudget`] (what `nugget-draft` gives non-cloud providers).
+    pub fn with_local_budget(world: &'a World, local: Option<nugget_draft::LocalBudget>) -> Self {
         let config = RetrieveConfig {
-            context_max_items: CONTEXT_MAX_ITEMS,
+            context_max_items: local.as_ref().map_or(CONTEXT_MAX_ITEMS, |l| l.max_snippets),
             recency: Some(RecencyBoost {
                 half_life_days: 30.0,
                 weight: 1.0,
@@ -212,7 +220,11 @@ impl<'a> NuggetArm<'a> {
                 )
             })
             .collect();
-        Self { world, retrievers }
+        Self {
+            world,
+            retrievers,
+            local,
+        }
     }
 
     /// Voice hints for this channel and recipient: recipient statistics when there are enough
@@ -288,14 +300,22 @@ impl<'a> NuggetArm<'a> {
         let packed = retriever
             .pack_context_with(
                 &query,
-                CONTEXT_BUDGET_TOKENS,
+                self.local
+                    .as_ref()
+                    .map_or(CONTEXT_BUDGET_TOKENS, |l| l.budget_tokens as usize),
                 ContextOptions { exclude_sensitive },
             )
             .await?;
         let (context, n) = neutralise(&packed.response.text);
         neutralised += n;
 
-        let (voice, voice_scope) = Self::voice(persona, channel, &recipient, &ask);
+        let (mut voice, voice_scope) = Self::voice(persona, channel, &recipient, &ask);
+        if let Some(l) = &self.local {
+            voice.exemplars.truncate(l.limits.exemplars);
+            for e in &mut voice.exemplars {
+                *e = e.chars().take(l.limits.exemplar_chars).collect();
+            }
+        }
         let emoji = top_emoji(
             voice.exemplars.iter().map(String::as_str).chain(
                 persona
@@ -306,7 +326,7 @@ impl<'a> NuggetArm<'a> {
             ),
         );
         let profile = render_profile(&voice.stats, channel, voice_scope, &emoji);
-        let thread = ctx
+        let mut thread: Vec<ThreadLine> = ctx
             .thread
             .iter()
             .map(|m| ThreadLine {
@@ -315,6 +335,24 @@ impl<'a> NuggetArm<'a> {
                 from_me: m.from_me == Some(true),
             })
             .collect();
+        if let Some(l) = &self.local {
+            // The newest messages within the thread cap, each cut to the message cap.
+            for t in &mut thread {
+                t.text = t.text.chars().take(l.limits.message_chars).collect();
+            }
+            let mut used = 0;
+            let keep = thread
+                .iter()
+                .rev()
+                .take_while(|t| {
+                    used += t.text.chars().count();
+                    used <= l.limits.thread_chars
+                })
+                .count()
+                .max(1)
+                .min(thread.len());
+            thread.drain(..thread.len() - keep);
+        }
         let parts = PromptParts {
             reply_to_name: if recipient.is_empty() {
                 task.contact_name.clone()
