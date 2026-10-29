@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "Tranquila (500 ms)",
   "onboarding.trigger.summary": "Seu acionamento: {trigger}",
   "onboarding.trigger.summaryDoubleTap": "tocar duas vezes em {key}",
-  "onboarding.trigger.saved": "Salvo neste dispositivo. O Double Tap começará a responder a ele quando for ativado em uma atualização futura.",
+  "onboarding.trigger.saved": "O Double Tap passa a responder a ele imediatamente. Você pode alterá-lo a qualquer momento nas configurações do Double Tap.",
   "onboarding.trigger.mod.left_command": "⌘ Command esquerdo",
   "onboarding.trigger.mod.right_command": "⌘ Command direito",
   "onboarding.trigger.mod.left_control": "Ctrl esquerdo",

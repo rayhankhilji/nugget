@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "धीमी (500 ms)",
   "onboarding.trigger.summary": "आपका ट्रिगर: {trigger}",
   "onboarding.trigger.summaryDoubleTap": "{key} को दो बार टैप करें",
-  "onboarding.trigger.saved": "इस डिवाइस पर सेव किया गया। किसी आने वाले अपडेट में Double Tap चालू होने पर यह इस ट्रिगर का इंतज़ार करने लगेगा।",
+  "onboarding.trigger.saved": "Double Tap तुरंत इस ट्रिगर का इंतज़ार करने लगता है। आप इसे Double Tap सेटिंग्स में कभी भी बदल सकते हैं।",
   "onboarding.trigger.mod.left_command": "बायाँ ⌘ Command",
   "onboarding.trigger.mod.right_command": "दायाँ ⌘ Command",
   "onboarding.trigger.mod.left_control": "बायाँ Ctrl",

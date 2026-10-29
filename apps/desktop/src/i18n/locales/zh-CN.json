@@ -233,7 +233,7 @@
   "onboarding.trigger.speed.relaxed": "慢（500 ms）",
   "onboarding.trigger.summary": "你的触发方式：{trigger}",
   "onboarding.trigger.summaryDoubleTap": "连按两次 {key}",
-  "onboarding.trigger.saved": "已保存在此设备上。Double Tap 在后续更新中启用后，就会开始监听此触发方式。",
+  "onboarding.trigger.saved": "Double Tap 会立即开始监听此触发方式。你可以随时在 Double Tap 设置中更改。",
   "onboarding.trigger.mod.left_command": "左 ⌘ Command",
   "onboarding.trigger.mod.right_command": "右 ⌘ Command",
   "onboarding.trigger.mod.left_control": "左 Ctrl",

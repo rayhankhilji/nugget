@@ -38,8 +38,8 @@ pub use classify::{
 };
 pub use engine::{
     DraftConfig, DraftStream, DraftTimings, Drafter, FeedbackOutcome, FeedbackRecord, FeedbackSink,
-    MAX_BUDGET_TOKENS, NoVoice, Prewarm, VoiceQuery, VoiceSource, Warmer, post_options,
-    retrieval_query,
+    MAX_BUDGET_TOKENS, NoVoice, Prewarm, RetrievalRunner, VoiceQuery, VoiceSource, Warmer,
+    post_options, retrieval_query,
 };
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
 pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};

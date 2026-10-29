@@ -29,6 +29,9 @@ use settings::DoubleTapSettings;
 pub const OVERLAY_LABEL: &str = "doubletap-overlay";
 /// The event carrying an `OverlayView` to the overlay window.
 pub const OVERLAY_EVENT: &str = "doubletap:overlay";
+/// The event carrying the saved `DoubleTapSettings` to every window after a change, so the
+/// settings page and onboarding show what the running trigger is.
+pub const SETTINGS_EVENT: &str = "doubletap:settings";
 pub use nugget_core::ipc::method::DRAFT_PREWARM;
 /// The overlay's size in logical pixels.
 pub const OVERLAY_SIZE: (f64, f64) = (440.0, 200.0);

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import axe from "axe-core";
 import { act } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { DoubleTapSettings, DoubleTapStatus, VoiceStatus } from "../api";
 import { App } from "../App";
@@ -120,6 +121,28 @@ describe("Double Tap settings page", () => {
     await change(chord, "Space");
     expect(chord?.getAttribute("aria-invalid")).toBe("true");
     expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("follows a trigger saved in onboarding, but keeps unsaved edits", async () => {
+    let current = settings;
+    setup({ doubletap_settings_get: () => current });
+    await render(<App />);
+    await flush(10);
+    const chordInput = () => document.querySelector<HTMLInputElement>('input[placeholder^="e.g. Ctrl"]');
+    expect(chordInput()).toBeNull();
+
+    current = { ...settings, trigger: { kind: "chord", chord: "Alt+Space" } };
+    await act(() => emit("doubletap:settings", current));
+    await flush(5);
+    expect(chordInput()?.value).toBe("Alt+Space");
+    expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
+
+    // With unsaved edits, the form is left alone (the saved copy still updates underneath).
+    await change(chordInput(), "Ctrl+Alt+K");
+    current = { ...settings, trigger: { kind: "chord", chord: "CmdOrCtrl+Shift+Space" } };
+    await act(() => emit("doubletap:settings", current));
+    await flush(5);
+    expect(chordInput()?.value).toBe("Ctrl+Alt+K");
   });
 
   it("adds a provider row and fires a test draft", async () => {
