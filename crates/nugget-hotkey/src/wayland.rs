@@ -95,7 +95,16 @@ async fn run(
     mut stop: oneshot::Receiver<()>,
 ) {
     let setup = async {
-        let portal = GlobalShortcuts::new().await.map_err(portal_err)?;
+        // A connection of this listener's own. `GlobalShortcuts::new()` would reuse ashpd's
+        // process-wide one, whose I/O task lives on the runtime that first created it: once
+        // that listener is dropped (its runtime with it), every later listener in the process
+        // would wait on a dead connection and time out.
+        let conn = ashpd::zbus::Connection::session()
+            .await
+            .map_err(portal_err)?;
+        let portal = GlobalShortcuts::with_connection(conn)
+            .await
+            .map_err(portal_err)?;
         let session = portal
             .create_session(CreateSessionOptions::default())
             .await
@@ -123,13 +132,24 @@ async fn run(
             .bind_shortcuts(&session, &[shortcut], None, BindShortcutsOptions::default())
             .await?
             .response()
-            .map(|_| ())
     };
     tokio::select! {
-        r = bind => if let Err(e) = r {
-            tracing::warn!(error = %e, "nugget-hotkey: the portal did not bind the shortcut");
-            let _ = session.close().await;
-            return;
+        r = bind => match r {
+            // A desktop may answer without binding anything and leave the keys to the user
+            // (Plasma 5.27 opens System Settings' shortcuts page instead). The session stays
+            // open, so the shortcut fires once the user assigns it there.
+            Ok(bound) if !bound.shortcuts().iter().any(|s| s.id() == id) => {
+                tracing::warn!(
+                    "nugget-hotkey: the desktop did not bind the shortcut yet; assign it in the \
+                     desktop's keyboard shortcut settings"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "nugget-hotkey: the portal did not bind the shortcut");
+                let _ = session.close().await;
+                return;
+            }
         },
         _ = &mut stop => {
             let _ = session.close().await;

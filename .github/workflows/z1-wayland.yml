@@ -1,0 +1,130 @@
+name: Z1 Wayland (temporary)
+
+# Temporary iteration workflow for Z1's Wayland piece; the `wayland` job below is folded into
+# real-os.yml as-is.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [z/desktop-coverage]
+    paths:
+      - "crates/nugget-hotkey/tests/**"
+      - "crates/nugget-hotkey/src/wayland.rs"
+      - "crates/nugget-hotkey/Cargo.toml"
+      - "crates/nugget-a11y/tests/linux_wayland.rs"
+      - "crates/nugget-a11y/src/platform/linux/**"
+      - "tests/fixtures/native/linux/**"
+      - ".github/workflows/z1-wayland.yml"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  NO_COLOR: "1"
+
+jobs:
+  # ---- Linux Wayland ----
+  # A private headless Wayland session (tests/fixtures/native/linux/wayland-session.sh): a session
+  # bus, the compositor, the accessibility bus and the XDG portals, with a GTK 4 fixture app
+  # running natively on Wayland (GDK_BACKEND=wayland, no XWayland). Two compositors, because no
+  # single one on Ubuntu 24.04 covers both portal outcomes:
+  # - sway (wlroots headless): wlr-data-control, so the Wayland clipboard works; its portal
+  #   backend (xdg-desktop-portal-wlr) has no GlobalShortcuts, so nugget-hotkey's documented
+  #   "portal unavailable" error is tested. GNOME's mutter is not used: Ubuntu 24.04 ships
+  #   GNOME 46, whose portal gains GlobalShortcuts only in 48, and it has no data control.
+  # - kwin (kwin_wayland --virtual + xdg-desktop-portal-kde 5.27): GlobalShortcuts exists, so
+  #   the real portal session is created and the bind requested. Plasma 5.27 answers the bind
+  #   by opening System Settings' shortcuts page for the user to assign the keys (the manual
+  #   step); the test checks everything up to it.
+  # Both run nugget-a11y over AT-SPI on the GTK 4 app (crates/nugget-a11y/tests/linux_wayland.rs)
+  # and Double Tap's read -> draft (scripted provider) -> insert -> read-back path
+  # (crates/nugget-hotkey/tests/wayland_it.rs), with timings in the job summary.
+  wayland:
+    name: Wayland (${{ matrix.compositor }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        compositor: [sway, kwin]
+    env:
+      NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
+      NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
+      NUGGET_GTK4_PYTHON: /usr/bin/python3
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install the Wayland session
+        run: |
+          common="dbus dbus-bin libglib2.0-bin at-spi2-core xdg-desktop-portal python3-gi gir1.2-gtk-4.0"
+          if [ "${{ matrix.compositor }}" = sway ]; then
+            extra="sway wtype xdg-desktop-portal-wlr"
+          else
+            extra="kwin-wayland xdg-desktop-portal-kde qtwayland5"
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $common $extra
+          /usr/bin/python3 -c "import gi; gi.require_version('Gtk', '4.0'); from gi.repository import Gtk; print('GTK', Gtk.get_major_version(), Gtk.get_minor_version())"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wayland
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the tests
+        run: |
+          cargo test -p nugget-a11y --locked --test linux_wayland --no-run
+          cargo test -p nugget-hotkey --locked --test wayland_it --no-run
+
+      - name: AT-SPI on a GTK 4 Wayland app
+        run: |
+          mkdir -p "$NUGGET_WAYLAND_LOGS"
+          tests/fixtures/native/linux/wayland-session.sh \
+            cargo test -p nugget-a11y --locked --test linux_wayland -- --ignored --test-threads=1 --nocapture 2>&1 \
+            | tee "$NUGGET_WAYLAND_LOGS/linux_wayland.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Hotkey portal and Double Tap insert
+        run: |
+          mkdir -p "$NUGGET_WAYLAND_LOGS"
+          {
+            echo "### Wayland (${{ matrix.compositor }}): GlobalShortcuts portal"
+            echo "| compositor | trigger | portal | activation |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          hotkey="$RUNNER_TEMP/hotkey.md"
+          doubletap="$RUNNER_TEMP/doubletap.md"
+          : > "$hotkey"; : > "$doubletap"
+          NUGGET_HOTKEY_SUMMARY="$hotkey" NUGGET_DOUBLETAP_SUMMARY="$doubletap" \
+            tests/fixtures/native/linux/wayland-session.sh \
+            cargo test -p nugget-hotkey --locked --test wayland_it -- --ignored --test-threads=1 --nocapture 2>&1 \
+            | tee "$NUGGET_WAYLAND_LOGS/wayland_it.log"
+          status="${PIPESTATUS[0]}"
+          cat "$hotkey" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo
+            echo "### Double Tap on Wayland (${{ matrix.compositor }}, GTK 4 text view, scripted provider, no delay)"
+            echo "| OS | mode | app | read field ms | draft started ms | first token ms | first insert call ms | total ms | chunks | insert methods | verified |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|"
+            cat "$doubletap"
+            echo
+            grep -h '^DOUBLETAP-WAYLAND\|^DOUBLETAP-A11Y\|MANUAL STEP' "$NUGGET_WAYLAND_LOGS/wayland_it.log" | sed 's/^/    /' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: wayland-${{ matrix.compositor }}
+          path: wayland-artifacts/
+          if-no-files-found: ignore
