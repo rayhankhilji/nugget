@@ -90,3 +90,12 @@ Briefs in `docs/waves/wave-aa/`.
 | AA1 | `aa/doubletap-latency` | session_01CTjRSuDx768RtwbJTaiHvE | local Double Tap under 3 s: prompt budget, prefix cache, Apple Silicon numbers |
 | AA2 | `aa/agent-quality` | session_01CTjRSpmAvmjUGCE3Js3Ytu | computer use with small local models: success ≥ 0.8, false confirmations ≤ 0.10 |
 | AA3 | `aa/grounding` | session_01CTjRSseja8BUetk34ePA1G | drafts without hallucinations, extraction F1 ≥ 0.8 with real models |
+
+## Wave BB (depth alongside Z1 and AA): cloud sessions from 3924cf1
+Briefs in `docs/waves/wave-bb/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| BB1 | `bb/google-drive` | session_01CTjRStcm2Tq4cK6HdhtSor | Google Drive, Docs, Sheets and Slides connector |
+| BB2 | `bb/proactive-learning` | session_01CTjRSt2zXMhX5puD2vRYrP | cards learn from Accept/Dismiss feedback, explainable and resettable |
+| BB3 | `bb/a11y-audit` | session_01CTjRSuD9VRtjRwVksuYKcZ | axe audit on every page and dialog, keyboard-only core flows, screen readers |
