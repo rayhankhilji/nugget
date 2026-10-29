@@ -1,2 +1,5 @@
 # Benchmark reports are machine-specific; publish curated numbers in the README instead.
-/results/
+# Exceptions: the nightly results the README table and the dashboard are generated from.
+/results/*
+!/results/latest.json
+!/results/history/

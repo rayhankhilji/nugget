@@ -1,0 +1,197 @@
+name: Nightly benchmarks
+
+# Runs every benchmark that needs no secret and no network (scripts/bench-runs.json: knowledge,
+# memory and perf on the real stack, proactive on the real crate, cua in process and on an Xvfb
+# desktop, draft with the deterministic fake model) on a release build, validates the reports
+# against bench/schema, uploads them, and on main appends them to the `bench-results` branch as
+# dated JSON (history/YYYY-MM-DD.json plus latest.json). The dashboard in the book
+# (docs/book/src/benchmarks/) is rebuilt from that history and, when the repository variable
+# NUGGET_PAGES is "true", published to GitHub Pages.
+#
+# To refresh the README table from a night's results: copy latest.json from the bench-results
+# branch to bench/results/latest.json, then run `python3 scripts/bench-readme.py`.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  bench:
+    name: Run the benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # The cua xvfb run: Xvfb, a window manager, D-Bus and AT-SPI. The runner's Chrome serves as
+      # Chromium (the harness finds google-chrome on PATH).
+      - name: Install the Linux desktop for cua
+        run: sudo bench/cua/env/setup-debian.sh
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Every run, even after a failure; the step fails at the end if any run failed or reported
+      # a status other than ok. Targets are recorded in the reports, not enforced here.
+      - name: Run the benchmarks
+        id: run
+        env:
+          NUGGET_BENCH_COMMIT: ${{ github.sha }}
+        run: |
+          python3 scripts/bench-run.py --out-dir "$RUNNER_TEMP/bench" \
+            --history-dir "$RUNNER_TEMP/bench/history" --commit "$GITHUB_SHA"
+
+      - name: Validate the reports against the schema
+        if: ${{ !cancelled() }}
+        run: pipx run check-jsonschema --schemafile bench/schema/report.schema.json "$RUNNER_TEMP"/bench/reports/*/*.json
+
+      - name: Upload the reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-nightly
+          path: |
+            ${{ runner.temp }}/bench/latest.json
+            ${{ runner.temp }}/bench/history/
+            ${{ runner.temp }}/bench/reports/
+          retention-days: 90
+          if-no-files-found: error
+
+  # Appends the night's results to the bench-results branch. Only for main, so a manual run on a
+  # feature branch never enters the history. Runs even when a benchmark failed: a partial night is
+  # still a data point, and the failed run shows as a gap on the dashboard.
+  publish:
+    name: Publish to the bench-results branch
+    needs: bench
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          name: bench-nightly
+          path: ${{ runner.temp }}/bench
+
+      - name: Commit the results
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git config --global "http.https://github.com/.extraheader" "AUTHORIZATION: basic $auth"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          url="https://github.com/$REPO.git"
+          dir="$RUNNER_TEMP/bench-results"
+          if git ls-remote --exit-code --heads "$url" bench-results >/dev/null; then
+            git clone --depth 1 --branch bench-results "$url" "$dir"
+          else
+            git init -b bench-results "$dir"
+            git -C "$dir" remote add origin "$url"
+            printf '%s\n' "# Nightly benchmark results" "" \
+              "Written by .github/workflows/nightly.yml on main. One file per night in history/;" \
+              "latest.json is the newest. Format: docs/book/src/benchmarks/dashboard.md." > "$dir/README.md"
+          fi
+          mkdir -p "$dir/history"
+          cp "$RUNNER_TEMP"/bench/history/*.json "$dir/history/"
+          cp "$RUNNER_TEMP/bench/latest.json" "$dir/latest.json"
+          cd "$dir"
+          git add -A
+          if git diff --cached --quiet; then echo "nothing new"; exit 0; fi
+          git commit -q -m "Nightly benchmarks $(date -u +%Y-%m-%d) for ${GITHUB_SHA::12}"
+          for attempt in 1 2 3; do
+            git push origin HEAD:bench-results && exit 0
+            sleep $((attempt * 5))
+            git pull --rebase -X theirs origin bench-results
+          done
+          exit 1
+
+  # Rebuilds the book with the dashboard's history.json regenerated from the bench-results branch.
+  dashboard:
+    name: Build the dashboard
+    needs: publish
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: bench-results
+          path: bench-results
+          persist-credentials: false
+
+      - name: Regenerate the dashboard data
+        run: |
+          python3 scripts/bench-dashboard.py --history bench/results/history \
+            --history bench-results/history
+
+      # mdBook (MPL-2.0) is a build tool only, as in docs.yml.
+      - name: Install mdBook
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.4.52
+
+      - name: Build the book
+        run: mdbook build docs/book
+
+      - name: Upload the built book
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: book-with-dashboard
+          path: docs/book/build/html
+          retention-days: 14
+
+      - name: Upload the Pages artifact
+        if: ${{ vars.NUGGET_PAGES == 'true' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book/build/html
+
+  # Opt-in: set the repository variable NUGGET_PAGES to "true" and Pages' source to "GitHub
+  # Actions". Without it nothing is published and this job is skipped.
+  pages:
+    name: Publish to GitHub Pages
+    needs: dashboard
+    if: ${{ vars.NUGGET_PAGES == 'true' && needs.dashboard.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

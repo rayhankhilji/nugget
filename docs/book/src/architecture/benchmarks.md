@@ -123,3 +123,6 @@ nDCG@10 0.913, against 0.905 and 0.810 for full-text alone.
   by default.
 - Nugget's own computer-use agent and the real proactive engine on their suites (being wired in
   wave W).
+
+The [benchmark dashboard](../benchmarks/dashboard.md) charts the headline metrics of each nightly
+run over time.
