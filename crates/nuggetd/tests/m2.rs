@@ -857,14 +857,18 @@ async fn stdio_bridge_and_install_helper() {
         status.success(),
         "bridge exits cleanly when the app closes it"
     );
-    let stdio_calls = h
-        .store
-        .recent_audit(1000)
-        .unwrap()
-        .into_iter()
-        .filter(|r| r.action == "mcp.tool_call" && r.detail["transport"] == "stdio")
-        .count();
-    assert!(stdio_calls >= 2, "{stdio_calls}");
+    // MCP audit entries go to a background writer over a channel, so the rows can land just
+    // after the bridge has exited (seen on Windows CI); wait for them.
+    eventually("both stdio tool calls are audited", || async {
+        h.store
+            .recent_audit(1000)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.action == "mcp.tool_call" && r.detail["transport"] == "stdio")
+            .count()
+            >= 2
+    })
+    .await;
 
     // A wrong token (or no token) is refused before any MCP traffic.
     let out = tokio::process::Command::new(EXE)
