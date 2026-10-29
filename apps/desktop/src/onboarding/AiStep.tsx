@@ -1,11 +1,13 @@
 import { useId, useState } from "react";
-import { api, errorMessage, events, type ModelInfo, type ModelProgress } from "../api";
+import { api, errorMessage, events, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
 import { CopyButton } from "../components/CopyButton";
 import { Badge, ErrorNote, Spinner } from "../components/ui";
 import type { AiChoice } from "./machine";
+import { ByokForm } from "./ByokForm";
+import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { detectOs, type Os } from "./platform";
 import { OfflineNote, StepHeading, type StepProps } from "./steps";
 
@@ -71,6 +73,8 @@ export function sortModels(list: readonly ModelInfo[]): ModelInfo[] {
 function LocalModels() {
   const t = useT();
   const models = useAsync(api.modelsList);
+  // Why each model is recommended; `null` on an older daemon (then nothing is explained).
+  const fit = useAsync(loadFit);
   const [all, setAll] = useState(false);
   const [progress, setProgress] = useState<Record<string, ModelProgress>>({});
   const [requestError, setRequestError] = useState<Record<string, string>>({});
@@ -103,6 +107,7 @@ function LocalModels() {
     <section className="ob-section" aria-labelledby="ob-models">
       <h2 id="ob-models">{t("onboarding.models.heading")}</h2>
       <p className="muted">{t("onboarding.models.lead")}</p>
+      {fit.data && <MachineLine report={fit.data} />}
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && <Spinner />}
       {models.data && recommended.length === 0 && <p className="note">{t("onboarding.models.none")}</p>}
@@ -113,6 +118,7 @@ function LocalModels() {
             model={m}
             progress={progress[m.id]}
             error={requestError[m.id]}
+            fit={fit.data}
             onInstall={() => void install(m.id)}
           />
         ))}
@@ -133,11 +139,13 @@ function ModelRow({
   model,
   progress,
   error,
+  fit,
   onInstall,
 }: {
   model: ModelInfo;
   progress?: ModelProgress;
   error?: string;
+  fit?: FitReport | null;
   onInstall: () => void;
 }) {
   const t = useT();
@@ -148,6 +156,7 @@ function ModelRow({
   const pct = progress ? percent(progress.downloaded, total) : 0;
   const labelId = `ob-model-${model.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
   const phase = progress ? t(PHASE[progress.phase]) : "";
+  const modelFit = fit?.models.find((f) => f.id === model.id);
 
   return (
     <li className="card" aria-labelledby={labelId}>
@@ -164,6 +173,7 @@ function ModelRow({
         {t("onboarding.models.size", { size: formatBytes(model.size_bytes) })}
         {model.license && <> · {t("onboarding.models.license", { license: model.license })}</>}
       </p>
+      {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} />}
       {busy && progress && (
         <div className="progress">
           <progress
@@ -294,6 +304,7 @@ function ByokGuide() {
           ))}
         </select>
       </div>
+      <ByokForm kind={kind} />
       <ol className="ob-guide">
         <li>
           <h3>{t("onboarding.byok.step1")}</h3>

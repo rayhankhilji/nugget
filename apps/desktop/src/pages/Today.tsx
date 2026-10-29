@@ -133,15 +133,19 @@ export function TodayPage() {
             {t("today.inbox")}
             {list && visible.length > 0 && <span className="muted"> · {formatNumber(visible.length)}</span>}
           </h2>
-          {metrics.data?.precision != null && (
-            <p className="muted small">
-              {t("today.metrics", {
-                precision: formatNumber(metrics.data.precision, { style: "percent", maximumFractionDigits: 0 }),
-                accepted: metrics.data.accepted,
-                shown: metrics.data.shown,
-              })}
-            </p>
-          )}
+          {metrics.data &&
+            // A rate means something only once a card has been accepted or dismissed.
+            (metrics.data.precision != null && metrics.data.accepted + metrics.data.dismissed > 0 ? (
+              <p className="muted small today-metrics">
+                {t("today.metrics", {
+                  precision: formatNumber(metrics.data.precision, { style: "percent", maximumFractionDigits: 0 }),
+                  accepted: metrics.data.accepted,
+                  shown: metrics.data.shown,
+                })}
+              </p>
+            ) : metrics.data.shown > 0 ? (
+              <p className="muted small today-metrics">{t("today.noFeedback")}</p>
+            ) : null)}
           <ErrorNote error={cards.error} onRetry={cards.reload} />
           {cards.loading && !list && <Loading label={t("today.loading")} />}
           {list && visible.length === 0 &&

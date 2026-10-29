@@ -25,7 +25,7 @@ import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
 import { CopyButton } from "../components/CopyButton";
 import { Markdown, type CitationLinks } from "../components/Markdown";
-import { stripCitationMarkers, withheldNotice } from "../citations";
+import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type SourceEntry } from "../citations";
 import { Trans, useT } from "../i18n";
 import "../styles-chat.css";
 
@@ -299,17 +299,20 @@ export function ChatPage() {
       // With sources, the daemon retrieves for the question (rewritten from the conversation
       // when it is a follow-up) and the reply cites what it was given.
       let asked: AskStarted | null = useSources ? await askInConversation(text, history, route) : null;
-      // Nothing in the sources matched: the sourced prompt would only decline, so stop that
-      // stream and answer as a plain chat instead, saying so on the turn.
+      // Nothing in the sources matched: the daemon answers as a plain chat itself (`general`).
+      // An older daemon doesn't, so stop that stream and ask as a plain chat instead.
       let general: AskStarted | null = null;
-      if (asked && asked.citations.length === 0) {
+      if (asked?.general) {
         general = asked;
-        asked = null;
+      } else if (asked && asked.citations.length === 0) {
+        general = asked;
         dropped.current.add(general.stream_id);
         early.current.delete(general.stream_id);
         void api.chatCancel(general.stream_id).catch(() => {});
       }
-      const started = asked ?? (await api.chat({ ...route, messages: [...history, { role: "user", text }] }));
+      if (general) asked = null;
+      const started =
+        asked ?? (general?.general ? general : await api.chat({ ...route, messages: [...history, { role: "user", text }] }));
       const buffered = early.current.get(started.stream_id);
       early.current.delete(started.stream_id);
       if (!buffered?.done) attached.current.add(started.stream_id);
@@ -609,13 +612,41 @@ export function ChatPage() {
   );
 }
 
-/** Element id of source `n` in the list under reply `turnId`. */
+/** Element id of the source `n` belongs to, in the list under reply `turnId`. */
 const citeId = (turnId: number, n: number) => `msg-${turnId}-cite-${n}`;
 
 function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: string, label: string) => void }) {
   const t = useT();
   const opener = onOpenLink;
-  const sourcesRef = useRef<HTMLOListElement>(null);
+  const sourcesRef = useRef<HTMLDivElement>(null);
+  const [showMore, setShowMore] = useState(false);
+  /** A source to focus once the list that holds it has been expanded. */
+  const [pendingFocus, setPendingFocus] = useState<number | null>(null);
+
+  // Cited sources first; passages the model saw but the reply doesn't cite go behind a toggle.
+  // An item retrieved as several passages shows once, under its first marker's id.
+  const sources = useMemo(() => {
+    const citations = turn.citations ?? [];
+    const cited = citedNumbers(turn.text, new Set(citations.map((c) => c.n)));
+    const groups = groupSources(citations, cited);
+    const entryOf = new Map<number, { anchor: number; cited: boolean }>();
+    for (const e of [...groups.cited, ...groups.uncited]) {
+      for (const c of e.citations) entryOf.set(c.n, { anchor: e.citations[0]!.n, cited: e.cited });
+    }
+    return { ...groups, entryOf };
+  }, [turn.citations, turn.text]);
+
+  const focusSource = useCallback(
+    (n: number) =>
+      sourcesRef.current?.querySelector<HTMLElement>(`[data-cite-ns~="${n}"]`)?.focus(),
+    [turn.id],
+  );
+  useEffect(() => {
+    if (pendingFocus === null) return;
+    focusSource(pendingFocus);
+    setPendingFocus(null);
+  }, [pendingFocus, focusSource]);
+
   // A source with a URL the shell can open opens; any other moves focus to it in the list below.
   const cite = useMemo<CitationLinks | undefined>(() => {
     const citations = turn.citations ?? [];
@@ -627,12 +658,48 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
       label: (n) => t("chat.citationLabel", { n, title: titleOf(n) }),
       onCite: (n) => {
         const c = byN.get(n);
-        if (c && isOpenableUrl(c.url)) opener(c.url, titleOf(n));
-        else sourcesRef.current?.querySelector<HTMLElement>(`#${citeId(turn.id, n)}`)?.focus();
+        if (c && isOpenableUrl(c.url)) {
+          opener(c.url, titleOf(n));
+          return;
+        }
+        const entry = sources.entryOf.get(n);
+        if (!entry) return;
+        if (entry.cited || showMore) focusSource(entry.anchor);
+        else {
+          setShowMore(true);
+          setPendingFocus(entry.anchor);
+        }
       },
     };
-  }, [turn.citations, turn.id, opener, t]);
+  }, [turn.citations, opener, t, sources, showMore, focusSource]);
   const withheld = turn.provider ? withheldNotice(turn.excludedSensitive, turn.provider) : null;
+  const moreId = `msg-${turn.id}-more-sources`;
+
+  const sourceItem = (e: SourceEntry<Citation>) => {
+    const first = e.citations[0]!;
+    const title = first.title || first.item.key;
+    const url = e.citations.find((c) => isOpenableUrl(c.url))?.url;
+    return (
+      <li key={e.key} id={citeId(turn.id, first.n)} data-cite-ns={e.ns.join(" ")} tabIndex={-1} className="citation">
+        <span className="cite-n">{e.ns.map((n) => `[${n}]`).join(" ")}</span>
+        <span className="citation-body">
+          <span className="citation-title" dir="auto">
+            {title}
+          </span>
+        </span>
+        {url && isOpenableUrl(url) && (
+          <button
+            type="button"
+            className="btn btn-small"
+            onClick={() => opener(url, title)}
+            aria-label={t("search.openTitle", { title })}
+          >
+            {t("search.open")}
+          </button>
+        )}
+      </li>
+    );
+  };
 
   const streaming = isActive(turn);
   return (
@@ -664,33 +731,27 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
       {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
       {withheld && <p className="note small">{withheld}</p>}
       {turn.role === "assistant" && !!turn.citations?.length && (
-        <div className="chat-sources">
+        <div className="chat-sources" ref={sourcesRef}>
           <h3 className="chat-sources-title small muted">{t("chat.sources")}</h3>
-          <ol className="citations chat-citations" ref={sourcesRef}>
-            {turn.citations.map((c) => {
-              const title = c.title || c.item.key;
-              return (
-                <li key={c.n} id={citeId(turn.id, c.n)} tabIndex={-1} className="citation">
-                  <span className="cite-n">[{c.n}]</span>
-                  <span className="citation-body">
-                    <span className="citation-title" dir="auto">
-                      {title}
-                    </span>
-                  </span>
-                  {isOpenableUrl(c.url) && (
-                    <button
-                      type="button"
-                      className="btn btn-small"
-                      onClick={() => opener(c.url!, title)}
-                      aria-label={t("search.openTitle", { title })}
-                    >
-                      {t("search.open")}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
+          {sources.cited.length > 0 && <ol className="citations chat-citations">{sources.cited.map(sourceItem)}</ol>}
+          {sources.uncited.length > 0 && (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost btn-small chat-sources-more"
+                aria-expanded={showMore}
+                aria-controls={moreId}
+                onClick={() => setShowMore((v) => !v)}
+              >
+                {t("chat.sourcesMore", { n: sources.uncited.length })}
+              </button>
+              {showMore && (
+                <ol className="citations chat-citations chat-citations-more" id={moreId}>
+                  {sources.uncited.map(sourceItem)}
+                </ol>
+              )}
+            </>
+          )}
         </div>
       )}
       {turn.state === "error" && (

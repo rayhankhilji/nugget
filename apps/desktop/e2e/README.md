@@ -6,7 +6,7 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
-It runs three scenarios:
+It runs five scenarios:
 
 - **pages**: a home with the corpus already indexed; every page is opened and checked.
 - **i18n**: on the same indexed home (indexed once, shared with pages), every page is opened in
@@ -14,6 +14,13 @@ It runs three scenarios:
 - **first-run**: its own empty home; the test goes through onboarding like a new user, connects the
   corpus folder, and times app start to a cited answer on Search. It fails above a budget
   (2 minutes by default), the promise of "useful search in under two minutes from install".
+- **ai-setup**: the same first run, but choosing "On this device" in onboarding: the recommended
+  model is installed from a local mock download server (a test manifest signed with a throwaway
+  key), served by the repo's fake llama-server, and Chat answers with `[n]` citations streamed by
+  it. Times app start to the first cited model answer; also drafts through `draft.begin`.
+- **byok**: onboarding's "Bring your own key" form against a mock OpenAI-compatible server on
+  localhost: bad key, wrong URL and no network are reported, a good key is saved to the secret
+  store (never to `config.toml`) and the egress ledger shows the checks.
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -29,21 +36,26 @@ pnpm run e2e
 ```
 
 It builds the frontend first when `dist/` is missing, and runs `cargo build --locked -p nuggetd`
-(a no-op when up to date) unless `NUGGETD` names a binary. A run takes about 35 s once both are
+(a no-op when up to date) unless `NUGGETD` names a binary. ai-setup also needs `nuggetd-e2e` and
+`nuggetd-fake-llama-server`: it runs `cargo build --locked -p nuggetd --features fake-runtime --bins`
+unless `NUGGETD_E2E` and `NUGGET_FAKE_LLAMA_SERVER` name them (CI builds that way once and sets all three). A run takes about 35 s once both are
 built, plus about 60 s for the i18n scenario. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `NUGGETD` | build with cargo | Path to a built `nuggetd` (skips the cargo build). |
+| `NUGGETD_E2E`, `NUGGET_FAKE_LLAMA_SERVER` | build with cargo | ai-setup: paths to `nuggetd-e2e` and `nuggetd-fake-llama-server` (both, to skip the build). |
 | `CARGO_TARGET_DIR` | `<repo>/target` | Where the cargo build looks for the binary. |
 | `E2E_ARTIFACTS` | `e2e/artifacts/` | Output directory, wiped at the start of each run. |
 | `E2E_BUILD=1` | off | Rebuild the frontend even when `dist/` exists (it may be stale). |
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok` | Which scenarios to run, comma-separated. |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
 | `E2E_FIRST_RUN_BUDGET_MS` | 120000 | First run: the most app start to a cited answer may take. |
+| `E2E_AI_BUDGET_MS` | 180000 | ai-setup: the most app start to a cited model answer may take. |
+| `E2E_MODEL_BYTES`, `E2E_MODEL_BYTES_PER_SEC` | 4 MiB, 1.5 MiB/s | ai-setup: size of the fake model and the mock server's speed (progress shows for size / speed seconds). |
 | `E2E_FIRST_RUN_NO_CONFIG=1` | off | First run: write no `config.toml` at all (binds MCP HTTP on its fixed port 7319 and starts the local runtime). |
 | `E2E_CHROMIUM` | Playwright's | Path to a Chromium binary to launch instead of Playwright's download. |
 
@@ -107,9 +119,9 @@ Checks: the flow completes with no error notes or page errors; `cited_answer` is
 start), `steps` (ms since the previous mark), the indexing states the user saw, the top titles
 and the citations; the log prints the same breakdown.
 
-No AI is set up: onboarding can't configure a provider by itself (it shows a config snippet to
-paste), and a model's streamed answer needs Tauri events the bridge doesn't deliver. So the
-"cited answer" is the context an answer or a draft is grounded on, not model output. The test
+No AI is set up ("Decide later"), so the "cited answer" is the context an answer or a draft is
+grounded on, not model output; the ai-setup scenario covers the path with a local model and adds
+its time as `first_run.time_to_cited_model_answer_ms`. The test
 clicks as fast as the UI allows, so the time is the software's share of the two minutes, not a
 person's reading time.
 
@@ -144,15 +156,82 @@ To fix an offender, let the text wrap (`min-width: 0` on flex items, `flex-wrap:
 `overflow-wrap: anywhere`, no fixed widths); cut it with `text-overflow: ellipsis` and a `title`
 only where truncation is acceptable, and then add the selector to `ALLOW` with the reason.
 
+## Events
+
+`bridge.mjs` keeps one connection to the daemon open, like the shell, and turns its notifications
+into the shell's Tauri events (`chat.delta` becomes `nugget:chat-delta`, and so on, plus
+`nugget:notification`). A scenario calls `bridge.deliverEvents(page)` to have them dispatched to the
+page's listeners (`window.__E2E_EMIT__` in `tauri-shim.js`, through `page.evaluate`, in order; no
+long-lived request, so `networkidle` still works). ai-setup and byok do; pages and first-run don't
+need them. `bridge.notifications` records every notification seen.
+
+## What happens: ai-setup
+
+Before the clock starts, the scenario builds or locates the binaries, generates an ed25519 key pair
+with `node:crypto` (`generateKeyPairSync("ed25519")`), writes a manifest (version 1) with two chat
+models (`e2e-chat-q4`: 4 MiB of deterministic bytes starting with `GGUF`, `min_ram_gb = 4`;
+`e2e-chat-big-q8`: 64 GB, never recommended, never served) whose URLs are
+`http://127.0.0.1:<port>/<40-hex revision>/<file>.gguf`, signs its exact bytes and starts the
+throttled mock download server (Range support, 1.5 MiB/s). Then it starts `nuggetd-e2e` with
+`[runtime] enabled = true`, `idle_stop_minutes = 0`, `[mcp] http = false` and:
+
+| Variable | Value |
+| --- | --- |
+| `NUGGET_E2E_MANIFEST`, `NUGGET_E2E_MANIFEST_SIG` | the manifest and its hex signature |
+| `NUGGET_E2E_MANIFEST_PUBKEY` | the throwaway public key (hex); the only key `nuggetd-e2e` trusts, and it refuses to start if the manifest doesn't verify |
+| `NUGGET_E2E_LLAMA_SERVER` | `nuggetd-fake-llama-server` (run as a CPU llama-server) |
+| `NUGGET_E2E_RAM_GB`, `NUGGET_E2E_GPU` | `16`, `unknown`: the machine the recommendation sees |
+
+`nuggetd-e2e` (`crates/nuggetd/src/bin/nuggetd-e2e.rs`, built only with the `fake-runtime`
+feature) is `nuggetd`'s default command with those `RuntimeOverrides`; production `nuggetd` reads
+none of them. The fake llama-server answers a prompt holding numbered passages (a line starting
+`[1] `) with `According to your notes, "<first words of passage 1>" [1].` in several stream chunks.
+
+| Mark | What the test does |
+| --- | --- |
+| `daemon_ready`, `app_open` | as in the first run |
+| `install_clicked` | "On this device"; the AI step lists `e2e-chat-q4` with the "Recommended" badge and not the big model; Install |
+| `model_installed` | the card's `<progress>` showed a value between 0 and 100 with "Downloading · n% · …" at least once, then the "Installed" badge; the mock server sent the whole file |
+| `ai_step`, `source_searchable`, `setup_done` | Continue; the corpus folder as in the first run; through to Done |
+| `cited_model_answer` | Status lists `e2e-chat-q4` as the chat runtime (`local-chat`); Chat with "Use my sources" on asks "Tidewater Billing vendor contract": the reply from `local-chat` arrives in several `chat.delta`s, starts with "According to your notes", its `[n]` markers render as citation buttons, every marker is in the sources list and "Tidewater Billing" is a cited source |
+
+Then: the cited answer is within `E2E_AI_BUDGET_MS`; Status shows the runtime "Ready"; `draft.begin`
+(a mail reply context, over its own socket connection that collects the `chat.delta`/`chat.done`
+notifications) produces a non-empty draft from `local-chat` without an error; `egress.recent` has a
+`model_download` row for 127.0.0.1; no unknown daemon commands and no page errors. `summary.json`
+has it as `first_run_ai` (`time_to_cited_model_answer_ms`, `marks`, `steps`, the progress states
+seen, download requests, the answer, citations and the draft), and `first_run` gets
+`time_to_cited_model_answer_ms` too; the log ends with both first-run times.
+
+## What happens: byok
+
+A mock OpenAI-compatible server on 127.0.0.1 answers `GET /v1/models` with
+`{ object: "list", data: [{ id: "mock-model" }] }` only for `Authorization: Bearer sk-e2e-good`
+(401 otherwise, 404 on other paths). The plain `nuggetd` runs with the first-run config. In
+onboarding the test chooses "Bring your own key", selects the OpenAI-compatible kind in the form
+(labels `onboarding.byok.form.kind`, `.baseUrl`, `.model`, `.key`, `.name`; buttons `.test`,
+`.save`; the daemon's `ai.key.test` / `ai.key.save`) and checks:
+
+| Case | Base URL, key | Expected note |
+| --- | --- | --- |
+| bad key | `http://127.0.0.1:<mock>/v1`, `sk-e2e-bad`, Test | `onboarding.byok.form.error.bad_key` (role=alert) |
+| wrong URL | `http://127.0.0.1:<mock>/nope`, good key, Test | `onboarding.byok.form.error.wrong_url` |
+| no network | a closed localhost port, good key, Test | `onboarding.byok.form.error.no_network` |
+| good key | `http://127.0.0.1:<mock>/v1`, good key, Save | `onboarding.byok.form.saved` (role=status) |
+
+Then `config.toml` has a `[[providers]]` table with `api_key = "keychain:…"` and neither it nor the
+daemon logs contain the key; `egress.recent` and the Privacy page show requests to 127.0.0.1.
+
 ## Artifacts
 
 `e2e/artifacts/` (git-ignored; CI uploads it as `desktop-e2e`): a numbered screenshot per page and
 per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboarding step, `i18n-<locale>-<page>.png` per locale and page),
 `summary.json` (checks with timings, every command that returned an error, console errors per page,
-the commands the UI called, `i18n` and `first_run`), `daemon-logs/`, `nuggetd.out.log`, the first run's
-`first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`.
+the commands the UI called, `i18n`, `first_run`, `first_run_ai` and `byok`), `daemon-logs/`, `nuggetd.out.log`, the first run's
+`first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`; also `ai-setup-*.png`, `ai-setup-daemon-logs/`,
+`ai-setup-nuggetd.out.log`, `byok-*.png`, `byok-daemon-logs/` and `byok-config.toml` (with the key masked, if it ever leaked).
 
-`harness.mjs` holds what both scenarios share: settings from the environment, the log, `t(key)`
+`harness.mjs` holds what the scenarios share: settings from the environment, the log, `t(key)`
 for UI strings, `check`, `until`, `shot` and the browser context setup.
 
 ## Adding a check
