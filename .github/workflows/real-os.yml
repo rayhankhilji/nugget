@@ -1,0 +1,81 @@
+name: Real OS
+
+# Runs Nugget for real on macOS and Windows runners, which have a desktop session: installer
+# smoke tests (dmg, NSIS), accessibility against native test apps (AX, UIA), the Double Tap
+# hotkey-and-insert path, computer use over real UIA, and the notification click path.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - "crates/nugget-a11y/**"
+      - "crates/nugget-hotkey/**"
+      - "crates/nugget-computer/**"
+      - "apps/desktop/src-tauri/**"
+      - "packaging/**"
+      - "tests/fixtures/native/**"
+      - ".github/workflows/real-os.yml"
+  # TEMPORARY while Y1 iterates; removed before the final push. A push runs only the jobs whose
+  # tag ([ci:smoke], [ci:a11y], [ci:doubletap], [ci:cua], [ci:notify]) or [ci:all] is in the
+  # head commit message.
+  push:
+    branches: [y/real-os]
+
+# Least privilege: every job only reads the repository.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  NO_COLOR: "1"
+
+jobs:
+  # ---- BEGIN smoke (installer smoke tests) ----
+  smoke-placeholder:
+    name: Installer smoke (placeholder)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  # ---- END smoke ----
+
+  # ---- BEGIN a11y (accessibility against native test apps) ----
+  a11y-placeholder:
+    name: Accessibility (placeholder)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  # ---- END a11y ----
+
+  # ---- BEGIN doubletap (hotkey and insert path) ----
+  doubletap-placeholder:
+    name: Double Tap (placeholder)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  # ---- END doubletap ----
+
+  # ---- BEGIN cua (computer use over real UIA) ----
+  cua-placeholder:
+    name: Computer use (placeholder)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  # ---- END cua ----
+
+  # ---- BEGIN notify (notification click) ----
+  notify-placeholder:
+    name: Notification click (placeholder)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+  # ---- END notify ----
