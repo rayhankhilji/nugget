@@ -54,6 +54,19 @@ dump_logs() {
     done
 }
 
+# xdg-desktop-portal 1.19+ names an unsandboxed app only from a desktop file matching the app id
+# it registers (nugget-hotkey registers dev.nugget.desktop): provide the one an installed Nugget
+# would have. Older portals ignore it.
+mkdir -p "$runtime/data/applications"
+cat >"$runtime/data/applications/dev.nugget.desktop.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=Nugget
+Exec=nugget
+NoDisplay=true
+EOF
+export XDG_DATA_DIRS="$runtime/data:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+
 # The desktop name decides which portal backends the front end uses (kde-portals.conf,
 # sway-portals.conf). Set before the bus starts: KWin activates the portal front end itself.
 case "$compositor" in
@@ -138,7 +151,7 @@ fi
 
 # D-Bus activated services (portals, the accessibility bus) inherit this environment.
 dbus-update-activation-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE \
-    XDG_CURRENT_DESKTOP DBUS_SESSION_BUS_ADDRESS ${KDE_FULL_SESSION:+KDE_FULL_SESSION} \
+    XDG_CURRENT_DESKTOP XDG_DATA_DIRS DBUS_SESSION_BUS_ADDRESS ${KDE_FULL_SESSION:+KDE_FULL_SESSION} \
     ${QT_QPA_PLATFORM:+QT_QPA_PLATFORM} >/dev/null 2>&1 || true
 
 if [ "$compositor" = kwin ]; then
