@@ -251,4 +251,17 @@ pub trait PolicyGate: Send + Sync {
         let _ = (action, risk);
         true
     }
+    /// Like [`PolicyGate::record_approved`], with the context the action was evaluated in, so
+    /// the effective risk counted is the one [`PolicyGate::evaluate_with_context`] judged.
+    /// Callers that passed a context to the evaluation should pass the same one here. The
+    /// default ignores the context.
+    fn record_approved_with_context(
+        &self,
+        action: &ActionDescriptor,
+        risk: RiskClass,
+        context: &ActionContext,
+    ) -> bool {
+        let _ = context;
+        self.record_approved(action, risk)
+    }
 }

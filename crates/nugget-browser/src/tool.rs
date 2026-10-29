@@ -10,6 +10,7 @@
 //! | [`BrowserAction::classify`] on the latest snapshot | [`Tool::risk`] (never below the declared risk) |
 //! | [`BrowserAction::describe`] on the latest snapshot | [`Tool::describe`]: the site's host is the `target_app` |
 //! | the controller's [`Verification`](crate::Verification) | [`Tool::verify`] (through the result's `data`) |
+//! | the page and the target element in the latest snapshot | [`Tool::context`]: page URL (the destination for navigate), tab title, the element's role, whether it submits, and the fields of its form (password and payment fields marked) |
 //! | [`ToolError::is_mutation_refused`] | an error result telling the model not to retry |
 //!
 //! Page content is untrusted: every spec has [`ToolSpec::untrusted_output`] set, and the adapter
@@ -33,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nugget_agent::{ActionTarget, Tool, ToolCtx, ToolResult};
-use nugget_policy::{ActionDescriptor, PolicyGate, RiskClass};
+use nugget_policy::{ActionContext, ActionDescriptor, PolicyGate, RiskClass};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -41,7 +42,7 @@ use crate::action::{BrowserAction, Verification as PageVerification, WaitConditi
 use crate::bridge::{BridgeError, BrowserBridge};
 use crate::controller::{BrowserController, BrowserError, Confirmer};
 use crate::protocol::SnapshotOptions;
-use crate::snapshot::PageSnapshot;
+use crate::snapshot::{ElementInfo, PageSnapshot, Sensitive};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToolSpec {
@@ -454,6 +455,47 @@ fn verb_of(kind: Kind) -> &'static str {
     }
 }
 
+/// Bounds on page-controlled text copied into an [`ActionContext`].
+const CONTEXT_URL_MAX: usize = 2048;
+const CONTEXT_TEXT_MAX: usize = 200;
+const CONTEXT_FIELDS_MAX: usize = 64;
+
+fn cap_text(s: &str, max: usize) -> String {
+    match s.char_indices().nth(max) {
+        Some((i, _)) => s[..i].to_owned(),
+        None => s.to_owned(),
+    }
+}
+
+/// The element's accessibility role, falling back to its input type or tag.
+fn element_role(e: &ElementInfo) -> String {
+    let role = e.role.trim();
+    if !role.is_empty() && role != "generic" {
+        return cap_text(role, 64);
+    }
+    let fallback = match (e.tag.as_str(), e.input_type.as_deref()) {
+        ("input", Some("checkbox")) => "checkbox",
+        ("input", Some("radio")) => "radio",
+        ("input", Some("submit" | "image" | "button" | "reset")) | ("button", _) => "button",
+        ("input" | "textarea", _) => "textbox",
+        ("select", _) => "combobox",
+        ("a", _) => "link",
+        (tag, _) => tag,
+    };
+    cap_text(fallback, 64)
+}
+
+/// Whether activating `e` submits its form (same test as the action classifier).
+fn submits_form(e: &ElementInfo) -> bool {
+    e.form.is_some()
+        && (e.tag == "button" && e.input_type.is_none()
+            || matches!(e.input_type.as_deref(), Some("submit" | "image")))
+}
+
+fn is_password(e: &ElementInfo) -> bool {
+    e.sensitive == Some(Sensitive::Password) || e.input_type.as_deref() == Some("password")
+}
+
 const NOT_PERFORMED: &str = "The action was not performed. Do not retry it; choose another approach, ask the user, or finish.";
 
 impl BrowserAgentTool {
@@ -508,6 +550,70 @@ impl BrowserAgentTool {
             Ok(action) => declared.max(action.classify(latest)),
             Err(_) => declared,
         }
+    }
+
+    /// What the latest snapshot shows around this call (see [`Tool::context`]).
+    fn context_on(&self, args: &Value, latest: Option<&PageSnapshot>) -> ActionContext {
+        let mut ctx = ActionContext::default();
+        if let Some(s) = latest {
+            if !s.url.is_empty() {
+                ctx = ctx.with_url(cap_text(&s.url, CONTEXT_URL_MAX));
+            }
+            if !s.title.is_empty() {
+                ctx = ctx.with_window_title(cap_text(&s.title, CONTEXT_TEXT_MAX));
+            }
+        }
+        if self.kind() == Kind::Snapshot {
+            return ctx;
+        }
+        let Ok(action) = to_action(self.kind(), args.clone()) else {
+            return ctx;
+        };
+        if let BrowserAction::Navigate { url } = &action {
+            // The action happens on the destination, not the page being left.
+            let dest = crate::action::resolve_url(url, latest.map(|s| s.url.as_str()))
+                .map(|u| u.to_string())
+                .unwrap_or_else(|_| url.clone());
+            ctx.url = Some(cap_text(&dest, CONTEXT_URL_MAX));
+            ctx.window_title = None;
+            return ctx;
+        }
+        let (Some(snap), Some(id)) = (latest, action.element()) else {
+            return ctx;
+        };
+        let Some(e) = snap.element(id) else {
+            return ctx;
+        };
+        ctx = ctx.with_role(element_role(e));
+        if self.kind() == Kind::Submit {
+            ctx = ctx.with_submits(true);
+        } else if matches!(e.role.as_str(), "button" | "menuitem") {
+            ctx = ctx.with_submits(submits_form(e));
+        }
+        ctx = ctx.with_secure_field(is_password(e));
+        let mut fields: Vec<String> = Vec::new();
+        let mut push = |f: String| {
+            if !f.is_empty() && !fields.contains(&f) && fields.len() < CONTEXT_FIELDS_MAX {
+                fields.push(f);
+            }
+        };
+        let form_mates: Vec<&ElementInfo> = match e.form.as_deref() {
+            Some(form) => snap.form_elements(form).collect(),
+            None => vec![e],
+        };
+        for f in form_mates {
+            push(cap_text(f.name.trim(), CONTEXT_TEXT_MAX));
+            // The extension marks sensitive fields whatever their visible label says; name
+            // them in the classifier's vocabulary so a form with an unlabelled card field
+            // still reads as a payment form.
+            match f.sensitive {
+                Some(Sensitive::Payment) => push("cc-number".into()),
+                Some(Sensitive::Password) => push("password".into()),
+                None if is_password(f) => push("password".into()),
+                None => {}
+            }
+        }
+        ctx.with_form_fields(fields)
     }
 
     fn remember(&self, args: &Value, target: &ActionTarget, risk: RiskClass) {
@@ -617,6 +723,13 @@ impl Tool for BrowserAgentTool {
         let target = self.target(args, latest.as_ref());
         self.remember(args, &target, self.risk_on(args, latest.as_ref()));
         target
+    }
+
+    /// The page URL (the destination for navigate), the tab title, and for the target element
+    /// of the latest snapshot its role, whether it submits its form, whether it is a password
+    /// field, and the fields of its form.
+    fn context(&self, args: &Value) -> ActionContext {
+        self.context_on(args, self.latest().as_ref())
     }
 
     /// Only runs when the agent loop's gate allowed (or the user approved) this call.
@@ -1153,5 +1266,200 @@ mod tests {
             r.content
         );
         assert_eq!(bridge.acts_sent(), 1);
+    }
+
+    // ---- Tool::context ----
+
+    /// A checkout page: a card form (an unlabelled payment field, a password field without a
+    /// telling name, a "Continue" button that submits) and a "Remote access" switch.
+    fn checkout_page() -> PageSnapshot {
+        let mut card = el("n1", "textbox", "", "input");
+        card.editable = true;
+        card.sensitive = Some(Sensitive::Payment);
+        let mut name = el("n2", "textbox", "Name on card", "input");
+        name.editable = true;
+        let mut pass = el("n3", "textbox", "", "input");
+        pass.editable = true;
+        pass.input_type = Some("password".into());
+        pass.sensitive = Some(Sensitive::Password);
+        let cont = el("n4", "button", "Continue", "button");
+        let mut remote = el("n5", "switch", "Remote access", "input");
+        remote.input_type = Some("checkbox".into());
+        remote.form = None;
+        let mut plain = el("n6", "", "", "input");
+        plain.input_type = Some("checkbox".into());
+        plain.form = None;
+        PageSnapshot {
+            snapshot_id: "s1".into(),
+            url: "https://shop.example.com/checkout/step-2".into(),
+            title: "Checkout".into(),
+            captured_at_ms: 0,
+            viewport: Viewport::default(),
+            elements: vec![card, name, pass, cont, remote, plain],
+            elements_truncated: false,
+            text: String::new(),
+            text_truncated: false,
+            frames: Vec::new(),
+        }
+    }
+
+    async fn rig_on(snap: PageSnapshot) -> Rig {
+        let rig = Rig::new();
+        rig.bridge.snapshots.lock().unwrap().push_back(snap);
+        let (_, r, _) = rig.run("t1", "browser_snapshot", json!({})).await;
+        assert!(!r.is_error, "{}", r.content);
+        rig
+    }
+
+    #[test]
+    fn context_is_empty_before_any_snapshot_except_for_navigate() {
+        let rig = Rig::new();
+        assert_eq!(
+            rig.tool("browser_click").context(&json!({"element": "n1"})),
+            ActionContext::default()
+        );
+        let ctx = rig
+            .tool("browser_navigate")
+            .context(&json!({"url": "https://bank.example.com/login"}));
+        assert_eq!(ctx.url.as_deref(), Some("https://bank.example.com/login"));
+    }
+
+    #[tokio::test]
+    async fn every_tool_fills_its_context() {
+        let rig = rig_on(checkout_page()).await;
+        let url = "https://shop.example.com/checkout/step-2";
+        let ctx_of = |name: &str, args: Value| rig.tool(name).context(&args);
+
+        // The page itself.
+        let snap = ctx_of("browser_snapshot", json!({}));
+        assert_eq!(snap.url.as_deref(), Some(url));
+        assert_eq!(snap.window_title.as_deref(), Some("Checkout"));
+        assert_eq!(snap.role, None);
+
+        // Clicking the form's button: role, submits, the form's fields with markers.
+        let click = ctx_of("browser_click", json!({"element": "n4"}));
+        assert_eq!(click.url.as_deref(), Some(url));
+        assert_eq!(click.role.as_deref(), Some("button"));
+        assert_eq!(click.submits, Some(true));
+        assert!(!click.secure_field);
+        for f in ["cc-number", "Name on card", "password", "Continue"] {
+            assert!(click.form_fields.iter().any(|x| x == f), "{f}: {click:?}");
+        }
+
+        // Typing into the password field.
+        let typ = ctx_of("browser_type", json!({"element": "n3", "text": "x"}));
+        assert!(typ.secure_field);
+        assert_eq!(typ.role.as_deref(), Some("textbox"));
+        assert_eq!(typ.submits, None);
+        assert!(typ.form_fields.iter().any(|f| f == "cc-number"));
+
+        // Select, submit, scroll and wait_for on an element.
+        let sel = ctx_of("browser_select", json!({"element": "n2", "value": "x"}));
+        assert_eq!(sel.role.as_deref(), Some("textbox"));
+        assert!(!sel.secure_field);
+        let sub = ctx_of("browser_submit", json!({"element": "n2"}));
+        assert_eq!(sub.submits, Some(true));
+        assert!(sub.form_fields.iter().any(|f| f == "cc-number"));
+        let scroll = ctx_of("browser_scroll", json!({"element": "n5"}));
+        assert_eq!(scroll.role.as_deref(), Some("switch"));
+        // Outside a form: only the element itself.
+        assert_eq!(scroll.form_fields, vec!["Remote access".to_string()]);
+        let wait = ctx_of("browser_wait_for", json!({"element_gone": "n6"}));
+        // No role from the page: derived from the input type.
+        assert_eq!(wait.role.as_deref(), Some("checkbox"));
+        let wait = ctx_of("browser_wait_for", json!({"text_present": "Done"}));
+        assert_eq!(wait.url.as_deref(), Some(url));
+        assert_eq!(wait.role, None);
+
+        // Navigate: the destination (resolved against the page), not the page being left.
+        let nav = ctx_of("browser_navigate", json!({"url": "/account/security"}));
+        assert_eq!(
+            nav.url.as_deref(),
+            Some("https://shop.example.com/account/security")
+        );
+        assert_eq!(nav.window_title, None);
+
+        // Unknown elements and bad arguments still carry the page.
+        let gone = ctx_of("browser_click", json!({"element": "n99"}));
+        assert_eq!(gone.url.as_deref(), Some(url));
+        assert_eq!(gone.role, None);
+        let bad = ctx_of("browser_click", json!({"nope": 1}));
+        assert_eq!(bad.url.as_deref(), Some(url));
+    }
+
+    /// What the agent loop does with a browser call: describe it at the tool's declared risk and
+    /// classify it with and without the tool's context.
+    fn classify_both(
+        rig: &Rig,
+        name: &str,
+        args: Value,
+    ) -> (nugget_policy::Classification, nugget_policy::Classification) {
+        let tool = rig.tool(name);
+        let t = tool.describe(&args);
+        let d = ActionDescriptor {
+            target_app: t.target_app,
+            verb: t.verb,
+            target_label: t.target_label,
+            text_preview: t.text_preview,
+            declared_risk: tool.declared_risk(),
+            task_id: "t1".into(),
+        };
+        (
+            rig.engine.classify(&d, &ActionContext::default()),
+            rig.engine.classify(&d, &tool.context(&args)),
+        )
+    }
+
+    #[tokio::test]
+    async fn context_escalates_payment_password_and_remote_access() {
+        let rig = rig_on(checkout_page()).await;
+        // "Continue" in a card form pays.
+        let (bare, ctx) = classify_both(&rig, "browser_click", json!({"element": "n4"}));
+        assert!(bare.risk < RiskClass::Spend, "{bare:?}");
+        assert_eq!(ctx.risk, RiskClass::Spend, "{ctx:?}");
+        // Submitting the form, too.
+        let (bare, ctx) = classify_both(&rig, "browser_submit", json!({"element": "n2"}));
+        assert!(bare.risk < RiskClass::Spend, "{bare:?}");
+        assert_eq!(ctx.risk, RiskClass::Spend, "{ctx:?}");
+        // An unnamed password field is a secure field only in context.
+        let (bare, ctx) = classify_both(
+            &rig,
+            "browser_type",
+            json!({"element": "n3", "text": "hunter2"}),
+        );
+        assert!(bare.risk < RiskClass::Security, "{bare:?}");
+        assert_eq!(ctx.risk, RiskClass::Security, "{ctx:?}");
+        // A remote-access switch on a web page is Security and always asks.
+        let (_, ctx) = classify_both(&rig, "browser_click", json!({"element": "n5"}));
+        assert_eq!(ctx.risk, RiskClass::Security, "{ctx:?}");
+
+        // Through the gate: a user Allow rule for the site does not skip the payment.
+        rig.engine
+            .upsert_rule(
+                nugget_policy::Rule::new("shop", nugget_policy::Effect::Allow)
+                    .targets(["shop.example.com"])
+                    .risks([RiskClass::Edit, RiskClass::Send]),
+            )
+            .unwrap();
+        let tool = rig.tool("browser_click");
+        let args = json!({"element": "n4"});
+        let t = tool.describe(&args);
+        let d = ActionDescriptor {
+            target_app: t.target_app,
+            verb: t.verb,
+            target_label: t.target_label,
+            text_preview: None,
+            declared_risk: RiskClass::Edit,
+            task_id: "t1".into(),
+        };
+        assert_eq!(
+            rig.engine.evaluate(&d),
+            nugget_policy::Decision::Allow,
+            "without context the site rule applies"
+        );
+        assert!(matches!(
+            rig.engine.evaluate_with_context(&d, &tool.context(&args)),
+            nugget_policy::Decision::Confirm(_)
+        ));
     }
 }

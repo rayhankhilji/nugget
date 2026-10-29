@@ -36,6 +36,13 @@ tauri-plugin-dialog = "=2.7.3"
 # `.app` tarball (which the plugin unpacks without it), so the legacy zip path (zip 4.x, with open
 # advisories) is never needed.
 tauri-plugin-updater = { version = "=2.12.0", default-features = false, features = ["rustls-tls", "system-proxy"] }
+# Signed update feed (`updater/feed.rs`): fetch the feed and its `.sig`, verify with the updater
+# key, before the plugin reads it. The same crates and features the updater plugin already uses
+# (minisign-verify, base64, reqwest on rustls with the `ring` provider), so nothing new is built.
+minisign-verify = "0.2.5"
+base64 = "0.22"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # OS notifications (morning brief, reminders), shown from Rust (`commands::notify`) only. 2.4.0 is
 # the last release that accepts tauri 2.11 and Rust 1.88.
 tauri-plugin-notification = "=2.4.0"

@@ -125,17 +125,21 @@ and every action is pinned to a commit SHA.
      `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD`, secrets that exist only in this environment. Only
      the locked Tauri CLI is installed, with `--ignore-scripts`;
    - writes `latest.json` (the Tauri updater manifest: version, the tag's notes, and per-platform
-     URL and signature);
-   - writes `SHA256SUMS` over every asset, including the signatures, `latest.json` and the SBOMs;
+     URL and signature) and signs it as a whole with the same key and command, giving
+     `latest.json.sig` (a detached minisign signature over the exact bytes, base64-wrapped like
+     the payload signatures);
+   - writes `SHA256SUMS` over every asset, including the signatures, `latest.json`,
+     `latest.json.sig` and the SBOMs;
    - records SLSA build provenance for every asset (`actions/attest-build-provenance`; check one with
      `gh attestation verify <file> -R rayhankhilji/nugget`);
    - creates a **draft** GitHub release with everything attached.
 5. **Publish (human).** A maintainer checks the draft (it installs, the checksums match, the notes
    are right) and clicks *Publish*.
 6. **`channels`** (on `release: published`, `contents: write`, no secrets). It copies the release's
-   `latest.json` to the rolling `updater-feed` release as `beta.json`, and as `stable.json` too
-   if it is not a prerelease. It only moves a feed forward (semver), so publishing an old patch
-   release never pulls anyone back.
+   `latest.json` and `latest.json.sig` to the rolling `updater-feed` release as `beta.json` /
+   `beta.json.sig`, and as `stable.json` / `stable.json.sig` too if it is not a prerelease. It
+   only moves a feed forward (semver), so publishing an old patch release never pulls anyone
+   back. It needs no key: the copies are byte for byte, so the signature stays valid.
 
 A `workflow_dispatch` run with `dry_run: true` (the default) builds unsigned bundles from any ref,
 uploads them as workflow artifacts, and creates no release; see *Dry run* below.
@@ -201,15 +205,16 @@ schemes. Neither uses a CI secret today:
 
   (`NUGGET_MANIFEST_SIGNING_KEY`, 64 hex chars, works instead of the file.) A stale or wrong
   signature fails the `nugget-models` tests in CI, and at runtime the daemon logs "bundled model
-  manifest failed verification" and offers no model downloads. There is **no release manifest
-  key** yet: releases ship trusting the development key (see §8).
+  manifest failed verification" and offers no model downloads. Release builds trust only the
+  release key from `NUGGET_MANIFEST_RELEASE_PUBKEY` (end of §4); dry runs also trust the
+  development key. The release key has not been generated yet (see §8).
 - **Plugin packages** (`plugin.sig`, `nugget-plugin`). There is no project-wide plugin key. Users
   list the publishers they trust in `[plugins] trusted_keys`; authors sign with
   `cargo run -p nugget-plugin --example sign-plugin` and `NUGGET_PLUGIN_SIGNING_KEY` (or
   `_FILE`). Nothing in the release pipeline touches plugin keys.
 
-The channel feeds (`beta.json`, `stable.json`) and `latest.json` are not signed as a whole; only
-the payloads they point at are (§8).
+The channel feeds (`beta.json`, `stable.json`) and `latest.json` are signed as a whole with the
+**updater** key (`<feed>.sig`, §3 and §5), not with either of these schemes.
 
 ### Dry run
 
@@ -289,7 +294,7 @@ test yet.
 5. **Approve `sign`.** A second maintainer (not the tagger) reviews the run and approves the
    `release` environment.
 6. **Review the draft** on the Releases page: every installer is attached with its `.sig`,
-   `latest.json` lists each platform, `SHA256SUMS` matches (`sha256sum -c SHA256SUMS` after
+   `latest.json` lists each platform and has its `latest.json.sig`, `SHA256SUMS` matches (`sha256sum -c SHA256SUMS` after
    downloading), the notes are right, and an installer from it installs and starts on at least
    one OS. Check one provenance attestation with `gh attestation verify`.
 7. **Publish.** That triggers `channels`, which moves the feeds. Check the run log for
@@ -303,13 +308,19 @@ tag push ─► build ─► sign (approved) ─► draft release ─► Publish
 ```
 
 - Nothing reaches users before *Publish*. A draft never triggers `channels`.
-- `channels` downloads the published release's `latest.json` and, for each channel it applies to,
-  runs `updater_manifest.py promote latest.json current.json`. That prints the new version only if
-  it is **strictly newer** (SemVer 2.0 precedence; build metadata ignored) than the version the
-  feed already holds, or if the feed is empty. Otherwise the feed stays as it is and the job logs
-  `keeping <current>: <new> is not newer`. So publishing an older patch, or re-publishing the same
-  version, never moves a feed.
-- A release without `latest.json` (no updater key) leaves both feeds unchanged.
+- `channels` downloads the published release's `latest.json` and `latest.json.sig` and, for each
+  channel it applies to, runs `updater_manifest.py promote latest.json current.json`. That prints
+  the new version only if it is **strictly newer** (SemVer 2.0 precedence; build metadata ignored)
+  than the version the feed already holds, or if the feed is empty. Otherwise the feed stays as it
+  is and the job logs `keeping <current>: <new> is not newer`. So publishing an older patch, or
+  re-publishing the same version, never moves a feed. To move it, `updater_manifest.py channel
+  latest.json <ch>` copies both files to `<ch>.json` and `<ch>.json.sig` (refusing if the
+  signature is missing) and both are uploaded in one `gh release upload`.
+- A release without `latest.json` (no updater key) or without `latest.json.sig` (released before
+  feeds were signed) leaves both feeds unchanged: current apps refuse an unsigned feed.
+- Each feed file always travels with its `.sig`; a feed and a signature from different releases
+  don't verify. Apps that check during the few seconds between the two uploads report a failed
+  check and get the new feed on the next one.
 - Installed apps also refuse to go backwards: the updater only offers a version newer than the one
   running.
 
@@ -320,8 +331,9 @@ people who already installed it is always a **newer** release. To stop it spread
    upload directly:
 
    ```sh
-   gh release download vGOOD -p latest.json -O stable.json
-   gh release upload updater-feed --clobber stable.json      # likewise beta.json if needed
+   gh release download vGOOD -p latest.json -p latest.json.sig
+   python3 packaging/scripts/updater_manifest.py channel latest.json stable   # likewise beta
+   gh release upload updater-feed --clobber stable.json stable.json.sig
    ```
 
    Apps still on the good version then see no update. Apps already on the bad version stay on it.
@@ -367,6 +379,28 @@ publish a security advisory, and ship a rotation release as fast as possible.
 
 **Public key:** *not generated yet; paste `nugget-updater.key.pub` here after the ceremony.*
 
+### Manifest release key
+
+The model manifest has its own ed25519 key slot, separate from the updater key
+(`docs/security/manifest-trust.md`). `nugget-models` reads two **build-time** variables when the
+sidecar is compiled:
+
+- `NUGGET_MANIFEST_RELEASE_PUBKEY`: the release public key, 64 hex chars. Public, so it is a
+  **repository variable**, not a secret (`gh variable set NUGGET_MANIFEST_RELEASE_PUBKEY`). The
+  `build` job passes it to *Build and stage the nuggetd sidecar*, which runs
+  `packaging/scripts/stage-sidecar.sh` (`cargo build --release -p nuggetd`); `option_env!` bakes
+  it into the binary. A malformed value fails the build.
+- `NUGGET_TRUST_DEV_MANIFEST_KEY=1`: also trust the development key in a release build. The
+  workflow sets it **only for dry runs**, so dry-run installers keep a working manifest; real
+  releases trust only the release key. Debug builds always trust the development key.
+
+A release build with neither trusts no manifest key: the daemon starts but offers no model
+downloads. The private key is kept offline like the updater recovery shares (generate it with
+`cargo run -p nugget-models --example sign-manifest -- --generate-key <path>` on the ephemeral
+machine). Before the first release built with the variable, add a release signature next to the
+development one with `sign-manifest --append --key-file <release key> manifests/default.json` and
+commit the two-line `default.json.sig`.
+
 ## 5. Updater behaviour in the app
 
 Settings live in `settings.json` in the app config directory (for example
@@ -378,8 +412,18 @@ menu has an *Updates…* item that changes to *Update available: vX…*.
 | Channel | **Stable** | `stable.json` from the `updater-feed` release. **Beta** follows `beta.json` (prereleases as well as stable). **Off** never contacts the server. |
 | Auto-install | **off** | Off means **notify only**: the app shows the version and its release notes, and nothing is downloaded until the user clicks *Install vX and restart*. On means the update is downloaded and verified in the background, its notes are shown, and it installs **when the user quits Nugget**. |
 
-- Checks run 60 s after launch and then every 24 h, plus *Check now*. A check is one HTTPS GET of
-  a static JSON file, with no identifiers beyond what any HTTPS request carries.
+- Checks run 60 s after launch and then every 24 h, plus *Check now*. A check fetches static
+  files only (the channel's JSON feed and its `.sig`, then the feed again through the updater
+  plugin), with no identifiers beyond what any HTTPS request carries.
+- **The feed is verified before it is used.** The app downloads `<channel>.json` and
+  `<channel>.json.sig` and checks the minisign signature over the exact bytes against the
+  built-in updater key (`apps/desktop/src-tauri/src/updater/feed.rs`). Nothing in the feed is
+  parsed before that; a missing, malformed or wrong-key signature, or any changed byte, fails the
+  check ("the update feed failed signature verification") and nothing is offered. Because
+  `tauri-plugin-updater` fetches the feed itself, the app then accepts the plugin's result only
+  if the plugin read the same feed: the same version and, when an update is offered, the
+  identical JSON document. Otherwise the check fails ("the update feed changed while it was being
+  checked") and the next check tries again.
 - Every payload is verified against the built-in minisign key before installation. A build
   without a key has no updater at all.
 - *Install* sends the exact version whose notes were displayed. If the feed changed in the
@@ -430,17 +474,28 @@ Pinned inputs:
 - **CI actions:** commit SHAs. **OS images:** the runner labels above (record the image version
   from the job log).
 
-Determinism measures:
-- `SOURCE_DATE_EPOCH` = the tagged commit's timestamp, for every packaging tool that honours it.
-- `RUSTFLAGS=--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$HOME/.cargo=/cargo`,
-  so no runner paths end up in binaries.
+Determinism measures (`packaging/scripts/repro-env.sh`, applied by the "Deterministic build
+environment" step of every release build):
+- `SOURCE_DATE_EPOCH` = the tagged commit's timestamp, for every packaging tool that honours it;
+  `stage-sidecar.sh` clamps the staged sidecar's mtime to it (`packaging/scripts/clamp_mtimes.py`).
+- `RUSTFLAGS` with `--remap-path-prefix` for the workspace (`/build`), `CARGO_HOME` (`/cargo`) and
+  the toolchain sysroot (`/rustc-sysroot`), in native form on Windows, so no runner paths from Rust
+  code end up in binaries.
 - No build cache in release jobs; the macOS tarball is written with fixed owner ids.
 
-What is and isn't reproducible today: the Rust binaries (`nuggetd`, `nugget-desktop`) built with the
-same toolchain, target and flags should match. The installers don't, bit for bit: code
-signatures and timestamps (Authenticode, Apple, notarization tickets), DMG/MSI metadata, and AppImage
-squashfs ordering all vary. To check a release, rebuild the binaries and compare them with the
-ones extracted from the installer, ignoring signature sections.
+What is reproducible today: **`nuggetd` on x86_64 Linux**, checked by
+`.github/workflows/reproducible.yml`, which builds it twice from checkouts in different
+directories and compares them. Code and data are identical; the whole files still differ in
+symbol names, because wasmtime's `bindgen!` in `nugget-plugin` embeds the WIT files' absolute path
+(the job warns on that and fails on anything else). One input remains path-dependent: the vendored OpenSSL
+(SQLCipher) compiles its install prefix, which lies under the cargo target dir, into the binary,
+so the target dir's absolute path must match. Not verified: `nuggetd` on other targets and
+`nugget-desktop` (which embeds the frontend bundle). Not reproducible: the installers. Tauri's
+deb and rpm writers keep build-time mtimes and do not read `SOURCE_DATE_EPOCH`, the AppImage
+bundles the runner's system libraries, and code signatures, notarization tickets and DMG/MSI
+metadata vary. To check a release, rebuild the binaries and compare them with the ones extracted
+from the installer, ignoring signature sections. Details, the exact commands and the full list of
+gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
 
 ## 8. Known gaps
 
@@ -453,13 +508,17 @@ ones extracted from the installer, ignoring signature sections.
   through the in-app updater or by downloading again.
 - Update checks aren't recorded in the daemon's egress ledger (the desktop app makes them, not
   `nuggetd`).
-- The `updater-feed` manifests are unsigned JSON, as Tauri designs it. A forged feed can only point
-  at payloads, and those still need a valid signature. A forged feed could withhold updates
-  (freeze attack); manifest signing would close that.
-- No release key for the model manifest: `trusted_keys()` returns only the development key, so a
-  release build trusts whoever holds that key. A release key, held offline like the updater
-  key, should replace it before 1.0. The `version` serial in the manifest is documented as
-  rollback protection, but since the manifest is only ever bundled, nothing checks it yet.
+- The `updater-feed` manifests are signed (§5), but the signature covers only the bytes, not the
+  channel name or a date: someone who controls the feed URL can still replay an older signed feed
+  or serve the beta feed to stable users (a signed prerelease), and can always withhold the feed.
+  None of that installs anything the updater key didn't sign or anything older than the running
+  version.
+- The model manifest release key slot exists (`NUGGET_MANIFEST_RELEASE_PUBKEY`, §4) but the key
+  has not been generated and `manifests/default.json.sig` carries only the development signature,
+  so a real release built with the variable set would offer no model downloads until a release
+  signature is appended. Rollback protection (a per-key highest-version record in the model store,
+  `docs/security/manifest-trust.md`) is in place, but the manifest is still only bundled; there is
+  no download path for newer manifests yet.
 - Windows signing only supports an exportable `.pfx`. Hardware-backed and cloud signing (the normal
   case for new certificates) needs a `signCommand` path that isn't written.
 - No automated launch test for the macOS or Windows installers; only the Linux AppImage is

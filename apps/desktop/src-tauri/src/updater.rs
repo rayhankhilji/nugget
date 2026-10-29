@@ -9,9 +9,13 @@
 //! - Every package is verified against the minisign public key compiled into this build
 //!   (`NUGGET_UPDATER_PUBKEY`, set by the release workflow). Builds without a key (dev builds,
 //!   self-built packages) have no updater at all.
+//! - The channel feed is signed with the same key (`<feed>.sig`) and verified before anything in
+//!   it is read; a feed that doesn't verify is refused (see `feed`).
+
+mod feed;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -205,17 +209,39 @@ impl Updates {
         };
         self.set_busy(app, true);
         let result = async {
-            let url = url.parse().map_err(err)?;
-            app.updater_builder()
+            // Verify the feed before the plugin reads it; then accept the plugin's answer only
+            // if it came from that same feed (`feed::consistent`).
+            let verified = feed::fetch_verified(&url, pubkey, HTTP_TIMEOUT)
+                .await
+                .map_err(err)?;
+            let seen = Arc::new(Mutex::new(None::<String>));
+            let record = Arc::clone(&seen);
+            let want = verified.version.clone();
+            let update = app
+                .updater_builder()
                 .pubkey(pubkey)
-                .endpoints(vec![url])
+                .endpoints(vec![url.parse().map_err(err)?])
                 .map_err(err)?
                 .timeout(HTTP_TIMEOUT)
+                .version_comparator(move |current, release| {
+                    let version = release.version.to_string();
+                    let same = version == want;
+                    *record.lock().unwrap_or_else(|p| p.into_inner()) = Some(version);
+                    same && release.version > current
+                })
                 .build()
                 .map_err(err)?
                 .check()
                 .await
-                .map_err(err)
+                .map_err(err)?;
+            let seen = seen.lock().unwrap_or_else(|p| p.into_inner()).take();
+            feed::consistent(
+                &verified,
+                seen.as_deref(),
+                update.as_ref().map(|u| &u.raw_json),
+            )
+            .map_err(err)?;
+            Ok::<_, CmdError>(update)
         }
         .await;
         let auto = {

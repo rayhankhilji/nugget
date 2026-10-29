@@ -8,6 +8,9 @@
 //! NUGGET_MANIFEST_SIGNING_KEY_FILE=~/.config/nugget/manifest-dev.key \
 //!   cargo run -p nugget-models --example sign-manifest -- manifests/default.json
 //!
+//! # add a second signature (e.g. the release key) to an existing .sig instead of replacing it
+//! cargo run -p nugget-models --example sign-manifest -- --append --key-file release.key manifests/default.json
+//!
 //! # verify against the keys embedded in this build (or --pubkey HEX)
 //! cargo run -p nugget-models --example sign-manifest -- --verify manifests/default.json
 //! ```
@@ -24,7 +27,7 @@ use nugget_models::{
 };
 
 const USAGE: &str = "usage:
-  sign-manifest [--key-file PATH] [--out SIG] MANIFEST
+  sign-manifest [--key-file PATH] [--out SIG] [--append] MANIFEST
   sign-manifest --verify MANIFEST [--sig SIG] [--pubkey HEX]
   sign-manifest --generate-key PATH";
 
@@ -44,6 +47,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
     let mut sig = None;
     let mut pubkey = None;
     let mut verify = false;
+    let mut append = false;
     let mut generate = None;
     let mut manifest = None;
     let mut it = args.into_iter();
@@ -56,6 +60,7 @@ fn run(args: Vec<String>) -> Result<(), String> {
             "--pubkey" => pubkey = Some(val("--pubkey")?),
             "--generate-key" => generate = Some(PathBuf::from(val("--generate-key")?)),
             "--verify" => verify = true,
+            "--append" => append = true,
             "-h" | "--help" => {
                 println!("{USAGE}");
                 return Ok(());
@@ -94,7 +99,18 @@ fn run(args: Vec<String>) -> Result<(), String> {
     // Refuse to sign something clients would reject anyway.
     let m = verify_manifest(&bytes, sig_hex.as_bytes(), &[vk])
         .map_err(|e| format!("manifest rejected, not signing: {e}"))?;
-    std::fs::write(&sig_path, format!("{sig_hex}\n"))
+    // With --append, keep the signatures already there (one hex line each) and add this one.
+    let mut lines: Vec<String> = Vec::new();
+    if append && let Ok(old) = std::fs::read_to_string(&sig_path) {
+        lines.extend(
+            old.lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && *l != sig_hex)
+                .map(String::from),
+        );
+    }
+    lines.push(sig_hex.clone());
+    std::fs::write(&sig_path, lines.join("\n") + "\n")
         .map_err(|e| format!("{}: {e}", sig_path.display()))?;
     let pk = hex::encode(vk.to_bytes());
     println!(
