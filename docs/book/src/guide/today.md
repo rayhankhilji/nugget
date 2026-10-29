@@ -1,15 +1,17 @@
 # Today: proactive cards and the morning brief
 
-> **Status: being wired in (wave W).** The engine (`nugget-proactive`: generators, scoring, the
-> optional judge, the card state machine, typed actions with dry-run previews, the brief and
-> metrics) is built and tested. The daemon methods (`cards.list`, `cards.feedback`,
-> `cards.preview`, `cards.execute`, `brief.get`, `proactive.metrics`), the action executors and the
-> **Today** page are being connected in this wave. This page describes the behaviour of the built
-> engine.
+> **Status:** the **Today** page shows the brief and your cards, and every action below can be
+> previewed and run from it. The daemon serves `cards.list`, `cards.feedback`, `cards.preview`,
+> `cards.execute`, `brief.get`, `proactive.metrics` and `proactive.refresh`.
 
 Nugget reads your indexed mail, calendar and knowledge graph and suggests what needs your attention
 as **cards**. Each card says why it is there and offers an action you can preview before anything
 happens.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/today-dark.png">
+  <img src="../images/screenshots/today-light.png" alt="The Today page: the morning brief and a card suggesting a reply to an unanswered email, with the reasons it is shown and its actions" loading="lazy">
+</picture>
 
 ## Where cards come from
 
@@ -81,7 +83,8 @@ their prep cards and external attendees), overdue commitments and promises, rene
 ## Metrics
 
 Nugget tracks how useful its cards are: precision (accepted cards out of cards shown), time to
-action, and why cards were dismissed. They are visible through `proactive.metrics`.
+action, and why cards were dismissed. The **Today** page shows the precision; all of them are available through
+`proactive.metrics`.
 
 ## Privacy
 

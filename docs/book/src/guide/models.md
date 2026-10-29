@@ -7,8 +7,8 @@ provider you configure says which tiers it serves:
 |---|---|---|
 | `triage` | Per-item keep, junk or sensitive, plus a short summary, during indexing | **Local only.** Cloud providers are never used for triage. |
 | `light` | Cheap classification and routing calls | Any provider you assign |
-| `synthesis` | Ask, chat, knowledge extraction, drafting (being wired in, wave W) | Any provider you assign. Knowledge extraction uses local providers only, unless you allow cloud for specific sources |
-| `agentic` | Tool-using agent loops and computer use (being wired in, wave W) | Any provider you assign |
+| `synthesis` | Ask, chat, knowledge extraction, Double Tap drafting | Any provider you assign. Knowledge extraction uses local providers only, unless you allow cloud for specific sources |
+| `agentic` | Tool-using agent loops and computer use | Any provider you assign |
 | `embedding` | Vectors for semantic search, at indexing and query time | **Local or LAN only** unless you opt in |
 
 A sixth tier, `rerank`, only marks reranker models in the manifest. It is never routed and providers

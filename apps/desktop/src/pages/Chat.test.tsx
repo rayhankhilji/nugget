@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
-import type { AskStarted, ChatMessage } from "../api";
+import type { AskStarted, ChatMessage, StoredConversation } from "../api";
 import { ChatPage, readUseSources, writeUseSources } from "./Chat";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 
@@ -19,20 +19,31 @@ const askStarted: AskStarted = {
   query_rewrite: "what about the second one? herons river",
 };
 
-function setup() {
+function setup(opts: { cite?: (n: number) => boolean } = {}) {
   const asks: Record<string, unknown>[] = [];
   const chats: Record<string, unknown>[] = [];
+  const cancels: string[] = [];
+  const saved: StoredConversation[] = [];
   const calls = mockDaemon({
     retrieve_ask: (a: unknown) => {
       asks.push((a as Req).request);
-      return { ...askStarted, stream_id: `s-ask-${asks.length}` };
+      const n = asks.length;
+      const cite = opts.cite?.(n) ?? true;
+      return { ...askStarted, stream_id: `s-ask-${n}`, citations: cite ? askStarted.citations : [] };
+    },
+    chat_cancel: (a: unknown) => {
+      cancels.push((a as { streamId: string }).streamId);
+    },
+    chat_history_load: [],
+    chat_history_save: (a: unknown) => {
+      saved.push((a as { conversation: StoredConversation }).conversation);
     },
     chat: (a: unknown) => {
       chats.push((a as Req).request);
       return { stream_id: `s-chat-${chats.length}`, provider: "ollama", locality: "on_device" };
     },
   });
-  return { asks, chats, calls };
+  return { asks, chats, cancels, saved, calls };
 }
 
 async function say(container: HTMLElement, text: string) {
@@ -81,7 +92,7 @@ describe("Chat with sources", () => {
     const history = asks[1]!.history as ChatMessage[];
     expect(history).toEqual([
       { role: "user", text: "Where did we watch herons?" },
-      { role: "assistant", text: "By the river [1]." },
+      { role: "assistant", text: "By the river." },
     ]);
     await reply("s-ask-2", "The second walk [1].");
 
@@ -106,5 +117,80 @@ describe("Chat with sources", () => {
 
     const again = await render(<ChatPage />);
     expect(toggle(again.container).checked).toBe(false);
+  });
+
+  it("answers as a plain chat, and says so, when nothing in the sources matches", async () => {
+    // The first question finds passages; the second finds none.
+    const { asks, chats, cancels, saved } = setup({ cite: (n) => n === 1 });
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    await reply("s-ask-1", "By the river [1].");
+
+    await say(container, "What is a heron?");
+    expect(asks).toHaveLength(2);
+    expect(cancels).toEqual(["s-ask-2"]);
+    // The sourced stream is dropped: its text never shows.
+    await reply("s-ask-2", "I can't find that in your sources.");
+    expect(container.textContent).not.toContain("I can't find that");
+    expect(chats).toHaveLength(1);
+    expect(chats[0]!.messages).toEqual([
+      { role: "user", text: "Where did we watch herons?" },
+      { role: "assistant", text: "By the river." },
+      { role: "user", text: "What is a heron?" },
+    ]);
+    await reply("s-chat-1", "A wading bird.");
+
+    const items = container.querySelectorAll("li.msg-assistant");
+    expect(items[1]!.textContent).toContain("A wading bird.");
+    expect(items[1]!.textContent).toContain("No matching passages were found in your sources, so this is a general answer.");
+    expect(items[0]!.textContent).not.toContain("general answer");
+    expect(items[1]!.querySelector(".chat-sources")).toBeNull();
+
+    // Kept with the saved turn, and shown again when the conversation is reopened.
+    const last = saved[saved.length - 1]!;
+    expect(last.messages[3]).toMatchObject({ role: "assistant", text: "A wading bird.", general_answer: true });
+    expect(last.messages[1]!.general_answer).toBeUndefined();
+  });
+
+  it("strips earlier replies' [n] markers from the history it sends", async () => {
+    const { asks, chats } = setup();
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons [x]?");
+    await reply("s-ask-1", "By the river [1][2], see [map](https://example.com) and `arr[0]` [12].");
+    await say(container, "and then?");
+    expect((asks[1]!.history as ChatMessage[])[1]).toEqual({
+      role: "assistant",
+      text: "By the river, see [map](https://example.com) and `arr[0]`.",
+    });
+    // The user's own text is sent as typed; the reply on screen keeps its citations.
+    expect((asks[1]!.history as ChatMessage[])[0]!.text).toBe("Where did we watch herons [x]?");
+    expect(container.querySelectorAll("button.cite").length).toBeGreaterThan(0);
+
+    await reply("s-ask-2", "Home [1].");
+    await click(toggle(container));
+    await say(container, "thanks");
+    const msgs = chats[0]!.messages as ChatMessage[];
+    expect(msgs.filter((m) => m.role === "assistant").map((m) => m.text)).toEqual([
+      "By the river, see [map](https://example.com) and `arr[0]`.",
+      "Home.",
+    ]);
+  });
+
+  it("restores the general-answer note from history", async () => {
+    mockDaemon({
+      chat_history_load: [
+        {
+          id: "c-1",
+          title: "q",
+          updated_at: 1,
+          messages: [
+            { role: "user", text: "q" },
+            { role: "assistant", text: "general", state: "done", general_answer: true },
+          ],
+        },
+      ],
+    });
+    const { container } = await render(<ChatPage />);
+    expect(container.textContent).toContain("so this is a general answer");
   });
 });

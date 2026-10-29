@@ -4,6 +4,11 @@ A **source** is one configured connector: a folder, a vault, a mailbox, a calend
 on the desktop app's **Sources** page. Each one shows its state, item count, last sync and last error,
 and has **Sync now**, **Disable** and **Remove** actions.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/sources-dark.png">
+  <img src="../images/screenshots/sources-light.png" alt="The Sources page with one folder source: its state, item and chunk counts, last sync, and Sync now and Remove actions" loading="lazy">
+</picture>
+
 | Kind | What it indexes | Sign-in | How changes arrive |
 |---|---|---|---|
 | [`files`](sources-files.md) | Folders on this machine | None | Live file-system watcher (about 0.3 s debounce) |
@@ -23,9 +28,10 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`github`](sources-saas.md#github) | Issues, pull requests and discussions involving you | Pasted token, or the device flow | Polled every 10 min, full listing daily |
 | [`linear`](sources-saas.md#linear) | Issues assigned to, created by or followed by you | Pasted API key, or OAuth with PKCE | Polled every 5 min, full listing every 6 h |
 
-**Plugin connectors** (being wired in, wave W) add kinds named `plugin:<plugin id>`, for example
+**Plugin connectors** add kinds named `plugin:<plugin id>`, for example
 `plugin:dev.nugget.example.feeds` for the example feed reader. They are WebAssembly plugins you install
-and approve on the [**Plugins**](plugins.md) page; each one reaches only the hosts it declared, and its
+and approve on the [**Plugins**](plugins.md) page. A new plugin kind is available after Nugget restarts,
+and the Add source wizard does not list plugin kinds yet. Each one reaches only the hosts it declared, and its
 traffic is in the egress ledger under `sync:plugin:<plugin id>`. A plugin connector signs in with
 nothing or with a secret you set, never with OAuth.
 

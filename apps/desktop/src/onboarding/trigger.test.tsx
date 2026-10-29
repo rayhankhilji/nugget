@@ -5,7 +5,8 @@ import { emit } from "@tauri-apps/api/event";
 import type { DoubleTapSettings, DoubleTapStatus, TriggerSpec } from "../api";
 import { byText, cleanup, flush, installDomShims, mockDaemon, render } from "../test/render";
 import { TriggerStep } from "./TriggerStep";
-import { MIGRATED_KEY, readTrigger, TRIGGER_KEY, writeTrigger, type TriggerPref } from "./trigger";
+import { App } from "../App";
+import { MIGRATED_KEY, migrateTriggerOnce, readTrigger, TRIGGER_KEY, writeTrigger, type TriggerPref } from "./trigger";
 
 const recommended: TriggerSpec = { kind: "double_tap", modifier: "right_control", window_ms: 350 };
 
@@ -83,6 +84,55 @@ describe("trigger source of truth", () => {
     expect(await readTrigger("macos")).toEqual({ kind: "double_tap", modifier: "right_command", window_ms: 350 });
     await writeTrigger({ kind: "chord", accelerator: "Alt+Space" });
     expect(await readTrigger("macos")).toEqual({ kind: "chord", accelerator: "Alt+Space" });
+  });
+});
+
+describe("migration at start", () => {
+  it("runs once, before and without the trigger step", async () => {
+    const { state, calls } = shell(settings());
+    local({ kind: "chord", accelerator: "Alt+Space" });
+    await Promise.all([migrateTriggerOnce(), migrateTriggerOnce()]);
+    expect(state.sets.map((s) => s.trigger)).toEqual([{ kind: "chord", chord: "Alt+Space" }]);
+    expect(localStorage.getItem(MIGRATED_KEY)).not.toBeNull();
+    // Done: neither a later start nor onboarding's step migrate again.
+    const before = calls.length;
+    await migrateTriggerOnce();
+    expect(calls.length).toBe(before);
+    expect(await readTrigger("linux")).toEqual({ kind: "chord", accelerator: "Alt+Space" });
+    expect(state.sets).toHaveLength(1);
+  });
+
+  it("onboarding's read waits for a migration already running", async () => {
+    const { state } = shell(settings());
+    local({ kind: "chord", accelerator: "Alt+Space" });
+    const started = migrateTriggerOnce();
+    expect(await readTrigger("linux")).toEqual({ kind: "chord", accelerator: "Alt+Space" });
+    await started;
+    expect(state.sets).toHaveLength(1);
+  });
+
+  it("swallows errors and tries again next time", async () => {
+    mockDaemon({});
+    local({ kind: "chord", accelerator: "Alt+Space" });
+    await expect(migrateTriggerOnce()).resolves.toBeUndefined();
+    expect(localStorage.getItem(MIGRATED_KEY)).toBeNull();
+  });
+
+  it("does nothing outside the app", async () => {
+    delete (window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+    local({ kind: "chord", accelerator: "Alt+Space" });
+    await migrateTriggerOnce();
+    expect(localStorage.getItem(MIGRATED_KEY)).toBeNull();
+  });
+
+  it("the app runs it when it starts and is connected", async () => {
+    const { state } = shell(settings());
+    localStorage.setItem("nugget.onboarding.v1", JSON.stringify({ version: 1, step: "done", completed: [], skipped: [], ai: null, finished: true }));
+    local({ kind: "chord", accelerator: "Alt+Space" });
+    await render(<App />);
+    await flush();
+    expect(state.sets.map((s) => s.trigger)).toEqual([{ kind: "chord", chord: "Alt+Space" }]);
+    expect(localStorage.getItem(MIGRATED_KEY)).not.toBeNull();
   });
 });
 

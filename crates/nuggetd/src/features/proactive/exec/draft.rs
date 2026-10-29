@@ -5,12 +5,18 @@
 //!
 //! The voice is the user's profile as the draft feature last saved it ([`SnapshotVoice`], for
 //! the identity in `[draft.voice]`); neutral until one exists.
+//!
+//! The engine runs with the user's Double Tap settings from `[draft]` ([`proactive_config`]):
+//! tier, budget, temperature, timeouts, and the provider mapped to Mail in `app_providers`.
+//! `[draft]` is read once at daemon start (nothing rewrites it at runtime; the desktop's own
+//! per-app providers travel with each Double Tap request instead), so a startup copy is current.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use futures::StreamExt;
+use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     AppInfo, DraftContext, DraftRequest as FieldDraft, FieldInfo, ThreadMessage,
 };
@@ -20,6 +26,7 @@ use nugget_proactive::{DraftRequest, Drafter};
 use nugget_store::Store;
 
 use crate::daemon::blocking;
+use crate::features::draft::draft_config_from_table;
 use crate::features::draft::voice::SnapshotVoice;
 
 /// Longest a proactive draft may take end to end.
@@ -28,15 +35,40 @@ const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
 const MAX_THREAD: usize = 12;
 /// A loaded voice snapshot is read again after this long.
 const VOICE_MAX_AGE: Duration = Duration::from_secs(10 * 60);
+/// `app_providers` keys that name the mail app proactive replies are drafted for (compared
+/// trimmed and case-insensitively): Apple Mail's bundle id and the app's name.
+const MAIL_APP_KEYS: &[&str] = &["com.apple.mail", "mail"];
+
+/// The engine config for proactive drafts: the user's `[draft]` settings, or the defaults (with
+/// a warning) when the table does not parse.
+pub(crate) fn proactive_config(draft: &toml::Table) -> nugget_draft::DraftConfig {
+    draft_config_from_table(draft).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "proactive drafts: invalid [draft], using the defaults");
+        nugget_draft::DraftConfig::default()
+    })
+}
+
+/// The provider the user mapped to Mail in `app_providers`, if any.
+pub(crate) fn mail_provider(config: &nugget_draft::DraftConfig) -> Option<ProviderId> {
+    MAIL_APP_KEYS.iter().find_map(|key| {
+        config
+            .app_providers
+            .iter()
+            .find(|(k, _)| k.trim().eq_ignore_ascii_case(key))
+            .map(|(_, v)| v.clone())
+    })
+}
 
 pub(crate) struct EngineDrafter {
     engine: nugget_draft::Drafter,
     voice: Option<Arc<SnapshotVoice>>,
+    /// The user's provider for Mail, named on every request (the field context has no app id).
+    provider: Option<ProviderId>,
 }
 
 impl EngineDrafter {
-    /// A drafter over `store`, `retriever` and `router`, in the user's voice when `[draft]`
-    /// (`draft`) parses (neutral otherwise, logged).
+    /// A drafter over `store`, `retriever` and `router`, with the user's `[draft]` (`draft`)
+    /// settings and voice when it parses (defaults and a neutral voice otherwise, logged).
     pub(crate) fn new(
         store: Store,
         retriever: nugget_retrieve::Retriever,
@@ -54,14 +86,14 @@ impl EngineDrafter {
             Some(v) => Arc::new(nugget_draft::ProfileVoice::from_arc(v.clone())),
             None => Arc::new(nugget_draft::NoVoice),
         };
-        let engine = nugget_draft::Drafter::new(
-            store,
-            retriever,
-            router,
-            source,
-            nugget_draft::DraftConfig::default(),
-        );
-        Self { engine, voice }
+        let config = proactive_config(draft);
+        let provider = mail_provider(&config);
+        let engine = nugget_draft::Drafter::new(store, retriever, router, source, config);
+        Self {
+            engine,
+            voice,
+            provider,
+        }
     }
 }
 
@@ -113,7 +145,9 @@ impl Drafter for EngineDrafter {
             let _ = blocking(move || Ok(v.load_blocking())).await;
         }
         let run = async {
-            let (_, mut stream) = self.engine.begin(field_request(req)).await?;
+            let mut field = field_request(req);
+            field.provider = self.provider.clone();
+            let (_, mut stream) = self.engine.begin(field).await?;
             let mut text = String::new();
             while let Some(ev) = stream.next().await {
                 match ev? {
@@ -252,6 +286,143 @@ mod tests {
         assert_eq!(text, "Sure, attached.");
         let req = fake.requests.lock().unwrap().pop().unwrap();
         req.system.unwrap_or_default()
+    }
+
+    /// Draft one reply with the `[draft]` table `draft_toml` over fakes `(id, tier)` (a provider
+    /// with no tier is only reachable by name); returns the drafter and the requests per fake.
+    async fn draft_with(
+        draft_toml: &str,
+        fakes: &[(&str, Option<Tier>)],
+    ) -> (EngineDrafter, HashMap<String, Vec<ChatRequest>>) {
+        let fakes: Vec<(Arc<Fake>, Option<Tier>)> = fakes
+            .iter()
+            .map(|(id, tier)| {
+                let fake = Arc::new(Fake {
+                    id: ProviderId::new(*id),
+                    requests: Mutex::new(Vec::new()),
+                });
+                (fake, *tier)
+            })
+            .collect();
+        let mut tiers: HashMap<Tier, Vec<ProviderId>> = HashMap::new();
+        for (f, tier) in &fakes {
+            if let Some(t) = tier {
+                tiers.entry(*t).or_default().push(f.id.clone());
+            }
+        }
+        let router = Arc::new(nugget_infer::Router::new(
+            fakes
+                .iter()
+                .map(|(f, _)| f.clone() as Arc<dyn Provider>)
+                .collect(),
+            tiers,
+        ));
+        let store = Store::open_in_memory().unwrap();
+        let retriever = nugget_retrieve::Retriever::new(
+            store.clone(),
+            None,
+            nugget_retrieve::RetrieveConfig::default(),
+        );
+        let table: toml::Table = toml::from_str(draft_toml).unwrap();
+        let drafter = EngineDrafter::new(store, retriever, router, &table);
+        let text = drafter.draft_reply(&request()).await.unwrap();
+        assert_eq!(text, "Sure, attached.");
+        let requests = fakes
+            .iter()
+            .map(|(f, _)| {
+                let reqs = std::mem::take(&mut *f.requests.lock().unwrap());
+                (f.id.as_str().to_owned(), reqs)
+            })
+            .collect();
+        (drafter, requests)
+    }
+
+    #[test]
+    fn the_proactive_config_is_the_users_draft_settings() {
+        let table: toml::Table = toml::from_str(
+            "tier = \"light\"\nbudget_tokens = 900\ntemperature = 0.2\n\
+             retrieval_timeout_ms = 4000\nvoice_timeout_ms = 900\n\
+             app_providers = { \"Mail\" = \"mailp\" }\n[voice]\nemails = [\"a@b.example\"]",
+        )
+        .unwrap();
+        let c = proactive_config(&table);
+        assert_eq!(c.tier, Tier::Light);
+        assert_eq!(c.budget_tokens, 900);
+        assert_eq!(c.temperature, Some(0.2));
+        assert_eq!(c.retrieval_timeout_ms, 4000);
+        assert_eq!(c.voice_timeout_ms, 900);
+        assert_eq!(mail_provider(&c), Some(ProviderId::new("mailp")));
+
+        // The budget is capped as for Double Tap.
+        let table: toml::Table = toml::from_str("budget_tokens = 999999999").unwrap();
+        assert_eq!(
+            proactive_config(&table).budget_tokens,
+            nugget_draft::MAX_BUDGET_TOKENS
+        );
+    }
+
+    #[test]
+    fn an_invalid_draft_section_falls_back_to_the_defaults() {
+        let table: toml::Table = toml::from_str("tier = \"light\"\nbogus = 1").unwrap();
+        let c = proactive_config(&table);
+        let d = nugget_draft::DraftConfig::default();
+        assert_eq!(c.tier, d.tier);
+        assert_eq!(c.budget_tokens, d.budget_tokens);
+        assert_eq!(c.temperature, d.temperature);
+        assert!(c.app_providers.is_empty());
+        assert_eq!(proactive_config(&toml::Table::new()).tier, d.tier);
+    }
+
+    #[test]
+    fn the_mail_provider_is_found_by_bundle_id_or_name() {
+        let mut c = nugget_draft::DraftConfig::default();
+        assert_eq!(mail_provider(&c), None);
+        c.app_providers
+            .insert("com.tinyspeck.slackmacgap".into(), ProviderId::new("slack"));
+        assert_eq!(mail_provider(&c), None);
+        c.app_providers
+            .insert(" COM.APPLE.MAIL ".into(), ProviderId::new("apple"));
+        assert_eq!(mail_provider(&c), Some(ProviderId::new("apple")));
+    }
+
+    #[tokio::test]
+    async fn drafts_use_the_users_tier_budget_and_temperature() {
+        let (drafter, reqs) = draft_with(
+            "tier = \"light\"\nbudget_tokens = 900\ntemperature = 0.2",
+            &[("syn", Some(Tier::Synthesis)), ("lite", Some(Tier::Light))],
+        )
+        .await;
+        assert!(reqs["syn"].is_empty());
+        assert_eq!(reqs["lite"].len(), 1);
+        assert_eq!(reqs["lite"][0].temperature, Some(0.2));
+        assert_eq!(drafter.engine.config().budget_tokens, 900);
+        assert_eq!(drafter.engine.config().tier, Tier::Light);
+    }
+
+    #[tokio::test]
+    async fn drafts_use_the_provider_mapped_to_mail() {
+        let (_, reqs) = draft_with(
+            "app_providers = { \"Mail\" = \"mailp\" }",
+            &[("syn", Some(Tier::Synthesis)), ("mailp", None)],
+        )
+        .await;
+        assert!(reqs["syn"].is_empty());
+        assert_eq!(reqs["mailp"].len(), 1);
+    }
+
+    #[tokio::test]
+    async fn drafts_use_the_defaults_when_draft_is_invalid() {
+        let (drafter, reqs) = draft_with(
+            "tier = \"light\"\nbogus = 1",
+            &[("syn", Some(Tier::Synthesis)), ("lite", Some(Tier::Light))],
+        )
+        .await;
+        assert_eq!(reqs["syn"].len(), 1);
+        assert!(reqs["lite"].is_empty());
+        assert_eq!(
+            drafter.engine.config().budget_tokens,
+            nugget_draft::DraftConfig::default().budget_tokens
+        );
     }
 
     #[tokio::test]

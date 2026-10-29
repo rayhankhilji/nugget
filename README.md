@@ -48,10 +48,37 @@ details.
 How this compares with Sentient OS, with sources for every claim:
 [docs/compare/sentient-os.md](docs/compare/sentient-os.md).
 
+## Screenshots
+
+The desktop app on a fictional corpus (light or dark follows your system). More in the
+[user guide](docs/book/src/guide/first-run.md); they are regenerated from the real app with
+`pnpm run screenshots` in `apps/desktop`.
+
+<p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/search-dark.png">
+  <img src="docs/book/src/images/screenshots/search-light.png" alt="Search: results for Tidewater budget, each with its passage and source" width="49%">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/chat-dark.png">
+  <img src="docs/book/src/images/screenshots/chat-light.png" alt="Chat: an answer about Tidewater Billing with [1] and [2] citations and the sources it was given" width="49%">
+</picture>
+</p>
+<p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/knowledge-why-dark.png">
+  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Why? to show the quoted calendar event" width="49%">
+</picture>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/today-dark.png">
+  <img src="docs/book/src/images/screenshots/today-light.png" alt="Today: the morning brief and a card suggesting a reply, with the reasons it is shown" width="49%">
+</picture>
+</p>
+
 ## Benchmarks
 
-These numbers come from a release build on a GitHub-hosted Linux runner, with deterministic
-fixtures and seeds. Runs marked "fake model" or "in process" use in-process stand-ins instead of a
+The nightly workflow produces these numbers from a release build on a GitHub-hosted Linux runner, with
+deterministic fixtures and seeds (the line under the table says where the current ones came from). Runs marked "fake model" or "in process" use in-process stand-ins instead of a
 real model, so they measure Nugget's own pipeline, not a frontier model. What each suite and metric
 means: [bench/README.md](bench/README.md).
 

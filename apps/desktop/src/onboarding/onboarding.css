@@ -248,6 +248,27 @@
   list-style: none;
 }
 
+/* Live indexing progress for the sources added during setup. */
+.ob-index {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.ob-index > li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.ob-index-ready {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
 .ob-row-start {
   justify-content: flex-start;
   margin-block: 8px;
@@ -276,12 +297,26 @@
   font-size: 12px;
 }
 
+.sidebar-settings {
+  min-inline-size: 0;
+}
+
+/* Stay inside the sidebar: wrap the label above the picker rather than overflow it. */
 .sidebar-settings .field-inline {
+  display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
+  min-inline-size: 0;
 }
 
 .sidebar-settings select {
-  max-inline-size: 140px;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.sidebar-settings .btn {
+  max-inline-size: 100%;
+  white-space: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {

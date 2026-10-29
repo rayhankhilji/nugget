@@ -6,6 +6,13 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
+It runs two scenarios, each with its own daemon and temp home:
+
+- **pages**: a home with the corpus already indexed; every page is opened and checked.
+- **first-run**: an empty home; the test goes through onboarding like a new user, connects the
+  corpus folder, and times app start to a cited answer on Search. It fails above a budget
+  (2 minutes by default), the promise of "useful search in under two minutes from install".
+
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
 ```
@@ -20,7 +27,7 @@ pnpm run e2e
 ```
 
 It builds the frontend first when `dist/` is missing, and runs `cargo build --locked -p nuggetd`
-(a no-op when up to date) unless `NUGGETD` names a binary. A run takes about 20 s once both are
+(a no-op when up to date) unless `NUGGETD` names a binary. A run takes about 35 s once both are
 built. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
 
 | Variable | Default | Meaning |
@@ -32,8 +39,12 @@ built. Linux and macOS only, because the bridge speaks to the daemon's Unix sock
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
+| `E2E_SCENARIOS` | `pages,first-run` | Which scenarios to run, comma-separated. |
+| `E2E_FIRST_RUN_BUDGET_MS` | 120000 | First run: the most app start to a cited answer may take. |
+| `E2E_FIRST_RUN_NO_CONFIG=1` | off | First run: write no `config.toml` at all (binds MCP HTTP on its fixed port 7319 and starts the local runtime). |
+| `E2E_CHROMIUM` | Playwright's | Path to a Chromium binary to launch instead of Playwright's download. |
 
-## What happens
+## What happens: pages
 
 1. `daemon.mjs` creates a temp home with a fixed `config/config.toml` (local runtime off, MCP HTTP
    off, `[knowledge.me]` set to the corpus owner Robin Ashgrove), starts
@@ -44,7 +55,8 @@ built. Linux and macOS only, because the bridge speaks to the daemon's Unix sock
 2. `bridge.mjs` serves `dist/` on a free localhost port and answers `POST /invoke {cmd, args}` like
    `src-tauri/src/commands.rs`: `knowledge_status` becomes the daemon method `knowledge.status`,
    `{ request }` args are sent as the params, other args are snake-cased. Commands the shell answers
-   itself (connection, pickers, chat history, updates, Double Tap, overlay) return fixed stubs.
+   itself (connection, pickers, chat history, updates, Double Tap, overlay) return fixed stubs
+   (`startBridge({ pickFolders })` sets what the folder picker "chooses"; by default nothing).
    Errors use the shell's `{ kind, message, code }` shape.
 3. `tauri-shim.js` is injected before the app loads; it provides `window.__TAURI_INTERNALS__`
    with an `invoke` that posts to the bridge. Onboarding is marked finished in `localStorage`
@@ -68,12 +80,46 @@ built. Linux and macOS only, because the bridge speaks to the daemon's Unix sock
 UI strings come from `src/i18n/locales/en.json`, so copy changes don't break the test.
 There is no screenshot diffing.
 
+## What happens: first run
+
+`first-run.mjs` starts the clock, starts `nuggetd` on an empty temp home (the only config is
+`[runtime] enabled = false` and `[mcp] http = false`, so CI starts no model runtime and binds no
+fixed port; there is no `[knowledge.me]`, which onboarding doesn't ask for), and opens the app
+without any saved onboarding state. Then, through the real UI:
+
+| Mark | What the test does |
+| --- | --- |
+| `daemon_ready` | the daemon answers on its socket |
+| `app_open` | the window shows onboarding's Welcome step (not preset: nothing is in `localStorage`) |
+| `ai_step` | Continue; "Decide later" on Choose your AI; Continue |
+| `source_added` | "Add a folder" opens the folder form; "Choose folders…" (the bridge's picker returns the corpus folder); "Add folder" |
+| `source_searchable` | the step's live progress goes from indexing to "93 items indexed. Search works now." |
+| `setup_done` | Continue through Permissions and Double Tap; Done offers "Search your sources", which opens Search |
+| `first_results` | "Tidewater Billing vendor contract": a "Tidewater Billing" hit with the answer (Vellum & Thistle) in the top three |
+| `cited_answer` | Ask with context, Find context: numbered citations ([1] …) with source titles, "Tidewater Billing" among them, and the answer in the cited passages |
+
+Checks: the flow completes with no error notes or page errors; `cited_answer` is within
+`E2E_FIRST_RUN_BUDGET_MS` of the clock start; every daemon command the UI called exists.
+`summary.json` has `first_run` with `total_ms`, `from_app_open_ms`, `marks` (ms since the clock
+start), `steps` (ms since the previous mark), the indexing states the user saw, the top titles
+and the citations; the log prints the same breakdown.
+
+No AI is set up: onboarding can't configure a provider by itself (it shows a config snippet to
+paste), and a model's streamed answer needs Tauri events the bridge doesn't deliver. So the
+"cited answer" is the context an answer or a draft is grounded on, not model output. The test
+clicks as fast as the UI allows, so the time is the software's share of the two minutes, not a
+person's reading time.
+
 ## Artifacts
 
 `e2e/artifacts/` (git-ignored; CI uploads it as `desktop-e2e`): a numbered screenshot per page and
-per step (`FAIL-<page>.png` when a page fails), `summary.json` (checks with timings, every command
-that returned an error, console errors per page, the commands the UI called), `daemon-logs/`,
-`nuggetd.out.log` and the rendered `vault-Ada-Wexford.md`.
+per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboarding step),
+`summary.json` (checks with timings, every command that returned an error, console errors per page,
+the commands the UI called, and `first_run`), `daemon-logs/`, `nuggetd.out.log`, the first run's
+`first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`.
+
+`harness.mjs` holds what both scenarios share: settings from the environment, the log, `t(key)`
+for UI strings, `check`, `until`, `shot` and the browser context setup.
 
 ## Adding a check
 
