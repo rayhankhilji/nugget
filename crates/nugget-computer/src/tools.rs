@@ -18,8 +18,7 @@ use serde_json::{Value, json};
 use crate::observe::{self, Probe, Target, find_option, is_choice, precheck, verify_change};
 use crate::render::{has_actionable, header, node_line, render, safe_id, screen_text};
 use crate::risk::{
-    classify_text, click_risk, input_risk, is_secret_field, is_terminal_app, is_terminal_role,
-    keys_risk,
+    classify_text, input_risk, is_secret_field, is_terminal_app, is_terminal_role, keys_risk,
 };
 use crate::state::{Found, Shared, blocking};
 
@@ -861,9 +860,7 @@ impl Tool for ComputerTool {
             Kind::Observe | Kind::Scroll | Kind::WaitFor => RiskClass::Observe,
             Kind::Click => {
                 let (found, _) = self.target(args);
-                let empty = Vec::new();
-                let ctx = found.as_ref().map_or(&empty, |f| &f.context);
-                click_risk(found.as_ref().map(|f| &f.node), ctx, kw)
+                crate::risk::click_risk_found(found.as_ref(), kw)
             }
             Kind::TypeText | Kind::SetValue => {
                 let (found, explicit) = self.target(args);
