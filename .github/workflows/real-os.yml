@@ -255,7 +255,6 @@ jobs:
           name: a11y-macos
           path: ${{ runner.temp }}/a11y-record
           if-no-files-found: ignore
-  # ---- END a11y ----
 
   # ---- hotkey and insert path ----
   # The Double Tap path on a real desktop: nugget-hotkey listeners fed with synthesized key
