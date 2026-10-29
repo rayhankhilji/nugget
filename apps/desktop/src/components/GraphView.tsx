@@ -228,6 +228,7 @@ function CenterPicker({ onPick }: { onPick: (id: string) => void }) {
         <input
           id={inputId}
           type="search"
+          dir="auto"
           placeholder={t("graph.centrePlaceholder")}
           value={text}
           onChange={(e) => {
@@ -262,7 +263,7 @@ function CenterPicker({ onPick }: { onPick: (id: string) => void }) {
                   setText("");
                 }}
               >
-                {r.name} <span className="muted">{kindLabel(r.kind)}</span>
+                <span dir="auto">{r.name}</span> <span className="muted">{kindLabel(r.kind)}</span>
               </button>
             </li>
           ))}
@@ -319,7 +320,9 @@ function GraphList({
             const conns = links.get(n.id) ?? [];
             return (
               <tr key={n.id} aria-current={n.id === selected ? "true" : undefined}>
-                <th scope="row">{n.name}</th>
+                <th scope="row" dir="auto">
+                  {n.name}
+                </th>
                 <td>{kindLabel(n.kind)}</td>
                 <td className="num">{n.id === graph.center ? "–" : n.depth}</td>
                 <td className="small">

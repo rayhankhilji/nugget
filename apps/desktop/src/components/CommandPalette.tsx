@@ -172,6 +172,7 @@ export function CommandPalette({
         <input
           ref={inputRef}
           type="text"
+          dir="auto"
           role="combobox"
           aria-expanded="true"
           aria-controls={listId}
@@ -208,7 +209,7 @@ export function CommandPalette({
           >
             <span className="palette-label">{item.label}</span>
             <span className="palette-meta">
-              {item.hint && <kbd>{item.hint}</kbd>}
+              {item.hint && <kbd dir="ltr">{item.hint}</kbd>}
               <span className="palette-group">{item.group}</span>
             </span>
           </li>

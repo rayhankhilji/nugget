@@ -211,6 +211,7 @@ function EntityBrowser({
         <input
           id="kb-search"
           type="search"
+          dir="auto"
           placeholder={t("knowledge.searchPlaceholder")}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -250,7 +251,7 @@ function EntityBrowser({
             <button type="button" className="entity-row" aria-current={e.id === selected ? "true" : undefined} onClick={() => onSelect(e.id)}>
               <span className="entity-row-name">
                 <span className={`kind-dot kind-${e.kind}`} aria-hidden="true" />
-                {e.name}
+                <span dir="auto">{e.name}</span>
               </span>
               <span className="muted small">
                 {t("knowledge.rowMeta", { kind: kindLabel(e.kind), claims: e.claims, mentions: e.mentions })}
