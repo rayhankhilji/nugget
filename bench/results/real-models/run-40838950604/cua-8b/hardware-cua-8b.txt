@@ -1,0 +1,12 @@
+suite: cua-8b
+runner: GitHub Actions 1000009440 (Linux X64)
+commit: c062fd1b49dd988efc8afcff9ba6ea5e86206c4b
+date: 2026-10-29T08:03:07Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) Platinum 8370C CPU @ 2.80GHz
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      124%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           9           0           5          14
+Swap:              2           0           2

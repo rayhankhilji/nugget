@@ -19,9 +19,6 @@ on:
         description: "Manifest id of the chat model (empty: the smallest)"
         default: ""
         type: string
-  # TEMPORARY: lets the first runs start from the work branch; removed before the final push.
-  push:
-    branches: [y/real-models]
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
@@ -91,7 +88,6 @@ jobs:
           key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
 
       - name: Build the bench
-        if: github.event_name != 'push' || matrix.suite == 'doubletap-threads'  # TEMPORARY
         run: cargo build --release --locked -p nugget-bench
 
       - name: Record hardware
@@ -107,7 +103,6 @@ jobs:
           } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
 
       - name: Run ${{ matrix.suite }}
-        if: github.event_name != 'push' || matrix.suite == 'doubletap-threads'  # TEMPORARY
         run: |
           extra=()
           if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
