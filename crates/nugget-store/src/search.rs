@@ -2,12 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use nugget_core::{Error, Result};
+use nugget_core::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::Store;
 use crate::error::DbExt;
-use crate::items::{embedding_dim, f32_blob, item_ref, validate_embedding};
+use crate::fts;
+use crate::items::item_ref;
 use crate::types::{ChunkId, Hit};
 
 /// Weight of an item's title bm25 score, added to the bm25 score of each of its matching chunks
@@ -25,25 +26,11 @@ const HYBRID_OVERFETCH: usize = 4;
 /// ...but at least this many.
 const HYBRID_MIN_CANDIDATES: usize = 50;
 /// `sqlite-vec` caps `k` for kNN queries.
-const MAX_KNN: usize = 4096;
-/// Most query terms used for full-text search.
-const MAX_QUERY_TERMS: usize = 32;
+pub(crate) const MAX_KNN: usize = 4096;
 /// Snippet length for vector hits (characters).
 const SNIPPET_CHARS: usize = 200;
 
-/// Turn free text into a safe FTS5 query: alphanumeric terms, each quoted (so FTS5 syntax in user
-/// input is inert), OR-ed so bm25 ranks documents matching more terms higher.
-fn fts_query(query: &str) -> Option<String> {
-    let terms: Vec<String> = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .take(MAX_QUERY_TERMS)
-        .map(|t| format!("\"{t}\""))
-        .collect();
-    (!terms.is_empty()).then(|| terms.join(" OR "))
-}
-
-fn excerpt(text: &str) -> String {
+pub(crate) fn excerpt(text: &str) -> String {
     let text = text.trim();
     match text.char_indices().nth(SNIPPET_CHARS) {
         None => text.to_owned(),
@@ -61,94 +48,24 @@ fn excerpt(text: &str) -> String {
 impl Store {
     /// Full-text search over chunks **and item titles**, ranked by bm25 (best first).
     ///
-    /// The query is treated as plain words: punctuation and FTS5 operators are ignored. Words are
-    /// stemmed (Porter) and diacritics folded.
+    /// The query is plain words (OR-ed, so chunks matching more of them rank higher) plus a small
+    /// syntax: `"quoted phrases"`, `word*` prefixes (2+ characters) and `-word` / `-"phrase"`
+    /// exclusions (only alongside a positive term). Anything else, FTS5 operators included, is
+    /// treated as plain text; see the `fts` module for the exact rules. At most 32 words are
+    /// used. Words are stemmed (Porter) and diacritics folded.
     ///
     /// Titles live in their own FTS5 index. A title match adds [`TITLE_WEIGHT`] × its bm25 score
     /// to every matching chunk of that item, and an item whose title matches but none of whose
     /// chunks do is represented by its first chunk (snippet: the chunk's opening text). Items
     /// without chunks cannot be returned (a hit is a chunk).
     pub fn search_text(&self, query: &str, limit: usize) -> Result<Vec<Hit>> {
-        let Some(q) = fts_query(query) else {
+        let Some(q) = fts::match_expr(query) else {
             return Ok(Vec::new());
         };
         if limit == 0 {
             return Ok(Vec::new());
         }
-        self.with_conn(|c| text_hits(c, &q, limit))
-    }
-
-    /// k-nearest-neighbour search by cosine distance (best first; `score` is cosine similarity).
-    ///
-    /// Returns `Error::Invalid` if the query's dimension differs from the store's. An empty result
-    /// is returned while no embeddings have been stored.
-    pub fn search_vector(&self, embedding: &[f32], limit: usize) -> Result<Vec<Hit>> {
-        validate_embedding(embedding).map_err(Error::Invalid)?;
-        self.with_conn(|c| {
-            let Some(dim) = embedding_dim(c)? else {
-                return Ok(Vec::new());
-            };
-            if dim != embedding.len() {
-                return Err(Error::Invalid(format!(
-                    "query embedding dimension {} does not match this store's dimension {dim}",
-                    embedding.len()
-                )));
-            }
-            let k = limit.min(MAX_KNN);
-            if k == 0 {
-                return Ok(Vec::new());
-            }
-            // vec0 kNN queries must stand alone (no joins or extra ORDER BY), so fetch the
-            // neighbours first, then their chunk and item rows.
-            let neighbours: Vec<(ChunkId, f64)> = {
-                let mut knn = c
-                    .prepare_cached(
-                        "SELECT rowid, distance FROM chunk_vec
-                         WHERE embedding MATCH ?1 AND k = ?2
-                         ORDER BY distance",
-                    )
-                    .db("prepare vector search")?;
-                let rows = knn
-                    .query_map(params![f32_blob(embedding), k as i64], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
-                    .db("vector search")?;
-                rows.collect::<rusqlite::Result<_>>().db("vector search")?
-            };
-            let mut details = c
-                .prepare_cached(
-                    "SELECT i.source, i.key, i.title, ch.text
-                     FROM chunks ch JOIN items i ON i.id = ch.item_id
-                     WHERE ch.id = ?1",
-                )
-                .db("prepare chunk lookup")?;
-            let mut hits = Vec::with_capacity(neighbours.len());
-            for (chunk_id, distance) in neighbours {
-                let hit = details
-                    .query_row([chunk_id], |r| {
-                        let text: String = r.get(3)?;
-                        Ok(Hit {
-                            chunk_id,
-                            item: item_ref(r.get(0)?, r.get(1)?),
-                            title: r.get(2)?,
-                            snippet: excerpt(&text),
-                            score: (1.0 - distance) as f32,
-                        })
-                    })
-                    .optional()
-                    .db("chunk lookup")?;
-                // A vector without a chunk cannot happen (the delete trigger removes both), but
-                // skipping it is the safe reading if it ever does.
-                hits.extend(hit);
-            }
-            // Equal distances: order by chunk id for determinism.
-            hits.sort_by(|a, b| {
-                b.score
-                    .total_cmp(&a.score)
-                    .then(a.chunk_id.cmp(&b.chunk_id))
-            });
-            Ok(hits)
-        })
+        self.with_read_conn(|c| text_hits(c, &q, limit))
     }
 
     /// Hybrid search: full-text and (if an embedding is given) vector results fused with
@@ -197,33 +114,65 @@ impl Store {
     }
 }
 
+/// Chunk leg of text search: `?1` an FTS5 query, `?2` the limit.
+///
+/// Ranking happens on the FTS table alone and only the top `?2` rows are joined, so the cost of
+/// the join (and of the snippet, taken separately by [`SNIPPET_SQL`]) does not grow with the
+/// number of matching chunks. Computing `snippet()` in the ranked query made SQLite build a
+/// snippet for every match before sorting: 415 ms p50 per query at 100k chunks.
+pub(crate) const TEXT_SEARCH_SQL: &str = "
+    WITH top AS (
+        SELECT rowid AS id, bm25(chunks_fts) AS rank
+        FROM chunks_fts
+        WHERE chunks_fts MATCH ?1
+        ORDER BY bm25(chunks_fts), rowid
+        LIMIT ?2
+    )
+    SELECT ch.id, ch.item_id, i.source, i.key, i.title, top.rank
+    FROM top
+    JOIN chunks ch ON ch.id = top.id
+    JOIN items i ON i.id = ch.item_id
+    ORDER BY top.rank, ch.id";
+
+/// Snippet of one matching chunk: `?1` the FTS5 query, `?2` the chunk id.
+pub(crate) const SNIPPET_SQL: &str = "
+    SELECT snippet(chunks_fts, 0, '', '', '…', 24)
+    FROM chunks_fts
+    WHERE chunks_fts MATCH ?1 AND rowid = ?2";
+
+/// Title leg of text search: `?1` an FTS5 query, `?2` the limit.
+pub(crate) const TITLE_SEARCH_SQL: &str = "
+    SELECT rowid, bm25(items_fts) FROM items_fts
+    WHERE items_fts MATCH ?1
+    ORDER BY bm25(items_fts), rowid
+    LIMIT ?2";
+
+/// An item's first chunk (`?1` the item id), standing in for an item matched by title only.
+pub(crate) const FIRST_CHUNK_SQL: &str = "
+    SELECT ch.id, i.source, i.key, i.title, ch.text
+    FROM chunks ch JOIN items i ON i.id = ch.item_id
+    WHERE ch.item_id = ?1
+    ORDER BY ch.ord
+    LIMIT 1";
+
 /// Chunk and title full-text legs, fused (see [`Store::search_text`]). `q` is an FTS5 query
-/// from [`fts_query`].
+/// from [`fts::match_expr`].
 fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
     let lim = limit.min(i64::MAX as usize) as i64;
     let mut hits: Vec<(i64, Hit)> = {
         let mut stmt = c
-            .prepare_cached(
-                "SELECT ch.id, ch.item_id, i.source, i.key, i.title,
-                        snippet(chunks_fts, 0, '', '', '…', 24), bm25(chunks_fts)
-                 FROM chunks_fts
-                 JOIN chunks ch ON ch.id = chunks_fts.rowid
-                 JOIN items i ON i.id = ch.item_id
-                 WHERE chunks_fts MATCH ?1
-                 ORDER BY bm25(chunks_fts), ch.id
-                 LIMIT ?2",
-            )
+            .prepare_cached(TEXT_SEARCH_SQL)
             .db("prepare text search")?;
         let rows = stmt
             .query_map(params![q, lim], |r| {
-                let rank: f64 = r.get(6)?;
+                let rank: f64 = r.get(5)?;
                 Ok((
                     r.get::<_, i64>(1)?,
                     Hit {
                         chunk_id: r.get(0)?,
                         item: item_ref(r.get(2)?, r.get(3)?),
                         title: r.get(4)?,
-                        snippet: r.get(5)?,
+                        snippet: String::new(),
                         score: -rank as f32,
                     },
                 ))
@@ -231,16 +180,21 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
             .db("text search")?;
         rows.collect::<rusqlite::Result<_>>().db("text search")?
     };
+    if !hits.is_empty() {
+        let mut snip = c.prepare_cached(SNIPPET_SQL).db("prepare snippet")?;
+        for (_, hit) in &mut hits {
+            hit.snippet = snip
+                .query_row(params![q, hit.chunk_id], |r| r.get(0))
+                .optional()
+                .db("snippet")?
+                .unwrap_or_default();
+        }
+    }
 
     // Title leg: item id → weighted title score.
     let titles: Vec<(i64, f64)> = {
         let mut stmt = c
-            .prepare_cached(
-                "SELECT rowid, bm25(items_fts) FROM items_fts
-                 WHERE items_fts MATCH ?1
-                 ORDER BY bm25(items_fts), rowid
-                 LIMIT ?2",
-            )
+            .prepare_cached(TITLE_SEARCH_SQL)
             .db("prepare title search")?;
         let rows = stmt
             .query_map(params![q, lim], |r| {
@@ -261,13 +215,7 @@ fn text_hits(c: &Connection, q: &str, limit: usize) -> Result<Vec<Hit>> {
         }
     }
     let mut first_chunk = c
-        .prepare_cached(
-            "SELECT ch.id, i.source, i.key, i.title, ch.text
-             FROM chunks ch JOIN items i ON i.id = ch.item_id
-             WHERE ch.item_id = ?1
-             ORDER BY ch.ord
-             LIMIT 1",
-        )
+        .prepare_cached(FIRST_CHUNK_SQL)
         .db("prepare first chunk lookup")?;
     for (item_id, t) in titles {
         if with_chunk_hits.contains(&item_id) {
@@ -325,17 +273,6 @@ fn rrf_fuse<const N: usize>(lists: [Vec<Hit>; N], limit: usize) -> Vec<Hit> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn fts_query_neutralises_syntax() {
-        assert_eq!(fts_query("  "), None);
-        assert_eq!(fts_query("\"(*)-^"), None);
-        assert_eq!(
-            fts_query("rust AND \"tokio\" NEAR(x"),
-            Some("\"rust\" OR \"AND\" OR \"tokio\" OR \"NEAR\" OR \"x\"".into())
-        );
-        assert_eq!(fts_query("café über"), Some("\"café\" OR \"über\"".into()));
-    }
 
     #[test]
     fn excerpt_truncates_on_char_and_word_boundaries() {

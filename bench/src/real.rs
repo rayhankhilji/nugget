@@ -1193,7 +1193,7 @@ fn missing(id: usize) -> BenchError {
 // ---------------------------------------------------------------- resources
 
 /// Main database file plus its WAL and shared-memory files.
-fn db_bytes(path: &Path) -> u64 {
+pub(crate) fn db_bytes(path: &Path) -> u64 {
     let mut total = 0;
     for suffix in ["", "-wal", "-shm"] {
         let mut p = path.as_os_str().to_owned();

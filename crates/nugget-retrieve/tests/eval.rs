@@ -2,18 +2,22 @@
 //!
 //! Run with `--nocapture` to see the report table.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use nugget_core::capability::{Capabilities, Tier};
 use nugget_infer::{Provider, Router};
 use nugget_retrieve::eval::{self, EvalMode, EvalSet, HashEmbedder};
-use nugget_retrieve::{RetrieveConfig, Retriever};
+use nugget_retrieve::{RetrieveConfig, Retriever, SearchOptions, Strategy};
 use nugget_store::Store;
 
 const DIM: usize = 384;
 
 async fn setup(with_embedder: bool) -> (Store, Retriever, EvalSet) {
+    setup_with(with_embedder, RetrieveConfig::default()).await
+}
+
+async fn setup_with(with_embedder: bool, config: RetrieveConfig) -> (Store, Retriever, EvalSet) {
     let set = EvalSet::builtin().unwrap();
     let store = Store::open_in_memory().unwrap();
     let emb = Arc::new(HashEmbedder::new(DIM, &set.synonyms));
@@ -38,7 +42,7 @@ async fn setup(with_embedder: bool) -> (Store, Retriever, EvalSet) {
     )
     .await
     .unwrap();
-    let retriever = Retriever::new(store.clone(), router, RetrieveConfig::default());
+    let retriever = Retriever::new(store.clone(), router, config);
     (store, retriever, set)
 }
 
@@ -139,4 +143,97 @@ fn fixture_directory_loads() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eval");
     let set = EvalSet::load_dir(&dir).unwrap();
     assert_eq!(set.docs, EvalSet::builtin().unwrap().docs);
+}
+
+/// Intra-list similarity: mean pairwise token-set Jaccard of the top `k` documents' texts
+/// (lower is more diverse).
+fn intra_list_similarity(set: &EvalSet, ranked: &[String], k: usize) -> f64 {
+    use nugget_retrieve::rank::{jaccard, token_set};
+    let texts: HashMap<&str, &str> = set
+        .docs
+        .iter()
+        .map(|d| (d.id.as_str(), d.text.as_str()))
+        .collect();
+    let sets: Vec<_> = ranked
+        .iter()
+        .take(k)
+        .filter_map(|id| texts.get(id.as_str()))
+        .map(|t| token_set(t))
+        .collect();
+    let mut sum = 0.0;
+    let mut n = 0usize;
+    for i in 0..sets.len() {
+        for j in i + 1..sets.len() {
+            sum += f64::from(jaccard(&sets[i], &sets[j]));
+            n += 1;
+        }
+    }
+    if n == 0 { 0.0 } else { sum / n as f64 }
+}
+
+/// Mean (R@1, R@5, R@10, MRR@10, nDCG@10, ILS@5) over the set's queries, MMR on.
+async fn sweep_point(retriever: &Retriever, set: &EvalSet, strategy: Strategy) -> [f64; 6] {
+    let mut acc = [0.0f64; 6];
+    for q in &set.queries {
+        let opts = SearchOptions {
+            strategy,
+            mmr: Some(true),
+        };
+        let res = retriever
+            .search_with(&q.query, eval::EVAL_DEPTH, opts)
+            .await
+            .unwrap();
+        let ranked: Vec<String> = res
+            .items
+            .iter()
+            .map(|r| r.item.key.as_str().to_owned())
+            .collect();
+        let rel: HashSet<&str> = q.relevant.iter().map(String::as_str).collect();
+        acc[0] += eval::recall_at(&ranked, &rel, 1);
+        acc[1] += eval::recall_at(&ranked, &rel, 5);
+        acc[2] += eval::recall_at(&ranked, &rel, 10);
+        acc[3] += eval::mrr_at(&ranked, &rel, 10);
+        acc[4] += eval::ndcg_at(&ranked, &rel, 10);
+        acc[5] += intra_list_similarity(set, &ranked, 5);
+    }
+    acc.map(|x| x / set.queries.len() as f64)
+}
+
+/// Sweep `mmr_lambda` × `mmr_pool_factor` on the fixture set, with vector MMR (hybrid) and
+/// lexical MMR (text-only), and print a table; `RetrieveConfig`'s MMR defaults come from it.
+/// `cargo test -p nugget-retrieve --test eval -- --ignored --nocapture mmr_sweep`
+#[tokio::test]
+#[ignore = "parameter sweep; run by hand when tuning MMR"]
+async fn mmr_sweep() {
+    let now = time::OffsetDateTime::parse(
+        "2026-10-28T00:00:00Z",
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap();
+    for (label, strategy) in [
+        ("hybrid (vector MMR)", Strategy::Auto),
+        ("text-only (lexical MMR)", Strategy::TextOnly),
+    ] {
+        println!("\n{label}");
+        println!(
+            "{:>6} {:>4} {:>6} {:>6} {:>6} {:>7} {:>8} {:>6}",
+            "lambda", "pool", "R@1", "R@5", "R@10", "MRR@10", "nDCG@10", "ILS@5"
+        );
+        for lambda in [0.5f32, 0.6, 0.7, 0.8, 0.9, 1.0] {
+            for pool in 2..=5usize {
+                let cfg = RetrieveConfig {
+                    mmr_lambda: lambda,
+                    mmr_pool_factor: pool,
+                    ..RetrieveConfig::default()
+                };
+                let (_store, r, set) = setup_with(true, cfg).await;
+                let r = r.with_reference_time(now);
+                let m = sweep_point(&r, &set, strategy).await;
+                println!(
+                    "{lambda:>6.1} {pool:>4} {:>6.3} {:>6.3} {:>6.3} {:>7.3} {:>8.3} {:>6.3}",
+                    m[0], m[1], m[2], m[3], m[4], m[5]
+                );
+            }
+        }
+    }
 }

@@ -28,8 +28,21 @@ pub struct RetrieveConfig {
     /// Re-rank with maximal marginal relevance (MMR) for diversity.
     pub mmr: bool,
     /// MMR trade-off: 1.0 is pure relevance, 0.0 pure novelty.
+    ///
+    /// 0.7, kept after the sweep in `tests/eval.rs` (`mmr_sweep`: λ 0.5–1.0 × pool factor 2–5
+    /// on the 57-doc / 42-query fixture set; diversity as ILS@5, the mean pairwise token Jaccard
+    /// of the top 5, lower is more diverse). At 0.7: vector MMR R@1 0.583, R@5 0.881, R@10
+    /// 0.976, MRR@10 0.777, nDCG@10 0.822, ILS@5 0.021; lexical MMR 0.500 / 0.798 / 0.881 /
+    /// 0.677 / 0.724, ILS@5 0.024. No λ wins clearly: 0.5 is best for vector MMR (R@5 0.917,
+    /// MRR@10 0.789, nDCG@10 0.831) and 0.9 for lexical (R@5 0.833, MRR@10 0.679, nDCG@10
+    /// 0.727), each about one query of 42 and none moving R@1, R@10 or ILS@5. 0.9 is slightly
+    /// ahead in both, but it stops demoting exact duplicates below a clearly relevant distinct
+    /// passage (`mmr_demotes_near_duplicates_lexically`), which binary-labelled fixtures with
+    /// few multi-document queries cannot reward. So the gain is noise-sized and the cost real.
     pub mmr_lambda: f32,
     /// How many top items MMR chooses from, as a multiple of the requested result count.
+    /// The sweep showed no effect between 2 and 5 on the fixture set (identical metrics), so the
+    /// default stays at 3.
     pub mmr_pool_factor: usize,
     /// Upper bound on the MMR pool size (items).
     pub mmr_pool_max: usize,
@@ -54,6 +67,32 @@ pub struct RetrieveConfig {
     /// A passage that does not fit whole is cut to fit, but only if at least this many tokens
     /// of it remain; otherwise it is skipped.
     pub min_truncated_tokens: usize,
+    /// With a reranker ([`Retriever::with_reranker`](crate::Retriever::with_reranker)), how many
+    /// of the top grouped candidates it scores, before MMR. Candidates below the pool keep their
+    /// order after the reranked ones.
+    pub rerank_pool: usize,
+    /// How much the reranker decides: an item's relevance becomes
+    /// `w × rerank + (1 − w) × first_stage` (both scaled so the best is 1). `1.0` replaces the
+    /// first-stage score; the default keeps a little of it so a weak cross-encoder cannot bury
+    /// an exact keyword match on its own.
+    pub rerank_weight: f32,
+    /// Give up on the reranker after this long and keep the first-stage order.
+    pub rerank_timeout_ms: u64,
+    /// Parse date phrases ("last week", "in march") out of queries and keep results modified in
+    /// that range (see [`crate::dates`]).
+    pub dates: bool,
+    /// UTC offset, in minutes, at which days start for date phrases. `0` (UTC) by default: the
+    /// daemon has no reliable notion of the user's time zone. Clamped to ±18 hours.
+    pub date_utc_offset_minutes: i32,
+    /// Rewrite follow-up queries ("what about the second one?") into standalone ones in
+    /// [`Retriever::search_in_conversation`](crate::Retriever::search_in_conversation).
+    pub rewrite_followups: bool,
+    /// Give up on the rewriting model after this long and search the original query.
+    pub rewrite_timeout_ms: u64,
+    /// Longest accepted rewritten query (characters); longer output is cut at a word boundary.
+    pub rewrite_max_chars: usize,
+    /// Most recent conversation turns shown to the rewriting model.
+    pub rewrite_history_turns: usize,
 }
 
 impl Default for RetrieveConfig {
@@ -77,6 +116,15 @@ impl Default for RetrieveConfig {
             expand_neighbours: true,
             include_secondary_matches: true,
             min_truncated_tokens: 24,
+            rerank_pool: 30,
+            rerank_weight: 0.7,
+            rerank_timeout_ms: 2_500,
+            dates: true,
+            date_utc_offset_minutes: 0,
+            rewrite_followups: true,
+            rewrite_timeout_ms: 3_000,
+            rewrite_max_chars: 200,
+            rewrite_history_turns: 6,
         }
     }
 }

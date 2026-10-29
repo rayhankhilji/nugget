@@ -6,6 +6,7 @@ pub mod knowledge;
 pub mod memory;
 pub mod perf;
 pub mod proactive;
+pub mod scale;
 
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 

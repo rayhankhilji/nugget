@@ -1,23 +1,32 @@
-//! The [`Retriever`]: query embedding, over-fetched search, grouping, MMR and packing.
+//! The [`Retriever`]: query embedding, over-fetched search, grouping, reranking, MMR and
+//! packing.
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
+use std::time::Duration;
 
-use nugget_core::ipc::ContextResponse;
+use nugget_core::capability::{Capabilities, Locality, Tier};
+use nugget_core::ipc::{ChatMessage, ContextResponse};
 use nugget_core::{Error, Result};
-use nugget_infer::{Provider, Router};
+use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router};
 use nugget_store::{Chunk, ChunkId, Item, Store};
-use time::OffsetDateTime;
+use time::{OffsetDateTime, UtcOffset};
 
 use crate::config::RetrieveConfig;
+use crate::dates::{DateRange, parse_date_query};
 use crate::embed::{embed_first, embedding_candidates, validate_vectors};
 use crate::pack::{PackItem, PackOptions, pack};
 use crate::rank::{
     Candidate, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query, token_set,
 };
+use crate::rerank::{Reranker, normalise_scores};
+use crate::rewrite::{
+    FEATURE_REWRITE, QueryRewrite, RewriteMethod, clean_reply, heuristic_rewrite,
+    looks_like_followup, system_prompt, user_prompt,
+};
 use crate::types::{
-    ContextOptions, PackedContext, RetrievalMode, RetrievedItem, SearchOptions, SearchResults,
-    Similarity, Strategy, TextOnlyReason,
+    ContextOptions, DateFilter, PackedContext, RetrievalMode, RetrievedItem, SearchOptions,
+    SearchResults, Similarity, Strategy, TextOnlyReason,
 };
 
 /// Longest accepted `url` metadata value.
@@ -36,12 +45,17 @@ pub struct Retriever {
     router: Option<Arc<Router>>,
     config: RetrieveConfig,
     now: Option<OffsetDateTime>,
+    reranker: Option<Arc<dyn Reranker>>,
 }
 
 impl std::fmt::Debug for Retriever {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Retriever")
             .field("has_router", &self.router.is_some())
+            .field(
+                "reranker",
+                &self.reranker.as_ref().map(|r| r.name().to_owned()),
+            )
             .field("config", &self.config)
             .finish_non_exhaustive()
     }
@@ -59,7 +73,14 @@ struct Ranking {
     mode: RetrievalMode,
     similarity: Similarity,
     items: Vec<Ranked>,
+    reranked: bool,
+    date: Option<DateFilter>,
 }
+
+/// Terms of the last user turn appended by the heuristic rewrite.
+const HEURISTIC_TERMS: usize = 6;
+/// Output cap for the rewriting model (a query is short).
+const REWRITE_MAX_TOKENS: u32 = 96;
 
 impl Retriever {
     pub fn new(store: Store, router: Option<Arc<Router>>, config: RetrieveConfig) -> Self {
@@ -68,10 +89,18 @@ impl Retriever {
             router,
             config,
             now: None,
+            reranker: None,
         }
     }
 
-    /// Fix "now" for the recency boost (tests, evaluation). Defaults to the system clock.
+    /// Rerank the top candidates with `reranker` (see [`crate::rerank`]).
+    pub fn with_reranker(mut self, reranker: Arc<dyn Reranker>) -> Self {
+        self.reranker = Some(reranker);
+        self
+    }
+
+    /// Fix "now" for the recency boost and date phrases (tests, evaluation). Defaults to the
+    /// system clock.
     pub fn with_reference_time(mut self, now: OffsetDateTime) -> Self {
         self.now = Some(now);
         self
@@ -117,7 +146,113 @@ impl Retriever {
             mode: ranking.mode,
             similarity: ranking.similarity,
             items,
+            reranked: ranking.reranked,
+            date: ranking.date,
+            rewrite: None,
         })
+    }
+
+    /// [`search`](Self::search) for the latest message of a conversation: a follow-up such as
+    /// "what about the second one?" is first rewritten into a standalone query with
+    /// [`rewrite_query`](Self::rewrite_query). [`SearchResults::rewrite`] says what was searched.
+    pub async fn search_in_conversation(
+        &self,
+        history: &[ChatMessage],
+        query: &str,
+        limit: usize,
+    ) -> Result<SearchResults> {
+        let rewrite = self.rewrite_query(history, query).await;
+        let mut res = self.search(&rewrite.query, limit).await?;
+        res.rewrite = Some(rewrite);
+        Ok(res)
+    }
+
+    /// The standalone form of `query` given the conversation so far (see [`crate::rewrite`]).
+    /// Never fails: anything that goes wrong keeps the original query.
+    pub async fn rewrite_query(&self, history: &[ChatMessage], query: &str) -> QueryRewrite {
+        if !self.config.rewrite_followups
+            || !history
+                .iter()
+                .any(|m| m.role != nugget_core::ipc::Role::System)
+            || !looks_like_followup(query)
+        {
+            return QueryRewrite::unchanged(query);
+        }
+        let providers = self.rewrite_candidates();
+        let Some(p) = providers.first() else {
+            return match heuristic_rewrite(history, query, HEURISTIC_TERMS) {
+                Some(q) => QueryRewrite {
+                    query: q,
+                    method: RewriteMethod::Heuristic,
+                },
+                None => QueryRewrite::unchanged(query),
+            };
+        };
+        let max_chars = self.config.rewrite_max_chars.max(16);
+        let mut req = ChatRequest::new(vec![Message::user_text(user_prompt(
+            history,
+            query,
+            self.config.rewrite_history_turns,
+        ))])
+        .with_system(system_prompt(max_chars))
+        .with_max_tokens(REWRITE_MAX_TOKENS)
+        .with_feature(FEATURE_REWRITE);
+        req.temperature = Some(0.0);
+        let timeout = Duration::from_millis(self.config.rewrite_timeout_ms.max(1));
+        let reply = tokio::time::timeout(timeout, async {
+            ChatResponse::collect(p.chat(req).await?).await
+        })
+        .await;
+        let router = self.router.as_ref();
+        match reply {
+            Ok(Ok(r)) => {
+                if let Some(router) = router {
+                    router.report_success(p.id());
+                }
+                match clean_reply(&r.text(), max_chars) {
+                    Some(q) => QueryRewrite {
+                        query: q,
+                        method: RewriteMethod::Model {
+                            provider: p.id().clone(),
+                        },
+                    },
+                    None => {
+                        tracing::warn!(provider = %p.id(), "unusable query rewrite; searching the original query");
+                        QueryRewrite::unchanged(query)
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(provider = %p.id(), error = %e, "query rewrite failed; searching the original query");
+                if let Some(router) = router
+                    && !matches!(e, Error::Invalid(_) | Error::Cancelled)
+                {
+                    router.report_failure(p.id());
+                }
+                QueryRewrite::unchanged(query)
+            }
+            Err(_) => {
+                tracing::warn!(provider = %p.id(), "query rewrite timed out; searching the original query");
+                QueryRewrite::unchanged(query)
+            }
+        }
+    }
+
+    /// Local chat providers for rewriting, best first: the `Light`, then `Triage`, then
+    /// `Synthesis` tier, without `Cloud`-locality providers.
+    fn rewrite_candidates(&self) -> Vec<Arc<dyn Provider>> {
+        let Some(router) = &self.router else {
+            return Vec::new();
+        };
+        let mut out: Vec<Arc<dyn Provider>> = Vec::new();
+        for tier in [Tier::Light, Tier::Triage, Tier::Synthesis] {
+            for p in router.candidates(tier, &Capabilities::default()) {
+                if p.meta().locality != Locality::Cloud && !out.iter().any(|q| q.id() == p.id()) {
+                    out.push(p);
+                }
+            }
+        }
+        out
     }
 
     /// Pack the most relevant, diverse passages for `query` into at most `budget_tokens`
@@ -200,12 +335,56 @@ impl Retriever {
             similarity: ranking.similarity,
             tokens,
             passages,
+            reranked: ranking.reranked,
+            date: ranking.date,
         })
     }
 
     // ---- pipeline ----
 
+    fn now(&self) -> OffsetDateTime {
+        self.now.unwrap_or_else(OffsetDateTime::now_utc)
+    }
+
+    /// Rank with any date phrase handled: search the query without the phrase and keep items
+    /// modified in its range; if none match, search the original query unfiltered.
     async fn rank(&self, query: &str, limit: usize, opts: SearchOptions) -> Result<Ranking> {
+        let parsed = if self.config.dates && limit > 0 {
+            let minutes = self.config.date_utc_offset_minutes.clamp(-18 * 60, 18 * 60);
+            let offset = UtcOffset::from_whole_seconds(minutes * 60).unwrap_or(UtcOffset::UTC);
+            parse_date_query(query, self.now(), offset)
+        } else {
+            None
+        };
+        let Some(dq) = parsed else {
+            return self.rank_in(query, limit, opts, None).await;
+        };
+        // A query that is only a date has nothing else to search for.
+        let searched = if dq.cleaned.chars().any(char::is_alphanumeric) {
+            dq.cleaned.as_str()
+        } else {
+            query
+        };
+        let mut ranking = self.rank_in(searched, limit, opts, Some(dq.range)).await?;
+        let applied = !ranking.items.is_empty();
+        if !applied {
+            ranking = self.rank_in(query, limit, opts, None).await?;
+        }
+        ranking.date = Some(DateFilter {
+            phrase: dq.phrase,
+            range: dq.range,
+            applied,
+        });
+        Ok(ranking)
+    }
+
+    async fn rank_in(
+        &self,
+        query: &str,
+        limit: usize,
+        opts: SearchOptions,
+        range: Option<DateRange>,
+    ) -> Result<Ranking> {
         let mmr_on = opts.mmr.unwrap_or(self.config.mmr);
         if limit == 0 || !query.chars().any(char::is_alphanumeric) {
             return Ok(Ranking {
@@ -214,6 +393,8 @@ impl Retriever {
                 },
                 similarity: Similarity::None,
                 items: Vec::new(),
+                reranked: false,
+                date: None,
             });
         }
 
@@ -224,11 +405,15 @@ impl Retriever {
         };
 
         // 2. Over-fetched candidate chunks.
-        let n = limit
+        let mut n = limit
             .saturating_mul(self.config.overfetch.max(1))
             .max(self.config.min_candidates)
             .min(self.config.max_candidates.max(1))
             .max(limit);
+        if range.is_some() {
+            // The date filter drops candidates: start from as many as allowed.
+            n = n.max(self.config.max_candidates);
+        }
         // Each list's contribution to rank fusion is tied to what was asked for (see
         // `RetrieveConfig::fusion_depth_factor`), not to the over-fetched candidate count.
         let fusion_depth = limit
@@ -287,7 +472,7 @@ impl Retriever {
         // 3. Group by item.
         let mut cands = group_by_item(hits, self.config.max_matches_per_item);
 
-        // 4. The pool MMR chooses from (just the top `limit` without MMR).
+        // 4. The pool MMR chooses from (just the top `limit` without MMR), and the reranker's.
         let pool_len = if mmr_on {
             limit
                 .saturating_mul(self.config.mmr_pool_factor.max(1))
@@ -295,12 +480,41 @@ impl Retriever {
         } else {
             limit
         };
-        cands.truncate(pool_len);
-        let items_meta = self.load_items(&cands)?;
+        let rerank_len = if self.reranker.is_some() {
+            self.config.rerank_pool
+        } else {
+            0
+        };
+        let keep = pool_len.max(rerank_len);
+        let (mut cands, items_meta) = match range {
+            // Date filter: by source modification time, else the store's update time.
+            Some(range) => {
+                let metas = self.load_items(&cands)?;
+                cands
+                    .into_iter()
+                    .zip(metas)
+                    .filter(|(_, m)| {
+                        m.as_ref().is_some_and(|i| {
+                            range.contains(i.source_modified_at.unwrap_or(i.updated_at))
+                        })
+                    })
+                    .take(keep)
+                    .unzip()
+            }
+            None => {
+                cands.truncate(keep);
+                let metas = self.load_items(&cands)?;
+                (cands, metas)
+            }
+        };
+        if range.is_some() {
+            // Relevance is relative to the best candidate that is left.
+            crate::rank::normalise(&mut cands);
+        }
 
         // 5. Recency boost.
         if let Some(boost) = self.config.recency {
-            let now = self.now.unwrap_or_else(OffsetDateTime::now_utc);
+            let now = self.now();
             for (c, meta) in cands.iter_mut().zip(&items_meta) {
                 if let Some(item) = meta {
                     let at = item.source_modified_at.unwrap_or(item.updated_at);
@@ -330,7 +544,17 @@ impl Retriever {
             pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
         }
 
-        // 6. Diversify.
+        // 6. Rerank the head of the list.
+        let reranked = match &self.reranker {
+            Some(reranker) if rerank_len > 0 && !pool.is_empty() => {
+                self.rerank(reranker.as_ref(), query, &mut pool, rerank_len)
+                    .await?
+            }
+            _ => false,
+        };
+        pool.truncate(pool_len);
+
+        // 7. Diversify.
         let (order, similarity) = if mmr_on && pool.len() > 1 {
             self.diversify(&pool, limit, provider.as_ref()).await?
         } else {
@@ -342,7 +566,82 @@ impl Retriever {
             mode,
             similarity,
             items,
+            reranked,
+            date: None,
         })
+    }
+
+    /// Score the first `n` of `pool` with `reranker` and blend the scores into their relevance
+    /// ([`RetrieveConfig::rerank_weight`]); the rest count as scored 0, so they stay behind the
+    /// reranked candidates that the first stage also preferred. Re-sorts `pool` (stable) and
+    /// returns whether reranking was applied. Any reranker error, a bad response or a timeout
+    /// leaves `pool` as it was.
+    async fn rerank(
+        &self,
+        reranker: &dyn Reranker,
+        query: &str,
+        pool: &mut [Ranked],
+        n: usize,
+    ) -> Result<bool> {
+        let n = n.min(pool.len());
+        let ids: Vec<ChunkId> = pool[..n].iter().map(|r| r.cand.chunk_id).collect();
+        let chunks = self.chunks_by_id(&ids)?;
+        let passages: Vec<String> = pool[..n]
+            .iter()
+            .map(|r| {
+                let text = chunks
+                    .get(&r.cand.chunk_id)
+                    .map_or(r.cand.snippet.as_str(), |c| c.text.as_str());
+                match r.cand.title.as_deref().map(str::trim) {
+                    Some(t) if !t.is_empty() => format!("{t}\n\n{text}"),
+                    _ => text.to_owned(),
+                }
+            })
+            .collect();
+        let items: Vec<_> = pool[..n].iter().map(|r| r.cand.item.clone()).collect();
+        let timeout = Duration::from_millis(self.config.rerank_timeout_ms.max(1));
+        let call = reranker.rerank_items(query, &passages, &items);
+        let scores = match tokio::time::timeout(timeout, call).await {
+            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => s,
+            Ok(Ok(s)) => {
+                tracing::warn!(
+                    reranker = reranker.name(),
+                    got = s.len(),
+                    expected = n,
+                    "bad rerank scores; keeping first-stage order"
+                );
+                return Ok(false);
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(reranker = reranker.name(), error = %e, "reranking failed; keeping first-stage order");
+                return Ok(false);
+            }
+            Err(_) => {
+                tracing::warn!(
+                    reranker = reranker.name(),
+                    "reranking timed out; keeping first-stage order"
+                );
+                return Ok(false);
+            }
+        };
+        let w = if self.config.rerank_weight.is_finite() {
+            self.config.rerank_weight.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let scores = normalise_scores(&scores);
+        for (i, r) in pool.iter_mut().enumerate() {
+            let s = scores.get(i).copied().unwrap_or(0.0);
+            r.cand.rel = w * s + (1.0 - w) * r.cand.rel;
+        }
+        pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
+        let max = pool.first().map_or(0.0, |r| r.cand.rel);
+        if max > 0.0 {
+            for r in pool.iter_mut() {
+                r.cand.rel /= max;
+            }
+        }
+        Ok(true)
     }
 
     /// Embed the query with an eligible `Embedding`-tier provider.

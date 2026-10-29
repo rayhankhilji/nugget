@@ -127,19 +127,77 @@ fn is_stopword(token: &str) -> bool {
     STOPWORDS.contains(&token.to_lowercase().as_str())
 }
 
-/// The query for the full-text leg: alphanumeric words minus [`STOPWORDS`]. If nothing would be
-/// left (a query of only function words), the words are kept as they are.
+/// The query for the full-text leg: alphanumeric words minus [`STOPWORDS`], keeping the store's
+/// query syntax (see `Store::search_text`) intact. A `"quoted phrase"` passes through whole,
+/// stopwords included; `word*` prefixes and `-word` / `-"phrase"` exclusions are kept as typed.
+/// Everything else is reduced to plain words, as the store would read it. If no phrase, prefix
+/// or content word would be left (a query of only function words), all words are kept.
 pub fn text_query(query: &str) -> String {
-    let words: Vec<&str> = query
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .collect();
-    let content: Vec<&str> = words.iter().copied().filter(|t| !is_stopword(t)).collect();
-    if content.is_empty() {
-        words.join(" ")
-    } else {
-        content.join(" ")
+    // (text, is a plain word): plain words are the only parts stopword removal may drop.
+    let mut parts: Vec<(String, bool)> = Vec::new();
+    // Mirrors the scanner in nugget-store's `fts` module.
+    let is_quote = |c: char| matches!(c, '"' | '“' | '”');
+    let cs: Vec<char> = query.chars().collect();
+    let n = cs.len();
+    let mut i = 0;
+    while i < n {
+        let at_boundary = i == 0 || cs[i - 1].is_whitespace();
+        let exclude = cs[i] == '-'
+            && at_boundary
+            && cs
+                .get(i + 1)
+                .is_some_and(|&c| is_quote(c) || c.is_alphabetic());
+        let start = if exclude { i + 1 } else { i };
+        let sign = if exclude { "-" } else { "" };
+        if is_quote(cs[start]) {
+            match cs[start + 1..].iter().position(|&c| is_quote(c)) {
+                Some(len) => {
+                    let end = start + 1 + len;
+                    let words: Vec<String> = cs[start + 1..end]
+                        .split(|c| !c.is_alphanumeric())
+                        .filter(|w| !w.is_empty())
+                        .map(|w| w.iter().collect())
+                        .collect();
+                    if !words.is_empty() {
+                        parts.push((format!("{sign}\"{}\"", words.join(" ")), false));
+                    }
+                    i = end + 1;
+                }
+                // Unpaired quote: the store ignores it and reads on as plain text.
+                None => i = start + 1,
+            }
+            continue;
+        }
+        if cs[start].is_alphanumeric() {
+            let mut end = start;
+            while end < n && cs[end].is_alphanumeric() {
+                end += 1;
+            }
+            let word: String = cs[start..end].iter().collect();
+            let prefix = cs.get(end) == Some(&'*') && end - start >= 2;
+            if prefix {
+                parts.push((format!("{sign}{word}*"), false));
+            } else {
+                parts.push((format!("{sign}{word}"), !exclude));
+            }
+            i = if prefix { end + 1 } else { end };
+            continue;
+        }
+        i += 1;
     }
+    let has_content = parts.iter().any(|(t, plain)| {
+        if *plain {
+            !is_stopword(t)
+        } else {
+            !t.starts_with('-')
+        }
+    });
+    parts
+        .iter()
+        .filter(|(t, plain)| !has_content || !*plain || !is_stopword(t))
+        .map(|(t, _)| t.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Lowercased alphanumeric tokens of `text` (stopwords and 1-character tokens dropped).
@@ -324,6 +382,30 @@ mod tests {
         assert_eq!(text_query("what is it"), "what is it");
         assert_eq!(text_query("  "), "");
         assert_eq!(text_query("F28 (ignition)"), "F28 ignition");
+        assert_eq!(text_query("-5 degrees, well-known"), "5 degrees well known");
+    }
+
+    #[test]
+    fn text_query_keeps_phrases_prefixes_and_exclusions() {
+        // Phrases pass through whole, stopwords included.
+        assert_eq!(
+            text_query("the \"lord of the rings\" film"),
+            "\"lord of the rings\" film"
+        );
+        assert_eq!(text_query("\"The Who\""), "\"The Who\"");
+        assert_eq!(text_query("“smart quotes” for it"), "\"smart quotes\"");
+        assert_eq!(text_query("\"don't (stop)\""), "\"don t stop\"");
+        assert_eq!(text_query("\"\" \"?!\" boiler"), "boiler");
+        // Prefixes count as content; one-letter prefixes are plain words.
+        assert_eq!(text_query("what is nug*"), "nug*");
+        assert_eq!(text_query("the a*"), "the a");
+        // Exclusions are kept, but alone they are not content.
+        assert_eq!(text_query("rust for -the -tok*"), "rust -the -tok*");
+        assert_eq!(text_query("rust -\"of the\""), "rust -\"of the\"");
+        assert_eq!(text_query("the -it"), "the -it");
+        // Unpaired quotes are ignored; stray syntax is dropped.
+        assert_eq!(text_query("unpaired \"quote of the"), "unpaired quote");
+        assert_eq!(text_query("a AND (b* OR c):^"), "b c");
     }
 
     #[test]

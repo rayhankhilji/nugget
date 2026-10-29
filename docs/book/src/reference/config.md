@@ -127,6 +127,15 @@ Search and context packing (`nugget_retrieve::RetrieveConfig`).
 | `expand_neighbours` | bool | `true` | Add the chunks around each packed passage while the budget allows |
 | `include_secondary_matches` | bool | `true` | Also pack an item's other matching chunks while the budget allows |
 | `min_truncated_tokens` | integer | `24` | A passage that does not fit is cut to fit only if at least this many tokens remain |
+| `rerank_pool` | integer | `30` | Top grouped candidates scored by a reranker, when one is configured, before MMR |
+| `rerank_weight` | float, 0 to 1 | `0.7` | Share of the reranker's score in relevance; 1.0 replaces the first-stage score |
+| `rerank_timeout_ms` | integer | `2500` | After this, reranking is skipped and the first-stage order kept |
+| `dates` | bool | `true` | Parse date phrases ("last week", "in march") and keep items modified in that range, falling back to unfiltered results when none match |
+| `date_utc_offset_minutes` | integer | `0` | UTC offset used to resolve date phrases (clamped to ±18 h) |
+| `rewrite_followups` | bool | `true` | Rewrite follow-up questions into standalone queries from chat history, with a local model only |
+| `rewrite_timeout_ms` | integer | `3000` | After this, the original query is used |
+| `rewrite_max_chars` | integer | `200` | Longest rewritten query |
+| `rewrite_history_turns` | integer | `6` | Most recent chat turns given to the rewriter |
 
 ### `[retrieve.recency]`
 

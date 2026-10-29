@@ -1,4 +1,13 @@
 //! Items and chunks: upsert with content-hash dedup, delete cascade, chunk replacement.
+//!
+//! Item text is stored once: when an item's chunks cover its text, `items.text` is NULL and the
+//! text is kept as a layout over the chunks in `item_text` (see [`text_layout`]). Every path
+//! that rewrites an item's chunks re-plans that layout in the same transaction, without touching
+//! the `items` row (so `updated_at` and the item change feed are unaffected).
+
+mod text_layout;
+
+use std::collections::HashMap;
 
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 use nugget_core::{Error, Result};
@@ -9,6 +18,7 @@ use crate::Store;
 use crate::error::{DbExt, format_time, parse_time};
 use crate::graph::{ItemScope, Touched, retract_tx};
 use crate::types::{ChunkId, Item, NewChunk, NewItem, UpsertOutcome};
+use crate::vector::AnnWriter;
 
 /// Upper bound accepted by `sqlite-vec`'s `vec0` tables.
 pub(crate) const MAX_EMBEDDING_DIM: usize = 8192;
@@ -27,6 +37,8 @@ struct ItemRow {
     created_at: String,
     updated_at: String,
     version: Option<String>,
+    /// The `item_text` layout, when the text is stored there (then `text` is NULL).
+    layout: Option<Vec<u8>>,
 }
 
 const ITEM_COLUMNS: &str = "id, title, content_hash, mime, text, metadata, source_modified_at, \
@@ -44,17 +56,107 @@ fn read_item_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ItemRow> {
         created_at: r.get(7)?,
         updated_at: r.get(8)?,
         version: r.get(9)?,
+        layout: r.get(10)?,
     })
 }
 
 fn find_item(conn: &Connection, item: &ItemRef) -> Result<Option<ItemRow>> {
     conn.query_row(
-        &format!("SELECT {ITEM_COLUMNS} FROM items WHERE source = ?1 AND key = ?2"),
+        &format!(
+            "SELECT {ITEM_COLUMNS}, (SELECT layout FROM item_text WHERE item_id = items.id)
+             FROM items WHERE source = ?1 AND key = ?2"
+        ),
         params![item.source.as_str(), item.key.as_str()],
         read_item_row,
     )
     .optional()
     .db("read item")
+}
+
+/// Texts of an item's chunks by `ord`.
+fn chunk_texts(conn: &Connection, item_id: i64) -> Result<HashMap<u64, String>> {
+    let mut stmt = conn
+        .prepare_cached("SELECT ord, text FROM chunks WHERE item_id = ?1")
+        .db("prepare chunk texts")?;
+    let rows = stmt
+        .query_map([item_id], |r| Ok((r.get::<_, i64>(0)? as u64, r.get(1)?)))
+        .db("query chunk texts")?;
+    rows.collect::<rusqlite::Result<_>>().db("read chunk texts")
+}
+
+/// Rebuild an item's text from its `item_text` layout and current chunks.
+fn decode_layout(conn: &Connection, item_id: i64, layout: &[u8]) -> Result<String> {
+    let chunks = chunk_texts(conn, item_id)?;
+    text_layout::decode(layout, |ord| chunks.get(&ord).map(String::as_str))
+        .map_err(|e| Error::Integrity(format!("item {item_id}: {e}")))
+}
+
+impl ItemRow {
+    /// The item's text as the caller wrote it, wherever it is stored.
+    fn text(&self, conn: &Connection) -> Result<Option<String>> {
+        match (&self.text, &self.layout) {
+            (None, Some(l)) => decode_layout(conn, self.id, l).map(Some),
+            (text, _) => Ok(text.clone()),
+        }
+    }
+}
+
+/// Remove an item's `item_text` layout before its chunks are rewritten, returning the text it
+/// held (`None` when the text lives in `items.text` or there is none).
+fn take_text(tx: &Connection, item_id: i64) -> Result<Option<String>> {
+    let layout: Option<Vec<u8>> = tx
+        .query_row(
+            "SELECT layout FROM item_text WHERE item_id = ?1",
+            [item_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .db("read text layout")?;
+    let Some(layout) = layout else {
+        return Ok(None);
+    };
+    let text = decode_layout(tx, item_id, &layout)?;
+    tx.execute("DELETE FROM item_text WHERE item_id = ?1", [item_id])
+        .db("drop text layout")?;
+    Ok(Some(text))
+}
+
+fn insert_layout(tx: &Connection, item_id: i64, layout: &[u8]) -> Result<()> {
+    tx.execute(
+        "INSERT INTO item_text (item_id, layout) VALUES (?1, ?2)",
+        params![item_id, layout],
+    )
+    .db("store text layout")?;
+    Ok(())
+}
+
+/// Plan a layout of `text` over `chunks` (in `ord` order), if it saves space.
+fn plan_layout(text: &str, chunks: &[NewChunk]) -> Option<Vec<u8>> {
+    let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
+    text_layout::plan(text, &texts)
+}
+
+/// Replace an item's chunks, keeping its text intact: a text held in `item_text` is re-planned
+/// over the new chunks (or kept as a literal when they no longer cover it). `planned` is a
+/// layout already planned over `chunks` for an item row just written with `text = NULL`.
+fn rewrite_chunks(
+    tx: &Connection,
+    item_id: i64,
+    chunks: &[NewChunk],
+    dim: Option<usize>,
+    planned: Option<&[u8]>,
+) -> Result<Vec<ChunkId>> {
+    let carried = take_text(tx, item_id)?;
+    let ids = write_chunks(tx, item_id, chunks, dim)?;
+    match (planned, carried) {
+        (Some(layout), _) => insert_layout(tx, item_id, layout)?,
+        (None, Some(text)) => {
+            let layout = plan_layout(&text, chunks).unwrap_or_else(|| text_layout::literal(&text));
+            insert_layout(tx, item_id, &layout)?;
+        }
+        (None, None) => {}
+    }
+    Ok(ids)
 }
 
 fn validate_ref(item: &ItemRef) -> Result<()> {
@@ -72,6 +174,9 @@ struct PreparedItem<'a> {
     metadata: String,
     modified: Option<String>,
     now: String,
+    /// Layout of `new.text` over the chunks written with it (see [`rewrite_chunks`]); when set,
+    /// an inserted or updated row stores `text = NULL`.
+    layout: Option<Vec<u8>>,
 }
 
 impl<'a> PreparedItem<'a> {
@@ -85,7 +190,23 @@ impl<'a> PreparedItem<'a> {
             metadata: serde_json::to_string(&new.metadata)?,
             modified: new.source_modified_at.map(format_time).transpose()?,
             now: format_time(OffsetDateTime::now_utc())?,
+            layout: None,
         })
+    }
+
+    /// Like [`PreparedItem::new`], for an item written together with `chunks`.
+    fn with_chunks(new: &'a NewItem, chunks: &[NewChunk]) -> Result<Self> {
+        let mut p = Self::new(new)?;
+        p.layout = new.text.as_deref().and_then(|t| plan_layout(t, chunks));
+        Ok(p)
+    }
+
+    /// The value for the `items.text` column.
+    fn text_column(&self) -> Option<&str> {
+        match self.layout {
+            Some(_) => None,
+            None => self.new.text.as_deref(),
+        }
     }
 }
 
@@ -110,7 +231,7 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                     new.title,
                     new.content_hash,
                     new.mime,
-                    new.text,
+                    p.text_column(),
                     p.metadata,
                     p.modified,
                     p.now,
@@ -130,10 +251,11 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                 (Some(o), Some(n)) => parse_time(o)? == *n,
                 _ => false,
             };
-            let unchanged = !content_changed
+            // Decoding a stored layout reads the chunks: skip it when the content changed anyway.
+            let same_text = !content_changed && old.text(tx)? == new.text;
+            let unchanged = same_text
                 && old.title == new.title
                 && old.mime == new.mime
-                && old.text == new.text
                 && old.metadata == p.metadata
                 && old.version == new.version
                 && modified_unchanged;
@@ -143,6 +265,10 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                     item_id: old.id,
                 });
             }
+            // Same text over the same (kept) chunks: the stored layout stays valid. With chunks
+            // to write, `rewrite_chunks` then re-plans it over the new ones.
+            let keep_layout = old.layout.is_some() && same_text && p.layout.is_none();
+            let text_column = if keep_layout { None } else { p.text_column() };
             tx.execute(
                 "UPDATE items SET title = ?2, content_hash = ?3, mime = ?4, text = ?5,
                                   metadata = ?6, source_modified_at = ?7,
@@ -153,7 +279,7 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                     new.title,
                     new.content_hash,
                     new.mime,
-                    new.text,
+                    text_column,
                     p.metadata,
                     p.modified,
                     p.now,
@@ -161,6 +287,10 @@ fn upsert_row(tx: &Connection, p: &PreparedItem<'_>) -> Result<RowUpsert> {
                 ],
             )
             .db("update item")?;
+            if old.layout.is_some() && !keep_layout {
+                tx.execute("DELETE FROM item_text WHERE item_id = ?1", [old.id])
+                    .db("drop text layout")?;
+            }
             if content_changed {
                 tx.execute("DELETE FROM chunks WHERE item_id = ?1", [old.id])
                     .db("drop stale chunks")?;
@@ -218,12 +348,20 @@ fn write_chunks(
         ),
         None => None,
     };
+    // The approximate-search index, once built, is maintained in the same transaction.
+    let mut ann = match dim {
+        Some(_) => AnnWriter::prepare(tx)?,
+        None => None,
+    };
     for (ord, ch) in chunks.iter().enumerate() {
         ins.execute(params![item_id, ord as i64, ch.text])
             .db("insert chunk")?;
         let id = tx.last_insert_rowid();
         if let (Some(e), Some(stmt)) = (&ch.embedding, ins_vec.as_mut()) {
             stmt.execute(params![id, f32_blob(e)]).db("insert vector")?;
+            if let Some(ann) = ann.as_mut() {
+                ann.insert(id, e)?;
+            }
         }
         ids.push(id);
     }
@@ -267,8 +405,8 @@ impl Store {
         new: &NewItem,
         chunks: &[NewChunk],
     ) -> Result<UpsertOutcome> {
-        let p = PreparedItem::new(new)?;
         let dim = validate_chunks(chunks)?;
+        let p = PreparedItem::with_chunks(new, chunks)?;
         self.with_conn(|conn| {
             let tx = conn
                 .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -286,12 +424,12 @@ impl Store {
                     if has_chunks || chunks.is_empty() {
                         UpsertOutcome::Unchanged
                     } else {
-                        write_chunks(&tx, row.item_id, chunks, dim)?;
+                        rewrite_chunks(&tx, row.item_id, chunks, dim, None)?;
                         UpsertOutcome::Updated
                     }
                 }
                 outcome => {
-                    write_chunks(&tx, row.item_id, chunks, dim)?;
+                    rewrite_chunks(&tx, row.item_id, chunks, dim, p.layout.as_deref())?;
                     outcome
                 }
             };
@@ -302,7 +440,14 @@ impl Store {
 
     /// Fetch an item by reference.
     pub fn get_item(&self, item: &ItemRef) -> Result<Option<Item>> {
-        let Some(row) = self.with_read_conn(|c| find_item(c, item))? else {
+        let found = self.with_read_conn(|c| match find_item(c, item)? {
+            Some(row) => {
+                let text = row.text(c)?;
+                Ok(Some((row, text)))
+            }
+            None => Ok(None),
+        })?;
+        let Some((row, text)) = found else {
             return Ok(None);
         };
         Ok(Some(Item {
@@ -310,7 +455,7 @@ impl Store {
             title: row.title,
             content_hash: row.content_hash,
             mime: row.mime,
-            text: row.text,
+            text,
             metadata: serde_json::from_str(&row.metadata)?,
             source_modified_at: row
                 .source_modified_at
@@ -372,7 +517,7 @@ impl Store {
                 .optional()
                 .db("find item")?
                 .ok_or_else(|| Error::NotFound(format!("item {}:{}", item.source, item.key)))?;
-            let ids = write_chunks(&tx, item_id, chunks, dim)?;
+            let ids = rewrite_chunks(&tx, item_id, chunks, dim, None)?;
             tx.commit().db("commit replace_chunks")?;
             Ok(ids)
         })
