@@ -56,6 +56,8 @@ jobs:
       NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
       NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
       NUGGET_GTK4_PYTHON: /usr/bin/python3
+      # KDE's portal implements GlobalShortcuts: fail if the session lost it.
+      NUGGET_WAYLAND_EXPECT_GLOBAL_SHORTCUTS: ${{ matrix.compositor == 'kwin' && '1' || '0' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:

@@ -316,6 +316,9 @@ fn forced_x11_inner() {
 fn wayland_portal_chord() {
     require_wayland();
     let has = portal_has_global_shortcuts();
+    if std::env::var_os("NUGGET_WAYLAND_EXPECT_GLOBAL_SHORTCUTS").is_some_and(|v| v == "1") {
+        assert!(has, "this session's portal should offer GlobalShortcuts");
+    }
     println!("compositor={} portal GlobalShortcuts={has}", compositor());
     let (cb, rx) = channel_callback();
     let t = Instant::now();

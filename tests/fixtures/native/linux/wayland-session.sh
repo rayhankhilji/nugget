@@ -54,7 +54,28 @@ dump_logs() {
     done
 }
 
-bus_out="$(dbus-daemon --session --fork --print-address=1 --print-pid=1)" || {
+# KWin 5.27 only starts as root without a logind seat: as an ordinary user it crashes before it
+# parses its arguments (a segfault on ubuntu-latest, a refused QPA plugin elsewhere). Where
+# password-less sudo exists (CI runners) it runs as root; its socket is then opened to the
+# session's user, and the session bus admits root (KWin hosts kglobalaccel on it).
+if [ "$compositor" = kwin ] && [ "$(id -u)" != 0 ]; then
+    if sudo -n true 2>/dev/null; then
+        as_root=(sudo -n)
+    else
+        echo "wayland-session: kwin needs root here (sudo -n failed)" >&2
+    fi
+fi
+cat >"$runtime/bus.conf" <<'EOF'
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <include>/usr/share/dbus-1/session.conf</include>
+  <policy context="default"><allow user="root"/></policy>
+</busconfig>
+EOF
+bus_conf=(--session)
+[ "${#as_root[@]}" -gt 0 ] && bus_conf=(--config-file="$runtime/bus.conf")
+bus_out="$(dbus-daemon "${bus_conf[@]}" --fork --print-address=1 --print-pid=1)" || {
     echo "wayland-session: cannot start dbus-daemon" >&2
     exit 1
 }
@@ -80,18 +101,6 @@ kwin)
     # kwin_wayland carries a file capability (cap_sys_nice), which a no_new_privs container
     # refuses to exec ("Operation not permitted"); a plain copy has none and runs there.
     cp "$(command -v kwin_wayland)" "$runtime/kwin_wayland"
-    # KWin 5.27 only starts as root without a logind seat: as an ordinary user it crashes
-    # before it parses its arguments (a segfault on ubuntu-latest, a refused QPA plugin
-    # elsewhere). On a CI runner with password-less sudo it runs as root; its socket is then
-    # opened to the session's user, and the session bus admits root.
-    as_root=()
-    if [ "$(id -u)" != 0 ]; then
-        if sudo -n true 2>/dev/null; then
-            as_root=(sudo -n)
-        else
-            echo "wayland-session: kwin needs root here (sudo -n failed)" >&2
-        fi
-    fi
     # No GPU: composite with QPainter rather than through EGL.
     "${as_root[@]}" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
         XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland HOME="$runtime" KWIN_COMPOSE=Q \
