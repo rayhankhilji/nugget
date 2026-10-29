@@ -32,6 +32,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Release builds trust only the release manifest key unless told otherwise (docs/release.md
+  # §4). Benchmarks install models from the dev-signed bundled manifest, so opt in here; release.yml
+  # does not.
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_NET_RETRY: "10"
