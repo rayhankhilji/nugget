@@ -140,6 +140,8 @@ pub struct Report {
     pub field_role: String,
     /// The focused-field read (`Accessibility::focused`).
     pub read_field: Duration,
+    /// The `Accessibility::focused` call alone.
+    pub focused_call: Duration,
     /// `draft.begin` returned (provider opened).
     pub draft_started: Duration,
     /// Shell: first delta in the overlay. Streamed: first chunk read back from the field.
@@ -158,12 +160,14 @@ impl Report {
     pub fn line(&self, os: &str) -> String {
         format!(
             "DOUBLETAP-TIMING os={os} mode={} app={:?} role={} read_field_ms={:.1} \
+             focused_call_ms={:.1} \
              draft_started_ms={:.1} first_token_ms={:.1} first_insert_call_ms={:.1} \
              total_ms={:.1} chunks={} methods={:?} verified={}",
             self.mode.as_str(),
             self.app.name,
             self.field_role,
             ms(self.read_field),
+            ms(self.focused_call),
             ms(self.draft_started),
             ms(self.first_token),
             ms(self.first_insert),
@@ -275,11 +279,13 @@ pub fn draft_and_insert<P: nugget_a11y::Platform>(
 ) -> std::result::Result<Report, String> {
     let a11y: &dyn Accessibility = backend;
     // flow::fire: read the focused field.
+    let call = Instant::now();
     let focused = a11y
         .focused()
         .map_err(|e| format!("focused(): {e}"))?
         .ok_or("focused(): no focused text field")?;
     let read_field = fired.elapsed();
+    let focused_call = call.elapsed();
     if focused.field.secure {
         return Err("the focused field is a secure field".into());
     }
@@ -378,6 +384,7 @@ pub fn draft_and_insert<P: nugget_a11y::Platform>(
         app,
         field_role,
         read_field,
+        focused_call,
         draft_started,
         first_token: first_token.unwrap_or(total),
         first_insert: first_insert.unwrap_or_default(),
@@ -460,4 +467,44 @@ pub fn read_breakdown<P: nugget_a11y::Platform>(backend: &nugget_a11y::Backend<P
             matches!(focused, Ok(Some(_))),
         );
     }
+}
+
+/// Press the trigger with `press` (given the attempt number, at most 3 attempts, each given 2 s
+/// to fire) and run [`draft_and_insert`] as soon as `fired` delivers the fire time, on its own
+/// thread, as the shell's `on_trigger` does: the draft starts at the fire, not when `press`
+/// returns.
+pub fn trigger_and_draft<P: nugget_a11y::Platform>(
+    backend: &nugget_a11y::Backend<P>,
+    pipeline: &Pipeline,
+    mode: Mode,
+    fired: std::sync::mpsc::Receiver<Instant>,
+    mut press: impl FnMut(u32),
+) -> std::result::Result<Report, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let seen = AtomicBool::new(false);
+    std::thread::scope(|s| {
+        let seen = &seen;
+        let draft = s.spawn(move || {
+            let at = fired
+                .recv_timeout(Duration::from_secs(8))
+                .map_err(|_| "the trigger did not fire in 3 attempts".to_string())?;
+            seen.store(true, Ordering::Release);
+            draft_and_insert(backend, pipeline, at, mode)
+        });
+        for attempt in 1..=3 {
+            press(attempt);
+            if wait_for(Duration::from_secs(2), || {
+                seen.load(Ordering::Acquire).then_some(())
+            })
+            .is_some()
+            {
+                println!("trigger fired on attempt {attempt} of 3");
+                break;
+            }
+            println!("trigger missed (attempt {attempt} of 3)");
+        }
+        draft
+            .join()
+            .unwrap_or_else(|_| Err("the draft thread panicked".into()))
+    })
 }

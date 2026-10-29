@@ -329,8 +329,7 @@ mod mac {
                 (Mode::Streamed, support::STREAMED_CHUNKS),
             ] {
                 let pipeline = Pipeline::new(chunks);
-                // The listener stays up while the draft runs, as in the shell.
-                let (listener, fired_at) = if p.post {
+                let report = if p.post {
                     let t = Instant::now();
                     let (listener, rx) = listen(Trigger::default());
                     println!(
@@ -338,39 +337,26 @@ mod mac {
                         support::ms(t.elapsed()),
                         front()
                     );
-                    // A missed double tap is retried (twice at most) and reported, so a flaky
-                    // trigger shows up in the log instead of failing the timing run outright.
-                    let mut fired = None;
-                    for attempt in 1..=3 {
-                        rcmd_tap();
-                        rcmd_tap();
-                        if let Ok(at) = rx.recv_timeout(Duration::from_secs(2)) {
-                            println!(
-                                "macos_it: double tap over TextEdit fired on attempt {attempt} of 3"
-                            );
-                            fired = Some(at);
-                            break;
+                    // The draft starts on its own thread at the fire, and the listener stays up
+                    // meanwhile, as in the shell. A missed double tap is retried and reported.
+                    let report = support::trigger_and_draft(&ax, &pipeline, mode, rx, |attempt| {
+                        if attempt > 1 {
+                            println!("macos_it: frontmost before attempt {attempt}: {}", front());
+                            sleep(Duration::from_millis(500));
                         }
-                        println!(
-                            "macos_it: double tap over TextEdit missed (attempt {attempt} of 3); \
-                         frontmost {}",
-                            front()
-                        );
-                        sleep(Duration::from_millis(500));
-                    }
-                    let fired =
-                        fired.ok_or("the double tap did not fire over TextEdit in 3 attempts")?;
-                    (Some(listener), fired)
+                        rcmd_tap();
+                        rcmd_tap();
+                    });
+                    drop(listener);
+                    report
                 } else {
                     println!(
                         "macos_it: key events cannot be posted; the draft starts as `doubletap_fire` \
-                     does (no key press)"
+                         does (no key press)"
                     );
-                    (None, Instant::now())
-                };
-                let report = support::draft_and_insert(&ax, &pipeline, fired_at, mode)
-                    .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
-                drop(listener);
+                    support::draft_and_insert(&ax, &pipeline, Instant::now(), mode)
+                }
+                .map_err(|e| format!("{} mode: {e}", mode.as_str()))?;
                 report.publish("macos");
                 check(is_textedit(&report.app), "the draft was read from TextEdit")?;
             }

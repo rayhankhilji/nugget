@@ -302,14 +302,13 @@ fn windows_doubletap_into_notepad() {
         let (cb, rx) = channel_callback();
         let listener = start(right_ctrl_double_tap(), cb).expect("start the double-tap listener");
         sleep(Duration::from_millis(200));
-        tap(RCONTROL);
-        tap(RCONTROL);
-        let fired_at = rx
-            .recv_timeout(Duration::from_secs(2))
-            .expect("the double tap did not fire over Notepad");
-        // The listener stays up while the draft runs, as in the shell.
-        let report = support::draft_and_insert(&backend, &pipeline, fired_at, mode)
-            .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));
+        // The draft starts on its own thread at the fire; the listener stays up meanwhile, as in
+        // the shell.
+        let report = support::trigger_and_draft(&backend, &pipeline, mode, rx, |_| {
+            tap(RCONTROL);
+            tap(RCONTROL);
+        })
+        .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));
         drop(listener);
         report.publish("windows");
         assert!(is_notepad(&report.app), "{:?}", report.app);
