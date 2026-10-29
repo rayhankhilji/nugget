@@ -5,6 +5,12 @@
   manifest DIR ...            write the Tauri updater manifest (latest.json) for a release
   promote NEW [CURRENT]       print NEW if it should replace a channel feed holding CURRENT
   checksums DIR               write DIR/SHA256SUMS over every file in DIR
+  channel NEW NAME            copy NEW and NEW.sig to NAME.json and NAME.json.sig beside NEW
+                              (byte for byte, so the feed signature stays valid); print both
+
+Feeds are signed as a whole: the release workflow signs latest.json with the updater key
+(`tauri signer sign`, giving latest.json.sig) and the app refuses a feed whose `<feed>.sig` does
+not verify. `channel` refuses a feed without its signature.
 
 Tauri asks a feed for `{os}-{arch}-{installer}` first, then `{os}-{arch}`; the manifest lists
 both, with the plain key pointing at the default installer for that platform.
@@ -94,6 +100,21 @@ def checksums(dist: Path) -> Path:
     return out
 
 
+def channel(new: Path, name: str) -> tuple[Path, Path]:
+    """Copy a signed feed and its detached signature to a channel's file names."""
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
+        raise SystemExit(f"bad channel name {name!r}")
+    sig = new.with_name(new.name + ".sig")
+    if not sig.is_file() or not sig.read_bytes().strip():
+        raise SystemExit(f"{new.name} has no signature ({sig.name}); refusing to publish an unsigned feed")
+    feed_out = new.with_name(f"{name}.json")
+    sig_out = new.with_name(f"{name}.json.sig")
+    if feed_out != new:
+        feed_out.write_bytes(new.read_bytes())
+    sig_out.write_bytes(sig.read_bytes())
+    return feed_out, sig_out
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -111,6 +132,9 @@ def main(argv: list[str]) -> int:
     pr.add_argument("current", type=Path, nargs="?")
     c = sub.add_parser("checksums")
     c.add_argument("dist", type=Path)
+    ch = sub.add_parser("channel")
+    ch.add_argument("new", type=Path)
+    ch.add_argument("name")
     args = ap.parse_args(argv)
 
     if args.cmd == "payloads":
@@ -130,6 +154,9 @@ def main(argv: list[str]) -> int:
         print(new)
     elif args.cmd == "checksums":
         print(checksums(args.dist))
+    elif args.cmd == "channel":
+        for path in channel(args.new, args.name):
+            print(path)
     return 0
 
 

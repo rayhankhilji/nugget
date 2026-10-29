@@ -4009,14 +4009,18 @@ dependencies = [
 name = "nugget-desktop"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "futures",
  "mac-notification-sys",
+ "minisign-verify",
  "notify-rust",
  "nugget-a11y",
  "nugget-core",
  "nugget-hotkey",
  "nugget-ipc",
  "nugget-policy",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
