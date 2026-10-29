@@ -1,0 +1,177 @@
+name: Reproducible build
+
+# Builds the nuggetd release binary twice on Linux, from two checkouts in different directories
+# with separate target dirs, under the deterministic environment of
+# packaging/scripts/repro-env.sh (same SOURCE_DATE_EPOCH, --remap-path-prefix), and fails if the
+# two binaries differ. See docs/security/reproducible-builds.md.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "manifests/**"
+      - "packaging/scripts/repro-env.sh"
+      - ".github/workflows/reproducible.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "manifests/**"
+      - "packaging/scripts/repro-env.sh"
+      - ".github/workflows/reproducible.yml"
+  workflow_dispatch:
+
+# Least privilege: the job only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+
+jobs:
+  nuggetd:
+    name: nuggetd twice, same bytes (x86_64 Linux)
+    # The runner release.yml builds the Linux bundles on.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 150
+    steps:
+      # Two checkouts of the same commit; the second is moved out of the workspace so the two
+      # absolute paths differ in length and depth, not just in one component.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: one
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          path: two
+      - name: Place the second checkout elsewhere
+        run: |
+          mkdir -p "$RUNNER_TEMP/elsewhere/deeper"
+          mv two "$RUNNER_TEMP/elsewhere/deeper/nugget-two"
+          echo "ONE=$GITHUB_WORKSPACE/one" >> "$GITHUB_ENV"
+          echo "TWO=$RUNNER_TEMP/elsewhere/deeper/nugget-two" >> "$GITHUB_ENV"
+
+      # rust-toolchain.toml pins the channel; both builds use this one toolchain.
+      - name: Install Rust toolchain
+        working-directory: one
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustc -vV
+
+      # Downloaded crates only: no target dir is restored, both builds start from scratch.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: one
+          cache-targets: "false"
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # One target dir path for both builds, emptied in between (nothing is reused). It must be
+      # the same absolute path: the vendored OpenSSL (SQLCipher) compiles its install prefix,
+      # which lies in the build script's OUT_DIR, into the binary as ENGINESDIR/MODULESDIR, and
+      # --remap-path-prefix cannot reach C string constants. See reproducible-builds.md.
+      - name: Build in the first checkout
+        working-directory: one
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/repro-target"
+          echo "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" >> "$GITHUB_ENV"
+          . packaging/scripts/repro-env.sh
+          echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH"
+          echo "RUSTFLAGS=$RUSTFLAGS"
+          echo "EPOCH=$SOURCE_DATE_EPOCH" >> "$GITHUB_ENV"
+          cargo build --release -p nuggetd --locked
+          mkdir -p "$RUNNER_TEMP/compare"
+          cp "$CARGO_TARGET_DIR/release/nuggetd" "$RUNNER_TEMP/compare/nuggetd-1"
+          rm -rf "$CARGO_TARGET_DIR"
+
+      # Same SOURCE_DATE_EPOCH (both checkouts are of one commit, but say it explicitly).
+      - name: Build in the second checkout
+        run: |
+          cd "$TWO"
+          export SOURCE_DATE_EPOCH="$EPOCH"
+          . packaging/scripts/repro-env.sh
+          echo "RUSTFLAGS=$RUSTFLAGS"
+          cargo build --release -p nuggetd --locked
+          cp "$CARGO_TARGET_DIR/release/nuggetd" "$RUNNER_TEMP/compare/nuggetd-2"
+
+      - name: Compare
+        working-directory: one
+        env:
+          # true: also fail when only symbol names differ (see the known gap below).
+          STRICT: "false"
+        run: |
+          a="$RUNNER_TEMP/compare/nuggetd-1"
+          b="$RUNNER_TEMP/compare/nuggetd-2"
+          sha_a=$(sha256sum "$a" | cut -d' ' -f1)
+          sha_b=$(sha256sum "$b" | cut -d' ' -f1)
+          {
+            echo "## Reproducible nuggetd (x86_64-unknown-linux-gnu)"
+            echo
+            echo "| Build | Directory | Bytes | SHA-256 |"
+            echo "|---|---|---|---|"
+            echo "| 1 | \`$ONE\` | $(wc -c < "$a") | \`$sha_a\` |"
+            echo "| 2 | \`$TWO\` | $(wc -c < "$b") | \`$sha_b\` |"
+            echo
+            echo "rustc: \`$(rustc -V)\`, SOURCE_DATE_EPOCH=$EPOCH"
+          } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          if [ "$sha_a" = "$sha_b" ]; then
+            echo "nuggetd is reproducible: $sha_a"
+            echo "**Identical.**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "MISMATCH=true" >> "$GITHUB_ENV"
+            ls -l "$a" "$b"
+            echo "differing bytes: $(cmp -l "$a" "$b" 2>/dev/null | wc -l)"
+            echo "--- section headers (build 1 vs 2)"
+            diff <(readelf -SW "$a") <(readelf -SW "$b") || true
+            echo "--- printable strings only in one build (first 60)"
+            diff <(strings -n 8 "$a" | sort -u) <(strings -n 8 "$b" | sort -u) | head -60 || true
+            # Code and data without the symbol table and the build id (a hash that covers it).
+            for n in 1 2; do
+              objcopy --strip-all --remove-section .note.gnu.build-id "$RUNNER_TEMP/compare/nuggetd-$n" \
+                "$RUNNER_TEMP/stripped-$n"
+            done
+            if cmp -s "$RUNNER_TEMP/stripped-1" "$RUNNER_TEMP/stripped-2"; then
+              # Known gap: wasmtime's bindgen! (nugget-plugin) puts the absolute path of the WIT
+              # files into the crate's source, which changes ThinLTO's `.llvm.<hash>` suffix on
+              # that crate's local symbols. Strict mode fails on it; it is off until that is fixed.
+              msg="the two nuggetd builds differ only in symbol names and the build id (code and data are identical); see docs/security/reproducible-builds.md"
+              echo "**Symbol names differ; code and data identical.**" >> "$GITHUB_STEP_SUMMARY"
+              if [ "$STRICT" = true ]; then status=1; echo "::error::$msg"; else echo "::warning::$msg"; fi
+            else
+              status=1
+              echo "::error::the two nuggetd builds differ ($sha_a vs $sha_b), in code or data too; see the hints above and the uploaded binaries (run diffoscope on them)"
+              echo "**Different.**" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          # Independent of the comparison: no build machine path may survive in the binary.
+          for p in "$ONE" "$TWO" "$HOME/.cargo" "$(rustc --print sysroot)"; do
+            if grep -qaF "$p" "$a" "$b"; then
+              status=1
+              echo "::error::a build path leaked into nuggetd: $p"
+              strings -n 8 "$a" "$b" | grep -F "$p" | sort -u | head -20 || true
+            fi
+          done
+          exit "$status"
+
+      - name: Upload both binaries for diffoscope
+        if: failure() || env.MISMATCH == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nuggetd-unreproducible
+          path: ${{ runner.temp }}/compare/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -101,15 +101,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Reproducibility: timestamps come from the tagged commit, paths are not embedded.
-      - name: Deterministic build environment
-        shell: bash
-        run: |
-          {
-            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
-            echo "RUSTFLAGS=--remap-path-prefix=$GITHUB_WORKSPACE=/build --remap-path-prefix=$HOME/.cargo=/cargo"
-          } >> "$GITHUB_ENV"
-
       - name: Check the tag matches the app version
         if: env.RELEASE == 'true'
         shell: bash
@@ -134,6 +125,14 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup target add ${{ matrix.target }}
+
+      # Reproducibility: SOURCE_DATE_EPOCH from the tagged commit, and --remap-path-prefix for the
+      # workspace, CARGO_HOME and the toolchain sysroot (native paths on Windows), so no runner
+      # path is embedded. After the toolchain install, which the sysroot lookup needs.
+      # See docs/security/reproducible-builds.md.
+      - name: Deterministic build environment
+        shell: bash
+        run: packaging/scripts/repro-env.sh --github-env
 
       - name: Use Strawberry Perl for vendored OpenSSL
         if: runner.os == 'Windows'
@@ -161,6 +160,12 @@ jobs:
 
       - name: Build and stage the nuggetd sidecar
         shell: bash
+        env:
+          # Model manifest keys, baked in at build time (docs/security/manifest-trust.md). The
+          # release public key is a repository variable; dry runs also trust the dev key so their
+          # dev-signed bundled manifest keeps working. Real releases trust the release key only.
+          NUGGET_MANIFEST_RELEASE_PUBKEY: ${{ vars.NUGGET_MANIFEST_RELEASE_PUBKEY }}
+          NUGGET_TRUST_DEV_MANIFEST_KEY: ${{ env.RELEASE != 'true' && '1' || '' }}
         run: packaging/scripts/stage-sidecar.sh ${{ matrix.target }}
 
       # Each signing step writes a Tauri config fragment; the build merges whichever exist.
@@ -402,6 +407,24 @@ jobs:
           python3 packaging/scripts/updater_manifest.py checksums "$dist"
           cat "$dist/SHA256SUMS"
 
+      # The feed itself is signed too (detached, over the exact bytes, same updater key), so the
+      # app can refuse a feed that doesn't verify before reading it (docs/release.md §5). The
+      # channels job copies latest.json and latest.json.sig together; the SBOM step below
+      # rewrites SHA256SUMS, which then covers latest.json.sig.
+      - name: Sign the update feed
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          feed="$RUNNER_TEMP/dist/latest.json"
+          if [ ! -f "$feed" ]; then
+            echo "No latest.json (no updater key): nothing to sign."
+            exit 0
+          fi
+          pnpm exec tauri signer sign "$feed"
+          test -s "$feed.sig"
+
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: sbom
@@ -453,6 +476,11 @@ jobs:
             echo "::warning::$TAG has no latest.json (unsigned release); channels unchanged."
             exit 0
           fi
+          # Apps refuse a feed without a valid signature, so never publish one without it.
+          if ! gh release download "$TAG" --repo "$GITHUB_REPOSITORY" -p latest.json.sig; then
+            echo "::warning::$TAG has no latest.json.sig (unsigned feed); channels unchanged."
+            exit 0
+          fi
           if ! gh release view updater-feed --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create updater-feed --repo "$GITHUB_REPOSITORY" --prerelease \
               --target "${{ github.event.repository.default_branch }}" --title "Update feed" \
@@ -464,8 +492,9 @@ jobs:
             rm -f current.json
             gh release download updater-feed --repo "$GITHUB_REPOSITORY" -p "$ch.json" -O current.json 2>/dev/null || true
             if [ -n "$(python3 "$GITHUB_WORKSPACE/packaging/scripts/updater_manifest.py" promote latest.json current.json)" ]; then
-              cp latest.json "$ch.json"
-              gh release upload updater-feed --repo "$GITHUB_REPOSITORY" --clobber "$ch.json"
+              # <ch>.json and <ch>.json.sig: byte-for-byte copies, so the signature stays valid.
+              python3 "$GITHUB_WORKSPACE/packaging/scripts/updater_manifest.py" channel latest.json "$ch" >/dev/null
+              gh release upload updater-feed --repo "$GITHUB_REPOSITORY" --clobber "$ch.json" "$ch.json.sig"
               echo "$ch -> $TAG"
             fi
           done
