@@ -81,7 +81,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: cargo clippy
-        run: cargo clippy --locked --workspace --all-targets --exclude nugget-desktop -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --exclude nugget-desktop --keep-going -- -D warnings
 
       - name: cargo test (workspace)
         if: runner.os == 'Linux'

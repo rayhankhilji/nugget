@@ -551,6 +551,8 @@ mod tests {
         _dir: tempfile::TempDir,
         root: PathBuf,
         canon_root: PathBuf,
+        // Read only by the Unix-only symlink tests.
+        #[cfg_attr(not(unix), allow(dead_code))]
         outside: PathBuf,
         cfg: Config,
     }
@@ -587,6 +589,7 @@ mod tests {
     }
 
     /// Run `build` on a thread so a blocking open fails the test instead of hanging it.
+    #[cfg(unix)]
     fn build_bounded(f: Swap, rel: &'static str, md: Metadata) -> Result<Document> {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
