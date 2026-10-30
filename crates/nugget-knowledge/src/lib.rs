@@ -19,6 +19,9 @@
 //!    providers only by default; every claim must carry a quote found verbatim in the text.
 //! 4. **Entity resolution** (`resolve`): identifiers, then names and aliases,
 //!    then (optionally) embeddings and LLM adjudication; never across conflicting identifiers.
+//!    People's short names and nicknames ("Maggie", "M. Thistlewood", see `names`) join a
+//!    full-name person only when corroborated (shared identifier, item, thread or organisation),
+//!    whatever order items arrive in; every merge records why (`nugget_graph::MergeRecord`).
 //! 5. **Claim lifecycle:** single-valued predicates (`works_at`, `lives_in`, ...) keep one
 //!    active value, the one with the freshest evidence; a superseded value gets `valid_to` (when
 //!    the newer value's evidence is from); confidence rises with independent evidence
@@ -40,6 +43,7 @@ mod extract;
 mod feed;
 mod knowledge;
 pub mod llm;
+mod names;
 mod resolve;
 mod session;
 mod spec;

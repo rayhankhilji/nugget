@@ -1124,8 +1124,10 @@ struct Cand {
     identifiers: Vec<(String, String)>,
     /// Used by an accepted claim.
     used: bool,
-    /// Folded into another candidate (a first name of a full name in the same response).
+    /// Folded into another candidate (a short name of a full name in the same response).
     into: Option<usize>,
+    /// Short names folded into this one, and why.
+    folds: Vec<crate::spec::NameFold>,
 }
 
 enum Cleaned {
@@ -1210,6 +1212,7 @@ fn clean_entity(kind: EntityKind, raw_name: &str, raw_aliases: &[String], cx: &C
         identifiers: Vec::new(),
         used: false,
         into: None,
+        folds: Vec::new(),
     })
 }
 
@@ -1451,41 +1454,72 @@ fn validate_full(
         }
     }
 
-    // A first name alone, when exactly one full name in the response starts with it, is that
-    // person (the way the pipeline folds first names into earlier full names).
-    let words = |n: &str| normalize_name(n).split(' ').count();
-    let first_word = |n: &str| normalize_name(n).split(' ').next().map(str::to_owned);
+    // A short name ("Maggie", "M. Thistlewood", "Maggie T"), when exactly one person in the
+    // response has a full name it may be short for (first name, nickname, initials; see
+    // `crate::names::compatible`), is that person: same response, same item. Two candidates
+    // (two Sams): nothing is folded.
     for i in 0..cands.len() {
         let c = &cands[i];
-        if c.kind != EntityKind::Person || words(&c.name) != 1 || !c.identifiers.is_empty() {
+        if c.kind != EntityKind::Person
+            || !c.identifiers.is_empty()
+            || !crate::names::is_short_form(&c.name)
+        {
             continue;
         }
-        let word = normalize_name(&c.name);
-        let targets: Vec<usize> = (0..cands.len())
-            .filter(|&j| {
-                j != i
-                    && cands[j].into.is_none()
-                    && cands[j].kind == EntityKind::Person
-                    && words(&cands[j].name) >= 2
-                    && first_word(&cands[j].name).as_deref() == Some(word.as_str())
-            })
-            .collect();
-        if let [t] = targets[..] {
+        let shorts: Vec<&String> = std::iter::once(&c.name).chain(&c.aliases).collect();
+        let mut targets: Vec<(usize, Vec<&'static str>)> = Vec::new();
+        for (j, t) in cands.iter().enumerate() {
+            if j == i
+                || t.into.is_some()
+                || t.kind != EntityKind::Person
+                || (t.identifiers.is_empty() && crate::names::is_short_form(&t.name))
+            {
+                continue;
+            }
+            let mut reasons: Vec<&'static str> = Vec::new();
+            for full in std::iter::once(&t.name).chain(&t.aliases) {
+                for s in &shorts {
+                    if let Some(m) = crate::names::compatible(s, full) {
+                        for r in m.reasons {
+                            if !reasons.contains(&r) {
+                                reasons.push(r);
+                            }
+                        }
+                    }
+                }
+            }
+            if !reasons.is_empty() {
+                targets.push((j, reasons));
+            }
+        }
+        if let [(t, reasons)] = &targets[..] {
+            let t = *t;
             let folded: Vec<String> = std::iter::once(cands[i].name.clone())
                 .chain(cands[i].aliases.clone())
                 .collect();
             for a in folded {
-                if !cands[t]
-                    .aliases
-                    .iter()
-                    .any(|x| normalize_name(x) == normalize_name(&a))
+                if normalize_name(&a) != normalize_name(&cands[t].name)
+                    && !cands[t]
+                        .aliases
+                        .iter()
+                        .any(|x| normalize_name(x) == normalize_name(&a))
                 {
                     cands[t].aliases.push(a);
                 }
             }
+            let mut why: Vec<String> = reasons.iter().map(|r| (*r).to_owned()).collect();
+            why.push("same_item".into());
+            let fold = crate::spec::NameFold {
+                name: truncate_chars(&cands[i].name, 120),
+                detail: crate::resolve::describe(&why),
+                reasons: why,
+            };
+            let inherited = std::mem::take(&mut cands[i].folds);
+            cands[t].folds.extend(inherited);
+            cands[t].folds.push(fold);
             cands[i].into = Some(t);
             if let Some(vi) = cand_verdict[i] {
-                verdicts[vi].reason = format!("first name of {}", cands[t].name);
+                verdicts[vi].reason = format!("short name of {}", cands[t].name);
             }
             for v in lookup.values_mut() {
                 if *v == CRef::Cand(i) {
@@ -1748,6 +1782,7 @@ fn validate_full(
             .map(|ch| ch.0);
         let mut spec = EntitySpec::new(c.kind, c.name.clone()).mention(&surface, chunk, 0.6);
         spec.aliases = c.aliases.clone();
+        spec.folds = c.folds.clone();
         for (scheme, value) in &c.identifiers {
             spec = spec.ident(scheme, value);
         }
@@ -1868,12 +1903,16 @@ pub(crate) fn adopt_known_kinds(
 }
 
 /// Short names the model used that neither this item nor a name or alias in the graph
-/// resolves: a person's first name alone ("Priya"), or an organisation or project without the
-/// rest of its name ("Lodestar" for "Project Lodestar", "Ostrander" for "Ostrander Freight
-/// Cooperative"). When exactly one entity of that kind already in the graph (not the user) has
-/// a longer name made of the short one plus whole words (a person: at the start), the mention
-/// is theirs and the short form stays as an alias. Two candidates (two Sams): nothing is
-/// folded. Run after the item-local fold; an entity only seen later is not reached.
+/// resolves: an organisation or project without the rest of its name ("Lodestar" for "Project
+/// Lodestar", "Ostrander" for "Ostrander Freight Cooperative"). When exactly one entity of that
+/// kind already in the graph has a longer name made of the short one plus whole words, the
+/// mention is theirs and the short form stays as an alias. Two candidates: nothing is folded.
+/// Run after the item-local fold; an entity only seen later is not reached.
+///
+/// People are not folded here: a first name or nickname alone is never enough to join a person
+/// across items. Entity resolution joins it to a full-name person only with corroboration
+/// (shared identifier, item, thread or organisation), whichever is seen first (see
+/// `crate::resolve`).
 pub(crate) fn fold_first_names_in_graph(
     graph: &dyn GraphStore,
     me: Option<&EntityId>,
@@ -1882,7 +1921,6 @@ pub(crate) fn fold_first_names_in_graph(
     for e in &mut extra.entities {
         let short = normalize_name(&e.name);
         let min_chars = match e.kind {
-            EntityKind::Person if !short.contains(' ') => 2,
             EntityKind::Organization | EntityKind::Project => 4,
             _ => continue,
         };
@@ -1904,7 +1942,6 @@ pub(crate) fn fold_first_names_in_graph(
         }) else {
             continue;
         };
-        let person = e.kind == EntityKind::Person;
         let mut cands: Vec<(EntityId, String)> = found
             .into_iter()
             .filter(|s| Some(&s.id) != me)
@@ -1912,9 +1949,8 @@ pub(crate) fn fold_first_names_in_graph(
                 let n = normalize_name(&s.name);
                 n.len() > short.len()
                     && (n.starts_with(&format!("{short} "))
-                        || (!person
-                            && (n.ends_with(&format!(" {short}"))
-                                || n.contains(&format!(" {short} ")))))
+                        || n.ends_with(&format!(" {short}"))
+                        || n.contains(&format!(" {short} ")))
             })
             .map(|s| (s.id, s.name))
             .collect();

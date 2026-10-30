@@ -518,7 +518,14 @@ impl<'a> Session<'a> {
                     }
                 }
                 // The address is the user's: the person holding it is the user.
-                self.graph().merge(me, &other.id)?;
+                crate::resolve::merge_recorded(
+                    self.graph(),
+                    me,
+                    &other.id,
+                    vec!["shared_email".into()],
+                    "Holds one of the user's own email addresses.".into(),
+                    None,
+                )?;
                 self.stats.entities_merged += 1;
                 self.touch(&other.id);
                 self.touch(me);
@@ -584,6 +591,11 @@ impl<'a> Session<'a> {
 
     fn retract(&mut self, item: &ItemRef) -> Result<Retracted> {
         let affected = self.graph().retract_item(item)?;
+        // Merge records citing the item go with it (resolution writes them again if the item
+        // comes back and still corroborates the join).
+        for id in crate::resolve::forget_item(self.graph(), self.feed(), item)? {
+            self.touch(&id);
+        }
         self.retracted_any = true;
         let mut out = Retracted::default();
         for id in affected {
@@ -892,6 +904,8 @@ impl<'a> Session<'a> {
     ) -> Result<()> {
         let mut ids: Vec<EntityId> = Vec::with_capacity(ex.entities.len());
         let splits = self.inner.splits()?;
+        let feed: &dyn ItemFeed = self.inner.feed.as_ref();
+        let item_ctx = crate::resolve::ItemContext::new(item, &ex, Some(feed));
         for spec in &ex.entities {
             let me = self.state.me.clone();
             let resolver = Resolver::new(
@@ -901,7 +915,8 @@ impl<'a> Session<'a> {
                 &self.inner.emb_cache,
                 me,
             )
-            .with_splits(&splits, Some(&item.item));
+            .with_splits(&splits, Some(&item.item))
+            .with_context(&item_ctx);
             let r = resolver.resolve(spec).await?;
             if r.created {
                 self.stats.entities_created += 1;
@@ -1432,26 +1447,52 @@ fn trust_note_identifiers(ex: &mut Extraction) {
     }
 }
 
-/// A person the model named by one word only ("Maggie") is the one person on the same item
-/// whose name starts with that word ("Maggie T" in the headers), when there is exactly one:
-/// the occurrence takes that person's name and identifiers, so both resolve together.
+impl Session<'_> {
+    /// End of a run: place the short-form people ("Maggie", "Sam") whose corroboration this
+    /// run may have supplied (see `Resolver::settle_pending`), so the graph does not depend on
+    /// the order items were processed in.
+    pub fn settle_short_names(&mut self) -> Result<()> {
+        let splits = self.inner.splits()?;
+        let resolver = Resolver::new(
+            self.inner.graph.as_ref(),
+            &self.inner.cfg,
+            self.inner.router.as_deref(),
+            &self.inner.emb_cache,
+            self.state.me.clone(),
+        )
+        .with_splits(&splits, None)
+        .with_feed(self.inner.feed.as_ref());
+        let merges = resolver.settle_pending(self.inner.feed.as_ref(), &self.touched)?;
+        for (into, from) in merges {
+            self.stats.entities_merged += 1;
+            self.touch(&from);
+            self.touch(&into);
+            self.reconcile_single_valued(&into)?;
+        }
+        Ok(())
+    }
+}
+
+/// A person the model named by a short form only ("Maggie", "M. Thistlewood", "Maggie T") is
+/// the one person on the same item whose name it may be short for ([`crate::names::compatible`]:
+/// first name, nickname, initials), when there is exactly one: the occurrence takes that
+/// person's name and identifiers, so both resolve together, and notes why (a merge record on
+/// the entity). Being on the same item is the corroboration; two candidates (two Sams) fold
+/// nothing.
 fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
-    let first_word = |n: &str| normalize_name(n).split(' ').next().map(str::to_owned);
-    let words = |n: &str| normalize_name(n).split(' ').count();
     for i in 0..extra.entities.len() {
         let e = &extra.entities[i];
         if e.kind != EntityKind::Person
             || e.weak_name
             || !e.identifiers.is_empty()
-            || words(&e.name) != 1
+            || !crate::names::is_short_form(&e.name)
         {
             continue;
         }
-        let Some(word) = first_word(&e.name).filter(|w| w.chars().count() >= 2) else {
-            continue;
-        };
+        let own = normalize_name(&e.name);
+        let shorts: Vec<&String> = std::iter::once(&e.name).chain(&e.aliases).collect();
         // Candidates by display name, de-duplicated by normalised name.
-        let mut cands: Vec<(String, &crate::spec::EntitySpec)> = Vec::new();
+        let mut cands: Vec<(String, &crate::spec::EntitySpec, Vec<&'static str>)> = Vec::new();
         let others = base.entities.iter().chain(
             extra
                 .entities
@@ -1461,23 +1502,47 @@ fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
                 .map(|(_, x)| x),
         );
         for c in others {
-            if c.kind != EntityKind::Person || c.weak_name || words(&c.name) < 2 {
+            // A target is a full name, or a short one with an address of its own (a header).
+            if c.kind != EntityKind::Person
+                || c.weak_name
+                || (c.identifiers.is_empty() && crate::names::is_short_form(&c.name))
+            {
                 continue;
             }
-            let matches = std::iter::once(&c.name)
-                .chain(&c.aliases)
-                .any(|n| words(n) >= 2 && first_word(n).as_deref() == Some(word.as_str()));
             let key = normalize_name(&c.name);
-            if matches && !cands.iter().any(|(k, _)| *k == key) {
-                cands.push((key, c));
+            if key == own || cands.iter().any(|(k, _, _)| *k == key) {
+                continue;
+            }
+            let mut reasons: Vec<&'static str> = Vec::new();
+            for full in std::iter::once(&c.name).chain(&c.aliases) {
+                for s in &shorts {
+                    if let Some(m) = crate::names::compatible(s, full) {
+                        for r in m.reasons {
+                            if !reasons.contains(&r) {
+                                reasons.push(r);
+                            }
+                        }
+                    }
+                }
+            }
+            if !reasons.is_empty() {
+                cands.push((key, c, reasons));
             }
         }
-        if cands.len() != 1 {
+        let [(_, target, reasons)] = &cands[..] else {
             continue;
-        }
-        let (name, identifiers) = (cands[0].1.name.clone(), cands[0].1.identifiers.clone());
+        };
+        let (name, identifiers) = (target.name.clone(), target.identifiers.clone());
+        let mut reasons: Vec<String> = reasons.iter().map(|r| (*r).to_owned()).collect();
+        reasons.push("same_item".into());
         let e = &mut extra.entities[i];
-        let short = std::mem::replace(&mut e.name, name);
+        let short = std::mem::replace(&mut e.name, name.clone());
+        let detail = crate::resolve::describe(&reasons);
+        e.folds.push(crate::spec::NameFold {
+            name: short.clone(),
+            reasons,
+            detail,
+        });
         if !e.aliases.contains(&short) {
             e.aliases.push(short);
         }
@@ -1533,6 +1598,56 @@ mod tests {
         fold_first_names(&base, &mut extra);
         assert_eq!(extra.entities[0].name, "Sam");
         assert!(extra.entities[0].identifiers.is_empty());
+        assert!(extra.entities[0].folds.is_empty());
+    }
+
+    #[test]
+    fn nicknames_and_initials_fold_into_the_one_person_on_the_item() {
+        let mut base = Extraction::default();
+        base.entity(header(
+            "Margaret Thistlewood",
+            "margaret.thistlewood@cindergate.test",
+        ));
+        base.entity(header("Mark Ellery", "mark@ellery.test"));
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie"));
+        extra.entity(EntitySpec::new(EntityKind::Person, "M. Thistlewood"));
+        extra.entity(EntitySpec::new(EntityKind::Person, "Maggie T"));
+        // An initial alone fits both Margaret and Mark: not folded.
+        extra.entity(EntitySpec::new(EntityKind::Person, "M."));
+        // "Mark" is not a form of "Margaret".
+        extra.entity(EntitySpec::new(EntityKind::Person, "Marky"));
+        fold_first_names(&base, &mut extra);
+        let reasons: Vec<Vec<String>> = extra.entities[..3]
+            .iter()
+            .map(|e| {
+                assert_eq!(e.name, "Margaret Thistlewood");
+                assert_eq!(
+                    e.identifiers,
+                    vec![Identifier::new(
+                        "email",
+                        "margaret.thistlewood@cindergate.test"
+                    )]
+                );
+                assert_eq!(e.folds.len(), 1);
+                e.folds[0].reasons.clone()
+            })
+            .collect();
+        assert_eq!(
+            reasons,
+            [
+                vec!["nickname", "same_item"],
+                vec!["initial", "same_item"],
+                vec!["nickname", "initial", "same_item"],
+            ]
+        );
+        assert_eq!(extra.entities[3].name, "M.");
+        assert_eq!(extra.entities[4].name, "Marky");
+        // The folds travel with the occurrence when it is absorbed into the header's.
+        base.absorb(extra);
+        let m = &base.entities[0];
+        assert_eq!(m.folds.len(), 3);
+        assert!(m.aliases.contains(&"Maggie".to_string()));
     }
 
     #[test]

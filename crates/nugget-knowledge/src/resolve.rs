@@ -20,9 +20,24 @@
 //! identifiers together. Once an occurrence resolves, name-only duplicates it makes unambiguous
 //! are folded in (see [`Resolver::absorb`]).
 //!
+//! People's short names ("Maggie", "M. Thistlewood", "Maggie T", "Bob Chen") join the one
+//! full-name person they may be short for ([`crate::names`]) only when something corroborates
+//! it (a shared identifier, the same item, the same mail thread, the same organisation), in
+//! both directions so the result does not depend on the order items arrive in (see
+//! [`short`]). A first name alone never merges two people.
+//!
+//! Every merge, and every occurrence folded in by a short-name rule, leaves a
+//! [`MergeRecord`](nugget_graph::MergeRecord) in the survivor's
+//! [`MERGE_LOG_ATTR`](nugget_graph::MERGE_LOG_ATTR) attribute: the reasons, one sentence and the
+//! corroborating item.
+//!
 //! User splits are constraints ([`crate::splits`]): a split pair is never merged, and an
 //! occurrence the user moved to the split-off entity (by its item or by a name only that entity
 //! has) resolves to it, not to the entity it was split from.
+
+mod short;
+
+pub(crate) use short::{ItemContext, describe, forget_item, merge_recorded};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -98,6 +113,10 @@ pub(crate) struct Resolver<'a> {
     pub splits: &'a [Split],
     /// The item whose occurrences are being resolved.
     pub item: Option<&'a ItemRef>,
+    /// What that item says about who is on it (corroboration for short names).
+    ctx: Option<&'a ItemContext<'a>>,
+    /// Where merge records are indexed by item (so a retracted item's records can be dropped).
+    feed: Option<&'a dyn crate::feed::ItemFeed>,
     /// The splits that apply now; recomputed after a merge.
     live: Mutex<Option<Vec<Live>>>,
 }
@@ -118,6 +137,8 @@ impl<'a> Resolver<'a> {
             me,
             splits: &[],
             item: None,
+            ctx: None,
+            feed: None,
             live: Mutex::new(None),
         }
     }
@@ -126,6 +147,19 @@ impl<'a> Resolver<'a> {
     pub fn with_splits(mut self, splits: &'a [Split], item: Option<&'a ItemRef>) -> Self {
         self.splits = splits;
         self.item = item;
+        self
+    }
+
+    /// Index merge records in `feed` (outside an item; [`Resolver::with_context`] does it too).
+    pub fn with_feed(mut self, feed: &'a dyn crate::feed::ItemFeed) -> Self {
+        self.feed = Some(feed);
+        self
+    }
+
+    /// Resolve occurrences of the item `ctx` describes (its people, organisations, thread).
+    pub fn with_context(mut self, ctx: &'a ItemContext<'a>) -> Self {
+        self.ctx = Some(ctx);
+        self.feed = ctx.feed();
         self
     }
 }
@@ -150,12 +184,22 @@ impl Resolver<'_> {
         Ok(v)
     }
 
-    /// Merge `from` into `into` unless a user split keeps them apart. Returns whether merged.
-    fn merge(&self, into: &EntityId, from: &EntityId) -> Result<bool> {
-        if crate::splits::apart(&self.live()?, into, from) {
+    /// Merge `from` into `into` unless a user split keeps them apart, recording why on the
+    /// survivor. Returns whether merged.
+    fn merge(
+        &self,
+        into: &EntityId,
+        from: &EntityId,
+        reasons: Vec<String>,
+        detail: String,
+        item: Option<ItemRef>,
+    ) -> Result<bool> {
+        if into == from || crate::splits::apart(&self.live()?, into, from) {
             return Ok(false);
         }
-        self.graph.merge(into, from)?;
+        let item = item.or_else(|| self.item.cloned());
+        merge_recorded(self.graph, into, from, reasons, detail, item.clone())?;
+        self.index_record(item.as_ref(), into)?;
         *self.live.lock().unwrap_or_else(|p| p.into_inner()) = None;
         Ok(true)
     }
@@ -264,20 +308,23 @@ impl Resolver<'_> {
                     {
                         continue;
                     }
-                    if self.merge(&primary.id, &other.id)? {
+                    let detail =
+                        "A trusted record (contact card or own note) lists both identifiers."
+                            .to_string();
+                    if self.merge(
+                        &primary.id,
+                        &other.id,
+                        vec!["trusted_record".into()],
+                        detail,
+                        None,
+                    )? {
                         merged.push(other.id);
                     }
                 }
             }
-            let mut touched = self.attach(&primary, spec)?;
+            let touched = self.attach(&primary, spec)?;
             merged.extend(self.absorb(&primary.id, spec)?);
-            touched.extend(merged.iter().cloned());
-            return Ok(Resolved {
-                id: primary.id,
-                created: false,
-                merged,
-                touched,
-            });
+            return self.finish(primary.id, spec, false, merged, touched);
         }
 
         // 2. Names.
@@ -289,16 +336,37 @@ impl Resolver<'_> {
             };
             if let Some(e) = found {
                 let e = self.redirect(e, spec)?;
-                let mut touched = self.attach(&e, spec)?;
+                let touched = self.attach(&e, spec)?;
                 let merged = self.absorb(&e.id, spec)?;
-                touched.extend(merged.iter().cloned());
-                return Ok(Resolved {
-                    id: e.id,
-                    created: false,
-                    merged,
-                    touched,
-                });
+                return self.finish(e.id, spec, false, merged, touched);
             }
+        }
+
+        // A short name ("Maggie", "M. Thistlewood") of the one corroborated full-name person.
+        if short::wants_full(spec) {
+            let side = short::Short::of_spec(spec, self.ctx.is_some());
+            if let Some(pick) = self.full_for(&side, None)? {
+                let e = self.redirect(pick.entity, spec)?;
+                let mut touched = self.attach(&e, spec)?;
+                if self.record(
+                    &e.id,
+                    nugget_graph::MergeRecord {
+                        from: None,
+                        name: crate::text::truncate_chars(&spec.name, 200),
+                        reasons: pick.reasons,
+                        detail: pick.detail,
+                        item: pick.item.or_else(|| self.item.cloned()),
+                        at: Some(time::OffsetDateTime::now_utc()),
+                    },
+                )? {
+                    touched.push(e.id.clone());
+                }
+                let merged = self.absorb(&e.id, spec)?;
+                return self.finish(e.id, spec, false, merged, touched);
+            }
+        }
+
+        if !spec.weak_name {
             // 3–4. Embeddings, adjudication.
             if self.rcfg().embedding
                 && self.rcfg().embedding_kinds.contains(&spec.kind)
@@ -306,23 +374,47 @@ impl Resolver<'_> {
             {
                 let e = self.redirect(e, spec)?;
                 let touched = self.attach(&e, spec)?;
-                return Ok(Resolved {
-                    id: e.id,
-                    created: false,
-                    merged: Vec::new(),
-                    touched,
-                });
+                return self.finish(e.id, spec, false, Vec::new(), touched);
             }
         }
 
         // New entity.
         let id = self.create(spec)?;
         let merged = self.absorb(&id, spec)?;
-        let mut touched = vec![id.clone()];
+        self.finish(id.clone(), spec, true, merged, vec![id])
+    }
+
+    /// The steps every resolution ends with: a short-form person joins its one corroborated
+    /// full-name person; a full-name person absorbs the short forms it is the one corroborated
+    /// candidate of; folded occurrences are recorded.
+    fn finish(
+        &self,
+        mut id: EntityId,
+        spec: &EntitySpec,
+        created: bool,
+        mut merged: Vec<EntityId>,
+        mut touched: Vec<EntityId>,
+    ) -> Result<Resolved> {
+        if spec.kind == EntityKind::Person {
+            if let Some(full) = self.settle_short(&id)? {
+                merged.push(id.clone());
+                touched.push(full.clone());
+                id = full;
+            }
+            merged.extend(self.absorb_short_forms(&id)?);
+            if self.record_folds(&id, spec)? {
+                touched.push(id.clone());
+            }
+        }
+        if let Some(ctx) = self.ctx {
+            ctx.note_resolved(&id);
+        }
         touched.extend(merged.iter().cloned());
+        touched.sort();
+        touched.dedup();
         Ok(Resolved {
             id,
-            created: true,
+            created,
             merged,
             touched,
         })
@@ -465,7 +557,18 @@ impl Resolver<'_> {
         }
         let mut merged = Vec::new();
         for d in dupes {
-            if single_valued_conflict(&e, &d) || !self.merge(&e.id, &d.id)? {
+            let (reasons, detail) = if e.kind == EntityKind::Organization {
+                (
+                    vec!["domain_name".to_string()],
+                    "Its mail domain spells this name.".to_string(),
+                )
+            } else {
+                (
+                    vec!["same_name".to_string()],
+                    "Same full name, and no identifier of its own.".to_string(),
+                )
+            };
+            if single_valued_conflict(&e, &d) || !self.merge(&e.id, &d.id, reasons, detail, None)? {
                 continue;
             }
             if e.kind == EntityKind::Organization
@@ -1030,5 +1133,294 @@ mod tests {
         let got = r.resolve(&org("Acmeb", Some("acmeb.test"))).await.unwrap();
         assert!(got.created);
         assert!(got.merged.is_empty());
+    }
+
+    // ---------------------------------------------------------------- short names
+
+    fn iref(key: &str) -> ItemRef {
+        ItemRef {
+            source: nugget_core::ids::SourceId::new("mail"),
+            key: nugget_core::ids::ItemKey::new(key),
+        }
+    }
+
+    fn mail_item(key: &str, extracted: Value) -> nugget_store::Item {
+        nugget_store::Item {
+            item: iref(key),
+            title: None,
+            content_hash: "h".into(),
+            mime: Some("message/rfc822".into()),
+            text: None,
+            metadata: json!({ "extracted": extracted }),
+            source_modified_at: None,
+            version: None,
+            created_at: time::OffsetDateTime::UNIX_EPOCH,
+            updated_at: time::OffsetDateTime::UNIX_EPOCH,
+        }
+    }
+
+    fn mention(g: &dyn GraphStore, id: &EntityId, key: &str, surface: &str) {
+        g.add_mention(&nugget_graph::Mention {
+            entity: id.clone(),
+            item: iref(key),
+            chunk_id: None,
+            surface: surface.into(),
+            confidence: 0.9,
+        })
+        .unwrap();
+    }
+
+    fn header(name: &str, email: &str) -> EntitySpec {
+        EntitySpec::new(EntityKind::Person, name).ident("email", email)
+    }
+
+    fn short(name: &str) -> EntitySpec {
+        EntitySpec::new(EntityKind::Person, name)
+    }
+
+    /// Resolve `spec` as an occurrence on `item`, whose extraction is `ex`.
+    async fn on_item(
+        g: &dyn GraphStore,
+        item: &nugget_store::Item,
+        ex: &crate::spec::Extraction,
+        spec: &EntitySpec,
+        feed: Option<&dyn crate::feed::ItemFeed>,
+    ) -> Resolved {
+        let cfg = KnowledgeConfig::default();
+        let cache = Mutex::new(HashMap::new());
+        let ctx = ItemContext::new(item, ex, feed);
+        Resolver::new(g, &cfg, None, &cache, None)
+            .with_splits(&[], Some(&item.item))
+            .with_context(&ctx)
+            .resolve(spec)
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_nickname_joins_a_full_name_only_when_corroborated() {
+        let g = nugget_graph::MemGraph::new();
+        let cfg = KnowledgeConfig::default();
+        let cache = Mutex::new(HashMap::new());
+        let maggie = person(
+            &g,
+            "Margaret Thistlewood",
+            Some("margaret.thistlewood@cindergate.test"),
+        );
+        // No item context, nothing corroborates: a name alone never joins.
+        let got = resolver(&g, &cfg, &cache)
+            .resolve(&short("Maggie"))
+            .await
+            .unwrap();
+        assert!(got.created && got.id != maggie);
+
+        // On an item she is on, "Maggie" is her (a record says why, no entity merged).
+        let g = nugget_graph::MemGraph::new();
+        let maggie = person(
+            &g,
+            "Margaret Thistlewood",
+            Some("margaret.thistlewood@cindergate.test"),
+        );
+        let it = mail_item("2", json!({"message_id": "<2@m>"}));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header(
+            "Margaret Thistlewood",
+            "margaret.thistlewood@cindergate.test",
+        ));
+        ex.entity(short("Maggie"));
+        let got = on_item(&g, &it, &ex, &short("Maggie"), None).await;
+        assert_eq!(got.id, maggie);
+        assert!(!got.created && got.merged.is_empty());
+        let e = g.get_entity(&maggie).unwrap().unwrap();
+        assert!(e.aliases.contains(&"Maggie".to_string()));
+        let log = nugget_graph::merge_log(&e);
+        assert_eq!(log.len(), 1);
+        assert_eq!(log[0].from, None);
+        assert_eq!(log[0].name, "Maggie");
+        assert_eq!(log[0].reasons, ["nickname", "same_item"]);
+        assert_eq!(log[0].item.as_ref(), Some(&it.item));
+        assert_eq!(log[0].detail, "Matched by nickname; on the same item.");
+        assert!(log[0].at.is_some());
+        // Resolving the same occurrence again adds no duplicate record.
+        on_item(&g, &it, &ex, &short("Maggie"), None).await;
+        assert_eq!(
+            nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap()).len(),
+            1
+        );
+
+        // "Mark" is not a form of Margaret; an initial with another surname neither.
+        for n in ["Mark", "M. Smith"] {
+            let got = on_item(&g, &it, &ex, &short(n), None).await;
+            assert!(got.created, "{n}");
+        }
+    }
+
+    #[tokio::test]
+    async fn two_people_sharing_a_first_name_are_never_merged_on_it() {
+        let g = nugget_graph::MemGraph::new();
+        let okafor = person(&g, "Sam Okafor", Some("sam.okafor@ostrander.test"));
+        let whitlock = person(&g, "Sam Whitlock", Some("sam@marrowbank.test"));
+        let it = mail_item("3", json!({}));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Sam Okafor", "sam.okafor@ostrander.test"));
+        ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
+        let got = on_item(&g, &it, &ex, &short("Sam"), None).await;
+        assert!(got.created);
+        assert!(got.id != okafor && got.id != whitlock);
+        // Only one of them on the item: that one.
+        let it = mail_item("4", json!({}));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
+        let got = on_item(&g, &it, &ex, &short("Sam"), None).await;
+        assert_eq!(got.id, whitlock);
+    }
+
+    #[tokio::test]
+    async fn the_same_organisation_corroborates_and_conflicting_addresses_never_join() {
+        let g = nugget_graph::MemGraph::new();
+        let maggie = person(
+            &g,
+            "Margaret Thistlewood",
+            Some("margaret.thistlewood@cindergate.test"),
+        );
+        // A colleague's mail mentions "Maggie": her mail domain is the sender's.
+        let it = mail_item("5", json!({}));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Bart Fenwick", "bart.fenwick@cindergate.test"));
+        let got = on_item(&g, &it, &ex, &short("Maggie"), None).await;
+        assert_eq!(got.id, maggie);
+        let log = nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap());
+        assert_eq!(log[0].reasons, ["nickname", "same_org"]);
+        // A webmail domain says nothing about an organisation.
+        let g2 = nugget_graph::MemGraph::new();
+        person(&g2, "Margaret Thistlewood", Some("maggie.t@gmail.com"));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Jo Bloggs", "jo@gmail.com"));
+        assert!(on_item(&g2, &it, &ex, &short("Maggie"), None).await.created);
+
+        // Her personal address is not her work one: the same item does not join them.
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header(
+            "Margaret Thistlewood",
+            "margaret.thistlewood@cindergate.test",
+        ));
+        let spec = header("Maggie T", "maggie.t@mail.test");
+        let got = on_item(&g, &it, &ex, &spec, None).await;
+        assert!(got.created && got.id != maggie);
+    }
+
+    #[tokio::test]
+    async fn a_mail_thread_corroborates() {
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        store
+            .upsert_item(
+                &nugget_store::NewItem::new("mail", "6", "h6")
+                    .with_mime("message/rfc822")
+                    .with_metadata(json!({"extracted": {"message_id": "<root@m>"}})),
+            )
+            .unwrap();
+        let g = nugget_graph::MemGraph::new();
+        let maggie = person(&g, "Margaret Thistlewood", None);
+        mention(&g, &maggie, "6", "Margaret Thistlewood");
+        let reply = mail_item(
+            "7",
+            json!({"message_id": "<7@m>", "in_reply_to": "<root@m>", "references": ["<root@m>"]}),
+        );
+        let ex = crate::spec::Extraction::default();
+        let got = on_item(&g, &reply, &ex, &short("Maggie"), Some(&store)).await;
+        assert_eq!(got.id, maggie);
+        let log = nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap());
+        assert_eq!(log[0].reasons, ["nickname", "same_thread"]);
+        // Without thread headers, nothing.
+        let other = mail_item("8", json!({"message_id": "<8@m>"}));
+        let got = on_item(&g, &other, &ex, &short("Maggie"), Some(&store)).await;
+        assert!(got.created);
+    }
+
+    #[tokio::test]
+    async fn a_full_name_absorbs_the_short_forms_seen_before_it() {
+        let g = nugget_graph::MemGraph::new();
+        // "Maggie" and "M. Thistlewood" were seen first, each on an item she is on too.
+        let m1 = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Maggie"))
+            .unwrap();
+        mention(&g, &m1, "10", "Maggie");
+        let m2 = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "M. Thistlewood"))
+            .unwrap();
+        mention(&g, &m2, "11", "M. Thistlewood");
+        // A "Sam" on an item with nobody else: left alone.
+        let sam = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
+            .unwrap();
+        mention(&g, &sam, "12", "Sam");
+        let full = person(&g, "Margaret Thistlewood", None);
+        mention(&g, &full, "10", "Margaret Thistlewood");
+        mention(&g, &full, "11", "Margaret Thistlewood");
+        // Her next occurrence (anywhere) re-examines them.
+        let it = mail_item("13", json!({}));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Margaret Thistlewood", "mt@cindergate.test"));
+        let got = on_item(
+            &g,
+            &it,
+            &ex,
+            &header("Margaret Thistlewood", "mt@cindergate.test"),
+            None,
+        )
+        .await;
+        assert_eq!(got.id, full);
+        let mut merged = got.merged.clone();
+        merged.sort();
+        let mut want = vec![m1.clone(), m2.clone()];
+        want.sort();
+        assert_eq!(merged, want);
+        assert_eq!(g.get_entity(&sam).unwrap().unwrap().id, sam);
+        let log = nugget_graph::merge_log(&g.get_entity(&full).unwrap().unwrap());
+        assert_eq!(log.len(), 2);
+        assert!(
+            log.iter()
+                .all(|r| r.from.is_some() && r.reasons.contains(&"same_item".to_string()))
+        );
+        assert!(
+            log.iter()
+                .any(|r| r.name == "M. Thistlewood" && r.reasons[0] == "initial")
+        );
+    }
+
+    #[test]
+    fn merge_logs_are_kept_from_both_sides() {
+        let g = nugget_graph::MemGraph::new();
+        let a = person(&g, "Robert Chen", None);
+        let b = person(&g, "Bob Chen", None);
+        let c = person(&g, "Rob Chen", None);
+        merge_recorded(&g, &b, &c, vec!["nickname".into()], "c".into(), None).unwrap();
+        merge_recorded(&g, &a, &b, vec!["nickname".into()], "b".into(), None).unwrap();
+        let log = nugget_graph::merge_log(&g.get_entity(&a).unwrap().unwrap());
+        let names: Vec<&str> = log.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["Rob Chen", "Bob Chen"]);
+        assert_eq!(log[1].from.as_ref(), Some(&b));
+        // Bounded.
+        for i in 0..(short::MAX_MERGE_LOG + 5) {
+            short::append_record(
+                &g,
+                &a,
+                nugget_graph::MergeRecord {
+                    from: None,
+                    name: format!("n{i}"),
+                    reasons: vec![],
+                    detail: String::new(),
+                    item: None,
+                    at: Some(time::OffsetDateTime::now_utc()),
+                },
+            )
+            .unwrap();
+        }
+        let log = nugget_graph::merge_log(&g.get_entity(&a).unwrap().unwrap());
+        assert_eq!(log.len(), short::MAX_MERGE_LOG);
+        assert_eq!(
+            log.last().unwrap().name,
+            format!("n{}", short::MAX_MERGE_LOG + 4)
+        );
     }
 }

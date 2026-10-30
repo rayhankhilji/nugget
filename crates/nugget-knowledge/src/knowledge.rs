@@ -258,6 +258,7 @@ impl Knowledge {
         }
         let done = (deletes_done + upserts_done) as u64;
         s.resolve_pending_links()?;
+        s.settle_short_names()?;
         if s.retracted_any {
             // Retractions may leave entities with nothing behind them. Every batch is applied
             // by now, so whatever is orphaned really is.
