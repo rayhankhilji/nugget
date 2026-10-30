@@ -82,6 +82,8 @@ pub struct RunConfig {
     pub knowledge: suites::knowledge::KnowledgeOptions,
     /// `doubletap` suite options (read-ahead).
     pub doubletap: suites::doubletap::DoubletapOptions,
+    /// `ask` suite options (answer prompt arms, judge, question count).
+    pub ask: suites::ask::AskOptions,
 }
 
 impl Default for RunConfig {
@@ -96,6 +98,7 @@ impl Default for RunConfig {
             local: crate::local::LocalOptions::default(),
             knowledge: suites::knowledge::KnowledgeOptions::default(),
             doubletap: suites::doubletap::DoubletapOptions::default(),
+            ask: suites::ask::AskOptions::default(),
         }
     }
 }
@@ -176,6 +179,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::doubletap::DoubleTapBench),
         Box::new(suites::cua::CuaBench::default()),
         Box::new(suites::knowledge::KnowledgeBench),
+        Box::new(suites::ask::AskBench),
     ]
 }
 
@@ -337,9 +341,11 @@ mod tests {
                 "draft",
                 "doubletap",
                 "cua",
-                "knowledge"
+                "knowledge",
+                "ask"
             ]
         );
+        assert!(find("ask").is_some_and(|b| b.implemented()));
         assert!(find("proactive").is_some_and(|b| b.implemented()));
         assert!(find("knowledge").is_some_and(|b| b.implemented()));
         assert!(find("perf").is_some_and(|b| b.implemented()));

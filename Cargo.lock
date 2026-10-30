@@ -3818,6 +3818,7 @@ dependencies = [
  "nugget-store",
  "nugget-vault",
  "nugget-voice",
+ "nuggetd",
  "serde",
  "serde_json",
  "tempfile",
