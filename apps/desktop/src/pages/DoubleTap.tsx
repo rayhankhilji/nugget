@@ -44,6 +44,7 @@ export function DoubleTapPage() {
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
   const readAheadHintId = useId();
+  const batteryHintId = useId();
 
   // Start editing from what's saved; a later reload doesn't clobber unsaved edits.
   useEffect(() => {
@@ -144,6 +145,21 @@ export function DoubleTapPage() {
             </label>
             <p id={readAheadHintId} className="muted small">
               {t("doubletap.readAheadHint")}
+            </p>
+            <label className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={form.read_ahead_on_battery ?? true}
+                disabled={!(form.read_ahead ?? true)}
+                aria-describedby={batteryHintId}
+                onChange={(e) => setForm({ ...form, read_ahead_on_battery: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("doubletap.readAheadOnBattery")}</span>
+            </label>
+            <p id={batteryHintId} className="muted small">
+              {t("doubletap.readAheadOnBatteryHint")}
             </p>
           </section>
 

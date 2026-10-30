@@ -22,6 +22,8 @@
     "doubletap.perm.accessibilityWhy",
     "doubletap.readAhead",
     "doubletap.readAheadHint",
+    "doubletap.readAheadOnBattery",
+    "doubletap.readAheadOnBatteryHint",
     "knowledge.emptyNoSources",
     "knowledge.emptyPending",
     "onboarding.byok.form.baseUrl",

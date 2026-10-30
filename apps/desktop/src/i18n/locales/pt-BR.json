@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "Ativar o Double Tap",
   "doubletap.readAhead": "Ler antecipadamente enquanto você responde",
   "doubletap.readAheadHint": "Quando um campo de resposta fica em foco por um momento, o Nugget o lê antes e faz o modelo local começar a lê-lo, para que o rascunho comece mais rápido quando você acionar o atalho. Só com modelos locais; nunca em apps excluídos, terminais ou campos de senha. Nada é enviado a um provedor de nuvem e nada é salvo. Usa um pouco de CPU enquanto você passa de um campo para outro.",
+  "doubletap.readAheadOnBattery": "Ler antecipadamente na bateria",
+  "doubletap.readAheadOnBatteryHint": "Desative para pausar a leitura antecipada enquanto o computador estiver na bateria. No modo de pouca energia (economia de bateria), ela sempre fica pausada.",
   "doubletap.save": "Salvar",
   "doubletap.saving": "Salvando…",
   "doubletap.revert": "Descartar alterações",

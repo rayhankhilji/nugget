@@ -542,6 +542,8 @@
     "doubletap.providers.title",
     "doubletap.readAhead",
     "doubletap.readAheadHint",
+    "doubletap.readAheadOnBattery",
+    "doubletap.readAheadOnBatteryHint",
     "doubletap.refused.excluded",
     "doubletap.refused.no_field",
     "doubletap.refused.not_draftable",

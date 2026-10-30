@@ -3,11 +3,17 @@
 //!
 //! # What happens, and when
 //!
-//! There are no OS callbacks for focus changes that work the same on every platform, so a small
-//! loop polls, cheaply:
+//! A small loop watches what is in front, cheaply, and sleeps between looks for as long as
+//! nothing can change ([`Planner::next_check`]):
 //!
-//! 1. Every [`POLL`] it asks the accessibility API for the **frontmost app only** (its id, name,
-//!    window title and page URL). No field, thread or message text is read at this step.
+//! 1. It asks the accessibility API for the **frontmost app only** (its id, name, window title
+//!    and page URL). No field, thread or message text is read at this step. It looks when the
+//!    OS reports a focus change ([`super::focus`]: on macOS another app coming to the front, on
+//!    Windows another window coming to the front or its title changing), when a dwell or re-read
+//!    below falls due, and otherwise every [`SLOW_POLL`] (macOS does not report window or tab
+//!    switches inside an app). Where there are no focus notifications (Linux) it looks every
+//!    [`POLL`] while a dwell is pending or a read-ahead may be running, else every
+//!    [`IDLE_POLL`].
 //! 2. When the same app and window have stayed in front for [`DWELL`], and the app is allowed
 //!    (not in the excluded list, not a terminal unless terminals are allowed), it does **one**
 //!    full read of the focused field: the same read the trigger does (field, the messages
@@ -21,9 +27,11 @@
 //! 5. When another app or window comes to the front (or the focus leaves the text field) while a
 //!    read-ahead may still be running, it sends `draft.read_ahead_cancel`.
 //!
-//! It pauses while a draft is running and while a Nugget window is in front, and does not run
-//! at all while Double Tap or read-ahead is off (the loop stops; it restarts when the settings
-//! change), or where accessibility is unsupported.
+//! It pauses while a draft is running and while a Nugget window is in front, and in low power
+//! mode or, when `read_ahead_on_battery` is off, on battery ([`super::power`]; a running
+//! read-ahead is cancelled, and the power state is looked at again every
+//! [`power::RECHECK`]). It does not run at all while Double Tap or read-ahead is off (the loop
+//! stops; it restarts when the settings change), or where accessibility is unsupported.
 //!
 //! # Privacy
 //!
@@ -37,13 +45,15 @@
 //! - **Stored:** nothing. The shell keeps only a keyed hash of the last context it sent (to
 //!   avoid sending the same one twice), in memory, with a key that is new every run. The local
 //!   model server keeps the prefilled prompt in its in-memory cache, as it does for any draft.
-//! - **Off switch:** the `read_ahead` setting (Double Tap settings page).
+//! - **Off switch:** the `read_ahead` setting (Double Tap settings page), and
+//!   `read_ahead_on_battery` for battery power.
 //!
 //! The decisions live in [`Planner`], a pure state machine with the clock passed in; the loop
 //! around it ([`restart`]) only reads, sends and feeds results back.
 
 use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasher, Hash, Hasher};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -51,12 +61,27 @@ use nugget_core::ipc::{AppInfo, DraftRequest, method};
 use serde::Deserialize;
 use tauri::{AppHandle, Manager};
 
+use super::focus::FocusEvents;
 use super::settings::DoubleTapSettings;
-use super::{DoubleTap, flow, lock, probe};
+use super::{DoubleTap, flow, lock, power, probe};
 use crate::daemon::Daemon;
 
-/// How often the frontmost app is checked (a cheap read: no field content).
+/// How often the frontmost app is checked (a cheap read: no field content) while a dwell is
+/// pending or a read-ahead may be running and the OS gives no focus notifications.
 pub const POLL: Duration = Duration::from_millis(1_000);
+/// How often it is checked otherwise without focus notifications (nothing is due soon).
+pub const IDLE_POLL: Duration = Duration::from_millis(2_000);
+/// The longest sleep with focus notifications: a fallback for changes they do not report
+/// (window and tab switches inside an app on macOS).
+pub const SLOW_POLL: Duration = Duration::from_secs(5);
+/// After a focus notification, wait this long before looking (a switch often comes as a burst
+/// of notifications, and the new window's title settles).
+pub const EVENT_SETTLE: Duration = Duration::from_millis(250);
+/// Looks prompted by focus notifications are at least this far apart (a window whose title
+/// keeps changing must not turn into a busy loop).
+pub const EVENT_MIN_GAP: Duration = Duration::from_millis(500);
+/// The shortest sleep between two looks.
+pub const MIN_WAIT: Duration = Duration::from_millis(100);
 /// How long an app and window must stay in front before the field is read.
 pub const DWELL: Duration = Duration::from_millis(1_500);
 /// The shortest time between two full reads in the same window.
@@ -156,6 +181,8 @@ pub enum Outcome {
 pub struct Planner {
     /// The app and surface in front, and since when.
     current: Option<(String, u64)>,
+    /// Whether drafting is allowed in the app in front (as of the last tick).
+    allowed: bool,
     since: Instant,
     last_read: Option<Instant>,
     /// Consecutive full reads that found the same context (slows re-reads down).
@@ -176,6 +203,7 @@ impl Planner {
     pub fn new(now: Instant) -> Self {
         Self {
             current: None,
+            allowed: false,
             since: now,
             last_read: None,
             unchanged: 0,
@@ -223,6 +251,52 @@ impl Planner {
         self.global_backoff.is_some() || self.app_backoff.contains_key(key)
     }
 
+    /// When sending is possible again, if [`RATE_MAX`] sends already happened in the window.
+    fn rate_free_at(&self, now: Instant) -> Option<Instant> {
+        let mut recent = self
+            .sends
+            .iter()
+            .filter(|t| now.saturating_duration_since(**t) < RATE_WINDOW);
+        let oldest = *recent.next()?;
+        (1 + recent.count() >= RATE_MAX).then_some(oldest + RATE_WINDOW)
+    }
+
+    /// How long the loop may sleep after a tick before the next one could do anything, given
+    /// whether the OS reports focus changes (`events`; the loop then also wakes on those).
+    ///
+    /// - Nothing allowed in front, or backed off: [`SLOW_POLL`] with events, else
+    ///   [`IDLE_POLL`] (or [`POLL`] while a read-ahead may be running, to cancel it promptly).
+    /// - A dwell pending: until it ends (no longer than [`POLL`] without events).
+    /// - After a read: until the next re-read (or until a send is allowed again), no longer
+    ///   than the same fallback as above.
+    ///
+    /// Never shorter than [`MIN_WAIT`]. Only the sleep changes: ticking earlier never changes
+    /// a decision, it only costs a look.
+    pub fn next_check(&self, now: Instant, events: bool) -> Duration {
+        let fallback = if events {
+            SLOW_POLL
+        } else if self.in_flight.is_some() {
+            POLL
+        } else {
+            IDLE_POLL
+        };
+        let Some((key, _)) = &self.current else {
+            return fallback;
+        };
+        let backed_off = self.global_backoff.is_some_and(|until| now < until)
+            || self.app_backoff.get(key).is_some_and(|until| now < *until);
+        if !self.allowed || backed_off {
+            return fallback;
+        }
+        let (due, cap) = match self.last_read {
+            None if events => (self.since + DWELL, fallback),
+            None => (self.since + DWELL, POLL),
+            Some(t) => (t + self.reread_after(), fallback),
+        };
+        let due = self.rate_free_at(now).map_or(due, |free| due.max(free));
+        due.saturating_duration_since(now).min(cap).max(MIN_WAIT)
+    }
+
     /// One poll: what is in front now.
     pub fn tick(&mut self, now: Instant, front: Front) -> Action {
         match front {
@@ -249,6 +323,7 @@ impl Planner {
                     .current
                     .as_ref()
                     .is_some_and(|(k, s)| *k == key && *s == surface);
+                self.allowed = allowed;
                 if !same {
                     self.current = Some((key, surface));
                     self.since = now;
@@ -398,6 +473,10 @@ pub fn draftable(field: &nugget_core::ipc::FieldInfo) -> bool {
 #[derive(Debug, Default)]
 pub struct Runner {
     generation: AtomicU64,
+    /// The latest generation, to wake a sleeping loop so it stops at once.
+    wake: tokio::sync::watch::Sender<u64>,
+    /// Focus change notifications, started with the first loop (`None`: none on this OS).
+    focus: OnceLock<Option<FocusEvents>>,
 }
 
 /// Stop the read-ahead loop and start one if Double Tap and read-ahead are on (call after the
@@ -407,6 +486,7 @@ pub fn restart(app: &AppHandle) {
         return;
     };
     let generation = state.read_ahead.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    state.read_ahead.wake.send_replace(generation);
     let s = lock(&state.settings).clone();
     let supported = cfg!(any(
         target_os = "linux",
@@ -447,14 +527,70 @@ impl Reply {
     }
 }
 
+/// What ended the loop's sleep.
+enum Woke {
+    Due,
+    Focus,
+    Outcome((u64, String, Outcome)),
+    Settings,
+}
+
 async fn run(app: AppHandle, generation: u64) {
     let hasher = std::collections::hash_map::RandomState::new();
     let mut planner = Planner::new(Instant::now());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, String, Outcome)>();
-    let mut interval = tokio::time::interval(POLL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let (focus, mut settings_changed) = {
+        let Some(state) = app.try_state::<DoubleTap>() else {
+            return;
+        };
+        let runner = &state.read_ahead;
+        let focus = runner
+            .focus
+            .get_or_init(|| FocusEvents::start(&app))
+            .clone();
+        (focus, runner.wake.subscribe())
+    };
+    let events = focus.is_some();
+    let mut power = power::Cached::default();
+    let mut paused = false;
+    // The first look is at once.
+    let mut deadline = tokio::time::Instant::now();
+    let mut last_look: Option<tokio::time::Instant> = None;
     loop {
-        interval.tick().await;
+        let focus_changed = async {
+            match &focus {
+                Some(f) => f.changed().await,
+                None => std::future::pending().await,
+            }
+        };
+        let woke = tokio::select! {
+            () = tokio::time::sleep_until(deadline) => Woke::Due,
+            () = focus_changed, if !paused => Woke::Focus,
+            Some(o) = rx.recv() => Woke::Outcome(o),
+            _ = settings_changed.changed() => Woke::Settings,
+        };
+        match woke {
+            Woke::Due | Woke::Settings => {}
+            Woke::Outcome((seq, key, outcome)) => {
+                // It can end a read-ahead or start a backoff: sleep again for as long as that
+                // allows.
+                planner.outcome(Instant::now(), seq, &key, outcome);
+                if !paused {
+                    deadline =
+                        tokio::time::Instant::now() + planner.next_check(Instant::now(), events);
+                }
+                continue;
+            }
+            Woke::Focus => {
+                let now = tokio::time::Instant::now();
+                let earliest = last_look.map_or(now, |t| t + EVENT_MIN_GAP);
+                tokio::time::sleep_until((now + EVENT_SETTLE).max(earliest)).await;
+                // Notifications during the settle are covered by this look.
+                if let Some(f) = &focus {
+                    let _ = futures::FutureExt::now_or_never(f.changed());
+                }
+            }
+        }
         let Some(state) = app.try_state::<DoubleTap>() else {
             return;
         };
@@ -468,6 +604,28 @@ async fn run(app: AppHandle, generation: u64) {
         while let Ok((seq, key, outcome)) = rx.try_recv() {
             planner.outcome(Instant::now(), seq, &key, outcome);
         }
+        let now_power = power.current().await;
+        let pause = power::paused(now_power, &s);
+        if pause != paused {
+            paused = pause;
+            probe::record("read_ahead_paused", || {
+                serde_json::json!({
+                    "paused": pause,
+                    "on_battery": now_power.on_battery,
+                    "low_power": now_power.low_power,
+                })
+            });
+        }
+        if paused {
+            // As if nothing were in front: a running read-ahead is cancelled, and the dwell
+            // starts over once it resumes.
+            if planner.tick(Instant::now(), Front::Nothing) == Action::Cancel {
+                cancel(&app);
+            }
+            deadline = tokio::time::Instant::now() + power.until_due(Instant::now()).max(MIN_WAIT);
+            continue;
+        }
+        last_look = Some(tokio::time::Instant::now());
         let front = observe(&app, &s, &hasher).await;
         let key = match &front {
             Front::App { key, .. } => key.clone(),
@@ -511,6 +669,7 @@ async fn run(app: AppHandle, generation: u64) {
                 }
             }
         }
+        deadline = tokio::time::Instant::now() + planner.next_check(Instant::now(), events);
     }
 }
 
@@ -824,6 +983,119 @@ mod tests {
         assert!(p.in_flight());
         p.outcome(t0 + ms(1_900), 1, "mail", Outcome::Started { done: true });
         assert!(!p.in_flight());
+    }
+
+    #[test]
+    fn next_check_waits_for_the_dwell_and_the_reread() {
+        let t0 = Instant::now();
+        let mut p = Planner::new(t0);
+        // Nothing in front yet.
+        assert_eq!(p.next_check(t0, true), SLOW_POLL);
+        assert_eq!(p.next_check(t0, false), IDLE_POLL);
+        // A dwell pending: until it ends with events, at most POLL without.
+        p.tick(t0, app("mail"));
+        assert_eq!(p.next_check(t0, true), DWELL);
+        assert_eq!(p.next_check(t0, false), POLL);
+        assert_eq!(p.next_check(t0 + ms(1_000), false), ms(500));
+        // Read and sent: with events, the re-read is further off than the fallback poll.
+        assert_eq!(p.tick(t0 + DWELL, app("mail")), Action::Read);
+        let r1 = t0 + DWELL;
+        assert_eq!(p.read(r1, "mail", Some(7)), Decision::Send(1));
+        assert_eq!(p.next_check(r1, true), SLOW_POLL);
+        // Without events a running read-ahead is watched every POLL, otherwise IDLE_POLL.
+        assert_eq!(p.next_check(r1, false), POLL);
+        p.outcome(r1, 1, "mail", Outcome::Started { done: true });
+        assert_eq!(p.next_check(r1, false), IDLE_POLL);
+        // Close to the re-read: until it.
+        assert_eq!(p.next_check(r1 + REREAD - ms(1_000), true), ms(1_000));
+        // Never a busy loop.
+        assert_eq!(p.next_check(r1 + REREAD * 3, true), MIN_WAIT);
+    }
+
+    #[test]
+    fn next_check_waits_long_when_nothing_can_happen() {
+        let t0 = Instant::now();
+        let mut p = Planner::new(t0);
+        let vault = Front::App {
+            key: "bitwarden".into(),
+            surface: 1,
+            allowed: false,
+        };
+        p.tick(t0, vault.clone());
+        p.tick(t0 + ms(100), vault);
+        assert_eq!(p.next_check(t0 + ms(100), true), SLOW_POLL);
+        assert_eq!(p.next_check(t0 + ms(100), false), IDLE_POLL);
+        // Backed off: likewise.
+        p.tick(t0 + ms(200), app("mail"));
+        p.tick(t0 + ms(1_700), app("mail"));
+        p.read(t0 + ms(1_800), "mail", Some(3));
+        p.outcome(t0 + ms(1_900), 1, "mail", Outcome::Skipped(Skip::Cloud));
+        assert_eq!(p.next_check(t0 + ms(2_000), true), SLOW_POLL);
+        assert_eq!(p.next_check(t0 + ms(2_000), false), IDLE_POLL);
+        // Busy (a draft runs): nothing to time.
+        p.tick(t0 + ms(3_000), Front::Busy);
+        assert_eq!(p.next_check(t0 + ms(3_000), true), SLOW_POLL);
+    }
+
+    #[test]
+    fn next_check_waits_out_the_rate_limit() {
+        let t0 = Instant::now();
+        let mut p = Planner::new(t0);
+        let mut now = t0;
+        for i in 0..RATE_MAX as u64 {
+            let front = app(&format!("app{i}"));
+            p.tick(now, front.clone());
+            now += DWELL;
+            assert_eq!(p.tick(now, front), Action::Read);
+            assert!(matches!(
+                p.read(now, &format!("app{i}"), Some(i + 1)),
+                Decision::Send(_)
+            ));
+        }
+        p.tick(now, app("next"));
+        // The dwell ends long before a send is allowed again.
+        let free = t0 + DWELL + RATE_WINDOW;
+        assert_eq!(p.next_check(now, true), SLOW_POLL);
+        assert_eq!(p.next_check(free - ms(2_000), true), ms(2_000));
+        assert_eq!(p.next_check(free - ms(2_000), false), POLL);
+    }
+
+    /// Ticking only when `next_check` says so reads at the same moments as polling every 100 ms.
+    #[test]
+    fn scheduled_ticks_read_when_polling_would() {
+        let schedule = |events: bool, step: Option<Duration>| {
+            let t0 = Instant::now();
+            let mut p = Planner::new(t0);
+            let mut reads = Vec::new();
+            let mut now = t0;
+            while now < t0 + Duration::from_secs(150) {
+                if p.tick(now, app("mail")) == Action::Read {
+                    reads.push(now.duration_since(t0).as_millis() / 100);
+                    p.read(now, "mail", Some(7));
+                }
+                now += step.unwrap_or_else(|| p.next_check(now, events));
+            }
+            reads
+        };
+        let polled = schedule(false, Some(ms(100)));
+        assert!(polled.len() >= 4, "{polled:?}");
+        assert_eq!(schedule(true, None), polled);
+        assert_eq!(schedule(false, None), polled);
+    }
+
+    #[test]
+    fn a_pause_cancels_and_restarts_the_dwell() {
+        // The loop ticks `Front::Nothing` while power pauses read-ahead.
+        let t0 = Instant::now();
+        let mut p = Planner::new(t0);
+        p.tick(t0, app("mail"));
+        p.tick(t0 + DWELL, app("mail"));
+        p.read(t0 + DWELL, "mail", Some(3));
+        assert_eq!(p.tick(t0 + ms(2_000), Front::Nothing), Action::Cancel);
+        assert_eq!(p.tick(t0 + ms(3_000), Front::Nothing), Action::Wait);
+        let t1 = t0 + Duration::from_secs(60);
+        assert_eq!(p.tick(t1, app("mail")), Action::Wait);
+        assert_eq!(p.tick(t1 + DWELL, app("mail")), Action::Read);
     }
 
     #[test]

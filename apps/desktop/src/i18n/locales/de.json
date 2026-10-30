@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "Double Tap einschalten",
   "doubletap.readAhead": "Beim Antworten vorauslesen",
   "doubletap.readAheadHint": "Bleibt ein Antwortfeld kurz im Fokus, liest Nugget es vorab und lässt das lokale Modell schon mit dem Lesen beginnen, sodass der Entwurf nach dem Auslöser schneller startet. Nur mit lokalen Modellen, nie in ausgeschlossenen Apps, Terminals oder Passwortfeldern. Nichts wird an einen Cloud-Anbieter gesendet und nichts gespeichert. Kostet etwas Rechenleistung, während du zwischen Feldern wechselst.",
+  "doubletap.readAheadOnBattery": "Auch im Akkubetrieb vorauslesen",
+  "doubletap.readAheadOnBatteryHint": "Schalte das aus, um das Vorauslesen zu pausieren, solange der Computer im Akkubetrieb läuft. Im Stromsparmodus (Energiesparmodus) pausiert das Vorauslesen immer.",
   "doubletap.save": "Speichern",
   "doubletap.saving": "Wird gespeichert…",
   "doubletap.revert": "Änderungen verwerfen",

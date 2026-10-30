@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "Turn on Double Tap",
   "doubletap.readAhead": "Read ahead while you reply",
   "doubletap.readAheadHint": "When a reply field keeps focus for a moment, Nugget reads it early and has the local model start reading it, so the draft begins sooner when you press the trigger. Local models only; never in excluded apps, terminals or password fields. Nothing is sent to a cloud provider and nothing is saved. Uses some CPU while you move between fields.",
+  "doubletap.readAheadOnBattery": "Read ahead on battery",
+  "doubletap.readAheadOnBatteryHint": "Turn this off to pause read-ahead while the computer runs on battery. Read-ahead always pauses in low power mode (battery saver).",
   "doubletap.save": "Save",
   "doubletap.saving": "Saving…",
   "doubletap.revert": "Discard changes",

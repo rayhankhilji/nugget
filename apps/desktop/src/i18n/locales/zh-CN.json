@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "开启 Double Tap",
   "doubletap.readAhead": "回复时提前读取",
   "doubletap.readAheadHint": "当回复框保持焦点片刻后，Nugget 会提前读取它，并让本地模型开始读入，这样按下触发键时草稿会更快开始。仅限本地模型；不会在已排除的应用、终端或密码框中进行。不会向云端提供商发送任何内容，也不会保存任何内容。在字段之间切换时会占用一些 CPU。",
+  "doubletap.readAheadOnBattery": "使用电池时也提前读取",
+  "doubletap.readAheadOnBatteryHint": "关闭后，电脑使用电池供电时会暂停提前读取。在低电量模式（省电模式）下始终会暂停提前读取。",
   "doubletap.save": "保存",
   "doubletap.saving": "正在保存…",
   "doubletap.revert": "放弃更改",

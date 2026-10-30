@@ -4013,6 +4013,7 @@ name = "nugget-desktop"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "futures",
  "mac-notification-sys",
  "minisign-verify",
@@ -4022,6 +4023,11 @@ dependencies = [
  "nugget-hotkey",
  "nugget-ipc",
  "nugget-policy",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-io-kit",
  "reqwest",
  "rustls",
  "serde",
@@ -4038,6 +4044,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.59.0",
  "zbus 5.19.0",
 ]
 

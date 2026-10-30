@@ -1456,6 +1456,8 @@ export interface DoubleTapSettings {
    * in excluded apps, terminals or secure fields. Absent from an older shell: treated as on.
    */
   read_ahead?: boolean;
+  /** Keep reading ahead on battery (low power mode always pauses it). Absent: treated as on. */
+  read_ahead_on_battery?: boolean;
 }
 
 export interface ModifierOption {
