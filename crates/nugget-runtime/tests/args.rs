@@ -44,6 +44,7 @@ fn every_plan_binds_loopback_and_never_carries_a_key() {
         RuntimeRole::Chat,
         RuntimeRole::Embedding,
         RuntimeRole::Rerank,
+        RuntimeRole::Draft,
     ] {
         for accel in [
             RuntimeAccel::Cpu,
@@ -202,11 +203,46 @@ fn rerank_role_enables_reranking_with_rank_pooling_and_whole_ubatches() {
     assert!(val(&a, "--pooling").is_none());
     assert_eq!(val(&a, "--ubatch-size").as_deref(), Some("4096"));
     assert_eq!(val(&a, "--ctx-size").as_deref(), Some("4096"));
-    // Neither chat nor embedding plans rerank.
-    for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+    // Neither chat, embedding nor draft plans rerank.
+    for role in [
+        RuntimeRole::Chat,
+        RuntimeRole::Embedding,
+        RuntimeRole::Draft,
+    ] {
         let a = strs(&plan(role, RuntimeAccel::Cpu, &hw(16, 8), &Tuning::default()).args());
         assert!(!a.contains(&"--reranking".to_string()));
     }
+}
+
+#[test]
+fn draft_role_generates_from_one_slot_with_room_for_a_thread() {
+    for ram in [8, 16, 64] {
+        let p = plan(
+            RuntimeRole::Draft,
+            RuntimeAccel::Cpu,
+            &hw(ram, 16),
+            &Tuning::default(),
+        );
+        assert_eq!(p.pooling, Pooling::Model);
+        let a = strs(&p.args());
+        // A generating server: no embedding or rerank mode, no whole-input batches.
+        for f in ["--embedding", "--reranking", "--pooling", "--batch-size"] {
+            assert!(!a.contains(&f.to_string()), "{f}");
+        }
+        // One slot, so the prefix a read-ahead cached is the one the trigger reuses.
+        assert_eq!(val(&a, "--parallel").as_deref(), Some("1"));
+        assert_eq!(val(&a, "--ctx-size").as_deref(), Some("8192"));
+    }
+    // Its own tuning applies.
+    let t = Tuning {
+        ctx_per_slot: Some(4096),
+        threads: Some(2),
+        ..Tuning::default()
+    };
+    let a = strs(&plan(RuntimeRole::Draft, RuntimeAccel::Metal, &hw(16, 8), &t).args());
+    assert_eq!(val(&a, "--ctx-size").as_deref(), Some("4096"));
+    assert_eq!(val(&a, "--threads").as_deref(), Some("2"));
+    assert_eq!(val(&a, "--n-gpu-layers").as_deref(), Some("all"));
 }
 
 #[test]

@@ -212,10 +212,28 @@ fn words(text: &str) -> impl Iterator<Item = String> + '_ {
         .map(str::to_lowercase)
 }
 
+/// What the streaming check holds back and checks ([`crate::DraftConfig::grounding_check`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GroundingCheck {
+    /// Hold each sentence (and the greeting) until it ends; drop sentences with unsupported or
+    /// superseded values and copied credentials. Costs the first sentence's generation time
+    /// before the first character.
+    Sentences,
+    /// Stream word by word; hold only the current word (and a run of digit groups) until it
+    /// is complete, and stop the draft before a credential copied from a sensitive fact.
+    /// Values are not checked. Near-zero added latency.
+    #[default]
+    Secrets,
+}
+
 /// The streaming grounding stage (see the module docs).
 #[derive(Debug, Clone)]
 pub struct Grounder {
     corpus: Corpus,
+    check: GroundingCheck,
+    /// `Secrets`: the end of the text emitted so far, for credentials split across releases.
+    tail: String,
     /// Text received but not yet decided (the current sentence and its leading whitespace).
     pending: String,
     /// Bytes of `pending` (after its first unit start) known to hold no boundary.
@@ -238,6 +256,8 @@ impl Grounder {
         };
         Self {
             corpus,
+            check: GroundingCheck::Sentences,
+            tail: String::new(),
             pending: String::new(),
             scanned: 0,
             held: String::new(),
@@ -257,6 +277,12 @@ impl Grounder {
         voice: &VoiceHints,
     ) -> Self {
         Self::new(Corpus::new(ctx, context, instruction, voice))
+    }
+
+    /// Use this check (the default is [`GroundingCheck::Sentences`]).
+    pub fn with_check(mut self, check: GroundingCheck) -> Self {
+        self.check = check;
+        self
     }
 
     pub fn report(&self) -> &GroundingReport {
@@ -280,6 +306,9 @@ impl Grounder {
             return String::new();
         }
         self.pending.push_str(text);
+        if self.check == GroundingCheck::Secrets {
+            return self.release_words(false);
+        }
         let mut out = String::new();
         loop {
             let start = self.unit_start();
@@ -313,6 +342,11 @@ impl Grounder {
     pub fn finish(&mut self) -> String {
         if self.finished {
             return String::new();
+        }
+        if self.check == GroundingCheck::Secrets {
+            let out = self.release_words(true);
+            self.finished = true;
+            return out;
         }
         self.finished = true;
         let rest = std::mem::take(&mut self.pending);
@@ -378,6 +412,61 @@ impl Grounder {
         }
         out.push_str(sentence);
         self.emitted_any = true;
+    }
+
+    /// `Secrets`: release the complete words of `pending` (everything with `last`), keeping a
+    /// trailing partial word and a trailing run of digit groups ("4111 1111") until they end.
+    /// A release that copies a credential from a sensitive fact is dropped and ends the draft.
+    fn release_words(&mut self, last: bool) -> String {
+        let cut = if last {
+            self.pending.len()
+        } else {
+            let mut cut = self.pending.rfind(char::is_whitespace).unwrap_or(0);
+            // Hold a trailing run of digit groups while the partial word after it may still
+            // continue it: a card number arrives a group at a time.
+            let partial = self.pending[cut..].trim();
+            let run_may_continue = partial.chars().all(|c| c.is_ascii_digit() || c == '-');
+            if run_may_continue {
+                loop {
+                    let head = self.pending[..cut].trim_end();
+                    let start = head.rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
+                    let word = &head[start..];
+                    if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit() || c == '-') {
+                        cut = start;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            // Never release trailing whitespace (it goes out in front of the next word).
+            self.pending[..cut].trim_end().len()
+        };
+        if cut == 0 {
+            return String::new();
+        }
+        let release: String = self.pending.drain(..cut).collect();
+        if !self.corpus.secrets.is_empty() {
+            let window = format!("{}{}", self.tail, release);
+            let sq = squash(&window);
+            let digits: String = sq.chars().filter(char::is_ascii_digit).collect();
+            if self.corpus.secrets.iter().any(|s| {
+                sq.contains(s.as_str())
+                    || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
+            }) {
+                self.report.secrets_dropped += 1;
+                self.pending.clear();
+                self.finished = true;
+                return String::new();
+            }
+        }
+        let keep = format!("{}{}", self.tail, release);
+        let n = keep.chars().count();
+        self.tail = keep.chars().skip(n.saturating_sub(48)).collect();
+        if !release.trim().is_empty() {
+            self.emitted_any = true;
+            self.body_ok = true;
+        }
+        release
     }
 
     /// Whether every value in the sentence is supported; counts values and names.
@@ -1368,6 +1457,37 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
             secret_tokens("password tangerine-Otter-42, card 4111 1111 1111 1111, CVV 737."),
             ["4111111111111111", "tangerineotter42"]
         );
+    }
+
+    #[test]
+    fn secrets_mode_streams_words_and_stops_before_a_credential() {
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        // Complete words go out at once: no sentence or greeting hold.
+        assert_eq!(g.push("Hi Ravi,\n\nThe team"), "Hi Ravi,\n\nThe");
+        assert_eq!(
+            g.push(" has 12 people. The VPN"),
+            " team has 12 people. The"
+        );
+        assert_eq!(g.push(" password is tangerine-"), " VPN password is");
+        // The credential completes: dropped, and the draft ends.
+        assert_eq!(g.push("Otter-42. Kind regards"), "");
+        assert!(g.is_finished());
+        assert_eq!(g.finish(), "");
+        assert_eq!(g.report().secrets_dropped, 1);
+        assert_eq!(g.report().values_checked, 0, "values are not checked");
+    }
+
+    #[test]
+    fn secrets_mode_holds_digit_groups_until_the_run_ends() {
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        assert_eq!(g.push("The card is 4111 1111"), "The card is");
+        assert_eq!(g.push(" 1111 1111 for"), "");
+        assert!(g.is_finished());
+        // A harmless number streams as usual, and the end flushes everything.
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let (out, _) = run(&mut g, &["We are 12 ", "people, see you at 10:00."]);
+        assert_eq!(out, "We are 12 people, see you at 10:00.");
+        assert_eq!(g.report().secrets_dropped, 0);
     }
 
     #[test]

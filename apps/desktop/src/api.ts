@@ -282,7 +282,7 @@ export interface AskStarted {
 
 // ---- local runtime ----
 
-export type RuntimeRole = "chat" | "embedding" | "rerank";
+export type RuntimeRole = "chat" | "embedding" | "rerank" | "draft";
 export type RuntimeState = "not_installed" | "stopped" | "starting" | "ready" | "stopping" | "failed";
 
 export interface RuntimeInfo {
@@ -1452,6 +1452,12 @@ export interface DoubleTapSettings {
   excluded_apps: string[];
   /** Allow drafting in terminal emulators (off by default: text there can run as a command). */
   allow_terminals: boolean;
+  /**
+   * Read ahead (CC1): when a reply field keeps focus for a moment, prefill its prompt into the
+   * local model server's cache so the trigger only reads the remainder. Local models only; never
+   * in excluded apps, terminals or secure fields. Absent from an older shell: treated as on.
+   */
+  read_ahead?: boolean;
 }
 
 export interface ModifierOption {

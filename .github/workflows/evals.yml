@@ -49,19 +49,14 @@ env:
 jobs:
   eval:
     name: ${{ matrix.suite }} (real model)
+    # The expensive general suites run on schedule and on demand only, never on push.
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
       fail-fast: false
       matrix:
         include:
-          - suite: doubletap
-            args: doubletap
-          # A/B on one runner: llama-server's default threads (the physical cores), then every
-          # logical core.
-          - suite: doubletap-threads
-            args: doubletap
-            args2: doubletap --local-threads 4
           # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
           # agentic-tier model rather than the drafting model (AA3).
           - suite: draft
@@ -156,6 +151,127 @@ jobs:
             echo "== $f"
             jq -c '{suite, status, message, duration_ms, git: .git_commit,
                     params: (.config.params | with_entries(select(.key | test("^(local|model|judge|tasks|items)")))),
+                    metrics: [.metrics[] | {name, value, unit, target, target_met}]}' "$f"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Double Tap latency where users are: the Linux CPU runner and Apple Silicon (the manifest's
+  # Metal llama-server). Each runner runs every configuration one after the other, so all of them
+  # share one CPU: the manifest's 4B chat model and the two small models proposed in
+  # manifests/pending/ (bench-only, SHA-256 verified; nuggetd never reads them), each without and
+  # with read-ahead. `draft-quality` measures drafting quality with each model on one runner.
+  # `runs` holds one run per line: a label (the report's subdirectory of eval-results/), then the
+  # bench arguments. The `chat_model` input does not apply here: every run names its model.
+  doubletap:
+    name: ${{ matrix.suite }} (real model)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: doubletap
+            os: ubuntu-latest
+            runs: |
+              4b-read-ahead-off doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead off
+              4b-read-ahead-on doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on
+              1.7b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead off
+              1.7b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead on
+              0.6b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead off
+              0.6b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead on
+          - suite: doubletap-macos
+            os: macos-latest
+            runs: |
+              4b-read-ahead-off doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead off
+              4b-read-ahead-on doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on
+              1.7b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead off
+              1.7b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead on
+              0.6b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead off
+              0.6b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead on
+          - suite: draft-quality
+            os: ubuntu-latest
+            runs: |
+              draft-4b draft --draft-judge model --local-chat-model qwen3-4b-q4km --draft-dump eval-results/draft-4b/drafts.jsonl
+              draft-1.7b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --draft-dump eval-results/draft-1.7b/drafts.jsonl
+              draft-0.6b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --draft-dump eval-results/draft-0.6b/drafts.jsonl
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      # Keyed by the signed manifest and the pending entries the runs install.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json', 'manifests/pending/*.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: ${{ matrix.suite }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if [ "$RUNNER_OS" = macOS ]; then
+              sysctl -n machdep.cpu.brand_string hw.ncpu hw.perflevel0.physicalcpu hw.memsize
+              system_profiler SPDisplaysDataType | grep -E 'Chipset|Cores|Metal' || true
+            else
+              lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+              free -g
+            fi
+          } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
+
+      # Every run, in order, on this runner; one that fails does not stop the others, but fails
+      # the step at the end. Each run's report goes to eval-results/<label>/.
+      - name: Run ${{ matrix.suite }}
+        env:
+          RUNS: ${{ matrix.runs }}
+        run: |
+          failed=0
+          while read -r -u 3 label args; do
+            [ -n "$label" ] || continue
+            echo "::group::$label: $args"
+            mkdir -p "$RESULTS/$label"
+            # Word splitting of $args is intended: it is the run's argument list.
+            # shellcheck disable=SC2086
+            if ! ./target/release/nugget-bench $args --local-models \
+                --scale "${{ matrix.scale || env.SCALE }}" --out-dir "$RESULTS/$label" < /dev/null; then
+              echo "::warning::$label failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done 3<<< "$RUNS"
+          exit "$failed"
+
+      - name: Summary
+        if: always()
+        run: |
+          find "$RESULTS" -name '*.json' | sort | while read -r f; do
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|model|judge|tasks|items|draft|read_ahead|server_cpu)")))),
                     metrics: [.metrics[] | {name, value, unit, target, target_met}]}' "$f"
           done
 

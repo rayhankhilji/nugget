@@ -174,6 +174,9 @@ impl LaunchPlan {
             // A query and one passage per sequence (the reranker gets at most ~2000 characters
             // of each passage); like embeddings, a whole sequence must fit one ubatch.
             RuntimeRole::Rerank => (2048, (cores / 2).clamp(1, 4), true),
+            // One Double Tap prompt (rules, voice, thread) plus its reply. A single slot, so the
+            // prefix a read-ahead prefilled is the one the trigger finds in the cache.
+            RuntimeRole::Draft => (8192, 1, false),
         };
         let ctx_per_slot = tuning.ctx_per_slot.unwrap_or(ctx_default).max(256);
         let parallel = tuning.parallel.unwrap_or(parallel_default).clamp(1, 64);
@@ -193,7 +196,7 @@ impl LaunchPlan {
                 RuntimeRole::Embedding => tuning.pooling.unwrap_or(Pooling::Model),
                 // `--reranking` implies rank pooling; a pooling override would break scoring.
                 RuntimeRole::Rerank => Pooling::Rank,
-                RuntimeRole::Chat => Pooling::Model,
+                RuntimeRole::Chat | RuntimeRole::Draft => Pooling::Model,
             },
             threads: tuning.threads,
             extra_args: tuning.extra_args.clone(),
@@ -245,7 +248,7 @@ impl LaunchPlan {
             }
             // Serves `/v1/rerank`; sets embedding mode and rank pooling itself.
             RuntimeRole::Rerank => push("--reranking", None),
-            RuntimeRole::Chat => {}
+            RuntimeRole::Chat | RuntimeRole::Draft => {}
         }
         if let Some(b) = self.batch_size {
             push("--batch-size", Some(b.to_string()));

@@ -14,6 +14,12 @@
 //!   the others, but it never joins the router: `Tier::Rerank` is not a routed tier and the slot
 //!   is not a router provider. Retrieval reaches it through [`crate::rerank`]. Rerankers are
 //!   never selected for chat or embeddings.
+//! - The `draft` role (`local-draft`, only with `[draft.local] model` naming a manifest chat
+//!   model) is the small model local Double Tap drafts with, in its own server. Its slot joins
+//!   the router as a provider **without tiers**, so Chat, agents and other features never route
+//!   to it; the draft engine asks for it by id ([`nugget_draft::LocalBudget::provider`]). Once
+//!   ready it has the chat role's capabilities, and like every slot it starts at boot when its
+//!   model is installed, restarts on demand and stops when idle.
 //! - A slot is routable for nothing (empty capabilities) until its server first became ready,
 //!   so neither chat, triage nor embeddings pick it before then. Once ready, the role's known
 //!   capabilities are set (chat streams and follows JSON schemas, embedding embeds) and stay
@@ -41,6 +47,7 @@ use nugget_models::{Hardware, Manifest, ModelEntry, recommend};
 use nugget_runtime::{Runtime, provider_id};
 
 use crate::config::Config;
+use crate::features::draft::local_draft_model;
 
 /// Tiers the local chat server always serves, whatever else its model lists.
 const CHAT_TIERS: [Tier; 3] = [Tier::Triage, Tier::Light, Tier::Synthesis];
@@ -107,6 +114,20 @@ pub(crate) fn selected_models(
             }
         }
     }
+    // Only when configured: the Double Tap model is opt-in.
+    if let Some(id) = local_draft_model(&cfg.draft) {
+        match manifest.get(&id) {
+            Some(m) if m.tiers.iter().any(|t| t.is_chat()) && !m.tiers.contains(&Tier::Rerank) => {
+                out.push((RuntimeRole::Draft, m.clone()));
+            }
+            Some(m) => {
+                tracing::warn!(model = %m.id, "draft.local.model serves no chat tier; no local Double Tap model");
+            }
+            None => {
+                tracing::warn!(model = %id, "draft.local.model is not in the manifest; no local Double Tap model");
+            }
+        }
+    }
     out
 }
 
@@ -117,6 +138,8 @@ pub(crate) fn slot_tiers(role: RuntimeRole, model: &ModelEntry) -> Vec<Tier> {
         // Retrieval calls the reranker directly: the slot never joins the router (see
         // `LocalRuntime::routed`), the tier is only reported by `providers.list`.
         RuntimeRole::Rerank => vec![Tier::Rerank],
+        // Never routed by tier: only the draft engine asks for it, by id.
+        RuntimeRole::Draft => Vec::new(),
         RuntimeRole::Chat => {
             let mut t: Vec<Tier> = CHAT_TIERS.to_vec();
             for x in &model.tiers {
@@ -133,7 +156,7 @@ pub(crate) fn slot_tiers(role: RuntimeRole, model: &ModelEntry) -> Vec<Tier> {
 /// Capabilities a ready local server is known to have.
 fn known_capabilities(role: RuntimeRole, cfg: &ProviderConfig) -> Capabilities {
     match role {
-        RuntimeRole::Chat => Capabilities {
+        RuntimeRole::Chat | RuntimeRole::Draft => Capabilities {
             streaming: true,
             json_schema: true,
             context_tokens: cfg.context_tokens,
@@ -347,7 +370,7 @@ impl Provider for RuntimeSlot {
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream> {
-        if self.role != RuntimeRole::Chat {
+        if !matches!(self.role, RuntimeRole::Chat | RuntimeRole::Draft) {
             return Err(Error::Unsupported(format!("{} does not chat", self.id)));
         }
         self.ready().await?.chat(req).await
@@ -375,6 +398,7 @@ fn role_name(role: RuntimeRole) -> &'static str {
         RuntimeRole::Chat => "chat",
         RuntimeRole::Embedding => "embedding",
         RuntimeRole::Rerank => "rerank",
+        RuntimeRole::Draft => "draft",
     }
 }
 
@@ -443,7 +467,7 @@ impl LocalRuntime {
         self.slots.iter().find(|s| s.role == RuntimeRole::Rerank)
     }
 
-    /// Slots that are router providers (all but the reranker).
+    /// Slots that are router providers (all but the reranker; the draft slot without tiers).
     fn routed(&self) -> impl Iterator<Item = &Arc<RuntimeSlot>> {
         self.slots.iter().filter(|s| s.role != RuntimeRole::Rerank)
     }
@@ -731,6 +755,129 @@ mod tests {
             rerank.embed(&["x".into()]).await,
             Err(Error::Unsupported(_))
         ));
+    }
+
+    fn chat_model(m: &Manifest) -> ModelEntry {
+        m.models
+            .iter()
+            .find(|e| e.tiers.iter().any(|t| t.is_chat()) && !e.tiers.contains(&Tier::Rerank))
+            .expect("the shipped manifest has a chat model")
+            .clone()
+    }
+
+    fn draft_slots(cfg: &str, m: &Manifest) -> Vec<ModelEntry> {
+        let cfg = Config::parse(cfg).unwrap();
+        selected_models(&cfg, m, &hw(64))
+            .into_iter()
+            .filter(|(r, _)| *r == RuntimeRole::Draft)
+            .map(|(_, e)| e)
+            .collect()
+    }
+
+    #[test]
+    fn a_draft_model_is_selected_only_when_configured_and_a_chat_model() {
+        let m = manifest();
+        // Not configured: no draft role, and the other roles are unchanged.
+        let none = selected_models(&Config::parse("").unwrap(), &m, &hw(64));
+        assert!(none.iter().all(|(r, _)| *r != RuntimeRole::Draft));
+        let chat = chat_model(&m);
+        let cfg = format!("[draft.local]\nmodel = \"{}\"\n", chat.id);
+        let sel = draft_slots(&cfg, &m);
+        assert_eq!(sel.len(), 1);
+        assert_eq!(sel[0].id, chat.id);
+        // Beside the usual roles, not instead of them.
+        let all = selected_models(&Config::parse(&cfg).unwrap(), &m, &hw(64));
+        assert_eq!(all.len(), none.len() + 1);
+        assert_eq!(&all[..none.len()], &none[..]);
+        // An embedding model or a reranker cannot draft; unknown ids select nothing.
+        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        for id in [emb.id.as_str(), reranker(&m).id.as_str(), "not-in-manifest"] {
+            let cfg = format!("[draft.local]\nmodel = \"{id}\"\n");
+            assert!(draft_slots(&cfg, &m).is_empty(), "{id}");
+        }
+        // A [draft] table the feature refuses selects nothing either.
+        let cfg = format!("[draft.local]\nmodel = \"{}\"\nnope = 1\n", chat.id);
+        assert!(draft_slots(&cfg, &m).is_empty());
+        // Never routed for a tier; chat's capabilities once ready.
+        assert!(slot_tiers(RuntimeRole::Draft, &chat).is_empty());
+        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
+            "id": "local-draft", "kind": "openai_compatible",
+            "base_url": "http://127.0.0.1:9/v1", "model": "m", "context_tokens": 8192,
+        }))
+        .unwrap();
+        assert_eq!(
+            known_capabilities(RuntimeRole::Draft, &cfg),
+            known_capabilities(RuntimeRole::Chat, &cfg)
+        );
+    }
+
+    /// The draft slot is a router provider (found by id) that no tier routes to.
+    #[tokio::test]
+    async fn the_draft_slot_is_a_router_provider_without_tiers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
+        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
+        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
+        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
+        let m = manifest();
+        let chat = chat_model(&m);
+        let local = LocalRuntime::new(
+            runtime,
+            vec![
+                (RuntimeRole::Chat, chat.clone()),
+                (RuntimeRole::Draft, chat.clone()),
+            ],
+            &|_| true,
+            egress,
+        );
+        let providers = as_providers(&local);
+        assert_eq!(providers.len(), 2);
+        let routes = slot_routes(Some(&local));
+        let router = Arc::new(Router::new(providers, tier_map(&[], &routes)));
+        local.attach(&router);
+        let id = nugget_runtime::provider_id(RuntimeRole::Draft);
+        assert_eq!(id.as_str(), nugget_runtime::DRAFT_PROVIDER_ID);
+        let found = router.provider(&id).expect("found by id");
+        assert_eq!(found.id(), &id);
+        assert_eq!(found.meta().locality, Locality::OnDevice);
+        assert!(router.tiers_of(&id).is_empty());
+        for (tier, ids) in router.tiers() {
+            assert!(!ids.contains(&id), "{tier:?}");
+        }
+        // Chat keeps its tiers.
+        assert!(router.tiers()[&Tier::Synthesis].contains(&provider_id(RuntimeRole::Chat)));
+        // Unroutable until ready, then chat's capabilities.
+        assert_eq!(router.capabilities(&id), Some(Capabilities::default()));
+        let slot = local.slot(&id).unwrap();
+        let cfg: ProviderConfig = serde_json::from_value(serde_json::json!({
+            "id": "local-draft", "kind": "openai_compatible",
+            "base_url": "http://127.0.0.1:9/v1", "model": chat.id,
+            "api_key": nugget_runtime::api_key_ref(RuntimeRole::Draft).to_string(),
+            "locality": "on_device",
+        }))
+        .unwrap();
+        slot.activate(cfg).unwrap();
+        assert!(router.capabilities(&id).unwrap().streaming);
+        // Still no tier routes to it.
+        for tier in Tier::ROUTED {
+            let plain = Capabilities::default();
+            assert!(
+                router
+                    .candidates(tier, &plain)
+                    .iter()
+                    .all(|p| p.id() != &id),
+                "{tier:?}"
+            );
+        }
+        // It drafts (chats), never embeds; reported in status like the other roles.
+        assert!(matches!(
+            slot.embed(&["x".into()]).await,
+            Err(Error::Unsupported(_))
+        ));
+        let st = local.status();
+        let d = st.iter().find(|i| i.role == RuntimeRole::Draft).unwrap();
+        assert_eq!(d.provider, id);
+        assert_eq!(d.state, RuntimeState::Stopped);
     }
 
     struct NoEgress;

@@ -2,6 +2,7 @@
 //! post-processing, cancellation, timings and feedback.
 
 use std::collections::{HashMap, VecDeque};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, RwLock};
 use std::task::{Context, Poll};
@@ -14,7 +15,10 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{ContextResponse, DraftContext, DraftFeedback, DraftRequest, DraftStarted};
 use nugget_core::{Error, Result};
-use nugget_infer::{ChatEvent, ChatStream, Provider, Router, StopReason};
+use nugget_infer::router::DEFAULT_COOLDOWN;
+use nugget_infer::{
+    CacheHint, ChatEvent, ChatRequest, ChatStream, Part, Provider, Router, StopReason,
+};
 use nugget_retrieve::{ContextOptions, PackedContext, Retriever};
 use nugget_store::{AuditEntry, Store};
 use nugget_voice::{Channel, VoiceHints};
@@ -24,11 +28,13 @@ use tokio_util::sync::CancellationToken;
 
 use crate::FieldKind;
 use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
-use crate::grounding::{Grounder, GroundingReport};
+use crate::grounding::{Grounder, GroundingCheck, GroundingReport};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
 use crate::prompt::{
-    LengthBand, PromptInput, PromptLimits, build_request, channel_for, split_value,
+    LengthBand, PromptInput, PromptLimits, SYSTEM_RULES, build_request, cache_key, channel_for,
+    prefix_request, split_value,
 };
+use crate::warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};
 
 /// Upper bound on the retrieval budget, whatever the config says.
 pub const MAX_BUDGET_TOKENS: u32 = 8_000;
@@ -131,6 +137,16 @@ pub trait FeedbackSink: Send + Sync {
 #[async_trait]
 pub trait Warmer: Send + Sync {
     async fn warm(&self, provider: Arc<dyn Provider>);
+
+    /// Warm the provider's prompt cache with a draft's stable prefix (see
+    /// [`nugget_infer::Provider::prewarm_prefix`]): the rules and voice at the trigger, or a
+    /// draft's whole prompt for a read-ahead ([`Drafter::read_ahead`], whose request ends with a
+    /// [`Part::CacheBreakpoint`] so that its messages are part of the prefix). Only ever called
+    /// for non-cloud providers. The default only opens the connection.
+    async fn warm_prefix(&self, provider: Arc<dyn Provider>, prefix: ChatRequest) {
+        let _ = prefix;
+        self.warm(provider).await;
+    }
 }
 
 /// Runs a draft's retrieval job (store and index calls that block between awaits). Without one
@@ -165,11 +181,59 @@ pub struct DraftConfig {
     pub voice_timeout_ms: u64,
     /// How long a prewarmed retrieval stays usable.
     pub prewarm_ttl_ms: u64,
-    /// Grounding (AA3): the context goes in as a dated facts block and a post-check drops
-    /// sentences whose numbers or dates the sources don't support.
+    /// Grounding (AA3): the context goes in as a dated facts block (superseded facts marked,
+    /// sensitive ones marked private) and the streamed draft is checked ([`Self::grounding_check`]).
     pub grounding: bool,
+    /// What the streaming check does when `grounding` is on: stop a copied credential while
+    /// streaming word by word (the default: it adds next to no latency), or hold and check
+    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts").
+    pub grounding_check: GroundingCheck,
     #[serde(skip)]
     pub limits: PromptLimits,
+    /// Smaller prompts for on-device and LAN providers ([`LocalBudget`]); cloud providers keep
+    /// `budget_tokens` and `limits`.
+    pub local: LocalBudget,
+    /// Read-ahead while a reply field keeps focus ([`Drafter::read_ahead`]).
+    pub read_ahead: ReadAheadConfig,
+}
+
+/// The prompt budget for non-cloud providers, whose prompt reading dominates Double Tap latency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalBudget {
+    /// Off: local providers get the cloud budget and limits.
+    pub enabled: bool,
+    /// Retrieval context budget, in tokens.
+    pub budget_tokens: u32,
+    /// Retrieved snippets kept (the best first).
+    pub max_snippets: usize,
+    /// Let passages marked sensitive into local prompts. Off by default: with only a few
+    /// snippets a sensitive one (a card number, a password) is more likely to make the cut and
+    /// a small model to paste it into a draft that is then sent from a third-party app.
+    pub include_sensitive: bool,
+    /// Drafts routed by tier to a non-cloud provider go to this provider first (the small
+    /// Double Tap model, `local-draft`), falling back to the tier's candidates; for the router's
+    /// cooldown after it fails a draft it goes after them instead. Ignored when the request or
+    /// the app names a provider, the tier's first candidate is a cloud one, the router does not
+    /// know it, or it is itself a cloud provider. [`Drafter::prewarm_idle`] and
+    /// [`Drafter::read_ahead`] warm the same provider.
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
+    #[serde(skip, default = "PromptLimits::local")]
+    pub limits: PromptLimits,
+}
+
+impl Default for LocalBudget {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            budget_tokens: 300,
+            max_snippets: 3,
+            include_sensitive: false,
+            provider: None,
+            limits: PromptLimits::local(),
+        }
+    }
 }
 
 impl Default for DraftConfig {
@@ -189,7 +253,10 @@ impl Default for DraftConfig {
             voice_timeout_ms: 500,
             prewarm_ttl_ms: 30_000,
             grounding: true,
+            grounding_check: GroundingCheck::default(),
             limits: PromptLimits::default(),
+            local: LocalBudget::default(),
+            read_ahead: ReadAheadConfig::default(),
         }
     }
 }
@@ -214,7 +281,13 @@ pub struct DraftTimings {
     pub attempts: u32,
     /// What the grounding check dropped (when grounding is on), set when the draft completes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub grounding: Option<GroundingReport>,
+    pub grounding: Option<Box<GroundingReport>>,
+    /// Prompt tokens of the request, cached or not (from the provider's stats).
+    #[serde(default)]
+    pub prompt_tokens: Option<u64>,
+    /// Prompt tokens served from the provider's prompt cache (llama-server `cache_n`).
+    #[serde(default)]
+    pub cached_prompt_tokens: Option<u64>,
 }
 
 fn ms(d: Duration) -> u64 {
@@ -297,6 +370,63 @@ struct Inner {
     config: DraftConfig,
     sessions: Mutex<Sessions>,
     cache: Mutex<Cache>,
+    /// Per provider, the system prompt of the last draft request sent or prefix warmed. A
+    /// llama-server slot holds that prompt's cache; warming the same prefix again would only cut
+    /// the cache back to it (losing a repeat draft's thread), so such warms are skipped.
+    last_prefix: Mutex<HashMap<ProviderId, String>>,
+    /// Per provider, a fingerprint ([`fingerprint`]) of the last whole draft prompt sent, by a
+    /// draft or a read-ahead; cleared when a prefix-only warm cuts the cache back to the prefix.
+    /// A read-ahead of the same prompt finds it cached ([`ReadAheadSkip::Unchanged`]).
+    last_full: Mutex<HashMap<ProviderId, u64>>,
+    read_ahead: Mutex<ReadAheadState>,
+    /// When [`LocalBudget::provider`] last failed a draft: while the router's default cooldown
+    /// runs, it goes after the tier's candidates rather than before them.
+    local_failed_at: Mutex<Option<Instant>>,
+}
+
+/// The read-ahead in flight and the last completed one (no prompt content, only a fingerprint).
+#[derive(Default)]
+struct ReadAheadState {
+    /// Numbers read-aheads, so a finished one only clears its own entry.
+    generation: u64,
+    in_flight: Option<InFlight>,
+    /// When the last read-ahead sent its prefill (the rate limit's reference).
+    last_work: Option<Instant>,
+    last_done: Option<ReadAheadDone>,
+}
+
+struct InFlight {
+    generation: u64,
+    cancel: CancellationToken,
+    app: Option<String>,
+    provider: ProviderId,
+    /// Once the prefill is sent: its system prompt and fingerprint, undone on cancel.
+    sent: Option<(String, u64)>,
+}
+
+/// Cancels its read-ahead if dropped while that one is still the one in flight.
+struct InFlightGuard<'a> {
+    drafter: &'a Drafter,
+    generation: u64,
+}
+
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        let mut st = lock(&self.drafter.inner.read_ahead);
+        if st
+            .in_flight
+            .as_ref()
+            .is_some_and(|f| f.generation == self.generation)
+        {
+            self.drafter.cancel_in_flight(&mut st);
+        }
+    }
+}
+
+struct ReadAheadDone {
+    app: Option<String>,
+    provider: ProviderId,
+    at: Instant,
 }
 
 /// The Double Tap drafting engine. Cheap to clone.
@@ -342,6 +472,10 @@ impl Drafter {
                 config,
                 sessions: Mutex::new(Sessions::default()),
                 cache: Mutex::new(Cache::default()),
+                last_prefix: Mutex::new(HashMap::new()),
+                last_full: Mutex::new(HashMap::new()),
+                read_ahead: Mutex::new(ReadAheadState::default()),
+                local_failed_at: Mutex::new(None),
             }),
         }
     }
@@ -382,9 +516,19 @@ impl Drafter {
     }
 
     /// Start work as soon as the trigger fires, before the full context is read: resolve the
-    /// provider, open its connection (with a [`Warmer`]), and start retrieval and the voice
-    /// lookup from whatever the hint already has. `begin` reuses the results when its context
-    /// gives the same retrieval query. Returns `None` when drafting would be refused.
+    /// provider, start retrieval and the voice lookup from whatever the hint already has, and
+    /// with a [`Warmer`] get the provider ready. For a cloud provider that only opens the
+    /// connection; for a non-cloud one, once the voice lookup is in (bounded by
+    /// `voice_timeout_ms`), it warms the prompt cache with the exact system prefix `begin` will
+    /// send ([`Warmer::warm_prefix`]), unless that is the system prompt of the last request sent
+    /// or warmed on that provider (already cached; warming it again would cut a llama-server
+    /// slot's cache back to the prefix), when it only opens the connection. It also only opens
+    /// the connection when a read-ahead ([`read_ahead`](Self::read_ahead)) for the same app and
+    /// provider is in flight or completed within `prewarm_ttl_ms`: that read-ahead holds (or is
+    /// filling) the slot with the whole prompt, which a prefix-only warm would cut back to the
+    /// prefix; `begin` then reads only what changed since. `begin` reuses the retrieval and voice
+    /// results when its context gives the same retrieval query. Returns `None` when drafting
+    /// would be refused.
     pub fn prewarm(&self, hint: &DraftContext) -> Option<Prewarm> {
         let kind = gate_with(
             hint,
@@ -395,29 +539,119 @@ impl Drafter {
         let (candidates, _) = self.candidates(hint, None).ok()?;
         let provider = candidates.into_iter().next()?;
         let cloud = provider.meta().locality == Locality::Cloud;
-        let warmer = self
-            .inner
-            .warmer
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        if let Some(w) = warmer {
-            let p = provider.clone();
-            tokio::spawn(async move { w.warm(p).await });
-        }
+        let warmer = self.warmer();
         let query = retrieval_query(hint);
         let retrieval = !query.is_empty();
         if retrieval {
             let (fut, _) = self.context_future(&query, cloud);
             tokio::spawn(fut);
         }
-        let fut = self.voice_future(voice_query(hint, kind, &query, cloud));
-        tokio::spawn(fut);
+        let voice = self.voice_future(voice_query(hint, kind, &query, cloud));
+        tokio::spawn(voice.clone());
+        if let Some(w) = warmer {
+            let p = provider.clone();
+            let app = hint.app.id.as_deref().map(normalize_app_id);
+            if cloud {
+                // Connection only: no prompt content leaves before the draft itself.
+                tokio::spawn(async move { w.warm(p).await });
+            } else if self.read_ahead_covers(app.as_deref(), p.id()) {
+                // The read-ahead holds the whole prompt: keep it, only open the connection.
+                tracing::debug!(provider = %p.id(), "draft prewarm: read-ahead covers the prefix");
+                tokio::spawn(async move { w.warm(p).await });
+            } else {
+                // The same system prefix `begin` will send for this field, once the voice is in.
+                // Skipped (connection only) when it is the provider's last prefix: it is cached.
+                let limits = self.limits_for(false);
+                let timeout = Duration::from_millis(self.inner.config.voice_timeout_ms);
+                let inner = self.inner.clone();
+                tokio::spawn(async move {
+                    let prefix = match tokio::time::timeout(timeout, voice).await {
+                        Ok(v) => {
+                            let band = LengthBand::for_draft(kind, &v);
+                            Some(prefix_request(kind, &v, &band, &limits))
+                        }
+                        Err(_) => None,
+                    };
+                    match prefix {
+                        Some(prefix) if note_prefix(&inner, p.id(), prefix.system.as_deref()) => {
+                            forget_full(&inner, p.id());
+                            w.warm_prefix(p, prefix).await;
+                        }
+                        _ => w.warm(p).await,
+                    }
+                });
+            }
+        }
         Some(Prewarm {
             provider: provider.id().clone(),
             locality: provider.meta().locality,
             retrieval,
         })
+    }
+
+    /// Warm the prompt cache of the provider drafts route to by default with the fixed drafting
+    /// rules, ahead of any trigger (when Double Tap is enabled or the local server is ready): the
+    /// first provider a draft naming no provider would try, [`LocalBudget::provider`] included.
+    /// Only non-cloud providers are warmed this way: the prefix is the rules and a neutral chat
+    /// voice block, so at least the rules are cached. Returns the provider warmed; `None` when
+    /// there is no warmer, no tokio runtime, the default provider is a cloud one, or a draft,
+    /// warm or read-ahead on it already sent the rules.
+    pub fn prewarm_idle(&self) -> Option<ProviderId> {
+        let warmer = self.warmer()?;
+        let handle = tokio::runtime::Handle::try_current().ok()?;
+        let (candidates, _) = self.candidates(&DraftContext::default(), None).ok()?;
+        let provider = candidates.into_iter().next()?;
+        if provider.meta().locality == Locality::Cloud {
+            return None;
+        }
+        // Any earlier draft or warm on this provider already cached the rules.
+        let rules_cached = self
+            .inner
+            .last_prefix
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(provider.id())
+            .is_some_and(|s| s.starts_with(SYSTEM_RULES));
+        if rules_cached {
+            return None;
+        }
+        let prefix = idle_prefix(&self.limits_for(false));
+        note_prefix(&self.inner, provider.id(), prefix.system.as_deref());
+        forget_full(&self.inner, provider.id());
+        let id = provider.id().clone();
+        handle.spawn(async move { warmer.warm_prefix(provider, prefix).await });
+        Some(id)
+    }
+
+    fn warmer(&self) -> Option<Arc<dyn Warmer>> {
+        self.inner
+            .warmer
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Prompt caps for a provider locality ([`LocalBudget`] for non-cloud ones when enabled).
+    fn limits_for(&self, cloud: bool) -> PromptLimits {
+        let c = &self.inner.config;
+        if !cloud && c.local.enabled {
+            c.local.limits
+        } else {
+            c.limits
+        }
+    }
+
+    /// Retrieval budget (tokens) and snippet cap for a provider locality.
+    fn budget_for(&self, cloud: bool) -> (usize, Option<usize>) {
+        let c = &self.inner.config;
+        if !cloud && c.local.enabled {
+            (
+                c.local.budget_tokens.min(MAX_BUDGET_TOKENS) as usize,
+                Some(c.local.max_snippets),
+            )
+        } else {
+            (c.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize, None)
+        }
     }
 
     /// Start a draft. Refuses secure fields, excluded apps and search boxes; picks the provider
@@ -447,42 +681,24 @@ impl Drafter {
                     "refusing to send sensitive passages to a cloud provider".into(),
                 ));
             }
-            let screenshot = ctx.thread.is_empty()
-                && ctx
-                    .screenshot_png_base64
-                    .as_deref()
-                    .is_some_and(|s| !s.is_empty())
-                && self
-                    .inner
-                    .router
-                    .capabilities(provider.id())
-                    .is_some_and(|c| c.vision)
-                && (!cloud || config.allow_cloud_screenshots);
-            let band = LengthBand::for_draft(kind, &voice);
-            let input = PromptInput {
-                kind,
-                ctx,
-                voice: &voice,
-                context: &context,
-                instruction: req.instruction.as_deref(),
-                screenshot,
-                band,
-                limits: config.limits,
-                grounding: config.grounding,
-            };
-            let max_tokens = req
-                .max_tokens
-                .unwrap_or_else(|| band.max_tokens())
-                .clamp(16, 4_096);
-            let chat = build_request(&input, max_tokens, config.temperature);
+            let (chat, screenshot, band) =
+                self.draft_request(&req, kind, provider.id(), cloud, &context, &voice);
 
+            note_prefix(&self.inner, provider.id(), chat.system.as_deref());
+            let full = (!cloud).then(|| fingerprint(&chat));
             match open_stream(provider.as_ref(), chat).await {
                 Ok(stream) => {
                     self.inner.router.report_success(provider.id());
+                    self.note_local_outcome(provider.id(), true);
+                    if let Some(fp) = full {
+                        // The slot now holds this prompt (and the reply after it).
+                        lock(&self.inner.last_full).insert(provider.id().clone(), fp);
+                    }
                     timings.provider_open_ms = Some(ms(t0.elapsed()));
                     // Values read off a screenshot can't be checked, so no post-check then.
                     let ground = (config.grounding && !screenshot).then(|| {
                         Grounder::for_draft(ctx, &context, req.instruction.as_deref(), &voice)
+                            .with_check(config.grounding_check)
                     });
                     return Ok(self.start(
                         provider, kind, ctx, context, screenshot, band, stream, t0, timings, ground,
@@ -491,6 +707,7 @@ impl Drafter {
                 Err(e) if !explicit && is_fallback_error(&e) => {
                     tracing::warn!(provider = %provider.id(), error = %e, "draft: provider failed; trying next");
                     self.inner.router.report_failure(provider.id());
+                    self.note_local_outcome(provider.id(), false);
                     last_err = Some(e);
                 }
                 Err(e) => {
@@ -502,6 +719,264 @@ impl Drafter {
             }
         }
         Err(last_err.unwrap_or_else(|| Error::NotFound("no provider could draft".into())))
+    }
+
+    /// The provider request a draft sends: the one code path for [`begin`](Self::begin) and
+    /// [`read_ahead`](Self::read_ahead), so that a read-ahead prefills exactly what the draft
+    /// will send (system, messages, cache hint `draft:<channel>` for non-cloud providers).
+    /// Returns the request, whether the screenshot is attached, and the length band.
+    fn draft_request(
+        &self,
+        req: &DraftRequest,
+        kind: FieldKind,
+        provider: &ProviderId,
+        cloud: bool,
+        context: &ContextResponse,
+        voice: &VoiceHints,
+    ) -> (ChatRequest, bool, LengthBand) {
+        let config = &self.inner.config;
+        let ctx = &req.context;
+        let screenshot = ctx.thread.is_empty()
+            && ctx
+                .screenshot_png_base64
+                .as_deref()
+                .is_some_and(|s| !s.is_empty())
+            && self
+                .inner
+                .router
+                .capabilities(provider)
+                .is_some_and(|c| c.vision)
+            && (!cloud || config.allow_cloud_screenshots);
+        let band = LengthBand::for_draft(kind, voice);
+        let input = PromptInput {
+            kind,
+            ctx,
+            voice,
+            context,
+            instruction: req.instruction.as_deref(),
+            screenshot,
+            band,
+            limits: self.limits_for(cloud),
+            grounding: config.grounding,
+        };
+        let max_tokens = req
+            .max_tokens
+            .unwrap_or_else(|| band.max_tokens())
+            .clamp(16, 4_096);
+        let mut chat = build_request(&input, max_tokens, config.temperature);
+        if !cloud {
+            // Routes llama-server requests sharing this prefix (with `slot_affinity`); cloud
+            // requests stay exactly as they were.
+            chat = chat.with_cache(CacheHint::keyed(cache_key(kind)));
+        }
+        (chat, screenshot, band)
+    }
+
+    /// Read ahead while a reply field keeps focus: prefill the whole prompt
+    /// [`begin`](Self::begin) would send for `req` into a non-cloud provider's prompt cache
+    /// (llama-server `n_predict: 0`), generating nothing, so that at the trigger only what
+    /// changed since is read. The shell calls it debounced and cancels it on blur
+    /// ([`cancel_read_ahead`](Self::cancel_read_ahead)).
+    ///
+    /// In order, it skips when: `[draft.read_ahead]` is off ([`ReadAheadSkip::Disabled`]);
+    /// drafting would be refused here ([`ReadAheadSkip::Refused`]); the draft would go to a
+    /// cloud provider ([`ReadAheadSkip::Cloud`]: nothing at all is sent, not even a connection
+    /// prewarm, and no retrieval runs); there is no [`Warmer`] or no provider
+    /// ([`ReadAheadSkip::Unavailable`]); a read-ahead sent its prefill less than
+    /// `min_interval_ms` ago ([`ReadAheadSkip::RateLimited`]). Otherwise it cancels any
+    /// read-ahead in flight, prepares the draft exactly as `begin` does (retrieval and voice
+    /// through the same caches a trigger reuses, the same budget and limits) and builds the
+    /// same request. When that prompt is the last one sent to the provider (by a draft or a
+    /// read-ahead) and the provider's cache still holds it, nothing is sent
+    /// ([`ReadAheadSkip::Unchanged`]). Else the request, with a trailing
+    /// [`Part::CacheBreakpoint`] so that its messages count as the prefix (the OpenAI-compatible
+    /// adapter drops the marker, so the server sees `begin`'s messages), goes to
+    /// [`Warmer::warm_prefix`]. Cancelled at any point it returns [`ReadAheadSkip::Cancelled`]
+    /// and the prefill request is dropped.
+    ///
+    /// Nothing is audited or stored: the engine keeps only a fingerprint of the prompt, the
+    /// app id and timestamps in memory. The provider records the egress (feature `draft`, the
+    /// cited items) like any draft request.
+    pub async fn read_ahead(
+        &self,
+        req: DraftRequest,
+    ) -> std::result::Result<ReadAheadOutcome, ReadAheadSkip> {
+        let config = &self.inner.config;
+        if !config.read_ahead.enabled {
+            return Err(ReadAheadSkip::Disabled);
+        }
+        let ctx = &req.context;
+        let kind = gate_with(ctx, &config.excluded_apps, config.allow_terminals)
+            .map_err(ReadAheadSkip::Refused)?;
+        let (candidates, _) = self
+            .candidates(ctx, req.provider.as_ref())
+            .map_err(|_| ReadAheadSkip::Unavailable)?;
+        let provider = candidates
+            .into_iter()
+            .next()
+            .ok_or(ReadAheadSkip::Unavailable)?;
+        if provider.meta().locality == Locality::Cloud {
+            return Err(ReadAheadSkip::Cloud);
+        }
+        let warmer = self.warmer().ok_or(ReadAheadSkip::Unavailable)?;
+        let app = ctx.app.id.as_deref().map(normalize_app_id);
+        let min_interval = Duration::from_millis(config.read_ahead.min_interval_ms);
+
+        let (generation, cancel) = {
+            let mut st = lock(&self.inner.read_ahead);
+            if st.last_work.is_some_and(|t| t.elapsed() < min_interval) {
+                return Err(ReadAheadSkip::RateLimited);
+            }
+            self.cancel_in_flight(&mut st);
+            st.generation += 1;
+            let cancel = CancellationToken::new();
+            st.in_flight = Some(InFlight {
+                generation: st.generation,
+                cancel: cancel.clone(),
+                app: app.clone(),
+                provider: provider.id().clone(),
+                sent: None,
+            });
+            (st.generation, cancel)
+        };
+        // Dropped before it finishes (the caller went away): cancelled like a blur.
+        let guard = InFlightGuard {
+            drafter: self,
+            generation,
+        };
+        let outcome = self
+            .read_ahead_in(&req, kind, provider, warmer, generation, &cancel)
+            .await;
+        std::mem::forget(guard);
+        let mut st = lock(&self.inner.read_ahead);
+        let finished = st.in_flight.take_if(|f| f.generation == generation);
+        if let Some(f) = finished
+            && matches!(outcome, Ok(_) | Err(ReadAheadSkip::Unchanged))
+        {
+            st.last_done = Some(ReadAheadDone {
+                app: f.app,
+                provider: f.provider,
+                at: Instant::now(),
+            });
+        }
+        outcome
+    }
+
+    /// The part of [`read_ahead`](Self::read_ahead) after its checks: prepare, compare, send.
+    async fn read_ahead_in(
+        &self,
+        req: &DraftRequest,
+        kind: FieldKind,
+        provider: Arc<dyn Provider>,
+        warmer: Arc<dyn Warmer>,
+        generation: u64,
+        cancel: &CancellationToken,
+    ) -> std::result::Result<ReadAheadOutcome, ReadAheadSkip> {
+        let t0 = Instant::now();
+        let query = retrieval_query(&req.context);
+        let mut timings = DraftTimings::default();
+        let (context, voice) = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(ReadAheadSkip::Cancelled),
+            r = self.prepare(&req.context, kind, &query, false, &mut timings) => r,
+        };
+        let (chat, _, _) = self.draft_request(req, kind, provider.id(), false, &context, &voice);
+        let prepare_ms = ms(t0.elapsed());
+        let fp = fingerprint(&chat);
+        let system = chat.system.clone().unwrap_or_default();
+        let id = provider.id().clone();
+        let prompt_chars = prompt_chars(&chat);
+        {
+            let mut st = lock(&self.inner.read_ahead);
+            // Registered and checked under one lock, so a cancel either came first or undoes
+            // exactly what this records.
+            let Some(f) = st
+                .in_flight
+                .as_mut()
+                .filter(|f| f.generation == generation && !f.cancel.is_cancelled())
+            else {
+                return Err(ReadAheadSkip::Cancelled);
+            };
+            let cached = lock(&self.inner.last_full).get(&id) == Some(&fp)
+                && lock(&self.inner.last_prefix).get(&id) == Some(&system);
+            if cached {
+                tracing::debug!(provider = %id, "draft read-ahead: prompt already cached");
+                return Err(ReadAheadSkip::Unchanged);
+            }
+            f.sent = Some((system.clone(), fp));
+            st.last_work = Some(Instant::now());
+            note_prefix(&self.inner, &id, Some(&system));
+            lock(&self.inner.last_full).insert(id.clone(), fp);
+        }
+        let warm_req = with_trailing_breakpoint(chat);
+        let t1 = Instant::now();
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                tracing::debug!(provider = %id, "draft read-ahead cancelled");
+                return Err(ReadAheadSkip::Cancelled);
+            }
+            () = warmer.warm_prefix(provider, warm_req) => {}
+        }
+        let warm_ms = ms(t1.elapsed());
+        tracing::debug!(provider = %id, prompt_chars, prepare_ms, warm_ms, "draft read-ahead done");
+        Ok(ReadAheadOutcome {
+            provider: id,
+            prompt_chars,
+            prepare_ms,
+            warm_ms,
+        })
+    }
+
+    /// Cancel the read-ahead in progress, if any (focus left the field). Returns whether one was
+    /// running. Its prefill request is dropped, and the provider is no longer assumed to hold
+    /// its prompt.
+    pub fn cancel_read_ahead(&self) -> bool {
+        let mut st = lock(&self.inner.read_ahead);
+        self.cancel_in_flight(&mut st)
+    }
+
+    /// Cancel and forget the read-ahead in flight; undo what it recorded as cached.
+    fn cancel_in_flight(&self, st: &mut ReadAheadState) -> bool {
+        let Some(f) = st.in_flight.take() else {
+            return false;
+        };
+        let running = !f.cancel.is_cancelled();
+        f.cancel.cancel();
+        if let Some((system, fp)) = f.sent {
+            let mut full = lock(&self.inner.last_full);
+            if full.get(&f.provider) == Some(&fp) {
+                full.remove(&f.provider);
+            }
+            // The prefill may not have reached the server: let the trigger warm the prefix.
+            let mut prefix = lock(&self.inner.last_prefix);
+            if prefix.get(&f.provider) == Some(&system) {
+                prefix.remove(&f.provider);
+            }
+        }
+        running
+    }
+
+    /// Whether a read-ahead for this app and provider is in flight, or completed within
+    /// `prewarm_ttl_ms`.
+    fn read_ahead_covers(&self, app: Option<&str>, provider: &ProviderId) -> bool {
+        let ttl = Duration::from_millis(self.inner.config.prewarm_ttl_ms);
+        let st = lock(&self.inner.read_ahead);
+        let in_flight = st.in_flight.as_ref().is_some_and(|f| {
+            !f.cancel.is_cancelled() && f.app.as_deref() == app && &f.provider == provider
+        });
+        let done = st.last_done.as_ref().is_some_and(|d| {
+            d.at.elapsed() < ttl && d.app.as_deref() == app && &d.provider == provider
+        });
+        in_flight || done
+    }
+
+    /// Track [`LocalBudget::provider`]'s health for [`candidates`](Self::candidates).
+    fn note_local_outcome(&self, provider: &ProviderId, ok: bool) {
+        if self.inner.config.local.provider.as_ref() != Some(provider) {
+            return;
+        }
+        *lock(&self.inner.local_failed_at) = if ok { None } else { Some(Instant::now()) };
     }
 
     /// Cancel a draft in progress. Returns whether it was known and still running.
@@ -599,6 +1074,9 @@ impl Drafter {
     }
 
     /// Providers to try, and whether the choice was explicit (request or per-app setting).
+    /// Routed by tier, a non-cloud first candidate puts [`LocalBudget::provider`] (when set,
+    /// known to the router and not a cloud provider) first, the tier's candidates after it as
+    /// fallback; while it is cooling down after a failure it goes after them instead.
     fn candidates(
         &self,
         ctx: &DraftContext,
@@ -612,12 +1090,32 @@ impl Drafter {
                 .ok_or_else(|| Error::NotFound(format!("provider {id} is not configured")))?;
             return Ok((vec![p], true));
         }
-        let c = router.candidates(self.inner.config.tier, &Capabilities::default());
+        let mut c = router.candidates(self.inner.config.tier, &Capabilities::default());
         if c.is_empty() {
             return Err(Error::NotFound(format!(
                 "no provider is available for the {:?} tier",
                 self.inner.config.tier
             )));
+        }
+        let local = self
+            .inner
+            .config
+            .local
+            .provider
+            .as_ref()
+            .and_then(|id| router.provider(id))
+            .filter(|p| p.meta().locality != Locality::Cloud);
+        if let Some(local) = local
+            && c[0].meta().locality != Locality::Cloud
+        {
+            c.retain(|p| p.id() != local.id());
+            let cooling =
+                lock(&self.inner.local_failed_at).is_some_and(|t| t.elapsed() < DEFAULT_COOLDOWN);
+            if cooling {
+                c.push(local);
+            } else {
+                c.insert(0, local);
+            }
         }
         Ok((c, false))
     }
@@ -675,20 +1173,27 @@ impl Drafter {
             .read()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        let budget = self.inner.config.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize;
+        // The cache key's `cloud` decides the budget too, so each locality gets its own packing.
+        let (budget, max_snippets) = self.budget_for(cloud);
+        let local = &self.inner.config.local;
+        let exclude_sensitive = cloud || (local.enabled && !local.include_sensitive);
         let q = query.to_owned();
         let fut = async move {
             let started = Instant::now();
-            let opts = ContextOptions {
-                exclude_sensitive: cloud,
-            };
+            let opts = ContextOptions { exclude_sensitive };
             let job = async move { retriever.pack_context_with(&q, budget, opts).await }.boxed();
             let packed = match runner {
                 Some(r) => r.run(job).await,
                 None => job.await,
             };
             let ctx = match packed {
-                Ok(p) => Some(p.response),
+                Ok(p) => {
+                    let mut r = p.response;
+                    if let Some(max) = max_snippets {
+                        keep_best_snippets(&mut r, max);
+                    }
+                    Some(r)
+                }
                 Err(e) => {
                     tracing::warn!(error = %e, "draft: retrieval failed; drafting without context");
                     None
@@ -982,6 +1487,114 @@ fn voice_query(ctx: &DraftContext, kind: FieldKind, topic: &str, for_cloud: bool
     }
 }
 
+/// Lock a mutex, recovering from poisoning.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// A fingerprint of a request's prompt (system and messages); no content is kept.
+fn fingerprint(req: &ChatRequest) -> u64 {
+    let mut h = DefaultHasher::new();
+    req.system.hash(&mut h);
+    serde_json::to_string(&req.messages)
+        .unwrap_or_default()
+        .hash(&mut h);
+    h.finish()
+}
+
+/// Characters of a request's prompt text (system and text parts).
+fn prompt_chars(req: &ChatRequest) -> usize {
+    let system = req.system.as_deref().map_or(0, |s| s.chars().count());
+    let messages: usize = req
+        .messages
+        .iter()
+        .flat_map(|m| &m.content)
+        .map(|p| match p {
+            Part::Text { text } => text.chars().count(),
+            _ => 0,
+        })
+        .sum();
+    system + messages
+}
+
+/// `req` with a [`Part::CacheBreakpoint`] closing its last message, so that
+/// [`ChatRequest::cache_prefix`] (what a prefix warm sends) keeps every message.
+fn with_trailing_breakpoint(mut req: ChatRequest) -> ChatRequest {
+    if let Some(m) = req.messages.last_mut() {
+        m.content.push(Part::CacheBreakpoint);
+    }
+    req
+}
+
+/// A prefix-only warm cut `provider`'s cache back to the prefix: no whole prompt is cached.
+fn forget_full(inner: &Inner, provider: &ProviderId) {
+    lock(&inner.last_full).remove(provider);
+}
+
+/// Record `system` as `provider`'s last prefix; returns whether it differs from the one before.
+fn note_prefix(inner: &Inner, provider: &ProviderId, system: Option<&str>) -> bool {
+    let system = system.unwrap_or_default();
+    let mut last = inner.last_prefix.lock().unwrap_or_else(|e| e.into_inner());
+    if last.get(provider).is_some_and(|s| s == system) {
+        return false;
+    }
+    last.insert(provider.clone(), system.to_owned());
+    true
+}
+
+/// The prefix [`Drafter::prewarm_idle`] warms: the rules and a neutral chat voice block.
+fn idle_prefix(limits: &PromptLimits) -> ChatRequest {
+    let kind = FieldKind::ChatMessage;
+    let voice = VoiceHints {
+        channel: Some(channel_for(kind)),
+        ..Default::default()
+    };
+    let band = LengthBand::for_draft(kind, &voice);
+    prefix_request(kind, &voice, &band, limits)
+}
+
+/// Keep the first `max` passages (the packer numbers them in rank order, best first) of a packed
+/// context, with their citations, so the prompt, the citations and the egress items agree.
+fn keep_best_snippets(ctx: &mut ContextResponse, max: usize) {
+    if ctx.citations.len() <= max {
+        return;
+    }
+    if max == 0 {
+        ctx.text.clear();
+        ctx.citations.clear();
+        return;
+    }
+    let next = &ctx.citations[max];
+    // `nugget_retrieve` renders each passage under a `[n] Title (source)` header line, with a
+    // blank line between passages.
+    let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let title = next
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or(next.item.key.as_str());
+    let source = next.url.as_deref().unwrap_or(next.item.source.as_str());
+    let header = format!(
+        "\n\n[{}] {} ({})\n",
+        next.n,
+        one_line(title),
+        one_line(source)
+    );
+    let cut = ctx
+        .text
+        .find(&header)
+        .or_else(|| ctx.text.find(&format!("\n\n[{}] ", next.n)));
+    match cut {
+        Some(i) => {
+            ctx.text.truncate(i);
+            ctx.citations.truncate(max);
+        }
+        // Not the packer's layout: keep it whole rather than cite what was dropped.
+        None => tracing::warn!("draft: cannot split packed context; keeping every passage"),
+    }
+}
+
 /// Open a chat and wait for its first event, so a provider that fails early can be skipped.
 async fn open_stream(p: &dyn Provider, req: nugget_infer::ChatRequest) -> Result<ChatStream> {
     let mut stream = p.chat(req).await?;
@@ -1052,6 +1665,10 @@ impl PumpState {
                     input_tokens,
                     output_tokens,
                 })) => {
+                    if let Some(n) = input_tokens {
+                        let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
+                        t.prompt_tokens.get_or_insert(u64::from(n));
+                    }
                     let tail = self.post.finish();
                     self.emit(Emit {
                         text: tail,
@@ -1065,7 +1682,18 @@ impl PumpState {
                     }));
                 }
                 // Usage and timing stats (cache hits, first-token time) pass through unchanged.
-                Some(Ok(stats @ ChatEvent::Stats(_))) => self.pending.push_back(Ok(stats)),
+                Some(Ok(ChatEvent::Stats(stats))) => {
+                    {
+                        let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(n) = stats.input_tokens {
+                            t.prompt_tokens = Some(u64::from(n));
+                        }
+                        if let Some(n) = stats.cached_input_tokens {
+                            t.cached_prompt_tokens = Some(u64::from(n));
+                        }
+                    }
+                    self.pending.push_back(Ok(ChatEvent::Stats(stats)));
+                }
                 Some(Ok(ChatEvent::ToolCall { .. } | ChatEvent::Opaque { .. })) => {}
                 Some(Err(e)) => {
                     self.finish();
@@ -1087,7 +1715,7 @@ impl PumpState {
             e.text = g.feed(&e.text, last);
             if last {
                 let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
-                t.grounding = Some(g.report().clone());
+                t.grounding = Some(Box::new(g.report().clone()));
             }
         }
         if !e.text.is_empty() {
@@ -1185,5 +1813,105 @@ impl Stream for DraftStream {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         self.inner.as_mut().poll_next(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+    use nugget_core::ipc::Citation;
+
+    fn cite(n: u32, key: &str, title: Option<&str>) -> Citation {
+        Citation {
+            n,
+            item: ItemRef {
+                source: SourceId::new("notes"),
+                key: ItemKey::new(key),
+            },
+            chunk_id: i64::from(n),
+            title: title.map(str::to_owned),
+            url: None,
+            sensitive: false,
+            date: None,
+        }
+    }
+
+    fn packed() -> ContextResponse {
+        ContextResponse {
+            // The second passage quotes a fake third header; the real one follows it.
+            text: "[1] Alpha (notes)\nfirst\n\n[2] Beta title (notes)\nsecond\n\n[3] x\n\n\
+[3] Gamma (notes)\nthird"
+                .into(),
+            citations: vec![
+                cite(1, "a", Some("Alpha")),
+                cite(2, "b", Some("Beta  title")),
+                cite(3, "c", Some("Gamma")),
+            ],
+            excluded_sensitive: 2,
+        }
+    }
+
+    #[test]
+    fn keep_best_snippets_trims_text_and_citations_together() {
+        let mut c = packed();
+        keep_best_snippets(&mut c, 3);
+        assert_eq!(c, packed());
+
+        keep_best_snippets(&mut c, 2);
+        assert_eq!(
+            c.text,
+            "[1] Alpha (notes)\nfirst\n\n[2] Beta title (notes)\nsecond\n\n[3] x"
+        );
+        assert_eq!(c.citations.len(), 2);
+        assert_eq!(c.excluded_sensitive, 2);
+
+        let mut c = packed();
+        keep_best_snippets(&mut c, 1);
+        assert_eq!(c.text, "[1] Alpha (notes)\nfirst");
+        assert_eq!(c.citations.len(), 1);
+
+        let mut c = packed();
+        keep_best_snippets(&mut c, 0);
+        assert!(c.text.is_empty() && c.citations.is_empty());
+
+        // Not the packer's layout: nothing is cut, so nothing is cited that isn't there.
+        let mut c = packed();
+        c.text = "free text".into();
+        keep_best_snippets(&mut c, 1);
+        assert_eq!(c.citations.len(), 3);
+    }
+
+    #[test]
+    fn idle_prefix_is_rules_and_a_neutral_voice() {
+        let p = idle_prefix(&PromptLimits::local());
+        let system = p.system.as_deref().unwrap();
+        assert!(system.starts_with(crate::prompt::SYSTEM_RULES));
+        assert!(system.contains("No writing samples yet"));
+        assert_eq!(p.cache, Some(CacheHint::keyed("draft:chat")));
+        assert_eq!(p.feature, crate::FEATURE_DRAFT);
+    }
+
+    #[test]
+    fn timings_serialize_prompt_tokens_and_accept_old_json() {
+        let t: DraftTimings = serde_json::from_str(r#"{"prewarmed":true,"attempts":1}"#).unwrap();
+        assert_eq!(t.prompt_tokens, None);
+        let v = serde_json::to_value(DraftTimings {
+            prompt_tokens: Some(5),
+            cached_prompt_tokens: Some(3),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(v["prompt_tokens"], 5);
+        assert_eq!(v["cached_prompt_tokens"], 3);
+    }
+
+    #[test]
+    fn local_budget_config_parses_with_defaults() {
+        let c: DraftConfig = serde_json::from_str(r#"{"local":{"budget_tokens":200}}"#).unwrap();
+        assert!(c.local.enabled);
+        assert_eq!(c.local.budget_tokens, 200);
+        assert_eq!(c.local.max_snippets, 3);
+        assert_eq!(c.local.limits, PromptLimits::local());
     }
 }

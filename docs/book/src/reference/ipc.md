@@ -148,6 +148,8 @@ Status: being wired in (wave W, Double Tap). The contracts below are already in 
 | `draft.cancel` | `ChatCancel`: `{stream_id}` | `null` | yes |
 | `draft.feedback` | `DraftFeedback`: `stream_id`, `outcome` (`accepted`, `edited`, `rejected`), `final_text`, `insert_verified` | `null` | yes |
 | `draft.prewarm` | A partial `DraftContext` (as much as is known when the trigger fires) | `{provider, locality, retrieval}`, or `null` when drafting is refused or disabled. Starts provider warm-up, retrieval and the voice lookup before `draft.begin` | yes |
+| `draft.read_ahead` | `DraftRequest`, as for `draft.begin` (the context read while the field has focus) | Answers within about 100 ms. `{"started": true}` while the prompt is being prefilled into a non-cloud server's cache in the background, `{"started": true, "done": true}` if it already finished, or `{"started": false, "skipped": reason}` with `disabled`, `refused`, `cloud`, `rate_limited`, `unchanged`, `unavailable` or `cancelled`. No text is generated, nothing is sent when the draft would go to a cloud provider, and nothing is audited or stored | yes |
+| `draft.read_ahead_cancel` | `{}` | `{cancelled}`: whether a read-ahead was in flight. Sent when focus leaves the field | yes |
 | `voice.status` | `{}` | `VoiceStatus`: `samples`, `channels`, `last_built` | yes |
 
 A field with `secure: true` (a password field) is refused, and its value is never read.

@@ -1,6 +1,6 @@
 //! `nugget-runtime`: local inference through llama.cpp's `llama-server`.
 //!
-//! [`Runtime`] supervises one server per [`RuntimeRole`] (chat, embedding, rerank):
+//! [`Runtime`] supervises one server per [`RuntimeRole`] (chat, embedding, rerank, draft):
 //!
 //! 1. **Install.** The `llama-server` build comes from the signed manifest (`runtimes`), picked
 //!    for this OS, CPU and GPU ([`nugget_models::runtime_candidates_for`]), downloaded and
@@ -20,7 +20,8 @@
 //!    [`Runtime::ensure`] then returns an `openai_compatible` [`nugget_infer::ProviderConfig`]
 //!    (`socket_path` = the socket and `http://localhost/v1`, or `http://127.0.0.1:<port>/v1`; the
 //!    model id as alias, tiers by role (none for the reranker, which is not a router provider:
-//!    `nuggetd` points retrieval's HTTP reranker at it, as `local-rerank`), locality
+//!    `nuggetd` points retrieval's HTTP reranker at it, as `local-rerank`; none for the Double
+//!    Tap model either, a router provider only the draft feature asks for, as `local-draft`), locality
 //!    `on_device`). The start runs as a detached
 //!    task: a caller that gives up (a timeout dropping its `ensure` future) does not cancel it,
 //!    and later calls join it.
@@ -71,8 +72,8 @@ mod supervisor;
 pub use args::{GpuLayers, LaunchPlan, Pooling, Tuning};
 pub use secrets::{RuntimeSecrets, api_key_ref};
 pub use supervisor::{
-    CHAT_PROVIDER_ID, EMBEDDING_PROVIDER_ID, RERANK_PROVIDER_ID, Runtime, RuntimeDetails,
-    RuntimeOptions, choose_port, provider_id,
+    CHAT_PROVIDER_ID, DRAFT_PROVIDER_ID, EMBEDDING_PROVIDER_ID, RERANK_PROVIDER_ID, Runtime,
+    RuntimeDetails, RuntimeOptions, choose_port, provider_id,
 };
 
 pub use nugget_core::ipc::{RuntimeInfo, RuntimeRole, RuntimeState};

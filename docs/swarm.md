@@ -87,7 +87,7 @@ Briefs in `docs/waves/wave-aa/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| AA1 | `aa/doubletap-latency` | session_01CTjRSuDx768RtwbJTaiHvE | local Double Tap under 3 s: prompt budget, prefix cache, Apple Silicon numbers |
+| AA1 | `aa/doubletap-latency` | session_01CTjRSuDx768RtwbJTaiHvE | local Double Tap under 3 s: prompt budget, prefix cache, Apple Silicon numbers (merged) |
 | AA2 | `aa/agent-quality` | session_01CTjRSpmAvmjUGCE3Js3Ytu | computer use with small local models: success ≥ 0.8, false confirmations ≤ 0.10 (merged) |
 | AA3 | `aa/grounding` | session_01CTjRSseja8BUetk34ePA1G | drafts without hallucinations, extraction F1 ≥ 0.8 with real models |
 
@@ -99,3 +99,10 @@ Briefs in `docs/waves/wave-bb/`.
 | BB1 | `bb/google-drive` | session_01CTjRStcm2Tq4cK6HdhtSor | Google Drive, Docs, Sheets and Slides connector (merged) |
 | BB2 | `bb/proactive-learning` | session_01CTjRSt2zXMhX5puD2vRYrP | cards learn from Accept/Dismiss feedback, explainable and resettable (merged) |
 | BB3 | `bb/a11y-audit` | session_01CTjRSuD9VRtjRwVksuYKcZ | axe audit on every page and dialog, keyboard-only core flows, screen readers (merged) |
+
+## Wave CC (local Double Tap under 3 s): cloud session from b5cc85a
+Brief in `docs/waves/wave-cc/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| CC1 | `cc/doubletap-fast` | session_01CTjRSs68FrQ6bjtvDEG7tf | small draft model for Double Tap, read-ahead on focus (local only), four-way latency measurement (merged) |

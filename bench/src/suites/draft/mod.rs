@@ -168,6 +168,46 @@ pub struct DraftOptions {
     /// `--draft-grounding both` and a judge; doubles the judge's requests).
     #[arg(long)]
     pub draft_judge_grounding: bool,
+    /// `draft`, `doubletap`: the smaller prompt budget `nugget-draft` gives non-cloud providers
+    /// (`nugget_draft::LocalBudget`): `on` (default, as the app) or `off` (the cloud budget for
+    /// every provider), for before/after comparisons on one job.
+    #[arg(long, value_enum, default_value_t = Switch::On)]
+    pub draft_local_budget: Switch,
+    /// `draft`, `doubletap`: the streaming check of grounded drafts
+    /// (`DraftConfig::grounding_check`): `secrets` (stream word by word, stop a copied
+    /// credential) or `sentences` (hold and check whole sentences). Default: the product's.
+    #[arg(long, value_enum)]
+    pub draft_grounding_check: Option<CheckMode>,
+}
+
+/// `--draft-grounding-check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
+pub enum CheckMode {
+    Sentences,
+    Secrets,
+}
+
+impl CheckMode {
+    pub fn check(self) -> nugget_draft::GroundingCheck {
+        match self {
+            Self::Sentences => nugget_draft::GroundingCheck::Sentences,
+            Self::Secrets => nugget_draft::GroundingCheck::Secrets,
+        }
+    }
+}
+
+/// The streaming check a run uses: the option, else the product default.
+pub fn grounding_check(opts: &DraftOptions) -> nugget_draft::GroundingCheck {
+    opts.draft_grounding_check
+        .map_or_else(nugget_draft::GroundingCheck::default, CheckMode::check)
+}
+
+/// `GroundingCheck` as recorded in reports.
+pub fn check_name(c: nugget_draft::GroundingCheck) -> &'static str {
+    match c {
+        nugget_draft::GroundingCheck::Sentences => "sentences",
+        nugget_draft::GroundingCheck::Secrets => "secrets",
+    }
 }
 
 /// `--draft-grounding`.
@@ -277,6 +317,27 @@ pub fn plan_judge(
             Some(id) if Some(id) == draft_model_id => Ok(JudgePlan::SameModel),
             Some(id) => Ok(JudgePlan::LocalModel(id.to_owned())),
         },
+    }
+}
+
+/// An on/off CLI switch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, clap::ValueEnum)]
+pub enum Switch {
+    #[default]
+    On,
+    Off,
+}
+
+impl Switch {
+    pub fn is_on(self) -> bool {
+        self == Self::On
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+        }
     }
 }
 
@@ -612,18 +673,22 @@ pub enum NuggetImpl<'a> {
 
 /// The Nugget arms of a run: the one reported as `draft.nugget.*` and, optionally, the
 /// ungrounded one.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct ArmSetup<'a> {
     pub nugget: NuggetImpl<'a>,
     pub ungrounded: Option<NuggetImpl<'a>>,
+    /// The in-suite pipeline's local prompt budget (`--draft-local-budget`); engine arms carry
+    /// theirs in their `DraftConfig`.
+    pub local_budget: Option<nugget_draft::LocalBudget>,
 }
 
 impl ArmSetup<'_> {
     /// One in-suite Nugget arm (the fake model's default).
-    pub fn suite() -> Self {
+    pub fn suite(local_budget: Option<nugget_draft::LocalBudget>) -> Self {
         Self {
             nugget: NuggetImpl::Suite,
             ungrounded: None,
+            local_budget,
         }
     }
 }
@@ -655,6 +720,7 @@ async fn run_arms(
     exclude_sensitive: bool,
     seed: u64,
     baseline_budget: Option<usize>,
+    local_budget: Option<nugget_draft::LocalBudget>,
 ) -> Result<DraftRun, BenchError> {
     run_arms_with(
         world,
@@ -663,7 +729,7 @@ async fn run_arms(
         exclude_sensitive,
         seed,
         baseline_budget,
-        ArmSetup::suite(),
+        ArmSetup::suite(local_budget),
     )
     .await
 }
@@ -679,7 +745,7 @@ async fn run_arms_with(
     baseline_budget: Option<usize>,
     setup: ArmSetup<'_>,
 ) -> Result<DraftRun, BenchError> {
-    let nugget_arm = NuggetArm::new(world);
+    let nugget_arm = NuggetArm::with_local_budget(world, setup.local_budget);
     let baseline_arm = BaselineArm::new(world, seed);
     let mut run = DraftRun::default();
     let mut slots = vec![Slot::Nugget];
@@ -876,6 +942,7 @@ impl Benchmark for DraftBench {
             },
         );
         ctx.param("nugget.grounding", grounding.as_str());
+        ctx.param("nugget.grounding_check", check_name(grounding_check(&opts)));
         ctx.param("baseline_path", BASELINE_PATH);
         ctx.param("voice_metric", VOICE_METRIC);
         ctx.param("tasks", tasks.len());
@@ -888,6 +955,23 @@ impl Benchmark for DraftBench {
         );
         ctx.param("context_budget_tokens", arms::CONTEXT_BUDGET_TOKENS);
         ctx.param("context_max_items", arms::CONTEXT_MAX_ITEMS);
+        // As `nugget-draft`: the local budget applies to non-cloud models only.
+        let local_budget = (opts.draft_local_budget.is_on() && locality != Locality::Cloud)
+            .then(nugget_draft::LocalBudget::default);
+        ctx.param("draft_local_budget", opts.draft_local_budget.as_str());
+        ctx.param(
+            "draft_local_budget.applied",
+            local_budget.as_ref().map_or(json!(null), |l| {
+                json!({
+                    "budget_tokens": l.budget_tokens,
+                    "max_snippets": l.max_snippets,
+                    "exemplars": l.limits.exemplars,
+                    "exemplar_chars": l.limits.exemplar_chars,
+                    "thread_chars": l.limits.thread_chars,
+                    "message_chars": l.limits.message_chars,
+                })
+            }),
+        );
         if !real {
             ctx.param("fake.ttft_ms", opts.fake_ttft_ms);
             ctx.param("fake.prefill_ms_per_1k", opts.fake_prefill_ms_per_1k);
@@ -940,11 +1024,13 @@ impl Benchmark for DraftBench {
                 };
                 arms.iter()
                     .map(|&g| {
-                        let config = nugget_draft::DraftConfig {
+                        let mut config = nugget_draft::DraftConfig {
                             grounding: g,
                             temperature: r.temperature,
                             ..nugget_draft::DraftConfig::default()
                         };
+                        config.local.enabled = opts.draft_local_budget.is_on();
+                        config.grounding_check = grounding_check(&opts);
                         Engine::new(&world, r.provider.clone(), config, max_tokens, r.timeout)
                     })
                     .collect()
@@ -959,14 +1045,17 @@ impl Benchmark for DraftBench {
                 nugget: NuggetImpl::Suite,
                 // The in-suite pipeline has no grounding switch: the second arm is identical.
                 ungrounded: (grounding == GroundingMode::Both).then_some(NuggetImpl::Suite),
+                local_budget: local_budget.clone(),
             },
             [one] => ArmSetup {
                 nugget: NuggetImpl::Engine(one),
                 ungrounded: None,
+                local_budget: local_budget.clone(),
             },
             [on, off, ..] => ArmSetup {
                 nugget: NuggetImpl::Engine(on),
                 ungrounded: Some(NuggetImpl::Engine(off)),
+                local_budget: local_budget.clone(),
             },
         };
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -1703,6 +1792,35 @@ mod tests {
     }
 
     #[test]
+    fn local_budget_flag_shrinks_local_prompts_only() {
+        let run = |locality, budget| {
+            smoke(DraftOptions {
+                draft_locality: locality,
+                draft_local_budget: budget,
+                ..DraftOptions::default()
+            })
+        };
+        let on = run(DraftLocality::Local, Switch::On);
+        let off = run(DraftLocality::Local, Switch::Off);
+        assert_eq!(on.status, Status::Ok, "{:?}", on.message);
+        assert_eq!(off.status, Status::Ok, "{:?}", off.message);
+        assert_eq!(on.config.params["draft_local_budget"], "on");
+        assert_eq!(off.config.params["draft_local_budget"], "off");
+        assert!(on.config.params["draft_local_budget.applied"].is_object());
+        assert!(off.config.params["draft_local_budget.applied"].is_null());
+        let tokens = |r: &Report| value(r, "draft.nugget.prompt_tokens.p50");
+        assert!(
+            tokens(&on) < tokens(&off),
+            "{} >= {}",
+            tokens(&on),
+            tokens(&off)
+        );
+        // Cloud models keep the cloud budget either way.
+        let cloud = run(DraftLocality::Cloud, Switch::On);
+        assert!(cloud.config.params["draft_local_budget.applied"].is_null());
+    }
+
+    #[test]
     fn dump_writes_one_line_per_task_and_arm() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("drafts.jsonl");
@@ -1850,7 +1968,7 @@ mod tests {
         });
         let model = real(p.clone(), Duration::from_secs(30));
         let tasks = [0, 1, 2, 3];
-        let run = block_on(run_arms(&world, &tasks, &model, false, 1, None)).unwrap();
+        let run = block_on(run_arms(&world, &tasks, &model, false, 1, None, None)).unwrap();
         assert_eq!(p.calls.load(std::sync::atomic::Ordering::SeqCst), 8);
         assert_eq!(run.failures("nugget"), 0);
         assert_eq!(run.failures("baseline"), 4);
@@ -1892,7 +2010,7 @@ mod tests {
             calls: Default::default(),
         });
         let model = real(p, Duration::from_millis(50));
-        let run = block_on(run_arms(&world, &[0], &model, false, 1, None)).unwrap();
+        let run = block_on(run_arms(&world, &[0], &model, false, 1, None, None)).unwrap();
         assert_eq!(run.failures("nugget") + run.failures("baseline"), 2);
         assert_eq!(run.failure_kinds()["nugget"]["timeout"], 1);
         // Failed requests stay out of the latency percentiles.
@@ -1913,7 +2031,16 @@ mod tests {
         let p = Scripted::new(|_| Ok("<think>plan the reply</think>\nHi Sam, yes.".into()));
         let model = real(p, Duration::from_secs(30));
         let budget = prompt_budget(4096, DRAFT_MAX_TOKENS);
-        let run = block_on(run_arms(&world, &[0, 5], &model, false, 1, Some(budget))).unwrap();
+        let run = block_on(run_arms(
+            &world,
+            &[0, 5],
+            &model,
+            false,
+            1,
+            Some(budget),
+            None,
+        ))
+        .unwrap();
         assert_eq!(run.nugget_drafts[0], "Hi Sam, yes.");
         assert_eq!(run.baseline_truncated, 2);
         assert!(run.baseline.iter().all(|s| s.prompt_tokens <= budget));
@@ -2239,6 +2366,7 @@ mod tests {
         let setup = ArmSetup {
             nugget: NuggetImpl::Engine(&on),
             ungrounded: Some(NuggetImpl::Engine(&off)),
+            local_budget: None,
         };
         let tasks = [0, 1, 2];
         let run = block_on(run_arms_with(&world, &tasks, &model, false, 1, None, setup)).unwrap();

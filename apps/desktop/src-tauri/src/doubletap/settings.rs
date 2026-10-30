@@ -144,6 +144,17 @@ pub struct DoubleTapSettings {
     /// Allow drafting into terminal emulators ([`TERMINALS`]); off by default, because text
     /// inserted into a shell can run as a command.
     pub allow_terminals: bool,
+    /// Read ahead: while a reply field keeps focus, read its context and ask the daemon to
+    /// prefill a local model's cache with it, so the trigger only reads the remainder. Local
+    /// providers only; see [`super::readahead`] for exactly what is read and sent. On by default.
+    #[serde(default = "default_read_ahead")]
+    pub read_ahead: bool,
+}
+
+/// The default for [`DoubleTapSettings::read_ahead`] (also used for files written before the
+/// setting existed).
+pub const fn default_read_ahead() -> bool {
+    true
 }
 
 impl Default for DoubleTapSettings {
@@ -154,6 +165,7 @@ impl Default for DoubleTapSettings {
             app_providers: BTreeMap::new(),
             excluded_apps: default_excluded(),
             allow_terminals: false,
+            read_ahead: default_read_ahead(),
         }
     }
 }
@@ -521,6 +533,13 @@ mod tests {
         let s: DoubleTapSettings = serde_json::from_str(r#"{"enabled":false}"#).unwrap();
         assert!(!s.enabled);
         assert_eq!(s.excluded_apps, default_excluded());
+        // Files written before read-ahead existed get its default.
+        assert!(s.read_ahead);
+        assert!(DoubleTapSettings::default().read_ahead);
+        assert_eq!(
+            serde_json::to_value(DoubleTapSettings::default()).unwrap()["read_ahead"],
+            serde_json::json!(true)
+        );
         // The defaults validate unchanged.
         assert_eq!(
             DoubleTapSettings::default().validated().unwrap(),
@@ -832,6 +851,15 @@ mod tests {
         };
         save(&path, &s).unwrap();
         assert_eq!(load(&path), s);
+        // An old file without `read_ahead` loads with the default; turning it off persists.
+        std::fs::write(&path, br#"{"enabled":true,"allow_terminals":false}"#).unwrap();
+        assert!(load(&path).read_ahead);
+        let off = DoubleTapSettings {
+            read_ahead: false,
+            ..DoubleTapSettings::default()
+        };
+        save(&path, &off).unwrap();
+        assert!(!load(&path).read_ahead);
         std::fs::write(&path, b"{not json").unwrap();
         assert_eq!(load(&path), DoubleTapSettings::default());
         let _ = std::fs::remove_dir_all(dir);

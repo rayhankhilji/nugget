@@ -43,6 +43,7 @@ export function DoubleTapPage() {
   const [notice, setNotice] = useState<Notice>(null);
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
+  const readAheadHintId = useId();
 
   // Start editing from what's saved; a later reload doesn't clobber unsaved edits.
   useEffect(() => {
@@ -130,6 +131,20 @@ export function DoubleTapPage() {
               <span className="switch-track" aria-hidden="true" />
               <span>{t("doubletap.enabled")}</span>
             </label>
+            <label className="switch">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={form.read_ahead ?? true}
+                aria-describedby={readAheadHintId}
+                onChange={(e) => setForm({ ...form, read_ahead: e.target.checked })}
+              />
+              <span className="switch-track" aria-hidden="true" />
+              <span>{t("doubletap.readAhead")}</span>
+            </label>
+            <p id={readAheadHintId} className="muted small">
+              {t("doubletap.readAheadHint")}
+            </p>
           </section>
 
           <TriggerPicker

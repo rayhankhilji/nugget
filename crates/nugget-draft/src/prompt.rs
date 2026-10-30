@@ -10,12 +10,16 @@
 //!    closing reminder of the output format (after all untrusted data, so injected text is never
 //!    the last word).
 //!
+//! For non-cloud providers the engine uses [`PromptLimits::local`] (smaller caps and a terser voice
+//! block) and adds a [`CacheHint`] keyed by channel ([`cache_key`]); [`prefix_request`] is the
+//! system-only request the engine prewarms, byte-identical to the draft request's system prompt.
+//!
 //! Everything copied from apps and documents (thread, existing text, context, exemplars, names,
 //! subject) is untrusted: it is wrapped in tags, its angle brackets are replaced so it cannot
 //! close a tag, control characters are dropped, and it is size-capped.
 
 use nugget_core::ipc::{ContextResponse, DraftContext};
-use nugget_infer::{ChatRequest, Message, Part};
+use nugget_infer::{CacheHint, ChatRequest, Message, Part};
 use nugget_voice::{Channel, VoiceHints};
 
 use crate::FieldKind;
@@ -36,6 +40,9 @@ pub struct PromptLimits {
     pub exemplar_chars: usize,
     pub exemplars: usize,
     pub instruction_chars: usize,
+    /// A shorter voice block: only the lines that carry information (no zero rates, no
+    /// single-language line, at most two greetings and sign-offs).
+    pub terse_voice: bool,
 }
 
 impl Default for PromptLimits {
@@ -47,6 +54,24 @@ impl Default for PromptLimits {
             exemplar_chars: 600,
             exemplars: 4,
             instruction_chars: 500,
+            terse_voice: false,
+        }
+    }
+}
+
+impl PromptLimits {
+    /// Caps for on-device models, where reading the prompt dominates latency (a 4B model on a
+    /// laptop CPU reads a few dozen tokens per second): the newest thread messages, a short
+    /// excerpt around the caret and two short exemplars.
+    pub fn local() -> Self {
+        Self {
+            thread_chars: 1_200,
+            message_chars: 600,
+            existing_chars: 400,
+            exemplar_chars: 240,
+            exemplars: 2,
+            instruction_chars: 300,
+            terse_voice: true,
         }
     }
 }
@@ -191,6 +216,45 @@ fn phrases(list: &[(String, f32)]) -> String {
         .join(", ")
 }
 
+/// [`voice_block`]'s stats for [`PromptLimits::terse_voice`]: no zero rates, no single-language
+/// line, at most two greetings and sign-offs.
+fn terse_stats(s: &nugget_voice::StyleStats, out: &mut String) {
+    out.push_str(&format!("- Learned from {} messages.\n", s.samples));
+    let short = |list: &[(String, f32)]| {
+        list.iter()
+            .take(2)
+            .map(|(p, _)| format!("\"{}\"", attr(p)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if !s.greetings.is_empty() {
+        out.push_str(&format!("- Greetings: {}.\n", short(&s.greetings)));
+    }
+    if !s.signoffs.is_empty() {
+        out.push_str(&format!("- Sign-offs: {}.\n", short(&s.signoffs)));
+    }
+    let formality = match s.formality {
+        f if f < 0.3 => "casual",
+        f if f < 0.7 => "neutral",
+        _ => "formal",
+    };
+    out.push_str(&format!("- Tone: {formality}.\n"));
+    let emoji = s.emoji_per_message.max(0.0);
+    if emoji >= 0.05 {
+        out.push_str(&format!("- Emoji per message: {emoji:.1}.\n"));
+    }
+    let bangs = s.exclamations_per_message.max(0.0);
+    if bangs >= 0.05 {
+        out.push_str(&format!("- Exclamation marks per message: {bangs:.1}.\n"));
+    }
+    if s.lowercase_start_rate > 0.3 {
+        out.push_str("- Often starts messages in lowercase.\n");
+    }
+    if s.languages.len() > 1 {
+        out.push_str("- Writes in several languages: reply in the thread's language.\n");
+    }
+}
+
 /// The voice block of the system prompt: deterministic for the same hints and band.
 pub fn voice_block(
     voice: &VoiceHints,
@@ -207,6 +271,8 @@ pub fn voice_block(
     ));
     if s.samples == 0 {
         out.push_str("- No writing samples yet: write plainly, briefly and naturally.\n");
+    } else if limits.terse_voice {
+        terse_stats(s, &mut out);
     } else {
         out.push_str(&format!(
             "- Learned from {} of the user's messages.\n",
@@ -309,10 +375,41 @@ pub struct PromptInput<'a> {
 
 /// The system prompt: fixed rules, then the voice.
 pub fn system_prompt(input: &PromptInput<'_>) -> String {
+    system_for(input.kind, input.voice, &input.band, &input.limits)
+}
+
+/// The system prompt for a field kind, voice, band and limits: everything that is the same
+/// across drafts in one channel, and nothing from the field, thread, app or recipients.
+pub fn system_for(
+    kind: FieldKind,
+    voice: &VoiceHints,
+    band: &LengthBand,
+    limits: &PromptLimits,
+) -> String {
     format!(
         "{SYSTEM_RULES}\n\n{}",
-        voice_block(input.voice, input.kind, &input.band, &input.limits)
+        voice_block(voice, kind, band, limits)
     )
+}
+
+/// The prompt-cache routing key for drafts of this kind: `draft:<channel>`. No user content.
+pub fn cache_key(kind: FieldKind) -> String {
+    format!("draft:{}", channel_name(channel_for(kind)))
+}
+
+/// The stable prefix of a draft request, for prewarming a provider's prompt cache: the same
+/// system prompt [`build_request`] sends for these inputs, feature `draft`, the cache hint
+/// [`cache_key`], no messages and no items.
+pub fn prefix_request(
+    kind: FieldKind,
+    voice: &VoiceHints,
+    band: &LengthBand,
+    limits: &PromptLimits,
+) -> ChatRequest {
+    ChatRequest::new(Vec::new())
+        .with_system(system_for(kind, voice, band, limits))
+        .with_feature(FEATURE_DRAFT)
+        .with_cache(CacheHint::keyed(cache_key(kind)))
 }
 
 /// The user message text (without the screenshot part).
@@ -560,6 +657,68 @@ mod tests {
             1,
             "exemplar text can't close the tag"
         );
+    }
+
+    #[test]
+    fn terse_voice_drops_zero_information_lines() {
+        let voice = VoiceHints {
+            channel: Some(Channel::Chat),
+            stats: StyleStats {
+                samples: 40,
+                median_words: 12.0,
+                greetings: vec![("hey".into(), 0.6), ("hi".into(), 0.2), ("yo".into(), 0.1)],
+                signoffs: vec![],
+                formality: 0.1,
+                emoji_per_message: 0.0,
+                exclamations_per_message: 0.2,
+                lowercase_start_rate: 0.8,
+                languages: vec![("en".into(), 1.0)],
+            },
+            exemplars: vec!["one".into(), "two".into(), "three".into()],
+        };
+        let band = LengthBand::for_draft(FieldKind::ChatMessage, &voice);
+        let full = voice_block(
+            &voice,
+            FieldKind::ChatMessage,
+            &band,
+            &PromptLimits::default(),
+        );
+        let terse = voice_block(
+            &voice,
+            FieldKind::ChatMessage,
+            &band,
+            &PromptLimits::local(),
+        );
+        assert!(terse.len() < full.len());
+        assert!(terse.contains("Learned from 40") && !terse.contains("Emoji"));
+        assert!(!terse.contains("Languages") && !terse.contains("\"yo\""));
+        assert!(terse.contains("\"hey\", \"hi\"") && terse.contains("casual"));
+        assert!(terse.contains("Exclamation marks per message: 0.2"));
+        assert!(terse.contains("about 12 words"));
+        assert_eq!(terse.matches("<example>").count(), 2);
+    }
+
+    #[test]
+    fn prefix_request_matches_the_draft_system_prompt() {
+        let voice = VoiceHints::default();
+        let cr = ContextResponse {
+            text: "[1] Note (notes)\nfacts".into(),
+            citations: vec![],
+            excluded_sensitive: 0,
+        };
+        let c = ctx();
+        let mut i = input(&c, &voice, &cr);
+        i.limits = PromptLimits::local();
+        let req = build_request(&i, 64, None);
+        let prefix = prefix_request(i.kind, &voice, &i.band, &i.limits);
+        assert_eq!(prefix.system, req.system);
+        assert_eq!(prefix.system.as_deref(), Some(system_prompt(&i).as_str()));
+        assert!(prefix.messages.is_empty() && prefix.items.is_empty());
+        assert_eq!(prefix.feature, FEATURE_DRAFT);
+        assert_eq!(cache_key(FieldKind::EmailBody), "draft:email");
+        assert_eq!(prefix.cache.unwrap().key.as_deref(), Some("draft:chat"));
+        // build_request itself adds no cache hint (the engine does, for non-cloud providers).
+        assert!(req.cache.is_none());
     }
 
     #[test]
