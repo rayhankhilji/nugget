@@ -49,7 +49,7 @@ mod types;
 
 pub use config::{
     ApiKeyRef, MaxTokensParam, ProviderConfig, ProvidersFile, Secret, SecretResolver,
-    SystemSecrets, is_sensitive_header,
+    SystemSecrets, embed_prefixes, is_sensitive_header,
 };
 pub use probe::{ProbeCheck, ProbeOptions, ProbeReport, probe, probe_with};
 pub use provider::{Provider, build_provider, build_provider_with};

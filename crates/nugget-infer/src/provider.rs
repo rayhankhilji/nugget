@@ -25,8 +25,15 @@ pub trait Provider: Send + Sync {
     /// Start a streaming chat. Transient HTTP failures are retried before the stream starts;
     /// errors after that arrive as `Err` items and end the stream.
     async fn chat(&self, req: ChatRequest) -> Result<ChatStream>;
-    /// Embed texts, one vector per input in order. `Error::Unsupported` if the API has none.
+    /// Embed documents (passages to be searched), one vector per input in order.
+    /// `Error::Unsupported` if the API has none.
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>>;
+    /// Embed search queries, one vector per input in order. Models trained with task prefixes
+    /// embed queries and documents differently; the default treats queries as documents.
+    /// Wrappers must forward both this and [`Provider::embed`].
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.embed(texts).await
+    }
 
     /// Get ready for an imminent request without sending any user content: resolve, connect and
     /// complete the TLS handshake so the connection sits warm in the pool (HTTP/2 keep-alive),

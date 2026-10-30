@@ -22,6 +22,9 @@ on:
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
+  # TEMPORARY (DD4 measurement): runs the memory job only; removed before the final push.
+  push:
+    branches: [dd/recall-real-embedder]
 
 # Least privilege: the job only reads the repository.
 permissions:
@@ -146,6 +149,8 @@ jobs:
   # bench arguments. The `chat_model` input does not apply here: every run names its model.
   doubletap:
     name: ${{ matrix.suite }} (real model)
+    # TEMPORARY (DD4 measurement): not on push; removed with the push trigger.
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 340
     strategy:
@@ -252,6 +257,108 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Memory recall with the manifest's embedding model (and reranker) on the real stack
+  # (`memory --backend real --local-models`), against the in-process hash embedder, every arm on
+  # one runner per scale so they share a CPU. `runs` holds one run per line: a label (the
+  # report's subdirectory of eval-results/), then the bench arguments. Each run also dumps the
+  # target's rank per query and arm (`NUGGET_BENCH_DUMP_MISSES`) to eval-results/<label>/ranks.tsv.
+  memory:
+    name: memory ${{ matrix.scale }} (real embedder)
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scale: quick
+            runs: |
+              hash memory --backend real
+              nomic-prefixes-off memory --backend real --local-models --memory-embed-prefixes off
+              nomic memory --backend real --local-models --memory-rerank local
+              nomic-rerank-unbounded memory --backend real --local-models --memory-rerank local --memory-rerank-timeout-ms 120000 --memory-queries 50 --memory-no-freshness
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: memory ${{ matrix.scale }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-memory-${{ matrix.scale }}.txt"
+
+      # Every run, in order, on this runner; one that fails does not stop the others, but fails
+      # the step at the end.
+      - name: Run memory ${{ matrix.scale }}
+        env:
+          RUNS: ${{ matrix.runs }}
+          MEMORY_SCALE: ${{ matrix.scale }}
+        run: |
+          failed=0
+          while read -r -u 3 label args; do
+            [ -n "$label" ] || continue
+            echo "::group::$label: $args"
+            mkdir -p "$RESULTS/$label"
+            # Word splitting of $args is intended: it is the run's argument list.
+            # shellcheck disable=SC2086
+            if ! NUGGET_BENCH_DUMP_MISSES="$RESULTS/$label/ranks.tsv" \
+                ./target/release/nugget-bench $args --scale "$MEMORY_SCALE" \
+                --out-dir "$RESULTS/$label" < /dev/null; then
+              echo "::warning::$label failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done 3<<< "$RUNS"
+          exit "$failed"
+
+      - name: Summary
+        if: always()
+        run: |
+          find "$RESULTS" -name '*.json' | sort | while read -r f; do
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|embed|reranker|docs|queries|retrieve)")))),
+                    metrics: [.metrics[] | select(.name | test("^(retrieval\\.(hybrid|vector|bm25|hybrid_mmr|hybrid_rerank|hybrid_mmr_rerank|eval\\.[a-z_]+)\\.(recall@10|mrr@10|ndcg@10|reranked_share)|query|ingest|resources|freshness\\.p95_s|baseline\\.fake\\.retrieval\\.hybrid)")) | {name, value, target, target_met}]}' "$f"
+          done
+          for f in "$RESULTS"/*/ranks.tsv; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            grep '^# hybrid@10' "$f" || true
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-memory-${{ matrix.scale }}
           path: |
             ${{ env.RESULTS }}
             bench/.local-models/data/logs

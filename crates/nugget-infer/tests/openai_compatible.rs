@@ -229,6 +229,74 @@ async fn embeddings_batch_and_keep_order() {
     assert!(p.embed(&[]).await.unwrap().is_empty());
 }
 
+/// The `input` arrays of every embeddings request `server` received, in order.
+async fn embed_inputs(server: &MockServer) -> Vec<Vec<String>> {
+    server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| {
+            let body: Value = serde_json::from_slice(&r.body).unwrap();
+            serde_json::from_value(body["input"].clone()).unwrap()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn embeddings_use_task_prefixes() {
+    let texts = vec!["cats".to_string(), "search_query: dogs".to_string()];
+    let run = |toml: String| {
+        let texts = texts.clone();
+        async move {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .and(path("/v1/embeddings"))
+                .respond_with(EmbedResponder)
+                .mount(&server)
+                .await;
+            let (p, _) = provider(&toml, &format!("{}/v1", server.uri()));
+            p.embed(&texts).await.unwrap();
+            p.embed_query(&texts).await.unwrap();
+            embed_inputs(&server).await
+        }
+    };
+    let cfg = |model: &str, extra: &str| {
+        format!("id = \"e\"\nkind = \"openai_compatible\"\nmodel = \"{model}\"\n{extra}")
+    };
+
+    // The served nomic model: documents and queries get their prefixes, never twice.
+    assert_eq!(
+        run(cfg("nomic-embed-text-v1.5-q8", "")).await,
+        vec![
+            vec![
+                "search_document: cats",
+                "search_document: search_query: dogs"
+            ],
+            vec!["search_query: cats", "search_query: dogs"],
+        ]
+    );
+    // An empty prefix disables it; the other one keeps its default.
+    assert_eq!(
+        run(cfg("nomic-embed-text-v1.5-q8", "embed_query_prefix = \"\"")).await,
+        vec![
+            vec![
+                "search_document: cats",
+                "search_document: search_query: dogs"
+            ],
+            vec!["cats", "search_query: dogs"],
+        ]
+    );
+    // Other models get the inputs unchanged.
+    assert_eq!(
+        run(cfg("test-model", "")).await,
+        vec![
+            vec!["cats", "search_query: dogs"],
+            vec!["cats", "search_query: dogs"],
+        ]
+    );
+}
+
 #[tokio::test]
 async fn embeddings_http_error() {
     let server = MockServer::start().await;

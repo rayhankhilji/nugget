@@ -555,10 +555,10 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     assert_eq!(emb2.calls(), 1);
 }
 
-/// Wraps the hash embedder and records how many texts each `embed` call carried.
+/// Wraps the hash embedder and records each call as (`"query"` or `"document"`, number of texts).
 struct Recording {
     inner: HashEmbedder,
-    batches: std::sync::Mutex<Vec<usize>>,
+    batches: std::sync::Mutex<Vec<(&'static str, usize)>>,
 }
 
 #[async_trait]
@@ -573,8 +573,12 @@ impl Provider for Recording {
         self.inner.chat(req).await
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.batches.lock().unwrap().push(texts.len());
+        self.batches.lock().unwrap().push(("document", texts.len()));
         self.inner.embed(texts).await
+    }
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.batches.lock().unwrap().push(("query", texts.len()));
+        self.inner.embed_query(texts).await
     }
 }
 
@@ -614,8 +618,8 @@ async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
     assert_eq!(keys(&res.items)[2], "dup-b", "{:?}", keys(&res.items));
     assert_eq!(
         *rec.batches.lock().unwrap(),
-        vec![1, 1],
-        "the query, then only the one passage without a stored vector"
+        vec![("query", 1), ("document", 1)],
+        "the query (as a query), then only the one passage without a stored vector (as a document)"
     );
 }
 

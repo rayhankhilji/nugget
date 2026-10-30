@@ -276,6 +276,40 @@ pub struct ProviderConfig {
     /// prefix match, whereas a pinned request waits whenever its slot is busy.
     #[serde(default)]
     pub slot_affinity: Option<bool>,
+    /// OpenAI-compatible only: text prepended to search queries ([`crate::Provider::embed_query`]).
+    /// Unset: the model's known default (see [`embed_prefixes`]); `""`: no prefix.
+    #[serde(default)]
+    pub embed_query_prefix: Option<String>,
+    /// OpenAI-compatible only: text prepended to documents ([`crate::Provider::embed`]). Unset:
+    /// the model's known default (see [`embed_prefixes`]); `""`: no prefix.
+    #[serde(default)]
+    pub embed_document_prefix: Option<String>,
+}
+
+/// Task prefixes for embedding models trained with them, as `(model substring, query prefix,
+/// document prefix)`. Matched case-insensitively against the model name, so served variants
+/// such as `nomic-embed-text-v1.5-q8` match too. Add a model (e.g. one with a query-only prefix)
+/// with a row here.
+const EMBED_PREFIXES: &[(&str, &str, &str)] =
+    &[("nomic-embed-text", "search_query: ", "search_document: ")];
+
+/// The `(query, document)` embedding prefixes for `cfg`: the configured
+/// `embed_query_prefix`/`embed_document_prefix` where set, else the model's known default from a
+/// small table, else none.
+pub fn embed_prefixes(cfg: &ProviderConfig) -> (String, String) {
+    let model = cfg.model.to_ascii_lowercase();
+    let (query, document) = EMBED_PREFIXES
+        .iter()
+        .find(|(name, _, _)| model.contains(name))
+        .map_or(("", ""), |&(_, q, d)| (q, d));
+    (
+        cfg.embed_query_prefix
+            .clone()
+            .unwrap_or_else(|| query.to_owned()),
+        cfg.embed_document_prefix
+            .clone()
+            .unwrap_or_else(|| document.to_owned()),
+    )
 }
 
 /// A TOML file holding `[[providers]]` tables.
@@ -595,6 +629,27 @@ mod tests {
 
     fn cfg(toml: &str) -> Result<ProviderConfig> {
         ProviderConfig::from_toml_str(toml)
+    }
+
+    #[test]
+    fn embed_prefix_defaults_and_overrides() {
+        let base = "id='e'\nkind='openai_compatible'\nbase_url='http://localhost:1/v1'\n";
+        let prefixes = |extra: &str| embed_prefixes(&cfg(&format!("{base}{extra}")).unwrap());
+        let nomic = ("search_query: ".to_owned(), "search_document: ".to_owned());
+        assert_eq!(prefixes("model='nomic-embed-text-v1.5-q8'"), nomic);
+        assert_eq!(prefixes("model='Nomic-Embed-Text:latest'"), nomic);
+        assert_eq!(
+            prefixes("model='other-embed'"),
+            (String::new(), String::new())
+        );
+        assert_eq!(
+            prefixes("model='nomic-embed-text-v1.5'\nembed_query_prefix=''"),
+            (String::new(), "search_document: ".to_owned())
+        );
+        assert_eq!(
+            prefixes("model='other'\nembed_query_prefix='q: '\nembed_document_prefix='d: '"),
+            ("q: ".to_owned(), "d: ".to_owned())
+        );
     }
 
     #[test]

@@ -80,6 +80,8 @@ pub struct RunConfig {
     pub local: crate::local::LocalOptions,
     /// `doubletap` suite options (read-ahead).
     pub doubletap: suites::doubletap::DoubletapOptions,
+    /// `memory` suite options (real embedder prefixes, reranker, query count).
+    pub memory: suites::memory::MemoryOptions,
 }
 
 impl Default for RunConfig {
@@ -93,6 +95,7 @@ impl Default for RunConfig {
             draft: suites::draft::DraftOptions::default(),
             local: crate::local::LocalOptions::default(),
             doubletap: suites::doubletap::DoubletapOptions::default(),
+            memory: suites::memory::MemoryOptions::default(),
         }
     }
 }

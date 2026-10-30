@@ -383,6 +383,13 @@ impl Provider for RuntimeSlot {
         self.ready().await?.embed(texts).await
     }
 
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if self.role != RuntimeRole::Embedding {
+            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
+        }
+        self.ready().await?.embed_query(texts).await
+    }
+
     /// Start the server if it stopped (Double Tap trigger), then warm the ready provider.
     async fn prewarm(&self) -> Result<()> {
         self.ready().await?.prewarm().await
