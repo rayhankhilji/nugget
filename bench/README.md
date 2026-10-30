@@ -1825,6 +1825,32 @@ Read across the rows:
   baseline arms still leak it; the check dropped the whole sentence, greeting included ("We'll connect
   during the kickoff on October 21. Thanks, Maya").
 
+**Grounding with AA1's local budget and CC1's read-ahead (the default).** After merging AA1
+(smaller local prompt, `[draft.local] include_sensitive = false`) and CC1 (read-ahead), the
+sentence check would have undone CC1's result: it holds every sentence, and the greeting, until the
+sentence ends. So the streaming check is now a setting, `[draft] grounding_check`: `sentences` (as
+above) or `secrets`, which streams word by word, holds only the current word (and a run of digit
+groups, a card number arriving a group at a time), stops the draft before a credential copied from
+a sensitive fact, and checks no values. Run [41007073954](https://github.com/rayhankhilji/nugget/actions/runs/41007073954),
+Qwen3-4B, read-ahead on, one runner (EPYC 7763), 12 drafts each:
+
+| Grounding | First inserted char p50 / p95 | Full draft p50 | Prompt tokens p50 |
+|---|---|---|---|
+| off | 0.14 / 0.14 s | 4.0 s | 809 |
+| on, `secrets` check | **0.27 / 0.33 s** | 4.9 s | 937 |
+| on, `sentences` check | 2.78 / 5.00 s | 5.2 s | 937 |
+
+The draft-suite half of this run (16 tasks incl. `maya-t13`, `secrets` vs `sentences`, leak and recall) is pending.
+
+**Default: `grounding = true` with `grounding_check = "secrets"`.** The facts block costs nothing at
+the trigger once read-ahead has cached it (it adds ~130 prompt tokens, read ahead), and the
+`secrets` check adds 0.13 s p50 / 0.19 s p95 to the first character, within the few hundred
+milliseconds CC1's result allows; the `sentences` check adds 2.6 s p50, which would undo it, so it
+stays available (`grounding_check = "sentences"`) but off by default. What that gives up: unsupported
+numbers and dates are no longer dropped while streaming; the planted-fact hallucination rate was 0
+with and without the value check in every real-model run above, and the dated, superseded-marked
+facts block stays on.
+
 ### Computer use with a real model
 
 `cua --cua-agent nugget --local-models`: the real agent loop, computer-use tools and policy gate,
