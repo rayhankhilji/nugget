@@ -1,0 +1,1795 @@
+{
+  "root": {
+    "role": "group",
+    "raw_role": "panel",
+    "bounds": [
+      44.0,
+      40.0,
+      1092.0,
+      846.0
+    ],
+    "children": [
+      {
+        "role": "group",
+        "raw_role": "panel",
+        "bounds": [
+          44.0,
+          80.0,
+          1092.0,
+          47.0
+        ],
+        "children": [
+          {
+            "role": "toolbar",
+            "raw_role": "tool bar",
+            "bounds": [
+              44.0,
+              80.0,
+              1092.0,
+              46.0
+            ],
+            "attrs": {
+              "identifier": "view_1000"
+            },
+            "children": [
+              {
+                "role": "button",
+                "raw_role": "push button",
+                "name": "Back",
+                "states": {
+                  "disabled": true
+                },
+                "bounds": [
+                  50.0,
+                  86.0,
+                  34.0,
+                  34.0
+                ],
+                "attrs": {
+                  "identifier": "view_1001"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "group",
+        "raw_role": "panel",
+        "bounds": [
+          44.0,
+          183.0,
+          1092.0,
+          703.0
+        ],
+        "children": [
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            },
+            "bounds": [
+              44.0,
+              183.0,
+              1092.0,
+              703.0
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "bounds": [
+              44.0,
+              183.0,
+              1092.0,
+              703.0
+            ],
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ],
+                "attrs": {
+                  "identifier": "view_1034"
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "panel",
+                    "states": {
+                      "offscreen": true
+                    },
+                    "bounds": [
+                      44.0,
+                      183.0,
+                      1092.0,
+                      703.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel"
+              },
+              {
+                "role": "web_area",
+                "raw_role": "document web",
+                "name": "Nugget fixture: Mail compose",
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ],
+                "children": [
+                  {
+                    "role": "section",
+                    "raw_role": "section",
+                    "bounds": [
+                      44.0,
+                      183.0,
+                      1092.0,
+                      703.0
+                    ],
+                    "attrs": {
+                      "identifier": "app"
+                    },
+                    "children": [
+                      {
+                        "role": "group",
+                        "raw_role": "landmark",
+                        "name": "Mail folders",
+                        "bounds": [
+                          44.0,
+                          183.0,
+                          220.0,
+                          703.0
+                        ],
+                        "attrs": {
+                          "xml_roles": "navigation"
+                        },
+                        "children": [
+                          {
+                            "role": "section",
+                            "raw_role": "section",
+                            "bounds": [
+                              56.0,
+                              195.0,
+                              196.0,
+                              29.0
+                            ],
+                            "children": [
+                              {
+                                "role": "static_text",
+                                "raw_role": "static",
+                                "name": "Fernmail",
+                                "bounds": [
+                                  56.0,
+                                  197.0,
+                                  84.0,
+                                  24.0
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "role": "button",
+                            "raw_role": "push button",
+                            "name": "Compose",
+                            "bounds": [
+                              56.0,
+                              236.0,
+                              108.0,
+                              45.0
+                            ]
+                          },
+                          {
+                            "role": "list",
+                            "raw_role": "list",
+                            "bounds": [
+                              56.0,
+                              292.0,
+                              196.0,
+                              171.0
+                            ],
+                            "children": [
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  292.0,
+                                  196.0,
+                                  29.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Inbox 12",
+                                    "value": "Inbox12",
+                                    "bounds": [
+                                      56.0,
+                                      292.0,
+                                      196.0,
+                                      29.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Inbox",
+                                        "bounds": [
+                                          68.0,
+                                          297.0,
+                                          38.0,
+                                          18.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "12",
+                                        "bounds": [
+                                          225.0,
+                                          297.0,
+                                          15.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  320.0,
+                                  196.0,
+                                  29.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Starred",
+                                    "bounds": [
+                                      56.0,
+                                      320.0,
+                                      196.0,
+                                      29.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Starred",
+                                        "bounds": [
+                                          68.0,
+                                          325.0,
+                                          49.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  348.0,
+                                  196.0,
+                                  30.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Snoozed",
+                                    "bounds": [
+                                      56.0,
+                                      348.0,
+                                      196.0,
+                                      30.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Snoozed",
+                                        "bounds": [
+                                          68.0,
+                                          353.0,
+                                          59.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  377.0,
+                                  196.0,
+                                  29.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Sent",
+                                    "bounds": [
+                                      56.0,
+                                      377.0,
+                                      196.0,
+                                      29.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Sent",
+                                        "bounds": [
+                                          68.0,
+                                          382.0,
+                                          30.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  405.0,
+                                  196.0,
+                                  29.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Drafts 2",
+                                    "value": "Drafts2",
+                                    "bounds": [
+                                      56.0,
+                                      405.0,
+                                      196.0,
+                                      29.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Drafts",
+                                        "bounds": [
+                                          68.0,
+                                          410.0,
+                                          40.0,
+                                          18.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "2",
+                                        "bounds": [
+                                          231.0,
+                                          410.0,
+                                          9.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  56.0,
+                                  433.0,
+                                  196.0,
+                                  30.0
+                                ],
+                                "children": [
+                                  {
+                                    "role": "link",
+                                    "raw_role": "link",
+                                    "name": "Offsite 3",
+                                    "value": "Offsite3",
+                                    "bounds": [
+                                      56.0,
+                                      433.0,
+                                      196.0,
+                                      30.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Offsite",
+                                        "bounds": [
+                                          68.0,
+                                          438.0,
+                                          44.0,
+                                          18.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "3",
+                                        "bounds": [
+                                          231.0,
+                                          438.0,
+                                          9.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "role": "group",
+                        "raw_role": "landmark",
+                        "bounds": [
+                          264.0,
+                          183.0,
+                          872.0,
+                          52.0
+                        ],
+                        "attrs": {
+                          "xml_roles": "banner"
+                        },
+                        "children": [
+                          {
+                            "role": "text_field",
+                            "raw_role": "entry",
+                            "name": "Search mail",
+                            "placeholder": "Search mail",
+                            "states": {
+                              "editable": true,
+                              "multiline": false
+                            },
+                            "bounds": [
+                              280.0,
+                              193.0,
+                              385.0,
+                              32.0
+                            ]
+                          },
+                          {
+                            "role": "toolbar",
+                            "raw_role": "tool bar",
+                            "name": "Thread actions",
+                            "bounds": [
+                              676.0,
+                              195.0,
+                              444.0,
+                              28.0
+                            ],
+                            "attrs": {
+                              "xml_roles": "toolbar"
+                            },
+                            "children": [
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Archive",
+                                "bounds": [
+                                  680.0,
+                                  195.0,
+                                  69.0,
+                                  28.0
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Report spam",
+                                "bounds": [
+                                  752.0,
+                                  195.0,
+                                  104.0,
+                                  28.0
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Delete",
+                                "bounds": [
+                                  859.0,
+                                  195.0,
+                                  61.0,
+                                  28.0
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Mark as unread",
+                                "bounds": [
+                                  923.0,
+                                  195.0,
+                                  122.0,
+                                  28.0
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Move to",
+                                "bounds": [
+                                  1048.0,
+                                  195.0,
+                                  72.0,
+                                  28.0
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "role": "group",
+                        "raw_role": "landmark",
+                        "bounds": [
+                          276.0,
+                          235.0,
+                          848.0,
+                          631.0
+                        ],
+                        "attrs": {
+                          "xml_roles": "main"
+                        },
+                        "children": [
+                          {
+                            "role": "heading",
+                            "raw_role": "heading",
+                            "name": "Q3 offsite venue",
+                            "bounds": [
+                              296.0,
+                              249.0,
+                              156.0,
+                              29.0
+                            ],
+                            "children": [
+                              {
+                                "role": "static_text",
+                                "raw_role": "static",
+                                "name": "Q3 offsite venue",
+                                "bounds": [
+                                  296.0,
+                                  251.0,
+                                  156.0,
+                                  24.0
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "role": "static_text",
+                            "raw_role": "static",
+                            "name": "Inbox",
+                            "bounds": [
+                              465.0,
+                              255.0,
+                              32.0,
+                              16.0
+                            ]
+                          },
+                          {
+                            "role": "list",
+                            "raw_role": "list",
+                            "name": "Conversation",
+                            "bounds": [
+                              296.0,
+                              284.0,
+                              808.0,
+                              360.0
+                            ],
+                            "attrs": {
+                              "xml_roles": "list"
+                            },
+                            "children": [
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  296.0,
+                                  284.0,
+                                  808.0,
+                                  111.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "listitem"
+                                },
+                                "children": [
+                                  {
+                                    "role": "heading",
+                                    "raw_role": "heading",
+                                    "name": "Jordan Lee",
+                                    "bounds": [
+                                      336.0,
+                                      297.0,
+                                      76.0,
+                                      22.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Jordan Lee",
+                                        "bounds": [
+                                          336.0,
+                                          298.0,
+                                          76.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "<jordan.lee@example.com>",
+                                    "bounds": [
+                                      419.0,
+                                      300.0,
+                                      160.0,
+                                      16.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      981.0,
+                                      299.0,
+                                      123.0,
+                                      18.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Mon, Oct 26, 9:14 AM",
+                                        "bounds": [
+                                          981.0,
+                                          300.0,
+                                          123.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      324.0,
+                                      768.0,
+                                      18.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "to me, Priya Natarajan",
+                                        "bounds": [
+                                          336.0,
+                                          325.0,
+                                          126.0,
+                                          15.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      345.0,
+                                      768.0,
+                                      41.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Hi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?",
+                                        "bounds": [
+                                          336.0,
+                                          346.0,
+                                          754.0,
+                                          38.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  296.0,
+                                  394.0,
+                                  808.0,
+                                  92.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "listitem"
+                                },
+                                "children": [
+                                  {
+                                    "role": "heading",
+                                    "raw_role": "heading",
+                                    "name": "Priya Natarajan",
+                                    "bounds": [
+                                      336.0,
+                                      408.0,
+                                      105.0,
+                                      22.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Priya Natarajan",
+                                        "bounds": [
+                                          336.0,
+                                          409.0,
+                                          105.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "<priya.natarajan@example.com>",
+                                    "bounds": [
+                                      448.0,
+                                      411.0,
+                                      189.0,
+                                      16.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      976.0,
+                                      410.0,
+                                      128.0,
+                                      18.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Mon, Oct 26, 11:40 AM",
+                                        "bounds": [
+                                          976.0,
+                                          411.0,
+                                          128.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      434.0,
+                                      768.0,
+                                      19.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "to me, Jordan Lee",
+                                        "bounds": [
+                                          336.0,
+                                          435.0,
+                                          103.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      456.0,
+                                      768.0,
+                                      21.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                        "bounds": [
+                                          336.0,
+                                          457.0,
+                                          658.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list_item",
+                                "raw_role": "list item",
+                                "bounds": [
+                                  296.0,
+                                  485.0,
+                                  808.0,
+                                  159.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "listitem"
+                                },
+                                "children": [
+                                  {
+                                    "role": "heading",
+                                    "raw_role": "heading",
+                                    "name": "Jordan Lee",
+                                    "bounds": [
+                                      336.0,
+                                      499.0,
+                                      76.0,
+                                      21.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Jordan Lee",
+                                        "bounds": [
+                                          336.0,
+                                          500.0,
+                                          76.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "<jordan.lee@example.com>",
+                                    "bounds": [
+                                      419.0,
+                                      501.0,
+                                      160.0,
+                                      16.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      985.0,
+                                      500.0,
+                                      119.0,
+                                      19.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Tue, Oct 27, 8:05 AM",
+                                        "bounds": [
+                                          985.0,
+                                          501.0,
+                                          119.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      525.0,
+                                      768.0,
+                                      19.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "to me, Priya Natarajan",
+                                        "bounds": [
+                                          336.0,
+                                          526.0,
+                                          126.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      547.0,
+                                      768.0,
+                                      41.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Thanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?",
+                                        "bounds": [
+                                          336.0,
+                                          548.0,
+                                          755.0,
+                                          38.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      336.0,
+                                      593.0,
+                                      768.0,
+                                      21.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "On Mon, Oct 26, 11:40 AM Priya Natarajan <priya.natarajan@example.com> wrote:",
+                                        "bounds": [
+                                          336.0,
+                                          594.0,
+                                          545.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "paragraph",
+                                    "raw_role": "block quote",
+                                    "value": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                    "bounds": [
+                                      342.0,
+                                      613.0,
+                                      762.0,
+                                      22.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                        "bounds": [
+                                          350.0,
+                                          614.0,
+                                          658.0,
+                                          18.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "role": "group",
+                            "raw_role": "landmark",
+                            "name": "Reply",
+                            "bounds": [
+                              296.0,
+                              677.0,
+                              808.0,
+                              181.0
+                            ],
+                            "attrs": {
+                              "xml_roles": "region"
+                            },
+                            "children": [
+                              {
+                                "role": "section",
+                                "raw_role": "section",
+                                "bounds": [
+                                  307.0,
+                                  687.0,
+                                  17.0,
+                                  21.0
+                                ],
+                                "attrs": {
+                                  "identifier": "to-label"
+                                },
+                                "children": [
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "To",
+                                    "bounds": [
+                                      307.0,
+                                      688.0,
+                                      17.0,
+                                      18.0
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "list",
+                                "raw_role": "list box",
+                                "name": "To",
+                                "bounds": [
+                                  329.0,
+                                  687.0,
+                                  200.0,
+                                  20.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "listbox"
+                                },
+                                "children": [
+                                  {
+                                    "role": "list_item",
+                                    "raw_role": "list item",
+                                    "name": "Jordan Lee",
+                                    "bounds": [
+                                      329.0,
+                                      687.0,
+                                      86.0,
+                                      20.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "option"
+                                    }
+                                  },
+                                  {
+                                    "role": "list_item",
+                                    "raw_role": "list item",
+                                    "name": "Priya Natarajan",
+                                    "bounds": [
+                                      418.0,
+                                      687.0,
+                                      111.0,
+                                      20.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "option"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "text_field",
+                                "raw_role": "entry",
+                                "name": "To recipients",
+                                "states": {
+                                  "editable": true,
+                                  "multiline": false
+                                },
+                                "bounds": [
+                                  534.0,
+                                  683.0,
+                                  559.0,
+                                  29.0
+                                ]
+                              },
+                              {
+                                "role": "text_field",
+                                "raw_role": "entry",
+                                "name": "Subject",
+                                "value": "Re: Q3 offsite venue",
+                                "placeholder": "Subject",
+                                "states": {
+                                  "editable": true,
+                                  "multiline": false
+                                },
+                                "bounds": [
+                                  307.0,
+                                  713.0,
+                                  786.0,
+                                  29.0
+                                ]
+                              },
+                              {
+                                "role": "text_field",
+                                "raw_role": "entry",
+                                "name": "Message Body",
+                                "value": "Draft:",
+                                "states": {
+                                  "focused": true,
+                                  "editable": true,
+                                  "multiline": true
+                                },
+                                "bounds": [
+                                  307.0,
+                                  742.0,
+                                  786.0,
+                                  71.0
+                                ],
+                                "attrs": {
+                                  "identifier": ":r7",
+                                  "xml_roles": "textbox"
+                                },
+                                "children": [
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "Draft:",
+                                    "states": {
+                                      "editable": true
+                                    },
+                                    "bounds": [
+                                      307.0,
+                                      749.0,
+                                      41.0,
+                                      18.0
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "push button",
+                                "name": "Send",
+                                "bounds": [
+                                  307.0,
+                                  816.0,
+                                  70.0,
+                                  33.0
+                                ]
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "landmark",
+                                "name": "Re-enter password to send",
+                                "bounds": [
+                                  387.0,
+                                  819.0,
+                                  383.0,
+                                  28.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "form"
+                                },
+                                "children": [
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      396.0,
+                                      824.0,
+                                      157.0,
+                                      18.0
+                                    ],
+                                    "attrs": {
+                                      "identifier": "reauth-title"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Re-enter password to send",
+                                        "bounds": [
+                                          396.0,
+                                          825.0,
+                                          157.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "label",
+                                    "value": "Password",
+                                    "bounds": [
+                                      558.0,
+                                      824.0,
+                                      57.0,
+                                      18.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "static",
+                                        "name": "Password",
+                                        "bounds": [
+                                          558.0,
+                                          825.0,
+                                          57.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "text_field",
+                                    "raw_role": "password text",
+                                    "name": "Password",
+                                    "states": {
+                                      "editable": true,
+                                      "secure": true,
+                                      "multiline": false
+                                    },
+                                    "bounds": [
+                                      620.0,
+                                      822.0,
+                                      141.0,
+                                      22.0
+                                    ],
+                                    "attrs": {
+                                      "identifier": "reauth-password"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "unknown",
+                                "raw_role": "statusbar",
+                                "bounds": [
+                                  1028.0,
+                                  824.0,
+                                  65.0,
+                                  18.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "status"
+                                },
+                                "children": [
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "static",
+                                    "name": "Draft saved",
+                                    "bounds": [
+                                      1028.0,
+                                      825.0,
+                                      65.0,
+                                      16.0
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "role": "unknown",
+                        "raw_role": "statusbar",
+                        "bounds": [
+                          264.0,
+                          866.0,
+                          872.0,
+                          20.0
+                        ],
+                        "attrs": {
+                          "xml_roles": "status"
+                        },
+                        "children": [
+                          {
+                            "role": "static_text",
+                            "raw_role": "static",
+                            "name": "Last account activity: 12 minutes ago",
+                            "bounds": [
+                              280.0,
+                              869.0,
+                              210.0,
+                              15.0
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "panel",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ],
+                "attrs": {
+                  "identifier": "view_1036"
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  987.0,
+                  862.0,
+                  149.0,
+                  24.0
+                ],
+                "children": [
+                  {
+                    "role": "static_text",
+                    "raw_role": "static",
+                    "name": "127.0.0.1:40225",
+                    "states": {
+                      "offscreen": true
+                    },
+                    "bounds": [
+                      1009.0,
+                      863.0,
+                      97.0,
+                      22.0
+                    ]
+                  },
+                  {
+                    "role": "button",
+                    "raw_role": "push button",
+                    "name": "Close this view",
+                    "states": {
+                      "offscreen": true
+                    },
+                    "bounds": [
+                      1112.0,
+                      862.0,
+                      24.0,
+                      24.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  183.0,
+                  1092.0,
+                  703.0
+                ]
+              }
+            ]
+          },
+          {
+            "role": "separator",
+            "raw_role": "separator",
+            "states": {
+              "offscreen": true
+            },
+            "children": [
+              {
+                "role": "unknown",
+                "raw_role": "slider",
+                "name": "Split View Resize Handle (draggable)",
+                "states": {
+                  "offscreen": true
+                },
+                "bounds": [
+                  44.0,
+                  171.0,
+                  4.0,
+                  24.0
+                ]
+              }
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            },
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "attrs": {
+                  "identifier": "view_1034"
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "panel",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "attrs": {
+                  "identifier": "view_1033"
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "panel",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "panel",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "attrs": {
+                  "identifier": "view_1036"
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "children": [
+                  {
+                    "role": "static_text",
+                    "raw_role": "static",
+                    "states": {
+                      "offscreen": true
+                    }
+                  },
+                  {
+                    "role": "button",
+                    "raw_role": "push button",
+                    "name": "Close this view",
+                    "states": {
+                      "offscreen": true
+                    },
+                    "bounds": [
+                      32.0,
+                      183.0,
+                      24.0,
+                      24.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              },
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                }
+              }
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            },
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "panel",
+                "states": {
+                  "offscreen": true
+                },
+                "children": [
+                  {
+                    "role": "static_text",
+                    "raw_role": "static",
+                    "name": "Create split view",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            },
+            "bounds": [
+              44.0,
+              183.0,
+              1092.0,
+              1.0
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            }
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            }
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            }
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "states": {
+              "offscreen": true
+            },
+            "bounds": [
+              44.0,
+              183.0,
+              1092.0,
+              703.0
+            ],
+            "attrs": {
+              "identifier": "view_1035"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "focus_path": [
+    1,
+    1,
+    3,
+    0,
+    2,
+    3,
+    4
+  ],
+  "truncated": true
+}
