@@ -840,6 +840,9 @@ impl<'a> Session<'a> {
             return LLM_PENDING + attempts;
         }
         let me_name = self.inner.cfg.me.name.clone();
+        let sender_is_me = crate::llm::sender(item)
+            .and_then(|raw| crate::text::parse_address(&raw).email)
+            .is_some_and(|e| self.me_set.contains(&e.to_lowercase()));
         let run = crate::llm::extract(
             &router,
             &providers,
@@ -847,6 +850,7 @@ impl<'a> Session<'a> {
             chunks,
             cfg,
             me_name.as_deref(),
+            sender_is_me,
             self.llm_left,
         )
         .await;

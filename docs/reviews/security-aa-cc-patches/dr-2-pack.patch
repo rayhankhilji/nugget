@@ -1,0 +1,22 @@
+diff --git a/crates/nugget-retrieve/src/pack.rs b/crates/nugget-retrieve/src/pack.rs
+index 9d8a28c..03896e4 100644
+--- a/crates/nugget-retrieve/src/pack.rs
++++ b/crates/nugget-retrieve/src/pack.rs
+@@ -94,7 +94,16 @@ fn render(blocks: &[Block], items: &[PackItem]) -> String {
+                 Some(p) if p + 1 == *ord => out.push('\n'),
+                 Some(_) => out.push_str(GAP),
+             }
+-            out.push_str(&piece.text);
++            // Chunk text is untrusted: only the packer's own header lines start with `[`.
++            for (i, line) in piece.text.split('\n').enumerate() {
++                if i > 0 {
++                    out.push('\n');
++                }
++                if line.starts_with('[') {
++                    out.push(' ');
++                }
++                out.push_str(line);
++            }
+             prev = Some(*ord);
+         }
+     }

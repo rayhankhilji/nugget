@@ -853,6 +853,22 @@ fn clean_line(s: &str, max: usize) -> String {
     truncate_chars(cleaned.trim(), max)
 }
 
+/// A `files.list` / `changes.list` entry as [`DriveConnector::apply_file`] reads it, for
+/// [`crate::drive_content::fuzz_export`].
+pub(crate) fn fuzz_file_entry(body: &[u8]) -> Vec<(&'static str, String, usize)> {
+    let Ok(file) = serde_json::from_slice::<DriveFile>(body) else {
+        return Vec::new();
+    };
+    let mut out = vec![("version", file.version(), 400)];
+    if valid_id(&file.id) {
+        let name = clean_line(file.name.as_deref().unwrap_or_default(), MAX_NAME);
+        let meta = metadata(&file, &name, Some("download"), Some("reason"));
+        out.push(("line", name, MAX_NAME * 4));
+        out.push(("json", meta.to_string(), 256 * 1024));
+    }
+    out
+}
+
 #[cfg(test)]
 mod unit {
     use super::*;
