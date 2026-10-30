@@ -591,6 +591,15 @@ impl Fixture {
                     add(self, id, &mut keep);
                 }
             }
+            // Skipping a further case's items must not take the original job change out of
+            // scope: every one of its claims keeps a supporting item.
+            debug_assert!(
+                self.claims
+                    .iter()
+                    .filter(|c| jc.superseded.contains(&c.id) || jc.current.contains(&c.id))
+                    .all(|c| c.support.iter().any(|s| keep.contains(&s.item.as_str()))),
+                "the original job change lost all support for a claim"
+            );
         }
         if let Some(c) = hc.nickname_identity.first() {
             let nick = mentioned(&c.entity);

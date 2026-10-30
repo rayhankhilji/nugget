@@ -49,8 +49,9 @@ use serde_json::json;
 use crate::knowledge::diagnose::{self, Baseline};
 use crate::knowledge::eval::{
     self, GoldIndex, Snapshot, distinct_identities, edits_preserved, gold_triples,
-    injection_unsupported, match_entities, same_identity, score_claims, score_entities,
-    score_resolution, score_retraction, score_support, score_vault, system_triples, unattributed,
+    injection_unsupported, match_entities, resolved_strictly, same_identity, score_claims,
+    score_entities, score_resolution, score_retraction, score_support, score_vault, system_triples,
+    unattributed,
 };
 use crate::knowledge::fake_llm::ScriptedLlm;
 use crate::knowledge::fixture::{self, Corpus, Fixture, Ingested};
@@ -738,7 +739,7 @@ pub fn run_with_system_and_baseline(
         .nickname_identity
         .iter()
         .map(|c| {
-            same_identity(&gold, &res, &c.entity)
+            resolved_strictly(&gold, &res, &snap, ing, &c.entity)
                 && unattributed(
                     &gold,
                     &res,
@@ -753,8 +754,14 @@ pub fn run_with_system_and_baseline(
         .same_first_name
         .iter()
         .map(|c| {
+            // EE1 pairs also need each person resolved (the context-identified bare first name
+            // included); the original pair (the Sams) keeps the M2 rule: separate is enough.
             distinct_identities(&gold, &res, &c.entities)
                 && unattributed(&gold, &res, &snap, ing, &c.entities, &c.unattributed)
+                && (c.added.is_none()
+                    || c.entities
+                        .iter()
+                        .all(|e| resolved_strictly(&gold, &res, &snap, ing, e)))
         })
         .collect();
     let mut details = Vec::new();
@@ -771,7 +778,11 @@ pub fn run_with_system_and_baseline(
         .zip(&nicknames)
         .zip(&scope.nickname)
     {
-        details.push(detail("nickname_identity", c.entity.clone(), *s, *ok));
+        let mut d = detail("nickname_identity", c.entity.clone(), *s, *ok);
+        // Not part of the pass: the pre-EE1 rule (majority vote over each mention's surfaces),
+        // for comparison with runs of the pre-EE1 bench.
+        d["majority_vote"] = json!(same_identity(&gold, &res, &c.entity));
+        details.push(d);
     }
     for ((c, ok), s) in hc
         .same_first_name
@@ -780,9 +791,13 @@ pub fn run_with_system_and_baseline(
         .zip(&scope.first_name)
     {
         let mut d = detail("same_first_name", c.entities.join(" / "), *s, *ok);
-        // Not part of the pass: whether each person's mentions (bare first names resolved by
-        // context included) also end up on one entity of their own.
-        d["one_entity_each"] = json!(c.entities.iter().all(|e| same_identity(&gold, &res, e)));
+        // Whether each person's mentions (bare first names resolved by context included) end
+        // up on one entity of their own: part of the pass for EE1 pairs only.
+        d["one_entity_each"] = json!(
+            c.entities
+                .iter()
+                .all(|e| resolved_strictly(&gold, &res, &snap, ing, e))
+        );
         details.push(d);
     }
     for ((c, ok), s) in hc
@@ -807,12 +822,12 @@ pub fn run_with_system_and_baseline(
         (
             "nickname_identity",
             all_in_scope(&nicknames, &scope.nickname),
-            "Every person under nicknames, display-name variants, initials or several addresses resolves to one entity holding nobody else's mentions, and the same nickname with nothing to identify its bearer is not given to them",
+            "Every person under nicknames, display-name variants, initials or several addresses resolves to one entity holding nobody else's mentions, with every system mention under one of their surfaces in their items on it, and the same nickname with nothing to identify its bearer is not given to them",
         ),
         (
             "same_first_name",
             all_in_scope(&first_names, &scope.first_name),
-            "People who share a first name stay separate entities, and a bare first name nothing identifies is given to neither",
+            "People who share a first name stay separate entities (EE1 pairs: each also resolved to one entity, context-identified bare first names included), and a bare first name nothing identifies is given to neither",
         ),
         (
             "job_change",
@@ -1378,49 +1393,58 @@ mod tests {
     #[cfg(feature = "pipeline")]
     #[test]
     fn scripted_answers_on_a_subset_score_like_the_whole_corpus() {
-        let full = Fixture::builtin().unwrap();
-        let run = |scale: Scale, items: Option<usize>| {
-            let mut ctx = RunContext::new(RunConfig {
-                scale,
-                knowledge: KnowledgeOptions {
-                    knowledge_items: items,
-                    ..KnowledgeOptions::default()
-                },
-                ..RunConfig::default()
-            });
-            let ms = run_real_model(
-                &mut ctx,
-                &full,
-                Arc::new(ScriptedLlm::new(&full)),
-                "scripted as real",
-                Duration::from_secs(60),
-            )
-            .unwrap();
-            (ms, ctx)
-        };
-        // Whole corpus, scripted: entity P 0.87 / R 1.0, claim P 0.96 / R 0.96 (EE1). A recall
-        // denominator that counted gold facts of unprocessed items would collapse on a subset.
-        let (whole, ctx) = run(Scale::Smoke, Some(usize::MAX));
-        assert_eq!(ctx.params()["knowledge_items"], "all");
-        assert_eq!(ctx.params()["subset"]["items"], full.items.len());
-        for scale in [Scale::Smoke, Scale::Quick] {
-            let (ms, ctx) = run(scale, None);
-            for n in [
-                "entities.precision",
-                "entities.recall",
-                "claims.precision",
-                "claims.recall",
-                "resolution.b3.f1",
-                "retraction.correctness",
-            ] {
-                let (sub, all) = (get(&ms, n), get(&whole, n));
-                assert!(
-                    sub >= 0.85 && sub >= all - 0.07,
-                    "{scale:?} {n} = {sub} (all {all})"
-                );
+        for corpus in [Corpus::Original, Corpus::All] {
+            let full = Fixture::builtin().unwrap().corpus(corpus);
+            let run = |scale: Scale, items: Option<usize>| {
+                let mut ctx = RunContext::new(RunConfig {
+                    scale,
+                    knowledge: KnowledgeOptions {
+                        knowledge_items: items,
+                        knowledge_corpus: corpus,
+                        ..KnowledgeOptions::default()
+                    },
+                    ..RunConfig::default()
+                });
+                let ms = run_real_model(
+                    &mut ctx,
+                    &full,
+                    Arc::new(ScriptedLlm::new(&full)),
+                    "scripted as real",
+                    Duration::from_secs(60),
+                )
+                .unwrap();
+                (ms, ctx)
+            };
+            // Whole corpus, scripted: entity P 0.93 / R 1.0, claim P 0.97 / R 0.95 (original);
+            // entity P 0.87 / R 1.0, claim P 0.96 / R 0.96 (all, with the EE1 hard cases the
+            // pipeline does not handle yet). A recall denominator that counted gold facts of
+            // unprocessed items would collapse on a subset.
+            let (whole, ctx) = run(Scale::Smoke, Some(usize::MAX));
+            assert_eq!(ctx.params()["knowledge_items"], "all");
+            assert_eq!(ctx.params()["knowledge_corpus"], corpus.as_str());
+            assert_eq!(ctx.params()["subset"]["items"], full.items.len());
+            for scale in [Scale::Smoke, Scale::Quick] {
+                let (ms, ctx) = run(scale, None);
+                for n in [
+                    "entities.precision",
+                    "entities.recall",
+                    "claims.precision",
+                    "claims.recall",
+                    "resolution.b3.f1",
+                    "retraction.correctness",
+                ] {
+                    let (sub, all) = (get(&ms, n), get(&whole, n));
+                    let ok = match corpus {
+                        // The pre-EE1 floor.
+                        Corpus::Original => sub >= 0.9,
+                        // Relaxed while the EE1 cases fail: near the whole corpus.
+                        Corpus::All => sub >= 0.85 && sub >= all - 0.07,
+                    };
+                    assert!(ok, "{corpus:?} {scale:?} {n} = {sub} (all {all})");
+                }
+                assert!(!ctx.params().contains_key("hard_cases_not_in_subset"));
+                assert_eq!(get(&ms, "llm.lost_rate"), 0.0);
             }
-            assert!(!ctx.params().contains_key("hard_cases_not_in_subset"));
-            assert_eq!(get(&ms, "llm.lost_rate"), 0.0);
         }
     }
 
@@ -1762,7 +1786,13 @@ mod noisy_model_tests {
 
     #[test]
     fn a_noisy_local_model_keeps_entity_precision_and_adds_nothing_unsupported() {
-        let full = Fixture::builtin().unwrap();
+        for corpus in [Corpus::Original, Corpus::All] {
+            noisy_run(corpus);
+        }
+    }
+
+    fn noisy_run(corpus: Corpus) {
+        let full = Fixture::builtin().unwrap().corpus(corpus);
         let dump = tempfile::tempdir().unwrap();
         let path = dump.path().join("dump.jsonl");
         let mut ctx = RunContext::new(RunConfig {
@@ -1770,7 +1800,7 @@ mod noisy_model_tests {
             knowledge: KnowledgeOptions {
                 knowledge_dump: Some(path.clone()),
                 knowledge_items: Some(40),
-                ..KnowledgeOptions::default()
+                knowledge_corpus: corpus,
             },
             ..RunConfig::default()
         });
@@ -1792,19 +1822,23 @@ mod noisy_model_tests {
         assert_eq!(p["subset"]["items"], 40);
         assert_eq!(p["knowledge_items"], 40);
         assert!(p["llm_limits"]["config"]["local"]["max_entities_per_request"].is_u64());
-        // Entity precision was 0.89 before EE1 put its hard cases (nicknames, same first names, a
-        // job change delivered out of order: 13 items) into this subset, where the pipeline
-        // still keeps "Rob", "Bob", "Felix", "Priya", "Tamsin", ... and a second and third
-        // "Delphine Corrigan" as their own people: 0.78 (bench/README.md, `knowledge`). A floor
-        // against regressions; raise it back to 0.85 once those cases are handled.
+        // On the original corpus, the pre-EE1 floors. With the EE1 hard cases (13 items) in the
+        // subset, the pipeline still keeps "Rob", "Bob", "Felix", "Priya", "Tamsin", ... and a
+        // second and third "Delphine Corrigan" as their own people: entity precision 0.78
+        // (bench/README.md, `knowledge`). A floor against regressions for `all`; raise it back
+        // to 0.85 once those cases are handled.
+        let entity_precision = match corpus {
+            Corpus::Original => 0.85,
+            Corpus::All => 0.75,
+        };
         for (n, min) in [
-            ("entities.precision", 0.75),
+            ("entities.precision", entity_precision),
             ("entities.recall", 0.9),
             ("entities.f1", ENTITY_F1_TARGET),
             ("claims.precision", 0.85),
             ("claims.recall", 0.8),
         ] {
-            assert!(get(&ms, n) >= min, "{n} = {}", get(&ms, n));
+            assert!(get(&ms, n) >= min, "{corpus:?} {n} = {}", get(&ms, n));
         }
         assert_eq!(get(&ms, "claims.unsupported_rate"), 0.0);
         assert_eq!(get(&ms, "injection.unsupported_claims"), 0.0);
