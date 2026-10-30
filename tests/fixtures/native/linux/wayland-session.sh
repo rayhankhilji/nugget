@@ -187,7 +187,6 @@ gnome)
     export GSK_RENDERER=cairo
     MUTTER_DEBUG="${NUGGET_WAYLAND_MUTTER_DEBUG:-}" \
         gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 \
-        ${NUGGET_WAYLAND_GNOME_UNSAFE:+--unsafe-mode} \
         --wayland-display wayland-1 >"$logs/gnome-shell.log" 2>&1 &
     pids+=($!)
     ;;
@@ -242,7 +241,7 @@ fi
 
 if [ "$compositor" = gnome ]; then
     # GNOME Shell owns org.gnome.Shell once its JS is up. It starts in the overview, where app
-    # accelerators (the portal's grab is ActionMode NORMAL) do not fire: leave it, as a user does.
+    # accelerators (the portal's grab is ActionMode NORMAL) do not fire.
     for _ in $(seq 1 600); do
         has_name org.gnome.Shell && has_name org.gnome.Mutter.RemoteDesktop && break
         sleep 0.1
@@ -256,13 +255,24 @@ if [ "$compositor" = gnome ]; then
         gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
             --method org.freedesktop.DBus.Properties.Get org.gnome.Shell "$1" 2>/dev/null
     }
-    # The startup animation opens the overview a moment after the shell is on the bus: hide it
-    # until it has stayed hidden for 3 s.
+    # App accelerators work only once the shell's startup animation is complete (it sets the
+    # action mode from NONE to NORMAL and logs "GNOME Shell started at"); hiding the overview
+    # before that can leave the startup unfinished, with every accelerator ignored. Wait for it,
+    # then leave the overview it starts in.
+    for _ in $(seq 1 600); do
+        grep -q "GNOME Shell started at" "$logs/gnome-shell.log" && break
+        sleep 0.1
+    done
+    if ! grep -q "GNOME Shell started at" "$logs/gnome-shell.log"; then
+        echo "wayland-session: gnome-shell did not complete its startup in 60 s" >&2
+        dump_logs >&2
+        exit 1
+    fi
     hidden=0
-    for _ in $(seq 1 100); do
+    for _ in $(seq 1 60); do
         if shell_prop OverviewActive | grep -q false; then
             hidden=$((hidden + 1))
-            [ "$hidden" -ge 6 ] && break
+            [ "$hidden" -ge 4 ] && break
         else
             hidden=0
             gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
