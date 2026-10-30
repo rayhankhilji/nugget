@@ -335,6 +335,39 @@ fn is_navigation_region(n: &Node) -> bool {
     !label.is_empty() && NAVIGATION_REGIONS.iter().any(|w| label.contains(w))
 }
 
+/// A form: a secure field, a text input, a check box or combo box, or an ARIA form inside.
+fn holds_form_controls(c: &Node) -> bool {
+    c.iter().take(1000).any(|d| {
+        d.states.secure
+            || d.role.is_text_input()
+            || matches!(d.role, Role::CheckBox | Role::ComboBox)
+            || d.attr("xml_roles")
+                .is_some_and(|x| x.split_whitespace().any(|r| r == "form"))
+    })
+}
+
+/// A list box, menu, tree or radio group of options (ARIA roles on web content).
+fn is_picker(c: &Node) -> bool {
+    let picker_role = |n: &Node, roles: &[&str]| {
+        n.attr("xml_roles")
+            .is_some_and(|x| x.split_whitespace().any(|r| roles.contains(&r)))
+    };
+    picker_role(
+        c,
+        &[
+            "listbox",
+            "menu",
+            "menubar",
+            "tree",
+            "radiogroup",
+            "tablist",
+        ],
+    ) || (!c.children.is_empty()
+        && c.children
+            .iter()
+            .all(|k| picker_role(k, &["option", "menuitem", "treeitem", "radio", "tab"])))
+}
+
 /// An item whose text all sits in one link or button (an entry in a list of conversations,
 /// with its preview): following single children down to a link or button.
 fn is_link_wrapped(item: &Node) -> bool {
@@ -362,8 +395,9 @@ fn overlap_x(a: &crate::Rect, b: &crate::Rect) -> f64 {
 
 /// Score `c` as the message container. `in_nav`: it sits in a navigation region.
 fn score(c: &Node, composer: Option<&Node>, precedes: bool, in_nav: bool) -> f64 {
-    // A table row's cells are the columns of one record, not messages.
-    if c.role == Role::Row {
+    // A table row's cells are the columns of one record, not messages; forms (a password
+    // prompt next to the composer) and pickers (a list box of recipient chips) are controls.
+    if c.role == Role::Row || holds_form_controls(c) || is_picker(c) {
         return 0.0;
     }
     let items: Vec<&Node> = c.children.iter().filter(|k| is_message_like(k)).collect();
@@ -544,9 +578,23 @@ struct Leaf<'a> {
     role: Role,
     text: &'a str,
     x: Option<f64>,
+    /// Identity of the parent element: leaves of one parent are runs of the same line.
+    parent: usize,
+}
+
+impl Leaf<'_> {
+    /// Whether `next` continues this leaf's line (text runs and links in one block).
+    fn same_line(&self, next: &Leaf<'_>) -> bool {
+        let inline = |r: Role| matches!(r, Role::StaticText | Role::Link);
+        self.parent == next.parent && inline(self.role) && inline(next.role)
+    }
 }
 
 fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
+    collect_leaves_in(n, 0, out);
+}
+
+fn collect_leaves_in<'a>(n: &'a Node, parent: usize, out: &mut Vec<Leaf<'a>>) {
     if out.len() >= 64 || n.states.secure {
         return;
     }
@@ -558,6 +606,7 @@ fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
             role: n.role,
             text: t,
             x: n.bounds.map(|b| b.x),
+            parent,
         });
         return;
     }
@@ -568,12 +617,14 @@ fn collect_leaves<'a>(n: &'a Node, out: &mut Vec<Leaf<'a>>) {
                 role: Role::Button,
                 text: t,
                 x: n.bounds.map(|b| b.x),
+                parent,
             });
         }
         return;
     }
+    let id = std::ptr::from_ref(n) as usize;
     for c in &n.children {
-        collect_leaves(c, out);
+        collect_leaves_in(c, id, out);
     }
 }
 
@@ -800,7 +851,12 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
     }
     // Buttons that are not the author are actions; the first short leaf before the body is the
     // author when there is a body after it.
+    // "Notes are here:" followed by a link on the same line is the start of the body.
+    let lead_in = leaves.len() >= 2
+        && leaves[0].text.trim_end().ends_with(':')
+        && leaves[0].same_line(&leaves[1]);
     if leaves.len() >= 2
+        && !lead_in
         && looks_like_name(leaves[0].text)
         && leaves[0].role != Role::Paragraph
         && leaves[1..].iter().any(|l| l.role != Role::Button)
@@ -819,11 +875,15 @@ fn draft_from_item(item: &Node, family: AppFamily) -> Option<Draft> {
     }
     let body: Vec<&Leaf<'_>> = leaves.iter().filter(|l| l.role != Role::Button).collect();
     d.indent = body.iter().filter_map(|l| l.x).reduce(f64::min);
-    d.text = body
-        .iter()
-        .map(|l| l.text.trim())
-        .collect::<Vec<_>>()
-        .join("\n");
+    // Runs of one line are joined with a space, lines and blocks with `\n`.
+    let mut text = String::new();
+    for (i, l) in body.iter().enumerate() {
+        if i > 0 {
+            text.push(if body[i - 1].same_line(l) { ' ' } else { '\n' });
+        }
+        text.push_str(l.text.trim());
+    }
+    d.text = text;
     if d.text.is_empty() {
         return None;
     }
@@ -960,6 +1020,21 @@ fn self_column_is_distinct(drafts: &[Draft], limits: &ThreadLimits) -> bool {
         })
 }
 
+/// Drop a leading "to me, Priya" line (who a mail was sent to) from a message body.
+fn strip_recipient_line(text: &str) -> String {
+    match text.split_once('\n') {
+        Some((first, rest)) if !rest.trim().is_empty() => {
+            let f = first.trim().to_lowercase();
+            if f.starts_with("to me") || f.starts_with("to you") {
+                rest.to_string()
+            } else {
+                text.to_string()
+            }
+        }
+        _ => text.to_string(),
+    }
+}
+
 fn messages_from_container(
     container: &Node,
     family: AppFamily,
@@ -977,7 +1052,7 @@ fn messages_from_container(
     drafts.retain(|d| !(d.author.is_none() && looks_like_timestamp(&d.text)));
     if mail {
         for d in &mut drafts {
-            d.text = strip_quoted(&d.text);
+            d.text = strip_recipient_line(&strip_quoted(&d.text));
         }
     }
     if family.groups_by_author() || family == AppFamily::Generic {
@@ -1133,7 +1208,7 @@ fn collect_recipient_tokens(field: &Node, out: &mut Vec<String>) {
 /// Recipients from To/Cc/Bcc fields: labelled inputs or token groups, or an input that follows
 /// a "To:" label.
 pub fn recipients(root: &Node) -> Vec<String> {
-    recipients_in(root, false)
+    recipients_in(root, false, false)
 }
 
 /// Ancestor levels above the composer searched for To/Subject fields in apps that are not
@@ -1156,10 +1231,11 @@ fn compose_fields_near_composer(snap: &Snapshot) -> (Vec<String>, Option<String>
         ) {
             break;
         }
-        let recipients = recipients_in(scope, true);
+        let recipients = recipients_in(scope, true, true);
         let subject = subject_field(scope, true);
         if !recipients.is_empty() || subject.is_some() {
-            return (recipients, subject);
+            // A compose: chips in a list labelled "To" count too, labels still exact.
+            return (recipients_in(scope, true, false), subject);
         }
     }
     (Vec::new(), None)
@@ -1172,16 +1248,18 @@ fn holds_editable_input(n: &Node) -> bool {
         .any(|d| d.states.editable && d.role.is_text_input() && !d.states.secure)
 }
 
-fn recipients_in(root: &Node, strict: bool) -> Vec<String> {
+/// `exact`: labels must be recipient labels as a whole; `need_input`: the field must hold an
+/// editable input.
+fn recipients_in(root: &Node, exact: bool, need_input: bool) -> Vec<String> {
     let mut out = Vec::new();
     let label_ok = |l: &str| {
-        if strict {
+        if exact {
             is_recipient_label_exact(l)
         } else {
             is_recipient_label(l)
         }
     };
-    let field_ok = |c: &Node| !strict || holds_editable_input(c);
+    let field_ok = |c: &Node| !need_input || holds_editable_input(c);
     fn visit(
         n: &Node,
         out: &mut Vec<String>,
@@ -1987,6 +2065,114 @@ mod tests {
         // Bubbles: the user's on the right.
         let bubbles = [draft("Maya", Some(60.0)), draft("You", Some(420.0))];
         assert!(self_column_is_distinct(&bubbles, &limits));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Trees recorded from Chrome on Linux (`Backend::snapshot()`), against the FF3 ground truth
+
+    fn truth_context(name: &str) -> serde_json::Value {
+        let path = format!(
+            "{}/tests/fixtures/apps/truth.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let truth: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        truth["contexts"][name].clone()
+    }
+
+    fn recorded(name: &str, title: &str) -> ThreadContext {
+        let path = format!(
+            "{}/tests/fixtures/trees/{name}.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let snap = Snapshot::from_json(&std::fs::read_to_string(path).unwrap()).unwrap();
+        assert!(snap.focused().is_some_and(|f| f.states.focused), "{name}");
+        let app = AppInfo {
+            id: Some("google-chrome".into()),
+            name: "Google Chrome".into(),
+            window_title: Some(format!("{title} - Google Chrome")),
+            url: None,
+        };
+        extract(&snap, &app, "Draft:", &ThreadLimits::default())
+    }
+
+    fn collapse(s: &str) -> String {
+        s.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    /// Every truth message found, in order, nothing else: same text (whitespace collapsed),
+    /// the author (an address may follow it), and `from_me` for the user's messages.
+    fn assert_matches_truth(ctx: &ThreadContext, truth: &serde_json::Value) {
+        let want = truth["messages"].as_array().unwrap();
+        let got: Vec<_> = ctx
+            .messages
+            .iter()
+            .map(|m| (m.author.as_deref(), collapse(&m.text), m.from_me))
+            .collect();
+        assert_eq!(got.len(), want.len(), "{got:#?}");
+        for (g, w) in got.iter().zip(want) {
+            assert_eq!(g.1, collapse(w["text"].as_str().unwrap()));
+            let author = w["author"].as_str().unwrap();
+            assert!(
+                g.0.is_some_and(|a| a == author || a.starts_with(&format!("{author} <"))),
+                "{g:?} by {author}"
+            );
+            if w["from_me"].as_bool().unwrap() {
+                assert_eq!(g.2, Some(true), "{g:?}");
+            } else {
+                assert_ne!(g.2, Some(true), "{g:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn recorded_chrome_linux_chat_matches_truth() {
+        let ctx = recorded("web_chrome_linux_chat", "Nugget fixture: Plain textarea");
+        let truth = truth_context("chat");
+        assert_matches_truth(&ctx, &truth);
+        assert_eq!(ctx.messages[1].timestamp.as_deref(), Some("10:03 AM"));
+        assert!(ctx.recipients.is_empty());
+        assert_eq!(ctx.subject, None);
+    }
+
+    #[test]
+    fn recorded_chrome_linux_mail_matches_truth() {
+        let ctx = recorded("web_chrome_linux_mail", "Nugget fixture: Mail compose");
+        let truth = truth_context("mail");
+        assert_matches_truth(&ctx, &truth);
+        assert_eq!(
+            ctx.messages[2].timestamp.as_deref(),
+            Some("Tue, Oct 27, 8:05 AM")
+        );
+        assert_eq!(ctx.recipients, vec!["Jordan Lee", "Priya Natarajan"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
+    }
+
+    #[test]
+    fn forms_and_pickers_are_never_a_thread() {
+        let item = |t: &str| {
+            let mut n = Node::new(Role::ListItem);
+            n.children = vec![static_text(t, [0.0, 0.0, 300.0, 18.0])];
+            n
+        };
+        let mut form = Node::new(Role::Group);
+        form.children = vec![
+            item("Re-enter password to send"),
+            item("Password for this account"),
+        ];
+        assert!(score(&form, None, true, false) > 0.0);
+        let mut pw = Node::new(Role::TextField);
+        pw.states.secure = true;
+        form.children.push(pw);
+        assert_eq!(score(&form, None, true, false), 0.0);
+        let mut chips = Node::new(Role::List);
+        chips.children = vec![
+            item("Jordan Lee, the venue person"),
+            item("Priya Natarajan"),
+        ];
+        assert!(score(&chips, None, true, false) > 0.0);
+        chips.attrs.insert("xml_roles".into(), "listbox".into());
+        assert_eq!(score(&chips, None, true, false), 0.0);
     }
     #[test]
     fn generic_grouping_follows_the_column() {
