@@ -2027,6 +2027,10 @@ similar are never entities. The remaining errors: first names before the full na
 with a wrong object (the dump lists each). At ~25 s per item, a 1,000-item backfill takes about 7
 hours on this CPU (was ~15).
 
+`nugget_knowledge::EXTRACTOR_VERSION` is **not** bumped for these changes: items extracted or
+changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
+that would cost one local-model request per item (26–33 s each here) without the user asking.
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
