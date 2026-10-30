@@ -203,7 +203,7 @@ describe("search page", () => {
     await flush();
     expect(text()).toContain("Ada wrote the first program");
     const live = Array.from(document.querySelectorAll('[aria-live="polite"]')).map((e) => e.textContent);
-    expect(live).toContain("1 result for Ada");
+    expect(live).toContain("1 result for “Ada”");
     expect(document.querySelector("ol.results")?.getAttribute("aria-labelledby")).toBe("search-results-heading");
     expect(await violations()).toEqual([]);
   });

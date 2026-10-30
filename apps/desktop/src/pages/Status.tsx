@@ -84,7 +84,7 @@ export function StatusPage() {
             <div>
               <dt>{t("status.daemon")}</dt>
               <dd>
-                <bdi dir="ltr">{s.version}</bdi>
+                <bdi dir="ltr">{t("status.version", { version: s.version })}</bdi>
               </dd>
             </div>
             <div>
