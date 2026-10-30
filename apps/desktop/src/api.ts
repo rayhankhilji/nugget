@@ -1481,6 +1481,20 @@ export interface DoubleTapStatus {
   hint: string | null;
   modifiers: ModifierOption[];
   recommended_trigger: TriggerSpec;
+  /** Where the running listener's shortcut stands; `null` when nothing is listening (older shells omit it). */
+  shortcut?: ShortcutStatus | null;
+}
+
+/**
+ * A desktop-owned shortcut (the Wayland GlobalShortcuts portal); every other backend is `active`
+ * with no `trigger`.
+ */
+export interface ShortcutStatus {
+  state: "active" | "awaiting_consent" | "not_assigned" | "rebinding" | "failed";
+  /** `active` only: the key the desktop bound, when it differs from the configured chord. */
+  trigger: string | null;
+  /** `failed` only: why. */
+  error: string | null;
 }
 
 /** `nugget_core::ipc::VoiceStatus`. */

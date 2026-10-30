@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap liest Textfelder über AT-SPI, das auf diesem Desktop aus ist. Schalte es ein mit: gsettings set org.gnome.desktop.interface toolkit-accessibility true — dann ab- und wieder anmelden.",
   "doubletap.hint.accessibility": "Nugget braucht Bedienungshilfen-Zugriff, um das aktive Feld zu lesen und Entwürfe einzufügen. Öffne Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen und aktiviere Nugget.",
   "doubletap.hint.wayland_chord": "Unter Wayland können Apps einzelne Tastenanschläge nicht beobachten, daher funktioniert doppeltes Tippen nicht. Verwende stattdessen eine Tastenkombination.",
-  "doubletap.hint.macos_permissions": "Double Tap braucht Bedienungshilfen und Eingabeüberwachung. Klicke auf Berechtigungsabfragen öffnen, aktiviere Nugget unter Systemeinstellungen → Datenschutz & Sicherheit und komm dann zurück."
+  "doubletap.hint.macos_permissions": "Double Tap braucht Bedienungshilfen und Eingabeüberwachung. Klicke auf Berechtigungsabfragen öffnen, aktiviere Nugget unter Systemeinstellungen → Datenschutz & Sicherheit und komm dann zurück.",
+  "doubletap.hint.wayland_no_portal": "Dieser Desktop hat kein Portal für globale Tastenkürzel (zum Beispiel sway oder ein älteres xdg-desktop-portal), daher kann Nugget deine Tastenkombination nicht registrieren. Lege, während Nugget läuft, in der Konfiguration deines Compositors eine Taste an, die nugget-desktop --double-tap ausführt (unter sway: bindsym $mod+Shift+space exec nugget-desktop --double-tap), oder öffne Nugget über das Tray-Symbol mit „Open Nugget“ und klicke auf „Ausprobieren“.",
+  "doubletap.shortcut.awaiting_consent": "Dein Desktop fragt, ob Nugget dieses Tastenkürzel verwenden darf. Bestätige es im Dialog, um Double Tap damit zu starten.",
+  "doubletap.shortcut.not_assigned": "Dein Desktop hat Double Tap keine Taste zugewiesen. Weise „Nugget: draft a reply“ in den Tastenkürzel-Einstellungen deines Desktops eine Taste zu; sie funktioniert sofort. Bis dahin öffne Nugget über das Tray-Symbol und klicke auf „Ausprobieren“.",
+  "doubletap.shortcut.rebinding": "Dein Desktop hat das Tastenkürzel entfernt; Nugget richtet es neu ein …",
+  "doubletap.shortcut.active_desktop": "Dein Desktop startet Double Tap mit {trigger}.",
+  "doubletap.shortcut.failed": "Das Tastenkürzel des Desktops funktioniert nicht mehr: {error}"
 }

@@ -8,6 +8,7 @@ import {
   type DoubleTapSettings,
   type DoubleTapStatus,
   type ProviderInfo,
+  type ShortcutStatus,
   type TriggerSpec,
 } from "../api";
 import { useAsync, useEvent } from "../hooks";
@@ -58,6 +59,15 @@ export function DoubleTapPage() {
     saved.reload();
     status.reload();
   });
+
+  // While the desktop asks about the shortcut (or Nugget binds it again), check back so the page
+  // flips to active once the user approves.
+  const shortcutState = status.data?.shortcut?.state;
+  useEffect(() => {
+    if (shortcutState !== "awaiting_consent" && shortcutState !== "rebinding") return;
+    const id = window.setInterval(status.reload, 2000);
+    return () => window.clearInterval(id);
+  }, [shortcutState, status.reload]);
 
   const dirty = form !== null && saved.data !== undefined && !sameSettings(form, saved.data);
   const invalid = form !== null && triggerError(form.trigger) !== null;
@@ -327,6 +337,7 @@ function TriggerPicker({
           {t("doubletap.trigger.listenError", { error: keyOrText(status.trigger_error) })}
         </p>
       )}
+      <ShortcutNote shortcut={status?.shortcut} />
       {recommended && (
         <button type="button" className="btn btn-ghost btn-small" onClick={() => set(recommended)}>
           {t("doubletap.trigger.useRecommended")}
@@ -334,6 +345,29 @@ function TriggerPicker({
       )}
     </section>
   );
+}
+
+/** Where the desktop's shortcut stands (Wayland portal); nothing when it is simply active. */
+function ShortcutNote({ shortcut }: { shortcut: ShortcutStatus | null | undefined }) {
+  const t = useT();
+  if (!shortcut) return null;
+  if (shortcut.state === "failed") {
+    return (
+      <p className="field-error" role="alert">
+        {t("doubletap.shortcut.failed", { error: keyOrText(shortcut.error ?? "") })}
+      </p>
+    );
+  }
+  let text: string | null = null;
+  if (shortcut.state === "awaiting_consent") text = t("doubletap.shortcut.awaiting_consent");
+  else if (shortcut.state === "not_assigned") text = t("doubletap.shortcut.not_assigned");
+  else if (shortcut.state === "rebinding") text = t("doubletap.shortcut.rebinding");
+  else if (shortcut.state === "active" && shortcut.trigger) text = t("doubletap.shortcut.active_desktop", { trigger: shortcut.trigger });
+  return text ? (
+    <p className="note" role="status">
+      {text}
+    </p>
+  ) : null;
 }
 
 // ---- provider per app ----

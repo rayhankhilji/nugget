@@ -174,7 +174,7 @@ GlobalShortcuts interface and is told when it is pressed. What happens depends o
 | KDE Plasma 6 | The first time, Plasma asks whether Nugget may use the shortcut, with the key it suggests. Approve it once; later starts bind it silently. Change the key in System Settings → Keyboard → Shortcuts → Nugget |
 | KDE Plasma 5.27 | Plasma registers the shortcut without a key. Assign one to "Nugget: draft a reply" in System Settings → Shortcuts |
 | GNOME 48 and later | GNOME asks whether Nugget may use the shortcut. Approve it once; later starts bind it silently. Change it in Settings → Keyboard → Keyboard Shortcuts |
-| GNOME before 48, sway, other wlroots desktops | No GlobalShortcuts portal. Start Double Tap from the tray icon or the app, or bind a key in your compositor to run `nugget-desktop --double-tap` (for sway: `bindsym Ctrl+Alt+Space exec nugget-desktop --double-tap`) |
+| GNOME before 48, sway, other wlroots desktops | No GlobalShortcuts portal. Bind a key in your compositor to run `nugget-desktop --double-tap` while Nugget is running (for sway: `bindsym Ctrl+Alt+Space exec nugget-desktop --double-tap`), or open Nugget from the tray (Open Nugget) and click Try it on the Double Tap page |
 
 The Double Tap page shows where the shortcut stands: waiting for your approval, no key assigned
 yet, the key your desktop actually uses (the desktop may keep a key you picked in its settings

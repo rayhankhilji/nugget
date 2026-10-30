@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap 通过 AT-SPI 读取文本框，但当前桌面未启用它。请运行：gsettings set org.gnome.desktop.interface toolkit-accessibility true，然后注销并重新登录。",
   "doubletap.hint.accessibility": "Nugget 需要辅助功能权限才能读取当前输入框并插入草稿。请打开 系统设置 → 隐私与安全性 → 辅助功能，并开启 Nugget。",
   "doubletap.hint.wayland_chord": "在 Wayland 下，应用无法监听单个按键，因此双击无法使用。请改用组合键作为触发键。",
-  "doubletap.hint.macos_permissions": "Double Tap 需要辅助功能和输入监控权限。点击“打开权限请求”，在系统设置 → 隐私与安全性中开启 Nugget，然后返回。"
+  "doubletap.hint.macos_permissions": "Double Tap 需要辅助功能和输入监控权限。点击“打开权限请求”，在系统设置 → 隐私与安全性中开启 Nugget，然后返回。",
+  "doubletap.hint.wayland_no_portal": "此桌面没有全局快捷键门户（例如 sway 或较旧的 xdg-desktop-portal），因此 Nugget 无法注册你的组合键。请在 Nugget 运行期间，在合成器配置中绑定一个按键来运行 nugget-desktop --double-tap（sway 示例：bindsym $mod+Shift+space exec nugget-desktop --double-tap），或从托盘的“Open Nugget”打开 Nugget 并点击“试一试”。",
+  "doubletap.shortcut.awaiting_consent": "桌面正在询问是否允许 Nugget 使用此快捷键。请在对话框中批准，即可用它启动 Double Tap。",
+  "doubletap.shortcut.not_assigned": "桌面尚未为 Double Tap 分配按键。请在桌面的键盘快捷键设置中为“Nugget: draft a reply”分配一个按键，分配后立即生效。在此之前，可从托盘打开 Nugget 并点击“试一试”。",
+  "doubletap.shortcut.rebinding": "桌面移除了该快捷键，Nugget 正在重新设置…",
+  "doubletap.shortcut.active_desktop": "桌面使用 {trigger} 启动 Double Tap。",
+  "doubletap.shortcut.failed": "桌面快捷键已停止工作：{error}"
 }

@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "O Double Tap lê campos de texto pelo AT-SPI, que está desativado nesta área de trabalho. Ative com: gsettings set org.gnome.desktop.interface toolkit-accessibility true — depois saia e entre de novo na sessão.",
   "doubletap.hint.accessibility": "O Nugget precisa de acesso de Acessibilidade para ler o campo ativo e inserir rascunhos. Abra Ajustes do Sistema → Privacidade e Segurança → Acessibilidade e ative o Nugget.",
   "doubletap.hint.wayland_chord": "No Wayland, os apps não conseguem detectar toques isolados de teclas, então o toque duplo não funciona. Use uma combinação de teclas como atalho.",
-  "doubletap.hint.macos_permissions": "O Double Tap precisa de Acessibilidade e Monitoramento de entrada. Clique em Abrir pedidos de permissão, ative o Nugget em Ajustes do Sistema → Privacidade e Segurança e volte."
+  "doubletap.hint.macos_permissions": "O Double Tap precisa de Acessibilidade e Monitoramento de entrada. Clique em Abrir pedidos de permissão, ative o Nugget em Ajustes do Sistema → Privacidade e Segurança e volte.",
+  "doubletap.hint.wayland_no_portal": "Este ambiente de trabalho não tem um portal de atalhos globais (por exemplo, sway ou um xdg-desktop-portal antigo), então o Nugget não consegue registrar sua combinação de teclas. Com o Nugget aberto, associe uma tecla na configuração do seu compositor para executar nugget-desktop --double-tap (no sway: bindsym $mod+Shift+space exec nugget-desktop --double-tap) ou abra o Nugget pela bandeja com “Open Nugget” e clique em “Experimentar”.",
+  "doubletap.shortcut.awaiting_consent": "Seu ambiente de trabalho está perguntando se o Nugget pode usar este atalho. Aprove na janela de diálogo para iniciar o Double Tap com ele.",
+  "doubletap.shortcut.not_assigned": "Seu ambiente de trabalho não atribuiu nenhuma tecla ao Double Tap. Atribua uma a “Nugget: draft a reply” nas configurações de atalhos de teclado do seu ambiente de trabalho; ela funciona assim que você fizer isso. Até lá, abra o Nugget pela bandeja e clique em “Experimentar”.",
+  "doubletap.shortcut.rebinding": "Seu ambiente de trabalho removeu o atalho; o Nugget está configurando-o de novo…",
+  "doubletap.shortcut.active_desktop": "Seu ambiente de trabalho inicia o Double Tap com {trigger}.",
+  "doubletap.shortcut.failed": "O atalho do ambiente de trabalho parou de funcionar: {error}"
 }
