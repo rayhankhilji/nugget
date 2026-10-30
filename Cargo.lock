@@ -4113,6 +4113,7 @@ dependencies = [
  "objc2",
  "objc2-app-kit",
  "objc2-core-graphics",
+ "tempfile",
  "tokio",
  "tracing",
  "windows-sys 0.59.0",

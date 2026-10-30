@@ -25,7 +25,7 @@
 //! | macOS | NSEvent `flagsChanged` monitors (no permission needed) | Carbon `RegisterEventHotKey` via `global-hotkey` | needs Accessibility (key-down monitor) |
 //! | Windows | `WH_KEYBOARD_LL` + `WH_MOUSE_LL` hooks | `RegisterHotKey` via `global-hotkey` | `WH_KEYBOARD_LL` |
 //! | Linux X11 | XInput2 raw events (`x11rb`) | `XGrabKey` via `global-hotkey` | XInput2 raw events |
-//! | Linux Wayland | **Unsupported** (use a chord) | XDG portal `GlobalShortcuts` (`ashpd`) | **Unsupported** (use a chord) |
+//! | Linux Wayland | **Unsupported** (use a chord) | XDG portal `GlobalShortcuts` (`ashpd`), stable shortcut ids, rebinds itself; see [`Listener::state`] | **Unsupported** (use a chord) |
 //!
 //! On Windows and Linux the `Command` modifiers are the Windows/Super keys and `Option` is Alt.
 //! Use [`capabilities`] or [`check`] to ask before starting, and [`recommended_trigger`] for a
@@ -46,7 +46,10 @@
 //! - **Windows:** each listener owns a thread with its own message loop (low-level hooks and
 //!   `RegisterHotKey` both deliver to the installing thread's queue). Callable from anywhere.
 //! - **Linux:** X11 listeners own a thread with their own X connection; the Wayland portal
-//!   listener owns a thread with a small async runtime. Callable from anywhere.
+//!   listener owns a thread with a small async runtime, which stays alive after [`start`]
+//!   returns: it waits for the desktop's consent, follows shortcut changes, and binds the
+//!   shortcut again (with a capped backoff) if the desktop closes the session or the portal
+//!   restarts. Callable from anywhere.
 //!
 //! # Tauri integration
 //!
@@ -79,6 +82,8 @@ mod engine;
 pub mod keymap;
 pub mod tap;
 
+#[cfg(target_os = "linux")]
+mod desktop_entry;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod ghk;
 #[cfg(target_os = "macos")]
@@ -217,7 +222,7 @@ pub enum ShortcutState {
 pub fn start(trigger: Trigger, on_fire: Box<dyn Fn() + Send + Sync>) -> Result<Box<dyn Listener>> {
     let plan = Plan::for_trigger(&trigger)?;
     let dispatcher = Dispatcher::spawn(on_fire)?;
-    let backend = plan.start(&dispatcher)?;
+    let backend = plan.start(&dispatcher, Role::DoubleTap)?;
     Ok(Box::new(Running {
         trigger,
         backend,
@@ -233,14 +238,74 @@ pub fn check(trigger: &Trigger) -> Result<()> {
 struct Running {
     trigger: Trigger,
     // Fields drop in order: the backend stops before the dispatcher does.
-    #[allow(dead_code)]
-    backend: Box<dyn Send>,
+    backend: Backend,
     _dispatcher: Dispatcher,
 }
 
 impl Listener for Running {
     fn trigger(&self) -> &Trigger {
         &self.trigger
+    }
+
+    fn state(&self) -> ShortcutState {
+        self.backend.state()
+    }
+}
+
+/// [`ShortcutState`] shared between a backend's thread and its listener handle.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+type SharedState = std::sync::Arc<std::sync::Mutex<ShortcutState>>;
+
+/// A started backend: the handle whose drop stops it, and the state it reports, if it has one.
+struct Backend {
+    #[allow(dead_code)]
+    handle: Box<dyn Send>,
+    state: Option<SharedState>,
+}
+
+impl Backend {
+    /// A backend that is active as soon as it starts.
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows", target_os = "linux")),
+        allow(dead_code)
+    )]
+    fn plain(handle: Box<dyn Send>) -> Self {
+        Self {
+            handle,
+            state: None,
+        }
+    }
+
+    fn state(&self) -> ShortcutState {
+        match &self.state {
+            Some(s) => s.lock().unwrap_or_else(|e| e.into_inner()).clone(),
+            None => ShortcutState::Active { trigger: None },
+        }
+    }
+}
+
+/// What a listener is for, which names its desktop-owned shortcut (Wayland portal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    DoubleTap,
+    KillSwitch,
+}
+
+#[cfg(target_os = "linux")]
+impl Role {
+    fn shortcut_id(self) -> &'static str {
+        match self {
+            Self::DoubleTap => DOUBLE_TAP_SHORTCUT_ID,
+            Self::KillSwitch => KILL_SWITCH_SHORTCUT_ID,
+        }
+    }
+
+    /// The description the desktop shows next to the shortcut.
+    fn description(self) -> &'static str {
+        match self {
+            Self::DoubleTap => "Nugget: draft a reply",
+            Self::KillSwitch => "Nugget: stop all agents",
+        }
     }
 }
 
@@ -268,14 +333,18 @@ impl Default for KillSwitch {
 /// A running kill switch; dropping it stops listening.
 pub struct KillSwitchListener {
     kill_switch: KillSwitch,
-    #[allow(dead_code)]
-    backend: Box<dyn Send>,
+    backend: Backend,
     _dispatcher: Dispatcher,
 }
 
 impl KillSwitchListener {
     pub fn kill_switch(&self) -> &KillSwitch {
         &self.kill_switch
+    }
+
+    /// Where the kill switch's shortcut stands; see [`Listener::state`].
+    pub fn state(&self) -> ShortcutState {
+        self.backend.state()
     }
 }
 
@@ -295,7 +364,7 @@ pub fn start_kill_switch(
 ) -> Result<KillSwitchListener> {
     let plan = Plan::for_kill_switch(&kill_switch)?;
     let dispatcher = Dispatcher::spawn(on_fire)?;
-    let backend = plan.start(&dispatcher)?;
+    let backend = plan.start(&dispatcher, Role::KillSwitch)?;
     Ok(KillSwitchListener {
         kill_switch,
         backend,
@@ -507,35 +576,46 @@ impl Plan {
         }
     }
 
-    fn start(self, dispatcher: &Dispatcher) -> Result<Box<dyn Send>> {
+    fn start(self, dispatcher: &Dispatcher, role: Role) -> Result<Backend> {
         self.supported()?;
         let fire = dispatcher.fire_handle();
         #[cfg(target_os = "macos")]
         {
+            let _ = role;
             match self {
                 Self::Detect(d) => macos::start_detector(d, fire),
                 Self::Chord(c) => ghk::start_chord(c, fire),
             }
+            .map(Backend::plain)
         }
         #[cfg(target_os = "windows")]
         {
+            let _ = role;
             match self {
                 Self::Detect(d) => windows::start(windows::Mode::Detect(d), fire),
                 Self::Chord(c) => windows::start(windows::Mode::Chord(c), fire),
             }
+            .map(Backend::plain)
         }
         #[cfg(target_os = "linux")]
         {
             match (self, session()) {
-                (Self::Detect(d), Session::X11) => x11::start_detector(d, fire),
-                (Self::Chord(c), Session::X11) => ghk::start_chord(c, fire),
-                (Self::Chord(c), Session::Wayland) => wayland::start_chord(c, fire),
+                (Self::Detect(d), Session::X11) => x11::start_detector(d, fire).map(Backend::plain),
+                (Self::Chord(c), Session::X11) => ghk::start_chord(c, fire).map(Backend::plain),
+                (Self::Chord(c), Session::Wayland) => wayland::start_chord(
+                    c,
+                    fire,
+                    wayland::Shortcut {
+                        id: role.shortcut_id(),
+                        description: role.description(),
+                    },
+                ),
                 (plan, s) => Err(unsupported(plan.describe(), s)),
             }
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
-            let _ = fire;
+            let _ = (fire, role);
             Err(unsupported(self.describe(), Session::Other))
         }
     }
