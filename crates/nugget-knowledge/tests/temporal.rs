@@ -216,13 +216,14 @@ fn expected() -> Vec<Row> {
             "2026-10-01T12:00:00Z",
             None,
         ),
-        // Last seen in September; the mail of 1 October says it ended.
+        // Last seen in September; the mail of 1 October 17:45 says it ended, but the note says
+        // Quillfeather from 12:00 that day: valid until the earlier of the two.
         row(
             "works_at",
             "Cindergate Analytics",
             Superseded,
             "2026-09-03T08:05:00Z",
-            Some("2026-10-01T17:45:00Z"),
+            Some("2026-10-01T12:00:00Z"),
         ),
         row(
             "has_title",
@@ -476,6 +477,9 @@ async fn the_users_assertion_wins_over_newer_evidence() {
         .find(|c| c.object == ClaimObject::Entity(globex.id.clone()))
         .unwrap();
     assert_eq!(g.status, ClaimStatus::Superseded);
+    // The assertion (with the 2025 card's evidence) is older than Globex's sighting: no end
+    // date can be given to Globex.
+    assert_eq!(g.valid_to, None);
 }
 
 /// A graph as written before validity intervals: no `valid_from` anywhere, two active values of
@@ -575,4 +579,195 @@ async fn a_new_vault_records_the_temporal_version() {
     run(&k).await;
     let state = env.store.get_state("knowledge").unwrap().unwrap();
     assert_eq!(state["temporal"], json!(1));
+}
+
+#[tokio::test]
+async fn a_forged_future_date_is_clamped() {
+    let env = Env::new();
+    let k = env.knowledge(plain_cfg(), None);
+    mail(
+        "far",
+        "Alice Smith <alice@mail.test>",
+        "2099-01-01T00:00:00Z",
+        "From the future",
+    )
+    .put(&env);
+    run(&k).await;
+    let me = env.me();
+    let corr = env.active(&me, "corresponded_with");
+    assert_eq!(corr.len(), 1);
+    let limit = OffsetDateTime::now_utc() + time::Duration::days(2);
+    assert!(
+        corr[0].valid_from.unwrap() < limit,
+        "{:?}",
+        corr[0].valid_from
+    );
+}
+
+#[tokio::test]
+async fn a_start_follows_the_earliest_evidence_left_after_a_deletion() {
+    let env = Env::new();
+    let k = env.knowledge(plain_cfg(), None);
+    mail(
+        "jan",
+        "Alice Smith <alice@mail.test>",
+        "2026-01-01T10:00:00Z",
+        "Coffee?",
+    )
+    .put(&env);
+    mail(
+        "jun",
+        "Alice Smith <alice@mail.test>",
+        "2026-06-01T10:00:00Z",
+        "Lunch?",
+    )
+    .put(&env);
+    run(&k).await;
+    let me = env.me();
+    assert_eq!(
+        env.active(&me, "corresponded_with")[0].valid_from,
+        Some(at("2026-01-01T10:00:00Z"))
+    );
+    env.store
+        .delete_item(&item_ref("imap:me@corp.example", "jan"))
+        .unwrap();
+    run(&k).await;
+    let corr = env.active(&me, "corresponded_with");
+    assert_eq!(corr[0].evidence.len(), 1);
+    assert_eq!(corr[0].valid_from, Some(at("2026-06-01T10:00:00Z")));
+}
+
+#[tokio::test]
+async fn a_rejected_value_never_comes_back_through_a_superseded_twin() {
+    let env = Env::new();
+    env.put(
+        card("old", "Acme", "2025-01-01T00:00:00Z"),
+        &["Alice Smith, Acme"],
+    );
+    env.put(
+        card("new", "Globex", "2026-02-01T00:00:00Z"),
+        &["Alice Smith, Globex"],
+    );
+    let k = env.knowledge(plain_cfg(), None);
+    run(&k).await;
+    let alice = env.entity(EntityKind::Person, "Alice Smith");
+    let acme = env.entity(EntityKind::Organization, "Acme");
+    // Acme is history; the user also rejects it (a separate claim next to the superseded one).
+    env.g()
+        .add_claim(&NewClaim {
+            subject: alice.id.clone(),
+            predicate: "works_at".into(),
+            object: ClaimObject::Entity(acme.id.clone()),
+            text: "Alice Smith works at Acme.".into(),
+            confidence: 1.0,
+            status: ClaimStatus::Rejected,
+            evidence: Vec::new(),
+            valid_from: None,
+            valid_to: None,
+        })
+        .unwrap();
+    // Globex goes away: Acme, the only value with evidence left, stays out.
+    env.store
+        .delete_item(&item_ref("contacts:phone", "new"))
+        .unwrap();
+    run(&k).await;
+    assert!(env.active(&alice, "works_at").is_empty());
+    let acme_claims: Vec<Claim> = env
+        .claims(&alice, "works_at")
+        .into_iter()
+        .filter(|c| c.object == ClaimObject::Entity(acme.id.clone()))
+        .collect();
+    assert!(
+        acme_claims
+            .iter()
+            .all(|c| matches!(c.status, ClaimStatus::Rejected | ClaimStatus::Superseded))
+    );
+}
+
+#[tokio::test]
+async fn the_backfill_stops_at_the_deadline_and_resumes() {
+    let env = Env::new();
+    for (i, org) in ["Acme", "Globex", "Initech"].iter().enumerate() {
+        env.put(
+            card(&format!("c{i}"), org, &format!("202{i}-01-01T00:00:00Z")),
+            &["card"],
+        );
+    }
+    let k = env.knowledge(plain_cfg(), None);
+    run(&k).await;
+    for c in env.all_claims() {
+        env.g()
+            .update_claim(
+                c.id,
+                &ClaimPatch {
+                    valid_from: Some(None),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let mut state = env.store.get_state("knowledge").unwrap().unwrap();
+    state.as_object_mut().unwrap().remove("temporal");
+    ItemFeed::set_state(&env.store, "knowledge", state).unwrap();
+
+    // Out of time at once: one entity is migrated, and the place is kept.
+    let k = env.knowledge(plain_cfg(), None);
+    k.run_once(nugget_knowledge::RunBudget {
+        max_millis: Some(0),
+        ..nugget_knowledge::RunBudget::unlimited()
+    })
+    .await
+    .unwrap();
+    let state = env.store.get_state("knowledge").unwrap().unwrap();
+    assert_ne!(state["temporal"], json!(1), "not finished");
+    assert!(state["temporal_cursor"].is_string(), "{state}");
+
+    // The next run finishes the job.
+    run(&k).await;
+    let state = env.store.get_state("knowledge").unwrap().unwrap();
+    assert_eq!(state["temporal"], json!(1));
+    assert!(state["temporal_cursor"].is_null());
+    for c in env.all_claims() {
+        assert!(c.valid_from.is_some(), "{c:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_explicit_start_of_an_event_venue_is_kept() {
+    let env = Env::new();
+    let text = "Event: Offsite\nLocation: Harbour Hall";
+    env.put(
+        ics(
+            "caldav:work",
+            "offsite.ics",
+            json!([{"kind": "event", "summary": "Offsite", "uid": "offsite-1",
+                    "start": "2026-12-01T09:00:00", "end": "2026-12-01T17:00:00",
+                    "all_day": false, "location": "Harbour Hall"}]),
+            text,
+        )
+        .with_modified_at(at("2026-10-01T00:00:00Z")),
+        &[text],
+    );
+    let k = env.knowledge(plain_cfg(), None);
+    run(&k).await;
+    let ev = env.entity(EntityKind::Event, "Offsite");
+    let venue = env.active(&ev, "located_at");
+    assert_eq!(venue.len(), 1);
+    // An extractor that knows the event's start gives it as the venue's start.
+    let start = at("2026-12-01T09:00:00Z");
+    env.g()
+        .update_claim(
+            venue[0].id,
+            &ClaimPatch {
+                valid_from: Some(Some(start)),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    // Settling the pair again (the migration does) keeps it.
+    let mut state = env.store.get_state("knowledge").unwrap().unwrap();
+    state.as_object_mut().unwrap().remove("temporal");
+    ItemFeed::set_state(&env.store, "knowledge", state).unwrap();
+    run(&env.knowledge(plain_cfg(), None)).await;
+    assert_eq!(env.active(&ev, "located_at")[0].valid_from, Some(start));
 }

@@ -52,9 +52,26 @@ pub const SINGLE_VALUED: &[&str] = &[
 /// Predicates whose validity is the time of the event they relate to (a calendar event's start,
 /// which the extractor gives explicitly), not when an item mentioned it.
 const EVENT_DATED: &[&str] = &["attended", "organized", "invited_to"];
-/// Evidence items consulted per claim (the most recent ones) when settling a single-valued
-/// predicate or backfilling a start.
-const SETTLE_SCAN: usize = 512;
+/// Single-valued predicates whose start an extractor may know (an event's venue from its
+/// calendar entry): a `valid_from` that is not one of the claim's evidence dates is kept.
+const EXPLICIT_START: &[&str] = &["located_at", "held_at"];
+/// Distinct quotes per claim (the newest by item date, then text) read for temporal cues. Dates
+/// are read from every evidence item; only the quote work is capped, and the choice depends on
+/// the evidence, not on the order it arrived in.
+const CUE_SCAN: usize = 256;
+/// Cached item dates at most (the cache is cleared beyond).
+#[cfg(not(test))]
+const DATE_CACHE: usize = 10_000;
+#[cfg(test)]
+const DATE_CACHE: usize = 4;
+/// Entities migrated per write batch by the backfill.
+const BACKFILL_PAGE: usize = 64;
+/// How far in the future an item's date may be: later dates (a forged mail `Date`) are clamped,
+/// so an item cannot pin a value as current for years.
+const FUTURE_SLACK: time::Duration = time::Duration::days(1);
+
+/// Item dates (clamped, see [`FUTURE_SLACK`]) for one computation.
+type Dates = HashMap<ItemRef, OffsetDateTime>;
 /// Upper bound of aggregated confidence.
 const MAX_AGGREGATE: f32 = 0.99;
 /// Name of the user's entity when no name is configured or learned.
@@ -305,6 +322,14 @@ fn claim_key(subject: &EntityId, predicate: &str, object: &ClaimObject) -> Strin
     )
 }
 
+/// The earliest date of a claim's evidence among `dates`.
+fn earliest(c: &Claim, dates: &Dates) -> Option<OffsetDateTime> {
+    c.evidence
+        .iter()
+        .filter_map(|e| dates.get(&e.item).copied())
+        .min()
+}
+
 /// Noisy-OR of `n` independent observations at confidence `c`.
 fn aggregate(c: f32, n: usize) -> f32 {
     let c = c.clamp(0.0, 1.0);
@@ -363,6 +388,8 @@ struct ValueGroup {
     started_at: Vec<OffsetDateTime>,
     /// Every date the value was seen holding (affirming evidence, user assertions).
     sightings: Vec<OffsetDateTime>,
+    /// Cue of each quote read so far.
+    cues: HashMap<String, Cue>,
 }
 
 impl ValueGroup {
@@ -378,10 +405,22 @@ impl ValueGroup {
             ended: None,
             started_at: Vec::new(),
             sightings: Vec::new(),
+            cues: HashMap::new(),
         }
     }
 
-    fn add(&mut self, c: &Claim, dates: &HashMap<ItemRef, Option<OffsetDateTime>>) {
+    /// The cue of `quote` for this value (cached).
+    fn cue(&mut self, quote: &str) -> Cue {
+        if let Some(c) = self.cues.get(quote) {
+            return *c;
+        }
+        let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
+        let c = temporal::cue(quote, &names);
+        self.cues.insert(quote.to_owned(), c);
+        c
+    }
+
+    fn add(&mut self, c: &Claim, dates: &Dates) {
         self.claims.push(c.clone());
         match c.status {
             ClaimStatus::Rejected => {
@@ -393,17 +432,25 @@ impl ValueGroup {
             _ => {}
         }
         self.live = true;
-        let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
-        let mut newest = None;
-        for e in c.evidence.iter().rev().take(SETTLE_SCAN) {
-            let Some(d) = dates.get(&e.item).copied().flatten() else {
-                continue;
+        // Every evidence item's date; quotes newest first (then by text), so which ones are read
+        // for cues does not depend on the order evidence was added in.
+        let mut dated: Vec<(OffsetDateTime, Option<&str>)> = c
+            .evidence
+            .iter()
+            .filter_map(|e| dates.get(&e.item).map(|d| (*d, e.quote.as_deref())))
+            .collect();
+        dated.sort_by(|a, b| b.cmp(a));
+        dated.dedup();
+        let newest = dated.first().map(|d| d.0);
+        let mut read: HashSet<&str> = HashSet::new();
+        for (d, q) in dated {
+            let cue = match q {
+                Some(q) if read.contains(q) || read.len() < CUE_SCAN => {
+                    read.insert(q);
+                    self.cue(q)
+                }
+                _ => Cue::Neutral,
             };
-            newest = newest.max(Some(d));
-            let cue = e
-                .quote
-                .as_deref()
-                .map_or(Cue::Neutral, |q| temporal::cue(q, &names));
             if cue == Cue::Ended {
                 self.ended = self.ended.max(Some(d));
             } else {
@@ -454,6 +501,10 @@ pub(crate) struct Session<'a> {
     agg: Vec<Written>,
     /// Single-valued pairs (subject, predicate) to settle once `batch` is applied.
     settle_queue: BTreeSet<(EntityId, String)>,
+    /// Multi-valued claims that lost evidence: their start is recomputed.
+    redate: BTreeSet<ClaimId>,
+    /// Item dates later than this are clamped to it (see [`FUTURE_SLACK`]).
+    horizon: OffsetDateTime,
     /// Some item's provenance was retracted during this run (orphans may be left).
     pub retracted_any: bool,
 }
@@ -496,6 +547,8 @@ impl<'a> Session<'a> {
             queued: HashMap::new(),
             agg: Vec::new(),
             settle_queue: BTreeSet::new(),
+            redate: BTreeSet::new(),
+            horizon: OffsetDateTime::now_utc() + FUTURE_SLACK,
             retracted_any: false,
         }
     }
@@ -720,6 +773,8 @@ impl<'a> Session<'a> {
                 // Its value may have lost its last sighting (or the evidence that ended it).
                 self.settle_queue
                     .insert((c.subject.clone(), c.predicate.clone()));
+            } else if !c.evidence.is_empty() {
+                self.redate.insert(c.id); // its earliest evidence may be gone
             }
             if c.status == ClaimStatus::Retracted && c.evidence.is_empty() {
                 out.reuse
@@ -743,6 +798,46 @@ impl<'a> Session<'a> {
         for (s, p) in pairs {
             self.settle(&s, &p)?;
         }
+        self.redate_claims()
+    }
+
+    /// Multi-valued claims that lost evidence start at their earliest remaining evidence date
+    /// (event-dated ones keep the event's start).
+    fn redate_claims(&mut self) -> Result<()> {
+        let ids = std::mem::take(&mut self.redate);
+        let mut claims = Vec::new();
+        for id in ids {
+            if let Some(c) = self.graph().get_claim(id)?
+                && matches!(c.status, ClaimStatus::Active | ClaimStatus::Superseded)
+                && !c.evidence.is_empty()
+                && !self.single_valued.contains(&c.predicate)
+                && !EVENT_DATED.contains(&c.predicate.as_str())
+            {
+                claims.push(c);
+            }
+        }
+        let dates = self.dates_of(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        )?;
+        let mut batch = GraphBatch::new();
+        for c in &claims {
+            let from = earliest(c, &dates);
+            if from.is_some() && from != c.valid_from {
+                batch.push(GraphOp::UpdateClaim {
+                    claim: c.id,
+                    patch: ClaimPatch {
+                        valid_from: Some(from),
+                        ..Default::default()
+                    },
+                });
+                self.touch_claim(c);
+            }
+        }
+        if !batch.is_empty() {
+            self.graph().apply_batch(&batch)?;
+        }
         Ok(())
     }
 
@@ -758,32 +853,48 @@ impl<'a> Session<'a> {
 
     // ---------------------------------------------------------------- items
 
-    /// Load the dates of `items` not cached yet, in one feed call.
-    fn prefetch_dates<'i>(&mut self, items: impl IntoIterator<Item = &'i ItemRef>) -> Result<()> {
+    /// An item date, clamped to [`Session::horizon`].
+    fn clamp(&self, d: OffsetDateTime) -> OffsetDateTime {
+        d.min(self.horizon)
+    }
+
+    /// The (clamped) dates of `items` known to the store, the ones not cached loaded in one feed
+    /// call. The result is the caller's own: clearing the cache cannot lose any of it.
+    fn dates_of<'i>(&mut self, items: impl IntoIterator<Item = &'i ItemRef>) -> Result<Dates> {
+        let mut out = Dates::new();
         let mut missing: Vec<ItemRef> = Vec::new();
         let mut seen: HashSet<&ItemRef> = HashSet::new();
         for i in items {
-            if !self.dates.contains_key(i) && seen.insert(i) {
-                missing.push(i.clone());
+            if !seen.insert(i) {
+                continue;
+            }
+            match self.dates.get(i) {
+                Some(Some(d)) => {
+                    out.insert(i.clone(), *d);
+                }
+                Some(None) => {}
+                None => missing.push(i.clone()),
             }
         }
         if missing.is_empty() {
-            return Ok(());
+            return Ok(out);
         }
         let found = self.feed().item_dates(&missing)?;
-        if self.dates.len() + missing.len() > 10_000 {
+        if self.dates.len() + missing.len() > DATE_CACHE {
             self.dates.clear();
         }
         for i in missing {
-            let d = found.get(&i).copied();
+            let d = found.get(&i).map(|d| self.clamp(*d));
+            if let Some(d) = d {
+                out.insert(i.clone(), d);
+            }
             self.dates.insert(i, d);
         }
-        Ok(())
+        Ok(out)
     }
 
     fn item_date(&mut self, item: &ItemRef) -> Result<Option<OffsetDateTime>> {
-        self.prefetch_dates(std::iter::once(item))?;
-        Ok(self.dates.get(item).copied().flatten())
+        Ok(self.dates_of(std::iter::once(item))?.get(item).copied())
     }
 
     /// Process a changed (or new) item. Returns `false` when it turned out unchanged.
@@ -847,7 +958,7 @@ impl<'a> Session<'a> {
 
     /// Retract the item's old evidence, extract again, apply. Returns the LLM status.
     async fn extract_and_apply(&mut self, item: &Item, prev_llm: u32) -> Result<u32> {
-        let date = crate::extract::item_date(item);
+        let date = self.clamp(crate::extract::item_date(item));
         self.dates.insert(item.item.clone(), Some(date));
         let retracted = self.retract(&item.item)?;
         let chunks = self
@@ -1386,37 +1497,33 @@ impl<'a> Session<'a> {
         })
     }
 
-    /// The earliest known date of a claim's evidence.
-    fn earliest(&self, c: &Claim) -> Option<OffsetDateTime> {
-        c.evidence
-            .iter()
-            .rev()
-            .take(SETTLE_SCAN)
-            .filter_map(|e| self.dates.get(&e.item).copied().flatten())
-            .min()
-    }
-
     /// Settle one single-valued predicate of one subject from scratch: which value is current,
     /// which are history, and every interval. A deterministic function of the claims' evidence
-    /// (item dates and quotes), so the order items were processed in does not matter.
+    /// (item dates, clamped to the near future, and quotes), so the order items were processed in
+    /// does not matter.
     ///
-    /// Claims are grouped by value (object). A value the user rejected is left alone and takes no
-    /// part. For each other value: its *last sighting* is its newest evidence date whose quote
-    /// does not say the fact ended ([`temporal::Cue::Ended`]); it has *ended* when its newest
-    /// ended-quote is at least as recent as that (so "my last day at X" ends X, and only a later
-    /// sighting brings it back).
+    /// Claims are grouped by value (object). A value the user rejected takes no part (an active
+    /// twin of it is superseded). For each other value: its *last sighting* is its newest
+    /// evidence date whose quote does not say the fact ended ([`temporal::Cue::Ended`]); it has
+    /// *ended* when its newest ended-quote is at least as recent as that (so "my last day at X"
+    /// ends X, and only a later sighting brings it back).
     ///
     /// The current value is a user-asserted one if any (the newest assertion); otherwise the
     /// value with the latest sighting among those not ended, ties broken by a start cue at that
     /// date ("joined", "now", "moved to"), then by the latest place in the text (chunk, quote
     /// position in the chunk, object position in the quote: "from X to Y"), then by the
     /// object's name. Its claims are active; every other value's active claims are superseded.
-    /// With every value ended, none is current.
+    /// With every value ended, none is current. (A user assertion stays current until the user
+    /// changes it, whatever newer evidence says: a known limit.)
     ///
     /// Intervals (of active and superseded claims with evidence): `valid_from` is the earliest
-    /// evidence date; an active claim has no `valid_to`; an ended value's `valid_to` is its last
-    /// ended-quote's date; any other superseded value is valid until the first date another
-    /// value is seen at or after its last sighting.
+    /// evidence date (an explicit start of [`EXPLICIT_START`] predicates is kept); an active
+    /// claim has no `valid_to`. A superseded value is valid until the first date another value is
+    /// seen at or after its last sighting; an ended one until its last ended-quote, or that first
+    /// other sighting when earlier; with neither, `valid_to` stays open.
+    ///
+    /// Reads the pair with one `claims_for` (the graph has no subject-and-predicate lookup) and
+    /// re-reads only the claims an activation may have folded.
     fn settle(&mut self, subject: &EntityId, predicate: &str) -> Result<()> {
         let Some(ent) = self.graph().get_entity(subject)? else {
             return Ok(());
@@ -1426,12 +1533,11 @@ impl<'a> Session<'a> {
         if claims.is_empty() {
             return Ok(());
         }
-        let items: Vec<ItemRef> = claims
-            .iter()
-            .flat_map(|c| c.evidence.iter().rev().take(SETTLE_SCAN))
-            .map(|e| e.item.clone())
-            .collect();
-        self.prefetch_dates(items.iter())?;
+        let dates = self.dates_of(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        )?;
         let mut groups: BTreeMap<String, ValueGroup> = BTreeMap::new();
         for c in &claims {
             let key = serde_json::to_string(&c.object).unwrap_or_default();
@@ -1440,78 +1546,92 @@ impl<'a> Session<'a> {
                 groups.insert(key.clone(), ValueGroup::new(names));
             }
             if let Some(g) = groups.get_mut(&key) {
-                g.add(c, &self.dates);
+                g.add(c, &dates);
             }
         }
-        let winner = self.winner(&groups)?;
+        let winner = self.winner(&mut groups, &dates)?;
 
-        // Statuses.
-        let mut changed = false;
+        // Statuses; `current` holds the claims as they are afterwards.
+        let mut current: Vec<Claim> = Vec::with_capacity(claims.len());
         for (key, g) in &groups {
-            if g.rejected || !g.live {
+            let win = winner.as_ref() == Some(key);
+            if g.rejected || (g.live && !win) {
+                for c in &g.claims {
+                    let mut c = c.clone();
+                    if c.status == ClaimStatus::Active {
+                        self.graph()
+                            .set_claim_status(c.id, ClaimStatus::Superseded)?;
+                        self.stats.claims_superseded += 1;
+                        self.touch_claim(&c);
+                        c.status = ClaimStatus::Superseded;
+                    }
+                    current.push(c);
+                }
                 continue;
             }
-            let win = winner.as_ref() == Some(key);
-            if win && g.user.is_none() {
-                let had_active = g.claims.iter().any(|c| c.status == ClaimStatus::Active);
-                let mut revived = false;
-                for c in g
-                    .claims
-                    .iter()
-                    .filter(|c| c.status == ClaimStatus::Superseded && !c.evidence.is_empty())
+            let revive: Vec<&Claim> = g
+                .claims
+                .iter()
+                .filter(|c| c.status == ClaimStatus::Superseded && !c.evidence.is_empty())
+                .collect();
+            if !win || g.user.is_some() || revive.is_empty() {
+                current.extend(g.claims.iter().cloned());
+                continue;
+            }
+            for c in &revive {
+                // Folds into a live twin of the same value, if any.
+                self.graph().set_claim_status(c.id, ClaimStatus::Active)?;
+                self.touch_claim(c);
+            }
+            if !g.claims.iter().any(|c| c.status == ClaimStatus::Active) {
+                self.stats.claims_reactivated += 1;
+            }
+            for c in &g.claims {
+                if let Some(now) = self.graph().get_claim(c.id)?
+                    && !current.iter().any(|x| x.id == now.id)
                 {
-                    // Folds into a live twin of the same value, if any.
-                    self.graph().set_claim_status(c.id, ClaimStatus::Active)?;
-                    revived = true;
-                    changed = true;
-                    self.touch_claim(c);
-                }
-                if revived && !had_active {
-                    self.stats.claims_reactivated += 1;
-                }
-            } else if !win {
-                for c in g.claims.iter().filter(|c| c.status == ClaimStatus::Active) {
-                    self.graph()
-                        .set_claim_status(c.id, ClaimStatus::Superseded)?;
-                    self.stats.claims_superseded += 1;
-                    self.touch_claim(c);
-                    changed = true;
+                    current.push(now);
                 }
             }
         }
 
-        // Intervals, on the claims as they are now (activation may have folded twins).
-        let now = if changed {
-            self.pair_claims(&subject, predicate)?
-        } else {
-            claims
-        };
-        for c in now {
+        // Intervals.
+        let explicit_ok = EXPLICIT_START.contains(&predicate);
+        for c in &current {
             if !matches!(c.status, ClaimStatus::Active | ClaimStatus::Superseded)
                 || c.evidence.is_empty()
             {
                 continue;
             }
             let key = serde_json::to_string(&c.object).unwrap_or_default();
-            let Some(g) = groups.get(&key) else {
+            let Some(g) = groups.get(&key).filter(|g| !g.rejected) else {
                 continue;
             };
-            let from = self.earliest(&c).or(c.valid_from);
+            let explicit = explicit_ok
+                && c.valid_from
+                    .is_some_and(|v| !c.evidence.iter().any(|e| dates.get(&e.item) == Some(&v)));
+            let from = if explicit {
+                c.valid_from
+            } else {
+                earliest(c, &dates).or(c.valid_from)
+            };
+            let next_other = g.affirmed.and_then(|last| {
+                groups
+                    .iter()
+                    .filter(|(k, o)| **k != key && !o.rejected)
+                    .flat_map(|(_, o)| o.sightings.iter().copied())
+                    .filter(|d| *d >= last)
+                    .min()
+            });
             let to = if c.status == ClaimStatus::Active {
                 None
             } else if g.ended() {
-                g.ended
-            } else {
-                match g.affirmed {
-                    Some(last) => groups
-                        .iter()
-                        .filter(|(k, o)| **k != key && !o.rejected)
-                        .flat_map(|(_, o)| o.sightings.iter().copied())
-                        .filter(|d| *d >= last)
-                        .min()
-                        .or(Some(last)),
-                    None => c.valid_to,
+                match (g.ended, next_other) {
+                    (Some(e), Some(n)) => Some(e.min(n)),
+                    (e, _) => e,
                 }
+            } else {
+                next_other
             };
             let mut patch = ClaimPatch::default();
             if c.valid_from != from {
@@ -1522,14 +1642,18 @@ impl<'a> Session<'a> {
             }
             if patch != ClaimPatch::default() {
                 self.graph().update_claim(c.id, &patch)?;
-                self.touch_claim(&c);
+                self.touch_claim(c);
             }
         }
         Ok(())
     }
 
     /// The current value of a settled pair (see [`Session::settle`]).
-    fn winner(&mut self, groups: &BTreeMap<String, ValueGroup>) -> Result<Option<String>> {
+    fn winner(
+        &mut self,
+        groups: &mut BTreeMap<String, ValueGroup>,
+        dates: &Dates,
+    ) -> Result<Option<String>> {
         let cands: Vec<(&String, &ValueGroup)> = groups
             .iter()
             .filter(|(_, g)| g.live && !g.rejected && !g.ended())
@@ -1544,18 +1668,22 @@ impl<'a> Session<'a> {
         let Some(best) = cands.iter().map(|(_, g)| (g.affirmed, g.started())).max() else {
             return Ok(None);
         };
-        let tied: Vec<(&String, &ValueGroup)> = cands
+        let tied: Vec<String> = cands
             .into_iter()
             .filter(|(_, g)| (g.affirmed, g.started()) == best)
+            .map(|(k, _)| k.clone())
             .collect();
         if tied.len() == 1 {
-            return Ok(Some(tied[0].0.clone()));
+            return Ok(tied.into_iter().next());
         }
         let mut chunks: HashMap<ItemRef, Vec<nugget_store::Chunk>> = HashMap::new();
         let mut scored = Vec::with_capacity(tied.len());
-        for (k, g) in tied {
-            let pos = self.position(g, &mut chunks)?;
-            scored.push((pos, g.name.clone(), k.clone()));
+        for k in tied {
+            let Some(g) = groups.get_mut(&k) else {
+                continue;
+            };
+            let pos = self.position(g, dates, &mut chunks)?;
+            scored.push((pos, g.name.clone(), k));
         }
         Ok(scored.into_iter().max().map(|(_, _, k)| k))
     }
@@ -1564,42 +1692,46 @@ impl<'a> Session<'a> {
     /// chunk, object offset in the quote), the latest of its quotes at its last sighting.
     fn position(
         &self,
-        g: &ValueGroup,
+        g: &mut ValueGroup,
+        dates: &Dates,
         chunks: &mut HashMap<ItemRef, Vec<nugget_store::Chunk>>,
     ) -> Result<(i64, i64, i64)> {
-        let names: Vec<&str> = g.names.iter().map(String::as_str).collect();
+        // A maximum: the order the evidence is visited in does not matter.
+        let at: Vec<Evidence> = g
+            .claims
+            .iter()
+            .flat_map(|c| c.evidence.iter())
+            .filter(|e| e.quote.is_some() && dates.get(&e.item).copied() == g.affirmed)
+            .cloned()
+            .collect();
         let mut best = (-1, -1, -1);
-        for c in &g.claims {
-            for e in c.evidence.iter().rev().take(SETTLE_SCAN) {
-                if self.dates.get(&e.item).copied().flatten() != g.affirmed {
-                    continue;
-                }
-                let Some(q) = e.quote.as_deref() else {
-                    continue;
-                };
-                if temporal::cue(q, &names) == temporal::Cue::Ended {
-                    continue;
-                }
-                let chunk = e.chunk_id.unwrap_or(-1);
-                if !chunks.contains_key(&e.item) {
-                    let cs = self
-                        .feed()
-                        .chunks(&e.item, self.inner.cfg.max_chunks_per_item.max(1))?;
-                    chunks.insert(e.item.clone(), cs);
-                }
-                let offset = chunks[&e.item]
-                    .iter()
-                    .find(|ch| Some(ch.id) == e.chunk_id)
-                    .and_then(|ch| {
-                        normalize_ws(&ch.text)
-                            .to_lowercase()
-                            .find(&normalize_ws(q).to_lowercase())
-                    })
-                    .map_or(-1, |o| i64::try_from(o).unwrap_or(i64::MAX));
-                let word = temporal::object_position(q, &names)
-                    .map_or(-1, |w| i64::try_from(w).unwrap_or(i64::MAX));
-                best = best.max((chunk, offset, word));
+        for e in at {
+            let Some(q) = e.quote.as_deref() else {
+                continue;
+            };
+            if g.cue(q) == Cue::Ended {
+                continue;
             }
+            let chunk = e.chunk_id.unwrap_or(-1);
+            if !chunks.contains_key(&e.item) {
+                let cs = self
+                    .feed()
+                    .chunks(&e.item, self.inner.cfg.max_chunks_per_item.max(1))?;
+                chunks.insert(e.item.clone(), cs);
+            }
+            let offset = chunks[&e.item]
+                .iter()
+                .find(|ch| Some(ch.id) == e.chunk_id)
+                .and_then(|ch| {
+                    normalize_ws(&ch.text)
+                        .to_lowercase()
+                        .find(&normalize_ws(q).to_lowercase())
+                })
+                .map_or(-1, |o| i64::try_from(o).unwrap_or(i64::MAX));
+            let names: Vec<&str> = g.names.iter().map(String::as_str).collect();
+            let word = temporal::object_position(q, &names)
+                .map_or(-1, |w| i64::try_from(w).unwrap_or(i64::MAX));
+            best = best.max((chunk, offset, word));
         }
         Ok(best)
     }
@@ -1608,19 +1740,29 @@ impl<'a> Session<'a> {
     /// `state::TEMPORAL_VERSION`), without the LLM: claims with evidence but no `valid_from`
     /// start at their earliest evidence date, and every single-valued pair is settled
     /// ([`Session::settle`]), which supersedes all but one of several active values and dates
-    /// superseded ones.
-    pub fn backfill_validity(&mut self) -> Result<()> {
-        let entities = self.graph().list_entities(&EntityQuery::default())?;
-        for e in entities {
-            let claims: Vec<Claim> = self
-                .graph()
-                .claims_for(&e.id, true)?
-                .into_iter()
-                .filter(|c| c.subject == e.id)
-                .collect();
+    /// superseded ones. Entities are visited in id order; the last one done is kept in
+    /// `State::temporal_cursor` and the walk stops at the deadline (after at least one entity),
+    /// so a cut or killed run resumes where it stopped. Idempotent. Returns whether it finished.
+    pub fn backfill_validity(&mut self, deadline: Option<Instant>) -> Result<bool> {
+        let mut ids: Vec<EntityId> = self
+            .graph()
+            .list_entities(&EntityQuery::default())?
+            .into_iter()
+            .map(|e| e.id)
+            .collect();
+        ids.sort();
+        if let Some(cursor) = &self.state.temporal_cursor {
+            ids.retain(|i| i > cursor);
+        }
+        let mut undated: Vec<Claim> = Vec::new();
+        let mut done_in_page = 0usize;
+        let total = ids.len();
+        for (n, id) in ids.into_iter().enumerate() {
             let mut pairs: BTreeSet<String> = BTreeSet::new();
-            let mut undated: Vec<&Claim> = Vec::new();
-            for c in &claims {
+            for c in self.graph().claims_for(&id, true)? {
+                if c.subject != id {
+                    continue;
+                }
                 if self.single_valued.contains(&c.predicate) {
                     pairs.insert(c.predicate.clone());
                 } else if c.valid_from.is_none()
@@ -1630,31 +1772,49 @@ impl<'a> Session<'a> {
                     undated.push(c);
                 }
             }
-            let items: Vec<ItemRef> = undated
-                .iter()
-                .flat_map(|c| c.evidence.iter().rev().take(SETTLE_SCAN))
-                .map(|e| e.item.clone())
-                .collect();
-            self.prefetch_dates(items.iter())?;
-            let mut batch = GraphBatch::new();
-            for c in undated {
-                if let Some(from) = self.earliest(c) {
-                    batch.push(GraphOp::UpdateClaim {
-                        claim: c.id,
-                        patch: ClaimPatch {
-                            valid_from: Some(Some(from)),
-                            ..Default::default()
-                        },
-                    });
-                    self.touch_claim(c);
-                }
-            }
-            if !batch.is_empty() {
-                self.graph().apply_batch(&batch)?;
-            }
             for p in pairs {
-                self.settle(&e.id, &p)?;
+                self.settle(&id, &p)?;
             }
+            done_in_page += 1;
+            let stop = self.out_of_time(deadline);
+            if stop || done_in_page >= BACKFILL_PAGE || n + 1 == total {
+                self.date_undated(std::mem::take(&mut undated))?;
+                self.state.temporal_cursor = Some(id);
+                done_in_page = 0;
+            }
+            if stop && n + 1 < total {
+                return Ok(false);
+            }
+        }
+        self.state.temporal_cursor = None;
+        Ok(true)
+    }
+
+    /// Set `valid_from` of claims that have none to their earliest evidence date (one batch).
+    fn date_undated(&mut self, claims: Vec<Claim>) -> Result<()> {
+        if claims.is_empty() {
+            return Ok(());
+        }
+        let dates = self.dates_of(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        )?;
+        let mut batch = GraphBatch::new();
+        for c in &claims {
+            if let Some(from) = earliest(c, &dates) {
+                batch.push(GraphOp::UpdateClaim {
+                    claim: c.id,
+                    patch: ClaimPatch {
+                        valid_from: Some(Some(from)),
+                        ..Default::default()
+                    },
+                });
+                self.touch_claim(c);
+            }
+        }
+        if !batch.is_empty() {
+            self.graph().apply_batch(&batch)?;
         }
         Ok(())
     }
@@ -1840,5 +2000,149 @@ mod tests {
         assert!((aggregate(0.5, 2) - 0.75).abs() < 1e-6);
         assert!(aggregate(0.9, 40) <= 0.99);
         assert!(aggregate(0.995, 3) <= 0.995 + 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod temporal_tests {
+    use std::sync::Arc;
+
+    use nugget_core::ids::{ItemKey, ItemRef, SourceId};
+    use nugget_graph::{Claim, ClaimObject, ClaimStatus, Evidence, MemGraph};
+    use nugget_store::{NewChunk, NewItem, Store, content_hash};
+    use time::OffsetDateTime;
+    use time::format_description::well_known::Rfc3339;
+
+    fn at(s: &str) -> OffsetDateTime {
+        OffsetDateTime::parse(s, &Rfc3339).unwrap()
+    }
+
+    use super::{CUE_SCAN, DATE_CACHE, Dates, Session, ValueGroup};
+    use crate::state::{Notes, State};
+    use crate::{Knowledge, KnowledgeConfig};
+
+    fn item(key: &str) -> ItemRef {
+        ItemRef {
+            source: SourceId::new("notes"),
+            key: ItemKey::new(key),
+        }
+    }
+
+    fn put(store: &Store, key: &str, at: OffsetDateTime) {
+        let it = NewItem::new("notes", key, content_hash(key)).with_modified_at(at);
+        store
+            .upsert_item_with_chunks(&it, &[NewChunk::text("x")])
+            .unwrap();
+    }
+
+    fn knowledge(store: &Store) -> Knowledge {
+        Knowledge::with_feed(
+            Arc::new(store.clone()),
+            Arc::new(MemGraph::new()),
+            None,
+            KnowledgeConfig::default(),
+        )
+    }
+
+    #[test]
+    fn dates_survive_the_cache_being_cleared() {
+        let store = Store::open_in_memory().unwrap();
+        let keys: Vec<String> = (0..DATE_CACHE + 3).map(|i| format!("n{i}")).collect();
+        for (i, k) in keys.iter().enumerate() {
+            put(
+                &store,
+                k,
+                at("2026-01-01T00:00:00Z") + time::Duration::days(i as i64),
+            );
+        }
+        let refs: Vec<ItemRef> = keys.iter().map(|k| item(k)).collect();
+        let k = knowledge(&store);
+        let mut s = Session::new(
+            k.inner_for_tests(),
+            State::default(),
+            Notes::load(&store).unwrap(),
+            Default::default(),
+            0,
+        );
+        // Fill the cache, then ask for all: the misses clear it, the answer keeps everything.
+        assert_eq!(
+            s.dates_of(refs[..DATE_CACHE].iter()).unwrap().len(),
+            DATE_CACHE
+        );
+        let all = s.dates_of(refs.iter()).unwrap();
+        assert_eq!(all.len(), refs.len());
+        assert_eq!(all[&refs[0]], at("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn future_dates_are_clamped() {
+        let store = Store::open_in_memory().unwrap();
+        put(&store, "far", at("2099-01-01T00:00:00Z"));
+        let k = knowledge(&store);
+        let mut s = Session::new(
+            k.inner_for_tests(),
+            State::default(),
+            Notes::load(&store).unwrap(),
+            Default::default(),
+            0,
+        );
+        let d = s.item_date(&item("far")).unwrap().unwrap();
+        assert!(d <= OffsetDateTime::now_utc() + time::Duration::days(1));
+    }
+
+    fn claim(evidence: Vec<Evidence>) -> Claim {
+        let t = at("2026-01-01T00:00:00Z");
+        Claim {
+            id: 1,
+            subject: nugget_core::ids::EntityId::new("ent_a"),
+            predicate: "works_at".into(),
+            object: ClaimObject::Literal("Acme".into()),
+            text: "A works at Acme.".into(),
+            confidence: 0.7,
+            status: ClaimStatus::Active,
+            evidence,
+            valid_from: None,
+            valid_to: None,
+            created_at: t,
+            updated_at: t,
+        }
+    }
+
+    #[test]
+    fn a_value_is_read_from_every_evidence_item_in_any_order() {
+        // More evidence than quotes are read for cues; the newest item, which says the job
+        // ended, was added first (an old cap kept only the most recently added items).
+        let n = CUE_SCAN * 2 + 10;
+        let base = at("2020-01-01T00:00:00Z");
+        let mut dates = Dates::new();
+        let mut evidence = Vec::new();
+        for i in (0..n).rev() {
+            let it = item(&format!("m{i}"));
+            dates.insert(it.clone(), base + time::Duration::days(i as i64));
+            let quote = if i == n - 1 {
+                "my last day at Acme".to_owned()
+            } else {
+                format!("Alice of Acme, note {i}")
+            };
+            evidence.push(Evidence {
+                item: it,
+                chunk_id: None,
+                quote: Some(quote),
+            });
+        }
+        let summary = |ev: Vec<Evidence>| {
+            let mut g = ValueGroup::new(vec!["Acme".into()]);
+            g.add(&claim(ev), &dates);
+            let mut s = g.sightings.clone();
+            s.sort();
+            (g.affirmed, g.ended, g.ended(), s)
+        };
+        let forward = summary(evidence.clone());
+        evidence.reverse();
+        let backward = summary(evidence);
+        assert_eq!(forward, backward);
+        assert!(forward.2, "ended");
+        assert_eq!(forward.1, Some(base + time::Duration::days(n as i64 - 1)));
+        assert_eq!(forward.0, Some(base + time::Duration::days(n as i64 - 2)));
     }
 }

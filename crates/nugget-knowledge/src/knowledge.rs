@@ -170,6 +170,11 @@ impl Knowledge {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inner_for_tests(&self) -> &Inner {
+        &self.inner
+    }
+
     pub fn config(&self) -> &KnowledgeConfig {
         &self.inner.cfg
     }
@@ -237,9 +242,9 @@ impl Knowledge {
             budget.max_llm_requests,
         );
         s.stats.planned = total;
-        if s.state.temporal < TEMPORAL_VERSION {
-            // A graph from before validity intervals: migrate it once, before any item.
-            s.backfill_validity()?;
+        // A graph from before validity intervals: migrate it once, before any item (resumable:
+        // a run out of time continues it next time).
+        if s.state.temporal < TEMPORAL_VERSION && s.backfill_validity(deadline)? {
             s.state.temporal = TEMPORAL_VERSION;
         }
         let (mut deletes_done, mut upserts_done) = (0usize, 0usize);

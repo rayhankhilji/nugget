@@ -533,4 +533,6 @@ fn role_synonyms_are_one_single_valued_predicate_and_titles_lose_the_employer() 
         "Senior Data Scientist"
     );
     assert_eq!(clean_title("Head of Data"), "Head of Data");
+    assert_eq!(clean_title("Head of Data AT Quillfeather"), "Head of Data");
+    assert_eq!(clean_title("CTO @ Acme"), "CTO");
 }

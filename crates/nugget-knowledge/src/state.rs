@@ -83,6 +83,8 @@ pub(crate) struct State {
     /// [`TEMPORAL_VERSION`] the graph was last migrated to (0: written before validity
     /// intervals, or a new vault).
     pub temporal: u32,
+    /// The migration's progress: the last entity (in id order) it finished, while unfinished.
+    pub temporal_cursor: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -1080,8 +1080,10 @@ fn commitment_core(name: &str) -> String {
 /// Strip a leading article or possessive from a job title (`our Senior Data Scientist`).
 fn clean_title(s: &str) -> String {
     let mut t = trim_name(s);
-    // "Head of Data at Quillfeather": the employer is a `works_at` of its own.
-    if let Some(i) = t.find(" at ")
+    // "Head of Data at Quillfeather", "CTO @ Acme": the employer is a `works_at` of its own.
+    // (ASCII lower-casing keeps byte offsets.)
+    let lower = t.to_ascii_lowercase();
+    if let Some(i) = [" at ", " @ "].iter().filter_map(|p| lower.find(p)).min()
         && i > 0
     {
         t.truncate(i);
