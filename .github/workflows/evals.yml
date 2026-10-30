@@ -182,14 +182,8 @@ jobs:
         include:
           - suite: ask
             args: >-
-              ask --ask-prompt both --ask-temperature 0 --ask-judge model
+              ask --local-chat-model qwen3-4b-q4km --ask-prompt both --ask-temperature 0 --ask-judge model
               --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
-              --ask-dump eval-results/ask-answers.jsonl
-          # The manifest's agentic-tier model answering; it judges itself on the same server.
-          - suite: ask-8b
-            args: >-
-              ask --local-chat-model qwen3-8b-q4km --ask-prompt both --ask-temperature 0
-              --ask-judge model --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
               --ask-dump eval-results/ask-answers.jsonl
     steps:
       - uses: actions/checkout@v5
