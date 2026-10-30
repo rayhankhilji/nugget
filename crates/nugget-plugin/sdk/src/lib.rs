@@ -23,14 +23,23 @@
 //! ## What a plugin can do
 //! Only what the host imports offer, each checked against the capabilities in
 //! `nugget-plugin.toml`: [`http`] (declared hosts only, no redirects), [`kv`], [`secrets`]
-//! (declared names only), [`log`](mod@log), [`now_ms`] and, during a sync, [`sink`].
+//! (declared names only), [`log`](mod@log), [`now_ms`], [`fs`] (connectors only, below the
+//! paths the user chose) and, during a sync, [`sink`].
 //!
 //! Rust `std` APIs that need WASI (files, environment variables, `SystemTime`, stdout, and the
 //! random seed behind `std::collections::HashMap::new`) **trap**. Use [`now_ms`], [`log`](mod@log)
 //! and `BTreeMap` instead.
+//!
+//! ## Testing natively
+//! On any target other than `wasm32`, the host imports go to an in-process fake host instead:
+//! [`testing::TestHost`]. Plugin logic can then be unit-tested with plain `cargo test` on the
+//! host triple (`cargo test-native` in the SDK and plugin workspaces), with canned HTTP
+//! responses, in-memory key-value store and secrets, a fake clock, file roots, and a sink that
+//! records what the connector sent. No network, no wasm runtime.
 
 pub use serde_json::{self, Value, json};
 
+#[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 pub mod bindings {
     wit_bindgen::generate!({
@@ -42,10 +51,35 @@ pub mod bindings {
     });
 }
 
-use bindings::nugget::plugin as wit;
+#[cfg(target_arch = "wasm32")]
+#[path = "sys_wasm.rs"]
+mod sys;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod testing;
+#[cfg(not(target_arch = "wasm32"))]
+use testing::sys;
 
 /// Why a call failed. Return [`Error::Cancelled`] when [`sink::cancelled`] says so.
-pub use wit::types::PluginError as Error;
+///
+/// The variants mirror the WIT `plugin-error`; the host maps them onto Nugget's error kinds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// Bad input or settings.
+    Invalid(String),
+    /// A credential is missing or was rejected.
+    Unauthorized(String),
+    /// A network failure, or a 5xx from the remote.
+    Network(String),
+    /// The remote asked to back off. The payload is the hint, in milliseconds.
+    RateLimited(Option<u64>),
+    NotFound(String),
+    /// The host denied a capability the plugin did not declare, or one the user did not approve.
+    Denied(String),
+    /// The sync or call was cancelled. Return promptly.
+    Cancelled,
+    Other(String),
+}
 
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
@@ -58,6 +92,24 @@ impl Error {
         Error::Other(msg.into())
     }
 }
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Error::Invalid(m) => write!(f, "invalid: {m}"),
+            Error::Unauthorized(m) => write!(f, "unauthorized: {m}"),
+            Error::Network(m) => write!(f, "network: {m}"),
+            Error::RateLimited(Some(ms)) => write!(f, "rate limited (retry in {ms} ms)"),
+            Error::RateLimited(None) => f.write_str("rate limited"),
+            Error::NotFound(m) => write!(f, "not found: {m}"),
+            Error::Denied(m) => write!(f, "denied: {m}"),
+            Error::Cancelled => f.write_str("cancelled"),
+            Error::Other(m) => f.write_str(m),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
@@ -80,7 +132,7 @@ pub trait Connector {
 }
 
 /// A tool for the agent. Tools are read-only: `GET`/`HEAD` only, key-value and secret reads only.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tool {
     /// `[a-z0-9_]`, 1 to 64 characters.
     pub name: String,
@@ -142,6 +194,9 @@ impl Tools for NoTools {
 /// export_plugin!(connector: MyConnector);
 /// export_plugin!(tools: MyTools);
 /// ```
+///
+/// On native targets (tests) this only checks the types; drive the plugin through
+/// [`testing::TestHost`] instead.
 #[macro_export]
 macro_rules! export_plugin {
     (connector: $c:ty, tools: $t:ty $(,)?) => {
@@ -155,6 +210,7 @@ macro_rules! export_plugin {
     };
 }
 
+#[cfg(target_arch = "wasm32")]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __nugget_export_impl {
@@ -162,14 +218,14 @@ macro_rules! __nugget_export_impl {
         struct __NuggetPlugin;
 
         impl $crate::bindings::exports::nugget::plugin::connector::Guest for __NuggetPlugin {
-            fn validate(settings: String) -> ::core::result::Result<(), $crate::Error> {
+            fn validate(settings: String) -> ::core::result::Result<(), $crate::__rt::WitError> {
                 $crate::__rt::validate::<$c>(&settings)
             }
 
             fn sync(
                 settings: String,
                 cursor: Option<String>,
-            ) -> ::core::result::Result<String, $crate::Error> {
+            ) -> ::core::result::Result<String, $crate::__rt::WitError> {
                 $crate::__rt::sync::<$c>(&settings, cursor)
             }
         }
@@ -179,7 +235,10 @@ macro_rules! __nugget_export_impl {
                 $crate::__rt::list_tools::<$t>()
             }
 
-            fn call(name: String, input: String) -> ::core::result::Result<String, $crate::Error> {
+            fn call(
+                name: String,
+                input: String,
+            ) -> ::core::result::Result<String, $crate::__rt::WitError> {
                 $crate::__rt::call::<$t>(&name, &input)
             }
         }
@@ -188,60 +247,93 @@ macro_rules! __nugget_export_impl {
     };
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __nugget_export_impl {
+    ($c:ty, $t:ty) => {
+        // Native builds export nothing; this only checks the types implement the traits.
+        const _: fn() = || {
+            $crate::__rt::check::<$c, $t>();
+        };
+    };
+}
+
 #[doc(hidden)]
 pub mod __rt {
     use super::*;
-    use crate::bindings::exports::nugget::plugin::tools::ToolSpec;
 
-    fn install_panic_hook() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            // The default hook writes to stderr, which plugins do not have.
-            std::panic::set_hook(Box::new(|info| {
-                crate::log::error(&format!("panic: {info}"));
-            }));
-        });
-    }
-
-    fn parse(json: &str) -> Result<Value> {
+    /// The JSON the host passes in: an empty string means `null`.
+    pub fn parse(json: &str) -> Result<Value> {
         if json.trim().is_empty() {
             return Ok(Value::Null);
         }
         Ok(serde_json::from_str(json)?)
     }
 
-    pub fn validate<C: Connector>(settings: &str) -> Result<()> {
-        install_panic_hook();
-        C::validate(&parse(settings)?)
-    }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn check<C: Connector, T: Tools>() {}
 
-    pub fn sync<C: Connector>(settings: &str, cursor: Option<String>) -> Result<String> {
-        install_panic_hook();
-        let cursor = cursor.as_deref().map(parse).transpose()?;
-        let next = C::sync(&parse(settings)?, cursor)?;
-        Ok(next.to_string())
-    }
+    #[cfg(target_arch = "wasm32")]
+    pub use wasm::*;
 
-    pub fn list_tools<T: Tools>() -> Vec<ToolSpec> {
-        install_panic_hook();
-        T::tools()
-            .into_iter()
-            .map(|t| ToolSpec {
-                name: t.name,
-                description: t.description,
-                input_schema: t.input_schema.to_string(),
-            })
-            .collect()
-    }
+    #[cfg(target_arch = "wasm32")]
+    mod wasm {
+        use super::*;
+        use crate::bindings::exports::nugget::plugin::tools::ToolSpec;
 
-    pub fn call<T: Tools>(name: &str, input: &str) -> Result<String> {
-        install_panic_hook();
-        Ok(T::call(name, parse(input)?)?.to_string())
+        pub use crate::sys::WitError;
+
+        fn install_panic_hook() {
+            static ONCE: std::sync::Once = std::sync::Once::new();
+            ONCE.call_once(|| {
+                // The default hook writes to stderr, which plugins do not have.
+                std::panic::set_hook(Box::new(|info| {
+                    crate::log::error(&format!("panic: {info}"));
+                }));
+            });
+        }
+
+        pub fn validate<C: Connector>(settings: &str) -> Result<(), WitError> {
+            install_panic_hook();
+            C::validate(&parse(settings)?).map_err(WitError::from)
+        }
+
+        pub fn sync<C: Connector>(
+            settings: &str,
+            cursor: Option<String>,
+        ) -> Result<String, WitError> {
+            install_panic_hook();
+            let run = || -> Result<String> {
+                let cursor = cursor.as_deref().map(parse).transpose()?;
+                let next = C::sync(&parse(settings)?, cursor)?;
+                Ok(next.to_string())
+            };
+            run().map_err(WitError::from)
+        }
+
+        pub fn list_tools<T: Tools>() -> Vec<ToolSpec> {
+            install_panic_hook();
+            T::tools()
+                .into_iter()
+                .map(|t| ToolSpec {
+                    name: t.name,
+                    description: t.description,
+                    input_schema: t.input_schema.to_string(),
+                })
+                .collect()
+        }
+
+        pub fn call<T: Tools>(name: &str, input: &str) -> Result<String, WitError> {
+            install_panic_hook();
+            let run = || -> Result<String> { Ok(T::call(name, parse(input)?)?.to_string()) };
+            run().map_err(WitError::from)
+        }
     }
 }
 
 /// One document reported by a connector.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Document {
     /// Stable key within the source.
     pub key: String,
@@ -258,7 +350,7 @@ pub struct Document {
 }
 
 /// Document content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Content {
     Text(String),
     Bytes(Vec<u8>),
@@ -310,6 +402,14 @@ impl Document {
         self.metadata = metadata;
         self
     }
+
+    /// The content as text, when it is [`Content::Text`].
+    pub fn text_content(&self) -> Option<&str> {
+        match &self.content {
+            Content::Text(t) => Some(t),
+            Content::Bytes(_) => None,
+        }
+    }
 }
 
 /// Host-mediated HTTP: only hosts declared in the manifest, no redirects, metered.
@@ -317,7 +417,7 @@ pub mod http {
     use super::*;
 
     /// An HTTP request. Build with [`Request::get`] or [`Request::new`], then [`send`](Request::send).
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Request {
         pub method: String,
         pub url: String,
@@ -349,36 +449,59 @@ pub mod http {
             self
         }
 
+        /// The first header named `name` (case-insensitive).
+        pub fn header_value(&self, name: &str) -> Option<&str> {
+            find_header(&self.headers, name)
+        }
+
         pub fn send(self) -> Result<Response> {
-            let resp = wit::http::send(&wit::http::Request {
-                method: self.method,
-                url: self.url,
-                headers: self.headers,
-                body: self.body,
-            })?;
-            Ok(Response {
-                status: resp.status,
-                headers: resp.headers,
-                body: resp.body,
-            })
+            sys::http_send(self)
         }
     }
 
     /// A fully read response.
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct Response {
         pub status: u16,
         pub headers: Vec<(String, String)>,
         pub body: Vec<u8>,
     }
 
+    fn find_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
     impl Response {
+        /// A response with `status`, no headers and an empty body (handy for tests).
+        pub fn new(status: u16) -> Self {
+            Self {
+                status,
+                headers: Vec::new(),
+                body: Vec::new(),
+            }
+        }
+
+        /// `200 OK` with `body`.
+        pub fn ok(body: impl Into<Vec<u8>>) -> Self {
+            Self::new(200).with_body(body)
+        }
+
+        pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
+            self.headers.push((name.into(), value.into()));
+            self
+        }
+
+        pub fn with_body(mut self, body: impl Into<Vec<u8>>) -> Self {
+            self.body = body.into();
+            self
+        }
+
         /// The first header named `name` (case-insensitive).
         pub fn header(&self, name: &str) -> Option<&str> {
-            self.headers
-                .iter()
-                .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                .map(|(_, v)| v.as_str())
+            find_header(&self.headers, name)
         }
 
         pub fn text(&self) -> Result<String> {
@@ -418,19 +541,20 @@ pub mod kv {
     use super::*;
 
     pub fn get(key: &str) -> Result<Option<Vec<u8>>> {
-        wit::kv::get(key)
+        sys::kv_get(key)
     }
 
     pub fn set(key: &str, value: &[u8]) -> Result<()> {
-        wit::kv::set(key, value)
+        sys::kv_set(key, value)
     }
 
     pub fn delete(key: &str) -> Result<()> {
-        wit::kv::delete(key)
+        sys::kv_delete(key)
     }
 
+    /// Every key that starts with `prefix`, in order.
     pub fn keys(prefix: &str) -> Result<Vec<String>> {
-        wit::kv::keys(prefix)
+        sys::kv_keys(prefix)
     }
 
     pub fn get_json(key: &str) -> Result<Option<Value>> {
@@ -449,17 +573,29 @@ pub mod secrets {
     use super::*;
 
     pub fn get(name: &str) -> Result<Option<String>> {
-        wit::secrets::get(name)
+        sys::secret_get(name)
     }
 
     pub fn set(name: &str, value: &str) -> Result<()> {
-        wit::secrets::set(name, value)
+        sys::secret_set(name, value)
     }
 }
 
 /// Logging into Nugget's log.
 pub mod log {
-    use super::wit::log::{Level, log};
+    /// Severity of a log line.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum Level {
+        Trace,
+        Debug,
+        Info,
+        Warn,
+        Error,
+    }
+
+    pub fn log(level: Level, msg: &str) {
+        super::sys::log(level, msg)
+    }
 
     pub fn trace(msg: &str) {
         log(Level::Trace, msg)
@@ -480,7 +616,7 @@ pub mod log {
 
 /// Milliseconds since the Unix epoch (the only clock a plugin has).
 pub fn now_ms() -> i64 {
-    wit::clock::now()
+    sys::now()
 }
 
 /// Read-only files and folders the user chose for this source (connectors only). `root` is the
@@ -499,28 +635,14 @@ pub mod fs {
         pub modified_at: Option<i64>,
     }
 
-    impl From<wit::fs::DirEntry> for DirEntry {
-        fn from(e: wit::fs::DirEntry) -> Self {
-            Self {
-                name: e.name,
-                is_dir: e.is_dir,
-                size: e.size,
-                modified_at: e.modified_at,
-            }
-        }
-    }
-
     /// A folder's entries, sorted by name.
     pub fn read_dir(root: &str, path: &str) -> Result<Vec<DirEntry>> {
-        Ok(wit::fs::read_dir(root, path)?
-            .into_iter()
-            .map(DirEntry::from)
-            .collect())
+        sys::fs_read_dir(root, path)
     }
 
     /// A whole file.
     pub fn read_file(root: &str, path: &str) -> Result<Vec<u8>> {
-        wit::fs::read_file(root, path)
+        sys::fs_read_file(root, path)
     }
 
     /// A whole file as UTF-8 text (invalid sequences replaced).
@@ -530,7 +652,16 @@ pub mod fs {
 
     /// One entry's metadata.
     pub fn stat(root: &str, path: &str) -> Result<DirEntry> {
-        wit::fs::stat(root, path).map(DirEntry::from)
+        sys::fs_stat(root, path)
+    }
+
+    /// `parent` joined with `name` (`""` is the root).
+    pub fn join(parent: &str, name: &str) -> String {
+        if parent.is_empty() {
+            name.to_string()
+        } else {
+            format!("{parent}/{name}")
+        }
     }
 }
 
@@ -540,41 +671,26 @@ pub mod sink {
 
     /// Queue an insert or update.
     pub fn upsert(doc: Document) -> Result<()> {
-        wit::sink::upsert(&wit::types::Document {
-            key: doc.key,
-            title: doc.title,
-            mime: doc.mime,
-            content: match doc.content {
-                Content::Text(t) => wit::types::Content::Text(t),
-                Content::Bytes(b) => wit::types::Content::Bytes(b),
-            },
-            version: doc.version,
-            modified_at: doc.modified_at,
-            url: doc.url,
-            metadata: doc.metadata.to_string(),
-        })
+        sys::sink_upsert(doc)
     }
 
     /// Queue a delete.
     pub fn delete(key: &str) -> Result<()> {
-        wit::sink::delete(key)
+        sys::sink_delete(key)
     }
 
     /// Commit `cursor` once everything sent before it is applied.
     pub fn checkpoint(cursor: &Value) -> Result<()> {
-        wit::sink::checkpoint(&cursor.to_string())
+        sys::sink_checkpoint(&cursor.to_string())
     }
 
     /// `(key, version)` of every item the store holds for this source.
     pub fn known_items() -> Result<Vec<(String, Option<String>)>> {
-        Ok(wit::sink::known_items()?
-            .into_iter()
-            .map(|k| (k.key, k.version))
-            .collect())
+        sys::sink_known_items()
     }
 
     /// Whether the host asked this sync to stop.
     pub fn cancelled() -> bool {
-        wit::sink::cancelled()
+        sys::sink_cancelled()
     }
 }

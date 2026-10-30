@@ -1,0 +1,68 @@
+# RSS / Atom feeds. The host only lets a plugin reach the hosts listed under `capabilities.hosts`,
+# and a feed URL is chosen by the user, so no static list can cover every feed. This manifest
+# declares common feed *platforms* (each listed host is shown to the user before they approve).
+# To follow a feed elsewhere, add its host here and reinstall the plugin: see README.md, "Hosts".
+id = "dev.nugget.rss"
+name = "RSS and Atom feeds"
+version = "0.1.0"
+description = "Indexes the entries of RSS 2.0, Atom and RSS 1.0 feeds with conditional requests, and offers a tool that lists a feed's latest headlines."
+kind = ["connector", "tool"]
+
+[capabilities]
+hosts = [
+    # Blog and newsletter platforms (each user's feed lives on a subdomain).
+    "*.substack.com",
+    "*.wordpress.com",
+    "*.blogspot.com",
+    "*.tumblr.com",
+    "*.ghost.io",
+    "*.bearblog.dev",
+    "*.micro.blog",
+    "*.hashnode.dev",
+    "*.github.io",
+    "medium.com",
+    "*.medium.com",
+    "dev.to",
+    # Feed services and aggregators.
+    "feeds.feedburner.com",
+    "hnrss.org",
+    "news.ycombinator.com",
+    "lobste.rs",
+    "www.reddit.com",
+    "rss.arxiv.org",
+    "export.arxiv.org",
+    # Code hosting (release and commit Atom feeds) and video channels.
+    "github.com",
+    "gitlab.com",
+    "www.youtube.com",
+    # The fediverse's largest instance (`https://mastodon.social/@user.rss`).
+    "mastodon.social",
+]
+# Per feed: ETag / Last-Modified and the ids and versions of the entries last seen.
+kv_max_bytes = 4194304
+
+[connector]
+display_name = "RSS / Atom feeds"
+poll_interval_secs = 1800
+
+[connector.settings_schema]
+type = "object"
+required = ["feeds"]
+
+[connector.settings_schema.properties.feeds]
+type = "array"
+title = "Feed URLs"
+description = "RSS or Atom feed addresses on a host this plugin declares."
+minItems = 1
+maxItems = 100
+
+[connector.settings_schema.properties.feeds.items]
+type = "string"
+format = "uri"
+
+[connector.settings_schema.properties.max_entries]
+type = "integer"
+title = "Entries per feed"
+description = "Most entries indexed from each feed per pass (newest first as the feed lists them)."
+minimum = 1
+maximum = 500

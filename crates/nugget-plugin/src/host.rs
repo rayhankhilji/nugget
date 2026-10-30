@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::{Duration, Instant};
 
@@ -40,6 +40,8 @@ mod bindings;
 use bindings::nugget::plugin::{clock, fs, http, kv, log, secrets, sink, types};
 use bindings::{Plugin, PluginPre};
 use types::PluginError;
+#[cfg(test)]
+pub(crate) use types::PluginError as PluginErrorForTests;
 
 /// How often the epoch advances. Wall-clock deadlines are rounded up to this.
 const EPOCH_TICK: Duration = Duration::from_millis(10);
@@ -95,10 +97,15 @@ pub struct Limits {
     pub max_fs_file_bytes: u64,
     /// Most entries in one folder listing; a larger folder fails to list.
     pub max_fs_dir_entries: usize,
-    /// Total bytes of files a connector may read in one `validate`.
+    /// Total bytes of files a connector may read in one `validate` (which only needs to check
+    /// the folder), counting bytes read by reads that then fail.
     pub max_fs_read_bytes_per_call: u64,
-    /// Total bytes of files a connector may read in one sync pass.
+    /// Total bytes of files a connector may read in one sync pass, counted the same way.
     pub max_fs_read_bytes_per_sync: u64,
+    /// `nugget:plugin/fs` calls (read-dir, read-file, stat) in one `validate`.
+    pub max_fs_ops_per_call: u32,
+    /// `nugget:plugin/fs` calls in one sync pass.
+    pub max_fs_ops_per_sync: u32,
 }
 
 impl Default for Limits {
@@ -119,8 +126,10 @@ impl Default for Limits {
             max_log_lines: 1000,
             max_fs_file_bytes: 16 * 1024 * 1024,
             max_fs_dir_entries: 10_000,
-            max_fs_read_bytes_per_call: 256 * 1024 * 1024,
+            max_fs_read_bytes_per_call: 4 * 1024 * 1024,
             max_fs_read_bytes_per_sync: 4 * 1024 * 1024 * 1024,
+            max_fs_ops_per_call: 1_000,
+            max_fs_ops_per_sync: 1_000_000,
         }
     }
 }
@@ -678,9 +687,15 @@ impl LoadedPlugin {
             Mode::Sync => limits.max_http_requests_per_sync,
             _ => limits.max_http_requests_per_call,
         };
-        let fs_read_budget = match mode {
-            Mode::Sync => limits.max_fs_read_bytes_per_sync,
-            _ => limits.max_fs_read_bytes_per_call,
+        let (fs_read_budget, fs_op_budget) = match mode {
+            Mode::Sync => (
+                limits.max_fs_read_bytes_per_sync,
+                limits.max_fs_ops_per_sync,
+            ),
+            _ => (
+                limits.max_fs_read_bytes_per_call,
+                limits.max_fs_ops_per_call,
+            ),
         };
         Ok(HostState {
             caps: self.caps.clone(),
@@ -697,6 +712,7 @@ impl LoadedPlugin {
             log_lines: 0,
             settings: None,
             fs_read_budget,
+            fs_op_budget,
         })
     }
 
@@ -933,6 +949,8 @@ pub(crate) struct HostState {
     settings: Option<Arc<Value>>,
     /// Bytes of files this call may still read.
     fs_read_budget: u64,
+    /// `nugget:plugin/fs` calls this call may still make.
+    fs_op_budget: u32,
 }
 
 /// Settings JSON as a value; anything unparsable resolves no file roots.
@@ -1212,7 +1230,7 @@ impl clock::Host for HostState {
 
 impl HostState {
     /// The user-chosen path behind file root `root`, if this call may read it.
-    fn fs_root(&self, root: &str) -> std::result::Result<String, PluginError> {
+    fn fs_root(&mut self, root: &str) -> std::result::Result<String, PluginError> {
         if self.cancel.is_cancelled() {
             return Err(PluginError::Cancelled);
         }
@@ -1226,6 +1244,10 @@ impl HostState {
                 "file root `{root}` is not declared in the manifest or not approved"
             )));
         }
+        if self.fs_op_budget == 0 {
+            return Err(self.deny("the file operation budget for this call is spent".into()));
+        }
+        self.fs_op_budget -= 1;
         match self.settings.as_deref().and_then(|s| s.get(root)) {
             Some(Value::String(p)) if !p.is_empty() => Ok(p.clone()),
             Some(Value::String(_)) | None | Some(Value::Null) => Err(PluginError::Invalid(
@@ -1237,19 +1259,32 @@ impl HostState {
         }
     }
 
-    /// Run blocking file IO: on the blocking pool during a sync, inline in `validate` (which
-    /// already runs to completion on the caller's thread, maybe outside any runtime).
+    /// Run blocking file IO without stalling the async runtime: on the blocking pool during a
+    /// sync; in `validate` (which runs to completion on the caller's thread through
+    /// `block_on`, possibly on a runtime worker) with `block_in_place` on a multi-thread
+    /// runtime, so a slow mount does not hold up the worker's other tasks, and inline otherwise.
     async fn fs_blocking<T: Send + 'static>(
         &self,
-        f: impl FnOnce() -> std::result::Result<T, PluginError> + Send + 'static,
+        f: impl FnOnce() -> T + Send + 'static,
     ) -> std::result::Result<T, PluginError> {
-        let r = match tokio::runtime::Handle::try_current() {
-            Ok(h) if self.mode == Mode::Sync => h
+        use tokio::runtime::{Handle, RuntimeFlavor};
+        let handle = Handle::try_current().ok();
+        Ok(match handle {
+            Some(h) if self.mode == Mode::Sync => h
                 .spawn_blocking(f)
                 .await
-                .unwrap_or_else(|_| Err(PluginError::Other("file access failed".into()))),
+                .map_err(|_| PluginError::Other("file access failed".into()))?,
+            Some(h) if h.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(f)
+            }
             _ => f(),
-        };
+        })
+    }
+
+    fn log_denial<T>(
+        &self,
+        r: std::result::Result<T, PluginError>,
+    ) -> std::result::Result<T, PluginError> {
         if let Err(PluginError::Denied(m)) = &r {
             tracing::warn!(plugin = %self.caps.id, "capability denied: {m}");
         }
@@ -1264,9 +1299,11 @@ impl fs::Host for HostState {
             Err(e) => return Ok(Err(e)),
         };
         let max = self.limits.max_fs_dir_entries;
-        Ok(self
+        let r = self
             .fs_blocking(move || fs_read_dir(&root_path, &path, max))
-            .await)
+            .await
+            .and_then(|r| r);
+        Ok(self.log_denial(r))
     }
 
     async fn read_file(&mut self, root: String, path: String) -> HostResult<Vec<u8>> {
@@ -1276,13 +1313,18 @@ impl fs::Host for HostState {
         };
         let max = self.limits.max_fs_file_bytes;
         let budget = self.fs_read_budget;
-        let r = self
+        let r = match self
             .fs_blocking(move || fs_read_file(&root_path, &path, max, budget))
-            .await;
-        if let Ok(bytes) = &r {
-            self.fs_read_budget = self.fs_read_budget.saturating_sub(bytes.len() as u64);
-        }
-        Ok(r)
+            .await
+        {
+            Ok((read, r)) => {
+                // Every byte read is charged, also when the read then fails.
+                self.fs_read_budget = self.fs_read_budget.saturating_sub(read);
+                r
+            }
+            Err(e) => Err(e),
+        };
+        Ok(self.log_denial(r))
     }
 
     async fn stat(&mut self, root: String, path: String) -> HostResult<fs::DirEntry> {
@@ -1290,7 +1332,11 @@ impl fs::Host for HostState {
             Ok(p) => p,
             Err(e) => return Ok(Err(e)),
         };
-        Ok(self.fs_blocking(move || fs_stat(&root_path, &path)).await)
+        let r = self
+            .fs_blocking(move || fs_stat(&root_path, &path))
+            .await
+            .and_then(|r| r);
+        Ok(self.log_denial(r))
     }
 }
 
@@ -1397,42 +1443,163 @@ fn fs_read_dir(
     Ok(out)
 }
 
+/// Read a file below the root. Returns the bytes actually read (to charge to the budget, also
+/// on failure) and the result.
+///
+/// The file is opened first (on Unix with `O_NONBLOCK`, so a FIFO swapped in after the path
+/// check cannot block the open), then the open handle is checked: it must be a regular file,
+/// and it must still be the file at a canonical path inside the root (on Linux the handle's own
+/// path from `/proc/self/fd`; elsewhere the path is canonicalized again and, on Unix, compared by
+/// device and inode). A rename racing between that check and the read remains possible on
+/// platforms without a handle-path query; it needs another local process to win the race.
 fn fs_read_file(
     root: &str,
     rel: &str,
     max_file: u64,
     budget: u64,
-) -> std::result::Result<Vec<u8>, PluginError> {
+) -> (u64, std::result::Result<Vec<u8>, PluginError>) {
+    let (root, path) = match fs_resolve(root, rel) {
+        Ok(v) => v,
+        Err(e) => return (0, Err(e)),
+    };
+    let file = match open_checked(&root, &path) {
+        Ok(f) => f,
+        Err(e) => return (0, Err(e)),
+    };
+    let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+    let too_large = || PluginError::Invalid(format!("the file is larger than {max_file} bytes"));
+    if size > max_file {
+        return (0, Err(too_large()));
+    }
+    if size > budget {
+        return (0, Err(spent_read_budget()));
+    }
+    read_limited(file, size, max_file, budget)
+}
+
+fn spent_read_budget() -> PluginError {
+    denied("the file read budget for this call is spent".to_string())
+}
+
+/// Read at most `min(max_file, budget) + 1` bytes from `r`, whatever its reported `size`
+/// (files grow, and some report a size smaller than what they yield). Returns the bytes read
+/// and the result.
+pub(crate) fn read_limited(
+    r: impl std::io::Read,
+    size: u64,
+    max_file: u64,
+    budget: u64,
+) -> (u64, std::result::Result<Vec<u8>, PluginError>) {
     use std::io::Read;
-    let (_, path) = fs_resolve(root, rel)?;
-    let meta = std::fs::metadata(&path).map_err(|e| io_err(&e))?;
-    // Not a folder, FIFO, socket or device (reading those could block or never end).
+    let cap = max_file.min(budget);
+    let mut buf = Vec::with_capacity(usize::try_from(size.min(cap)).unwrap_or(0));
+    // `read_to_end` keeps what it read before an error, so that is charged too.
+    let res = r.take(cap.saturating_add(1)).read_to_end(&mut buf);
+    let n = buf.len() as u64;
+    if let Err(e) = res {
+        return (n, Err(io_err(&e)));
+    }
+    if n > max_file {
+        return (
+            n,
+            Err(PluginError::Invalid(format!(
+                "the file is larger than {max_file} bytes"
+            ))),
+        );
+    }
+    if n > budget {
+        return (n, Err(spent_read_budget()));
+    }
+    (n, Ok(buf))
+}
+
+/// `O_NONBLOCK` for `open(2)`, by platform (no libc dependency).
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(not(any(
+    target_arch = "mips",
+    target_arch = "mips64",
+    target_arch = "sparc",
+    target_arch = "sparc64"
+)))]
+const O_NONBLOCK: i32 = 0o4000;
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "openbsd",
+    target_os = "netbsd",
+    target_os = "dragonfly"
+))]
+const O_NONBLOCK: i32 = 0x4;
+/// Elsewhere no flag: the `is_file` check before opening still applies.
+#[cfg(all(
+    unix,
+    not(any(
+        all(
+            any(target_os = "linux", target_os = "android"),
+            not(any(
+                target_arch = "mips",
+                target_arch = "mips64",
+                target_arch = "sparc",
+                target_arch = "sparc64"
+            ))
+        ),
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly"
+    ))
+))]
+const O_NONBLOCK: i32 = 0;
+
+/// Open canonical `path` (inside canonical `root`) for reading and check the open handle.
+fn open_checked(root: &Path, path: &Path) -> std::result::Result<std::fs::File, PluginError> {
+    // Cheap pre-check: don't even open folders, FIFOs, sockets or devices.
+    let meta = std::fs::metadata(path).map_err(|e| io_err(&e))?;
     if !meta.is_file() {
         return Err(PluginError::Invalid("not a regular file".into()));
     }
-    let too_large = || PluginError::Invalid(format!("the file is larger than {max_file} bytes"));
-    let spent = || denied("the file read budget for this call is spent".to_string());
-    if meta.len() > max_file {
-        return Err(too_large());
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(O_NONBLOCK);
     }
-    if meta.len() > budget {
-        return Err(spent());
+    let file = opts.open(path).map_err(|e| io_err(&e))?;
+    let opened = file.metadata().map_err(|e| io_err(&e))?;
+    if !opened.is_file() {
+        return Err(PluginError::Invalid("not a regular file".into()));
     }
-    let file = std::fs::File::open(&path).map_err(|e| io_err(&e))?;
-    // The file may grow between the check and the read: never read past the caps.
-    let cap = max_file.min(budget);
-    let mut buf = Vec::with_capacity(usize::try_from(meta.len()).unwrap_or(0));
-    file.take(cap.saturating_add(1))
-        .read_to_end(&mut buf)
-        .map_err(|e| io_err(&e))?;
-    let n = buf.len() as u64;
-    if n > max_file {
-        return Err(too_large());
+    let escaped = || denied("the file left the folder the user chose".to_string());
+    // Where the handle really points.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::fd::AsRawFd;
+        if let Ok(real) = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd())) {
+            return if crate::fs::is_within(root, &real) {
+                Ok(file)
+            } else {
+                Err(escaped())
+            };
+        }
     }
-    if n > budget {
-        return Err(spent());
+    // Without a handle-path query: the path must still lead inside the root, to this file.
+    let again = std::fs::canonicalize(path).map_err(|e| io_err(&e))?;
+    if !crate::fs::is_within(root, &again) {
+        return Err(escaped());
     }
-    Ok(buf)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let now = std::fs::metadata(&again).map_err(|e| io_err(&e))?;
+        if (now.dev(), now.ino()) != (opened.dev(), opened.ino()) {
+            return Err(escaped());
+        }
+    }
+    Ok(file)
 }
 
 impl sink::Host for HostState {

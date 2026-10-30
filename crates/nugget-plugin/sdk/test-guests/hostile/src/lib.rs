@@ -168,7 +168,7 @@ impl Connector for Hostile {
     }
 }
 
-/// `{"op": "read" | "list" | "stat" | "read_many", "root": "<file root>", "path": "<rel>",
+/// `{"op": "read" | "list" | "list_loop" | "stat" | "read_many", "root": "<file root>", "path": "<rel>",
 /// "paths": [...]}`. `read` returns the length and (UTF-8 lossy) text of the file; `read_many`
 /// reads every path in turn and returns the total length.
 fn fs_op(args: &Value) -> Result<Value> {
@@ -186,6 +186,14 @@ fn fs_op(args: &Value) -> Result<Value> {
                 total += fs::read_file(root, p.as_str().unwrap_or_default())?.len();
             }
             Ok(json!({ "len": total }))
+        }
+        // List the same folder `times` times (the op budget must stop it).
+        "list_loop" => {
+            let times = args["times"].as_u64().unwrap_or(1_000_000);
+            for _ in 0..times {
+                fs::read_dir(root, path)?;
+            }
+            Ok(json!({ "times": times }))
         }
         "list" => Ok(Value::Array(
             fs::read_dir(root, path)?.into_iter().map(entry).collect(),

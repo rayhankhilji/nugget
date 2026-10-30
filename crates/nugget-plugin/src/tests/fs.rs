@@ -220,3 +220,108 @@ fn windows_verbatim_roots_compare_consistently() {
     assert!(p.starts_with(&root));
     assert!(matches!(resolve(&root, "C:"), Err(Error::Invalid(_))));
 }
+
+/// Directory symlinks need a privilege (or developer mode) on Windows: skip without it.
+#[cfg(windows)]
+#[test]
+fn windows_symlinks_out_of_the_root_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("vault");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(dir.path().join("private")).unwrap();
+    std::fs::write(dir.path().join("private").join("key"), "secret").unwrap();
+    if let Err(e) = std::os::windows::fs::symlink_dir(dir.path().join("private"), root.join("priv"))
+    {
+        eprintln!("WARNING: cannot create symlinks here ({e}); skipping");
+        return;
+    }
+    let root = canonical_root(root.to_str().unwrap()).unwrap();
+    assert!(matches!(
+        resolve(&root, "priv/key"),
+        Err(Error::Unauthorized(_))
+    ));
+    assert!(matches!(
+        resolve(&root, "priv"),
+        Err(Error::Unauthorized(_))
+    ));
+}
+
+/// A reader that yields more than the size it reported, then fails.
+struct Lying {
+    left: usize,
+    fail: bool,
+}
+
+impl std::io::Read for Lying {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.left == 0 {
+            return if self.fail {
+                Err(std::io::Error::other("boom"))
+            } else {
+                Ok(0)
+            };
+        }
+        let n = buf.len().min(self.left).min(100);
+        buf[..n].fill(b'x');
+        self.left -= n;
+        Ok(n)
+    }
+}
+
+#[test]
+fn bytes_read_are_charged_even_when_the_read_fails() {
+    use crate::host::read_limited;
+    // Reports 10 bytes, yields 5000: stops at the cap (1024 + 1) and charges what it read.
+    let (n, r) = read_limited(
+        Lying {
+            left: 5000,
+            fail: false,
+        },
+        10,
+        1024,
+        1 << 20,
+    );
+    assert_eq!(n, 1025);
+    assert!(matches!(
+        r,
+        Err(crate::host::PluginErrorForTests::Invalid(_))
+    ));
+    // Budget smaller than the file cap: stops at budget + 1, a denial, still charged.
+    let (n, r) = read_limited(
+        Lying {
+            left: 5000,
+            fail: false,
+        },
+        10,
+        1024,
+        300,
+    );
+    assert_eq!(n, 301);
+    assert!(matches!(
+        r,
+        Err(crate::host::PluginErrorForTests::Denied(_))
+    ));
+    // An IO error part-way: the 200 bytes read before it are charged.
+    let (n, r) = read_limited(
+        Lying {
+            left: 200,
+            fail: true,
+        },
+        10,
+        1024,
+        1 << 20,
+    );
+    assert_eq!(n, 200);
+    assert!(r.is_err());
+    // Within the caps: all of it.
+    let (n, r) = read_limited(
+        Lying {
+            left: 500,
+            fail: false,
+        },
+        500,
+        1024,
+        1 << 20,
+    );
+    assert_eq!((n, r.unwrap().len()), (500, 500));
+}

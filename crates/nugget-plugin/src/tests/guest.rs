@@ -969,6 +969,24 @@ async fn relative_paths_cannot_leave_the_root() {
     }
     let r = fs_sync(&fx, fs_settings(&root, "read", "missing.txt")).await;
     assert!(matches!(r, Err(Error::NotFound(_))), "{r:?}");
+    // Everything above fails the syntax check. A path that passes it can only leave the root
+    // through a symlink, so containment proper is tested in `symlinks_cannot_escape_the_root`
+    // (and `tests::fs`); one such case here, where symlinks can be made without privileges.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            std::path::Path::new(&root).parent().unwrap(),
+            std::path::Path::new(&root).join("parent"),
+        )
+        .unwrap();
+        crate::fs::check_relative("parent/secret.txt").unwrap();
+        for op in ["read", "stat"] {
+            assert_denied(
+                fs_sync(&fx, fs_settings(&root, op, "parent/secret.txt")).await,
+                "syntactically valid escape",
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -1023,10 +1041,11 @@ async fn symlinks_cannot_escape_the_root() {
         ("list", "slash"),
         ("read", "slash/etc/hosts"),
     ] {
+        // `/etc/hosts` exists on every Unix CI runner: an escape that exists is always a
+        // denial, never "not found".
         let res = fs_sync(&fx, fs_settings(&root, op, path)).await;
         match res {
             Err(Error::Other(m)) if m.contains("capability denied") => {}
-            Err(Error::NotFound(_)) if path.starts_with("slash/") => {}
             other => panic!("{op} {path}: expected a denial, got {other:?}"),
         }
     }
@@ -1167,4 +1186,88 @@ async fn sync_memory_is_capped() {
     assert_err_contains(r, "memory limit");
     let (r, _) = fx.sync(json!({ "mode": "alloc", "mib": 4 }), None).await;
     r.unwrap();
+}
+
+#[tokio::test]
+async fn the_fs_op_budget_stops_a_listing_loop() {
+    let (_tmp, root) = vault();
+    let limits = Limits {
+        max_fs_ops_per_sync: 5,
+        max_fs_ops_per_call: 3,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with(FS_CAPS, limits) else {
+        return;
+    };
+    let mut lp = fs_settings(&root, "list_loop", "");
+    lp["times"] = json!(5);
+    assert_eq!(fs_sync(&fx, lp.clone()).await.unwrap()["times"], 5);
+    lp["times"] = json!(1_000_000);
+    let started = std::time::Instant::now();
+    match fs_sync(&fx, lp).await {
+        Err(Error::Other(m))
+            if m.contains("capability denied") && m.contains("operation budget") => {}
+        other => panic!("expected the op budget to stop the loop, got {other:?}"),
+    }
+    assert!(started.elapsed() < Duration::from_secs(10));
+    // `validate` has its own, smaller budget.
+    let factory = fx.factory();
+    let v = |times: u64| json!({ "folder": root, "fs": { "root": "folder", "op": "list_loop", "path": "", "times": times } });
+    factory.validate(&v(3)).unwrap();
+    let err = factory.validate(&v(4)).unwrap_err();
+    assert!(err.to_string().contains("operation budget"), "{err}");
+}
+
+#[tokio::test]
+async fn fs_errors_do_not_reveal_host_paths() {
+    let (tmp, root) = vault();
+    let canon = std::fs::canonicalize(&root).unwrap();
+    let canon = canon.to_str().unwrap().to_string();
+    let parent = std::fs::canonicalize(tmp.path()).unwrap();
+    let parent = parent.to_str().unwrap().to_string();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(
+        tmp.path().join("secret.txt"),
+        std::path::Path::new(&root).join("leak"),
+    )
+    .unwrap();
+    std::fs::write(std::path::Path::new(&root).join("big.bin"), vec![0u8; 4096]).unwrap();
+    let limits = Limits {
+        max_fs_file_bytes: 1024,
+        ..test_limits()
+    };
+    let Some(fx) = hostile_with(FS_CAPS, limits) else {
+        return;
+    };
+    let mut errors = Vec::new();
+    for (op, path) in [
+        ("read", "missing.txt"),
+        ("read", "../secret.txt"),
+        ("read", "sub"),
+        ("list", "a.txt"),
+        ("read", "big.bin"),
+        ("read", "leak"),
+        ("stat", "leak"),
+        ("list", "nope"),
+    ] {
+        errors.push(
+            fs_sync(&fx, fs_settings(&root, op, path))
+                .await
+                .unwrap_err()
+                .to_string(),
+        );
+    }
+    let missing = std::path::Path::new(&root).join("gone");
+    errors.push(
+        fs_sync(&fx, fs_settings(missing.to_str().unwrap(), "list", ""))
+            .await
+            .unwrap_err()
+            .to_string(),
+    );
+    for e in &errors {
+        assert!(
+            !e.contains(&canon) && !e.contains(&parent) && !e.contains(&root),
+            "{e}"
+        );
+    }
 }

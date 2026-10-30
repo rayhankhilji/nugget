@@ -73,6 +73,8 @@ pub enum Outcome {
     /// Bad arguments or not found.
     Rejected,
     Error,
+    /// The client cancelled the request (`notifications/cancelled`) before it finished.
+    Cancelled,
 }
 
 impl Outcome {
@@ -82,6 +84,7 @@ impl Outcome {
             Self::Denied => "denied",
             Self::Rejected => "rejected",
             Self::Error => "error",
+            Self::Cancelled => "cancelled",
         }
     }
 }

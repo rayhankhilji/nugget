@@ -6,8 +6,9 @@
 //!   ([`connector_factories`]) and the feature ([`start`]) share the same loaded plugins.
 //! - **IPC.** `plugins.list`, `plugins.inspect`, `plugins.install` (verify and stage a local
 //!   package for 10 minutes), `plugins.approve` (commit or discard it), `plugins.enable`,
-//!   `plugins.remove`. Every mutation is audited (`plugin.install`, `plugin.approve`,
-//!   `plugin.reject`, `plugin.remove`, `plugin.enable`, `plugin.disable`).
+//!   `plugins.remove`, `plugins.catalog` (packages available to install, see below). Every
+//!   mutation is audited (`plugin.install`, `plugin.approve`, `plugin.reject`, `plugin.remove`,
+//!   `plugin.enable`, `plugin.disable`).
 //! - **Trust.** A package must be signed by a key in `[plugins] trusted_keys`. With
 //!   `dev_mode = true`, an unsigned package (empty signature) is signed at install with the
 //!   daemon's dev key: an ed25519 seed kept in the secret store under
@@ -24,6 +25,14 @@
 //!   starts. Each sync runs the plugin as currently loaded, so an update, a disable or a removal
 //!   takes effect on the next sync. **Known gap:** a connector plugin installed while the daemon
 //!   runs becomes a source kind only after a daemon restart. Tools update live ([`agent_tools`]).
+//! - **Catalog.** `plugins.catalog` lists the `*.nuggetplugin` files (non-recursive, at most
+//!   [`MAX_CATALOG_ENTRIES`]) in the catalog directories: `[plugins] catalog_dirs` (absolute
+//!   paths; default `<data>/plugin-catalog`) plus the entries of `NUGGET_PLUGIN_CATALOG` (a
+//!   PATH-style list a package or launcher can set to ship plugins with the app). Each package is
+//!   verified exactly as `plugins.install` would (signature against the trusted keys, manifest,
+//!   update rules) but nothing is installed or staged; the UI installs one through the normal
+//!   `plugins.install` / `plugins.approve` flow with the entry's path. A package that cannot be
+//!   read or verified is listed with its error and never fails the listing.
 //! - **Egress and secrets for tools** go to the daemon's ledger and secret store; until [`start`]
 //!   binds them (no tool can run before), nothing is recorded and secrets are unavailable.
 
@@ -38,9 +47,10 @@ use nugget_connector::{
 };
 use nugget_core::egress::{EgressEvent, EgressSink};
 use nugget_core::ipc::{
-    PluginApproveParams, PluginApproveResult, PluginCapabilities, PluginEnableParams,
-    PluginIdParams, PluginInfo, PluginInspectResult, PluginInstallParams, PluginInstallResult,
-    PluginListResult, PluginRemoveResult, PluginSignature, plugin_method,
+    PluginApproveParams, PluginApproveResult, PluginCapabilities, PluginCatalogEntry,
+    PluginCatalogResult, PluginEnableParams, PluginIdParams, PluginInfo, PluginInspectResult,
+    PluginInstallParams, PluginInstallResult, PluginListResult, PluginRemoveResult,
+    PluginSignature, plugin_method,
 };
 use nugget_core::paths::Paths;
 use nugget_core::{Error, Result};
@@ -68,6 +78,12 @@ const DEV_PUB_FILE: &str = "dev-signing-key.pub";
 const STAGE_TTL: Duration = Duration::from_secs(10 * 60);
 /// Most staged installs at once; the oldest is dropped beyond this.
 const MAX_STAGED: usize = 8;
+/// Default catalog directory, under the data dir.
+const CATALOG_DIR: &str = "plugin-catalog";
+/// Extra catalog directories (a PATH-style list of absolute paths), e.g. set by a package.
+const CATALOG_ENV: &str = "NUGGET_PLUGIN_CATALOG";
+/// Most packages `plugins.catalog` reads (over all directories).
+const MAX_CATALOG_ENTRIES: usize = 64;
 
 const METHODS: &[&str] = &[
     plugin_method::LIST,
@@ -76,6 +92,7 @@ const METHODS: &[&str] = &[
     plugin_method::APPROVE,
     plugin_method::REMOVE,
     plugin_method::ENABLE,
+    plugin_method::CATALOG,
 ];
 
 // ---- config ----
@@ -87,6 +104,7 @@ struct PluginsSection {
     enabled: bool,
     trusted_keys: Vec<String>,
     dev_mode: bool,
+    catalog_dirs: Vec<PathBuf>,
 }
 
 impl Default for PluginsSection {
@@ -95,6 +113,7 @@ impl Default for PluginsSection {
             enabled: true,
             trusted_keys: Vec::new(),
             dev_mode: false,
+            catalog_dirs: Vec::new(),
         }
     }
 }
@@ -105,6 +124,8 @@ struct Settings {
     enabled: bool,
     trusted: Vec<VerifyingKey>,
     dev_mode: bool,
+    /// Configured catalog directories (empty: the default one).
+    catalog_dirs: Vec<PathBuf>,
 }
 
 fn settings(config: &Config) -> Result<Settings> {
@@ -118,11 +139,47 @@ fn settings(config: &Config) -> Result<Settings> {
                 .map_err(|e| Error::Invalid(format!("[plugins] trusted_keys[{i}]: {e}")))
         })
         .collect::<Result<Vec<_>>>()?;
+    if let Some(dir) = raw.catalog_dirs.iter().find(|d| !d.is_absolute()) {
+        return Err(Error::Invalid(format!(
+            "[plugins] catalog_dirs: not an absolute path: {}",
+            dir.display()
+        )));
+    }
     Ok(Settings {
         enabled: raw.enabled,
         trusted,
         dev_mode: raw.dev_mode,
+        catalog_dirs: raw.catalog_dirs,
     })
+}
+
+/// The catalog directories: the configured ones (or `<data>/plugin-catalog`), then the absolute
+/// entries of `env` (the value of [`CATALOG_ENV`]), without duplicates.
+fn catalog_dirs(
+    configured: &[PathBuf],
+    data: &Path,
+    env: Option<std::ffi::OsString>,
+) -> Vec<PathBuf> {
+    let mut dirs = if configured.is_empty() {
+        vec![data.join(CATALOG_DIR)]
+    } else {
+        configured.to_vec()
+    };
+    if let Some(env) = env {
+        for dir in std::env::split_paths(&env) {
+            if dir.as_os_str().is_empty() {
+                continue;
+            }
+            if !dir.is_absolute() {
+                tracing::warn!(dir = %dir.display(), "{CATALOG_ENV}: ignoring a relative path");
+                continue;
+            }
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    dirs
 }
 
 // ---- late-bound egress and secrets ----
@@ -190,6 +247,8 @@ struct Runtime {
     dev_key: Mutex<Option<VerifyingKey>>,
     /// Enabled plugins by id (disabled ones have no slot).
     slots: Mutex<HashMap<String, Slot>>,
+    /// Where `plugins.catalog` looks for packages.
+    catalog_dirs: Vec<PathBuf>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -224,6 +283,11 @@ impl Runtime {
             http_client: None,
             allow_private_network: false,
         })?;
+        let catalog_dirs = catalog_dirs(
+            &settings.catalog_dirs,
+            &paths.data,
+            std::env::var_os(CATALOG_ENV),
+        );
         let dev_key = if settings.dev_mode {
             std::fs::read_to_string(store.root().join(DEV_PUB_FILE))
                 .ok()
@@ -239,6 +303,7 @@ impl Runtime {
             secrets,
             dev_key: Mutex::new(dev_key),
             slots: Mutex::new(HashMap::new()),
+            catalog_dirs,
         })
     }
 
@@ -459,6 +524,160 @@ fn caps(c: &Capabilities) -> PluginCapabilities {
         hosts: c.hosts.clone(),
         secrets: c.secrets.clone(),
         kv_max_bytes: c.kv_max_bytes,
+        file_roots: c.file_roots.clone(),
+    }
+}
+
+// ---- catalog ----
+
+/// What a catalog scan found.
+enum Found {
+    Package(PathBuf),
+    /// A catalog directory that exists but cannot be read, and why.
+    Unreadable(PathBuf, String),
+}
+
+/// The package files in the catalog directories, sorted by directory then name, at most
+/// [`MAX_CATALOG_ENTRIES`] (the flag says whether more were found). A directory that does not
+/// exist is skipped; one that cannot be read is reported.
+fn scan_catalog(dirs: &[PathBuf]) -> (Vec<Found>, bool) {
+    let mut out = Vec::new();
+    let mut truncated = false;
+    for dir in dirs {
+        let read = match std::fs::read_dir(dir) {
+            Ok(r) => r,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                out.push(Found::Unreadable(
+                    dir.clone(),
+                    format!("cannot read the folder: {e}"),
+                ));
+                continue;
+            }
+        };
+        let mut files: Vec<PathBuf> = read
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(PACKAGE_EXTENSION))
+            // Follows symlinks: a packager may link packages in. Directories are not listed.
+            .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file()))
+            .collect();
+        files.sort();
+        for f in files {
+            if out.len() >= MAX_CATALOG_ENTRIES {
+                truncated = true;
+                break;
+            }
+            out.push(Found::Package(f));
+        }
+        if truncated {
+            break;
+        }
+    }
+    (out, truncated)
+}
+
+impl Runtime {
+    /// Describe one catalog package as `plugins.install` would see it, without installing it.
+    /// Reads and verifies the file: call from a blocking thread.
+    fn catalog_entry(&self, path: &Path) -> PluginCatalogEntry {
+        let mut entry = PluginCatalogEntry {
+            path: path.display().to_string(),
+            file_name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            ..Default::default()
+        };
+        if let Err(e) = self.describe(path, &mut entry) {
+            entry.error = Some(e.to_string());
+        }
+        entry
+    }
+
+    fn describe(&self, path: &Path, entry: &mut PluginCatalogEntry) -> Result<()> {
+        let package = read_package(path)?;
+        let trusted = self.trusted_keys();
+        let unsigned = package.signature.is_empty();
+        let manifest = if unsigned {
+            if !self.settings.dev_mode {
+                return Err(Error::Unauthorized(
+                    "the plugin package is unsigned; unsigned plugins install only with \
+                     [plugins] dev_mode = true"
+                        .into(),
+                ));
+            }
+            // `plugins.install` signs it with the dev key.
+            entry.signature = PluginSignature::Dev;
+            Manifest::parse(&package.manifest)?
+        } else {
+            if trusted.is_empty() {
+                return Err(Error::Unauthorized(
+                    "no plugin signing key is trusted yet: add the publisher's public key to \
+                     [plugins] trusted_keys"
+                        .into(),
+                ));
+            }
+            // The signature is checked before the manifest is parsed.
+            let verified = package.verify(&trusted).map_err(|e| {
+                Error::Unauthorized(format!(
+                    "{e}: the publisher's key is not in [plugins] trusted_keys, or the file was \
+                     changed after signing"
+                ))
+            })?;
+            entry.signer = hex(verified.signer.as_bytes());
+            entry.signature = self.signature(&entry.signer);
+            verified.manifest
+        };
+        entry.id = manifest.id.clone();
+        entry.name = manifest.name.clone();
+        entry.version = manifest.version.to_string();
+        entry.description = manifest.description.clone();
+        entry.kinds = kinds(&manifest);
+        entry.requested = caps(&manifest.capabilities);
+        entry.connector_display_name = manifest.connector.as_ref().map(|c| c.display_name.clone());
+
+        let installed = self.store.get(&manifest.id)?;
+        entry.installed_version = installed.as_ref().map(|i| i.manifest.version.to_string());
+        match installed {
+            Some(old) if old.manifest.version >= manifest.version => {}
+            Some(old) if unsigned => {
+                entry.update_available = true;
+                entry.needs_approval = !manifest.capabilities.is_subset_of(&old.approved);
+            }
+            None if unsigned => entry.needs_approval = true,
+            _ => {
+                // The same checks `plugins.install` runs (signer, seal, downgrade), writing nothing.
+                let preview = self.store.preview(&package, &trusted)?;
+                entry.update_available = preview.installed_version.is_some();
+                entry.needs_approval = preview.needs_approval;
+            }
+        }
+        Ok(())
+    }
+
+    fn catalog(&self) -> PluginCatalogResult {
+        let (found, truncated) = scan_catalog(&self.catalog_dirs);
+        let entries = found
+            .into_iter()
+            .map(|f| match f {
+                Found::Package(path) => self.catalog_entry(&path),
+                Found::Unreadable(dir, error) => PluginCatalogEntry {
+                    path: dir.display().to_string(),
+                    error: Some(error),
+                    ..Default::default()
+                },
+            })
+            .collect();
+        PluginCatalogResult {
+            entries,
+            dirs: self
+                .catalog_dirs
+                .iter()
+                .map(|d| d.display().to_string())
+                .collect(),
+            truncated,
+        }
     }
 }
 
@@ -751,6 +970,11 @@ impl Plugins {
         Ok(PluginListResult {
             plugins: list.iter().map(|p| self.rt.info(p)).collect(),
         })
+    }
+
+    async fn catalog(&self) -> Result<PluginCatalogResult> {
+        let rt = self.rt.clone();
+        blocking(move || Ok(rt.catalog())).await
     }
 
     async fn inspect(&self, p: PluginIdParams) -> Result<PluginInspectResult> {
@@ -1063,6 +1287,7 @@ impl Feature for Plugins {
             plugin_method::APPROVE => to_result(self.approve(parse_params(params)?).await?),
             plugin_method::REMOVE => to_result(self.remove(parse_params(params)?).await?),
             plugin_method::ENABLE => to_result(self.enable(parse_params(params)?).await?),
+            plugin_method::CATALOG => to_result(self.catalog().await?),
             other => Err(RpcError::method_not_found(other)),
         }
     }
@@ -1422,6 +1647,289 @@ mod tests {
         assert_eq!(info.signature, PluginSignature::Untrusted);
         assert!(!info.loaded);
         assert!(info.error.as_deref().unwrap().contains("dev_mode"));
+    }
+
+    fn catalog_cfg(seed: u8, dir: &Path) -> String {
+        format!(
+            "[plugins]\ntrusted_keys = [\"{}\"]\ncatalog_dirs = [{}]\n",
+            pubhex(seed),
+            toml_str(dir)
+        )
+    }
+
+    /// A TOML basic string holding `p` (Windows paths have backslashes).
+    fn toml_str(p: &Path) -> String {
+        serde_json::to_string(&p.display().to_string()).unwrap()
+    }
+
+    #[test]
+    fn catalog_dirs_default_config_and_env() {
+        let data = std::env::temp_dir().join("nugget-data");
+        let a = std::env::temp_dir().join("cat-a");
+        let b = std::env::temp_dir().join("cat-b");
+        assert_eq!(catalog_dirs(&[], &data, None), [data.join(CATALOG_DIR)]);
+        assert_eq!(
+            catalog_dirs(std::slice::from_ref(&a), &data, None),
+            std::slice::from_ref(&a)
+        );
+        let env = std::env::join_paths([b.clone(), a.clone(), PathBuf::from("relative")]).unwrap();
+        assert_eq!(
+            catalog_dirs(std::slice::from_ref(&a), &data, Some(env)),
+            [a.clone(), b.clone()]
+        );
+        assert_eq!(
+            catalog_dirs(&[], &data, Some(std::ffi::OsString::new())),
+            [data.join(CATALOG_DIR)]
+        );
+        // Relative catalog dirs are a config error.
+        let bad = Config::parse("[plugins]\ncatalog_dirs = [\"plugins\"]\n").unwrap();
+        let err = settings(&bad).unwrap_err().to_string();
+        assert!(err.contains("catalog_dirs"), "{err}");
+        let ok = Config::parse(&catalog_cfg(1, &a)).unwrap();
+        assert_eq!(settings(&ok).unwrap().catalog_dirs, [a]);
+    }
+
+    #[tokio::test]
+    async fn catalog_lists_verified_packages_without_installing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = tmp.path().join("catalog");
+        // A missing catalog dir is an empty catalog.
+        let fx = Fx::at(tmp.path(), &catalog_cfg(1, &cat)).await;
+        let r = fx.f.catalog().await.unwrap();
+        assert!(r.entries.is_empty() && !r.truncated);
+        assert_eq!(r.dirs, [cat.display().to_string()]);
+
+        std::fs::create_dir_all(cat.join("dir.nuggetplugin")).unwrap();
+        std::fs::write(cat.join("notes.txt"), b"ignored").unwrap();
+        std::fs::write(cat.join("junk.nuggetplugin"), b"not a package").unwrap();
+        let write = |name: &str, pkg: &PluginPackage| {
+            pkg.write_file(&cat.join(format!("{name}.{PACKAGE_EXTENSION}")))
+                .unwrap()
+        };
+        write(
+            "a-tool",
+            &signed("dev.test.tool", "1.0.0", "hosts = [\"example.com\"]", 1),
+        );
+        write("b-other", &signed("dev.test.other", "1.0.0", "", 9));
+        write(
+            "c-unsigned",
+            &PluginPackage {
+                manifest: manifest("dev.test.raw", "1.0.0", "[\"tool\"]", "").into_bytes(),
+                wasm: EMPTY_COMPONENT.to_vec(),
+                signature: Vec::new(),
+            },
+        );
+
+        let r = fx.f.catalog().await.unwrap();
+        let names: Vec<&str> = r.entries.iter().map(|e| e.file_name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "a-tool.nuggetplugin",
+                "b-other.nuggetplugin",
+                "c-unsigned.nuggetplugin",
+                "junk.nuggetplugin"
+            ]
+        );
+        let tool = &r.entries[0];
+        assert_eq!(tool.error, None);
+        assert_eq!(tool.id, "dev.test.tool");
+        assert_eq!(tool.name, "Test plugin");
+        assert_eq!(tool.version, "1.0.0");
+        assert_eq!(tool.kinds, ["tool"]);
+        assert_eq!(tool.requested.hosts, ["example.com"]);
+        assert_eq!(tool.signature, PluginSignature::Trusted);
+        assert_eq!(tool.signer, pubhex(1));
+        assert!(tool.needs_approval && !tool.update_available);
+        assert_eq!(tool.installed_version, None);
+        assert!(Path::new(&tool.path).is_absolute());
+        // Untrusted, unsigned (no dev mode) and corrupt packages: listed with an error, and
+        // nothing from an unverified manifest is shown.
+        for e in &r.entries[1..] {
+            assert!(e.error.is_some(), "{e:?}");
+            assert_eq!(e.signature, PluginSignature::Untrusted);
+            assert!(e.id.is_empty() && e.name.is_empty(), "{e:?}");
+        }
+        assert!(
+            r.entries[1]
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("trusted_keys")
+        );
+        assert!(r.entries[2].error.as_deref().unwrap().contains("dev_mode"));
+        // Listing installs, stages and audits nothing.
+        assert!(fx.f.list().await.unwrap().plugins.is_empty());
+        assert!(lock(&fx.f.staged).is_empty());
+        assert!(fx.actions().is_empty());
+
+        // Installing an entry goes through the normal flow with its path.
+        let staged = fx.install(&tool.path).await.unwrap();
+        assert!(staged.needs_approval);
+        fx.approve(&staged.token, true)
+            .await
+            .unwrap()
+            .plugin
+            .unwrap();
+        let r = fx.f.catalog().await.unwrap();
+        let tool = &r.entries[0];
+        assert_eq!(tool.installed_version.as_deref(), Some("1.0.0"));
+        assert!(!tool.update_available && !tool.needs_approval && tool.error.is_none());
+
+        // A newer version is an update; one within the approved access needs no approval.
+        write(
+            "a-tool",
+            &signed("dev.test.tool", "1.1.0", "hosts = [\"example.com\"]", 1),
+        );
+        let tool = &fx.f.catalog().await.unwrap().entries[0];
+        assert_eq!(tool.version, "1.1.0");
+        assert_eq!(tool.installed_version.as_deref(), Some("1.0.0"));
+        assert!(tool.update_available && !tool.needs_approval, "{tool:?}");
+        write(
+            "a-tool",
+            &signed("dev.test.tool", "1.2.0", "secrets = [\"t\"]", 1),
+        );
+        let tool = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(tool.update_available && tool.needs_approval, "{tool:?}");
+        // An older version than installed is not offered.
+        write("a-tool", &signed("dev.test.tool", "0.9.0", "", 1));
+        let tool = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(!tool.update_available && tool.error.is_none(), "{tool:?}");
+        assert_eq!(fx.actions(), ["plugin.install", "plugin.approve"]);
+    }
+
+    #[tokio::test]
+    async fn catalog_in_dev_mode_offers_unsigned_packages_and_caps_the_listing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = tmp.path().join("catalog");
+        std::fs::create_dir_all(&cat).unwrap();
+        let cfg = format!(
+            "[plugins]\ndev_mode = true\ncatalog_dirs = [{}]\n",
+            toml_str(&cat)
+        );
+        let fx = Fx::at(tmp.path(), &cfg).await;
+        for i in 0..MAX_CATALOG_ENTRIES + 3 {
+            PluginPackage {
+                manifest: manifest(&format!("dev.test.p{i:03}"), "1.0.0", "[\"tool\"]", "")
+                    .into_bytes(),
+                wasm: EMPTY_COMPONENT.to_vec(),
+                signature: Vec::new(),
+            }
+            .write_file(&cat.join(format!("p{i:03}.{PACKAGE_EXTENSION}")))
+            .unwrap();
+        }
+        let r = fx.f.catalog().await.unwrap();
+        assert!(r.truncated);
+        assert_eq!(r.entries.len(), MAX_CATALOG_ENTRIES);
+        let first = &r.entries[0];
+        assert_eq!(first.id, "dev.test.p000");
+        assert_eq!(first.signature, PluginSignature::Dev);
+        assert!(first.error.is_none() && first.needs_approval && first.signer.is_empty());
+        // No dev key was created just by listing.
+        assert_eq!(fx.secrets.get(DEV_KEY_ACCOUNT).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn catalog_and_install_report_file_roots() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = tmp.path().join("catalog");
+        std::fs::create_dir_all(&cat).unwrap();
+        let fx = Fx::at(tmp.path(), &catalog_cfg(1, &cat)).await;
+        let manifest = "id = \"dev.test.vault\"\nname = \"Vault\"\nversion = \"1.0.0\"\n\
+            description = \"test\"\nkind = [\"connector\"]\n\n[capabilities]\n\
+            file_roots = [\"vault\"]\n\n[connector]\ndisplay_name = \"Vault\"\n\
+            settings_schema = { type = \"object\", properties = { vault = { type = \"string\" } } }\n";
+        let path = cat.join(format!("vault.{PACKAGE_EXTENSION}"));
+        PluginPackage::sign(manifest.into(), EMPTY_COMPONENT.to_vec(), &key(1))
+            .write_file(&path)
+            .unwrap();
+        let r = fx.f.catalog().await.unwrap();
+        let e = &r.entries[0];
+        assert_eq!(e.error, None);
+        assert_eq!(e.requested.file_roots, ["vault"]);
+        assert_eq!(e.connector_display_name.as_deref(), Some("Vault"));
+        let v = serde_json::to_value(e).unwrap();
+        assert_eq!(v["requested"]["file_roots"], json!(["vault"]));
+        let staged = fx.install(&e.path).await.unwrap();
+        assert_eq!(staged.requested.file_roots, ["vault"]);
+        let info = fx
+            .approve(&staged.token, true)
+            .await
+            .unwrap()
+            .plugin
+            .unwrap();
+        assert_eq!(info.approved.file_roots, ["vault"]);
+    }
+
+    #[tokio::test]
+    async fn catalog_method_is_declared() {
+        let fx = Fx::new(&trusted_cfg(1)).await;
+        assert!(fx.f.methods().contains(&plugin_method::CATALOG));
+        let v = serde_json::to_value(fx.f.catalog().await.unwrap()).unwrap();
+        assert_eq!(v["entries"], json!([]));
+        assert_eq!(v["truncated"], json!(false));
+    }
+
+    /// Signed first-party packages (CI: `plugins/build.sh` with a throwaway key) install from a
+    /// catalog directory through the normal flow and load. Runs only when
+    /// `NUGGET_FIRST_PARTY_PLUGINS` names the directory of `.nuggetplugin` files; the trusted
+    /// key is `NUGGET_FIRST_PARTY_PLUGINS_PUBKEY` (hex) or derived from
+    /// `NUGGET_PLUGIN_SIGNING_KEY`.
+    #[tokio::test]
+    async fn first_party_plugins_install_from_the_catalog() {
+        let Some(dir) = std::env::var_os("NUGGET_FIRST_PARTY_PLUGINS") else {
+            eprintln!("NUGGET_FIRST_PARTY_PLUGINS is not set; skipping");
+            return;
+        };
+        let dir = std::fs::canonicalize(PathBuf::from(dir)).unwrap();
+        let public = match std::env::var("NUGGET_FIRST_PARTY_PLUGINS_PUBKEY") {
+            Ok(k) => parse_verifying_key(&k).unwrap(),
+            Err(_) => parse_signing_key(
+                &std::env::var("NUGGET_PLUGIN_SIGNING_KEY")
+                    .expect("set NUGGET_FIRST_PARTY_PLUGINS_PUBKEY or NUGGET_PLUGIN_SIGNING_KEY"),
+            )
+            .unwrap()
+            .verifying_key(),
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = format!(
+            "[plugins]\ntrusted_keys = [\"{}\"]\ncatalog_dirs = [{}]\n",
+            hex(public.as_bytes()),
+            toml_str(&dir)
+        );
+        let fx = Fx::at(tmp.path(), &cfg).await;
+        let catalog = fx.f.catalog().await.unwrap();
+        assert!(
+            catalog.entries.len() >= 3,
+            "expected the first-party plugins in {}: {:?}",
+            dir.display(),
+            catalog.entries
+        );
+        for e in &catalog.entries {
+            assert_eq!(e.error, None, "{}", e.file_name);
+            assert_eq!(e.signature, PluginSignature::Trusted, "{}", e.file_name);
+            assert!(e.needs_approval && e.installed_version.is_none());
+            let staged = fx.install(&e.path).await.unwrap();
+            assert_eq!(staged.id, e.id);
+            assert_eq!(staged.requested, e.requested);
+            let info = fx
+                .approve(&staged.token, true)
+                .await
+                .unwrap()
+                .plugin
+                .unwrap();
+            assert!(info.loaded, "{} does not load: {:?}", e.id, info.error);
+            eprintln!("installed {} {} ({:?})", e.id, e.version, e.kinds);
+        }
+        let after = fx.f.catalog().await.unwrap();
+        for e in &after.entries {
+            assert_eq!(e.installed_version.as_deref(), Some(e.version.as_str()));
+            assert!(!e.update_available && e.error.is_none());
+        }
+        assert_eq!(
+            fx.f.list().await.unwrap().plugins.len(),
+            after.entries.len()
+        );
     }
 
     /// An example plugin, when the guests were built (`cargo test -p nugget-plugin` with

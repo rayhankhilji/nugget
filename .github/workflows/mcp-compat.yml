@@ -1,0 +1,123 @@
+name: MCP compatibility
+
+# The official MCP SDK clients against a real nuggetd: the TypeScript SDK
+# (@modelcontextprotocol/sdk, crates/nugget-mcp/compat/ts) and the Python SDK (mcp,
+# crates/nugget-mcp/compat/py), each pinned to an exact version with a lockfile. The fixture
+# (crates/nugget-mcp/compat/fixture.mjs) starts nuggetd on a throwaway home with loopback HTTP on,
+# indexes 150+ generated entities (so resources/list needs more than one page) and registers MCP
+# clients through the daemon's own IPC. Each client then runs every check over both transports and
+# the two newest protocol revisions it shares with Nugget, and exits nonzero on any failure.
+#
+# Which documented setup each leg verifies (docs/book/src/guide/mcp.md):
+#   - stdio legs launch the bridge with the `command`, `args` and `env` of the daemon's
+#     `claude-desktop` snippet: the `mcpServers` JSON of the Claude Desktop and Cursor sections,
+#     the same shape as the VS Code, Zed, Claude Code and "Other apps" stdio entries;
+#   - HTTP legs use the URL and `Authorization` header of the daemon's `generic-http` snippet: the
+#     "Other apps" HTTP entry and the Cursor, VS Code and Claude Code HTTP entries.
+# `cargo test -p nugget-mcp --test docs` checks that the guide shows exactly those snippets.
+#
+# Loopback only: nothing but npm and PyPI (dependency install) is reached over the network.
+
+on:
+  pull_request:
+    paths:
+      - "crates/nugget-mcp/**"
+      - "crates/nuggetd/src/mcp*.rs"
+      - "apps/desktop/e2e/daemon.mjs"
+      - ".github/workflows/mcp-compat.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/nugget-mcp/**"
+      - "crates/nuggetd/src/mcp*.rs"
+      - "apps/desktop/e2e/daemon.mjs"
+      - ".github/workflows/mcp-compat.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  compat:
+    name: MCP SDK clients (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    # Linux is required. macOS and Windows run the same legs (the stdio bridge goes over the
+    # local IPC socket / named pipe) but do not fail the workflow until they have a green record.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            experimental: false
+          - os: macos-latest
+            experimental: true
+          - os: windows-latest
+            experimental: true
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml pins the channel and components; this makes sure they are present.
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build nuggetd
+        run: cargo build --locked -p nuggetd --bin nuggetd
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/nugget-mcp/compat/ts/package-lock.json
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the TypeScript SDK client
+        working-directory: crates/nugget-mcp/compat/ts
+        run: npm ci --no-audit --no-fund
+
+      - name: Install the Python SDK client
+        working-directory: crates/nugget-mcp/compat/py
+        run: |
+          python -m venv .venv
+          if [ -x .venv/Scripts/python.exe ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          "$py" -m pip install --disable-pip-version-check --require-hashes -r requirements.txt
+          # A native path, so node can spawn it on Windows too.
+          if command -v cygpath >/dev/null; then py="$(cygpath -w "$PWD/$py")"; else py="$PWD/$py"; fi
+          echo "COMPAT_PYTHON=$py" >> "$GITHUB_ENV"
+
+      - name: TypeScript SDK against nuggetd (stdio bridge + loopback HTTP)
+        working-directory: crates/nugget-mcp/compat/ts
+        env:
+          NUGGETD: ${{ github.workspace }}/target/debug/nuggetd${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: node ../fixture.mjs -- node client.mjs
+
+      - name: Python SDK against nuggetd (stdio bridge + loopback HTTP)
+        if: success() || failure()
+        working-directory: crates/nugget-mcp/compat/py
+        env:
+          NUGGETD: ${{ github.workspace }}/target/debug/nuggetd${{ runner.os == 'Windows' && '.exe' || '' }}
+        run: node ../fixture.mjs -- "$COMPAT_PYTHON" client.py

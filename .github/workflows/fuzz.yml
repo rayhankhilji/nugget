@@ -1,7 +1,8 @@
 name: Fuzz
 
 # cargo-fuzz (libFuzzer) over the parsers that read untrusted input: mail and calendar files from
-# the files connector, IPC JSON-RPC framing, the signed model manifest and plugin manifests. Each
+# the files connector, IPC JSON-RPC framing, the signed model manifest, plugin manifests, signed
+# plugin packages, plugin host-capability checks and plugin file-root paths. Each
 # target starts from its handmade seed corpus (fuzz/corpus/<target>/seed-*) and runs for a fixed
 # time; a crash fails the job and its reproducer is uploaded. See fuzz/README.md.
 
@@ -49,7 +50,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [mail, calendar, ipc_frame, model_manifest, plugin_manifest]
+        target: [mail, calendar, ipc_frame, model_manifest, plugin_manifest, plugin_package, plugin_caps, plugin_fs_path]
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:

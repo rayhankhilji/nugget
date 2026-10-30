@@ -12,6 +12,9 @@ the root `rust-toolchain.toml` stays on stable, so name `+nightly` explicitly.
 | `ipc_frame` | Bytes from the local socket: line framing, JSON-RPC decoding, reply encoding | `nugget_ipc::fuzz_frames` (hidden hook) |
 | `model_manifest` | Model manifest JSON (signed here with a test key) or a detached signature file | `nugget_models::verify_manifest` |
 | `plugin_manifest` | `nugget-plugin.toml` and its host rules | `nugget_plugin::Manifest::parse` |
+| `plugin_package` | `.nuggetplugin` files: container decoding, signature check against a fixed test key (seeds signed with it), store install/load | `nugget_plugin::PluginPackage::{from_bytes, verify}`, `PluginStore` |
+| `plugin_caps` | Host rules against URLs, capability subsets, `[capabilities]` validation | `nugget_plugin::HostRule::{parse, matches}`, `Capabilities::is_subset_of` |
+| `plugin_fs_path` | Relative paths a plugin passes to `nugget:plugin/fs`, under a scratch root with symlinks | `nugget_plugin::fs::{check_relative, resolve}` |
 
 Always pass `-O`. Without it cargo-fuzz turns on debug assertions in every crate, and third-party
 `debug_assert!`s that are no-ops in shipped builds (mail-parser 0.11 has a `debug_assert!(false)`

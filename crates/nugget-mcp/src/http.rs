@@ -10,6 +10,11 @@
 //! 5. **`Authorization: Bearer ngt_…`** must name a live client (401 otherwise).
 //! 6. **Per-client rate limit** (429 with `Retry-After`).
 //!
+//! Refusals from these gates (and the body limits below) keep their HTTP status and headers and
+//! carry a JSON-RPC error body (`application/json`, `id: null`), so MCP SDK clients surface the
+//! reason ("missing or invalid bearer token", "rate limited; retry after 3 s") instead of a bare
+//! status. Only an unknown path gets a plain 404.
+//!
 //! Resource limits: the listener binds exactly the configured port and fails if it is taken (no
 //! fallback, so a squatter is never mistaken for Nugget); at most
 //! [`HttpConfig::max_connections`] connections are served at once (others wait in the backlog);
@@ -41,6 +46,8 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+use nugget_core::ipc::McpClientInfo;
+
 use crate::auth::ClientRegistry;
 use crate::server::{AuthenticatedClient, McpHandler, McpServer};
 
@@ -55,6 +62,10 @@ pub const DEFAULT_HEADER_TIMEOUT_MS: u64 = 10_000;
 /// Default time a request gets to send its whole body.
 pub const DEFAULT_BODY_TIMEOUT_MS: u64 = 30_000;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
+/// Most bytes of a refused request's body read (and discarded) before answering.
+const DRAIN_BYTES: usize = 64 * 1024;
+/// Longest wait for a refused request's body.
+const DRAIN_TIMEOUT_MS: u64 = 2_000;
 
 type Body = BoxBody<Bytes, Infallible>;
 
@@ -231,80 +242,48 @@ fn plain(status: StatusCode, msg: &'static str) -> Response<Body> {
         .expect("valid response")
 }
 
+/// JSON-RPC "Invalid Request".
+const INVALID_REQUEST: i32 = -32600;
+/// JSON-RPC "Internal error".
+const INTERNAL_ERROR: i32 = -32603;
+
+/// A refusal with a JSON-RPC error body, so SDK clients can show `msg`. The request is refused
+/// before its body is parsed, so the id is `null`.
+fn refuse(status: StatusCode, msg: impl Into<String>) -> Response<Body> {
+    let code = if status.is_server_error() {
+        INTERNAL_ERROR
+    } else {
+        INVALID_REQUEST
+    };
+    let body = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": null,
+        "error": {"code": code, "message": msg.into(), "data": {"http_status": status.as_u16()}},
+    });
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Full::new(Bytes::from(body.to_string())).boxed())
+        .expect("valid response")
+}
+
 impl Gate {
     async fn handle(&self, req: Request<Incoming>) -> Response<Body> {
-        if req.uri().path() != MCP_PATH {
-            return plain(StatusCode::NOT_FOUND, "not found");
-        }
-        if req.uri().query().is_some() {
-            return plain(
-                StatusCode::BAD_REQUEST,
-                "query strings are not accepted; send the token in the Authorization header",
-            );
-        }
-        let host_ok = req
-            .headers()
-            .get(header::HOST)
-            .and_then(|h| h.to_str().ok())
-            .is_some_and(|h| self.allowed_hosts.iter().any(|a| a.eq_ignore_ascii_case(h)));
-        if !host_ok {
-            return plain(StatusCode::FORBIDDEN, "forbidden host");
-        }
-        if let Some(origin) = req.headers().get(header::ORIGIN) {
-            let ok = origin
-                .to_str()
-                .is_ok_and(|o| self.allowed_origins.iter().any(|a| a == o));
-            if !ok {
-                return plain(StatusCode::FORBIDDEN, "forbidden origin");
-            }
-        }
-        if req.method() == Method::OPTIONS {
-            return plain(
-                StatusCode::FORBIDDEN,
-                "cross-origin requests are not allowed",
-            );
-        }
-        let token = req
-            .headers()
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| {
-                let (scheme, rest) = v.split_once(' ')?;
-                scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim())
-            });
-        let client = match token.map(|t| self.registry.authenticate(t)) {
-            Some(Ok(Some(c))) => c,
-            Some(Err(e)) => {
-                tracing::warn!(error = %e, "mcp client lookup failed");
-                return plain(StatusCode::SERVICE_UNAVAILABLE, "try again later");
-            }
-            _ => {
-                let mut r = plain(StatusCode::UNAUTHORIZED, "missing or invalid bearer token");
-                r.headers_mut().insert(
-                    header::WWW_AUTHENTICATE,
-                    HeaderValue::from_static("Bearer realm=\"nugget\""),
-                );
-                return r;
-            }
+        let (mut parts, body) = req.into_parts();
+        let client = match self.admit(&parts) {
+            Ok(c) => c,
+            Err(refusal) => return self.refused(body, *refusal).await,
         };
-        if let Err(retry) = self.server.limiter().check(&client.id) {
-            let mut r = plain(StatusCode::TOO_MANY_REQUESTS, "rate limited");
-            r.headers_mut().insert(
-                header::RETRY_AFTER,
-                HeaderValue::from(retry.as_secs().max(1)),
-            );
-            return r;
-        }
         // Read the whole body under a deadline and a size cap, so a slow sender cannot hold a
         // connection slot.
-        let (mut parts, body) = req.into_parts();
         let limited = http_body_util::Limited::new(body, MAX_BODY_BYTES);
         let bytes = match tokio::time::timeout(self.body_timeout, limited.collect()).await {
-            Err(_) => return plain(StatusCode::REQUEST_TIMEOUT, "request body timed out"),
+            Err(_) => return refuse(StatusCode::REQUEST_TIMEOUT, "request body timed out"),
             Ok(Err(e)) if e.is::<http_body_util::LengthLimitError>() => {
-                return plain(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
+                return refuse(StatusCode::PAYLOAD_TOO_LARGE, "request body too large");
             }
-            Ok(Err(_)) => return plain(StatusCode::BAD_REQUEST, "unreadable request body"),
+            Ok(Err(_)) => return refuse(StatusCode::BAD_REQUEST, "unreadable request body"),
             Ok(Ok(c)) => c.to_bytes(),
         };
         parts.extensions.insert(AuthenticatedClient(client));
@@ -326,5 +305,98 @@ impl Gate {
         resp.headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         resp
+    }
+
+    /// Finish a refused request: read (and discard) a small body first. Closing a connection with
+    /// unread request bytes makes the OS reset it, and the client then loses the refusal (an SDK
+    /// reports "server disconnected" instead of "rate limited"). A body that is large or slow is
+    /// not waited for; the connection is closed instead.
+    async fn refused(&self, body: Incoming, mut refusal: Response<Body>) -> Response<Body> {
+        let wait = self
+            .body_timeout
+            .min(Duration::from_millis(DRAIN_TIMEOUT_MS));
+        let drain = http_body_util::Limited::new(body, DRAIN_BYTES).collect();
+        let drained = matches!(tokio::time::timeout(wait, drain).await, Ok(Ok(_)));
+        if !drained {
+            refusal
+                .headers_mut()
+                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+        }
+        refusal
+    }
+
+    /// The gates before the body: path, query, Host, Origin, CORS, bearer token, rate limit.
+    fn admit(&self, req: &http::request::Parts) -> Result<McpClientInfo, Box<Response<Body>>> {
+        if req.uri.path() != MCP_PATH {
+            return Err(Box::new(plain(StatusCode::NOT_FOUND, "not found")));
+        }
+        if req.uri.query().is_some() {
+            return Err(Box::new(refuse(
+                StatusCode::BAD_REQUEST,
+                "query strings are not accepted; send the token in the Authorization header",
+            )));
+        }
+        let host_ok = req
+            .headers
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .is_some_and(|h| self.allowed_hosts.iter().any(|a| a.eq_ignore_ascii_case(h)));
+        if !host_ok {
+            return Err(Box::new(refuse(StatusCode::FORBIDDEN, "forbidden host")));
+        }
+        if let Some(origin) = req.headers.get(header::ORIGIN) {
+            let ok = origin
+                .to_str()
+                .is_ok_and(|o| self.allowed_origins.iter().any(|a| a == o));
+            if !ok {
+                return Err(Box::new(refuse(StatusCode::FORBIDDEN, "forbidden origin")));
+            }
+        }
+        if req.method == Method::OPTIONS {
+            return Err(Box::new(refuse(
+                StatusCode::FORBIDDEN,
+                "cross-origin requests are not allowed",
+            )));
+        }
+        let token = req
+            .headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| {
+                let (scheme, rest) = v.split_once(' ')?;
+                scheme.eq_ignore_ascii_case("bearer").then(|| rest.trim())
+            });
+        let client = match token.map(|t| self.registry.authenticate(t)) {
+            Some(Ok(Some(c))) => c,
+            Some(Err(e)) => {
+                tracing::warn!(error = %e, "mcp client lookup failed");
+                return Err(Box::new(refuse(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "try again later",
+                )));
+            }
+            _ => {
+                let mut r = refuse(
+                    StatusCode::UNAUTHORIZED,
+                    "missing or invalid bearer token (or the MCP client was revoked in Nugget)",
+                );
+                r.headers_mut().insert(
+                    header::WWW_AUTHENTICATE,
+                    HeaderValue::from_static("Bearer realm=\"nugget\""),
+                );
+                return Err(Box::new(r));
+            }
+        };
+        if let Err(retry) = self.server.limiter().check(&client.id) {
+            let secs = retry.as_secs().max(1);
+            let mut r = refuse(
+                StatusCode::TOO_MANY_REQUESTS,
+                format!("rate limited; retry after {secs} s"),
+            );
+            r.headers_mut()
+                .insert(header::RETRY_AFTER, HeaderValue::from(secs));
+            return Err(Box::new(r));
+        }
+        Ok(client)
     }
 }

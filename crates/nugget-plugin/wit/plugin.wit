@@ -128,8 +128,11 @@ interface clock {
 /// or a single file). The user types or picks those paths when adding the source, so only what
 /// they chose is reachable. A plugin addresses files as `root` (the settings field name) plus a
 /// relative `/`-separated `path`; `""` is the root itself. The host refuses `..`, absolute paths,
-/// and symlinks that leave the root, caps file sizes and listing lengths, and never writes.
-/// Connectors only, during `connector.validate` and `connector.sync`; tools are always denied.
+/// and symlinks that leave the root, caps file sizes, listing lengths, the number of calls and
+/// the bytes read per call, and never writes. Containment is by path: hard links and bind mounts
+/// inside the root are followed by design. Each call fails with `denied` once the call budget is
+/// spent. Connectors only, during `connector.validate` and `connector.sync`; tools are always
+/// denied.
 interface fs {
     use types.{plugin-error};
 
@@ -144,9 +147,13 @@ interface fs {
     }
 
     /// Entries of a folder, sorted by name. Hidden entries (names starting with `.`) are
-    /// included; symlinks that leave the root are left out.
+    /// included; symlinks that leave the root are left out, and so are names a plugin could not
+    /// address in `path` (not UTF-8, containing `\` or `:`, ending in `.` or a space, or a
+    /// Windows device name such as `con`). Fails with `invalid` when the folder has more entries
+    /// than the host allows (the list is never cut short).
     read-dir: func(root: string, path: string) -> result<list<dir-entry>, plugin-error>;
-    /// The whole file. Fails with `invalid` when it is larger than the host allows.
+    /// The whole file. Fails with `invalid` when it is larger than the host allows or is not a
+    /// regular file, and with `denied` when the bytes this call may read are spent.
     read-file: func(root: string, path: string) -> result<list<u8>, plugin-error>;
     /// One entry's metadata (its `name` is the last path segment, or `""` for the root).
     stat: func(root: string, path: string) -> result<dir-entry, plugin-error>;

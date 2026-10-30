@@ -13,6 +13,7 @@ use rmcp::model::{
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData, RoleServer, ServerHandler};
+use tokio_util::sync::CancellationToken;
 
 use crate::audit::{
     ACTION_RESOURCE, ACTION_TOOL, AuditEntry, AuditSink, CallRecord, Outcome, Transport,
@@ -201,6 +202,21 @@ impl McpServer {
         name: &str,
         args: &JsonObject,
     ) -> Result<ToolOutput, ToolFailure> {
+        self.call_tool_until(client, transport, name, args, &CancellationToken::new())
+            .await
+    }
+
+    /// [`Self::call_tool`] that stops working when `cancel` fires (the client sent
+    /// `notifications/cancelled`). Exactly one audit entry either way; a cancelled call is
+    /// recorded with the outcome `cancelled`.
+    pub async fn call_tool_until(
+        &self,
+        client: &McpClientInfo,
+        transport: Transport,
+        name: &str,
+        args: &JsonObject,
+        cancel: &CancellationToken,
+    ) -> Result<ToolOutput, ToolFailure> {
         let scope = Scope::new(&client.scopes);
         let result = if !tools::ALL_TOOLS.contains(&name) {
             Err(ToolFailure {
@@ -213,7 +229,11 @@ impl McpServer {
                 message: format!("the tool {name} is not enabled for this client"),
             })
         } else {
-            tools::run(self.inner.backend.as_ref(), &scope, name, args).await
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => Err(ToolFailure::cancelled()),
+                r = tools::run(self.inner.backend.as_ref(), &scope, name, args) => r,
+            }
         };
         let (outcome, results, items): (Outcome, usize, &[ItemRef]) = match &result {
             Ok(o) => (Outcome::Ok, o.results, &o.items),
@@ -240,8 +260,24 @@ impl McpServer {
         transport: Transport,
         uri: &str,
     ) -> Result<(String, String), ToolFailure> {
+        self.read_resource_until(client, transport, uri, &CancellationToken::new())
+            .await
+    }
+
+    /// [`Self::read_resource`] that stops working when `cancel` fires; audited once either way.
+    pub async fn read_resource_until(
+        &self,
+        client: &McpClientInfo,
+        transport: Transport,
+        uri: &str,
+        cancel: &CancellationToken,
+    ) -> Result<(String, String), ToolFailure> {
         let scope = Scope::new(&client.scopes);
-        let result = self.read_resource_inner(&scope, uri).await;
+        let result = tokio::select! {
+            biased;
+            () = cancel.cancelled() => Err(ToolFailure::cancelled()),
+            r = self.read_resource_inner(&scope, uri) => r,
+        };
         let (outcome, items) = match &result {
             Ok((_, _, items)) => (Outcome::Ok, items.clone()),
             Err(f) => (f.outcome, Vec::new()),
@@ -404,6 +440,22 @@ fn access_error(e: AccessError) -> ErrorData {
     }
 }
 
+/// Answer to a request the client cancelled. The client has stopped waiting for it (rmcp still
+/// writes a response, which clients drop for a cancelled id).
+fn cancelled_error() -> ErrorData {
+    ErrorData::invalid_request("request cancelled by the client", None)
+}
+
+/// A `resources/list` cursor: the decimal offset of the next page, as this server hands out in
+/// `nextCursor`. Clients treat it as opaque; anything else is refused rather than silently
+/// restarting the listing (which would loop a client forever).
+fn parse_cursor(cursor: &str) -> Option<usize> {
+    if cursor.is_empty() || !cursor.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    cursor.parse().ok()
+}
+
 fn instructions() -> String {
     format!(
         "Nugget is the user's local, private knowledge base: their files, mail, calendar and \
@@ -449,22 +501,22 @@ impl ServerHandler for McpHandler {
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let (client, transport) = self.client(&ctx, true)?;
-        if !tools::ALL_TOOLS.contains(&request.name.as_ref()) {
-            return Err(ErrorData::invalid_params(
-                format!("unknown tool: {}", request.name),
-                None,
-            ));
-        }
         let args = request.arguments.unwrap_or_default();
+        // Unknown tools are audited too (outcome `rejected`), then answered with the protocol
+        // error the spec asks for (-32602) instead of a tool result.
         let result = match self
             .server
-            .call_tool(&client, transport, &request.name, &args)
+            .call_tool_until(&client, transport, &request.name, &args, &ctx.ct)
             .await
         {
             Ok(out) => {
                 let mut r = CallToolResult::success(vec![ContentBlock::text(out.text)]);
                 r.structured_content = Some(out.structured);
                 r
+            }
+            Err(f) if f.outcome == Outcome::Cancelled => return Err(cancelled_error()),
+            Err(f) if !tools::ALL_TOOLS.contains(&request.name.as_ref()) => {
+                return Err(ErrorData::invalid_params(f.message, None));
             }
             Err(f) => CallToolResult::error(vec![ContentBlock::text(f.message)]),
         };
@@ -478,10 +530,12 @@ impl ServerHandler for McpHandler {
     ) -> Result<ListResourcesResult, ErrorData> {
         let (client, _) = self.client(&ctx, true)?;
         let scope = Scope::new(&client.scopes);
-        let offset = request
-            .and_then(|r| r.cursor)
-            .and_then(|c| c.parse::<usize>().ok())
-            .unwrap_or(0);
+        let offset = match request.and_then(|r| r.cursor) {
+            None => 0,
+            Some(c) => parse_cursor(&c).ok_or_else(|| {
+                ErrorData::invalid_params("invalid cursor; start again without one", None)
+            })?,
+        };
         let (resources, more) = self
             .server
             .list_entity_resources(&scope, offset)
@@ -538,7 +592,7 @@ impl ServerHandler for McpHandler {
         let (client, transport) = self.client(&ctx, true)?;
         match self
             .server
-            .read_resource(&client, transport, &request.uri)
+            .read_resource_until(&client, transport, &request.uri, &ctx.ct)
             .await
         {
             Ok((mime, text)) => {
@@ -553,6 +607,7 @@ impl ServerHandler for McpHandler {
             Err(f) if f.outcome == Outcome::Error => {
                 Err(ErrorData::internal_error(f.message, None))
             }
+            Err(f) if f.outcome == Outcome::Cancelled => Err(cancelled_error()),
             Err(f) => Err(ErrorData::resource_not_found(f.message, None)),
         }
     }
