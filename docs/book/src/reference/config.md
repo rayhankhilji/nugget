@@ -329,7 +329,7 @@ is logged) and the rest of the daemon runs normally. The keys are not final; the
 | `policy` | The safety policy for agent actions; rules are edited from the Safety page (`policy.set`) |
 | `browser` | Settings of the browser extension bridge; not settled yet |
 | `proactive` | `enabled`, the time of the morning brief, and where the card judge may run (its locality) |
-| `plugins` | `trusted_keys` (trusted publisher keys) and a developer-mode switch that allows unsigned plugins |
+| `plugins` | `trusted_keys` (trusted publisher keys), `dev_mode` (allows unsigned plugins) and `catalog_dirs` (absolute folders whose `.nuggetplugin` files the Plugins page lists as available; default `<data>/plugin-catalog`, plus the folders in the `NUGGET_PLUGIN_CATALOG` environment variable) |
 
 When a feature lands, its keys get their own table on this page.
 
