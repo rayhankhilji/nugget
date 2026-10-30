@@ -12,6 +12,9 @@ the root `rust-toolchain.toml` stays on stable, so name `+nightly` explicitly.
 | `ipc_frame` | Bytes from the local socket: line framing, JSON-RPC decoding, reply encoding | `nugget_ipc::fuzz_frames` (hidden hook) |
 | `model_manifest` | Model manifest JSON (signed here with a test key) or a detached signature file | `nugget_models::verify_manifest` |
 | `plugin_manifest` | `nugget-plugin.toml` and its host rules | `nugget_plugin::Manifest::parse` |
+| `facts_block` | Retrieved context text (attacker-written passages, headers, dates) turned into the draft facts block | `nugget_draft::prompt_facts::{facts, facts_section}` |
+| `secret_stream` | Model output streamed in arbitrary chunks past the credential stop | `nugget_draft::Grounder` (`GroundingCheck::Secrets`/`Sentences`) |
+| `drive_export` | Google Drive file entries, Docs/Sheets/Slides exports and sheet titles | `nugget_connector_google::fuzz_export` (hidden hook) |
 
 Always pass `-O`. Without it cargo-fuzz turns on debug assertions in every crate, and third-party
 `debug_assert!`s that are no-ops in shipped builds (mail-parser 0.11 has a `debug_assert!(false)`

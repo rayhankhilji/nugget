@@ -186,7 +186,9 @@ pub struct DraftConfig {
     pub grounding: bool,
     /// What the streaming check does when `grounding` is on: stop a copied credential while
     /// streaming word by word (the default: it adds next to no latency), or hold and check
-    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts").
+    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts"). With
+    /// grounding off, or a screenshot in the prompt, the credential stop still runs whenever a
+    /// cited passage is sensitive.
     pub grounding_check: GroundingCheck,
     #[serde(skip)]
     pub limits: PromptLimits,
@@ -695,11 +697,14 @@ impl Drafter {
                         lock(&self.inner.last_full).insert(provider.id().clone(), fp);
                     }
                     timings.provider_open_ms = Some(ms(t0.elapsed()));
-                    // Values read off a screenshot can't be checked, so no post-check then.
-                    let ground = (config.grounding && !screenshot).then(|| {
-                        Grounder::for_draft(ctx, &context, req.instruction.as_deref(), &voice)
-                            .with_check(config.grounding_check)
-                    });
+                    let ground = stream_check(
+                        config,
+                        screenshot,
+                        ctx,
+                        &context,
+                        req.instruction.as_deref(),
+                        &voice,
+                    );
                     return Ok(self.start(
                         provider, kind, ctx, context, screenshot, band, stream, t0, timings, ground,
                     ));
@@ -1410,6 +1415,28 @@ impl Drafter {
     }
 }
 
+/// The streaming check on a draft: the configured grounding check; with grounding off, or with
+/// a screenshot (values read off it can't be checked), still the credential stop
+/// ([`GroundingCheck::Secrets`]) whenever a cited passage is sensitive, so that a credential in
+/// the prompt never goes into a message whatever the settings or the screen ask.
+fn stream_check(
+    config: &DraftConfig,
+    screenshot: bool,
+    ctx: &DraftContext,
+    context: &ContextResponse,
+    instruction: Option<&str>,
+    voice: &VoiceHints,
+) -> Option<Grounder> {
+    let check = if config.grounding && !screenshot {
+        config.grounding_check
+    } else if context.citations.iter().any(|c| c.sensitive) {
+        GroundingCheck::Secrets
+    } else {
+        return None;
+    };
+    Some(Grounder::for_draft(ctx, context, instruction, voice).with_check(check))
+}
+
 /// Post-processing settings for this field.
 pub fn post_options(kind: FieldKind, ctx: &DraftContext, band: LengthBand) -> PostOptions {
     let (before, _, after) = split_value(&ctx.field.value, ctx.field.selection);
@@ -1913,5 +1940,35 @@ mod tests {
         assert_eq!(c.local.budget_tokens, 200);
         assert_eq!(c.local.max_snippets, 3);
         assert_eq!(c.local.limits, PromptLimits::local());
+    }
+
+    #[test]
+    fn credential_stop_runs_with_grounding_off_or_a_screenshot() {
+        let mut sens = cite(1, "k1", Some("Vault"));
+        sens.sensitive = true;
+        let context = ContextResponse {
+            text: "[1] Vault (notes)\nThe VPN password is tangerine-Otter-42.".into(),
+            citations: vec![sens],
+            excluded_sensitive: 0,
+        };
+        let plain = ContextResponse {
+            text: "[1] Alpha (notes)\nfirst".into(),
+            citations: vec![cite(1, "k1", Some("Alpha"))],
+            excluded_sensitive: 0,
+        };
+        let ctx = DraftContext::default();
+        let voice = VoiceHints::default();
+        let off = DraftConfig {
+            grounding: false,
+            ..Default::default()
+        };
+        for (config, screenshot) in [(DraftConfig::default(), true), (off.clone(), false)] {
+            let mut g = stream_check(&config, screenshot, &ctx, &context, None, &voice)
+                .expect("a sensitive passage is always checked");
+            let out = g.feed("Sure: the password is tangerine-Otter-42 today.", true);
+            assert!(!out.contains("tangerine"), "{out:?}");
+            assert_eq!(g.report().secrets_dropped, 1);
+            assert!(stream_check(&config, screenshot, &ctx, &plain, None, &voice).is_none());
+        }
     }
 }
