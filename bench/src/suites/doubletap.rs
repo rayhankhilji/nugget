@@ -62,6 +62,31 @@
 //!   model's own thinking default ([`Thinking::Model`]), showing what Qwen3's default thinking
 //!   costs, and how many drafts it left without visible text.
 //!
+//! - `server_cpu_s.mean` (`--local-models` only): CPU seconds the `llama-server` process spent
+//!   per timed draft, trigger to end of stream.
+//!
+//! **Read-ahead** (`--doubletap-read-ahead on`; default `off`, so earlier results stay
+//! comparable): as when a reply field keeps focus before the user taps, every task of the
+//! warm-up and timed passes first calls [`Drafter::read_ahead`] with the same [`DraftRequest`]
+//! the trigger sends and waits for it (bounded by the per-draft timeout; cancelled with
+//! [`Drafter::cancel_read_ahead`] on timeout), then runs the trigger flow above unchanged, so
+//! `from_trigger.first_inserted_char` and the cached/evaluated token counts show what the
+//! read-ahead saved at the trigger. The bench sets `[draft.read_ahead] min_interval_ms = 0`
+//! (its tasks stand for focus changes minutes apart; the projection below applies the product's
+//! interval). Extra metrics (`doubletap.read_ahead.` prefix, timed pass only):
+//! - `requests`, `completed`, `timeouts`, `skipped` and `skipped.<reason>`
+//!   ([`nugget_draft::ReadAheadSkip::as_str`]): `skipped` must be 0 with a local provider (its target on real
+//!   on-device runs).
+//! - `time.p50/.p95`: wall-clock time of a completed read-ahead (what the user's focus has to
+//!   last for the trigger to find the prompt cached); `prepare.p50` and `warm.p50`: its retrieval
+//!   and prefill parts ([`ReadAheadOutcome`]).
+//! - `server_cpu_s.mean/.p50` (`--local-models` only): CPU seconds `llama-server` spent per
+//!   completed read-ahead (`/proc/<pid>/stat` on Linux, `ps -o cputime` on macOS), and
+//!   `core_pct.at_{1,2,4,6}_per_min`: that cost as a share of one core at that many focus changes
+//!   per minute (each one reading a new context ahead; capped by the product's
+//!   `min_interval_ms`). Battery drain cannot be metered on CI runners: these are CPU-seconds,
+//!   the input to any energy estimate, not watt-hours.
+//!
 //! Models: `--local-models` runs the signed manifest's smallest chat model through
 //! `nugget-runtime` ([`LocalModels`]); else `--provider-url` (with `--provider-model`,
 //! `--provider-kind`, `--api-key-env`, as for `draft`); else a deterministic in-process fake
@@ -84,7 +109,8 @@ use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{DraftContext, DraftRequest, RuntimeRole};
 use nugget_core::{Error, Result as CoreResult};
 use nugget_draft::{
-    DraftConfig, DraftTimings, Drafter, RetrievalRunner, VoiceQuery, VoiceSource, Warmer,
+    DraftConfig, DraftTimings, Drafter, ReadAheadConfig, ReadAheadOutcome, RetrievalRunner,
+    VoiceQuery, VoiceSource, Warmer,
 };
 use nugget_infer::{
     ChatEvent, ChatRequest, ChatStats, ChatStream, Message, Part, Provider, ProviderConfig,
@@ -96,14 +122,35 @@ use nugget_voice::{Channel, VoiceHints};
 use serde_json::json;
 use time::{Date, OffsetDateTime, Time};
 
-use crate::local::{HostInfo, LocalModels, Thinking};
+use crate::local::{HostInfo, LocalModels, Thinking, process_cpu_seconds};
 use crate::report::{Direction, Metric};
 use crate::runner::{BenchError, Benchmark, RunContext};
 use crate::stats::summarize;
 use crate::suites::draft::fixtures::{Corpus, Persona, Task};
 use crate::suites::draft::{
-    DraftLocality, DraftOptions, TTFT_TARGET_CLOUD_S, TTFT_TARGET_LOCAL_S, style,
+    DraftLocality, DraftOptions, Switch, TTFT_TARGET_CLOUD_S, TTFT_TARGET_LOCAL_S, style,
 };
+
+/// `doubletap` options (flattened into the CLI).
+#[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
+pub struct DoubletapOptions {
+    /// `doubletap`: before each trigger, read the draft's whole prompt ahead
+    /// (`Drafter::read_ahead`, as when a reply field keeps focus) and wait for it (`on`), or not
+    /// (`off`, the default).
+    #[arg(long, value_enum, default_value_t = Switch::Off)]
+    pub doubletap_read_ahead: Switch,
+}
+
+impl Default for DoubletapOptions {
+    fn default() -> Self {
+        Self {
+            doubletap_read_ahead: Switch::Off,
+        }
+    }
+}
+
+/// Focus changes per minute the read-ahead CPU cost is projected at.
+pub const FOCUS_CHANGES_PER_MIN: [u32; 4] = [1, 2, 4, 6];
 
 /// Longest a single draft may take (prewarm to end of stream) before it counts as timed out.
 pub const DRAFT_TIMEOUT: Duration = Duration::from_secs(180);
@@ -572,6 +619,9 @@ pub struct Sample {
     pub lead_ms: u64,
     /// [`Flow::WaitForPrewarm`]: whether the prewarm finished within the wait.
     pub prewarm_settled: Option<bool>,
+    /// CPU seconds the local `llama-server` spent from the trigger to the end of the stream
+    /// (`--local-models` only).
+    pub server_cpu_s: Option<f64>,
 }
 
 impl Sample {
@@ -643,12 +693,7 @@ async fn one_draft(
         app: task.context.app.clone(),
         ..DraftContext::default()
     };
-    let req = DraftRequest {
-        context: task.context.clone(),
-        instruction: None,
-        provider: None,
-        max_tokens: None,
-    };
+    let req = draft_request(task);
     let work = async {
         let trigger = Instant::now();
         let mut settled = None;
@@ -706,6 +751,81 @@ async fn one_draft(
     }
 }
 
+/// The request the trigger sends for `task` (and a read-ahead reads ahead).
+fn draft_request(task: &Task) -> DraftRequest {
+    DraftRequest {
+        context: task.context.clone(),
+        instruction: None,
+        provider: None,
+        max_tokens: None,
+    }
+}
+
+/// How one read-ahead ended.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReadAheadResult {
+    Done {
+        /// Wall-clock time of the `read_ahead` call.
+        wall_ms: u64,
+        outcome: ReadAheadOutcome,
+        /// CPU seconds `llama-server` spent meanwhile (`--local-models` only).
+        server_cpu_s: Option<f64>,
+    },
+    Skipped {
+        /// [`nugget_draft::ReadAheadSkip::as_str`], or `no_drafter`.
+        reason: &'static str,
+    },
+    TimedOut,
+}
+
+/// What a pass does besides the trigger flow.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Probe {
+    /// Read each task ahead ([`Drafter::read_ahead`], waited for) before its trigger.
+    pub read_ahead: bool,
+    /// The local server to meter CPU time of.
+    pub server_pid: Option<u32>,
+}
+
+impl Probe {
+    fn cpu(&self) -> Option<f64> {
+        self.server_pid.and_then(process_cpu_seconds)
+    }
+}
+
+/// Read `task` ahead with the request its trigger will send, bounded by `timeout` (cancelled
+/// when it runs out).
+async fn read_ahead_task(
+    drafters: &Drafters,
+    task: &Task,
+    timeout: Duration,
+    probe: &Probe,
+) -> ReadAheadResult {
+    let Some(drafter) = drafters.get(&task.persona) else {
+        return ReadAheadResult::Skipped {
+            reason: "no_drafter",
+        };
+    };
+    let cpu_before = probe.cpu();
+    let started = Instant::now();
+    let res = tokio::time::timeout(timeout, drafter.read_ahead(draft_request(task))).await;
+    let wall_ms = ms_between(started, Instant::now());
+    match res {
+        Err(_) => {
+            drafter.cancel_read_ahead();
+            ReadAheadResult::TimedOut
+        }
+        Ok(Err(skip)) => ReadAheadResult::Skipped {
+            reason: skip.as_str(),
+        },
+        Ok(Ok(outcome)) => ReadAheadResult::Done {
+            wall_ms,
+            outcome,
+            server_cpu_s: cpu_before.zip(probe.cpu()).map(|(a, b)| (b - a).max(0.0)),
+        },
+    }
+}
+
 fn ms_between(from: Instant, to: Instant) -> u64 {
     u64::try_from(to.saturating_duration_since(from).as_millis()).unwrap_or(u64::MAX)
 }
@@ -714,6 +834,8 @@ fn ms_between(from: Instant, to: Instant) -> u64 {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pass {
     pub outcomes: Vec<Outcome>,
+    /// With [`Probe::read_ahead`]: the read-ahead before each draft, in the same order.
+    pub read_aheads: Vec<ReadAheadResult>,
 }
 
 impl Pass {
@@ -766,11 +888,27 @@ async fn run_pass(
     tasks: &[usize],
     timeout: Duration,
     label: &str,
+    probe: Probe,
 ) -> Pass {
     let mut pass = Pass::default();
     for (n, &ti) in tasks.iter().enumerate() {
         let task = &corpus.tasks[ti];
-        let outcome = draft_task(drafters, task, timeout, Flow::Product).await;
+        if probe.read_ahead {
+            let ra = read_ahead_task(drafters, task, timeout, &probe).await;
+            eprintln!(
+                "doubletap {label}: {}/{} {} read-ahead -> {}",
+                n + 1,
+                tasks.len(),
+                task.id,
+                describe_read_ahead(&ra)
+            );
+            pass.read_aheads.push(ra);
+        }
+        let cpu_before = probe.cpu();
+        let mut outcome = draft_task(drafters, task, timeout, Flow::Product).await;
+        if let Outcome::Completed(s) = &mut outcome {
+            s.server_cpu_s = cpu_before.zip(probe.cpu()).map(|(a, b)| (b - a).max(0.0));
+        }
         eprintln!(
             "doubletap {label}: {}/{} {} -> {}",
             n + 1,
@@ -781,6 +919,24 @@ async fn run_pass(
         pass.outcomes.push(outcome);
     }
     pass
+}
+
+fn describe_read_ahead(r: &ReadAheadResult) -> String {
+    match r {
+        ReadAheadResult::Done {
+            wall_ms,
+            outcome,
+            server_cpu_s,
+        } => format!(
+            "done in {wall_ms} ms (prepare {} ms, prefill {} ms, {} prompt chars{})",
+            outcome.prepare_ms,
+            outcome.warm_ms,
+            outcome.prompt_chars,
+            server_cpu_s.map_or_else(String::new, |c| format!(", server CPU {c:.2} s"))
+        ),
+        ReadAheadResult::Skipped { reason } => format!("SKIPPED: {reason}"),
+        ReadAheadResult::TimedOut => "TIMED OUT".into(),
+    }
 }
 
 fn describe(o: &Outcome) -> String {
@@ -1031,6 +1187,20 @@ pub fn pass_metrics(pass: &Pass, target: Option<f64>) -> Vec<Metric> {
              the end of the stream (drafts with usage only)",
         ));
     }
+    let cpu: Vec<f64> = pass.samples().filter_map(|s| s.server_cpu_s).collect();
+    if let Some(s) = summarize(&cpu) {
+        out.push(Metric::new(
+            format!("{p}.server_cpu_s.mean"),
+            s.mean,
+            "cpu-s",
+            Direction::Info,
+            format!(
+                "Mean CPU seconds the llama-server process spent per draft, trigger to end of \
+                 stream ({} drafts)",
+                s.count
+            ),
+        ));
+    }
     let prompts: Vec<f64> = pass
         .samples()
         .filter_map(|s| s.input_tokens.map(f64::from))
@@ -1048,6 +1218,176 @@ pub fn pass_metrics(pass: &Pass, target: Option<f64>) -> Vec<Metric> {
         ));
     }
     out
+}
+
+/// Metrics of the read-ahead before each draft of the timed pass (`doubletap.read_ahead.`
+/// prefix). `min_interval_ms`: the product's `[draft.read_ahead] min_interval_ms`, which caps
+/// the projected rate. `skip_target`: give `skipped` a target of 0 (real on-device runs).
+pub fn read_ahead_metrics(
+    results: &[ReadAheadResult],
+    min_interval_ms: u64,
+    skip_target: bool,
+) -> Vec<Metric> {
+    let p = "doubletap.read_ahead";
+    let mut out = Vec::new();
+    let done: Vec<(u64, &ReadAheadOutcome, Option<f64>)> = results
+        .iter()
+        .filter_map(|r| match r {
+            ReadAheadResult::Done {
+                wall_ms,
+                outcome,
+                server_cpu_s,
+            } => Some((*wall_ms, outcome, *server_cpu_s)),
+            _ => None,
+        })
+        .collect();
+    let mut reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for r in results {
+        if let ReadAheadResult::Skipped { reason } = r {
+            *reasons.entry(reason).or_default() += 1;
+        }
+    }
+    let timeouts = results
+        .iter()
+        .filter(|r| matches!(r, ReadAheadResult::TimedOut))
+        .count();
+    let skipped: usize = reasons.values().sum();
+    let counted = |name: &str, v: usize, dir: Direction, desc: String| {
+        Metric::new(format!("{p}.{name}"), v as f64, "read-aheads", dir, desc)
+    };
+    out.push(counted(
+        "requests",
+        results.len(),
+        Direction::Info,
+        "Drafter::read_ahead calls, one before each timed draft".into(),
+    ));
+    out.push(counted(
+        "completed",
+        done.len(),
+        Direction::HigherIsBetter,
+        "Read-aheads that prefilled the draft's prompt".into(),
+    ));
+    let mut m = counted(
+        "skipped",
+        skipped,
+        Direction::LowerIsBetter,
+        "Read-aheads that did nothing (any reason; must be 0 with a local provider)".into(),
+    );
+    if skip_target {
+        m = m.with_target(0.0);
+    }
+    out.push(m);
+    for (reason, n) in &reasons {
+        out.push(counted(
+            &format!("skipped.{reason}"),
+            *n,
+            Direction::LowerIsBetter,
+            format!("Read-aheads skipped as `{reason}`"),
+        ));
+    }
+    out.push(counted(
+        "timeouts",
+        timeouts,
+        Direction::LowerIsBetter,
+        "Read-aheads that ran past the per-draft timeout (cancelled)".into(),
+    ));
+    let wall: Vec<f64> = done.iter().map(|(ms, _, _)| *ms as f64 / 1000.0).collect();
+    if let Some(s) = summarize(&wall) {
+        for (q, v) in [("p50", s.p50), ("p95", s.p95)] {
+            out.push(Metric::new(
+                format!("{p}.time.{q}"),
+                v,
+                "s",
+                Direction::LowerIsBetter,
+                format!(
+                    "{q} wall-clock time of a completed Drafter::read_ahead (how long focus has \
+                     to stay for the trigger to find the prompt cached), over {} read-aheads",
+                    s.count
+                ),
+            ));
+        }
+    }
+    for (name, f, what) in [
+        (
+            "prepare",
+            (|o: &ReadAheadOutcome| o.prepare_ms) as fn(&ReadAheadOutcome) -> u64,
+            "retrieval and voice lookup until the prompt was built",
+        ),
+        (
+            "warm",
+            |o: &ReadAheadOutcome| o.warm_ms,
+            "the prefill request (the server reading the prompt)",
+        ),
+    ] {
+        let v: Vec<f64> = done.iter().map(|(_, o, _)| f(o) as f64 / 1000.0).collect();
+        if let Some(s) = summarize(&v) {
+            out.push(Metric::new(
+                format!("{p}.{name}.p50"),
+                s.p50,
+                "s",
+                Direction::LowerIsBetter,
+                format!(
+                    "Median read-ahead time in {what}, over {} read-aheads",
+                    s.count
+                ),
+            ));
+        }
+    }
+    let cpu: Vec<f64> = done.iter().filter_map(|(_, _, c)| *c).collect();
+    if let Some(s) = summarize(&cpu) {
+        out.push(Metric::new(
+            format!("{p}.server_cpu_s.mean"),
+            s.mean,
+            "cpu-s",
+            Direction::LowerIsBetter,
+            format!(
+                "Mean CPU seconds (user + system) the llama-server process spent per completed \
+                 read-ahead, over {} read-aheads. Battery drain is not metered on CI runners; \
+                 CPU-seconds are the input to an energy estimate",
+                s.count
+            ),
+        ));
+        out.push(Metric::new(
+            format!("{p}.server_cpu_s.p50"),
+            s.p50,
+            "cpu-s",
+            Direction::LowerIsBetter,
+            format!(
+                "Median CPU seconds the llama-server process spent per completed read-ahead, \
+                 over {} read-aheads",
+                s.count
+            ),
+        ));
+        for per_min in FOCUS_CHANGES_PER_MIN {
+            out.push(Metric::new(
+                format!("{p}.core_pct.at_{per_min}_per_min"),
+                projected_core_pct(s.mean, per_min, min_interval_ms),
+                "%",
+                Direction::LowerIsBetter,
+                format!(
+                    "Projected share of one CPU core spent reading ahead at {per_min} focus \
+                     changes per minute, each a new context (mean CPU seconds per read-ahead x \
+                     rate, the rate capped at one per {} ms by [draft.read_ahead] \
+                     min_interval_ms). CPU time, not measured battery drain (not meterable on CI \
+                     runners)",
+                    min_interval_ms
+                ),
+            ));
+        }
+    }
+    out
+}
+
+/// `cpu_s` CPU seconds per read-ahead at `per_min` focus changes a minute, as a percentage of
+/// one core; the rate is capped at one read-ahead per `min_interval_ms`.
+pub fn projected_core_pct(cpu_s: f64, per_min: u32, min_interval_ms: u64) -> f64 {
+    let cap = if min_interval_ms == 0 {
+        f64::INFINITY
+    } else {
+        60_000.0 / min_interval_ms as f64
+    };
+    let rate = f64::from(per_min).min(cap);
+    round3(cpu_s * rate / 60.0 * 100.0)
 }
 
 /// Metrics of the untimed warm-up draft.
@@ -1395,6 +1735,8 @@ struct Setup {
     desc: String,
     /// The sampling seed sent with every request, where the provider takes one.
     seed: Option<u64>,
+    /// `--local-models`: the chat server's process, for CPU metering.
+    server_pid: Option<u32>,
 }
 
 fn own_runtime() -> Result<tokio::runtime::Runtime, BenchError> {
@@ -1430,6 +1772,7 @@ fn setup(ctx: &mut RunContext) -> Result<Setup, BenchError> {
             Some(seeded(Thinking::Model)?)
         };
         let desc = models.chat_label();
+        let server_pid = models.server_pid(RuntimeRole::Chat);
         return Ok(Setup {
             exec: Exec::Local(Box::new(models)),
             provider,
@@ -1437,6 +1780,7 @@ fn setup(ctx: &mut RunContext) -> Result<Setup, BenchError> {
             real: true,
             desc,
             seed: Some(seed),
+            server_pid,
         });
     }
     let opts = ctx.config.draft.clone();
@@ -1449,6 +1793,7 @@ fn setup(ctx: &mut RunContext) -> Result<Setup, BenchError> {
             real: true,
             desc,
             seed,
+            server_pid: None,
         });
     }
     let locality = match opts.draft_locality {
@@ -1470,6 +1815,7 @@ fn setup(ctx: &mut RunContext) -> Result<Setup, BenchError> {
         real: false,
         desc: "fake-deterministic (in-process)".into(),
         seed: None,
+        server_pid: None,
     })
 }
 
@@ -1519,6 +1865,18 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
         config.temperature = Some(0.0);
     }
     let local_applies = config.local.enabled && locality != Locality::Cloud;
+    let read_ahead = ctx.config.doubletap.doubletap_read_ahead;
+    let product_interval_ms = ReadAheadConfig::default().min_interval_ms;
+    if read_ahead.is_on() {
+        // Every task stands for a focus change well apart from the last; the product's rate
+        // limit is applied to the CPU projection instead.
+        config.read_ahead.enabled = true;
+        config.read_ahead.min_interval_ms = 0;
+    }
+    let probe = Probe {
+        read_ahead: read_ahead.is_on(),
+        server_pid: s.server_pid,
+    };
 
     ctx.param("model", s.desc.clone());
     ctx.param("model.locality", format!("{locality:?}"));
@@ -1564,6 +1922,36 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
         "Drafter::begin (a11y read and IPC not included); from_trigger.* from the \
          Drafter::prewarm call",
     );
+    ctx.param("read_ahead", read_ahead.as_str());
+    if read_ahead.is_on() {
+        ctx.param(
+            "read_ahead.flow",
+            "per task: Drafter::read_ahead with the trigger's DraftRequest, waited for (bounded \
+             by the per-draft timeout), then the trigger flow unchanged; from_trigger.* starts \
+             after the read-ahead",
+        );
+        ctx.param(
+            "read_ahead.min_interval_ms",
+            config.read_ahead.min_interval_ms,
+        );
+        ctx.param("read_ahead.product_min_interval_ms", product_interval_ms);
+    }
+    ctx.param(
+        "server_cpu",
+        match s.server_pid {
+            Some(pid) => format!(
+                "llama-server pid {pid}: user + system CPU time from {}",
+                if cfg!(target_os = "linux") {
+                    "/proc/<pid>/stat"
+                } else if cfg!(target_os = "macos") {
+                    "ps -o cputime"
+                } else {
+                    "nowhere (not metered on this OS)"
+                }
+            ),
+            None => "not metered (no local server process)".to_owned(),
+        },
+    );
     ctx.param("meets_16gb", host.meets_16gb);
     if !matches!(s.exec, Exec::Local(_)) {
         ctx.param("hardware", host.to_json());
@@ -1580,8 +1968,8 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
         let t = Instant::now();
         let idle = drafters.prewarm_idle(timeout).await;
         let idle_s = t.elapsed().as_secs_f64();
-        let cold = run_pass(&drafters, &corpus, &warmup, timeout, "warm-up").await;
-        let pass = run_pass(&drafters, &corpus, &tasks, timeout, "timed").await;
+        let cold = run_pass(&drafters, &corpus, &warmup, timeout, "warm-up", probe).await;
+        let pass = run_pass(&drafters, &corpus, &tasks, timeout, "timed", probe).await;
         (idle, idle_s, cold, pass)
     });
     ctx.param("main_pass_s", round3(started.elapsed().as_secs_f64()));
@@ -1613,6 +2001,14 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
     }
 
     let mut out = pass_metrics(&pass, target);
+    if read_ahead.is_on() {
+        let on_device = s.real && locality == Locality::OnDevice;
+        out.extend(read_ahead_metrics(
+            &pass.read_aheads,
+            product_interval_ms,
+            on_device,
+        ));
+    }
     if let Some(c) = cold.outcomes.first() {
         out.extend(cold_metrics(c));
     }
@@ -1702,6 +2098,10 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
                 &thinking_tasks,
                 timeout,
                 "thinking",
+                Probe {
+                    read_ahead: false,
+                    ..probe
+                },
             ));
             out.extend(thinking_metrics(&thinking));
         }
@@ -1763,6 +2163,7 @@ mod tests {
                 real: self.real,
                 desc: "test".into(),
                 seed: None,
+                server_pid: None,
             };
             run_with(ctx, s, self.timeout)
         }
@@ -1912,6 +2313,7 @@ mod tests {
                     text_chars: 10,
                     ..Sample::default()
                 })],
+                ..Pass::default()
             },
             Some(latency_target(Locality::Cloud)),
         );
@@ -2204,6 +2606,181 @@ mod tests {
             tokens(&on),
             tokens(&off)
         );
+    }
+
+    fn read_ahead_run(read_ahead: Switch) -> Report {
+        let cfg = RunConfig {
+            draft: DraftOptions {
+                draft_locality: DraftLocality::Local,
+                fake_prefill_ms_per_1k: 20,
+                ..DraftOptions::default()
+            },
+            doubletap: DoubletapOptions {
+                doubletap_read_ahead: read_ahead,
+            },
+            ..smoke()
+        };
+        run_benchmark(&DoubleTapBench, &cfg)
+    }
+
+    #[test]
+    fn read_ahead_is_off_by_default() {
+        assert_eq!(
+            DoubletapOptions::default().doubletap_read_ahead,
+            Switch::Off
+        );
+        let r = run_benchmark(&DoubleTapBench, &smoke());
+        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
+        assert_eq!(r.config.params["read_ahead"], "off");
+        assert!(
+            r.metrics
+                .iter()
+                .all(|m| !m.name.starts_with("doubletap.read_ahead."))
+        );
+        // The fake runs in process: no server CPU to meter.
+        assert!(r.metric("doubletap.server_cpu_s.mean").is_none());
+        assert_eq!(
+            r.config.params["server_cpu"],
+            "not metered (no local server process)"
+        );
+    }
+
+    #[test]
+    fn read_ahead_runs_before_every_trigger() {
+        let off = read_ahead_run(Switch::Off);
+        let on = read_ahead_run(Switch::On);
+        assert_eq!(on.status, Status::Ok, "{:?}", on.message);
+        assert_eq!(on.config.params["read_ahead"], "on");
+        assert_eq!(on.config.params["read_ahead.min_interval_ms"], 0);
+        assert_eq!(
+            on.config.params["read_ahead.product_min_interval_ms"],
+            ReadAheadConfig::default().min_interval_ms
+        );
+        let requests = value(&on, "doubletap.read_ahead.requests");
+        assert_eq!(requests, value(&on, "doubletap.requests"));
+        let completed = value(&on, "doubletap.read_ahead.completed");
+        let skipped = value(&on, "doubletap.read_ahead.skipped");
+        assert_eq!(
+            completed + skipped + value(&on, "doubletap.read_ahead.timeouts"),
+            requests
+        );
+        // The fake is not a real provider: no target on the skip count.
+        assert!(on.targets.is_empty());
+        // The trigger flow itself is unchanged.
+        assert_eq!(value(&on, "doubletap.completed"), 12.0);
+        if completed == 0.0 {
+            // The engine reads nothing ahead (read-ahead not implemented or turned off).
+            assert!(on.metric("doubletap.read_ahead.time.p50").is_none());
+            return;
+        }
+        // A local provider with read-ahead enabled never skips.
+        assert_eq!(skipped, 0.0);
+        for name in [
+            "doubletap.read_ahead.time.p50",
+            "doubletap.read_ahead.time.p95",
+            "doubletap.read_ahead.prepare.p50",
+            "doubletap.read_ahead.warm.p50",
+        ] {
+            assert!(on.metric(name).is_some(), "missing {name}");
+        }
+        // What was read ahead is served from the cache at the trigger.
+        let evaluated = |r: &Report| value(r, "doubletap.evaluated_prompt_tokens.p50");
+        let cached = |r: &Report| value(r, "doubletap.cached_prompt_tokens.p50");
+        assert!(
+            evaluated(&on) < evaluated(&off),
+            "{} >= {}",
+            evaluated(&on),
+            evaluated(&off)
+        );
+        assert!(
+            cached(&on) > cached(&off),
+            "{} <= {}",
+            cached(&on),
+            cached(&off)
+        );
+    }
+
+    #[test]
+    fn read_ahead_metrics_count_skips_and_project_cpu() {
+        let done = |wall_ms, cpu| ReadAheadResult::Done {
+            wall_ms,
+            outcome: ReadAheadOutcome {
+                provider: ProviderId::new("local-chat"),
+                prompt_chars: 3_000,
+                prepare_ms: 10,
+                warm_ms: wall_ms - 10,
+            },
+            server_cpu_s: Some(cpu),
+        };
+        let results = vec![
+            done(2_000, 3.0),
+            done(4_000, 5.0),
+            ReadAheadResult::Skipped {
+                reason: "rate_limited",
+            },
+            ReadAheadResult::TimedOut,
+        ];
+        let m = read_ahead_metrics(&results, 5_000, true);
+        let get = |name: &str| {
+            m.iter()
+                .find(|x| x.name == name)
+                .unwrap_or_else(|| panic!("missing {name}"))
+        };
+        assert_eq!(get("doubletap.read_ahead.requests").value, 4.0);
+        assert_eq!(get("doubletap.read_ahead.completed").value, 2.0);
+        assert_eq!(get("doubletap.read_ahead.skipped").value, 1.0);
+        assert_eq!(get("doubletap.read_ahead.skipped").target_met, Some(false));
+        assert_eq!(get("doubletap.read_ahead.skipped.rate_limited").value, 1.0);
+        assert_eq!(get("doubletap.read_ahead.timeouts").value, 1.0);
+        assert_eq!(get("doubletap.read_ahead.server_cpu_s.mean").value, 4.0);
+        // 4 CPU-s per read-ahead at 6 a minute: 24 CPU-s a minute, 40% of a core.
+        assert_eq!(
+            get("doubletap.read_ahead.core_pct.at_6_per_min").value,
+            40.0
+        );
+        assert_eq!(
+            get("doubletap.read_ahead.core_pct.at_1_per_min").value,
+            round3(4.0 / 60.0 * 100.0)
+        );
+        assert!(
+            get("doubletap.read_ahead.server_cpu_s.mean")
+                .description
+                .contains("Battery")
+        );
+        // Without CPU readings (in-process fake) nothing is projected.
+        let m = read_ahead_metrics(
+            &[ReadAheadResult::Skipped { reason: "disabled" }],
+            5_000,
+            false,
+        );
+        assert!(m.iter().all(|x| !x.name.contains("core_pct")));
+        assert!(m.iter().all(|x| x.target.is_none()));
+    }
+
+    #[test]
+    fn projected_cpu_is_capped_by_the_rate_limit() {
+        assert_eq!(projected_core_pct(6.0, 1, 5_000), 10.0);
+        assert_eq!(projected_core_pct(6.0, 6, 5_000), 60.0);
+        // At most one read-ahead per 20 s: 3 a minute, whatever the focus rate.
+        assert_eq!(projected_core_pct(6.0, 6, 20_000), 30.0);
+        assert_eq!(projected_core_pct(6.0, 4, 0), 40.0);
+    }
+
+    #[test]
+    fn fake_provider_models_a_whole_prompt_prefill() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let p = FakeChat::new(Locality::OnDevice, FakeLatency::default());
+            let rules = "Draft a reply in the user's voice. ".repeat(20);
+            let thread = "Can we move the review to Friday afternoon? ".repeat(20);
+            // A read-ahead: the whole request, ending with a cache breakpoint.
+            let mut ahead = chat_req(&rules, &thread);
+            ahead.messages[0].content.push(Part::CacheBreakpoint);
+            p.prewarm_prefix(&ahead).await.unwrap();
+            // The trigger's request: everything but the breakpoint is served from the cache.
+            let (input, cached) = usage(&p, chat_req(&rules, &thread)).await;
+            assert_eq!(cached, input);
+        });
     }
 
     #[test]
