@@ -14,15 +14,17 @@ on:
         description: "Space-separated suites (install replay actions brief judge learning)"
         default: "install replay actions brief judge learning"
         type: string
+  # Temporary while QA runs: a push that touches qa/GG4/ci/trigger starts a run.
   push:
     branches: [qa/proactive]
+    paths: [qa/GG4/ci/trigger]
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
@@ -57,6 +59,8 @@ jobs:
         run: |
           cargo build --release --locked -p nuggetd
           cargo build --release --manifest-path qa/GG4/probe/Cargo.toml --target-dir target
+          cargo build --release --manifest-path qa/GG4/scenarios/a2audit/Cargo.toml --target-dir target
+          mkdir -p target/debug && ln -sf ../release/gg4-audit target/debug/gg4-audit && ln -sf ../release/gg4-probe target/debug/gg4-probe
       - name: Record hardware
         run: |
           mkdir -p gg4-out

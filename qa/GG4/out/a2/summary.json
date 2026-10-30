@@ -1,0 +1,2577 @@
+{
+ "report": {
+  "repeat_accept_and_done_are_noops": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "sender_accepted_before": 0.9999999907622492,
+    "after_second_accept_and_done": 0.9999999876024945,
+    "model_updates": [
+     7,
+     7
+    ],
+    "second_accept_error": null,
+    "done_error": null,
+    "state_after_done": "done"
+   }
+  },
+  "learning_persists_across_restart": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "before_stop": [
+     [
+      "domain",
+      "benefitsco.example",
+      0.0,
+      2.0
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      1.0,
+      0.0
+     ],
+     [
+      "domain",
+      "talentpeak.example",
+      0.0,
+      1.0
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      1.0,
+      5.0
+     ],
+     [
+      "sender",
+      "deals.guy@gmail.com",
+      0.0,
+      1.0
+     ],
+     [
+      "sender",
+      "hr@benefitsco.example",
+      0.0,
+      2.0
+     ],
+     [
+      "sender",
+      "jo@talentpeak.example",
+      0.0,
+      1.0
+     ],
+     [
+      "sender",
+      "priya@larkspur.example",
+      1.0,
+      0.0
+     ],
+     [
+      "sender",
+      "rita@cloudnest.example",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "55439200699bb3ab",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "5b29cebb344edb8f",
+      1.0,
+      0.0
+     ],
+     [
+      "thread",
+      "9e64095dd774856b",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "a9a2c10602eb0178",
+      0.0,
+      0.0
+     ],
+     [
+      "thread",
+      "a9d4d6aecf591f7f",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "d60e4c324085f5d3",
+      0.0,
+      1.0
+     ]
+    ],
+    "after_start": [
+     [
+      "domain",
+      "benefitsco.example",
+      0.0,
+      2.0
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      1.0,
+      0.0
+     ],
+     [
+      "domain",
+      "talentpeak.example",
+      0.0,
+      1.0
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      1.0,
+      5.0
+     ],
+     [
+      "sender",
+      "deals.guy@gmail.com",
+      0.0,
+      1.0
+     ],
+     [
+      "sender",
+      "hr@benefitsco.example",
+      0.0,
+      2.0
+     ],
+     [
+      "sender",
+      "jo@talentpeak.example",
+      0.0,
+      1.0
+     ],
+     [
+      "sender",
+      "priya@larkspur.example",
+      1.0,
+      0.0
+     ],
+     [
+      "sender",
+      "rita@cloudnest.example",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "55439200699bb3ab",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "5b29cebb344edb8f",
+      1.0,
+      0.0
+     ],
+     [
+      "thread",
+      "9e64095dd774856b",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "a9a2c10602eb0178",
+      0.0,
+      0.0
+     ],
+     [
+      "thread",
+      "a9d4d6aecf591f7f",
+      0.0,
+      1.0
+     ],
+     [
+      "thread",
+      "d60e4c324085f5d3",
+      0.0,
+      1.0
+     ]
+    ]
+   }
+  },
+  "recruiter_not_relevant_demotes_and_hides_sender": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day1_jo": {
+     "U": 0.0335,
+     "C": 0.7171,
+     "d_logodds": -4.292,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "jo@talentpeak.example",
+       "less",
+       0,
+       1,
+       "not_relevant",
+       -1.491
+      ],
+      [
+       "domain",
+       "talentpeak.example",
+       "less",
+       0,
+       1,
+       "not_relevant",
+       -0.496
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       1,
+       5,
+       "not_relevant",
+       -0.224
+      ]
+     ]
+    }
+   }
+  },
+  "manager_accepts_raise_learned_sender_effect": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day1_priya": {
+     "U": 0.8367,
+     "C": 0.87,
+     "d_logodds": -0.267,
+     "U_shown": true,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "priya@larkspur.example",
+       "more",
+       1,
+       0,
+       null,
+       1.491
+      ],
+      [
+       "domain",
+       "larkspur.example",
+       "more",
+       1,
+       0,
+       null,
+       0.496
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       1,
+       5,
+       "not_relevant",
+       -0.224
+      ]
+     ]
+    }
+   }
+  },
+  "manager_ranks_higher_than_without_feedback": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "priya_d_logodds_vs_control_by_day": {
+     "1": -0.267,
+     "2": 0.221,
+     "3": 0.962,
+     "4": 0.212
+    },
+    "day4_priya": {
+     "U": 0.8922,
+     "C": 0.87,
+     "d_logodds": 0.212,
+     "U_shown": true,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "priya@larkspur.example",
+       "more",
+       4,
+       0,
+       null,
+       2.386
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ],
+      [
+       "domain",
+       "larkspur.example",
+       "more",
+       4,
+       1,
+       null,
+       0.156
+      ]
+     ]
+    }
+   }
+  },
+  "no_gmail_domain_bleed_in_learned_layer": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "gmail_entries": [],
+    "friend_learned_scopes_days1to4": [
+     "kind"
+    ],
+    "day4_sofia": {
+     "U": 0.1878,
+     "C": 0.7474,
+     "d_logodds": -2.549,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ]
+     ]
+    },
+    "day4_ben": {
+     "U": 0.1994,
+     "C": 0.7584,
+     "d_logodds": -2.534,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ]
+     ]
+    },
+    "day4_deals": {
+     "U": 0.0155,
+     "C": 0.7584,
+     "d_logodds": -5.295,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "deals.guy@gmail.com",
+       "less",
+       0,
+       4,
+       "not_important",
+       -2.763
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ]
+     ]
+    }
+   }
+  },
+  "untouched_friends_not_hidden_by_others_feedback": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "hidden (day, who)": [
+     [
+      1,
+      "sofia"
+     ],
+     [
+      1,
+      "ben"
+     ],
+     [
+      1,
+      "lee"
+     ],
+     [
+      2,
+      "sofia"
+     ],
+     [
+      2,
+      "ben"
+     ],
+     [
+      2,
+      "lee"
+     ],
+     [
+      3,
+      "sofia"
+     ],
+     [
+      3,
+      "ben"
+     ],
+     [
+      3,
+      "lee"
+     ],
+     [
+      4,
+      "sofia"
+     ],
+     [
+      4,
+      "ben"
+     ],
+     [
+      4,
+      "lee"
+     ]
+    ],
+    "d_logodds_vs_control": {
+     "1": {
+      "sofia": -2.31,
+      "ben": -2.305,
+      "lee": -2.305,
+      "tom": -1.808
+     },
+     "2": {
+      "sofia": -2.623,
+      "ben": -2.528,
+      "lee": -2.613,
+      "tom": -1.87
+     },
+     "3": {
+      "sofia": -2.35,
+      "ben": -2.335,
+      "lee": -2.335,
+      "tom": -1.443
+     },
+     "4": {
+      "sofia": -2.549,
+      "ben": -2.534,
+      "lee": -2.585,
+      "tom": -2.378
+     }
+    }
+   }
+  },
+  "untouched_friends_rank_moves_less_than_0.5_logodds": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "worst_d_logodds": -2.623,
+    "d_logodds_vs_control": {
+     "1": {
+      "sofia": -2.31,
+      "ben": -2.305,
+      "lee": -2.305,
+      "tom": -1.808
+     },
+     "2": {
+      "sofia": -2.623,
+      "ben": -2.528,
+      "lee": -2.613,
+      "tom": -1.87
+     },
+     "3": {
+      "sofia": -2.35,
+      "ben": -2.335,
+      "lee": -2.335,
+      "tom": -1.443
+     },
+     "4": {
+      "sofia": -2.549,
+      "ben": -2.534,
+      "lee": -2.585,
+      "tom": -2.378
+     }
+    },
+    "note": "everything beyond the learned 'kind' effect comes from the shared scoring model (score.rs update_weighted), which is not listed in card.learned"
+   }
+  },
+  "same_company_domain_effect_weaker_than_sender": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day3_jo": {
+     "U": 0.0133,
+     "C": 0.7676,
+     "d_logodds": -5.501,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "jo@talentpeak.example",
+       "less",
+       0,
+       3,
+       "not_relevant",
+       -2.237
+      ],
+      [
+       "domain",
+       "talentpeak.example",
+       "less",
+       0,
+       3,
+       "not_relevant",
+       -0.892
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       10,
+       "not_relevant",
+       -0.243
+      ]
+     ]
+    },
+    "day3_sam": {
+     "U": 0.0888,
+     "C": 0.7171,
+     "d_logodds": -3.258,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "domain",
+       "talentpeak.example",
+       "less",
+       0,
+       3,
+       "not_relevant",
+       -0.892
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       10,
+       "not_relevant",
+       -0.243
+      ]
+     ]
+    },
+    "day3_lee_other_firm": {
+     "U": 0.2227,
+     "C": 0.7474,
+     "d_logodds": -2.335,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       10,
+       "not_relevant",
+       -0.243
+      ]
+     ]
+    }
+   }
+  },
+  "noisy_coworker_not_important_does_not_demote_manager_via_domain": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "day4_priya_learned": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "more",
+      4,
+      0,
+      null,
+      2.386
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      4,
+      13,
+      "not_relevant",
+      -0.281
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "more",
+      4,
+      1,
+      null,
+      0.156
+     ]
+    ],
+    "day4_tom": {
+     "U": 0.2255,
+     "C": 0.7584,
+     "d_logodds": -2.378,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ],
+      [
+       "domain",
+       "larkspur.example",
+       "more",
+       4,
+       1,
+       null,
+       0.156
+      ]
+     ]
+    },
+    "learning_domain_larkspur": {
+     "accepted": 4.886451788254992,
+     "adjustment": -0.1259442939698003,
+     "dismissed": 1.9885139917879415,
+     "key": "larkspur.example",
+     "label": null,
+     "last_at": "2026-11-13T14:00:00.708643381Z",
+     "scope": "domain",
+     "suppresses": false
+    }
+   }
+  },
+  "learning_counts_match_actions": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "jo_entry_day4": {
+     "accepted": 0.0,
+     "adjustment": -2.4903551214675432,
+     "dismissed": 4.886451775280509,
+     "key": "jo@talentpeak.example",
+     "label": null,
+     "last_at": "2026-11-13T14:00:00.614880243Z",
+     "scope": "sender",
+     "suppresses": false
+    },
+    "expected_dismissed_hl60": 4.886451921622404,
+    "expected_dismissed_hl30": 4.776757052439686
+   }
+  },
+  "card_learned_explains_counts": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day4_jo_card_learned": [
+     [
+      "sender",
+      "jo@talentpeak.example",
+      "less",
+      0,
+      4,
+      "not_relevant",
+      -2.386
+     ],
+     [
+      "domain",
+      "talentpeak.example",
+      "less",
+      0,
+      4,
+      "not_relevant",
+      -0.99
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      4,
+      13,
+      "not_relevant",
+      -0.281
+     ]
+    ]
+   }
+  },
+  "card_learned_counts_accepts": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day4_priya_card_learned": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "more",
+      4,
+      0,
+      null,
+      2.386
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      4,
+      13,
+      "not_relevant",
+      -0.281
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "more",
+      4,
+      1,
+      null,
+      0.156
+     ]
+    ]
+   }
+  },
+  "already_handled_suppresses_thread_without_penalising_sender": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "suppressing_entries_day0": [
+     {
+      "accepted": 0.0,
+      "adjustment": 0.0,
+      "dismissed": 0.0,
+      "key": "a9a2c10602eb0178",
+      "label": "Reply to Dana Whitfield: Checkout copy: which version?",
+      "last_at": "2026-11-09T14:00:00.614099834Z",
+      "scope": "thread",
+      "suppresses": true
+     }
+    ],
+    "dana_sender_entry_day4": null,
+    "day1_other_dana_thread": {
+     "U": 0.2268,
+     "C": 0.7372,
+     "d_logodds": -2.258,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       1,
+       5,
+       "not_relevant",
+       -0.224
+      ]
+     ]
+    }
+   }
+  },
+  "already_handled_thread_not_hidden_after_new_message": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day2_dana_new_message_card": {
+     "id": "ee875ead93e8aeec",
+     "title": "Reply to Dana Whitfield: Re: Checkout copy: which version?",
+     "state": "new",
+     "rank": 0.1683,
+     "shown": false,
+     "inbox": false,
+     "factors": [
+      [
+       "importance",
+       1.673,
+       0.685
+      ],
+      [
+       "kind_unanswered_thread",
+       -0.511,
+       -0.511
+      ],
+      [
+       "freshness",
+       0.362,
+       0.31
+      ]
+     ],
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       2,
+       8,
+       "not_relevant",
+       -0.254
+      ]
+     ]
+    },
+    "control": {
+     "id": "ee875ead93e8aeec",
+     "title": "Reply to Dana Whitfield: Re: Checkout copy: which version?",
+     "state": "new",
+     "rank": 0.7341,
+     "shown": true,
+     "inbox": false,
+     "factors": [
+      [
+       "freshness",
+       0.8,
+       0.685
+      ],
+      [
+       "importance",
+       1.5,
+       0.614
+      ],
+      [
+       "direct",
+       0.6,
+       0.6
+      ]
+     ],
+     "learned": []
+    }
+   }
+  },
+  "already_handled_thread_new_message_is_offered": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "day2_dana_new_message_card": {
+     "id": "ee875ead93e8aeec",
+     "title": "Reply to Dana Whitfield: Re: Checkout copy: which version?",
+     "state": "new",
+     "rank": 0.1683,
+     "shown": false,
+     "inbox": false,
+     "factors": [
+      [
+       "importance",
+       1.673,
+       0.685
+      ],
+      [
+       "kind_unanswered_thread",
+       -0.511,
+       -0.511
+      ],
+      [
+       "freshness",
+       0.362,
+       0.31
+      ]
+     ],
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       2,
+       8,
+       "not_relevant",
+       -0.254
+      ]
+     ]
+    },
+    "control": {
+     "id": "ee875ead93e8aeec",
+     "title": "Reply to Dana Whitfield: Re: Checkout copy: which version?",
+     "state": "new",
+     "rank": 0.7341,
+     "shown": true,
+     "inbox": false,
+     "factors": [
+      [
+       "freshness",
+       0.8,
+       0.685
+      ],
+      [
+       "importance",
+       1.5,
+       0.614
+      ],
+      [
+       "direct",
+       0.6,
+       0.6
+      ]
+     ],
+     "learned": []
+    }
+   }
+  },
+  "wrong_info_only_mild_sender_effect_no_domain": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day1_billing_other_card": {
+     "U": 0.1325,
+     "C": 0.7341,
+     "d_logodds": -2.895,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "rita@cloudnest.example",
+       "less",
+       0,
+       1,
+       "wrong_info",
+       -0.594
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       1,
+       5,
+       "not_relevant",
+       -0.224
+      ]
+     ]
+    },
+    "day1_support_same_vendor": {
+     "U": 0.1267,
+     "C": 0.599,
+     "d_logodds": -2.332,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       1,
+       5,
+       "not_relevant",
+       -0.224
+      ]
+     ]
+    },
+    "day3_billing": {
+     "U": 0.1378,
+     "C": 0.7474,
+     "d_logodds": -2.918,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "rita@cloudnest.example",
+       "less",
+       0,
+       1,
+       "wrong_info",
+       -0.584
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       10,
+       "not_relevant",
+       -0.243
+      ]
+     ]
+    },
+    "day3_support": {
+     "U": 0.1921,
+     "C": 0.7171,
+     "d_logodds": -2.367,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       10,
+       "not_relevant",
+       -0.243
+      ]
+     ]
+    },
+    "learning_billing": {
+     "accepted": 0.0,
+     "adjustment": -0.5944740342291235,
+     "dismissed": 0.9885140176212862,
+     "key": "rita@cloudnest.example",
+     "label": null,
+     "last_at": "2026-11-09T14:00:00.622734422Z",
+     "scope": "sender",
+     "suppresses": false
+    },
+    "learning_cloudnest_domain": null
+   }
+  },
+  "sensitive_titles_not_kept_as_thread_labels": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "leaks": [],
+    "day0_benefits_labels": [
+     {
+      "accepted": 0.0,
+      "adjustment": -0.9999999961764311,
+      "dismissed": 0.9999999923528623,
+      "key": "9e64095dd774856b",
+      "label": "Reply to Benefits Desk: Open enrollment: dental plan choice?",
+      "last_at": "2026-11-09T14:00:00.630680831Z",
+      "scope": "thread",
+      "suppresses": false
+     }
+    ],
+    "sensitive_cards": {
+     "hrs-0": {
+      "id": "f40c641a74b48efa",
+      "title": "Reply to Benefits Desk: Payroll correction for Maya, SSN 123-45-6789?",
+      "state": "new",
+      "rank": 0.599,
+      "shown": true,
+      "inbox": false,
+      "factors": [
+       [
+        "freshness",
+        0.8,
+        0.685
+       ],
+       [
+        "direct",
+        0.6,
+        0.6
+       ],
+       [
+        "question",
+        0.5,
+        0.5
+       ]
+      ],
+      "learned": []
+     },
+     "hr-1": {
+      "id": "c8d431db25ab7de5",
+      "title": "Reply to Benefits Desk: Re: Open enrollment: dental plan choice?",
+      "state": "new",
+      "rank": 0.0066,
+      "shown": false,
+      "inbox": false,
+      "factors": [
+       [
+        "learned",
+        -3.957,
+        -3.957
+       ],
+       [
+        "importance",
+        1.577,
+        0.645
+       ],
+       [
+        "kind_unanswered_thread",
+        -0.444,
+        -0.444
+       ]
+      ],
+      "learned": [
+       [
+        "sender",
+        "hr@benefitsco.example",
+        "less",
+        0,
+        2,
+        "not_relevant",
+        -1.992
+       ],
+       [
+        "thread",
+        "9e64095dd774856b",
+        "less",
+        0,
+        1,
+        "not_relevant",
+        -0.994
+       ],
+       [
+        "domain",
+        "benefitsco.example",
+        "less",
+        0,
+        2,
+        "not_relevant",
+        -0.746
+       ],
+       [
+        "kind",
+        "unanswered_thread",
+        "less",
+        1,
+        5,
+        "not_relevant",
+        -0.224
+       ]
+      ]
+     }
+    }
+   }
+  },
+  "decay_half_life_matches_code_constant_60d": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "jo_dismissed_day4": 4.886451775280509,
+    "jo_dismissed_day35": 3.415556423025999,
+    "measured_half_life_days": 60.00000439979262,
+    "spec_days": 30.0,
+    "code_const_days": 60.0
+   }
+  },
+  "decay_effects_smaller_after_35_days": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "day4_jo": {
+     "U": 0.0095,
+     "C": 0.7755,
+     "d_logodds": -5.887,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "jo@talentpeak.example",
+       "less",
+       0,
+       4,
+       "not_relevant",
+       -2.386
+      ],
+      [
+       "domain",
+       "talentpeak.example",
+       "less",
+       0,
+       4,
+       "not_relevant",
+       -0.99
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       4,
+       13,
+       "not_relevant",
+       -0.281
+      ]
+     ]
+    },
+    "day35_jo": {
+     "U": 0.0092,
+     "C": 0.7755,
+     "d_logodds": -5.924,
+     "learned_sum": -3.549,
+     "model_part": -2.375,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "sender",
+       "jo@talentpeak.example",
+       "less",
+       0,
+       3,
+       "not_relevant",
+       -2.321
+      ],
+      [
+       "domain",
+       "talentpeak.example",
+       "less",
+       0,
+       3,
+       "not_relevant",
+       -0.946
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       11,
+       "not_relevant",
+       -0.283
+      ]
+     ]
+    }
+   }
+  },
+  "shared_model_part_decays_too": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "model_part_by_sender_day35": {
+     "jo": -2.375,
+     "sam": -2.523,
+     "priya": -2.27,
+     "deals": -2.438,
+     "sofia": -2.505,
+     "tom": -2.489,
+     "lee": -2.43,
+     "dana_thread": -2.505,
+     "jo_thread": -2.375
+    },
+    "note": "model_part = rank change vs control not explained by card.learned (the shared ScoringModel, no decay)"
+   }
+  },
+  "dana_thread_handled_then_new_messages_not_hidden_day35": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "day35_dana": {
+     "U": 0.1619,
+     "C": 0.7584,
+     "d_logodds": -2.788,
+     "learned_sum": -0.283,
+     "model_part": -2.505,
+     "U_shown": false,
+     "C_shown": true,
+     "learned": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       3,
+       11,
+       "not_relevant",
+       -0.283
+      ]
+     ]
+    }
+   }
+  },
+  "learning_never_changes_actions": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "actions": {
+     "jo-35": {
+      "C": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to jo@talentpeak.example"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Principal designer role at Studio35?\""
+       ]
+      ],
+      "U": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to jo@talentpeak.example"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Principal designer role at Studio35?\""
+       ]
+      ]
+     },
+     "priya-35": {
+      "C": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to priya@larkspur.example"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Can you review the Q1 plan?\""
+       ]
+      ],
+      "U": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to priya@larkspur.example"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Can you review the Q1 plan?\""
+       ]
+      ]
+     },
+     "deals-35": {
+      "C": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to deals.guy@gmail.com"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Want a discount on chairs?\""
+       ]
+      ],
+      "U": [
+       [
+        "draft_reply",
+        "edit",
+        true,
+        "Draft a reply to deals.guy@gmail.com"
+       ],
+       [
+        "archive_thread",
+        "destroy",
+        false,
+        "Archive \"Want a discount on chairs?\""
+       ]
+      ]
+     }
+    },
+    "archive_previews": {
+     "jo-35": {
+      "C": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Principal designer role at Studio35? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Principal designer role at Studio35?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Principal designer role at Studio35?\""
+      },
+      "U": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Principal designer role at Studio35? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Principal designer role at Studio35?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Principal designer role at Studio35?\""
+      }
+     },
+     "priya-35": {
+      "C": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Can you review the Q1 plan? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Can you review the Q1 plan?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Can you review the Q1 plan?\""
+      },
+      "U": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Can you review the Q1 plan? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Can you review the Q1 plan?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Can you review the Q1 plan?\""
+      }
+     },
+     "deals-35": {
+      "C": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Want a discount on chairs? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Want a discount on chairs?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Want a discount on chairs?\""
+      },
+      "U": {
+       "kind": "archive_thread",
+       "risk": "destroy",
+       "target": "mail:inbox",
+       "diff": [
+        {
+         "op": "remove",
+         "text": "Inbox: Want a discount on chairs? (1 message)"
+        },
+        {
+         "op": "add",
+         "text": "Archive: Want a discount on chairs?"
+        },
+        {
+         "op": "context",
+         "text": "Messages are kept; they only leave the inbox."
+        }
+       ],
+       "summary": "Archive \"Want a discount on chairs?\""
+      }
+     }
+    }
+   }
+  },
+  "reset_sender_moves_only_its_cards": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "sender",
+     "key": "  JO@TalentPeak.example "
+    },
+    "result": {
+     "cleared": 1
+    },
+    "error": null,
+    "moved": [
+     "jo-0c",
+     "jo-35"
+    ],
+    "unexpected_moves": [],
+    "expected_but_unmoved": [],
+    "entries_removed": [
+     [
+      "sender",
+      "jo@talentpeak.example"
+     ]
+    ]
+   }
+  },
+  "reset_sender_broadcasts_cards_changed": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "notification": {
+     "created": 0,
+     "open": 1,
+     "reason": "reset_learning",
+     "resolved": 0
+    }
+   }
+  },
+  "reset_domain_moves_only_its_cards": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "domain",
+     "key": "talentpeak.example"
+    },
+    "result": {
+     "cleared": 1
+    },
+    "error": null,
+    "moved": [
+     "jo-0c",
+     "jo-35",
+     "sam-35"
+    ],
+    "unexpected_moves": [],
+    "expected_but_unmoved": [],
+    "entries_removed": [
+     [
+      "domain",
+      "talentpeak.example"
+     ]
+    ]
+   }
+  },
+  "reset_domain_broadcasts_cards_changed": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "notification": {
+     "created": 0,
+     "open": 1,
+     "reason": "reset_learning",
+     "resolved": 0
+    }
+   }
+  },
+  "reset_thread_moves_only_its_cards": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "thread",
+     "key": "55439200699bb3ab"
+    },
+    "result": {
+     "cleared": 1
+    },
+    "error": null,
+    "moved": [
+     "jo-0c"
+    ],
+    "unexpected_moves": [],
+    "expected_but_unmoved": [],
+    "entries_removed": [
+     [
+      "thread",
+      "55439200699bb3ab"
+     ]
+    ]
+   }
+  },
+  "reset_thread_broadcasts_cards_changed": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "notification": {
+     "created": 0,
+     "open": 1,
+     "reason": "reset_learning",
+     "resolved": 0
+    }
+   }
+  },
+  "reset_kind_moves_only_its_cards": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "kind",
+     "key": "unanswered_thread"
+    },
+    "result": {
+     "cleared": 1
+    },
+    "error": null,
+    "moved": [
+     "dana-35",
+     "deals-35",
+     "jo-0c",
+     "jo-35",
+     "lee-35",
+     "priya-35",
+     "sam-35",
+     "sofia-35",
+     "tom-35"
+    ],
+    "unexpected_moves": [],
+    "expected_but_unmoved": [],
+    "entries_removed": [
+     [
+      "kind",
+      "unanswered_thread"
+     ]
+    ]
+   }
+  },
+  "reset_kind_broadcasts_cards_changed": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "notification": {
+     "created": 0,
+     "open": 1,
+     "reason": "reset_learning",
+     "resolved": 0
+    }
+   }
+  },
+  "reset_all_moves_only_its_cards": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "all"
+    },
+    "result": {
+     "cleared": 25
+    },
+    "error": null,
+    "moved": [
+     "dana-35",
+     "deals-35",
+     "jo-0c",
+     "jo-35",
+     "lee-35",
+     "priya-35",
+     "sam-35",
+     "sofia-35",
+     "tom-35"
+    ],
+    "unexpected_moves": [],
+    "expected_but_unmoved": [],
+    "entries_removed": [
+     [
+      "domain",
+      "benefitsco.example"
+     ],
+     [
+      "domain",
+      "larkspur.example"
+     ],
+     [
+      "sender",
+      "deals.guy@gmail.com"
+     ],
+     [
+      "sender",
+      "hr@benefitsco.example"
+     ],
+     [
+      "sender",
+      "kevin@larkspur.example"
+     ],
+     [
+      "sender",
+      "priya@larkspur.example"
+     ],
+     [
+      "sender",
+      "rita@cloudnest.example"
+     ],
+     [
+      "thread",
+      "0de401f1a7a03355"
+     ],
+     [
+      "thread",
+      "2c1689b51d503854"
+     ],
+     [
+      "thread",
+      "34dfbd70fe217ed3"
+     ],
+     [
+      "thread",
+      "5b29cebb344edb8f"
+     ],
+     [
+      "thread",
+      "6255b0336777af65"
+     ],
+     [
+      "thread",
+      "7df8154f24b4b972"
+     ],
+     [
+      "thread",
+      "7ee272d5070735c9"
+     ],
+     [
+      "thread",
+      "9e64095dd774856b"
+     ],
+     [
+      "thread",
+      "a9d4d6aecf591f7f"
+     ],
+     [
+      "thread",
+      "c2b79a393149aa5e"
+     ],
+     [
+      "thread",
+      "c69628e5c08929d7"
+     ],
+     [
+      "thread",
+      "c8d7477dfd0e9427"
+     ],
+     [
+      "thread",
+      "d313d15783ce97da"
+     ],
+     [
+      "thread",
+      "d51c7e7bfb2c7a90"
+     ],
+     [
+      "thread",
+      "d60e4c324085f5d3"
+     ],
+     [
+      "thread",
+      "d6f5365057fd38a0"
+     ],
+     [
+      "thread",
+      "e811c77841d36aaa"
+     ],
+     [
+      "thread",
+      "fec013ae03cccb79"
+     ]
+    ]
+   }
+  },
+  "reset_all_broadcasts_cards_changed": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "notification": {
+     "created": 0,
+     "open": 9,
+     "reason": "reset_learning",
+     "resolved": 0
+    }
+   }
+  },
+  "reset_sender_removes_only_sender_entry": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "removed": [
+     [
+      "sender",
+      "jo@talentpeak.example"
+     ]
+    ]
+   }
+  },
+  "scoped_resets_restore_jo_cards_to_no_feedback_rank": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "jo_cards_after_sender_domain_thread_kind_resets": {
+     "jo-35": [
+      0.364212,
+      false,
+      []
+     ],
+     "jo-0c": [
+      0.364212,
+      false,
+      []
+     ]
+    },
+    "control_same_instant": {
+     "jo-35": [
+      0.78868,
+      true
+     ],
+     "jo-0c": [
+      0.78868,
+      true
+     ]
+    },
+    "gap_logodds": {
+     "jo-35": -1.874,
+     "jo-0c": -1.874
+    },
+    "remaining_learned_scopes": {
+     "jo-35": [],
+     "jo-0c": []
+    }
+   }
+  },
+  "reset_all_restores_control_ranks": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "mismatch U vs C": {},
+    "final_U": {
+     "jo-35": [
+      0.78868,
+      true,
+      []
+     ],
+     "sam-35": [
+      0.758515,
+      true,
+      []
+     ],
+     "priya-35": [
+      0.870139,
+      true,
+      []
+     ],
+     "deals-35": [
+      0.767723,
+      true,
+      []
+     ],
+     "sofia-35": [
+      0.767723,
+      true,
+      []
+     ],
+     "tom-35": [
+      0.775639,
+      true,
+      []
+     ],
+     "lee-35": [
+      0.775639,
+      true,
+      []
+     ],
+     "dana-35": [
+      0.758515,
+      true,
+      []
+     ],
+     "jo-0c": [
+      0.78868,
+      true,
+      []
+     ]
+    },
+    "final_C": {
+     "jo-35": [
+      0.78868,
+      true
+     ],
+     "sam-35": [
+      0.758515,
+      true
+     ],
+     "priya-35": [
+      0.870139,
+      true
+     ],
+     "deals-35": [
+      0.767723,
+      true
+     ],
+     "sofia-35": [
+      0.767723,
+      true
+     ],
+     "tom-35": [
+      0.775639,
+      true
+     ],
+     "lee-35": [
+      0.775639,
+      true
+     ],
+     "dana-35": [
+      0.758515,
+      true
+     ],
+     "jo-0c": [
+      0.78868,
+      true
+     ]
+    },
+    "model_updates_after": 0
+   }
+  },
+  "bad_reset_unknown_scope_clear_error": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "everything"
+    },
+    "result": null,
+    "error": {
+     "code": -32602,
+     "message": "unknown learning scope \"everything\" (all, sender, domain, kind, thread)"
+    },
+    "notified": false,
+    "learning_unchanged": true
+   }
+  },
+  "bad_reset_missing_key_clear_error": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "sender"
+    },
+    "result": null,
+    "error": {
+     "code": -32602,
+     "message": "a key is required to reset the sender scope"
+    },
+    "notified": false,
+    "learning_unchanged": true
+   }
+  },
+  "bad_reset_empty_key_clear_error": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "domain",
+     "key": "  "
+    },
+    "result": null,
+    "error": {
+     "code": -32602,
+     "message": "a key is required to reset the domain scope"
+    },
+    "notified": false,
+    "learning_unchanged": true
+   }
+  },
+  "bad_reset_unknown_kind_clear_error": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": {
+     "scope": "kind",
+     "key": "spam"
+    },
+    "result": null,
+    "error": {
+     "code": -32602,
+     "message": "unknown card kind \"spam\""
+    },
+    "notified": false,
+    "learning_unchanged": true
+   }
+  },
+  "bad_reset_no_params_clear_error": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "params": null,
+    "result": null,
+    "error": {
+     "code": -32602,
+     "message": "missing field `scope`"
+    },
+    "notified": false,
+    "learning_unchanged": true
+   }
+  },
+  "bad_reset_nonexistent_key_gives_clear_answer": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "nonexistent_sender": {
+     "params": {
+      "scope": "sender",
+      "key": "nobody@nowhere.example"
+     },
+     "result": {
+      "cleared": 0
+     },
+     "error": null,
+     "notified": true,
+     "learning_unchanged": true
+    },
+    "nonexistent_thread": {
+     "params": {
+      "scope": "thread",
+      "key": "ffffffffffffffff"
+     },
+     "result": {
+      "cleared": 0
+     },
+     "error": null,
+     "notified": true,
+     "learning_unchanged": true
+    },
+    "public_domain": {
+     "params": {
+      "scope": "domain",
+      "key": "gmail.com"
+     },
+     "result": {
+      "cleared": 0
+     },
+     "error": null,
+     "notified": true,
+     "learning_unchanged": true
+    },
+    "scope_case": {
+     "params": {
+      "scope": "Sender",
+      "key": "deals.guy@gmail.com"
+     },
+     "result": null,
+     "error": {
+      "code": -32602,
+      "message": "unknown learning scope \"Sender\" (all, sender, domain, kind, thread)"
+     },
+     "notified": false,
+     "learning_unchanged": true
+    }
+   }
+  },
+  "reset_works_when_proactive_disabled": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "reset_disabled": {
+     "result": {
+      "cleared": 1
+     },
+     "error": null
+    },
+    "notification": {
+     "created": 0,
+     "open": 6,
+     "reason": "reset_learning",
+     "resolved": 0
+    },
+    "lee_other_before": {
+     "id": "e5e5234ee3170b0b",
+     "title": "Reply to Lee Park: Another opening for you?",
+     "state": "new",
+     "rank": 0.0376,
+     "shown": false,
+     "inbox": false,
+     "factors": [
+      [
+       "learned",
+       -3.35,
+       -3.35
+      ],
+      [
+       "importance",
+       1.356,
+       0.827
+      ],
+      [
+       "freshness",
+       0.597,
+       0.512
+      ]
+     ],
+     "learned": [
+      [
+       "sender",
+       "lee@hirewave.example",
+       "less",
+       0,
+       1,
+       "not_important",
+       -2.25
+      ],
+      [
+       "domain",
+       "hirewave.example",
+       "less",
+       0,
+       1,
+       "not_important",
+       -0.9
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       0,
+       1,
+       "not_important",
+       -0.2
+      ]
+     ]
+    },
+    "lee_other_after": {
+     "id": "e5e5234ee3170b0b",
+     "title": "Reply to Lee Park: Another opening for you?",
+     "state": "new",
+     "rank": 0.2705,
+     "shown": false,
+     "inbox": false,
+     "factors": [
+      [
+       "learned",
+       -1.1,
+       -1.1
+      ],
+      [
+       "importance",
+       1.356,
+       0.827
+      ],
+      [
+       "freshness",
+       0.597,
+       0.511
+      ]
+     ],
+     "learned": [
+      [
+       "domain",
+       "hirewave.example",
+       "less",
+       0,
+       1,
+       "not_important",
+       -0.9
+      ],
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       0,
+       1,
+       "not_important",
+       -0.2
+      ]
+     ]
+    }
+   }
+  },
+  "reset_writes_audit_entries": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "records(actor,target,cleared)": [
+     [
+      "user",
+      "sender:jo@talentpeak.example",
+      1
+     ],
+     [
+      "user",
+      "domain:talentpeak.example",
+      1
+     ],
+     [
+      "user",
+      "thread:55439200699bb3ab",
+      1
+     ],
+     [
+      "user",
+      "kind:unanswered_thread",
+      1
+     ],
+     [
+      "user",
+      "sender:nobody@nowhere.example",
+      0
+     ],
+     [
+      "user",
+      "thread:ffffffffffffffff",
+      0
+     ],
+     [
+      "user",
+      "domain:gmail.com",
+      0
+     ],
+     [
+      "user",
+      "all",
+      25
+     ],
+     [
+      "user",
+      "sender:lee@hirewave.example",
+      1
+     ]
+    ],
+    "chain_ok": true
+   }
+  },
+  "bad_resets_not_audited": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "targets": [
+     "sender:jo@talentpeak.example",
+     "domain:talentpeak.example",
+     "thread:55439200699bb3ab",
+     "kind:unanswered_thread",
+     "sender:nobody@nowhere.example",
+     "thread:ffffffffffffffff",
+     "domain:gmail.com",
+     "all",
+     "sender:lee@hirewave.example"
+    ]
+   }
+  },
+  "bounded_learned_adjustment_within_cap": {
+   "ok": true,
+   "n": 1,
+   "evidence": {
+    "5": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "less",
+      0,
+      5,
+      "not_important",
+      -2.403
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "less",
+      0,
+      5,
+      "not_important",
+      -1.129
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      0,
+      5,
+      "not_important",
+      -0.468
+     ]
+    ],
+    "35": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "less",
+      0,
+      3,
+      "not_important",
+      -2.457
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "less",
+      0,
+      3,
+      "not_important",
+      -1.128
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      0,
+      3,
+      "not_important",
+      -0.414
+     ]
+    ],
+    "95": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "less",
+      0,
+      2,
+      "not_important",
+      -2.51
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "less",
+      0,
+      2,
+      "not_important",
+      -1.079
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      0,
+      2,
+      "not_important",
+      -0.299
+     ]
+    ],
+    "185": [
+     [
+      "sender",
+      "priya@larkspur.example",
+      "less",
+      0,
+      1,
+      "not_important",
+      -1.933
+     ],
+     [
+      "domain",
+      "larkspur.example",
+      "less",
+      0,
+      1,
+      "not_important",
+      -0.713
+     ],
+     [
+      "kind",
+      "unanswered_thread",
+      "less",
+      0,
+      1,
+      "not_important",
+      -0.131
+     ]
+    ]
+   }
+  },
+  "bounded_urgent_manager_mail_resurfaces_within_95_days": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "shown_by_day_offset": {
+     "5": false,
+     "35": false,
+     "95": false,
+     "185": false
+    },
+    "first_shown": null,
+    "ranks": {
+     "5": [
+      0.0075,
+      0.9262,
+      -7.415
+     ],
+     "35": [
+      0.0075,
+      0.9262,
+      -7.415
+     ],
+     "95": [
+      0.0084,
+      0.9262,
+      -7.301
+     ],
+     "185": [
+      0.025,
+      0.9262,
+      -6.193
+     ]
+    }
+   }
+  },
+  "one_dismissal_of_X_moves_untouched_friend_less_than_0.25_logodds": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "sofia_d_logodds_after_one_jo_feedback_by_reason": {
+     "not_relevant": -0.962,
+     "not_important": -1.051,
+     "already_handled": -0.426,
+     "wrong_info": -0.272,
+     "snooze": -0.354
+    },
+    "sofia_learned_after": {
+     "not_relevant": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       0,
+       1,
+       "not_relevant",
+       -0.111
+      ]
+     ],
+     "not_important": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       0,
+       1,
+       "not_important",
+       -0.2
+      ]
+     ],
+     "already_handled": [],
+     "wrong_info": [
+      [
+       "kind",
+       "unanswered_thread",
+       "less",
+       0,
+       1,
+       "wrong_info",
+       -0.059
+      ]
+     ],
+     "snooze": []
+    },
+    "sofia_factors_after_not_relevant": [
+     [
+      "freshness",
+      0.646,
+      0.553
+     ],
+     [
+      "direct",
+      0.42,
+      0.42
+     ],
+     [
+      "question",
+      0.32,
+      0.32
+     ]
+    ]
+   }
+  },
+  "six_recruiter_dismissals_keep_friend_and_manager_offered": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "six": {
+     "sofia-a": {
+      "after": 0.0763,
+      "eligible": false,
+      "d_logodds": -2.895,
+      "learned": [
+       [
+        "kind",
+        "unanswered_thread",
+        "less",
+        0,
+        6,
+        "not_relevant",
+        -0.429
+       ]
+      ]
+     },
+     "priya-a": {
+      "after": 0.0763,
+      "eligible": false,
+      "d_logodds": -2.895,
+      "learned": [
+       [
+        "kind",
+        "unanswered_thread",
+        "less",
+        0,
+        6,
+        "not_relevant",
+        -0.429
+       ]
+      ]
+     }
+    }
+   }
+  },
+  "scoped_resets_undo_bleed_on_friend": {
+   "ok": false,
+   "n": 1,
+   "evidence": {
+    "after_resets": {
+     "sofia-a": {
+      "after": 0.1757,
+      "d_logodds": -1.947,
+      "learned": []
+     },
+     "priya-a": {
+      "after": 0.1757,
+      "d_logodds": -1.947,
+      "learned": []
+     }
+    },
+    "model_updates": 6
+   }
+  }
+ },
+ "secs": 29.8,
+ "passed": 37,
+ "total": 50
+}
