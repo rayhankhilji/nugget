@@ -11,19 +11,23 @@
 //! on related subjects (a September recap, a November plan) both stay current.
 //!
 //! [`facts_section`] renders the block for the user message, wrapped in `<context>` tags and
-//! fenced like all untrusted text, followed by the rules for using it.
+//! fenced like all untrusted text, followed by the rules for using it. With the thread's
+//! [`Ask`] ([`facts_for`], [`facts_section_for`]) the same facts are numbered by relevance to
+//! what the thread asks instead, so the fact that answers it comes first; supersession is
+//! decided by date either way.
 
 use std::collections::HashSet;
 
 use nugget_core::ipc::ContextResponse;
 
+use crate::ask::{Ask, Passage};
 use crate::grounding::{ValueKind, values};
 use crate::prompt::untrusted;
 
 /// One retrieved passage as a fact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fact {
-    /// `F{id}` in the prompt, from 1, newest first.
+    /// `F{id}` in the prompt, from 1, newest first (or most relevant first, [`facts_for`]).
     pub id: usize,
     /// The passage's `[n]` marker in the packed context (0 when the text had no headers).
     pub n: u32,
@@ -220,14 +224,84 @@ pub fn facts(context: &ContextResponse) -> Vec<Fact> {
     out
 }
 
-/// The facts section of the user message (empty `<context>` is never rendered).
+/// The facts in `context` for a draft with this `ask`: by relevance to it, most relevant first
+/// ([`Ask::select`]: a fact counts less for what the facts before it already cover; the packed
+/// order breaks ties), renumbered `F1`, `F2`, … in that order.
+/// Supersession is still decided by date ([`facts`]); only the ids change. Without an ask, or
+/// with one that has nothing to score by, the same as [`facts`] (newest first).
+pub fn facts_for(context: &ContextResponse, ask: Option<&Ask>) -> Vec<Fact> {
+    ordered(context, ask).0
+}
+
+/// [`facts_for`], and whether the facts are ordered by relevance.
+fn ordered(context: &ContextResponse, ask: Option<&Ask>) -> (Vec<Fact>, bool) {
+    let mut out = facts(context);
+    let Some(ask) = ask.filter(|a| !a.is_empty()) else {
+        return (out, false);
+    };
+    if out.len() < 2 {
+        return (out, true);
+    }
+    // Scored in packed (rank) order, so the rank prior breaks ties.
+    let mut by_rank: Vec<usize> = (0..out.len()).collect();
+    by_rank.sort_by_key(|&i| out[i].n);
+    let passages: Vec<Passage<'_>> = by_rank
+        .iter()
+        .map(|&i| Passage {
+            title: &out[i].title,
+            body: &out[i].body,
+        })
+        .collect();
+    // The order that best answers the ask together, as the engine selects (positions in
+    // `by_rank`).
+    let order: Vec<usize> = ask
+        .select(&passages, passages.len(), |_| true)
+        .into_iter()
+        .map(|k| by_rank[k])
+        .collect();
+    // Old id → new id.
+    let mut renumber = vec![0usize; out.len() + 1];
+    for (new, &i) in order.iter().enumerate() {
+        renumber[out[i].id] = new + 1;
+    }
+    let mut taken: Vec<Option<Fact>> = out.drain(..).map(Some).collect();
+    for &i in &order {
+        let mut f = taken[i].take().expect("each fact once");
+        f.id = renumber[f.id];
+        f.superseded_by = f.superseded_by.map(|by| renumber[by]);
+        out.push(f);
+    }
+    (out, true)
+}
+
+/// The facts section of the user message (empty `<context>` is never rendered), newest first.
 pub fn facts_section(context: &ContextResponse) -> String {
-    let facts = facts(context);
+    render(&facts(context), false)
+}
+
+/// [`facts_section`] for a draft with this `ask`: the facts of [`facts_for`], most relevant
+/// first.
+pub fn facts_section_for(context: &ContextResponse, ask: Option<&Ask>) -> String {
+    let (facts, relevance) = ordered(context, ask);
+    render(&facts, relevance)
+}
+
+/// The facts of [`facts_for`] and their section, for a prompt that also refers to them.
+pub(crate) fn facts_and_section(
+    context: &ContextResponse,
+    ask: Option<&Ask>,
+) -> (Vec<Fact>, String) {
+    let (facts, relevance) = ordered(context, ask);
+    let section = render(&facts, relevance);
+    (facts, section)
+}
+
+fn render(facts: &[Fact], relevance: bool) -> String {
     if facts.is_empty() {
         return format!("\n{THREAD_RULES}\n");
     }
     let mut block = String::new();
-    for f in &facts {
+    for f in facts {
         if !block.is_empty() {
             block.push('\n');
         }
@@ -250,8 +324,13 @@ pub fn facts_section(context: &ContextResponse) -> String {
         block.push_str("): ");
         block.push_str(&f.body);
     }
+    let order = if relevance {
+        "most relevant first"
+    } else {
+        "newest first"
+    };
     format!(
-        "\nFacts from the user's own notes, files, mail and calendar, newest first, each with an \
+        "\nFacts from the user's own notes, files, mail and calendar, {order}, each with an \
 id, the date it was written and a title. Use them only where relevant; never mention or cite \
 them:\n<context>\n{}\n</context>\n{FACTS_RULES}\n",
         untrusted(&block, 40_000)
@@ -660,5 +739,96 @@ pizza budget is $600.",
         assert_eq!(f.len(), 1);
         assert_eq!(f[0].body, "loose passage");
         assert_eq!(f[0].date, None);
+    }
+
+    fn ask(question: &str) -> Ask {
+        Ask::from_draft(
+            &nugget_core::ipc::DraftContext {
+                thread: vec![nugget_core::ipc::ThreadMessage {
+                    author: None,
+                    text: question.into(),
+                    from_me: Some(false),
+                    timestamp: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+    }
+
+    /// A choir's notes: the oldest one answers the question.
+    fn choir() -> ContextResponse {
+        context(&[
+            (
+                "Spring concert rehearsal",
+                Some("2026-03-02"),
+                "Rehearsal for the spring concert moved to the parish hall. Bring folders.",
+            ),
+            (
+                "Choir robes order",
+                Some("2026-02-20"),
+                "Robes for the spring concert ordered from the tailor.",
+            ),
+            (
+                "Ticket sales",
+                Some("2026-01-15"),
+                "Ticket sales for the spring concert closed: 212 tickets sold, $3,180 raised.",
+            ),
+        ])
+    }
+
+    #[test]
+    fn facts_are_ordered_by_relevance_to_the_ask() {
+        let a = ask("How many tickets did we sell for the spring concert?");
+        let f = facts_for(&choir(), Some(&a));
+        let titles: Vec<&str> = f.iter().map(|f| f.title.as_str()).collect();
+        assert_eq!(titles[0], "Ticket sales", "{titles:?}");
+        assert_eq!(f.iter().map(|f| f.id).collect::<Vec<_>>(), [1, 2, 3]);
+        let s = facts_section_for(&choir(), Some(&a));
+        assert!(s.contains("most relevant first"), "{s}");
+        assert!(
+            s.contains("<context>\nF1 (written 2026-01-15, \"Ticket sales\")"),
+            "{s}"
+        );
+        // Still dated: the date stays with each fact whatever its place.
+        assert!(s.contains("F2 (written 2026-03-02") || s.contains("F2 (written 2026-02-20"));
+    }
+
+    #[test]
+    fn newest_first_without_an_ask() {
+        let f = facts_for(&choir(), None);
+        assert_eq!(f, facts(&choir()));
+        assert_eq!(f[0].title, "Spring concert rehearsal");
+        let s = facts_section_for(&choir(), None);
+        assert_eq!(s, facts_section(&choir()));
+        assert!(s.contains("newest first"));
+        // An ask with nothing to score by changes nothing.
+        let empty = Ask::default();
+        assert_eq!(
+            facts_section_for(&choir(), Some(&empty)),
+            facts_section(&choir())
+        );
+    }
+
+    #[test]
+    fn supersession_is_by_date_whatever_the_order() {
+        // The question is about the draft's subject; the draft's values stay out of date.
+        let a = ask("Was the Q4 marketing budget draft with two trade shows?");
+        let by_date = facts(&henrik());
+        let f = facts_for(&henrik(), Some(&a));
+        assert_eq!(f.len(), 3);
+        let draft = f.iter().find(|f| f.title == "Q4 budget draft").unwrap();
+        let approved = f.iter().find(|f| f.title == "Q4 budget approved").unwrap();
+        assert_eq!(draft.superseded_by, Some(approved.id), "{f:?}");
+        assert!(f.iter().filter(|f| f.superseded_by.is_some()).count() == 1);
+        assert_eq!(
+            by_date.iter().filter(|f| f.superseded_by.is_some()).count(),
+            1
+        );
+        let s = facts_section_for(&henrik(), Some(&a));
+        assert!(s.contains(&format!(
+            "\"Q4 budget draft\"; superseded by F{}, its values are out of date",
+            approved.id
+        )));
     }
 }

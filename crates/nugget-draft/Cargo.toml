@@ -12,6 +12,7 @@ nugget-core.workspace = true
 nugget-store.workspace = true
 nugget-infer.workspace = true
 nugget-retrieve.workspace = true
+nugget-extract.workspace = true
 nugget-voice.workspace = true
 serde.workspace = true
 serde_json.workspace = true

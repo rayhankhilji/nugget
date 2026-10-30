@@ -27,6 +27,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::FieldKind;
+use crate::ask::{Ask, Passage};
 use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
 use crate::grounding::{Grounder, GroundingCheck, GroundingReport};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
@@ -207,6 +208,14 @@ pub struct LocalBudget {
     pub budget_tokens: u32,
     /// Retrieved snippets kept (the best first).
     pub max_snippets: usize,
+    /// Ask-aware selection: retrieval is packed into this larger pool (tokens, capped at
+    /// [`MAX_BUDGET_TOKENS`]) and the `max_snippets` passages most relevant to what the thread
+    /// asks ([`crate::ask`]) are kept within `budget_tokens`, rather than the packer's best by
+    /// the whole retrieval query. 0 or at most `budget_tokens`: the packer's best, as before.
+    pub candidate_tokens: u32,
+    /// Grounded local prompts order the facts by relevance to the thread's open points and list
+    /// those points before the closing line ([`crate::prompt::answer_plan`]).
+    pub answer_plan: bool,
     /// Let passages marked sensitive into local prompts. Off by default: with only a few
     /// snippets a sensitive one (a card number, a password) is more likely to make the cut and
     /// a small model to paste it into a draft that is then sent from a third-party app.
@@ -229,6 +238,8 @@ impl Default for LocalBudget {
             enabled: true,
             budget_tokens: 300,
             max_snippets: 3,
+            candidate_tokens: 1_500,
+            answer_plan: true,
             include_sensitive: false,
             provider: None,
             limits: PromptLimits::local(),
@@ -641,10 +652,17 @@ impl Drafter {
         }
     }
 
-    /// Retrieval budget (tokens) and snippet cap for a provider locality.
+    /// Retrieval budget (tokens) and snippet cap for a provider locality: what the packer
+    /// fills, and how many of its best passages are kept. With ask-aware selection
+    /// ([`selection_for`](Self::selection_for)) the candidate pool, with no cap.
     fn budget_for(&self, cloud: bool) -> (usize, Option<usize>) {
         let c = &self.inner.config;
-        if !cloud && c.local.enabled {
+        if self.selection_for(cloud).is_some() {
+            (
+                c.local.candidate_tokens.min(MAX_BUDGET_TOKENS) as usize,
+                None,
+            )
+        } else if !cloud && c.local.enabled {
             (
                 c.local.budget_tokens.min(MAX_BUDGET_TOKENS) as usize,
                 Some(c.local.max_snippets),
@@ -652,6 +670,23 @@ impl Drafter {
         } else {
             (c.budget_tokens.clamp(1, MAX_BUDGET_TOKENS) as usize, None)
         }
+    }
+
+    /// The budget (tokens) and snippet cap that ask-aware selection keeps from the candidate
+    /// pool ([`LocalBudget::candidate_tokens`]), for non-cloud providers with the local budget on
+    /// and a pool larger than the budget.
+    fn selection_for(&self, cloud: bool) -> Option<(usize, usize)> {
+        let local = &self.inner.config.local;
+        let budget = local.budget_tokens.min(MAX_BUDGET_TOKENS);
+        (!cloud && local.enabled && local.candidate_tokens.min(MAX_BUDGET_TOKENS) > budget)
+            .then_some((budget as usize, local.max_snippets))
+    }
+
+    /// The ask a prompt for this locality carries ([`LocalBudget::answer_plan`]): never for cloud
+    /// providers, whose prompts stay as they were.
+    fn ask_for<'a>(&self, cloud: bool, ask: &'a Ask) -> Option<&'a Ask> {
+        let local = &self.inner.config.local;
+        (!cloud && local.enabled && local.answer_plan).then_some(ask)
     }
 
     /// Start a draft. Refuses secure fields, excluded apps and search boxes; picks the provider
@@ -666,6 +701,7 @@ impl Drafter {
         let kind = gate_with(ctx, &config.excluded_apps, config.allow_terminals)?;
         let (candidates, explicit) = self.candidates(ctx, req.provider.as_ref())?;
         let query = retrieval_query(ctx);
+        let ask = Ask::from_draft(ctx, req.instruction.as_deref());
         let mut timings = DraftTimings::default();
         let mut last_err = None;
 
@@ -674,7 +710,9 @@ impl Drafter {
             let cloud = meta.locality == Locality::Cloud;
             timings.attempts += 1;
 
-            let (context, voice) = self.prepare(ctx, kind, &query, cloud, &mut timings).await;
+            let (context, voice, scored) = self
+                .prepare(ctx, kind, &query, &ask, cloud, &mut timings)
+                .await;
             // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
             if cloud && context.citations.iter().any(|c| c.sensitive) {
                 return Err(Error::Integrity(
@@ -682,7 +720,7 @@ impl Drafter {
                 ));
             }
             let (chat, screenshot, band) =
-                self.draft_request(&req, kind, provider.id(), cloud, &context, &voice);
+                self.draft_request(&req, kind, provider.id(), cloud, &context, &voice, &scored);
 
             note_prefix(&self.inner, provider.id(), chat.system.as_deref());
             let full = (!cloud).then(|| fingerprint(&chat));
@@ -725,6 +763,7 @@ impl Drafter {
     /// [`read_ahead`](Self::read_ahead), so that a read-ahead prefills exactly what the draft
     /// will send (system, messages, cache hint `draft:<channel>` for non-cloud providers).
     /// Returns the request, whether the screenshot is attached, and the length band.
+    #[allow(clippy::too_many_arguments)]
     fn draft_request(
         &self,
         req: &DraftRequest,
@@ -733,6 +772,7 @@ impl Drafter {
         cloud: bool,
         context: &ContextResponse,
         voice: &VoiceHints,
+        ask: &Ask,
     ) -> (ChatRequest, bool, LengthBand) {
         let config = &self.inner.config;
         let ctx = &req.context;
@@ -758,6 +798,7 @@ impl Drafter {
             band,
             limits: self.limits_for(cloud),
             grounding: config.grounding,
+            ask: self.ask_for(cloud, ask),
         };
         let max_tokens = req
             .max_tokens
@@ -874,13 +915,15 @@ impl Drafter {
     ) -> std::result::Result<ReadAheadOutcome, ReadAheadSkip> {
         let t0 = Instant::now();
         let query = retrieval_query(&req.context);
+        let ask = Ask::from_draft(&req.context, req.instruction.as_deref());
         let mut timings = DraftTimings::default();
-        let (context, voice) = tokio::select! {
+        let (context, voice, ask) = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(ReadAheadSkip::Cancelled),
-            r = self.prepare(&req.context, kind, &query, false, &mut timings) => r,
+            r = self.prepare(&req.context, kind, &query, &ask, false, &mut timings) => r,
         };
-        let (chat, _, _) = self.draft_request(req, kind, provider.id(), false, &context, &voice);
+        let (chat, _, _) =
+            self.draft_request(req, kind, provider.id(), false, &context, &voice, &ask);
         let prepare_ms = ms(t0.elapsed());
         let fp = fingerprint(&chat);
         let system = chat.system.clone().unwrap_or_default();
@@ -1158,7 +1201,10 @@ impl Drafter {
     }
 
     /// Retrieval for `query` packed for this locality, shared with any prewarm of the same query.
-    /// Also returns whether it was already running or done (prewarmed).
+    /// Also returns whether it was already running or done (prewarmed). With ask-aware selection
+    /// this is the whole candidate pool: [`prepare`](Self::prepare) selects from it per draft, so
+    /// the cache depends on the query alone and a prewarmed pool gives the trigger the same
+    /// passages as a fresh one.
     fn context_future(&self, query: &str, cloud: bool) -> (SharedContext, bool) {
         let ttl = Duration::from_millis(self.inner.config.prewarm_ttl_ms);
         let key = (query.to_owned(), cloud);
@@ -1238,14 +1284,19 @@ impl Drafter {
 
     /// Retrieval context and voice hints for one provider locality, concurrently, each bounded
     /// by its timeout. A slow or failed retrieval drafts without context rather than failing.
+    /// With ask-aware selection the passages most relevant to `ask` are kept from the pool
+    /// ([`select_snippets`]): a pure function of the pool and the ask, so `begin`, a prewarm and
+    /// a read-ahead of the same draft all end up with the same context. Also returns the ask the
+    /// prompt orders its facts by (with the pool's term weights after a selection).
     async fn prepare(
         &self,
         ctx: &DraftContext,
         kind: FieldKind,
         query: &str,
+        ask: &Ask,
         cloud: bool,
         timings: &mut DraftTimings,
-    ) -> (ContextResponse, VoiceHints) {
+    ) -> (ContextResponse, VoiceHints, Ask) {
         let config = &self.inner.config;
         let empty = ContextResponse {
             text: String::new(),
@@ -1297,12 +1348,16 @@ impl Drafter {
         timings.retrieval_ms = Some(ms(waited));
         timings.retrieval_run_ms = outcome.as_ref().map(|o| ms(o.run));
         timings.voice_ms = Some(ms(voice_took));
-        let context = outcome.and_then(|o| o.ctx.clone()).unwrap_or(empty);
+        let mut context = outcome.and_then(|o| o.ctx.clone()).unwrap_or(empty);
+        let ask = match self.selection_for(cloud) {
+            Some((budget, max)) => select_snippets(&mut context, ask, budget, max),
+            None => ask.clone(),
+        };
         let voice = voice.map(|v| (*v).clone()).unwrap_or_else(|| VoiceHints {
             channel: Some(channel_for(kind)),
             ..Default::default()
         });
-        (context, voice)
+        (context, voice, ask)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1595,6 +1650,179 @@ fn keep_best_snippets(ctx: &mut ContextResponse, max: usize) {
     }
 }
 
+/// Passages shorter than this (estimated tokens) are not kept cut down to fit (the packer's
+/// default `min_truncated_tokens`).
+const MIN_CUT_TOKENS: usize = 24;
+
+/// Ask-aware selection ([`LocalBudget::candidate_tokens`]): of a packed candidate pool, keep up
+/// to `max` passages that best answer `ask` together ([`Ask::select`]: greedy by relevance, a
+/// passage counting less for what the ones already kept cover; the packer's rank breaks ties,
+/// and decides alone when the ask has nothing to score by) whose rendering stays within
+/// `budget` tokens (`nugget_extract::estimate_tokens`, as the packer measures). A passage that
+/// does not fit whole is cut at a word boundary to what fits, ending with `…`, if
+/// at least [`MIN_CUT_TOKENS`] of its text remain, else skipped for the next one. The kept
+/// passages stay in rank order, renumbered `[1]`, `[2]`, … in the text and the citations alike,
+/// so the prompt, the citations and the egress items agree. Text not in the packer's layout
+/// falls back to [`keep_best_snippets`], and is dropped whole if that is still over budget.
+///
+/// Returns the ask with the pool's term weights ([`Ask::with_pool`]), for ordering the kept
+/// passages in the prompt.
+fn select_snippets(ctx: &mut ContextResponse, ask: &Ask, budget: usize, max: usize) -> Ask {
+    use nugget_extract::estimate_tokens;
+    let Some(blocks) = split_packed(ctx) else {
+        keep_best_snippets(ctx, max);
+        if estimate_tokens(&ctx.text) > budget {
+            tracing::warn!("draft: cannot split packed context; dropping it");
+            ctx.text.clear();
+            ctx.citations.clear();
+        }
+        return ask.clone();
+    };
+    let passages: Vec<Passage<'_>> = blocks
+        .iter()
+        .map(|b| Passage {
+            title: b.title,
+            body: b.body,
+        })
+        .collect();
+    let pooled = ask.with_pool(&passages);
+
+    let render = |kept: &[(usize, String)]| {
+        let mut sorted: Vec<&(usize, String)> = kept.iter().collect();
+        sorted.sort_by_key(|(i, _)| *i);
+        let mut out = String::new();
+        for (k, (i, body)) in sorted.into_iter().enumerate() {
+            if k > 0 {
+                out.push_str("\n\n");
+            }
+            out.push_str(&format!("[{}] {}\n{}", k + 1, blocks[*i].rest, body));
+        }
+        out
+    };
+    let fits = |kept: &[(usize, String)]| estimate_tokens(&render(kept)) <= budget;
+    let mut kept: Vec<(usize, String)> = Vec::new();
+    // Each pick whole if it fits, else the longest cut that fits if enough of it remains.
+    let fit = |kept: &mut Vec<(usize, String)>, i: usize| {
+        kept.push((i, blocks[i].body.to_owned()));
+        if fits(kept) {
+            return true;
+        }
+        kept.pop();
+        let body = blocks[i].body;
+        let (mut lo, mut hi) = (0usize, body.chars().count());
+        let mut best: Option<String> = None;
+        while lo < hi {
+            let mid = (lo + hi).div_ceil(2);
+            kept.push((i, cut(body, mid)));
+            let ok = fits(kept);
+            let (_, piece) = kept.pop().expect("just pushed");
+            if ok {
+                best = Some(piece);
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        match best.filter(|p| estimate_tokens(p) >= MIN_CUT_TOKENS) {
+            Some(piece) => {
+                kept.push((i, piece));
+                true
+            }
+            None => false,
+        }
+    };
+    ask.select(&passages, max, |i| fit(&mut kept, i));
+    kept.sort_by_key(|(i, _)| *i);
+    let text = render(&kept);
+    let citations = kept
+        .iter()
+        .enumerate()
+        .map(|(k, (i, _))| {
+            let mut c = ctx.citations[blocks[*i].citation].clone();
+            c.n = k as u32 + 1;
+            c
+        })
+        .collect();
+    ctx.text = text;
+    ctx.citations = citations;
+    pooled
+}
+
+/// One passage of a packed context.
+struct Block<'a> {
+    /// Index into the citations.
+    citation: usize,
+    /// The header after its `[n] ` marker: `Title (source)`.
+    rest: String,
+    title: &'a str,
+    body: &'a str,
+}
+
+/// Split a packed context into its passages, one per citation in order, each under the header
+/// `nugget_retrieve`'s packer renders (`[n] Title (source)`, passages separated by a blank
+/// line). `None` when the text is not in that layout.
+fn split_packed(ctx: &ContextResponse) -> Option<Vec<Block<'_>>> {
+    let one_line = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = ctx.text.as_str();
+    // (citation, rest, start of the header, start of the body).
+    let mut heads: Vec<(usize, String, usize, usize)> = Vec::with_capacity(ctx.citations.len());
+    let mut from = 0;
+    for (ci, c) in ctx.citations.iter().enumerate() {
+        let title = c
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or(c.item.key.as_str());
+        let source = c.url.as_deref().unwrap_or(c.item.source.as_str());
+        let rest = format!("{} ({})", one_line(title), one_line(source));
+        let line = format!("[{}] {rest}\n", c.n);
+        let at = if ci == 0 {
+            text.starts_with(&line).then_some(0)?
+        } else {
+            text[from..].find(&format!("\n\n{line}"))? + from + 2
+        };
+        let body = at + line.len();
+        heads.push((ci, rest, at, body));
+        from = body;
+    }
+    let mut out = Vec::with_capacity(heads.len());
+    for (k, (ci, rest, _, body)) in heads.iter().enumerate() {
+        let end = heads.get(k + 1).map_or(text.len(), |h| h.2 - 2);
+        let c = &ctx.citations[*ci];
+        out.push(Block {
+            citation: *ci,
+            title: c
+                .title
+                .as_deref()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or(""),
+            rest: rest.clone(),
+            body: text.get(*body..end)?,
+        });
+    }
+    Some(out)
+}
+
+/// The first `chars` characters of `text`, cut back to a word boundary when there is one, plus
+/// `…` (as the packer cuts).
+fn cut(text: &str, chars: usize) -> String {
+    let end = text
+        .char_indices()
+        .nth(chars)
+        .map_or(text.len(), |(i, _)| i);
+    if end >= text.len() {
+        return text.to_owned();
+    }
+    let head = &text[..end];
+    let head = match head.rfind(char::is_whitespace) {
+        Some(i) if i > 0 => &head[..i],
+        _ => head,
+    };
+    format!("{}…", head.trim_end())
+}
+
 /// Open a chat and wait for its first event, so a provider that fails early can be skipped.
 async fn open_stream(p: &dyn Provider, req: nugget_infer::ChatRequest) -> Result<ChatStream> {
     let mut stream = p.chat(req).await?;
@@ -1882,6 +2110,152 @@ mod tests {
         assert_eq!(c.citations.len(), 3);
     }
 
+    fn ask(question: &str) -> Ask {
+        Ask::from_draft(
+            &DraftContext {
+                thread: vec![nugget_core::ipc::ThreadMessage {
+                    author: None,
+                    text: question.into(),
+                    from_me: Some(false),
+                    timestamp: None,
+                }],
+                ..Default::default()
+            },
+            None,
+        )
+    }
+
+    /// A packed pool: the packer's layout, best ranked first.
+    fn pool(items: &[(&str, &str)]) -> ContextResponse {
+        let mut text = String::new();
+        let mut citations = Vec::new();
+        for (i, (title, body)) in items.iter().enumerate() {
+            let n = i as u32 + 1;
+            if i > 0 {
+                text.push_str("\n\n");
+            }
+            text.push_str(&format!("[{n}] {title} (notes)\n{body}"));
+            citations.push(cite(n, &format!("k{n}"), Some(title)));
+        }
+        ContextResponse {
+            text,
+            citations,
+            excluded_sensitive: 1,
+        }
+    }
+
+    fn garage() -> ContextResponse {
+        pool(&[
+            (
+                "Garage sale flyers",
+                "Garage sale flyers went up on every lamp post in the street.",
+            ),
+            (
+                "Garage sale setup",
+                "Garage sale tables go on the driveway; the sale opens early.",
+            ),
+            (
+                "Garage sale leftovers",
+                "Garage sale leftovers go to the charity shop afterwards.",
+            ),
+            (
+                "Street permit",
+                "The street permit for the garage sale costs $25 and covers one Saturday.",
+            ),
+        ])
+    }
+
+    #[test]
+    fn selection_keeps_the_most_relevant_within_budget_and_cap() {
+        let a = ask("How much is the permit for the garage sale?");
+        let mut c = garage();
+        select_snippets(&mut c, &a, 300, 2);
+        assert_eq!(c.citations.len(), 2);
+        let keys: Vec<&str> = c.citations.iter().map(|c| c.item.key.as_str()).collect();
+        assert!(keys.contains(&"k4"), "{keys:?}");
+        // Rank order kept, renumbered, and the text agrees with the citations.
+        assert_eq!(c.citations.iter().map(|c| c.n).collect::<Vec<_>>(), [1, 2]);
+        assert!(c.text.starts_with("[1] "), "{}", c.text);
+        assert!(
+            c.text
+                .contains("\n\n[2] Street permit (notes)\nThe street permit")
+        );
+        assert!(!c.text.contains("[3]"));
+        assert_eq!(c.excluded_sensitive, 1);
+        let facts = crate::prompt_facts::facts(&c);
+        assert_eq!(facts.len(), 2);
+        assert!(facts.iter().any(|f| f.title == "Street permit" && f.n == 2));
+
+        // A tight budget: fewer passages, never over it.
+        let mut c = garage();
+        select_snippets(&mut c, &a, 30, 3);
+        assert!(nugget_extract::estimate_tokens(&c.text) <= 30, "{}", c.text);
+        assert_eq!(c.citations.len(), 1);
+        assert_eq!(c.citations[0].item.key.as_str(), "k4");
+        assert_eq!(c.citations[0].n, 1);
+
+        // Nothing to score by: the packer's rank decides.
+        let mut c = garage();
+        select_snippets(&mut c, &Ask::default(), 300, 2);
+        let keys: Vec<&str> = c.citations.iter().map(|c| c.item.key.as_str()).collect();
+        assert_eq!(keys, ["k1", "k2"]);
+
+        let mut c = garage();
+        select_snippets(&mut c, &a, 300, 0);
+        assert!(c.text.is_empty() && c.citations.is_empty());
+    }
+
+    #[test]
+    fn selection_cuts_a_long_passage_to_fit_or_skips_it() {
+        let long = "The street permit for the garage sale costs $25. ".repeat(20);
+        let mut c = pool(&[
+            ("Street permit", long.trim()),
+            ("Garage sale setup", "Tables out."),
+        ]);
+        let a = ask("How much is the permit for the garage sale?");
+        select_snippets(&mut c, &a, 60, 2);
+        assert!(nugget_extract::estimate_tokens(&c.text) <= 60, "{}", c.text);
+        assert!(
+            c.text
+                .starts_with("[1] Street permit (notes)\nThe street permit")
+        );
+        assert!(c.text.contains("…"), "{}", c.text);
+        // The cut fills the budget: nothing else fits.
+        assert_eq!(c.citations.len(), 1);
+
+        // Too little room for a useful cut: skipped for one that fits.
+        let mut c = pool(&[
+            ("Street permit", long.trim()),
+            ("Garage sale setup", "Tables out."),
+        ]);
+        select_snippets(&mut c, &a, 20, 2);
+        let keys: Vec<&str> = c.citations.iter().map(|c| c.item.key.as_str()).collect();
+        assert_eq!(keys, ["k2"]);
+        assert_eq!(c.text, "[1] Garage sale setup (notes)\nTables out.");
+    }
+
+    #[test]
+    fn selection_of_unknown_layouts_never_cites_what_is_dropped() {
+        let a = ask("How much is the permit?");
+        // A body quoting a fake header is not a passage boundary.
+        let mut c = packed();
+        select_snippets(&mut c, &a, 300, 3);
+        assert_eq!(c.citations.len(), 3);
+        assert!(
+            c.text
+                .contains("second\n\n[3] x\n\n[3] Gamma (notes)\nthird")
+        );
+
+        let mut c = packed();
+        c.text = "free text".into();
+        select_snippets(&mut c, &a, 300, 1);
+        assert_eq!(c.citations.len(), 3, "kept whole within budget");
+        let mut c = packed();
+        c.text = "free text ".repeat(200);
+        select_snippets(&mut c, &a, 50, 1);
+        assert!(c.text.is_empty() && c.citations.is_empty());
+    }
+
     #[test]
     fn idle_prefix_is_rules_and_a_neutral_voice() {
         let p = idle_prefix(&PromptLimits::local());
@@ -1912,6 +2286,8 @@ mod tests {
         assert!(c.local.enabled);
         assert_eq!(c.local.budget_tokens, 200);
         assert_eq!(c.local.max_snippets, 3);
+        assert_eq!(c.local.candidate_tokens, 1_500);
+        assert!(c.local.answer_plan);
         assert_eq!(c.local.limits, PromptLimits::local());
     }
 }

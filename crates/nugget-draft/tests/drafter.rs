@@ -1030,11 +1030,13 @@ async fn local_budget_keeps_the_best_snippets_and_matching_citations() {
     let (wide, _st) = s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
     assert!(wide.citations.len() >= 2, "{:?}", keys(&wide));
 
-    // One snippet: the best passage only, and the citations and egress items say so.
+    // One snippet, no candidate pool: the packer's best passage only, and the citations and
+    // egress items say so.
     let local = Fake::new("local", Locality::OnDevice, &["ok"]);
     let config = DraftConfig {
         local: LocalBudget {
             max_snippets: 1,
+            candidate_tokens: 0,
             // Compared with the unbudgeted packing, which includes sensitive passages.
             include_sensitive: true,
             ..Default::default()
@@ -1047,11 +1049,30 @@ async fn local_budget_keeps_the_best_snippets_and_matching_citations() {
     let req = local.last();
     let items: Vec<&str> = req.items.iter().map(|i| i.key.as_str()).collect();
     assert_eq!(items, keys(&started));
+
+    // With the candidate pool (the default): the passage that answers the ask (the numbers),
+    // with matching citations and egress items.
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let config = DraftConfig {
+        local: LocalBudget {
+            max_snippets: 1,
+            include_sensitive: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
+    let (started, _st) = s.drafter.begin(request(slack_ctx(ask))).await.unwrap();
+    assert_eq!(keys(&started), ["q3"]);
+    assert_eq!(started.citations[0].n, 1);
+    let req = local.last();
+    let items: Vec<&str> = req.items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(items, keys(&started));
     let ctx = context_of(&req);
     // Grounding (on by default) renders the passages as facts F1, F2, ...
     assert!(ctx.starts_with("F1 ("), "{ctx}");
     assert!(!ctx.contains("F2 ("), "{ctx}");
-    assert!(user_text(&req).len() < user_text(&full.last()).len());
+    assert!(ctx.len() < context_of(&full.last()).len());
 }
 
 #[tokio::test]
@@ -1310,4 +1331,156 @@ async fn prewarm_skips_a_prefix_the_provider_already_holds() {
     drafter.prewarm(&email).unwrap();
     until(|| rec.warms.lock().unwrap().len() == 2).await;
     assert_eq!(rec.prefixes.lock().unwrap().len(), 1);
+}
+
+/// A festival's notes, all on the festival, and the one policy that answers a question about it.
+fn festival(store: &Store) {
+    for (key, title, text) in [
+        (
+            "fest-stage",
+            "Harbour festival stage plan",
+            "The harbour festival main stage sits by the north pier; the sound check for the \
+festival bands is at noon and the stage crew arrives at nine.",
+        ),
+        (
+            "fest-vendors",
+            "Harbour festival vendors",
+            "Harbour festival food vendors are confirmed: twelve stalls along the harbour \
+promenade, with drinks run by the rowing club during the festival.",
+        ),
+        (
+            "fest-parking",
+            "Harbour festival parking",
+            "Parking for the harbour festival is at the old market lot; festival shuttles run \
+from the lot to the harbour every twenty minutes.",
+        ),
+        (
+            "fest-rota",
+            "Harbour festival volunteer rota",
+            "Volunteer rota for the harbour festival: two shifts, morning and evening, with a \
+festival briefing at the harbour office before each shift.",
+        ),
+        (
+            "fest-poster",
+            "Harbour festival poster",
+            "The harbour festival poster is printed in blue and white; festival flyers go to \
+every cafe near the harbour.",
+        ),
+        (
+            "mileage",
+            "Mileage policy",
+            "Mileage policy: driving your own car for work is reimbursed at $0.40 per \
+kilometre. Claims go through the finance portal within 60 days.",
+        ),
+    ] {
+        add(store, key, title, text, false);
+    }
+}
+
+fn festival_ctx() -> DraftContext {
+    slack_ctx(
+        "Driving down to the harbour festival on Saturday with the banners. Can I claim the \
+mileage for the harbour festival trip? What rate do we get?",
+    )
+}
+
+fn small_local() -> DraftConfig {
+    DraftConfig {
+        local: LocalBudget {
+            budget_tokens: 120,
+            max_snippets: 2,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn ask_aware_selection_keeps_the_passage_that_answers() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![local.clone()], small_local(), Arc::new(NoVoice));
+    festival(&s.store);
+    let (started, _st) = s.drafter.begin(request(festival_ctx())).await.unwrap();
+    let kept = keys(&started);
+    assert!(kept.contains(&"mileage"), "{kept:?}");
+    assert!(kept.len() <= 2, "{kept:?}");
+    // Citations numbered 1.., matching the egress items.
+    let ns: Vec<u32> = started.citations.iter().map(|c| c.n).collect();
+    assert_eq!(ns, (1..=kept.len() as u32).collect::<Vec<_>>());
+    let req = local.last();
+    let items: Vec<&str> = req.items.iter().map(|i| i.key.as_str()).collect();
+    assert_eq!(items, kept);
+    let user = user_text(&req);
+    let ctx = context_of(&req);
+    let first = ctx.lines().next().unwrap_or("");
+    assert!(
+        first.starts_with("F1 (") && first.contains("\"Mileage policy\"): "),
+        "{ctx}"
+    );
+    assert!(ctx.contains("$0.40 per kilometre"), "{ctx}");
+    // Within the budget: the facts block holds no more than the packed passages did.
+    assert!(ctx.chars().count() / 4 <= 120 + 20, "{ctx}");
+    assert!(
+        user.contains(
+            "- \"Can I claim the mileage for the harbour festival trip?\" (see F1)\n\
+- \"What rate do we get?\"\n"
+        ),
+        "{user}"
+    );
+    assert!(user.contains("most relevant first"));
+}
+
+#[tokio::test]
+async fn prewarmed_and_cold_drafts_send_the_same_prompt() {
+    let cold = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![cold.clone()], small_local(), Arc::new(NoVoice));
+    festival(&s.store);
+    s.drafter.begin(request(festival_ctx())).await.unwrap();
+
+    let warm = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![warm.clone()], small_local(), Arc::new(NoVoice));
+    festival(&s.store);
+    // The hint at the trigger has the thread; `begin` reuses its retrieval.
+    s.drafter.prewarm(&festival_ctx()).unwrap();
+    let (started, _st) = s.drafter.begin(request(festival_ctx())).await.unwrap();
+    let t = s.drafter.timings(&started.stream_id).unwrap();
+    assert!(t.prewarmed, "{t:?}");
+    assert_eq!(warm.last(), cold.last());
+}
+
+#[tokio::test]
+async fn cloud_prompts_carry_no_ask() {
+    let ask_off = || DraftConfig {
+        local: LocalBudget {
+            candidate_tokens: 0,
+            answer_plan: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let a = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let s = setup(vec![a.clone()], DraftConfig::default(), Arc::new(NoVoice));
+    festival(&s.store);
+    s.drafter.begin(request(festival_ctx())).await.unwrap();
+    let b = Fake::new("cloud", Locality::Cloud, &["ok"]);
+    let s = setup(vec![b.clone()], ask_off(), Arc::new(NoVoice));
+    festival(&s.store);
+    s.drafter.begin(request(festival_ctx())).await.unwrap();
+    assert_eq!(a.last(), b.last());
+    let user = user_text(&a.last());
+    assert!(
+        user.contains("newest first") && !user.contains("Points from the thread to answer:"),
+        "{user}"
+    );
+
+    // A local prompt with both off is the old one: newest first, no points.
+    let l = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(vec![l.clone()], ask_off(), Arc::new(NoVoice));
+    festival(&s.store);
+    s.drafter.begin(request(festival_ctx())).await.unwrap();
+    let user = user_text(&l.last());
+    assert!(
+        user.contains("newest first") && !user.contains("Points from the thread to answer:"),
+        "{user}"
+    );
 }

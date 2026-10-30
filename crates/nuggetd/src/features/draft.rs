@@ -58,6 +58,9 @@
 //! enabled = true                  # false: they get the cloud budget above
 //! budget_tokens = 300             # retrieval budget for them
 //! max_snippets = 3                # best retrieved passages kept
+//! candidate_tokens = 1500         # retrieval pool the passages are picked from by what the
+//!                                 # thread asks (0: the packer's best, as before EE2)
+//! answer_plan = true              # facts ordered by relevance and the thread's questions listed
 //! include_sensitive = false       # let passages marked sensitive into local prompts
 //! model = "qwen3-1.7b-q8"         # a manifest chat model served for Double Tap alone (unset:
 //!                                 # local drafts use the tier's chat server)
@@ -161,6 +164,8 @@ struct LocalSection {
     enabled: bool,
     budget_tokens: u32,
     max_snippets: usize,
+    candidate_tokens: u32,
+    answer_plan: bool,
     include_sensitive: bool,
     /// Manifest id of the small chat model local Double Tap drafts with, served in its own
     /// `llama-server` (runtime role `draft`, provider `local-draft`). Unset: none.
@@ -174,6 +179,8 @@ impl Default for LocalSection {
             enabled: d.enabled,
             budget_tokens: d.budget_tokens,
             max_snippets: d.max_snippets,
+            candidate_tokens: d.candidate_tokens,
+            answer_plan: d.answer_plan,
             include_sensitive: d.include_sensitive,
             model: None,
         }
@@ -298,6 +305,8 @@ impl DraftSection {
                 enabled: self.local.enabled,
                 budget_tokens: self.local.budget_tokens.min(MAX_BUDGET_TOKENS),
                 max_snippets: self.local.max_snippets,
+                candidate_tokens: self.local.candidate_tokens.min(MAX_BUDGET_TOKENS),
+                answer_plan: self.local.answer_plan,
                 include_sensitive: self.local.include_sensitive,
                 // The small model's server, when one is configured (see `crate::local`).
                 provider: self
@@ -894,11 +903,15 @@ mod tests {
             [local]
             budget_tokens = 999999
             max_snippets = 2
+            candidate_tokens = 999999
+            answer_plan = false
             "#,
         )
         .unwrap()
         .draft_config();
         assert!(c.local.enabled);
+        assert_eq!(c.local.candidate_tokens, MAX_BUDGET_TOKENS);
+        assert!(!c.local.answer_plan);
         assert_eq!(c.local.budget_tokens, MAX_BUDGET_TOKENS);
         assert_eq!(c.local.max_snippets, 2);
         assert_eq!(c.budget_tokens, 2000);

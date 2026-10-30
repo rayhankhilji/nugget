@@ -15,7 +15,7 @@
 //!   number) from a fact whose source is marked sensitive is dropped, whatever the thread asked.
 //! - **Artefacts**: a sentence that says an attachment, link, file or meeting invite exists
 //!   ("the password is in the attached file", "here's the link", "I've sent the invite") when
-//!   no source mentions one of that kind is dropped ([`artefact_claims`]). A commitment ("I'll
+//!   no source mentions one of that kind is dropped (`artefact_claims`). A commitment ("I'll
 //!   send the deck tomorrow"), a request or a question about one is only counted.
 //! - **Proper names** the corpus doesn't know, and unsupported **weekday names** (usually a
 //!   proposal such as "see you Friday"), are only counted ([`GroundingReport`]).

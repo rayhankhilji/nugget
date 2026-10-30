@@ -16,6 +16,11 @@
 //!   smaller prompt ([`LocalBudget`], on by default): 300 retrieval tokens, the best 3 passages
 //!   (citations and egress items trimmed to match), [`PromptLimits::local`] caps and a terser
 //!   voice block. Cloud prompts are unchanged.
+//! - **Ask-aware local prompts** ([`ask`]): the thread's open points (its questions and
+//!   requests, by rules) decide which passages a local prompt keeps, from a larger candidate
+//!   pool ([`LocalBudget::candidate_tokens`], 1,500 tokens), and, with grounding, the order of
+//!   the facts and a short list of the points to answer before the closing line
+//!   ([`LocalBudget::answer_plan`]). Prewarm, read-ahead and `begin` select alike.
 //! - **Voice.** Style stats and exemplars from a [`VoiceSource`], in a stable system prefix
 //!   (cache-friendly), with the thread and field text fenced as untrusted data ([`prompt`]).
 //! - **Streaming post-processing** ([`post`]): preambles, wrapping quotes, duplicate greetings
@@ -23,7 +28,8 @@
 //!   is cut to the voice's length band; nothing emitted is ever retracted and no trailing newline
 //!   is ever emitted.
 //! - **Grounding** (on by default, [`DraftConfig::grounding`]): the context goes in as dated
-//!   facts, newest first, with superseded facts marked ([`prompt_facts`]), and a streaming
+//!   facts, newest first (most relevant first in local prompts), with superseded facts marked
+//!   ([`prompt_facts`]), and a streaming
 //!   post-check drops sentences whose numbers, amounts, dates or times no source supports
 //!   ([`grounding`]); [`DraftTimings::grounding`] reports what it dropped.
 //! - **Latency.** [`Drafter::prewarm`] starts provider warm-up, retrieval and the voice lookup on
@@ -44,6 +50,7 @@
 //!   [`VoiceSource`]) and [`VoiceFeedback`] (the engine's [`FeedbackSink`] over the voice store
 //!   sink), each running the synchronous call on a blocking thread.
 
+pub mod ask;
 pub mod classify;
 mod engine;
 pub mod grounding;
@@ -53,6 +60,7 @@ pub mod prompt_facts;
 mod voice;
 mod warm;
 
+pub use ask::{AnswerKind, Ask};
 pub use classify::{
     DEFAULT_EXCLUDED_APPS, DEFAULT_TERMINAL_APPS, Refusal, classify, gate, gate_with, is_secure,
     is_terminal,
