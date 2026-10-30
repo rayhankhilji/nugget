@@ -7,16 +7,19 @@
 //! - [`permissions`]: per-OS onboarding and the status the settings page shows.
 //! - [`flow`]: the runtime glue (listener lifecycle, the draft flow, effects, focus restore).
 //! - [`readahead`]: read-ahead, prefilling the local model's cache while a reply field keeps
-//!   focus (with its privacy rules).
+//!   focus (with its privacy rules); [`focus`]: the OS focus change notifications it sleeps on;
+//!   [`power`]: battery and low power mode, which pause it.
 //! - [`commands`]: the Tauri commands.
 //! - `probe`: debug builds only, a step log for the native overlay runs (`apps/desktop/e2e-native`).
 
 pub mod commands;
 pub mod errors;
 pub mod flow;
+pub mod focus;
 pub mod overlay;
 pub mod permissions;
 pub mod placement;
+pub mod power;
 mod probe;
 pub mod readahead;
 pub mod settings;

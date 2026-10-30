@@ -379,7 +379,8 @@ Grounding (AA3; see `bench/README.md`, "Grounded drafts"):
 
 The desktop app has its own switch, **Read ahead while you reply** on the Double Tap page
 (`read_ahead` in its Double Tap settings, next to `allow_terminals`); read-ahead runs only when both
-are on.
+are on. Its `read_ahead_on_battery` (default `true`, **Read ahead on battery**) pauses
+read-ahead on battery power when off; low power mode or battery saver always pauses it.
 
 ## Example
 

@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "Activer Double Tap",
   "doubletap.readAhead": "Lire à l’avance pendant que vous répondez",
   "doubletap.readAheadHint": "Quand un champ de réponse garde le focus un instant, Nugget le lit en avance et fait commencer la lecture au modèle local, pour que le brouillon démarre plus vite quand vous déclenchez. Modèles locaux uniquement ; jamais dans les apps exclues, les terminaux ni les champs de mot de passe. Rien n’est envoyé à un fournisseur cloud et rien n’est enregistré. Utilise un peu de processeur quand vous passez d’un champ à l’autre.",
+  "doubletap.readAheadOnBattery": "Lire à l’avance sur batterie",
+  "doubletap.readAheadOnBatteryHint": "Désactivez cette option pour suspendre la lecture à l’avance quand l’ordinateur est sur batterie. Elle est toujours suspendue en mode économie d’énergie (économiseur de batterie).",
   "doubletap.save": "Enregistrer",
   "doubletap.saving": "Enregistrement…",
   "doubletap.revert": "Annuler les modifications",

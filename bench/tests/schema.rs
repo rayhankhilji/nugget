@@ -250,7 +250,7 @@ fn check_keys(r: &Value) {
 #[test]
 fn every_suite_report_conforms() {
     let reports = smoke_reports();
-    assert_eq!(reports.len(), 7);
+    assert_eq!(reports.len(), 8);
     for r in &reports {
         let errors = errors_for(r);
         assert!(errors.is_empty(), "{} report: {errors:#?}", r["suite"]);
@@ -268,6 +268,8 @@ fn every_suite_report_conforms() {
     assert_eq!(status("proactive"), "ok");
     assert_eq!(status("draft"), "ok");
     assert_eq!(status("cua"), "ok");
+    // Daemon scenarios are skipped (not failed) without a `nuggetd` binary.
+    assert_eq!(status("energy"), "ok");
     // The real M2 pipeline with the default `pipeline` feature; `not_implemented` without it.
     let expected = if cfg!(feature = "pipeline") {
         "ok"
