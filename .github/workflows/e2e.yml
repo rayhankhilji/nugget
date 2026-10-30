@@ -71,6 +71,11 @@ jobs:
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
 
+      # The visual scenario pins the app's fonts to DejaVu Sans / DejaVu Sans Mono so its
+      # screenshots match the committed baselines (apps/desktop/e2e/visual-baselines).
+      - name: Install the fonts the visual check uses
+        run: sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+
       - name: Run the end-to-end test
         working-directory: apps/desktop
         env:
@@ -81,7 +86,8 @@ jobs:
         run: pnpm run e2e
 
       # Screenshots of every page, summary.json (checks, command errors, console errors), the
-      # daemon logs and the rendered vault page. Uploaded on failure too.
+      # daemon logs and the rendered vault page; for a failed visual check its
+      # visual-<screen>-<theme>-actual/-expected/-diff.png. Uploaded on failure too.
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4
