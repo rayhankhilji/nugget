@@ -436,10 +436,24 @@ jobs:
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      # Only the installers (`bundle-<target>`) become release assets. The run also uploads
+      # `bundle-report-<target>` and `smoke-<target>` (logs, screenshots), which must not be
+      # attached, checksummed or attested; `bundle-*` matches the reports too, so filter by name.
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
-          path: ${{ runner.temp }}/dist
-          merge-multiple: true
+          pattern: bundle-*
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Collect the installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/dist"
+          for d in "$RUNNER_TEMP"/artifacts/bundle-*/; do
+            case "$(basename "$d")" in bundle-report-*) continue ;; esac
+            cp "$d"* "$RUNNER_TEMP/dist/"
+          done
+          ls -l "$RUNNER_TEMP/dist"
 
       - name: Sign update payloads
         working-directory: apps/desktop
