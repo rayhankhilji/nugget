@@ -305,6 +305,12 @@ jobs:
         shell: bash
         run: echo '{}' > "$RUNNER_TEMP/signing.json"
 
+      # A prerelease tag (v1.0.0-rc.1) needs a numeric MSI version; NSIS is left alone.
+      - name: MSI version
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/wix-version.ps1 -Config apps/desktop/src-tauri/tauri.conf.json -Out "$env:RUNNER_TEMP/wix-version.json"
+
       - name: Build bundles
         working-directory: apps/desktop
         shell: bash
@@ -313,8 +319,10 @@ jobs:
           NUGGET_UPDATER_PUBKEY: ${{ env.RELEASE == 'true' && vars.NUGGET_UPDATER_PUBKEY || '' }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
+          extra=()
+          if [ -f "$RUNNER_TEMP/wix-version.json" ]; then extra=(--config "$RUNNER_TEMP/wix-version.json"); fi
           pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
-            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json" "${extra[@]}"
 
       # NSIS signs the uninstaller in `!uninstfinalize` and ignores the sign command's exit status,
       # so a signing failure there would not stop the build. Check every file users run.

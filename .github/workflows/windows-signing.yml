@@ -207,7 +207,7 @@ jobs:
   # requests never get `id-token: write`.
   azure-oidc:
     name: sign.ps1 Azure OIDC (fake identity)
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' # TEMPORARY: push
+    if: github.event_name == 'workflow_dispatch'
     runs-on: windows-2022
     permissions:
       contents: read
@@ -337,12 +337,27 @@ jobs:
           } } } } | ConvertTo-Json -Depth 6 | Out-File -FilePath $out -Encoding utf8NoBOM
           Get-Content $out
 
+      # Build as a prerelease (in this job's checkout only) so the MSI version override that
+      # release.yml applies to tags like v1.0.0-rc.1 is exercised too.
+      - name: Prerelease version and MSI version
+        shell: pwsh
+        run: |
+          $conf = 'apps/desktop/src-tauri/tauri.conf.json'
+          $json = Get-Content -Raw $conf
+          $old = ($json | ConvertFrom-Json).version
+          ($json -replace ('"version":\s*"' + [regex]::Escape($old) + '"'), ('"version": "' + $old + '-rc.1"')) |
+            Set-Content -NoNewline -Encoding utf8NoBOM $conf
+          ./packaging/windows/wix-version.ps1 -Config $conf -Out "$env:RUNNER_TEMP/wix-version.json"
+          $wix = (Get-Content -Raw "$env:RUNNER_TEMP/wix-version.json" | ConvertFrom-Json).bundle.windows.wix.version
+          if ($wix -ne "$old.1") { Write-Output "::error::expected MSI version $old.1, got '$wix'"; exit 1 }
+
       - name: Build bundles
         working-directory: apps/desktop
         shell: bash
         run: |
           pnpm tauri build --ci --target "$TARGET" --bundles nsis,msi \
-            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json" \
+            --config "$RUNNER_TEMP/wix-version.json"
 
       - name: Verify signatures
         shell: pwsh
