@@ -483,6 +483,57 @@ pub fn now_ms() -> i64 {
     wit::clock::now()
 }
 
+/// Read-only files and folders the user chose for this source (connectors only). `root` is the
+/// name of a settings field listed in the manifest's `capabilities.file_roots`; `path` is
+/// relative to it, `/`-separated, and `""` means the root itself.
+pub mod fs {
+    use super::*;
+
+    /// One file or folder.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct DirEntry {
+        pub name: String,
+        pub is_dir: bool,
+        pub size: u64,
+        /// Milliseconds since the Unix epoch.
+        pub modified_at: Option<i64>,
+    }
+
+    impl From<wit::fs::DirEntry> for DirEntry {
+        fn from(e: wit::fs::DirEntry) -> Self {
+            Self {
+                name: e.name,
+                is_dir: e.is_dir,
+                size: e.size,
+                modified_at: e.modified_at,
+            }
+        }
+    }
+
+    /// A folder's entries, sorted by name.
+    pub fn read_dir(root: &str, path: &str) -> Result<Vec<DirEntry>> {
+        Ok(wit::fs::read_dir(root, path)?
+            .into_iter()
+            .map(DirEntry::from)
+            .collect())
+    }
+
+    /// A whole file.
+    pub fn read_file(root: &str, path: &str) -> Result<Vec<u8>> {
+        wit::fs::read_file(root, path)
+    }
+
+    /// A whole file as UTF-8 text (invalid sequences replaced).
+    pub fn read_to_string(root: &str, path: &str) -> Result<String> {
+        Ok(String::from_utf8_lossy(&read_file(root, path)?).into_owned())
+    }
+
+    /// One entry's metadata.
+    pub fn stat(root: &str, path: &str) -> Result<DirEntry> {
+        wit::fs::stat(root, path).map(DirEntry::from)
+    }
+}
+
 /// Where a connector sends its changes (during `sync` only).
 pub mod sink {
     use super::*;
