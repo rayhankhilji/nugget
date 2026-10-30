@@ -465,6 +465,14 @@ enum Cmd {
         out: PathBuf,
         #[arg(long, default_value_t = 300)]
         timeout_s: u64,
+        /// Judge only every `shards`-th draft, starting at `shard` (parallel judge runners).
+        #[arg(long, default_value_t = 0)]
+        shard: usize,
+        #[arg(long, default_value_t = 1)]
+        shards: usize,
+        /// Judge repeat 0 only.
+        #[arg(long)]
+        first_repeat_only: bool,
     },
     /// Check the inputs parse and print the classification and gate of every scenario.
     Lint {
@@ -508,6 +516,9 @@ fn main() {
             drafts,
             out,
             timeout_s,
+            shard,
+            shards,
+            first_repeat_only,
         } => run_judge(
             &models,
             &world,
@@ -515,6 +526,7 @@ fn main() {
             &drafts,
             &out,
             Duration::from_secs(timeout_s),
+            (shard, shards.max(1), first_repeat_only),
         ),
         Cmd::Lint { world, scenarios } => lint(&world, &scenarios),
     };
@@ -1017,8 +1029,10 @@ fn run_judge(
     drafts: &[PathBuf],
     out_path: &Path,
     timeout: Duration,
+    (shard, shards, first_only): (usize, usize, bool),
 ) -> Result<(), String> {
     let personas = load_world(world)?;
+    let mut seen = 0usize;
     let by_id: HashMap<String, Scenario> = load_scenarios(scenarios)?
         .into_iter()
         .map(|s| (s.id.clone(), s))
@@ -1042,6 +1056,13 @@ fn run_judge(
             if rec["result"]["outcome"] != "completed" {
                 continue;
             }
+            if first_only && rec["repeat"].as_u64().unwrap_or(0) > 0 {
+                continue;
+            }
+            seen += 1;
+            if (seen - 1) % shards != shard {
+                continue;
+            }
             let id = rec["scenario"].as_str().unwrap_or("");
             let Some(s) = by_id.get(id) else { continue };
             let Some(p) = personas.get(&s.persona) else {
@@ -1055,7 +1076,7 @@ fn run_judge(
             let mut req = req;
             req.temperature = Some(0.0);
             let t = Instant::now();
-            let verdict = lm.block_on(async {
+            let verdict = lm.block_on(tokio::time::timeout(timeout, async {
                 let mut raw = String::new();
                 let mut stream = judge.chat(req).await?;
                 while let Some(ev) = stream.next().await {
@@ -1064,13 +1085,12 @@ fn run_judge(
                     }
                 }
                 Ok::<_, Error>(raw)
-            });
-            let verdict = match verdict {
+            }));
+            let verdict = match verdict.unwrap_or_else(|_| Err(Error::Other("judge timed out".into()))) {
                 Ok(raw) => serde_json::from_str::<Value>(raw.trim())
                     .unwrap_or_else(|_| json!({"unparsed": raw})),
                 Err(e) => json!({"error": e.to_string()}),
             };
-            let _ = timeout;
             let line = json!({
                 "scenario": id, "label": rec["label"], "repeat": rec["repeat"],
                 "judge": judge_desc, "judge_ms": ms(t, Instant::now()),

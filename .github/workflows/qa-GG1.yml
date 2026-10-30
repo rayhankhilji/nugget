@@ -112,11 +112,15 @@ jobs:
           retention-days: 30
 
   judge:
-    name: judge (8B)
+    name: judge (8B) shard ${{ matrix.shard }}
     needs: draft
     if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]'))
     runs-on: ubuntu-latest
     timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -136,30 +140,55 @@ jobs:
         run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
       - uses: actions/download-artifact@v4
         with:
-          pattern: gg1-*
+          pattern: gg1-*-ra-off
           path: drafts
       - name: Judge
         run: |
           mkdir -p "$RESULTS"
           files=()
           for l in 4b-ra-off 1.7b-ra-off; do
-            f="drafts/gg1-$l/gg1-results/drafts-$l.jsonl"
-            [ -e "$f" ] || f=$(find drafts -name "drafts-$l.jsonl" | head -1)
-            [ -n "$f" ] && [ -e "$f" ] && files+=("$f")
+            f=$(find drafts -name "drafts-$l.jsonl" | head -1)
+            [ -n "$f" ] && files+=("$f")
           done
           ./qa/GG1/harness/target/release/gg1 judge --local-models \
-            --local-chat-model qwen3-8b-q4km --drafts "${files[@]}" \
-            --out "$RESULTS/judged.jsonl" < /dev/null
-      - name: Summary
-        if: always()
-        run: python3 qa/GG1/check.py --judged "$RESULTS/judged.jsonl" $(find drafts -name 'drafts-*.jsonl' | sort) | tee "$RESULTS/summary.txt"
+            --local-chat-model qwen3-8b-q4km --drafts "${files[@]}" --first-repeat-only \
+            --shard "${{ matrix.shard }}" --shards 3 \
+            --out "$RESULTS/judged-${{ matrix.shard }}.jsonl" < /dev/null
       - name: Upload
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gg1-judge
+          name: judge-${{ matrix.shard }}
           path: |
             ${{ env.RESULTS }}
             bench/.local-models/data/logs
           if-no-files-found: warn
+          retention-days: 30
+
+  summary:
+    name: summary
+    needs: [draft, judge]
+    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: all
+      - name: Summary
+        run: |
+          mkdir -p "$RESULTS"
+          cat $(find all -name 'judged-*.jsonl' | sort) > "$RESULTS/judged.jsonl" || true
+          cp $(find all -name 'drafts-*.jsonl') "$RESULTS/"
+          cp $(find all -name 'hardware-*.txt') "$RESULTS/" || true
+          python3 qa/GG1/check.py --judged "$RESULTS/judged.jsonl" --json "$RESULTS/checks.json" \
+            $(find "$RESULTS" -name 'drafts-*.jsonl' | sort) | tee "$RESULTS/summary.txt"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg1-summary
+          path: ${{ env.RESULTS }}
           retention-days: 30
