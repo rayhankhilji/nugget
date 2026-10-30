@@ -1867,6 +1867,62 @@ correct), but the 4B extractor misses the entity F1 target: it proposes many ent
 does not have (precision 0.5–0.6) and gets about half the relations. At ~60 s per item on this
 CPU, a 1,000-item backfill would take most of a day.
 
+### Memory recall with a real embedding model (DD4)
+
+`memory --backend real --local-models` runs the M1 memory benchmark (the real store, ingest
+pipeline, files watcher and retriever, see [`memory --backend real`](#memory---backend-real)) with
+the manifest's embedding model served by `nugget-runtime`'s `llama-server`, as the app runs it:
+**`nomic-embed-text-v1.5-q8`** (nomic-embed-text v1.5, **Q8_0** GGUF, 146 MB, 768 dimensions,
+CPU). `--memory-rerank local` also starts the manifest's reranker, **`bge-reranker-v2-m3-q4km`**
+(Q4_K_M, 438 MB), and measures the reranked search (`hybrid_rerank`, `hybrid_mmr_rerank`) on the
+same index as the plain one. Every arm of a scale runs one after the other on one runner (the
+`memory` job of [`evals.yml`](../.github/workflows/evals.yml)), against the in-process hash
+embedder (`hash`) as the M1 runs used it. Seed 42, release build, `RetrieveConfig::default()`.
+
+| Option | Meaning |
+|---|---|
+| `--memory-rerank off\|local` | Rerank with the manifest's reranker (`--local-rerank-model ID` picks another) |
+| `--memory-rerank-timeout-ms MS`, `--memory-rerank-pool N` | Override the app's reranker timeout (2.5 s) and pool (30) |
+| `--memory-embed-prefixes auto\|off` | The model's task prefixes (`search_query: ` / `search_document: ` for nomic), or none |
+| `--memory-queries N`, `--memory-no-freshness` | Ask only the first N known-item queries; skip the freshness phase |
+| `NUGGET_BENCH_DUMP_MISSES=FILE` | Write the target's rank per query and arm, and the hybrid top 10 of every query whose outcome differs from the fake index |
+
+**Task prefixes.** nomic-embed-text was trained with `search_query: ` on queries and
+`search_document: ` on documents. Providers now report a model's prefixes
+(`Provider::embed_prefixes`), and an index records the scheme it was built with
+(`Store::embedding_prefixes`): a new index adopts the embedder's prefixes on its first vector,
+ingest prefixes documents and the retriever prefixes queries with the recorded scheme, and an index
+that already held vectors before this change counts as built without prefixes, so existing users
+keep matching query and document embeddings (re-indexing picks the prefixes up).
+
+#### Quick scale
+
+Run [41015993297](https://github.com/rayhankhilji/nugget/actions/runs/41015993297) at `885a865`
+(2026-10-30), reports in [`results/real-models/run-41015993297/`](results/real-models/run-41015993297/).
+One runner: **AMD EPYC 9V45**, 4 vCPUs, 15.6 GiB, `llama-server` b11940 with its default threads.
+2,000 files (one chunk each, ~906 characters), 200 known-item queries; the eval set is 57 Markdown
+notes and 42 labelled queries.
+
+| | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
+|---|---|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index** | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | 0.980 vs 0.940 pass |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.455 / 0.830 / 0.607 / 0.694 | 0.145 / 0.870 / 0.405 / 0.543 | 0.175 / 0.890 / 0.425 / 0.558 | 0.260 / – / 0.496 / 0.615 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.885 / 0.579 | 0.975 / 0.417 | 0.970 / 0.425 | 0.980 / 0.496 |
+| reranked: R@1 / R@10 / MRR@10 / nDCG@10 | | | (never reranked, see below) | **0.740** / 0.980 / **0.832** / **0.869** |
+| bm25 R@10 / MRR@10 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.970 |
+| vector R@10 / MRR@10 | 0.425 / 0.248 | 0.060 / 0.023 | 0.045 / 0.018 | 0.060 / 0.027 |
+| Eval set: hybrid R@1 / R@10 / MRR@10 / nDCG@10 (text-only 0.595 / 0.905 / 0.768 / 0.798) | 0.714 / 1.000 / 0.895 / 0.917 | 0.798 / 1.000 / **0.943** / **0.954** | 0.774 / 1.000 / 0.931 / 0.946 | reranked: 0.984 MRR, 0.988 nDCG |
+| Eval set: hybrid + MMR R@10 / MRR@10 | 0.976 / 0.877 | 0.976 / 0.921 | **1.000** / 0.913 | |
+| Query latency, default search p50 / p95 | 3 / 5 ms | 27 / 29 ms | 29 / 32 ms | reranked: 14.5 / 15.1 **s** |
+| Query embedding p50 / p95 | <0.01 ms | 21 / 22 ms | 25 / 45 ms | |
+| Initial ingest | 2.0 s (998 files/s) | 655 s (3.05 files/s) | 654 s (3.06 files/s) | 645 s |
+| Embedding time per 1k items (= chunks here) | 0.02 s | **326 s** | **325 s** | 321 s |
+| Freshness p50 / p95 / max (target p95 ≤ 60 s); propagation | 0.48 / 0.61 / 0.62 s; all 1.0 | 0.90 / 1.89 / 2.46 s; all 1.0 | 0.92 / 1.65 / 2.47 s; all 1.0 | skipped |
+| Peak RSS: bench process / embedding server / reranker server | 50 MiB / – / – | 82 / 194 MiB / – | 81 / 194 / 735 MiB | 74 / 194 / 732 MiB |
+| DB per 1k items after ingest | 6.3 MB | 8.3 MB | 8.3 MB | 8.3 MB |
+
+STANDARD_FULL_PLACEHOLDER
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
