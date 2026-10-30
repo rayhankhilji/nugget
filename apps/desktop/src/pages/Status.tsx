@@ -419,7 +419,9 @@ function RuntimeCard({
                             ? t("status.role.embedding")
                             : r.role === "rerank"
                               ? t("status.role.rerank")
-                              : t("status.role.chat")}
+                              : r.role === "draft"
+                                ? t("status.role.draft")
+                                : t("status.role.chat")}
                         </td>
                         <td>
                           <Badge tone={st.tone}>{st.label}</Badge>

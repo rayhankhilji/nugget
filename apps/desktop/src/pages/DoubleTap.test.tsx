@@ -145,6 +145,33 @@ describe("Double Tap settings page", () => {
     expect(chordInput()?.value).toBe("Ctrl+Alt+K");
   });
 
+  it("turns read-ahead off and explains what it reads", async () => {
+    const { sent } = setup();
+    await render(<App />);
+    await flush(10);
+    const label = byText(document, "label", "Read ahead while you reply");
+    const toggle = label?.querySelector<HTMLInputElement>('input[role="switch"]');
+    // On when the shell doesn't say (an older shell), and described for screen readers.
+    expect(toggle?.checked).toBe(true);
+    const hint = document.getElementById(toggle!.getAttribute("aria-describedby")!);
+    expect(hint?.textContent).toContain("Local models only");
+    expect(hint?.textContent).toContain("Nothing is sent to a cloud provider");
+
+    await click(toggle);
+    expect(toggle?.checked).toBe(false);
+    await click(byText(document, "button", "Save"));
+    expect((sent[0] as DoubleTapSettings).read_ahead).toBe(false);
+  });
+
+  it("shows read-ahead as saved by the shell", async () => {
+    setup({ doubletap_settings_get: { ...settings, read_ahead: false } });
+    await render(<App />);
+    await flush(10);
+    const label = byText(document, "label", "Read ahead while you reply");
+    expect(label?.querySelector<HTMLInputElement>('input[role="switch"]')?.checked).toBe(false);
+    expect((byText(document, "button", "Save") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("adds a provider row and fires a test draft", async () => {
     const { calls, sent } = setup();
     await render(<App />);

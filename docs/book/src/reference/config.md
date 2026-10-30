@@ -342,6 +342,30 @@ Proactive cards and the morning brief (the Today page). Unknown keys are an erro
 e.g. `min_score` (`0.45`, cards ranked below it are kept but not offered), `max_inbox`,
 `user_addresses`, `followup_lead_days`, `awaiting_reply_days`, `renewal_horizon_days`.
 
+### `[draft]`
+
+Double Tap drafting. Only the CC1 keys are listed here; the rest of the section (provider per app,
+excluded apps, budgets, `[draft.voice]`) is described in the daemon's `features/draft.rs` and
+will get its own table when the keys settle.
+
+`[draft.local]` (on-device and local-network drafting):
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `model` | string (a manifest model id) | none | Run this model in its own local server (runtime role `draft`, provider id `local-draft`) and draft with it first when the draft goes by tier to a non-cloud provider (not through `app_providers`), falling back to the chat model. Ask, chat and cloud drafting are unchanged. The proposed small models are pending in `manifests/pending/` until they are signed into the manifest |
+
+`[draft.read_ahead]` (prefill a reply's prompt into the local server's cache before the trigger; see
+[Read-ahead](../guide/double-tap.md#read-ahead)):
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `true` | `false`: `draft.read_ahead` always skips with `"disabled"`, whatever the desktop setting (as it does when `[draft] enabled = false`) |
+| `min_interval_ms` | integer | `5000` | Minimum time between two read-aheads that do work; others skip with `"rate_limited"` |
+
+The desktop app has its own switch, **Read ahead while you reply** on the Double Tap page
+(`read_ahead` in its Double Tap settings, next to `allow_terminals`); read-ahead runs only when both
+are on.
+
 ## Example
 
 ```toml
