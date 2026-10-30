@@ -801,4 +801,27 @@ pizza budget is $600.",
             assert_eq!(iso_date(d), None, "{d}");
         }
     }
+
+    #[test]
+    fn dates_up_to_tomorrow_utc_are_kept() {
+        let day = || {
+            let s = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            i64::try_from(s / 86_400).unwrap()
+        };
+        let today = day();
+        let got: Vec<bool> = (-1..=2)
+            .map(|k| iso_date(&civil_date(today + k)).is_some())
+            .collect();
+        if day() == today {
+            // Yesterday, today and tomorrow (a sender ahead of UTC) are kept; later is not.
+            assert_eq!(got, [true, true, true, false]);
+        }
+        // Across a leap day and the end of a year.
+        assert_eq!(civil_date(19_782), "2024-02-29");
+        assert_eq!(civil_date(19_783), "2024-03-01");
+        assert_eq!(civil_date(20_453), "2025-12-31");
+    }
 }

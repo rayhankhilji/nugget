@@ -134,6 +134,8 @@ impl Corpus {
         }
         for f in prompt_facts::facts(context) {
             if f.sensitive {
+                // The title goes into the prompt too (a note's first line is often its title).
+                c.secrets.extend(secret_tokens(&f.title));
                 c.secrets.extend(secret_tokens(&f.body));
             }
             let text = format!("{} {} {}", f.date.as_deref().unwrap_or(""), f.title, f.body);
@@ -277,6 +279,9 @@ pub struct Grounder {
     /// The end of the text emitted so far, [`squash`]ed (so padding between characters does
     /// not push a credential's start out of it), for credentials split across releases.
     tail: String,
+    /// The last digits emitted so far (as many as the longest credential has characters): a
+    /// card or account number is caught by its digits however much text goes between them.
+    digits: String,
     /// Text received but not yet decided (the current sentence and its leading whitespace).
     pending: String,
     /// Bytes of `pending` (after its first unit start) known to hold no boundary.
@@ -301,6 +306,7 @@ impl Grounder {
             corpus,
             check: GroundingCheck::Sentences,
             tail: String::new(),
+            digits: String::new(),
             pending: String::new(),
             scanned: 0,
             held: String::new(),
@@ -473,7 +479,10 @@ impl Grounder {
             if run_may_continue {
                 loop {
                     let head = self.pending[..cut].trim_end();
-                    let start = head.rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
+                    let start = head
+                        .char_indices()
+                        .rfind(|(_, c)| c.is_whitespace())
+                        .map_or(0, |(i, c)| i + c.len_utf8());
                     let word = &head[start..];
                     if !word.is_empty() && word.chars().all(|c| c.is_ascii_digit() || c == '-') {
                         cut = start;
@@ -519,8 +528,13 @@ impl Grounder {
         if self.corpus.secrets.is_empty() {
             return false;
         }
-        let sq = format!("{}{}", self.tail, squash(text));
-        let digits: String = sq.chars().filter(char::is_ascii_digit).collect();
+        let new = squash(text);
+        let sq = format!("{}{new}", self.tail);
+        let digits: String = self
+            .digits
+            .chars()
+            .chain(new.chars().filter(char::is_ascii_digit))
+            .collect();
         self.corpus.secrets.iter().any(|s| {
             sq.contains(s.as_str())
                 || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
@@ -532,37 +546,45 @@ impl Grounder {
         if self.corpus.secrets.is_empty() {
             return;
         }
-        let keep = format!("{}{}", self.tail, squash(text));
+        let new = squash(text);
+        let keep = format!("{}{new}", self.tail);
         let n = keep.chars().count();
         let max = (2 * self.corpus.secret_len).max(64);
         self.tail = keep.chars().skip(n.saturating_sub(max)).collect();
+        let keep: Vec<char> = self
+            .digits
+            .chars()
+            .chain(new.chars().filter(char::is_ascii_digit))
+            .collect();
+        let n = keep.len().saturating_sub(self.corpus.secret_len);
+        self.digits = keep[n..].iter().collect();
     }
 
-    /// `Secrets`: move `cut` back to the start of the longest run of trailing words of
-    /// `pending[..cut]` that a credential starts with, so that no start of a credential goes out
-    /// before the words after it show whether it is one ("tangerine- Otter-42", or a password
-    /// spelled out a character at a time).
+    /// `Secrets`: move `cut` back to where the longest end of `pending[..cut]` that a
+    /// credential starts with begins (squashed, so at any letter or digit, mid-word too), so
+    /// that no start of a credential goes out before the text after it shows whether it is one
+    /// ("tangerine- Otter-42", "isTangerine Otter-42", or a password spelled out a character
+    /// at a time). The scan back is bounded, so each push costs time linear in what it adds:
+    /// padding past the bound can let a start out, never the whole credential (the tail
+    /// catches it).
     fn hold_secret_start(&self, cut: usize) -> usize {
         let head = &self.pending[..cut];
         let max = self.corpus.secret_len;
         let mut best = cut;
-        let mut prev_ws = true;
-        let starts: Vec<usize> = head
-            .char_indices()
-            .filter_map(|(i, c)| {
-                let start = prev_ws && !c.is_whitespace();
-                prev_ws = c.is_whitespace();
-                start.then_some(i)
-            })
-            .collect();
-        // Bounded: words of punctuation alone add nothing to the squashed text.
-        for &k in starts.iter().rev().take(4 * max + 16) {
-            let s = squash(&head[k..]);
-            if s.chars().count() > max {
+        // The squashed end of `head`, reversed.
+        let mut rev: Vec<char> = Vec::new();
+        for (i, c) in head.char_indices().rev().take(16 * max + 64) {
+            let sq = squash(&head[i..i + c.len_utf8()]);
+            if sq.is_empty() {
+                continue;
+            }
+            rev.extend(sq.chars().rev());
+            if rev.len() > max {
                 break;
             }
-            if !s.is_empty() && self.corpus.secrets.iter().any(|sec| sec.starts_with(&s)) {
-                best = k;
+            let s: String = rev.iter().rev().collect();
+            if self.corpus.secrets.iter().any(|sec| sec.starts_with(&s)) {
+                best = i;
             }
         }
         best
@@ -1678,6 +1700,86 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
             &["The team has 12 people. tangerine. Otter-42. Thanks!"],
         );
         assert!(!squash(&out).contains("tangerineotter42"), "{out:?}");
+        assert_eq!(g.report().secrets_dropped, 1);
+    }
+
+    #[test]
+    fn digits_of_a_card_are_caught_however_far_apart() {
+        // A digit at a time with words between them: the squashed text runs past the tail, but
+        // the digits still spell the card number.
+        let mut parts = vec!["Card: ".to_owned()];
+        parts.extend("4111111111111111".chars().map(|c| format!("{c} then ")));
+        parts.push("done.".into());
+        let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+        for check in [GroundingCheck::Secrets, GroundingCheck::Sentences] {
+            let mut g = with_secrets().with_check(check);
+            let out = stream(&mut g, &parts);
+            let digits: String = out.chars().filter(char::is_ascii_digit).collect();
+            assert!(!digits.contains("4111111111111111"), "{check:?}: {out:?}");
+            assert_eq!(g.report().secrets_dropped, 1, "{check:?}");
+        }
+    }
+
+    #[test]
+    fn secrets_mode_holds_the_start_of_a_credential_glued_to_a_word() {
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["the code isTangerine ", "Otter-42 ok."]);
+        assert!(!squash(&out).contains("tang"), "{out:?}");
+        assert_eq!(g.report().secrets_dropped, 1);
+        // Held mid-word only while it may still be one.
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        assert_eq!(
+            stream(&mut g, &["a cat ", "sat ", "here."]),
+            "a cat sat here."
+        );
+        assert_eq!(g.report().secrets_dropped, 0);
+    }
+
+    #[test]
+    fn secrets_mode_digit_groups_after_multibyte_whitespace() {
+        // A no-break space (French "12 345") before a run of digit groups.
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["le 12\u{a0}345 6", "78 et\u{3000}9 1 fin."]);
+        assert_eq!(out, "le 12\u{a0}345 678 et\u{3000}9 1 fin.");
+    }
+
+    #[test]
+    fn secrets_mode_cost_is_linear_in_a_long_held_stream() {
+        // The start of a credential, then thousands of pushes of punctuation: each push scans a
+        // bounded end of what is held, not all of it.
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let t = std::time::Instant::now();
+        let mut out = g.push("Hi t ");
+        for i in 0..4096 {
+            out.push_str(&g.push(if i % 16 == 15 {
+                "= "
+            } else {
+                "================"
+            }));
+        }
+        out.push_str(&g.finish());
+        assert!(out.starts_with("Hi t ="), "{:?}", &out[..20]);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            t.elapsed()
+        );
+    }
+
+    #[test]
+    fn a_credential_in_a_sensitive_title_is_caught() {
+        let (ctx, _) = henrik();
+        let mut c = cite(1, "k61", "wifi Kq7vZ93xw", "2026-10-01");
+        c.sensitive = true;
+        let cr = ContextResponse {
+            text: "[1] wifi Kq7vZ93xw (notes)\nThe guest network.".into(),
+            citations: vec![c],
+            excluded_sensitive: 0,
+        };
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["It is Kq7vZ93xw."]);
+        assert!(!out.contains("Kq7"), "{out:?}");
         assert_eq!(g.report().secrets_dropped, 1);
     }
 }
