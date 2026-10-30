@@ -949,6 +949,9 @@ progress::-moz-progress-bar {
 .stats dt {
   font-size: 12px;
   color: var(--muted);
+  /* Long single words (de "Hintergrunddienst") break inside narrow tiles instead of overflowing. */
+  overflow-wrap: anywhere;
+  hyphens: auto;
 }
 
 .stats dd {
