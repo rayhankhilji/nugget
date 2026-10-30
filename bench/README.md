@@ -928,6 +928,11 @@ In one run in two, a click sent to a page that was about to reload was lost
 (`files-delete-backup`, `reference` arm). The stage now records the version each page was served
 at, and the native session acts only on a current page.
 
+## Double Tap app matrix (FF3)
+
+<!-- a11y-matrix:bench:start -->
+<!-- a11y-matrix:bench:end -->
+
 ## Results
 
 ### `memory --backend real`, M1 (2026-10-28)

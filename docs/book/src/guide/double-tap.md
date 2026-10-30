@@ -162,6 +162,11 @@ What leaves the device depends on the provider used for the draft:
 Text read from other apps is treated as untrusted data in the prompt, never as instructions. Every
 draft is audited without its content.
 
+## Which apps work
+
+<!-- a11y-matrix:guide:start -->
+<!-- a11y-matrix:guide:end -->
+
 ## Permissions per OS
 
 | OS | What to allow |
