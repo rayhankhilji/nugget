@@ -1,0 +1,2 @@
+{"conv": "F01", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 6, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F01", "turn": 2, "q": "Who is it with?", "query_rewrite": null, "started_ms": 4357, "hit": false, "orig_hit": false, "general": false, "error": null}

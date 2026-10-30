@@ -1,0 +1,13 @@
+follow-up turns with support: 29; rewritten: 24
+hit with daemon query (rewrite if any): 29/29
+hit with original text only:           20/29
+started_ms follow-ups: min 3 median 6 max 13
+  F01.2 'Who is it with?' -> 'dentist appointment with whom': hit=True orig_hit=False
+  F01.3 'And where is it?' -> 'dentist appointment location address': hit=True orig_hit=False
+  F06.3 'How does that compare to the previous one?' -> 'previous electricity bill amount': hit=True orig_hit=False
+  F07.2 'What should I do about it?' -> 'blood test results advice': hit=True orig_hit=False
+  F08.3 'Who else is on it?' -> 'Kyoto flight passengers': hit=True orig_hit=False
+  F11.2 'What is it for?' -> 'physio appointment reason': hit=True orig_hit=False
+  F13.2 'What time?' -> 'farewell drinks time': hit=True orig_hit=False
+  X01.3 'When do I fly there?' -> 'Kyoto flight date': hit=True orig_hit=False
+  X03.3 "What's he working on?" -> 'Bob Lindqvist projects': hit=True orig_hit=False

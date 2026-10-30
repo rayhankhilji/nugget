@@ -1,0 +1,49 @@
+{"conv": "F01", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 7, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F01", "turn": 2, "q": "Who is it with?", "query_rewrite": "dentist appointment with whom", "started_ms": 6, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F01", "turn": 3, "q": "And where is it?", "query_rewrite": "dentist appointment location address", "started_ms": 10, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F02", "turn": 1, "q": "How much was the hotel in Lisbon?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F02", "turn": 2, "q": "How many nights was that?", "query_rewrite": "Lisbon hotel number of nights", "started_ms": 7, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F02", "turn": 3, "q": "And what about Kyoto?", "query_rewrite": "Kyoto trip cost", "started_ms": 6, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F03", "turn": 1, "q": "What did Sam say about the budget?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F03", "turn": 2, "q": "What about cloud spend?", "query_rewrite": "Sam budget cloud spend", "started_ms": 7, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F03", "turn": 3, "q": "Does unspent money roll over?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F04", "turn": 1, "q": "Who is Bob Lindqvist?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F04", "turn": 2, "q": "When is he on leave?", "query_rewrite": "Bob Lindqvist leave dates", "started_ms": 6, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F05", "turn": 1, "q": "When do I start at Corvid?", "query_rewrite": null, "started_ms": 7, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F05", "turn": 2, "q": "What's the salary?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F05", "turn": 3, "q": "Is there a non-compete?", "query_rewrite": "Corvid offer non-compete clause", "started_ms": 6, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F06", "turn": 1, "q": "What's my electricity bill?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F06", "turn": 2, "q": "When is it due?", "query_rewrite": "electricity bill due date", "started_ms": 7, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F06", "turn": 3, "q": "How does that compare to the previous one?", "query_rewrite": "previous electricity bill amount", "started_ms": 6, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F07", "turn": 1, "q": "What were my blood test results?", "query_rewrite": null, "started_ms": 5, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F07", "turn": 2, "q": "What should I do about it?", "query_rewrite": "blood test results advice", "started_ms": 6, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F07", "turn": 3, "q": "When should it be rechecked?", "query_rewrite": "blood test recheck", "started_ms": 5, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F08", "turn": 1, "q": "When is the Kyoto flight?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F08", "turn": 2, "q": "And the booking reference?", "query_rewrite": "Kyoto flight booking reference", "started_ms": 6, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F08", "turn": 3, "q": "Who else is on it?", "query_rewrite": "Kyoto flight passengers", "started_ms": 7, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F09", "turn": 1, "q": "Who is taking over Atlas?", "query_rewrite": null, "started_ms": 5, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F09", "turn": 2, "q": "And Harbor?", "query_rewrite": "who is taking over Harbor", "started_ms": 5, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F09", "turn": 3, "q": "When are the handover sessions?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F10", "turn": 1, "q": "What's my landlord's name?", "query_rewrite": null, "started_ms": 4, "hit": false, "orig_hit": null, "general": false, "error": null}
+{"conv": "F10", "turn": 2, "q": "What's the new rent he's proposing?", "query_rewrite": "landlord Achebe new rent proposal", "started_ms": 7, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F10", "turn": 3, "q": "What's his phone number?", "query_rewrite": "landlord Achebe phone number", "started_ms": 12, "hit": null, "orig_hit": null, "general": false, "error": null}
+{"conv": "F11", "turn": 1, "q": "When is the physio?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F11", "turn": 2, "q": "What is it for?", "query_rewrite": "physio appointment reason", "started_ms": 6, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F12", "turn": 1, "q": "What changed in the Corvid contract since v2?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F12", "turn": 2, "q": "And the equity?", "query_rewrite": "Corvid contract equity", "started_ms": 5, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F12", "turn": 3, "q": "What was it in the first version?", "query_rewrite": "Corvid offer v1 equity", "started_ms": 6, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F13", "turn": 1, "q": "Where are my farewell drinks?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F13", "turn": 2, "q": "What time?", "query_rewrite": "farewell drinks time", "started_ms": 5, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "F14", "turn": 1, "q": "Who is Lena?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F14", "turn": 2, "q": "When is my call with her?", "query_rewrite": "call with Lena Corvid", "started_ms": 11, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F15", "turn": 1, "q": "When is mum's birthday lunch?", "query_rewrite": null, "started_ms": 6, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F15", "turn": 2, "q": "What should I bring?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "F15", "turn": 3, "q": "What gift did I plan for her?", "query_rewrite": "gift idea for mum", "started_ms": 5, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "X01", "turn": 1, "q": "How much was the hotel in Lisbon?", "query_rewrite": null, "started_ms": 3, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X01", "turn": 2, "q": "What about Kyoto?", "query_rewrite": "Kyoto trip cost", "started_ms": 5, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "X01", "turn": 3, "q": "When do I fly there?", "query_rewrite": "Kyoto flight date", "started_ms": 7, "hit": true, "orig_hit": false, "general": false, "error": null}
+{"conv": "X02", "turn": 1, "q": "When is my dentist appointment?", "query_rewrite": null, "started_ms": 4, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X02", "turn": 2, "q": "Thanks! Now, what's my electricity bill?", "query_rewrite": null, "started_ms": 13, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "X03", "turn": 1, "q": "Who is Bob Lindqvist?", "query_rewrite": null, "started_ms": 5, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "X03", "turn": 2, "q": "What's his phone number?", "query_rewrite": "landlord Achebe phone number", "started_ms": 6, "hit": null, "orig_hit": null, "general": false, "error": null}
+{"conv": "X03", "turn": 3, "q": "What's he working on?", "query_rewrite": "Bob Lindqvist projects", "started_ms": 5, "hit": true, "orig_hit": false, "general": false, "error": null}
