@@ -36,7 +36,7 @@
 //! it streams the **first unit** word by word, unchecked except for credentials: the first
 //! sentence or line, or an opening greeting ("Hi Carlos,") even when the body follows on the
 //! same line. Every later unit (a sentence or line) is held until it ends, never cut, checked
-//! for artefact claims and credentials, then emitted or dropped whole; the draft goes on after
+//! for artefact claims, credentials and values (as above), then emitted or dropped whole; the draft goes on after
 //! a dropped unit, so a dropped claim never leaves a fragment. Known gap: a claim in a first
 //! sentence that opens without a greeting is not caught there (the prompt's rule is the guard);
 //! the `sentences` check catches it. The greeting is out before anything is checked, so a
@@ -75,6 +75,8 @@ pub struct GroundingReport {
     pub names_flagged: u32,
     /// Weekday names the corpus doesn't support (counted, not dropped: usually a proposal).
     pub weekdays_flagged: u32,
+    /// Sentences dropped for naming one of the prompt's fact ids (`F3`).
+    pub fact_refs_dropped: u32,
     /// Sentences dropped for copying a credential-like value from a sensitive fact.
     pub secrets_dropped: u32,
     /// Attachments, links, files or invites no source mentions, in a commitment, request or
@@ -124,6 +126,8 @@ pub struct Corpus {
     secrets: Vec<String>,
     /// The attachments, links, files and invites the sources show exist.
     artefacts: ArtefactSupport,
+    /// Fact-id-like tokens (`F3`) the sources themselves use.
+    fact_ids: HashSet<String>,
     superseded_facts: u32,
 }
 
@@ -187,7 +191,20 @@ impl Corpus {
         }
         self.words.extend(words(text));
         self.artefacts.add(text);
+        self.fact_ids.extend(fact_ids(text));
     }
+}
+
+/// Tokens shaped like the prompt's fact ids (`F1`, `f12`), lower case.
+fn fact_ids(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| {
+            w.len() >= 2
+                && w.len() <= 4
+                && w.starts_with(['F', 'f'])
+                && w[1..].bytes().all(|b| b.is_ascii_digit())
+        })
+        .map(str::to_lowercase)
 }
 
 /// Letters and digits only, lower case: "Tangerine-Otter-42" and "4111 1111" compare equal
@@ -252,8 +269,9 @@ pub enum GroundingCheck {
     /// Stream the first unit (the first sentence or line, or an opening greeting) word by word,
     /// holding only the current word (and a run of digit groups) until it is complete; hold
     /// each later sentence until it ends and drop it whole if it claims an unsupported
-    /// artefact. Stop the draft before a credential copied from a sensitive fact. Values are
-    /// not checked. Near-zero added latency to the first character.
+    /// artefact or states an unsupported or superseded value. Stop the draft before a
+    /// credential copied from a sensitive fact. The first unit's values are not checked.
+    /// Near-zero added latency to the first character.
     #[default]
     Secrets,
 }
@@ -582,7 +600,9 @@ impl Grounder {
             self.stop();
             return;
         }
-        if !self.artefacts_ok(body) {
+        // Held units cost the first character nothing, so they get the value check too.
+        let values_ok = self.values_ok(body);
+        if !self.artefacts_ok(body) || !values_ok || self.cites_fact(body) {
             self.report.sentences_dropped += 1;
             self.carry = gap;
             return;
@@ -661,6 +681,27 @@ impl Grounder {
             self.report.secrets_dropped += 1;
             return false;
         }
+        let mut ok = self.values_ok(sentence);
+        if !self.artefacts_ok(sentence) || self.cites_fact(sentence) {
+            ok = false;
+        }
+        self.report.names_flagged += unknown_names(sentence, &self.corpus.words);
+        ok
+    }
+
+    /// Whether the sentence names one of the prompt's fact ids ("As per F3, …") that no source
+    /// uses: the model is quoting its prompt, not writing the user's reply.
+    fn cites_fact(&mut self, sentence: &str) -> bool {
+        let cites = fact_ids(sentence).any(|id| !self.corpus.fact_ids.contains(&id));
+        if cites {
+            self.report.fact_refs_dropped += 1;
+        }
+        cites
+    }
+
+    /// Whether every number, amount, date and time in the sentence is supported by a current
+    /// source (weekdays are only counted); counts what it finds.
+    fn values_ok(&mut self, sentence: &str) -> bool {
         let mut ok = true;
         for v in values(sentence) {
             self.report.values_checked += 1;
@@ -683,10 +724,6 @@ impl Grounder {
                 self.report.unsupported.push(v.raw);
             }
         }
-        if !self.artefacts_ok(sentence) {
-            ok = false;
-        }
-        self.report.names_flagged += unknown_names(sentence, &self.corpus.words);
         ok
     }
 }
@@ -2010,6 +2047,38 @@ mod tests {
             parts.push(e);
         }
         (out, parts)
+    }
+
+    #[test]
+    fn secrets_mode_drops_later_sentences_with_superseded_values() {
+        let mut g = grounder().with_check(GroundingCheck::Secrets);
+        let deltas: Vec<String> = STALE.split_inclusive(' ').map(str::to_owned).collect();
+        let deltas: Vec<&str> = deltas.iter().map(String::as_str).collect();
+        let (out, parts) = run(&mut g, &deltas);
+        assert_eq!(out, CLEAN);
+        // The greeting still goes out on the first delta.
+        assert!(!parts[0].is_empty(), "{parts:?}");
+        assert_eq!(g.report().values_superseded, 1);
+    }
+
+    #[test]
+    fn sentences_naming_a_fact_id_are_dropped_unless_a_source_uses_it() {
+        for check in [GroundingCheck::Sentences, GroundingCheck::Secrets] {
+            let mut g = grounder().with_check(check);
+            let draft = "Dear Ravi,\n\nThe board approved $275,000. As per F2, travel is frozen.\n\nKind regards,\nHenrik";
+            let (out, _) = run(&mut g, &[draft]);
+            assert_eq!(
+                out, "Dear Ravi,\n\nThe board approved $275,000.\n\nKind regards,\nHenrik",
+                "{check:?}"
+            );
+            assert_eq!(g.report().fact_refs_dropped, 1);
+        }
+        let (mut ctx, cr) = henrik();
+        ctx.thread[0].text.push_str(" Is the F1 sponsorship in it?");
+        let mut g = Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default())
+            .with_check(GroundingCheck::Secrets);
+        let draft = "Dear Ravi,\n\nThe board approved $275,000. The F1 sponsorship is not in it.";
+        assert_eq!(run(&mut g, &[draft]).0, draft);
     }
 
     #[test]

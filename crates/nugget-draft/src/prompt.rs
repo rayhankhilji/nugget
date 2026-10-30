@@ -553,7 +553,9 @@ pub fn answer_plan(ask: &Ask, facts: &[Fact]) -> String {
         .collect();
     let eligible: Vec<bool> = facts
         .iter()
-        .map(|f| f.superseded_by.is_none() && !f.sensitive)
+        .map(|f| {
+            f.superseded_by.is_none() && !f.sensitive && !crate::ask::addresses_assistant(&f.body)
+        })
         .collect();
     let refs = ask.point_refs(&passages, &eligible);
     let mut out = String::from(

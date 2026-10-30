@@ -1849,7 +1849,10 @@ fn select_snippets(
             None => false,
         }
     };
-    ask.select(&passages, max, |i| fit(&mut kept, i));
+    // A passage that speaks to an AI model is an injection, never a fact to answer from.
+    ask.select(&passages, max, |i| {
+        !crate::ask::addresses_assistant(&bodies[i]) && fit(&mut kept, i)
+    });
     kept.sort_by_key(|(i, _)| *i);
     let context = ContextResponse {
         text: render(&kept),
