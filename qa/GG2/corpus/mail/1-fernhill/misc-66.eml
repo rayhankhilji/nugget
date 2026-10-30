@@ -1,0 +1,11 @@
+From: Omar Siddiqui <omar.siddiqui@fernhill.example>
+To: Dana Whitlock <dana.whitlock@example.net>
+Date: Sun, 13 Sep 2026 10:47:00 +0000
+Subject: PR review: export CSV
+Message-ID: <gg2-176@fernhill.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Left comments on the CSV export PR, mostly naming. Ship after tests pass.
+
+Omar
