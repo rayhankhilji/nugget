@@ -56,6 +56,8 @@ validly signed model manifest (rollback).
 | DR-2 | Medium | Fixed | EE4 | Header-like lines in passage text move sensitive text into a non-sensitive fact and forge facts |
 | RR-1 | Medium | Open | DD | Sensitive passages are sent to a cloud reranker |
 | AG-1 | Medium | Open | DD | Screen text reaches the agent prompt outside the untrusted fence via VERIFICATION FAILED reasons |
+| DR-5 | Medium | Fixed | EE4 | Credential stop: digits spaced out by words, a start glued to a word, a secret in a sensitive title; quadratic hold |
+| DR-6 | Medium | Fixed | EE4 | Credential stop panics on multi-byte whitespace before a digit group |
 | DR-3 | Low | Fixed | EE4 | Credential stop skipped when grounding is off or a screenshot is attached |
 | DR-4 | Low | Fixed | EE4 | `Citation.date` accepts impossible and future dates |
 | RA-1 | Low | Fixed | EE4 | `draft.read_ahead` rate limit bypassed by a burst of calls |
@@ -98,6 +100,20 @@ validly signed model manifest (rollback).
 - **Path:** `crates/nugget-draft/src/prompt_facts.rs` (`iso_date`, `civil_date`)
 - **Attack:** The date comes from a mail's `Date:` header and was checked for format only. A mail dated `2099-01-01` sorts first among the facts and, with "final/approved" wording and matching title terms, marks the user's real notes superseded; the grounder then drops sentences stating the true value.
 - **Fix:** Month and day are validated (leap years included); dates after tomorrow (UTC) count as undated.
+
+#### DR-5: Credential stop: digits spaced out by words, a start glued to a word, a secret in a sensitive title; quadratic hold
+- **Severity:** Medium (found by the review of DR-1's fix)
+- **Status:** Fixed (4881d83). Regression: nugget-draft `grounding::tests::digits_of_a_card_are_caught_however_far_apart`, `secrets_mode_holds_the_start_of_a_credential_glued_to_a_word`, `a_credential_in_a_sensitive_title_is_caught`, `secrets_mode_cost_is_linear_in_a_long_held_stream`.
+- **Path:** `crates/nugget-draft/src/grounding.rs` (`Grounder::digits`, `copies_secret`, `remember`, `hold_secret_start`, `Grounder::new`)
+- **Attack:** (a) The all-digit check looked only at digits inside the bounded squashed tail, so `"4 then 1 then 1 … "` emitted all 16 digits of a card number. (b) `hold_secret_start` tried only word starts, so `"the code isTangerine "` emitted the start of `tangerine-otter-42`. (c) Secret tokens came from the body only, but a sensitive item's title is in the prompt too. (d) A held start re-squashed every suffix of the held text on each push: 4096 punctuation tokens took 8.5 s on the async executor.
+- **Fix:** A separate window of the last emitted digits, however far apart; the hold scans back character by character (ordinary words are released on the next push); title secrets are extracted separately; one bounded reverse pass. Residual (accepted, latency trade-off): with words between digits, up to all but the last digit can go out before the stop (for a card the last is the Luhn digit, computable from the rest); a sentence-mode split across sentences releases the first part. Closing it means holding any text with a digit until the end of the stream. A forged header (DR-2 fallback) makes all context sensitive, so dates and order numbers in it become digit secrets and can stop drafts spuriously.
+
+#### DR-6: Credential stop panics on multi-byte whitespace before a digit group
+- **Severity:** Medium (kills the stream pump; reachable by default, and with DR-3 also with grounding off)
+- **Status:** Fixed (4881d83). Regression: nugget-draft `grounding::tests::secrets_mode_digit_groups_after_multibyte_whitespace`.
+- **Path:** `crates/nugget-draft/src/grounding.rs` (digit-run hold)
+- **Attack:** `head.rfind(char::is_whitespace).map_or(0, |i| i + 1)` slices off a char boundary before U+00A0 or U+3000: model output `"le 12\u{a0}345 6"` (French digit grouping) panicked with `slice_error_fail`.
+- **Fix:** `char_indices().rfind(..)` plus the character's UTF-8 length.
 
 ## Read-ahead and the draft runtime (RA)
 
