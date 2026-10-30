@@ -1,0 +1,14 @@
+From: Priya Raman <priya@acme-logistics.example>
+To: Sam Taylor <sam@example.com>
+Subject: Acme renewal: can you confirm by Friday?
+Date: Tue, 27 Oct 2026 09:12:00 +0000
+Message-ID: <gg8-01@acme-logistics.example>
+Content-Type: text/plain; charset=utf-8
+
+Hi Sam,
+
+Our contract renews on 14 November 2026. Could you confirm the 12-month term by Friday?
+Reference GG8CANARY-MAILNORMAL-1.
+
+Thanks,
+Priya
