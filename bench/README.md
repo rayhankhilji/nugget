@@ -1667,12 +1667,38 @@ three on one AMD EPYC 9V74 runner; each model judges its own drafts, so the judg
 | Judge: Nugget wins / inconsistent | 0.50 / 0.50 | 0.125 / 0.875 | 0.125 / 0.625 |
 | Time to first token p50 | 11.3 s | 6.0 s | 2.3 s |
 
+**Confirmation run** [40998964453](https://github.com/rayhankhilji/nugget/actions/runs/40998964453)
+at `3a48cab` (same code; reports in
+[`results/real-models/run-40998964453/`](results/real-models/run-40998964453/)) landed on the slow
+CPU of the AA1 runs and on a smaller virtual Mac, which shows the other end of the range:
+
+| Runner | Model | First inserted char p50 / p95, read-ahead off | ... on | Read-ahead time p50 | CPU-s per read-ahead |
+|---|---|---|---|---|---|
+| Linux, EPYC 7763, 2 cores, CPU | qwen3-4b-q4km | 30.1 / 34.6 s (**MISSED**) | **0.14** / 0.14 s | 21.3 s | 39.4 |
+| Linux, EPYC 7763 | qwen3-1.7b-q8 | 14.6 / 17.2 s (**MISSED**) | **0.08** / 0.15 s | 10.6 s | 19.6 |
+| Linux, EPYC 7763 | qwen3-0.6b-q8 | 5.6 / 6.9 s (**MISSED**) | 0.04 / 0.04 s | 4.2 s | 7.7 |
+| macOS, M1 (virtual, 3 cores), Metal | qwen3-4b-q4km | 16.6 / 23.7 s (**MISSED**) | **0.58** / 1.95 s | 15.1 s | 40.2 |
+| macOS, M1 (virtual) | qwen3-1.7b-q8 | 6.8 / 12.2 s (**MISSED**) | **0.20** / 0.37 s | 4.5 s | 11.2 |
+| macOS, M1 (virtual) | qwen3-0.6b-q8 | 3.2 / 3.9 s (**MISSED**) | 0.17 / 0.36 s | 2.5 s | 6.1 |
+
+Again 12 of 12 read-aheads completed per row, none skipped, 1 prompt token evaluated at the trigger.
+On the EPYC 7763 the 4B without read-ahead reproduces AA1's 30.2 s to the tenth. With read-ahead
+every configuration meets 3 s once the read-ahead has finished, but on these slower machines the
+4B's read-ahead needs 15–21 s of focus first, and the 1.7B's 4.5–11 s: here the small model is what
+makes read-ahead finish before a typical trigger. Without read-ahead nothing meets 3 s on these
+two runners, not even the 0.6B. Drafting quality (Xeon 8573C runner this time), 4B / 1.7B / 0.6B:
+voice match 0.93 / 0.88 / 0.82, fact recall 0.70 / 0.80 / 0.50, hallucination rate 0.33 / 0.0 /
+0.0, sensitive leak rate 0 / 0 / 0, injection resistance 1.0 for all, rule-based win rate 0.50 /
+1.0 / 0.875: the same picture as the first run (the 1.7B a little behind on voice, ahead on
+facts; the 0.6B behind on both).
+
 **Recommendation.** The 0.6B does not hold quality (fact recall 0.40, voice 0.77) and is not
 recommended. The 1.7B holds on facts (recall 0.80, no hallucinations, no leaks on this run) but
 loses 0.07 of voice match, and 8 tasks cannot settle a difference of that size. Read-ahead, not the
 smaller model, is what brings the 4B under 3 s, so the default stays as it is: Double Tap drafts
 with the synthesis-tier model, read-ahead on, and `[draft.local] model = "qwen3-1.7b-q8"` is
-offered (once signed) for slower CPUs, where it halves both the read-ahead time and its CPU cost.
+offered (once signed) for slower machines, where it halves both the read-ahead time and its CPU
+cost (on the EPYC 7763: 10.6 s of focus instead of 21.3 s before the trigger is instant).
 
 ### Drafting quality
 

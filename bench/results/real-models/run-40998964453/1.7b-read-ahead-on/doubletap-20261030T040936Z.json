@@ -1,0 +1,956 @@
+{
+  "schema_version": 1,
+  "suite": "doubletap",
+  "status": "ok",
+  "started_at": "2026-10-30T04:09:36.175905431Z",
+  "finished_at": "2026-10-30T04:13:41.120361832Z",
+  "duration_ms": 244944,
+  "harness_version": "0.0.1",
+  "git_commit": "3a48cab3b67d68f65a4e08a6e3125c448beba416",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "quick",
+    "seed": 42,
+    "params": {
+      "cache_reuse": "jules-t18 drafted twice in a row (begin alone), then a third time in the product flow; jules-t16 after a cache reset without a prewarm, then after another reset with Drafter::prewarm waited for (up to 90 s)",
+      "cache_reuse.prefix_prewarm_calls": 0,
+      "cache_reuse.prewarm_finished": true,
+      "draft_local_budget": "on",
+      "draft_local_budget.applies": true,
+      "engine": "nugget_draft::Drafter (DraftConfig::default, local budget and temperature as below)",
+      "idle_prewarm": "local-chat: finished before the warm-up draft",
+      "idle_prewarm_s": 6.663,
+      "local.chat": {
+        "file": "Qwen3-1.7B-Q8_0.gguf",
+        "id": "qwen3-1.7b-q8",
+        "load_s": 1.34,
+        "pending": true,
+        "pending_file": "manifests/pending/doubletap-small.json",
+        "quantisation": "Q8_0",
+        "revision": "90862c4b9d2787eaed51d12237eafdfe7c5f6077",
+        "sha256": "061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a",
+        "size_bytes": 1834426016
+      },
+      "local.hardware": {
+        "arch": "x86_64",
+        "cpu_model": "AMD EPYC 7763 64-Core Processor",
+        "gpu": "Unknown",
+        "logical_cores": 4,
+        "meets_16gb": true,
+        "os": "linux",
+        "total_ram_gib": 15.6
+      },
+      "local.install_s": 0.0,
+      "local.runtime": "llama-server-linux-x86_64-cpu (b11940)",
+      "local.thinking": "off",
+      "local_budget.max_snippets": 3,
+      "main_pass_s": 171.804,
+      "meets_16gb": true,
+      "model": "qwen3-1.7b-q8 (Qwen3-1.7B-Q8_0.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940), thinking off)",
+      "model.locality": "OnDevice",
+      "prefix_prewarm_calls": 14,
+      "prewarm": "Drafter::prewarm with an app-only hint before begin, as apps/desktop doubletap/flow.rs (connection warm-up; retrieval starts in begin)",
+      "prompt_budget_tokens": 300,
+      "read_ahead": "on",
+      "read_ahead.flow": "per task: Drafter::read_ahead with the trigger's DraftRequest, waited for (bounded by the per-draft timeout), then the trigger flow unchanged; from_trigger.* starts after the read-ahead",
+      "read_ahead.min_interval_ms": 0,
+      "read_ahead.product_min_interval_ms": 5000,
+      "retrieval": "nugget-retrieve text-only (no embedder), default RetrieveConfig, fixed reference time; one in-memory store per persona (draft fixture knowledge items + the persona's sent messages)",
+      "seed": 42,
+      "server_cpu": "llama-server pid 3646: user + system CPU time from /proc/<pid>/stat",
+      "target.first_inserted_token.p50_s": 3.0,
+      "tasks": 12,
+      "tasks.available": 66,
+      "temperature": 0.0,
+      "thinking_pass": "3 drafts, thinking at the model's default",
+      "thinking_tasks": [
+        "jules-t21",
+        "jules-t20",
+        "jules-t19"
+      ],
+      "timed_from": "Drafter::begin (a11y read and IPC not included); from_trigger.* from the Drafter::prewarm call",
+      "timeout_s": 180.0,
+      "voice": "persona sent messages: recipient (>= 3 messages) or channel style statistics + 3 exemplars (recipient first, then most recent)",
+      "warmup_task": "jules-t22"
+    }
+  },
+  "metrics": [
+    {
+      "name": "doubletap.ttft.p50",
+      "value": 0.081,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.ttft.p95",
+      "value": 0.085,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_token.p50",
+      "value": 0.083,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": 3.0,
+      "target_met": true,
+      "description": "p50 time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_token.p95",
+      "value": 0.152,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_char.p50",
+      "value": 0.083,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.first_inserted_char.p95",
+      "value": 0.152,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.total.p50",
+      "value": 2.447,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from Drafter::begin until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.total.p95",
+      "value": 5.928,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from Drafter::begin until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.ttft.p50",
+      "value": 0.081,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.ttft.p95",
+      "value": 0.085,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the provider's first stream event (prompt, retrieval and voice included), over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.first_inserted_token.p50",
+      "value": 0.083,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.first_inserted_token.p95",
+      "value": 0.152,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.first_inserted_char.p50",
+      "value": 0.083,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.first_inserted_char.p95",
+      "value": 0.152,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.total.p50",
+      "value": 2.447,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.from_trigger.total.p95",
+      "value": 5.928,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 time from the trigger (the Drafter::prewarm call, so time a prefix prewarm takes cannot hide) until the draft stream finished, over 12 completed drafts"
+    },
+    {
+      "name": "doubletap.prompt_tokens.p50",
+      "value": 809.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "p50 provider-reported prompt tokens, cached or not, over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.prompt_tokens.p95",
+      "value": 875.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "p95 provider-reported prompt tokens, cached or not, over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.cached_prompt_tokens.p50",
+      "value": 808.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 prompt tokens the provider served from its prompt cache (llama-server cache_n), over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.cached_prompt_tokens.p95",
+      "value": 874.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 prompt tokens the provider served from its prompt cache (llama-server cache_n), over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.evaluated_prompt_tokens.p50",
+      "value": 1.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 prompt tokens the provider actually read (prompt minus cached; what prefill time grows with), over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.evaluated_prompt_tokens.p95",
+      "value": 1.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 prompt tokens the provider actually read (prompt minus cached; what prefill time grows with), over 12 drafts with usage"
+    },
+    {
+      "name": "doubletap.retrieval.p50",
+      "value": 0.0,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median time Drafter::begin waited for retrieval and the voice lookup"
+    },
+    {
+      "name": "doubletap.requests",
+      "value": 12.0,
+      "unit": "drafts",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Timed drafts attempted"
+    },
+    {
+      "name": "doubletap.completed",
+      "value": 12.0,
+      "unit": "drafts",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts whose stream finished"
+    },
+    {
+      "name": "doubletap.failures",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts that failed (begin refused or errored, or the stream errored)"
+    },
+    {
+      "name": "doubletap.timeouts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Drafts that took longer than 180 s end to end (cancelled)"
+    },
+    {
+      "name": "doubletap.empty_drafts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Completed drafts with no visible text"
+    },
+    {
+      "name": "doubletap.retrieval_skipped",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Completed drafts whose retrieval timed out or failed (drafted without context)"
+    },
+    {
+      "name": "doubletap.output_tokens_per_s",
+      "value": 13.24013157894737,
+      "unit": "tokens/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Provider-reported output tokens over the time from the first insertable token to the end of the stream (drafts with usage only)"
+    },
+    {
+      "name": "doubletap.server_cpu_s.mean",
+      "value": 6.272499999999991,
+      "unit": "cpu-s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Mean CPU seconds the llama-server process spent per draft, trigger to end of stream (12 drafts)"
+    },
+    {
+      "name": "doubletap.prompt_tokens.mean",
+      "value": 773.4166666666666,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Mean provider-reported prompt tokens (12 drafts with usage)"
+    },
+    {
+      "name": "doubletap.read_ahead.requests",
+      "value": 12.0,
+      "unit": "read-aheads",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Drafter::read_ahead calls, one before each timed draft"
+    },
+    {
+      "name": "doubletap.read_ahead.completed",
+      "value": 12.0,
+      "unit": "read-aheads",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Read-aheads that prefilled the draft's prompt"
+    },
+    {
+      "name": "doubletap.read_ahead.skipped",
+      "value": 0.0,
+      "unit": "read-aheads",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Read-aheads that did nothing (any reason; must be 0 with a local provider)"
+    },
+    {
+      "name": "doubletap.read_ahead.timeouts",
+      "value": 0.0,
+      "unit": "read-aheads",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Read-aheads that ran past the per-draft timeout (cancelled)"
+    },
+    {
+      "name": "doubletap.read_ahead.time.p50",
+      "value": 10.617,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p50 wall-clock time of a completed Drafter::read_ahead (how long focus has to stay for the trigger to find the prompt cached), over 12 read-aheads"
+    },
+    {
+      "name": "doubletap.read_ahead.time.p95",
+      "value": 12.62,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "p95 wall-clock time of a completed Drafter::read_ahead (how long focus has to stay for the trigger to find the prompt cached), over 12 read-aheads"
+    },
+    {
+      "name": "doubletap.read_ahead.prepare.p50",
+      "value": 0.007,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median read-ahead time in retrieval and voice lookup until the prompt was built, over 12 read-aheads"
+    },
+    {
+      "name": "doubletap.read_ahead.warm.p50",
+      "value": 10.609,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median read-ahead time in the prefill request (the server reading the prompt), over 12 read-aheads"
+    },
+    {
+      "name": "doubletap.read_ahead.server_cpu_s.mean",
+      "value": 19.57750000000001,
+      "unit": "cpu-s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Mean CPU seconds (user + system) the llama-server process spent per completed read-ahead, over 12 read-aheads. Battery drain is not metered on CI runners; CPU-seconds are the input to an energy estimate"
+    },
+    {
+      "name": "doubletap.read_ahead.server_cpu_s.p50",
+      "value": 21.180000000000007,
+      "unit": "cpu-s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Median CPU seconds the llama-server process spent per completed read-ahead, over 12 read-aheads"
+    },
+    {
+      "name": "doubletap.read_ahead.core_pct.at_1_per_min",
+      "value": 32.629,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Projected share of one CPU core spent reading ahead at 1 focus changes per minute, each a new context (mean CPU seconds per read-ahead x rate, the rate capped at one per 5000 ms by [draft.read_ahead] min_interval_ms). CPU time, not measured battery drain (not meterable on CI runners)"
+    },
+    {
+      "name": "doubletap.read_ahead.core_pct.at_2_per_min",
+      "value": 65.258,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Projected share of one CPU core spent reading ahead at 2 focus changes per minute, each a new context (mean CPU seconds per read-ahead x rate, the rate capped at one per 5000 ms by [draft.read_ahead] min_interval_ms). CPU time, not measured battery drain (not meterable on CI runners)"
+    },
+    {
+      "name": "doubletap.read_ahead.core_pct.at_4_per_min",
+      "value": 130.517,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Projected share of one CPU core spent reading ahead at 4 focus changes per minute, each a new context (mean CPU seconds per read-ahead x rate, the rate capped at one per 5000 ms by [draft.read_ahead] min_interval_ms). CPU time, not measured battery drain (not meterable on CI runners)"
+    },
+    {
+      "name": "doubletap.read_ahead.core_pct.at_6_per_min",
+      "value": 195.775,
+      "unit": "%",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Projected share of one CPU core spent reading ahead at 6 focus changes per minute, each a new context (mean CPU seconds per read-ahead x rate, the rate capped at one per 5000 ms by [draft.read_ahead] min_interval_ms). CPU time, not measured battery drain (not meterable on CI runners)"
+    },
+    {
+      "name": "doubletap.cold.first_inserted_token",
+      "value": 0.079,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the first insertable token"
+    },
+    {
+      "name": "doubletap.cold.first_inserted_char",
+      "value": 0.079,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the first inserted character"
+    },
+    {
+      "name": "doubletap.cold.ttft",
+      "value": 0.079,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the provider's first event"
+    },
+    {
+      "name": "doubletap.cold.total",
+      "value": 0.84,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Warm-up draft (first after model start, not in the percentiles): time to the end of the stream"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.prompt_tokens",
+      "value": 674.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): provider-reported prompt tokens, cached or not"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.cached_prompt_tokens",
+      "value": 451.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): prompt tokens the provider served from its prompt cache (llama-server cache_n)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.evaluated_prompt_tokens",
+      "value": 223.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): prompt tokens the provider actually read (prompt minus cached; what prefill time grows with)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.ttft",
+      "value": 4.849,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.first_inserted_token",
+      "value": 4.849,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.first_inserted_char",
+      "value": 4.849,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_first.total",
+      "value": 5.587,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, first of the same task drafted twice in a row (Drafter::begin alone): time from Drafter::begin until the draft stream finished"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.prompt_tokens",
+      "value": 674.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): provider-reported prompt tokens, cached or not"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.cached_prompt_tokens",
+      "value": 673.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): prompt tokens the provider served from its prompt cache (llama-server cache_n)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.evaluated_prompt_tokens",
+      "value": 1.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): prompt tokens the provider actually read (prompt minus cached; what prefill time grows with)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.ttft",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.first_inserted_token",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.first_inserted_char",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.total",
+      "value": 0.826,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, second of the same task drafted twice in a row (Drafter::begin alone; should read only the tokens that differ from the first): time from Drafter::begin until the draft stream finished"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.prompt_tokens",
+      "value": 674.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: provider-reported prompt tokens, cached or not"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.cached_prompt_tokens",
+      "value": 673.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: prompt tokens the provider served from its prompt cache (llama-server cache_n)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.evaluated_prompt_tokens",
+      "value": 1.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: prompt tokens the provider actually read (prompt minus cached; what prefill time grows with)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.ttft",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included)"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.first_inserted_token",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.first_inserted_char",
+      "value": 0.077,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_after_prewarm.total",
+      "value": 0.829,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, the same task a third time in the product flow (Drafter::prewarm at the trigger, then begin): what the trigger's prefix prewarm leaves of the cache: time from Drafter::begin until the draft stream finished"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.prompt_tokens",
+      "value": 658.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: provider-reported prompt tokens, cached or not"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.cached_prompt_tokens",
+      "value": 451.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: prompt tokens the provider served from its prompt cache (llama-server cache_n)"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.evaluated_prompt_tokens",
+      "value": 207.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: prompt tokens the provider actually read (prompt minus cached; what prefill time grows with)"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.ttft",
+      "value": 4.482,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included)"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.first_inserted_token",
+      "value": 4.482,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.first_inserted_char",
+      "value": 4.482,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.no_prewarm.total",
+      "value": 5.373,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, after a cache reset, Drafter::begin without a prewarm: time from Drafter::begin until the draft stream finished"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.prompt_tokens",
+      "value": 658.0,
+      "unit": "tokens",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: provider-reported prompt tokens, cached or not"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.cached_prompt_tokens",
+      "value": 657.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: prompt tokens the provider served from its prompt cache (llama-server cache_n)"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.evaluated_prompt_tokens",
+      "value": 1.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: prompt tokens the provider actually read (prompt minus cached; what prefill time grows with)"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.ttft",
+      "value": 0.089,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time from Drafter::begin until the provider's first stream event (prompt, retrieval and voice included)"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.first_inserted_token",
+      "value": 0.089,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time from Drafter::begin until the first post-processed text the overlay shows and the user can insert (insertion itself not timed); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.first_inserted_char",
+      "value": 0.089,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time from Drafter::begin until the stream emitted its first non-whitespace character (the first character the overlay inserts); drafts with no visible text excluded"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.total",
+      "value": 0.968,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time from Drafter::begin until the draft stream finished"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.from_trigger.first_inserted_token",
+      "value": 0.091,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time from the trigger, the prewarm wait included"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarmed.prewarm_wait",
+      "value": 0.002,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "cache-reuse pass, same task after another cache reset, Drafter::prewarm finished (waited for, bounded) before Drafter::begin: time spent waiting for the prewarm before begin"
+    },
+    {
+      "name": "doubletap.cache_reuse.repeat_second.evaluated_share",
+      "value": 0.001,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of the second identical request's prompt the provider read again (near 0: only the new tokens were read)"
+    },
+    {
+      "name": "doubletap.cache_reuse.prewarm_saved_tokens",
+      "value": 206.0,
+      "unit": "tokens",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Prompt tokens a finished Drafter::prewarm saved the draft (evaluated without a prewarm minus evaluated after one, same task, both after a cache reset)"
+    },
+    {
+      "name": "doubletap.thinking_model_default.ttft.p50",
+      "value": 21.267,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking left at the model's default (Qwen3: thinks first): median ttft over 3 completed drafts"
+    },
+    {
+      "name": "doubletap.thinking_model_default.total.p50",
+      "value": 21.267,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking left at the model's default (Qwen3: thinks first): median total over 3 completed drafts"
+    },
+    {
+      "name": "doubletap.thinking_model_default.requests",
+      "value": 3.0,
+      "unit": "drafts",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts attempted"
+    },
+    {
+      "name": "doubletap.thinking_model_default.empty_drafts",
+      "value": 3.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Completed drafts with no visible text (the output budget went to thinking)"
+    },
+    {
+      "name": "doubletap.thinking_model_default.failures",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts that failed"
+    },
+    {
+      "name": "doubletap.thinking_model_default.timeouts",
+      "value": 0.0,
+      "unit": "drafts",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Thinking at the model's default: Drafts that timed out"
+    }
+  ],
+  "targets": [
+    {
+      "metric": "doubletap.first_inserted_token.p50",
+      "comparison": "at_most",
+      "target": 3.0,
+      "value": 0.083,
+      "pass": true
+    },
+    {
+      "metric": "doubletap.read_ahead.skipped",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    }
+  ],
+  "message": null
+}

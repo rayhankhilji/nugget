@@ -1,0 +1,11 @@
+suite: doubletap
+runner: GitHub Actions 1000010127 (Linux X64)
+commit: 3a48cab3b67d68f65a4e08a6e3125c448beba416
+date: 2026-10-30T03:47:25Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           6           0           8          14
+Swap:              2           0           2
