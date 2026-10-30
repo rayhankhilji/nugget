@@ -482,7 +482,7 @@ jobs:
   # - kwin (kwin_wayland --virtual as root, xdg-desktop-portal-kde on the Wayland QPA) and
   # - gnome (gnome-shell --headless with a virtual monitor, xdg-desktop-portal-gnome and
   #   gnome-control-center's global shortcuts provider): GlobalShortcuts. The test registers the
-  #   app id dev.nugget.desktop (the session provides its desktop file with an existing Exec),
+  #   app id dev.nugget.Nugget (the session provides its desktop file with an existing Exec),
   #   the desktop asks for consent in its real dialog, accepted over AT-SPI as a user would,
   #   and Ctrl+Alt+Space is pressed on the compositor's virtual keyboard (KWin fake input,
   #   Mutter RemoteDesktop): the shortcut must fire through the desktop's own key handling.
@@ -585,8 +585,8 @@ jobs:
   # build) is built once, checked (packaging/scripts/check-linux-desktop-file.sh) and installed
   # with apt in each session; the installed nugget-desktop is started natively on Wayland and
   # tests/fixtures/native/linux/wayland-app-shortcut.sh requires the probe's `trigger` event:
-  # - kwin, gnome: the portal session is created for dev.nugget.desktop from the installed
-  #   /usr/share/applications/dev.nugget.desktop.desktop; the desktop's consent dialog is
+  # - kwin, gnome: the portal session is created for dev.nugget.Nugget from the installed
+  #   /usr/share/applications/dev.nugget.Nugget.desktop; the desktop's consent dialog is
   #   accepted over AT-SPI; Ctrl+Alt+Space on the compositor's virtual keyboard fires Double Tap.
   # - sway: no GlobalShortcuts; the listener reports the documented error and the fallback a
   #   sway user binds (`nugget-desktop --double-tap`, handed to the running app) fires it.

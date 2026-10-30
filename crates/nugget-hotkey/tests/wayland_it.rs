@@ -12,7 +12,7 @@
 //!
 //! What runs depends on the portal the session offers:
 //! - **GlobalShortcuts available** (kwin: xdg-desktop-portal-kde, Plasma 6; gnome:
-//!   xdg-desktop-portal-gnome, GNOME 48+): nugget-hotkey registers the app id `dev.nugget.desktop`
+//!   xdg-desktop-portal-gnome, GNOME 48+): nugget-hotkey registers the app id `dev.nugget.Nugget`
 //!   (the session provides its desktop file, or the installed package does), the portal session
 //!   is created and the shortcut bound. A new shortcut makes the desktop ask in a dialog, which
 //!   the test accepts over AT-SPI (`accept-shortcut-dialog.py`), as a user would. The bound
@@ -88,7 +88,7 @@ fn tokens(reply: &str) -> Vec<String> {
 }
 
 /// The kglobalaccel component and action the KDE portal bound for Double Tap: component
-/// `dev.nugget.desktop` (the app id, object path `/component/dev_nugget_desktop`), action
+/// `dev.nugget.Nugget` (the app id, object path `/component/dev_nugget_Nugget`), action
 /// [`DOUBLE_TAP_SHORTCUT_ID`].
 fn find_kglobalaccel_shortcut() -> Option<(String, String)> {
     let comps = gdbus(&[

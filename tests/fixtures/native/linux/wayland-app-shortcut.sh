@@ -7,7 +7,7 @@
 #
 # 1. Starts the installed nugget-desktop natively on Wayland with NUGGET_E2E_PROBE=<file>, and
 #    waits for its Double Tap listener (probe `listener`): the GlobalShortcuts portal session is
-#    created for app id dev.nugget.desktop (the installed desktop file).
+#    created for app id dev.nugget.Nugget (the installed desktop file).
 # 2. Accepts the desktop's consent dialog for the new shortcut over AT-SPI
 #    (accept-shortcut-dialog.py), unless the session pre-seeded the consent
 #    (NUGGET_WAYLAND_CONSENT=preseed) and no dialog appears.
@@ -34,7 +34,7 @@ accept="${NUGGET_WAYLAND_ACCEPT_DIALOG:?run inside wayland-session.sh}"
 consent_mode="${NUGGET_WAYLAND_CONSENT:-dialog}"
 if [ -z "$app" ]; then
     # The binary the installed desktop file launches.
-    desktop=/usr/share/applications/dev.nugget.desktop.desktop
+    desktop=/usr/share/applications/dev.nugget.Nugget.desktop
     if [ -f "$desktop" ]; then
         app="$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' "$desktop" | head -n 1)"
         [ "${app#/}" = "$app" ] && app="$(command -v "$app")"
@@ -129,7 +129,7 @@ session="created"
 if grep -q "host portal registration failed" "$out/nugget-desktop.log"; then
     registered="failed (see log)"
 else
-    registered="dev.nugget.desktop"
+    registered="dev.nugget.Nugget"
 fi
 
 # 2. Consent. Nugget binds two shortcuts in two portal sessions (Double Tap, and the agents'

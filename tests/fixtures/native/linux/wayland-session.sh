@@ -25,7 +25,7 @@
 #
 # The portal names an unsandboxed app only from an installed desktop file whose Exec program
 # exists (xdg-desktop-portal 1.19+). When Nugget's package is installed, its
-# /usr/share/applications/dev.nugget.desktop.desktop is used; otherwise the session provides a
+# /usr/share/applications/dev.nugget.Nugget.desktop is used; otherwise the session provides a
 # test one whose Exec is $NUGGET_WAYLAND_DESKTOP_EXEC (default /usr/bin/true).
 #
 # NUGGET_WAYLAND_CONSENT=preseed (kwin only) writes the consent a returning user has (the
@@ -73,19 +73,19 @@ dump_logs() {
 }
 
 # xdg-desktop-portal 1.19+ names an unsandboxed app only from a desktop file matching the app id
-# it registers (nugget-hotkey registers dev.nugget.desktop), and GLib loads that file only when
+# it registers (nugget-hotkey registers dev.nugget.Nugget), and GLib loads that file only when
 # its Exec program exists (on PATH, or an absolute path). Use the installed package's, or provide
 # a test one. Older portals ignore it.
 mkdir -p "$runtime/data/applications"
 export XDG_DATA_DIRS="$runtime/data:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
-installed_desktop=/usr/share/applications/dev.nugget.desktop.desktop
+installed_desktop=/usr/share/applications/dev.nugget.Nugget.desktop
 if [ -f "$installed_desktop" ] && [ -z "${NUGGET_WAYLAND_DESKTOP_EXEC:-}" ]; then
     echo "wayland-session: desktop file: the installed $installed_desktop ($(grep -m1 '^Exec=' "$installed_desktop"))"
 else
     exec_path="${NUGGET_WAYLAND_DESKTOP_EXEC:-/usr/bin/true}"
     printf '[Desktop Entry]\nType=Application\nName=Nugget\nExec=%s\nNoDisplay=true\n' "$exec_path" \
-        >"$runtime/data/applications/dev.nugget.desktop.desktop"
-    echo "wayland-session: desktop file: a test dev.nugget.desktop.desktop with Exec=$exec_path"
+        >"$runtime/data/applications/dev.nugget.Nugget.desktop"
+    echo "wayland-session: desktop file: a test dev.nugget.Nugget.desktop with Exec=$exec_path"
 fi
 
 # The desktop name decides which portal backends the front end uses (kde-portals.conf,
@@ -152,10 +152,10 @@ kwin)
     # KWin hosts kglobalaccel, which reads $HOME/.config/kglobalshortcutsrc (HOME is $runtime).
     if [ "${NUGGET_WAYLAND_CONSENT:-dialog}" = preseed ]; then
         mkdir -p "$runtime/.config"
-        printf '%s\n' '[dev.nugget.desktop]' '_k_friendly_name=Nugget' \
+        printf '%s\n' '[dev.nugget.Nugget]' '_k_friendly_name=Nugget' \
             'double-tap=Ctrl+Alt+Space,Ctrl+Alt+Space,Nugget: draft a reply' \
             >"$runtime/.config/kglobalshortcutsrc"
-        echo "wayland-session: PRE-SEEDED consent: dev.nugget.desktop/double-tap in kglobalshortcutsrc (no dialog)"
+        echo "wayland-session: PRE-SEEDED consent: dev.nugget.Nugget/double-tap in kglobalshortcutsrc (no dialog)"
     fi
     # No GPU: composite with QPainter rather than through EGL. KWin 6.6 gives its restricted
     # Wayland interfaces (org_kde_kwin_fake_input, which virtual-keyboard.py uses) only to a
