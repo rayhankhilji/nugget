@@ -2148,14 +2148,15 @@ export const learningApi = {
 
 // ---- EE3: Ask answer check ----
 
-/** Why the daemon's post-check flagged a claim. Unknown future values are treated like `unsupported`. */
+/** Why the daemon's post-check flagged a claim. Newer daemons may send other values (shown like `unsupported`). */
 export type ClaimFlag = "uncited" | "unsupported";
 
 /** One claim of an answer the post-check could not tie to its sources. */
 export interface FlaggedClaim {
   /** The sentence exactly as it appears in the streamed answer text. */
   text: string;
-  reason: ClaimFlag;
+  /** Kept as sent, so a value this version doesn't know survives a re-save. */
+  reason: ClaimFlag | (string & {});
 }
 
 /** The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`. */

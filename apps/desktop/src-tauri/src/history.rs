@@ -31,6 +31,8 @@ const MAX_TITLE_BYTES: usize = 1024;
 const MAX_SHORT_BYTES: usize = 256;
 const MAX_ERROR_BYTES: usize = 4 * 1024;
 const MAX_CITATIONS: usize = 200;
+/// Flagged claims kept per answer check (the page saves at most this many).
+const MAX_FLAGGED: usize = 200;
 
 const FILE_VERSION: u32 = 1;
 
@@ -156,7 +158,11 @@ pub fn validate(c: &Conversation) -> Result<(), String> {
             return Err("too many citations".into());
         }
         if let Some(c) = &m.check
-            && serde_json::to_vec(c).map_or(true, |b| b.len() > MAX_MESSAGE_BYTES)
+            && (c
+                .get("flagged")
+                .and_then(Value::as_array)
+                .is_some_and(|f| f.len() > MAX_FLAGGED)
+                || serde_json::to_vec(c).map_or(true, |b| b.len() > MAX_MESSAGE_BYTES))
         {
             return Err("answer check is too long".into());
         }
@@ -404,6 +410,17 @@ mod tests {
         let mut big = conv("b", 2);
         big.messages[1].check = Some(serde_json::json!("x".repeat(MAX_MESSAGE_BYTES)));
         assert!(validate(&big).is_err());
+    }
+
+    #[test]
+    fn caps_flagged_claims() {
+        let claim = serde_json::json!({"text": "c", "reason": "uncited"});
+        let mut c = conv("a", 2);
+        c.messages[1].check =
+            Some(serde_json::json!({"flagged": vec![claim.clone(); MAX_FLAGGED]}));
+        assert!(validate(&c).is_ok());
+        c.messages[1].check = Some(serde_json::json!({"flagged": vec![claim; MAX_FLAGGED + 1]}));
+        assert!(validate(&c).is_err());
     }
 
     #[cfg(unix)]

@@ -91,8 +91,8 @@ export function answerCheckOf(v: unknown): AnswerCheck | undefined {
   const flagged = (Array.isArray(c.flagged) ? c.flagged : []).flatMap((f: unknown) => {
     const x = f as { text?: unknown; reason?: unknown } | null;
     if (!x || typeof x.text !== "string" || !x.text.trim()) return [];
-    // Unknown (newer) reasons read like `unsupported`.
-    return [{ text: x.text, reason: x.reason === "uncited" ? ("uncited" as const) : ("unsupported" as const) }];
+    // The reason is kept as sent (a newer one is only labelled like `unsupported`); none at all means `unsupported`.
+    return [{ text: x.text, reason: typeof x.reason === "string" && x.reason ? x.reason : "unsupported" }];
   });
   return { not_found: c.not_found === true, claims: count(c.claims), flagged, invalid_citations: count(c.invalid_citations) };
 }
@@ -102,6 +102,26 @@ const MAX_SAVED_TEXT = 60_000;
 const MAX_SAVED_ERROR = 1_000;
 const MAX_SAVED_MESSAGES = 200;
 const MAX_TITLE = 80;
+/** Flagged claims saved per answer (`MAX_FLAGGED` in history.rs), and chars kept of each claim and reason. */
+const MAX_SAVED_FLAGGED = 200;
+const MAX_SAVED_CLAIM = 1_000;
+const MAX_SAVED_REASON = 64;
+/** A saved check's JSON size limit (`MAX_MESSAGE_BYTES` in history.rs). */
+const MAX_SAVED_CHECK_BYTES = 256 * 1024;
+
+/**
+ * A check as saved with its (possibly cut) reply text: only claims that are in that text, bounded
+ * so the shell never refuses the conversation; the flagged list goes if it is still too big.
+ */
+export function storedCheck(check: AnswerCheck, text: string): AnswerCheck {
+  const flagged = check.flagged
+    .filter((f) => text.includes(f.text))
+    .slice(0, MAX_SAVED_FLAGGED)
+    .map((f) => ({ text: f.text.slice(0, MAX_SAVED_CLAIM), reason: f.reason.slice(0, MAX_SAVED_REASON) }));
+  const out: AnswerCheck = { ...check, flagged };
+  if (new TextEncoder().encode(JSON.stringify(out)).length > MAX_SAVED_CHECK_BYTES) out.flagged = [];
+  return out;
+}
 
 function newConversationId(): string {
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -121,7 +141,7 @@ function toStored(turns: readonly Turn[]): StoredChatMessage[] {
     if (x.tokens?.output != null) m.output_tokens = x.tokens.output;
     if (x.citations?.length) m.citations = x.citations;
     if (x.generalAnswer) m.general_answer = true;
-    if (x.check) m.check = x.check;
+    if (x.check) m.check = storedCheck(x.check, text);
     return m;
   });
 }
@@ -308,7 +328,13 @@ export function ChatPage() {
         }
         const citations = x.citations ?? [];
         const cited = citedNumbers(x.text, new Set(citations.map((c) => c.n)));
-        announce(t("announce.answerReady", { count: groupSources(citations, cited).cited.length }));
+        const sources = groupSources(citations, cited).cited.length;
+        const flagged = x.check?.flagged.length ?? 0;
+        announce(
+          flagged > 0
+            ? t("announce.answerFlagged", { sources, flagged })
+            : t("announce.answerReady", { count: sources }),
+        );
       }
     }
   }, [turns, announce, t]);
@@ -794,10 +820,14 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
             <ul className="chat-check-list small" id={flaggedId}>
               {flagged.map((f, i) => (
                 <li key={i} className="chat-check-claim">
-                  <span className="chat-check-reason muted">
-                    {t(f.reason === "uncited" ? "chat.check.uncited" : "chat.check.unsupported")}
-                  </span>{" "}
-                  <span dir="auto">{f.text}</span>
+                  <Trans
+                    k={f.reason === "uncited" ? "chat.check.uncited" : "chat.check.unsupported"}
+                    args={{ text: f.text }}
+                    tags={{
+                      reason: (c) => <span className="chat-check-reason muted">{c}</span>,
+                      claim: (c) => <span dir="auto">{c}</span>,
+                    }}
+                  />
                 </li>
               ))}
             </ul>

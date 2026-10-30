@@ -332,6 +332,7 @@
     "agent.verification.failed",
     "agent.verification.passed",
     "agent.verification.unverifiable",
+    "announce.answerFlagged",
     "announce.answerReady",
     "announce.answering",
     "announce.indexFailed",

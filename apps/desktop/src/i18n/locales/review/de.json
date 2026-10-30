@@ -11,6 +11,7 @@
     "addSource.gdrive.sharedWithMeHint",
     "addSource.gdrive.step2Extra",
     "addSource.imap.defaultName",
+    "announce.answerFlagged",
     "announce.answerReady",
     "announce.answering",
     "announce.indexFailed",

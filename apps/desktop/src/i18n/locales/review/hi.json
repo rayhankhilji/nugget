@@ -12,6 +12,7 @@
     "addSource.gdrive.step2Extra",
     "addSource.microsoft.clientId",
     "addSource.saas.clientId",
+    "announce.answerFlagged",
     "announce.answerReady",
     "announce.answering",
     "announce.indexFailed",

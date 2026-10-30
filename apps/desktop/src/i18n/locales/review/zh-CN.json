@@ -10,6 +10,7 @@
     "addSource.gdrive.sharedWithMe",
     "addSource.gdrive.sharedWithMeHint",
     "addSource.gdrive.step2Extra",
+    "announce.answerFlagged",
     "announce.answerReady",
     "announce.answering",
     "announce.indexFailed",
