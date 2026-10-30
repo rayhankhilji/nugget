@@ -1,0 +1,19 @@
+
+## day 6 2026-10-31 America/New_York  refresh={'created': 0, 'open': 7, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.98 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.89 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  renewal            r=0.80 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Paula Grant, RN: Your results - please call
+  TRANS +new                 follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: brunch?
+  TRANS +new                 renewal            Pixelboard renews 2026-11-03 — $144.00
+  TRANS +new                 unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  TRANS +new                 unanswered_thread  Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS +new                 unanswered_thread  Reply to Ngozi Okafor: Thanksgiving
+  TRANS +new                 unanswered_thread  Reply to Paula Grant, RN: Your results - please call
+  HITS: [('S2', 'budget'), ('S5', 'pixelboard'), ('S6', 'results'), ('S7', 'thanksgiving'), ('S12', 'agenda')]
+  MISSES: [('S3', 'brochure', True), ('S11', 'radiator', False)]
+  LEAKS: [('unanswered_thread', 'Reply to Paula Grant, RN: Your results - please call', 'results', False)]

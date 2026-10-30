@@ -1,0 +1,304 @@
+{
+ "date": "2026-10-27",
+ "tz": "America/New_York",
+ "cards": [
+  {
+   "id": "b4f9008fd90ea2a0",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: brunch?",
+   "detail": "You asked 9 days ago and haven't heard back.",
+   "rank": 0.8160974786519023,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+     "Brunch next weekend?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-10-27T16:00:15.083222555Z"
+   ]
+  },
+  {
+   "id": "ebfbad40112e264d",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Dana Whitfield: Revised checkout mockups",
+   "detail": "Dana Whitfield wrote 1 day ago and hasn't heard back.",
+   "rank": 0.8075298156460897,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "dana@northwind-outfitters.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261026-0914-s1-dana-ask.eml",
+     "Could you send the revised checkout mockups by Thursday (Oct 29)?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to dana@northwind-outfitters.example",
+    "Archive \"Revised checkout mockups\""
+   ]
+  },
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.8010674719474599,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00-04:00",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-02T09:00:00-04:00"
+   ]
+  }
+ ],
+ "cards_all": [
+  {
+   "id": "b4f9008fd90ea2a0",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: brunch?",
+   "detail": "You asked 9 days ago and haven't heard back.",
+   "rank": 0.8160974786519023,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+     "Brunch next weekend?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-10-27T16:00:15.083222555Z"
+   ]
+  },
+  {
+   "id": "ebfbad40112e264d",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Dana Whitfield: Revised checkout mockups",
+   "detail": "Dana Whitfield wrote 1 day ago and hasn't heard back.",
+   "rank": 0.8075298156460897,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "dana@northwind-outfitters.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261026-0914-s1-dana-ask.eml",
+     "Could you send the revised checkout mockups by Thursday (Oct 29)?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to dana@northwind-outfitters.example",
+    "Archive \"Revised checkout mockups\""
+   ]
+  },
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.8010674719474599,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00-04:00",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-02T09:00:00-04:00"
+   ]
+  }
+ ],
+ "brief_top": [
+  {
+   "actions": [
+    "draft_reply",
+    "reminder"
+   ],
+   "card_id": "b4f9008fd90ea2a0",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 1.0625187043930493,
+     "name": "urgency",
+     "value": 0.42500748175721975,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    },
+    {
+     "contribution": 0.5,
+     "name": "question",
+     "value": 1.0,
+     "weight": 0.5
+    }
+   ],
+   "kind": "follow_up",
+   "rank": 0.8160974786519023,
+   "summary": "You asked 9 days ago and haven't heard back.",
+   "title": "No answer from Sofia Alvarez: brunch?"
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "archive_thread"
+   ],
+   "card_id": "ebfbad40112e264d",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 1.0331270206503895,
+     "name": "importance",
+     "value": 0.6887513471002596,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6903275213234782,
+     "name": "freshness",
+     "value": 0.8629094016543477,
+     "weight": 0.8
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "unanswered_thread",
+   "rank": 0.8075298156460897,
+   "summary": "Dana Whitfield wrote 1 day ago and hasn't heard back.",
+   "title": "Reply to Dana Whitfield: Revised checkout mockups"
+  },
+  {
+   "actions": [
+    "reminder"
+   ],
+   "card_id": "1767d32fce21dbb4",
+   "due": "2026-11-03T09:00:00-04:00",
+   "factors": [
+    {
+     "contribution": 1.2000000000000002,
+     "name": "importance",
+     "value": 0.8,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.778836449232966,
+     "name": "freshness",
+     "value": 0.9735455615412074,
+     "weight": 0.8
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "renewal",
+   "rank": 0.8010674719474599,
+   "summary": "Keep it, or cancel before the charge.",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+  }
+ ],
+ "brief_ready_top": [
+  [
+   "No answer from Sofia Alvarez: brunch?",
+   "You asked 9 days ago and haven't heard back."
+  ],
+  [
+   "Reply to Dana Whitfield: Revised checkout mockups",
+   "Dana Whitfield wrote 1 day ago and hasn't heard back."
+  ],
+  [
+   "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "Keep it, or cancel before the charge."
+  ]
+ ],
+ "check": {
+  "hits": [
+   {
+    "scenario": "S1",
+    "expect": {
+     "kind": "unanswered_thread",
+     "match": "checkout mockups",
+     "first": "2026-10-27",
+     "last": "2026-10-27"
+    },
+    "cards": [
+     "ebfbad40112e264d"
+    ]
+   }
+  ],
+  "misses": [
+   {
+    "scenario": "S4",
+    "expect": {
+     "kind": "meeting_prep",
+     "match": "northwind checkout review",
+     "first": "2026-10-27",
+     "last": "2026-10-28"
+    },
+    "cards": []
+   }
+  ],
+  "forbidden": [],
+  "out_of_window": [
+   {
+    "scenario": "S5",
+    "expect": {
+     "kind": "renewal",
+     "match": "pixelboard",
+     "first": "2026-10-28",
+     "last": "2026-11-03"
+    },
+    "cards": [
+     [
+      "1767d32fce21dbb4",
+      "renewal",
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ]
+    ]
+   }
+  ],
+  "duplicates": [],
+  "brief_checks": []
+ }
+}

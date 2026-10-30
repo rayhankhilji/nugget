@@ -1,0 +1,726 @@
+{
+ "date": "2026-11-04",
+ "tz": "Europe/London",
+ "cards": [
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.97227794336843,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00Z",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-04T09:00:00.001087868Z"
+   ]
+  },
+  {
+   "id": "1ecee7d6844a481a",
+   "kind": "commitment",
+   "state": "new",
+   "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+   "detail": "From your note \"todo\".",
+   "rank": 0.906844381171076,
+   "sensitive": false,
+   "due": "2026-11-04T17:00:00Z",
+   "people": [],
+   "evidence": [
+    [
+     "0:Documents/todo.md",
+     "Send Jonah the final brochure files by Nov 4"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-04T10:00:00.001087868Z",
+    "Create calendar event \"Focus: Send Jonah the final brochure files by Nov 4\""
+   ]
+  },
+  {
+   "id": "ce342e3370f55c11",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: Re: drinks friday?",
+   "detail": "You asked 5 days ago and haven't heard back.",
+   "rank": 0.8098250383464889,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261029-1240-s7-sofia-r.eml",
+     "Yes!"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-11-04T10:00:00.001087868Z"
+   ]
+  },
+  {
+   "id": "a5e07a71cb0d04b3",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Kelsey Vance: Senior designer role at a fintech?",
+   "detail": "Kelsey Vance wrote 7 days ago and hasn't heard back.",
+   "rank": 0.8062212680884875,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "kelsey@talentbridge.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+     "Would you be open to a quick chat?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to kelsey@talentbridge.example",
+    "Archive \"Senior designer role at a fintech?\""
+   ]
+  },
+  {
+   "id": "6259962415126191",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Ngozi Okafor: Thanksgiving",
+   "detail": "Ngozi Okafor wrote 6 days ago and hasn't heard back.",
+   "rank": 0.7562864149507886,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "ngozi.okafor@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261028-1930-s7-mom.eml",
+     "Let me know by next week so I can tell your aunt."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to ngozi.okafor@gmail.com",
+    "Archive \"Thanksgiving\""
+   ]
+  },
+  {
+   "id": "50f5c5ab860ee558",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+   "detail": "Larkspur People Team wrote 4 days ago and hasn't heard back.",
+   "rank": 0.7372351889634744,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "hr@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261030-1600-s6-hr.eml",
+     "Maya, your salary for 2027 will be $118,500 (+6%)."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to hr@larkspur.example",
+    "Archive \"Confidential: your 2027 compensation\""
+   ]
+  },
+  {
+   "id": "fe849b0d156bed9f",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Rebecca Moss: Thursday session",
+   "detail": "Rebecca Moss wrote 1 day ago and hasn't heard back.",
+   "rank": 0.7190842319729764,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "rebecca@mossplace-therapy.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261102-0820-s6-therapy.eml",
+     "Let me know."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to rebecca@mossplace-therapy.example",
+    "Archive \"Thursday session\""
+   ]
+  }
+ ],
+ "cards_all": [
+  {
+   "id": "1767d32fce21dbb4",
+   "kind": "renewal",
+   "state": "new",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "detail": "Keep it, or cancel before the charge.",
+   "rank": 0.97227794336843,
+   "sensitive": false,
+   "due": "2026-11-03T09:00:00Z",
+   "people": [
+    "billing@pixelboard.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+     "Your Pixelboard Pro plan renews soon"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-04T09:00:00.001087868Z"
+   ]
+  },
+  {
+   "id": "1ecee7d6844a481a",
+   "kind": "commitment",
+   "state": "new",
+   "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+   "detail": "From your note \"todo\".",
+   "rank": 0.906844381171076,
+   "sensitive": false,
+   "due": "2026-11-04T17:00:00Z",
+   "people": [],
+   "evidence": [
+    [
+     "0:Documents/todo.md",
+     "Send Jonah the final brochure files by Nov 4"
+    ]
+   ],
+   "actions": [
+    "Remind me 2026-11-04T10:00:00.001087868Z",
+    "Create calendar event \"Focus: Send Jonah the final brochure files by Nov 4\""
+   ]
+  },
+  {
+   "id": "ce342e3370f55c11",
+   "kind": "follow_up",
+   "state": "new",
+   "title": "No answer from Sofia Alvarez: Re: drinks friday?",
+   "detail": "You asked 5 days ago and haven't heard back.",
+   "rank": 0.8098250383464889,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261029-1240-s7-sofia-r.eml",
+     "Yes!"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-11-04T10:00:00.001087868Z"
+   ]
+  },
+  {
+   "id": "a5e07a71cb0d04b3",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Kelsey Vance: Senior designer role at a fintech?",
+   "detail": "Kelsey Vance wrote 7 days ago and hasn't heard back.",
+   "rank": 0.8062212680884875,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "kelsey@talentbridge.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+     "Would you be open to a quick chat?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to kelsey@talentbridge.example",
+    "Archive \"Senior designer role at a fintech?\""
+   ]
+  },
+  {
+   "id": "6259962415126191",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Ngozi Okafor: Thanksgiving",
+   "detail": "Ngozi Okafor wrote 6 days ago and hasn't heard back.",
+   "rank": 0.7562864149507886,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "ngozi.okafor@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261028-1930-s7-mom.eml",
+     "Let me know by next week so I can tell your aunt."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to ngozi.okafor@gmail.com",
+    "Archive \"Thanksgiving\""
+   ]
+  },
+  {
+   "id": "50f5c5ab860ee558",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+   "detail": "Larkspur People Team wrote 4 days ago and hasn't heard back.",
+   "rank": 0.7372351889634744,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "hr@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261030-1600-s6-hr.eml",
+     "Maya, your salary for 2027 will be $118,500 (+6%)."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to hr@larkspur.example",
+    "Archive \"Confidential: your 2027 compensation\""
+   ]
+  },
+  {
+   "id": "fe849b0d156bed9f",
+   "kind": "unanswered_thread",
+   "state": "new",
+   "title": "Reply to Rebecca Moss: Thursday session",
+   "detail": "Rebecca Moss wrote 1 day ago and hasn't heard back.",
+   "rank": 0.7190842319729764,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "rebecca@mossplace-therapy.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261102-0820-s6-therapy.eml",
+     "Let me know."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to rebecca@mossplace-therapy.example",
+    "Archive \"Thursday session\""
+   ]
+  },
+  {
+   "id": "575195e380522dc9",
+   "kind": "unanswered_thread",
+   "state": "expired",
+   "title": "Reply to Harriet Cole: Workshop agenda",
+   "detail": "Harriet Cole wrote 4 days ago and hasn't heard back.",
+   "rank": 0.7900721548042321,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "harriet@foundry-ldn.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261029-0915-s12-harriet-ask.eml",
+     "Could you send me your agenda for the 5 November workshop by Monday 2 November?"
+    ],
+    [
+     "0:Mail/Sent/20261021-1300-h-harriet-0r.eml",
+     "Thanks Harriet, looking forward to it!"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to harriet@foundry-ldn.example",
+    "Archive \"Workshop agenda\""
+   ]
+  },
+  {
+   "id": "b7fb6a531ef6b4fc",
+   "kind": "follow_up",
+   "state": "expired",
+   "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+   "detail": "In \"Re: Q4 design budget\" on 2026-10-27.",
+   "rank": 0.977347391339053,
+   "sensitive": false,
+   "due": "2026-10-30T17:00:00-05:00",
+   "people": [
+    "theo@larkspur.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1105-s2-maya-promise.eml",
+     "Sure, I'll send the budget estimate by Friday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to theo@larkspur.example",
+    "Remind me 2026-11-02T15:00:00.001709928Z"
+   ]
+  },
+  {
+   "id": "f2b1f6677a6e7eab",
+   "kind": "unanswered_thread",
+   "state": "expired",
+   "title": "Reply to Gus Moreno: Radiator repair",
+   "detail": "Gus Moreno wrote 2 days ago and hasn't heard back.",
+   "rank": 0.7004855534425972,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "gus.moreno@outlook.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Inbox/20261030-1830-s11-gus.eml",
+     "Please confirm so I can book the plumber."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to gus.moreno@outlook.com",
+    "Archive \"Radiator repair\""
+   ]
+  },
+  {
+   "id": "b4f9008fd90ea2a0",
+   "kind": "follow_up",
+   "state": "expired",
+   "title": "No answer from Sofia Alvarez: brunch?",
+   "detail": "You asked 13 days ago and haven't heard back.",
+   "rank": 0.8889692246826009,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "sofia.alvarez@gmail.com"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+     "Brunch next weekend?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to sofia.alvarez@gmail.com",
+    "Remind me 2026-10-31T14:00:00.001976567Z"
+   ]
+  },
+  {
+   "id": "9c484a96e7e20a20",
+   "kind": "follow_up",
+   "state": "expired",
+   "title": "No answer from Jonah Pike: Quote for 500 brochures",
+   "detail": "You asked 3 days ago and haven't heard back.",
+   "rank": 0.768471706393363,
+   "sensitive": false,
+   "due": null,
+   "people": [
+    "jonah@pikeprint.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261026-1330-s3-maya-ask.eml",
+     "Could you quote 500 A5 brochures, 4 pages, matte?"
+    ]
+   ],
+   "actions": [
+    "Draft a reply to jonah@pikeprint.example",
+    "Remind me 2026-10-30T14:00:00.001477278Z"
+   ]
+  },
+  {
+   "id": "723944fb25c601b6",
+   "kind": "follow_up",
+   "state": "expired",
+   "title": "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+   "detail": "In \"Re: Revised checkout mockups\" on 2026-10-27.",
+   "rank": 0.9463251492847682,
+   "sensitive": false,
+   "due": "2026-10-29T17:00:00-04:00",
+   "people": [
+    "dana@northwind-outfitters.example"
+   ],
+   "evidence": [
+    [
+     "0:Mail/Sent/20261027-1602-s1-maya-promise.eml",
+     "Yes, I'll send the revised mockups by Thursday."
+    ]
+   ],
+   "actions": [
+    "Draft a reply to dana@northwind-outfitters.example",
+    "Remind me 2026-10-29T17:00:00-04:00"
+   ]
+  }
+ ],
+ "brief_top": [
+  {
+   "actions": [
+    "reminder"
+   ],
+   "card_id": "1767d32fce21dbb4",
+   "due": "2026-11-03T09:00:00Z",
+   "factors": [
+    {
+     "contribution": 3.0,
+     "name": "urgency",
+     "value": 1.2,
+     "weight": 2.5
+    },
+    {
+     "contribution": 1.2000000000000002,
+     "name": "importance",
+     "value": 0.8,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "renewal",
+   "rank": 0.97227794336843,
+   "summary": "Keep it, or cancel before the charge.",
+   "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+  },
+  {
+   "actions": [
+    "reminder",
+    "create_event"
+   ],
+   "card_id": "1ecee7d6844a481a",
+   "due": "2026-11-04T17:00:00Z",
+   "factors": [
+    {
+     "contribution": 1.8181818348311605,
+     "name": "urgency",
+     "value": 0.7272727339324642,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.75,
+     "name": "importance",
+     "value": 0.5,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "commitment",
+   "rank": 0.906844381171076,
+   "summary": "From your note \"todo\".",
+   "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "reminder"
+   ],
+   "card_id": "ce342e3370f55c11",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 0.6872353649869893,
+     "name": "importance",
+     "value": 0.45815690999132624,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6041666680157093,
+     "name": "urgency",
+     "value": 0.24166666720628371,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "follow_up",
+   "rank": 0.8098250383464889,
+   "summary": "You asked 5 days ago and haven't heard back.",
+   "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "archive_thread"
+   ],
+   "card_id": "a5e07a71cb0d04b3",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 0.8125000013490425,
+     "name": "urgency",
+     "value": 0.32500000053961703,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.742368939072335,
+     "name": "importance",
+     "value": 0.49491262604822334,
+     "weight": 1.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    }
+   ],
+   "kind": "unanswered_thread",
+   "rank": 0.8062212680884875,
+   "summary": "Kelsey Vance wrote 7 days ago and hasn't heard back.",
+   "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+  },
+  {
+   "actions": [
+    "draft_reply",
+    "archive_thread"
+   ],
+   "card_id": "6259962415126191",
+   "due": null,
+   "factors": [
+    {
+     "contribution": 0.680803572777614,
+     "name": "urgency",
+     "value": 0.2723214291110456,
+     "weight": 2.5
+    },
+    {
+     "contribution": 0.6,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.6
+    },
+    {
+     "contribution": 0.5288743031666463,
+     "name": "importance",
+     "value": 0.3525828687777642,
+     "weight": 1.5
+    }
+   ],
+   "kind": "unanswered_thread",
+   "rank": 0.7562864149507886,
+   "summary": "Ngozi Okafor wrote 6 days ago and hasn't heard back.",
+   "title": "Reply to Ngozi Okafor: Thanksgiving"
+  }
+ ],
+ "brief_ready_top": [
+  [
+   "Pixelboard renews 2026-11-03 \u2014 $144.00",
+   "Keep it, or cancel before the charge."
+  ],
+  [
+   "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+   "From your note \"todo\"."
+  ],
+  [
+   "No answer from Sofia Alvarez: Re: drinks friday?",
+   "You asked 5 days ago and haven't heard back."
+  ],
+  [
+   "Reply to Kelsey Vance: Senior designer role at a fintech?",
+   "Kelsey Vance wrote 7 days ago and hasn't heard back."
+  ],
+  [
+   "Reply to Ngozi Okafor: Thanksgiving",
+   "Ngozi Okafor wrote 6 days ago and hasn't heard back."
+  ]
+ ],
+ "check": {
+  "hits": [
+   {
+    "scenario": "S7",
+    "expect": {
+     "kind": "unanswered_thread",
+     "match": "thanksgiving",
+     "first": "2026-10-30",
+     "last": "2026-11-05"
+    },
+    "cards": [
+     "6259962415126191"
+    ]
+   },
+   {
+    "scenario": "S10",
+    "expect": {
+     "kind": "any",
+     "match": "brochure files",
+     "first": "2026-11-02",
+     "last": "2026-11-04",
+     "optional": true
+    },
+    "cards": [
+     "1ecee7d6844a481a"
+    ]
+   }
+  ],
+  "misses": [
+   {
+    "scenario": "S4",
+    "expect": {
+     "kind": "meeting_prep",
+     "match": "foundry",
+     "first": "2026-11-04",
+     "last": "2026-11-05"
+    },
+    "cards": []
+   }
+  ],
+  "forbidden": [
+   {
+    "scenario": "S6",
+    "why": "HR letter, no action asked",
+    "card": "50f5c5ab860ee558",
+    "kind": "unanswered_thread",
+    "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+   },
+   {
+    "scenario": "S7",
+    "why": "answered in 30 minutes",
+    "card": "ce342e3370f55c11",
+    "kind": "follow_up",
+    "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+   }
+  ],
+  "out_of_window": [
+   {
+    "scenario": "S5",
+    "expect": {
+     "kind": "renewal",
+     "match": "pixelboard",
+     "first": "2026-10-28",
+     "last": "2026-11-03"
+    },
+    "cards": [
+     [
+      "1767d32fce21dbb4",
+      "renewal",
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ]
+    ]
+   }
+  ],
+  "duplicates": [],
+  "brief_checks": []
+ }
+}

@@ -112,6 +112,8 @@ def main():
                 dst = root / it["path"]
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(WORLD / "files" / it["path"], dst)
+                ts = datetime.fromisoformat(it["at"]).timestamp()
+                os.utime(dst, (ts, ts))  # the file's time is its arrival, not today
                 copied.add(it["id"])
         with Daemon(home, sim=start, tz=tz, log_name="nuggetd") as d:
             if a.runtime:

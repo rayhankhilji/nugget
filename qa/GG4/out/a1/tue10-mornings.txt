@@ -1,0 +1,11 @@
+
+## day 2 2026-10-27 America/New_York  refresh={'created': 0, 'open': 3, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.82 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  unanswered_thread  r=0.81 sens=False Reply to Dana Whitfield: Revised checkout mockups
+  OPEN  renewal            r=0.80 sens=False Pixelboard renews 2026-11-03 — $144.00
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: brunch?
+  TRANS +new                 unanswered_thread  Reply to Dana Whitfield: Revised checkout mockups
+  TRANS +new                 renewal            Pixelboard renews 2026-11-03 — $144.00
+  HITS: [('S1', 'checkout mockups')]
+  MISSES: [('S4', 'northwind checkout review', False)]
+  OUT_OF_WINDOW: [('S5', 'pixelboard', [['1767d32fce21dbb4', 'renewal', 'Pixelboard renews 2026-11-03 — $144.00']])]

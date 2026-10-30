@@ -1,0 +1,2208 @@
+[
+ {
+  "day": 1,
+  "date": "2026-10-26",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.8,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 1,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": []
+ },
+ {
+  "day": 2,
+  "date": "2026-10-27",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.82,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S1",
+    "checkout mockups",
+    false
+   ],
+   [
+    "S4",
+    "northwind checkout review",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 1,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": []
+ },
+ {
+  "day": 3,
+  "date": "2026-10-28",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+    0.9,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.87,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.83,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.79,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "+new",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "+new",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S5",
+    "pixelboard"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "northwind checkout review",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [
+   [
+    "S2",
+    "budget",
+    [
+     [
+      "b7fb6a531ef6b4fc",
+      "follow_up",
+      "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+     ]
+    ]
+   ]
+  ],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 4,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6832587494739513,
+      "name": "freshness",
+      "value": 0.854073436842439,
+      "weight": 0.8
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.7922083179957382,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 4,
+  "date": "2026-10-29",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+    0.95,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.89,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.84,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Onboarding copy",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.76,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Priya Raman: Onboarding copy"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    false
+   ],
+   [
+    "S4",
+    "northwind design qa",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 6,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Onboarding copy"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     },
+     {
+      "contribution": 0.5923019097031619,
+      "name": "freshness",
+      "value": 0.7403773871289523,
+      "weight": 0.8
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.7868589768034375,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 5,
+  "date": "2026-10-30",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\"",
+    0.95,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.94,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.88,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures",
+    0.77,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.76,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.72,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.72,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "+new",
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "new->expired",
+    "unanswered_thread",
+    "Reply to Priya Raman: Onboarding copy"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S3",
+    "brochure"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S12",
+    "agenda"
+   ],
+   [
+    "X1",
+    "icon audit"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "northwind design qa",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "X6",
+    "onboarding copy",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 9,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     },
+     {
+      "contribution": 0.5134534348849088,
+      "name": "freshness",
+      "value": 0.641816793606136,
+      "weight": 0.8
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.787399546867295,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 6,
+  "date": "2026-10-31",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.89,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.77,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.72,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.72,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S12",
+    "agenda"
+   ],
+   [
+    "X1",
+    "icon audit"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "S11",
+    "radiator",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 9,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6185567036656501,
+      "name": "urgency",
+      "value": 0.24742268146626,
+      "weight": 2.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.796353597976217,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b2b78bfd4dbf390c",
+    "due": "2026-10-30T17:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.1233098517874502,
+      "name": "importance",
+      "value": 0.7488732345249669,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6521317720278479,
+      "name": "freshness",
+      "value": 0.8151647150348098,
+      "weight": 0.8
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9832989503540654,
+    "summary": "In \"Re: Icon audit\" on 2026-10-29.",
+    "title": "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   },
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.120832604463821,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9797863249172252,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 7,
+  "date": "2026-11-01",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.83,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.73,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.73,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.72,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair",
+    0.7,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S11",
+    "radiator"
+   ],
+   [
+    "S12",
+    "agenda"
+   ],
+   [
+    "X1",
+    "icon audit"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S4",
+    "northwind sprint planning",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ],
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 2,
+   "open": 10,
+   "reason": "refresh",
+   "resolved": 1
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.8219178125229687,
+      "name": "urgency",
+      "value": 0.3287671250091875,
+      "weight": 2.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.8183898587282241,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b2b78bfd4dbf390c",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.1233098517874502,
+      "name": "importance",
+      "value": 0.7488732345249669,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9817518249759468,
+    "summary": "In \"Re: Icon audit\" on 2026-10-29.",
+    "title": "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   },
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.120832604463821,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.97848705547217,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 8,
+  "date": "2026-11-02",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.83,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.74,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.74,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.72,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair",
+    0.7,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "+new",
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ],
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S11",
+    "radiator"
+   ],
+   [
+    "S12",
+    "agenda"
+   ],
+   [
+    "S10",
+    "brochure files"
+   ],
+   [
+    "X1",
+    "icon audit"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S4",
+    "northwind sprint planning",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ],
+   [
+    "S7",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    "answered in 30 minutes"
+   ],
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 12,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 1.2244898085385605,
+      "name": "urgency",
+      "value": 0.4897959234154242,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.8649455317368973,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b2b78bfd4dbf390c",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.1233098517874502,
+      "name": "importance",
+      "value": 0.7488732345249669,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9803621592407168,
+    "summary": "In \"Re: Icon audit\" on 2026-10-29.",
+    "title": "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   },
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.120832604463821,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9773473913376922,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 9,
+  "date": "2026-11-03",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\"",
+    0.96,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.95,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.85,
+    false,
+    "new"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    0.83,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.8,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.77,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.75,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.73,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\""
+   ],
+   [
+    "new->expired",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "You told Priya Raman: \"Sure, I'll send the icon audit by Friday.\""
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "new->expired",
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S5",
+    "pixelboard"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S10",
+    "brochure files"
+   ],
+   [
+    "X2",
+    "sprint notes"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S6",
+    "results",
+    true
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ],
+   [
+    "S7",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    "answered in 30 minutes"
+   ],
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 9,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\""
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 2.4000000421200274,
+      "name": "urgency",
+      "value": 0.960000016848011,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9520398162854932,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 10,
+  "date": "2026-11-04",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\"",
+    0.99,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.97,
+    false,
+    "new"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    0.91,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    0.81,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.81,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.78,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.76,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.74,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.72,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S10",
+    "brochure files"
+   ],
+   [
+    "X2",
+    "sprint notes"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "foundry",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ],
+   [
+    "S7",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    "answered in 30 minutes"
+   ],
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [
+   [
+    "S5",
+    "pixelboard",
+    [
+     [
+      "1767d32fce21dbb4",
+      "renewal",
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ]
+    ]
+   ]
+  ],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 10,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9722779433666904,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "c8be5fd77a8b0ed7",
+    "due": "2026-11-03T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.3007917184304951,
+      "name": "importance",
+      "value": 0.8671944789536634,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6671828235082518,
+      "name": "freshness",
+      "value": 0.8339785293853147,
+      "weight": 0.8
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.986183440446297,
+    "summary": "In \"Sprint notes\" on 2026-11-02.",
+    "title": "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\""
+   }
+  ]
+ },
+ {
+  "day": 11,
+  "date": "2026-11-05",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\"",
+    0.98,
+    false,
+    "new"
+   ],
+   [
+    "commitment",
+    "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    0.97,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice",
+    0.79,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.77,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.75,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.72,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "new->expired",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "X2",
+    "sprint notes"
+   ],
+   [
+    "X6",
+    "onboarding copy"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "foundry",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ],
+   [
+    "S7",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    "answered in 30 minutes"
+   ],
+   [
+    "X4",
+    "Reply to Priya Raman: Illustration invoice",
+    "asked of Theo, Maya is Cc"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 9,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Re: Onboarding copy"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Priya Raman: Illustration invoice"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "c8be5fd77a8b0ed7",
+    "due": "2026-11-03T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 1.3007917184304951,
+      "name": "importance",
+      "value": 0.8671944789536634,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9849195054884554,
+    "summary": "In \"Sprint notes\" on 2026-11-02.",
+    "title": "You told Dana Whitfield: \"I'll send the sprint notes tomorrow.\""
+   },
+   {
+    "actions": [
+     "reminder",
+     "create_event"
+    ],
+    "card_id": "1ecee7d6844a481a",
+    "due": "2026-11-04T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5
+     },
+     {
+      "contribution": 0.75,
+      "name": "importance",
+      "value": 0.5,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "commitment",
+    "rank": 0.9681206916222715,
+    "summary": "From your note \"todo\".",
+    "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   }
+  ]
+ }
+]

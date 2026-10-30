@@ -38,10 +38,10 @@ REPORT: dict = {}
 ARGS = None
 
 
-def check(name, ok, **evidence):
-    REPORT[name] = {"ok": bool(ok), "evidence": evidence}
-    print(f"  [{'PASS' if ok else 'FAIL'}] {name}", flush=True)
-    return ok
+def check(_name, _ok, **evidence):
+    REPORT[_name] = {"ok": bool(_ok), "evidence": evidence}
+    print(f"  [{'PASS' if _ok else 'FAIL'}] {_name}", flush=True)
+    return _ok
 
 
 def ts(s):
@@ -232,8 +232,11 @@ def all_summaries(cal_dir: Path):
 
 
 def compare_meetings(brief, cal_dir: Path, day: date, tz: str):
-    """Brief meetings vs the independent truth for `day` in `tz`."""
+    """Brief meetings vs the independent truth for `day` in `tz`. A timed event already over when
+    the brief was generated counts as optional (listing it is not wrong, leaving it out neither)."""
     exp = expected_meetings(cal_dir, day, tz) if cal_dir.exists() else []
+    gen = ts(brief["generated_at"]) if brief and brief.get("generated_at") else None
+    exp = [(t, w, e, c or bool(gen and e and datetime.fromisoformat(e) <= gen)) for t, w, e, c in exp]
     known = all_summaries(cal_dir) if cal_dir.exists() else set()
     got = []
     for m in (brief or {}).get("meetings", []):
@@ -265,7 +268,7 @@ def compare_meetings(brief, cal_dir: Path, day: date, tz: str):
     titles = [g["title"] for g in got]
     dups = sorted({t for t in titles if titles.count(t) > 1})
     order_ok = [g["start"] for g in got] == sorted([g["start"] for g in got], key=lambda s: ts(s))
-    return {"expected": [(t, w) for t, w, _, _ in exp], "got": [(g["title"], g["when"]) for g in got],
+    return {"expected": [(t, w) for t, w, _, c in exp if not c], "optional": [(t, w) for t, w, _, c in exp if c], "got": [(g["title"], g["when"]) for g in got],
             "missing": missing, "wrong_time": wrong_time, "extra": extra, "invented": invented,
             "duplicates": dups, "sorted": order_ok,
             "ok": not (missing or wrong_time or extra or invented or dups)}
@@ -360,6 +363,15 @@ def part_accuracy(out: Path, mode="os", days=None):
     'explicit' = OS on New York but [proactive] utc_offset set for the trip."""
     print(f"== accuracy ({mode})", flush=True)
     w = out / f"accuracy-{mode}"
+    if ARGS.reuse and (w / "days.json").exists():
+        recs = json.loads((w / "days.json").read_text())
+        for rec in recs:
+            b = rec["ready"] or rec["brief"]
+            d0 = date.fromisoformat(rec["date"])
+            rec["cmp_real"] = compare_meetings(b, w / "maya" / "Calendar", d0, rec["real_tz"])
+            if mode != "os":
+                rec["cmp_os"] = compare_meetings(b, w / "maya" / "Calendar", d0, rec["tz"])
+        return recs
     home = home_for(w / "home")
     root = w / "maya"
     root.mkdir(parents=True, exist_ok=True)
@@ -847,6 +859,7 @@ def main():
     ap.add_argument("--embed-model")
     ap.add_argument("--models-home")
     ap.add_argument("--judge", default="off")
+    ap.add_argument("--reuse", action="store_true", help="re-evaluate saved accuracy runs")
     ARGS = a = ap.parse_args()
     if a.runtime and a.judge == "off":
         a.judge = "local"

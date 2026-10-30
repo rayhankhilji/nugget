@@ -1,0 +1,135 @@
+[
+ {
+  "day": 2,
+  "date": "2026-10-27",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Dana Whitfield: Revised checkout mockups",
+    0.81,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.8,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Dana Whitfield: Revised checkout mockups"
+   ],
+   [
+    "+new",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S1",
+    "checkout mockups"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "northwind checkout review",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [
+   [
+    "S5",
+    "pixelboard",
+    [
+     [
+      "1767d32fce21dbb4",
+      "renewal",
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ]
+    ]
+   ]
+  ],
+  "dups": [],
+  "user": null,
+  "refresh": {
+   "created": 0,
+   "open": 3,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Dana Whitfield: Revised checkout mockups"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.778836449232966,
+      "name": "freshness",
+      "value": 0.9735455615412074,
+      "weight": 0.8
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.8010674719474599,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ }
+]

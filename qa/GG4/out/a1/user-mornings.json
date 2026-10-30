@@ -1,0 +1,1837 @@
+[
+ {
+  "day": 1,
+  "date": "2026-10-26",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.8,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 1,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": []
+ },
+ {
+  "day": 2,
+  "date": "2026-10-27",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.82,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S1",
+    "checkout mockups",
+    false
+   ],
+   [
+    "S4",
+    "northwind checkout review",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 1,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": []
+ },
+ {
+  "day": 3,
+  "date": "2026-10-28",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+    0.9,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.87,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.83,
+    false,
+    "new"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    0.79,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "+new",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "+new",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S5",
+    "pixelboard"
+   ]
+  ],
+  "misses": [
+   [
+    "S4",
+    "northwind checkout review",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [
+   [
+    "S2",
+    "budget",
+    [
+     [
+      "b7fb6a531ef6b4fc",
+      "follow_up",
+      "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+     ]
+    ]
+   ]
+  ],
+  "dups": [],
+  "user": [
+   {
+    "card": "1767d32fce21dbb4",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00",
+    "kind": "renewal",
+    "action": "accept",
+    "reason": null,
+    "because": "S5",
+    "error": null
+   }
+  ],
+  "refresh": {
+   "created": 0,
+   "open": 4,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.2000000000000002,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5
+     },
+     {
+      "contribution": 0.683258749063639,
+      "name": "freshness",
+      "value": 0.8540734363295487,
+      "weight": 0.8
+     },
+     {
+      "contribution": 0.6,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.7922083179630837,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 4,
+  "date": "2026-10-29",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\"",
+    0.96,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    0.91,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.79,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "new->accepted",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S2",
+    "budget"
+   ]
+  ],
+  "misses": [
+   [
+    "S3",
+    "brochure",
+    false
+   ],
+   [
+    "S4",
+    "northwind design qa",
+    false
+   ],
+   [
+    "S5",
+    "pixelboard",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [
+   {
+    "card": "b7fb6a531ef6b4fc",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+    "kind": "follow_up",
+    "action": "accept",
+    "reason": null,
+    "because": "S2",
+    "error": null
+   }
+  ],
+  "refresh": {
+   "created": 0,
+   "open": 4,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.239896002951088,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.54987000368886
+     },
+     {
+      "contribution": 0.6623375046110749,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6623375046110749
+     },
+     {
+      "contribution": 0.6317201988764486,
+      "name": "freshness",
+      "value": 0.7403773868526953,
+      "weight": 0.8532408067753898
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.8547118150896592,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 5,
+  "date": "2026-10-30",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.92,
+    false,
+    "new"
+   ],
+   [
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures",
+    0.84,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda",
+    0.82,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.81,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving",
+    0.77,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "You told Dana Whitfield: \"Yes, I'll send the revised mockups by Thursday.\""
+   ],
+   [
+    "new->accepted",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S3",
+    "brochure"
+   ],
+   [
+    "S7",
+    "thanksgiving"
+   ],
+   [
+    "S12",
+    "agenda"
+   ]
+  ],
+  "misses": [
+   [
+    "S2",
+    "budget",
+    false
+   ],
+   [
+    "S4",
+    "northwind design qa",
+    false
+   ],
+   [
+    "S5",
+    "pixelboard",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [
+   {
+    "card": "9c484a96e7e20a20",
+    "title": "No answer from Jonah Pike: Quote for 500 brochures",
+    "kind": "follow_up",
+    "action": "accept",
+    "reason": null,
+    "because": "S3",
+    "error": null
+   },
+   {
+    "card": "575195e380522dc9",
+    "title": "Reply to Harriet Cole: Workshop agenda",
+    "kind": "unanswered_thread",
+    "action": "accept",
+    "reason": null,
+    "because": "S12",
+    "error": null
+   },
+   {
+    "card": "6259962415126191",
+    "title": "Reply to Ngozi Okafor: Thanksgiving",
+    "kind": "unanswered_thread",
+    "action": "accept",
+    "reason": null,
+    "because": "S7",
+    "error": null
+   }
+  ],
+  "refresh": {
+   "created": 0,
+   "open": 5,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.256233933207424,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5702924165092798
+     },
+     {
+      "contribution": 0.6896818416710626,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6896818416710626
+     },
+     {
+      "contribution": 0.5610463885002397,
+      "name": "freshness",
+      "value": 0.6418167944221952,
+      "weight": 0.8741534864405188
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.8647397632034809,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 6,
+  "date": "2026-10-31",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?",
+    0.96,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.92,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "new->done",
+    "follow_up",
+    "No answer from Jonah Pike: Quote for 500 brochures"
+   ],
+   [
+    "new->accepted",
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ],
+   [
+    "new->accepted",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S2",
+    "budget",
+    false
+   ],
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S5",
+    "pixelboard",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ],
+   [
+    "S11",
+    "radiator",
+    false
+   ],
+   [
+    "S12",
+    "agenda",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 1.3054740729317424,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.631842591164678
+     },
+     {
+      "contribution": 0.8388579029841798,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.8388579029841798
+     },
+     {
+      "contribution": 0.6271090150508081,
+      "name": "urgency",
+      "value": 0.2474226818309796,
+      "weight": 2.5345655879649764
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9101440389036968,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-04:00",
+    "factors": [
+     {
+      "contribution": 3.0414787055579717,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5345655879649764
+     },
+     {
+      "contribution": 1.3179454520177634,
+      "name": "learned",
+      "value": 1.0,
+      "weight": 1.3179454520177634
+     },
+     {
+      "contribution": 1.2193482543533976,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.631842591164678
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.9975437118889529,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 7,
+  "date": "2026-11-01",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.92,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    0.9,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair",
+    0.89,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+   ],
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ],
+   [
+    "new->expired",
+    "follow_up",
+    "No answer from Sofia Alvarez: brunch?"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "compensation",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "compensation"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S11",
+    "radiator"
+   ]
+  ],
+  "misses": [
+   [
+    "S2",
+    "budget",
+    false
+   ],
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S4",
+    "northwind sprint planning",
+    false
+   ],
+   [
+    "S5",
+    "pixelboard",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ],
+   [
+    "S12",
+    "agenda",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "S6",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "HR letter, no action asked"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": [
+   {
+    "card": "50f5c5ab860ee558",
+    "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation",
+    "kind": "unanswered_thread",
+    "action": "dismiss",
+    "reason": "not_relevant",
+    "because": "S6",
+    "error": null
+   },
+   {
+    "card": "f2b1f6677a6e7eab",
+    "title": "Reply to Gus Moreno: Radiator repair",
+    "kind": "unanswered_thread",
+    "action": "accept",
+    "reason": null,
+    "because": "S11",
+    "error": null
+   }
+  ],
+  "refresh": {
+   "created": 2,
+   "open": 3,
+   "reason": "refresh",
+   "resolved": 1
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 1.3054740729317424,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.631842591164678
+     },
+     {
+      "contribution": 0.8388579029841798,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.8388579029841798
+     },
+     {
+      "contribution": 0.8332818438084818,
+      "name": "urgency",
+      "value": 0.32876712591901425,
+      "weight": 2.5345655879649764
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9201204055096496,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0414787055579717,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5345655879649764
+     },
+     {
+      "contribution": 1.3092767039128903,
+      "name": "learned",
+      "value": 1.0,
+      "weight": 1.3092767039128903
+     },
+     {
+      "contribution": 1.2193482543533976,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.631842591164678
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.997321222827254,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 8,
+  "date": "2026-11-02",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    0.88,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    0.83,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "+new",
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ],
+   [
+    "new->accepted",
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ],
+   [
+    "new->dismissed",
+    "unanswered_thread",
+    "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [
+   [
+    "S10",
+    "brochure files"
+   ]
+  ],
+  "misses": [
+   [
+    "S2",
+    "budget",
+    false
+   ],
+   [
+    "S3",
+    "brochure",
+    true
+   ],
+   [
+    "S4",
+    "northwind sprint planning",
+    false
+   ],
+   [
+    "S5",
+    "pixelboard",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ],
+   [
+    "S11",
+    "radiator",
+    false
+   ],
+   [
+    "S12",
+    "agenda",
+    false
+   ]
+  ],
+  "forbidden": [
+   [
+    "S7",
+    "No answer from Sofia Alvarez: Re: drinks friday?",
+    "answered in 30 minutes"
+   ]
+  ],
+  "out_of_window": [],
+  "dups": [],
+  "user": [
+   {
+    "card": "ce342e3370f55c11",
+    "title": "No answer from Sofia Alvarez: Re: drinks friday?",
+    "kind": "follow_up",
+    "action": "dismiss",
+    "reason": "already_handled",
+    "because": "S7",
+    "error": null
+   },
+   {
+    "card": "1ecee7d6844a481a",
+    "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4",
+    "kind": "commitment",
+    "action": "accept",
+    "reason": null,
+    "because": "S10",
+    "error": null
+   }
+  ],
+  "refresh": {
+   "created": 0,
+   "open": 3,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 1.2570705994218008,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.571338249277251
+     },
+     {
+      "contribution": 1.2358372283029104,
+      "name": "urgency",
+      "value": 0.4897959205039706,
+      "weight": 2.5231676634450286
+     },
+     {
+      "contribution": 0.6914470880309936,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.6914470880309936
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9161810728652956,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": [
+   {
+    "actions": [
+     "draft_reply",
+     "reminder"
+    ],
+    "card_id": "b7fb6a531ef6b4fc",
+    "due": "2026-10-30T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.027801196134034,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.5231676634450286
+     },
+     {
+      "contribution": 1.3009662756737228,
+      "name": "learned",
+      "value": 1.0,
+      "weight": 1.3009662756737228
+     },
+     {
+      "contribution": 1.174138094954028,
+      "name": "importance",
+      "value": 0.7472217363092141,
+      "weight": 1.571338249277251
+     }
+    ],
+    "kind": "follow_up",
+    "rank": 0.995695891913426,
+    "summary": "In \"Re: Q4 design budget\" on 2026-10-27.",
+    "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   }
+  ]
+ },
+ {
+  "day": 9,
+  "date": "2026-11-03",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.84,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "accepted->done",
+    "unanswered_thread",
+    "Reply to Harriet Cole: Workshop agenda"
+   ],
+   [
+    "accepted->done",
+    "follow_up",
+    "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\""
+   ],
+   [
+    "accepted->done",
+    "unanswered_thread",
+    "Reply to Gus Moreno: Radiator repair"
+   ],
+   [
+    "new->accepted",
+    "commitment",
+    "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   ],
+   [
+    "new->dismissed",
+    "follow_up",
+    "No answer from Sofia Alvarez: Re: drinks friday?"
+   ]
+  ],
+  "leaks": [],
+  "brief_leaks": [],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S5",
+    "pixelboard",
+    false
+   ],
+   [
+    "S6",
+    "results",
+    true
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ],
+   [
+    "S10",
+    "brochure files",
+    true
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 1,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 2.421060845840097,
+      "name": "urgency",
+      "value": 0.960000019888811,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 1.237070969443084,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9669221514091586,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 10,
+  "date": "2026-11-04",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.84,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.77,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "+new",
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "session"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S4",
+    "foundry",
+    false
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ],
+   [
+    "S10",
+    "brochure files",
+    true
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 1,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "brief_renewals": [
+   {
+    "actions": [
+     "reminder"
+    ],
+    "card_id": "1767d32fce21dbb4",
+    "due": "2026-11-03T09:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0263259946021774,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 1.237070969443084,
+      "name": "importance",
+      "value": 0.8,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "renewal",
+    "rank": 0.9810485499132208,
+    "summary": "Keep it, or cancel before the charge.",
+    "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   }
+  ],
+  "brief_overdue": []
+ },
+ {
+  "day": 11,
+  "date": "2026-11-05",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.85,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.77,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "accepted->expired",
+    "renewal",
+    "Pixelboard renews 2026-11-03 \u2014 $144.00"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "session"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [
+   [
+    "S4",
+    "foundry",
+    false
+   ],
+   [
+    "S7",
+    "thanksgiving",
+    false
+   ]
+  ],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": [
+   {
+    "actions": [
+     "reminder",
+     "create_event"
+    ],
+    "card_id": "1ecee7d6844a481a",
+    "due": "2026-11-04T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0263259946021774,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 0.7731693559019274,
+      "name": "importance",
+      "value": 0.5,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "commitment",
+    "rank": 0.9780430439611424,
+    "summary": "From your note \"todo\".",
+    "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   }
+  ]
+ },
+ {
+  "day": 12,
+  "date": "2026-11-06",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.86,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.78,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [
+   [
+    "accepted->done",
+    "unanswered_thread",
+    "Reply to Ngozi Okafor: Thanksgiving"
+   ]
+  ],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "session"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": [
+   {
+    "actions": [
+     "reminder",
+     "create_event"
+    ],
+    "card_id": "1ecee7d6844a481a",
+    "due": "2026-11-04T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0263259946021774,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 0.7731693559019274,
+      "name": "importance",
+      "value": 0.5,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "commitment",
+    "rank": 0.9769159697279785,
+    "summary": "From your note \"todo\".",
+    "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   }
+  ]
+ },
+ {
+  "day": 13,
+  "date": "2026-11-07",
+  "tz": "Europe/London",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.87,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.78,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "session"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": [
+   {
+    "actions": [
+     "reminder",
+     "create_event"
+    ],
+    "card_id": "1ecee7d6844a481a",
+    "due": "2026-11-04T17:00:00Z",
+    "factors": [
+     {
+      "contribution": 3.0263259946021774,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 0.7731693559019274,
+      "name": "importance",
+      "value": 0.5,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "commitment",
+    "rank": 0.975888019169786,
+    "summary": "From your note \"todo\".",
+    "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   }
+  ]
+ },
+ {
+  "day": 14,
+  "date": "2026-11-08",
+  "tz": "America/New_York",
+  "open": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?",
+    0.88,
+    false,
+    "new"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    0.79,
+    false,
+    "new"
+   ]
+  ],
+  "below_threshold_or_hidden": [],
+  "transitions": [],
+  "leaks": [
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session",
+    "session",
+    false
+   ]
+  ],
+  "brief_leaks": [
+   "session"
+  ],
+  "noise": [],
+  "evidence_dups": [],
+  "hits": [],
+  "misses": [],
+  "forbidden": [],
+  "out_of_window": [],
+  "dups": [],
+  "user": [],
+  "refresh": {
+   "created": 0,
+   "open": 2,
+   "reason": "refresh",
+   "resolved": 0
+  },
+  "brief_top": [
+   [
+    "unanswered_thread",
+    "Reply to Kelsey Vance: Senior designer role at a fintech?"
+   ],
+   [
+    "unanswered_thread",
+    "Reply to Rebecca Moss: Thursday session"
+   ]
+  ],
+  "brief_renewals": [],
+  "brief_overdue": [
+   {
+    "actions": [
+     "reminder",
+     "create_event"
+    ],
+    "card_id": "1ecee7d6844a481a",
+    "due": "2026-11-04T17:00:00-05:00",
+    "factors": [
+     {
+      "contribution": 3.0263259946021774,
+      "name": "urgency",
+      "value": 1.2,
+      "weight": 2.521938328835148
+     },
+     {
+      "contribution": 0.7731693559019274,
+      "name": "importance",
+      "value": 0.5,
+      "weight": 1.5463387118038547
+     },
+     {
+      "contribution": 0.631082631742622,
+      "name": "direct",
+      "value": 1.0,
+      "weight": 0.631082631742622
+     }
+    ],
+    "kind": "commitment",
+    "rank": 0.974772606602898,
+    "summary": "From your note \"todo\".",
+    "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+   }
+  ]
+ }
+]

@@ -15,6 +15,7 @@ cards seen, duplicates, sensitive flags, brief checks).
 """
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
@@ -151,6 +152,8 @@ def main():
                 dst = root / it["path"]
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(WORLD / "files" / it["path"], dst)
+                ts = datetime.fromisoformat(it["at"]).timestamp()
+                os.utime(dst, (ts, ts))  # the file's time is its arrival, not today
                 copied.add(it["id"])
         rec = {"day": day["day"], "date": day["date"], "tz": tz, "start": start.isoformat(),
                "files": len(copied)}
