@@ -1059,6 +1059,7 @@ async fn run_chat(
         error: None,
         input_tokens: None,
         output_tokens: None,
+        check: None,
     };
     match end {
         ChatEnd::Done {
