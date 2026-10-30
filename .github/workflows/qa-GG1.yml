@@ -1,0 +1,165 @@
+name: QA GG1 (Double Tap, real models)
+
+# GG1 QA package (docs/qa/GG1.md): every scenario in qa/GG1/scenarios/ through Double Tap's real
+# drafting engine with the signed manifest's models, served by nugget-runtime's llama-server as
+# the app does (qa/GG1/harness), with read-ahead off and on; then an 8B judge scores the drafts
+# against the GG1 rubric. Reports, prompts and drafts are uploaded as artifacts.
+
+on:
+  # TEMPORARY (removed before the final push): runs on pushes to qa/doubletap whose commit
+  # message carries [gg1-run], since workflow_dispatch only works once the file is on main.
+  push:
+    branches: [qa/doubletap]
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Scenario ids or area:<name>, comma separated (empty: all)"
+        default: ""
+        type: string
+      repeats:
+        description: "Drafts per scenario in the main 4B run"
+        default: "2"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Models come from the dev-signed bundled manifest (as evals.yml).
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/gg1-results
+  ONLY: ${{ inputs.only || '' }}
+  REPEATS: ${{ inputs.repeats || '2' }}
+
+jobs:
+  draft:
+    name: draft ${{ matrix.label }}
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { label: 4b-ra-off, os: ubuntu-latest, model: qwen3-4b-q4km, ra: "off", main: true }
+          - { label: 4b-ra-on, os: ubuntu-latest, model: qwen3-4b-q4km, ra: "on" }
+          - { label: 1.7b-ra-off, os: ubuntu-latest, model: qwen3-1.7b-q8, ra: "off" }
+          - { label: 1.7b-ra-on, os: ubuntu-latest, model: qwen3-1.7b-q8, ra: "on" }
+          - { label: mac-4b-ra-off, os: macos-latest, model: qwen3-4b-q4km, ra: "off" }
+          - { label: mac-4b-ra-on, os: macos-latest, model: qwen3-4b-q4km, ra: "on" }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg1
+          workspaces: qa/GG1/harness -> target
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+      - name: Build the harness
+        run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "label: ${{ matrix.label }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if [ "$RUNNER_OS" = macOS ]; then
+              sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
+            else
+              lscpu | grep -E 'Model name|^CPU\(s\)|Thread' ; free -g
+            fi
+          } | tee "$RESULTS/hardware-${{ matrix.label }}.txt"
+      - name: Draft
+        run: |
+          reps=1
+          if [ "${{ matrix.main }}" = "true" ]; then reps="$REPEATS"; fi
+          only=()
+          if [ -n "$ONLY" ]; then only=(--only "$ONLY"); fi
+          ./qa/GG1/harness/target/release/gg1 draft --local-models \
+            --local-chat-model "${{ matrix.model }}" --read-ahead "${{ matrix.ra }}" \
+            --repeats "$reps" --label "${{ matrix.label }}" "${only[@]}" \
+            --out "$RESULTS/drafts-${{ matrix.label }}.jsonl" < /dev/null
+      - name: Deterministic checks
+        if: always()
+        run: python3 qa/GG1/check.py "$RESULTS/drafts-${{ matrix.label }}.jsonl" | tee "$RESULTS/check-${{ matrix.label }}.txt"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg1-${{ matrix.label }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 30
+
+  judge:
+    name: judge (8B)
+    needs: draft
+    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg1
+          workspaces: qa/GG1/harness -> target
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-judge-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+      - name: Build the harness
+        run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gg1-*
+          path: drafts
+      - name: Judge
+        run: |
+          mkdir -p "$RESULTS"
+          files=()
+          for l in 4b-ra-off 1.7b-ra-off; do
+            f="drafts/gg1-$l/gg1-results/drafts-$l.jsonl"
+            [ -e "$f" ] || f=$(find drafts -name "drafts-$l.jsonl" | head -1)
+            [ -n "$f" ] && [ -e "$f" ] && files+=("$f")
+          done
+          ./qa/GG1/harness/target/release/gg1 judge --local-models \
+            --local-chat-model qwen3-8b-q4km --drafts "${files[@]}" \
+            --out "$RESULTS/judged.jsonl" < /dev/null
+      - name: Summary
+        if: always()
+        run: python3 qa/GG1/check.py --judged "$RESULTS/judged.jsonl" $(find drafts -name 'drafts-*.jsonl' | sort) | tee "$RESULTS/summary.txt"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg1-judge
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 30

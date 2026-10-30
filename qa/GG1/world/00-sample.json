@@ -1,0 +1,15 @@
+{"personas": [
+ {"id": "sample", "name": "Robin Vale", "emails": ["robin.vale@harbor.example.com"],
+  "voice": "Friendly, concise. Email: 'Hi <name>,' ... 'Cheers,\\nRobin'. Chat: lowercase, short.",
+  "sent": [
+   {"channel": "email", "to": ["ana@client.example.com"], "date": "2026-09-01", "subject": "Re: plan", "text": "Hi Ana,\n\nThanks for the note. Thursday works for me.\n\nCheers,\nRobin"},
+   {"channel": "email", "to": ["ana@client.example.com"], "date": "2026-09-05", "subject": "Re: docs", "text": "Hi Ana,\n\nAttached is nothing yet, I will send the doc tomorrow.\n\nCheers,\nRobin"},
+   {"channel": "email", "to": ["ben@harbor.example.com"], "date": "2026-09-08", "subject": "budget", "text": "Hi Ben,\n\nThe budget looks fine to me.\n\nCheers,\nRobin"},
+   {"channel": "email", "to": ["ana@client.example.com"], "date": "2026-09-10", "subject": "Re: call", "text": "Hi Ana,\n\nHappy to hop on a call next week.\n\nCheers,\nRobin"},
+   {"channel": "email", "to": ["cy@client.example.com"], "date": "2026-09-12", "subject": "intro", "text": "Hi Cy,\n\nNice to meet you. Let me know what you need.\n\nCheers,\nRobin"}
+  ],
+  "vault": [
+   {"id": "s1", "date": "2026-10-20", "title": "Harbor contract", "body": "Harbor x Client contract: signed 2026-10-20, total $12,400, delivery on November 18, 2026."},
+   {"id": "s2", "date": "2026-10-01", "title": "Wifi", "body": "Office wifi password: Tq7!marlin-42", "sensitive": true}
+  ]}
+]}
