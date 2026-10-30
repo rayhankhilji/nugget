@@ -8,8 +8,8 @@ sys.path.insert(0, str(ROOT / "harness"))
 import nugget_qa as q
 BIN = str(ROOT.parents[1] / "target" / "debug" / "nuggetd")
 out = Path(sys.argv[1]).resolve()
-d = q.Daemon(BIN, out / "home", out / "aliascheck")
 (out / "aliascheck").mkdir(exist_ok=True)
+d = q.Daemon(BIN, out / "home", out / "aliascheck")
 d.start()
 try:
     time.sleep(5)
