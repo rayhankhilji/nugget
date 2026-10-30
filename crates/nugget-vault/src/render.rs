@@ -1,15 +1,19 @@
 //! Rendering entities, redirect stubs and the index into page documents.
 //!
 //! Output is a pure function of the graph (and the item lookup): claims are grouped by predicate
-//! in byte order, sorted by id within a group, footnotes are numbered in order of first use, and
-//! neighbours are sorted by kind, name and id.
+//! in byte order; within a group the current facts (active, user-asserted) come first, by
+//! validity start descending (unknown last) then id, followed by the superseded claims under
+//! `*Earlier:*`, by validity end (else start) descending then id. Footnotes are numbered in order
+//! of first use in page order (the merge section's after all facts), and neighbours are
+//! sorted by kind, name and id. Every piece of graph or source text goes through [`inline`].
 
 use std::cell::RefCell;
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
-use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore};
+use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, merge_log};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
@@ -132,6 +136,25 @@ fn find_word(hay: &str, word: &str) -> Option<usize> {
     None
 }
 
+/// At most this many merge records are listed on a page.
+const MAX_MERGE_RECORDS: usize = 50;
+
+fn date(t: time::OffsetDateTime) -> String {
+    let d = t.to_offset(UtcOffset::UTC).date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
+}
+
+/// A claim's validity interval in dates: `2026-09-01 – 2026-10-05`, `until 2026-10-05`,
+/// `since 2026-09-01`, or `None` when unknown.
+fn interval(c: &Claim) -> Option<String> {
+    match (c.valid_from, c.valid_to) {
+        (Some(a), Some(b)) => Some(format!("{} – {}", date(a), date(b))),
+        (None, Some(b)) => Some(format!("until {}", date(b))),
+        (Some(a), None) => Some(format!("since {}", date(a))),
+        (None, None) => None,
+    }
+}
+
 fn rfc3339(t: time::OffsetDateTime) -> String {
     t.to_offset(UtcOffset::UTC)
         .format(&Rfc3339)
@@ -214,10 +237,15 @@ impl<'a> Ctx<'a> {
         let mut links = BTreeSet::new();
 
         // ---- facts ----
-        let mut groups: BTreeMap<&str, Vec<&Claim>> = BTreeMap::new();
-        for c in claims {
-            if c.subject == e.id && c.status.is_active() {
-                groups.entry(c.predicate.as_str()).or_default().push(c);
+        // Per predicate: live facts (active, user-asserted) and history (superseded claims that
+        // can be cited; a superseded user assertion has no source and is not shown).
+        type Group<'c> = (Vec<&'c Claim>, Vec<&'c Claim>);
+        let mut groups: BTreeMap<&str, Group> = BTreeMap::new();
+        for c in claims.iter().filter(|c| c.subject == e.id) {
+            if c.status.is_active() {
+                groups.entry(c.predicate.as_str()).or_default().0.push(c);
+            } else if c.status == ClaimStatus::Superseded && !c.evidence.is_empty() {
+                groups.entry(c.predicate.as_str()).or_default().1.push(c);
             }
         }
         let mut notes: Vec<String> = Vec::new();
@@ -226,8 +254,10 @@ impl<'a> Ctx<'a> {
         if groups.is_empty() {
             facts.push("_No facts yet._".into());
         }
-        for (pred, mut cs) in groups {
-            cs.sort_by_key(|c| c.id);
+        for (pred, (mut current, mut history)) in groups {
+            // Newest first; unknown dates last; then by id.
+            current.sort_by_key(|c| (Reverse(c.valid_from), c.id));
+            history.sort_by_key(|c| (Reverse(c.valid_to.or(c.valid_from)), c.id));
             if facts.len() > 2 {
                 facts.push(String::new());
             }
@@ -236,8 +266,29 @@ impl<'a> Ctx<'a> {
                 inline(&humanize(pred)),
                 inline(pred).replace("--", "-")
             ));
-            for c in cs {
-                facts.push(self.fact_line(e, c, &mut links, &mut notes, &mut note_ids)?);
+            for c in &current {
+                let (body, cites) = self.fact_body(e, c, &mut links, &mut notes, &mut note_ids)?;
+                let mut line = format!("- {body}{cites}");
+                if c.status == ClaimStatus::UserAsserted {
+                    line.push_str(" (you)");
+                }
+                line.push_str(&format!(" {CLAIM_MARK}{} -->", c.id));
+                facts.push(line);
+            }
+            if history.is_empty() {
+                continue;
+            }
+            if !current.is_empty() {
+                facts.push(String::new());
+            }
+            facts.push(HISTORY_INTRO.into());
+            for c in &history {
+                let (body, cites) = self.fact_body(e, c, &mut links, &mut notes, &mut note_ids)?;
+                let when = match interval(c) {
+                    Some(w) => format!(" ({w})"),
+                    None => String::new(),
+                };
+                facts.push(format!("  - {body}{when}{cites} {HIST_MARK}{} -->", c.id));
             }
         }
 
@@ -288,42 +339,80 @@ impl<'a> Ctx<'a> {
         }
         related.extend(rows.into_iter().map(|(_, l)| l));
 
+        // ---- why merged ----
+        let merged = self.merged_section(e, &mut notes, &mut note_ids);
+
+        let mut segs = vec![
+            Segment::Region {
+                name: R_HEADER.into(),
+                body: vec![format!("# {}", inline(&e.name))],
+            },
+            Segment::User(vec![String::new()]),
+            Segment::Region {
+                name: R_FACTS.into(),
+                body: facts,
+            },
+            Segment::User(vec![String::new()]),
+            Segment::Region {
+                name: R_RELATED.into(),
+                body: related,
+            },
+            Segment::User(vec![String::new()]),
+        ];
+        if let Some(body) = merged {
+            segs.push(Segment::Region {
+                name: R_MERGED.into(),
+                body,
+            });
+            segs.push(Segment::User(vec![String::new()]));
+        }
+        segs.push(Segment::Region {
+            name: R_SOURCES.into(),
+            body: notes,
+        });
+        segs.push(Segment::User(vec![
+            String::new(),
+            "## Notes".into(),
+            String::new(),
+        ]));
         let doc = Doc {
             fm: Some(self.frontmatter(e)),
-            segs: vec![
-                Segment::Region {
-                    name: R_HEADER.into(),
-                    body: vec![format!("# {}", inline(&e.name))],
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_FACTS.into(),
-                    body: facts,
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_RELATED.into(),
-                    body: related,
-                },
-                Segment::User(vec![String::new()]),
-                Segment::Region {
-                    name: R_SOURCES.into(),
-                    body: notes,
-                },
-                Segment::User(vec![String::new(), "## Notes".into(), String::new()]),
-            ],
+            segs,
         };
         Ok(Rendered { doc, links })
     }
 
-    fn fact_line(
+    /// The `[^n]` reference for a citation of `item` (with `quote`), defining the footnote on
+    /// first use.
+    fn cite(
+        &self,
+        item: &ItemRef,
+        quote: Option<&str>,
+        notes: &mut Vec<String>,
+        note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
+    ) -> String {
+        let key = (item.clone(), quote.map(str::to_owned));
+        let n = match note_ids.get(&key) {
+            Some(n) => *n,
+            None => {
+                let n = notes.len() + 1;
+                notes.push(self.footnote(n, item, quote));
+                note_ids.insert(key, n);
+                n
+            }
+        };
+        format!("[^{n}]")
+    }
+
+    /// A claim's sentence (with the object linked) and its citations (` [^1][^2]`, or empty).
+    fn fact_body(
         &self,
         e: &Entity,
         c: &Claim,
         links: &mut BTreeSet<EntityId>,
         notes: &mut Vec<String>,
         note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
-    ) -> Result<String> {
+    ) -> Result<(String, String)> {
         let mut body = inline(&c.text);
         let object = match &c.object {
             ClaimObject::Entity(o) if *o != e.id => self.entity(o)?,
@@ -359,28 +448,76 @@ impl<'a> Ctx<'a> {
         }
         let mut cites = String::new();
         for ev in &c.evidence {
-            let key = (ev.item.clone(), ev.quote.clone());
-            let n = match note_ids.get(&key) {
-                Some(n) => *n,
-                None => {
-                    let n = notes.len() + 1;
-                    notes.push(self.footnote(n, &ev.item, ev.quote.as_deref()));
-                    note_ids.insert(key, n);
-                    n
-                }
-            };
-            cites.push_str(&format!("[^{n}]"));
+            cites.push_str(&self.cite(&ev.item, ev.quote.as_deref(), notes, note_ids));
         }
-        let mut line = format!("- {body}");
         if !cites.is_empty() {
-            line.push(' ');
-            line.push_str(&cites);
+            cites.insert(0, ' ');
         }
-        if c.status == ClaimStatus::UserAsserted {
-            line.push_str(" (you)");
+        Ok((body, cites))
+    }
+
+    /// The "Merged" section listing the entity's merge log, or `None` when it has none.
+    fn merged_section(
+        &self,
+        e: &Entity,
+        notes: &mut Vec<String>,
+        note_ids: &mut HashMap<(ItemRef, Option<String>), usize>,
+    ) -> Option<Vec<String>> {
+        let log = merge_log(e);
+        if log.is_empty() {
+            return None;
         }
-        line.push_str(&format!(" {CLAIM_MARK}{} -->", c.id));
-        Ok(line)
+        let noun = match e.kind {
+            EntityKind::Person => "person",
+            EntityKind::Organization => "organization",
+            _ => "thing",
+        };
+        let mut body = vec![
+            "## Merged".to_owned(),
+            String::new(),
+            format!("Nugget recognised these as the same {noun} and combined them into this page:"),
+            String::new(),
+        ];
+        for r in log.iter().take(MAX_MERGE_RECORDS) {
+            let name = truncate(&inline(&r.name), 120);
+            let mut line = format!(
+                "- {}",
+                if name.is_empty() {
+                    "(unnamed)".into()
+                } else {
+                    name
+                }
+            );
+            let detail = truncate(&inline(&r.detail), 300);
+            if !detail.is_empty() {
+                line.push_str(": ");
+                line.push_str(&detail);
+            }
+            let reasons: Vec<String> = r
+                .reasons
+                .iter()
+                .map(|x| truncate(&inline(&x.replace(['_', '-'], " ")), 40))
+                .filter(|x| !x.is_empty())
+                .take(8)
+                .collect();
+            if !reasons.is_empty() {
+                line.push_str(&format!(" (because: {})", reasons.join(", ")));
+            }
+            if let Some(item) = &r.item {
+                line.push(' ');
+                line.push_str(&self.cite(item, None, notes, note_ids));
+            }
+            body.push(line);
+        }
+        if log.len() > MAX_MERGE_RECORDS {
+            body.push(format!("- … and {} more", log.len() - MAX_MERGE_RECORDS));
+        }
+        body.push(String::new());
+        body.push(format!(
+            "If any of these is a different {noun}, you can split it off again in Nugget; \
+             the facts it brought will move to a page of its own."
+        ));
+        Some(body)
     }
 
     fn footnote(&self, n: usize, item: &ItemRef, quote: Option<&str>) -> String {

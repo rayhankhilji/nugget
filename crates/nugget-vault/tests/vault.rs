@@ -369,7 +369,8 @@ fn edited_fact_becomes_user_asserted() {
         "- Prefers soy milk in coffee. (you) <!-- c:{} -->",
         new.id
     )));
-    assert!(!t.contains("oat milk"));
+    // The replaced claim is history now (it is superseded, and its sources still say so).
+    assert!(t.contains("*Earlier:*\n  - Prefers oat milk in coffee. [^1][^2] <!-- h:2 -->\n"));
     let report = f.vault.validate().unwrap();
     assert!(report.is_ok(), "{report:?}");
     assert_eq!(report.user_facts, 1);
@@ -559,6 +560,14 @@ fn conflicts_keep_user_text_and_write_a_sidecar() {
     f.vault.render_all().unwrap();
     assert!(f.vault.status().conflicts.is_empty());
     assert!(!f.root.join(".nugget/conflicts").join(rel).exists());
+}
+
+/// The lines inside a generated block (without its markers), each ending in a newline.
+fn block_body(text: &str, name: &str) -> String {
+    let b = format!("<!-- nugget:begin {name} -->\n");
+    let e = format!("<!-- nugget:end {name} -->");
+    let s = text.find(&b).unwrap() + b.len();
+    text[s..text.find(&e).unwrap()].to_owned()
 }
 
 fn nugget_block(text: &str, name: &str) -> String {
@@ -928,4 +937,391 @@ fn notes_are_written_inside_the_vault_and_never_overwrite() {
     v.render_all().unwrap();
     assert!(a.exists() && b.exists());
     assert!(v.validate().unwrap().is_ok());
+}
+
+// ---- history and merge log ----
+
+fn day(y: i32, m: u8, d: u8) -> time::OffsetDateTime {
+    time::Date::from_calendar_date(y, time::Month::try_from(m).unwrap(), d)
+        .unwrap()
+        .midnight()
+        .assume_utc()
+}
+
+/// Sam used to work at Initech (2025-01-15 – 2026-09-30) and lived in Boston (no dates); both
+/// are superseded. Returns `(initech, worked_at, lived_in)`.
+fn add_history(f: &Fixture) -> (EntityId, ClaimId, ClaimId) {
+    let initech = f
+        .graph
+        .create_entity(&NewEntity::new(EntityKind::Organization, "Initech"))
+        .unwrap();
+    let mut old = claim(
+        &f.sam,
+        "works_at",
+        ClaimObject::Entity(initech.clone()),
+        "Samantha works at Initech.",
+        vec![ev("mail", "msg-0", "Sam (Initech)")],
+    );
+    old.valid_from = Some(day(2025, 1, 15));
+    old.valid_to = Some(day(2026, 9, 30));
+    let worked_at = f.graph.add_claim(&old).unwrap();
+    f.graph
+        .set_claim_status(worked_at, ClaimStatus::Superseded)
+        .unwrap();
+    let lived = f
+        .graph
+        .add_claim(&claim(
+            &f.sam,
+            "lives_in",
+            ClaimObject::Literal("Boston".into()),
+            "Lives in Boston.",
+            vec![ev("files", "notes.md", "Sam moved from Boston")],
+        ))
+        .unwrap();
+    f.graph
+        .set_claim_status(lived, ClaimStatus::Superseded)
+        .unwrap();
+    (initech, worked_at, lived)
+}
+
+#[test]
+fn superseded_claims_render_as_cited_history() {
+    let f = fixture();
+    let (initech, worked_at, lived) = add_history(&f);
+    // Rejected claims never show up, current or history.
+    let rejected = f
+        .graph
+        .add_claim(&claim(
+            &f.sam,
+            "works_at",
+            ClaimObject::Literal("Globex".into()),
+            "Samantha works at Globex.",
+            vec![ev("mail", "msg-1", "Globex")],
+        ))
+        .unwrap();
+    f.graph
+        .set_claim_status(rejected, ClaimStatus::Rejected)
+        .unwrap();
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    let facts = block_body(&t, "facts");
+    assert_eq!(
+        facts,
+        format!(
+            "## Facts\n\n\
+### Lives in <!-- p:lives_in -->\n\
+*Earlier:*\n  - Lives in Boston. [^1] <!-- h:{lived} -->\n\n\
+### Prefers <!-- p:prefers -->\n\
+- Prefers oat milk in coffee. [^2][^3] <!-- c:2 -->\n\n\
+### Works at <!-- p:works_at -->\n\
+- Samantha works at [[Organization/Acme (ent_000002)|Acme]]. [^3] <!-- c:1 -->\n\n\
+*Earlier:*\n  - Samantha works at [[Organization/Initech ({})|Initech]]. (2025-01-15 – 2026-09-30) [^4] <!-- h:{worked_at} -->\n",
+            short_id(&initech)
+        ),
+        "{t}"
+    );
+    assert!(!t.contains("Globex"));
+    assert!(t.contains("[^4]: [msg-0](nugget://item/mail/msg-0): \"Sam (Initech)\""));
+    // The history link resolves: Initech got a page.
+    assert!(f.vault.page_path(&initech).unwrap().is_some());
+    let report = f.vault.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+    assert_eq!((report.facts, report.history_facts), (4, 2));
+    assert_eq!(report.cited_facts, 4);
+    // Deterministic: re-rendering writes nothing.
+    assert!(f.vault.render_all().unwrap().written.is_empty());
+}
+
+#[test]
+fn history_order_and_intervals() {
+    let f = fixture();
+    let mk = |text: &str, from: Option<time::OffsetDateTime>, to: Option<time::OffsetDateTime>| {
+        let mut c = claim(
+            &f.sam,
+            "has_role",
+            ClaimObject::Literal(text.into()),
+            text,
+            vec![ev("mail", "msg-1", "Sam from Acme here")],
+        );
+        c.valid_from = from;
+        c.valid_to = to;
+        f.graph.add_claim(&c).unwrap()
+    };
+    let a = mk("Role A.", None, Some(day(2026, 10, 5)));
+    let b = mk("Role B.", Some(day(2026, 9, 1)), Some(day(2026, 10, 5)));
+    let c = mk("Role C.", Some(day(2024, 3, 1)), None);
+    let d = mk("Role D.", None, None);
+    for id in [a, b, c, d] {
+        f.graph
+            .set_claim_status(id, ClaimStatus::Superseded)
+            .unwrap();
+    }
+    // Current facts: newest validity start first, unknown last.
+    let cur_old = mk("Lead.", Some(day(2025, 1, 1)), None);
+    let cur_new = mk("Director.", Some(day(2026, 10, 6)), None);
+    let cur_unk = mk("Mentor.", None, None);
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    let want = format!(
+        "### Has role <!-- p:has_role -->\n\
+- Director. [^1] <!-- c:{cur_new} -->\n\
+- Lead. [^1] <!-- c:{cur_old} -->\n\
+- Mentor. [^1] <!-- c:{cur_unk} -->\n\n\
+*Earlier:*\n  - Role A. (until 2026-10-05) [^1] <!-- h:{a} -->\n  - Role B. (2026-09-01 – 2026-10-05) [^1] <!-- h:{b} -->\n  - Role C. (since 2024-03-01) [^1] <!-- h:{c} -->\n  - Role D. [^1] <!-- h:{d} -->\n"
+    );
+    assert!(t.contains(&want), "{t}");
+    assert!(f.vault.validate().unwrap().is_ok());
+}
+
+#[test]
+fn editing_or_deleting_history_changes_nothing() {
+    let f = fixture();
+    let (_, worked_at, lived) = add_history(&f);
+    f.vault.render_all().unwrap();
+    let before = f.read(&f.sam);
+    f.edit(&f.sam, |t| {
+        t.lines()
+            .filter(|l| !l.contains(&format!("<!-- h:{lived} -->")))
+            .map(|l| {
+                if l.contains(&format!("<!-- h:{worked_at} -->")) {
+                    format!("- Samantha never worked at Initech. <!-- h:{worked_at} -->")
+                } else {
+                    l.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n"
+    });
+    let rep = f.vault.apply_user_edits(f.page(&f.sam)).unwrap();
+    assert!(rep.is_empty(), "{rep:?}");
+    assert_eq!(f.status(worked_at), ClaimStatus::Superseded);
+    assert_eq!(f.status(lived), ClaimStatus::Superseded);
+    // History lines are machine-owned: the next render restores them.
+    assert_eq!(f.read(&f.sam), before);
+    assert!(f.vault.validate().unwrap().is_ok());
+}
+
+#[test]
+fn edited_fact_moves_to_history() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    // A note under the fact follows the claim it was written under (now history).
+    f.edit(&f.sam, |t| {
+        t.replace(
+            "- Prefers oat milk in coffee. [^1][^2] <!-- c:2 -->",
+            "- Prefers soy milk in coffee. [^1][^2] <!-- c:2 -->\n  - (since the spring)",
+        )
+    });
+    let rep = f.vault.apply_user_edits(f.page(&f.sam)).unwrap();
+    let new = rep.asserted[0];
+    let t = f.read(&f.sam);
+    assert!(
+        t.contains(&format!(
+            "### Prefers <!-- p:prefers -->\n- Prefers soy milk in coffee. (you) <!-- c:{new} -->\n\n*Earlier:*\n  - Prefers oat milk in coffee. [^1][^2] <!-- h:2 -->\n  - (since the spring)\n"
+        )),
+        "{t}"
+    );
+    let report = f.vault.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+    assert_eq!(report.history_facts, 1);
+}
+
+fn set_merge_log(f: &Fixture, log: serde_json::Value) {
+    f.graph
+        .update_entity(
+            &f.sam,
+            &EntityPatch {
+                attributes: Some(serde_json::json!({ MERGE_LOG_ATTR: log })),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+}
+
+#[test]
+fn merge_log_renders_a_cited_section() {
+    let f = fixture();
+    set_merge_log(
+        &f,
+        serde_json::json!([
+            {"from": "ent_9", "name": "Sam L", "reasons": ["shared_email", "nickname"],
+             "detail": "Same address sam@example.com as Samantha Lee.",
+             "item": {"source": "mail", "key": "msg-1"}, "at": "2026-10-01T00:00:00Z"},
+            {"name": "S. <!-- nugget:end merged --> [[x]]\n## Notes", "reasons": [],
+             "detail": "Hostile\n<!-- c:1 --> detail [^1]"}
+        ]),
+    );
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    assert_eq!(
+        block_body(&t, "merged"),
+        "## Merged\n\n\
+Nugget recognised these as the same person and combined them into this page:\n\n\
+- Sam L: Same address sam@example.com as Samantha Lee. (because: shared email, nickname) [^3]\n\
+- S. &lt;!-- nugget:end merged --&gt; [ [x] ] ## Notes: Hostile &lt;!-- c:1 --&gt; detail [ ^1]\n\n\
+If any of these is a different person, you can split it off again in Nugget; the facts it brought will move to a page of its own.\n",
+        "{t}"
+    );
+    // The section sits between Related and the sources; its footnote is defined (no quote).
+    let related = t.find("<!-- nugget:end related -->").unwrap();
+    let merged = t.find("<!-- nugget:begin merged -->").unwrap();
+    let sources = t.find("<!-- nugget:begin sources -->").unwrap();
+    assert!(related < merged && merged < sources);
+    assert!(t.contains("[^3]: [Lunch on Friday](https://mail.example/msg-1)\n"));
+    assert_eq!(t.matches("<!-- nugget:end merged -->").count(), 1);
+    let report = f.vault.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+    assert!(f.vault.render_all().unwrap().written.is_empty());
+    // Split away again: the section disappears.
+    set_merge_log(&f, serde_json::json!([]));
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    assert!(!t.contains("nugget:begin merged"));
+    assert_eq!(
+        mask_updated(&t),
+        SAM_GOLDEN,
+        "without history or merges a page renders as before"
+    );
+}
+
+#[test]
+fn validator_checks_history_and_merge_citations() {
+    let ok = |_: &str| true;
+    let page = "---\nnugget_id: \"e\"\nkind: \"person\"\naliases: []\nupdated: \"2026-10-01T00:00:00Z\"\n---\n\
+<!-- nugget:begin facts -->\n## Facts\n\n### A <!-- p:a -->\n*Earlier:*\n  - Old. <!-- h:3 -->\n  - Older. [^7] <!-- h:4 -->\n  - Fine. [^1] <!-- h:5 -->\n  - Broken. [^1] <!-- h:x -->\n<!-- nugget:end facts -->\n\
+<!-- nugget:begin merged -->\n- M [^8]\n<!-- nugget:end merged -->\n\
+<!-- nugget:begin sources -->\n[^1]: [S](nugget://item/a/b)\n<!-- nugget:end sources -->\n";
+    let r = validate_page("Person/E.md", page, &ok);
+    let msgs: Vec<(IssueKind, &str)> = r
+        .issues
+        .iter()
+        .map(|i| (i.kind, i.message.as_str()))
+        .collect();
+    assert_eq!(
+        msgs,
+        [
+            (IssueKind::MissingCitation, "history line has no citation"),
+            (IssueKind::MissingCitation, "footnote [^7] is not defined"),
+            (IssueKind::BadMarker, "claim marker does not parse"),
+            (IssueKind::MissingCitation, "footnote [^8] is not defined"),
+        ]
+    );
+    assert_eq!((r.facts, r.history_facts, r.cited_facts), (3, 3, 1));
+}
+
+fn state_version(root: &Path) -> serde_json::Value {
+    let p = root.join(".nugget/state.json");
+    serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(p).unwrap()).unwrap()
+        ["version"]
+        .clone()
+}
+
+fn set_state_version(root: &Path, v: u32) {
+    let p = root.join(".nugget/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    state["version"] = v.into();
+    std::fs::write(&p, serde_json::to_string(&state).unwrap()).unwrap();
+}
+
+#[test]
+fn old_layout_vault_upgrades_and_keeps_user_edits() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    assert_eq!(state_version(&f.root), 2);
+    // Turn the vault into one written by the previous version: the page and merge base exactly
+    // as the layout-1 renderer wrote them, and a layout-1 manifest.
+    let old = SAM_GOLDEN.replace("\"<t>\"", "\"2026-10-01T09:00:00Z\"");
+    let base = f
+        .root
+        .join(format!(".nugget/base/entities/{}.md", short_id(&f.sam)));
+    std::fs::write(&base, &old).unwrap();
+    set_state_version(&f.root, 1);
+    // The user's edits: a paragraph after the frontmatter, a note inside the facts, text in the
+    // Notes section and a `## My notes` section at the end.
+    let para = "Met Sam at the 2024 offsite; she runs procurement.";
+    let user =
+        old.replace(
+            "---\n<!-- nugget:begin header -->",
+            &format!("---\n{para}\n\n<!-- nugget:begin header -->"),
+        )
+        .replace(
+            "<!-- c:1 -->\n",
+            "<!-- c:1 -->\n  - (she leads the platform team)\n",
+        ) + "Call her about the Q3 plan.\n- [ ] send deck\n\n## My notes\n\nPrefers mornings.\n";
+    f.write(&f.sam, &user);
+    let mark = f.graph.changes_since(0, 100_000).unwrap().1;
+
+    // Reopen as the new version; the graph meanwhile learnt a job change and a merge.
+    let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
+    let globex = f
+        .graph
+        .create_entity(&NewEntity::new(EntityKind::Organization, "Globex"))
+        .unwrap();
+    let mut now = claim(
+        &f.sam,
+        "works_at",
+        ClaimObject::Entity(globex.clone()),
+        "Samantha works at Globex.",
+        vec![ev("mail", "msg-2", "Sam, now at Globex")],
+    );
+    now.valid_from = Some(day(2026, 10, 1));
+    let now = f.graph.add_claim(&now).unwrap();
+    f.graph
+        .set_claim_status(f.works_at, ClaimStatus::Superseded)
+        .unwrap();
+    set_merge_log(
+        &f,
+        serde_json::json!([{"name": "Sam L", "reasons": ["shared_email"],
+            "detail": "Same address.", "item": {"source": "mail", "key": "msg-2"}}]),
+    );
+    let r = v2.render_changed(mark).unwrap();
+    assert!(r.edits.is_empty(), "{r:?}");
+    assert!(r.conflicts.is_empty(), "{r:?}");
+    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    assert!(
+        t.contains(&format!("---\n{para}\n\n<!-- nugget:begin header -->")),
+        "{t}"
+    );
+    assert!(
+        t.ends_with(
+            "## Notes\n\nCall her about the Q3 plan.\n- [ ] send deck\n\n## My notes\n\nPrefers mornings.\n"
+        ),
+        "{t}"
+    );
+    // The note followed its fact, which is now history.
+    assert!(
+        t.contains(&format!(
+            "### Works at <!-- p:works_at -->\n\
+- Samantha works at [[Organization/Globex ({})|Globex]]. [^3] <!-- c:{now} -->\n\n\
+*Earlier:*\n  - Samantha works at [[Organization/Acme (ent_000002)|Acme]]. [^2] <!-- h:{} -->\n  - (she leads the platform team)\n",
+            short_id(&globex),
+            f.works_at
+        )),
+        "{t}"
+    );
+    assert!(t.contains("<!-- nugget:end related -->\n\n<!-- nugget:begin merged -->\n## Merged\n"));
+    let report = v2.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+    assert_eq!(report.history_facts, 1);
+    assert_eq!(state_version(&f.root), 2);
+    // Upgraded once: an unchanged graph renders nothing new.
+    let high = f.graph.changes_since(0, 100_000).unwrap().1;
+    let again = v2.render_changed(high).unwrap();
+    assert!(again.written.is_empty(), "{again:?}");
+}
+
+#[test]
+fn partial_passes_do_not_mark_an_old_vault_upgraded() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    set_state_version(&f.root, 1);
+    let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
+    v2.apply_user_edits(v2.page_path(&f.sam).unwrap().unwrap())
+        .unwrap();
+    assert_eq!(state_version(&f.root), 1);
+    let high = f.graph.changes_since(0, 100_000).unwrap().1;
+    v2.render_changed(high).unwrap();
+    assert_eq!(state_version(&f.root), 2);
 }
