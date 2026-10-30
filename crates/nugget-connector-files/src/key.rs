@@ -1,6 +1,6 @@
 //! Item keys and URLs. Keys are OS-independent: `<root index>:<relative path with / separators>`.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 
@@ -25,7 +25,8 @@ impl PathStyle {
 /// The item key of a file at `rel` (relative to root number `root_index`).
 ///
 /// Only normal components are kept (`.` and prefixes are dropped) and they are joined with `/`,
-/// so the same tree yields the same keys on every OS. Non-UTF-8 names are converted lossily.
+/// so the same tree yields the same keys on every OS. In a non-UTF-8 name each invalid byte
+/// becomes `U+FFFD` followed by its two hex digits, so distinct names keep distinct keys.
 pub fn item_key(root_index: usize, rel: &Path) -> String {
     let mut key = format!("{root_index}:");
     key.push_str(&rel_key(rel));
@@ -40,10 +41,26 @@ pub fn rel_key(rel: &Path) -> String {
             if !out.is_empty() {
                 out.push('/');
             }
-            out.push_str(&s.to_string_lossy());
+            push_component(&mut out, s);
         }
     }
     out
+}
+
+/// Append one path component. Valid UTF-8 is copied as is; each invalid byte is written as
+/// `U+FFFD` plus its hex value (a lossy conversion would map different names to one key).
+fn push_component(out: &mut String, s: &std::ffi::OsStr) {
+    if let Some(s) = s.to_str() {
+        out.push_str(s);
+        return;
+    }
+    for chunk in s.as_encoded_bytes().utf8_chunks() {
+        out.push_str(chunk.valid());
+        for b in chunk.invalid() {
+            out.push('\u{fffd}');
+            out.push_str(&format!("{b:02x}"));
+        }
+    }
 }
 
 /// [`item_key`] for a relative path given as a string in a known separator convention. Empty and
@@ -60,13 +77,6 @@ pub fn item_key_from_str(root_index: usize, rel: &str, style: PathStyle) -> Stri
 pub fn parse_key(key: &str) -> Option<(usize, &str)> {
     let (idx, rel) = key.split_once(':')?;
     Some((idx.parse().ok()?, rel))
-}
-
-/// Re-attach a key's relative part to its root.
-pub(crate) fn join_rel(root: &Path, rel: &str) -> PathBuf {
-    rel.split('/')
-        .filter(|p| !p.is_empty())
-        .fold(root.to_path_buf(), |p, c| p.join(c))
 }
 
 /// `file://` URL of an absolute path (`None` for a relative one).
@@ -134,18 +144,24 @@ mod tests {
         assert_eq!(item_key(2, Path::new(r"a\b/c.txt")), "2:a/b/c.txt");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn regression_non_utf8_names_keep_distinct_keys() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let k = |b: &[u8]| item_key(0, Path::new(OsStr::from_bytes(b)));
+        assert_eq!(k(b"a\xffb.md"), "0:a\u{fffd}ffb.md");
+        assert_ne!(k(b"a\xff.md"), k(b"a\xfe.md"));
+        assert_ne!(k(b"a\xff.md"), k("a\u{fffd}.md".as_bytes()));
+        assert_eq!(k(b"d\xc3/x.md"), "0:d\u{fffd}c3/x.md");
+    }
+
     #[test]
     fn parse_and_join_round_trip() {
         assert_eq!(parse_key("12:a/b.md"), Some((12, "a/b.md")));
         assert_eq!(parse_key("0:"), Some((0, "")));
         assert_eq!(parse_key("x:a"), None);
         assert_eq!(parse_key("nocolon"), None);
-        let root = std::env::temp_dir();
-        assert_eq!(
-            join_rel(&root, "a/b.md"),
-            root.join("a").join("b.md"),
-            "joined with native separators"
-        );
     }
 
     #[test]

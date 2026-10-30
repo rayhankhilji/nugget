@@ -34,6 +34,11 @@ impl TokenSet {
             None => false,
         }
     }
+
+    /// Whether the access token has already expired (by the local clock).
+    fn expired(&self) -> bool {
+        self.expires_within(Duration::ZERO)
+    }
 }
 
 impl std::fmt::Debug for TokenSet {
@@ -80,7 +85,16 @@ pub struct TokenSource {
     secrets: Arc<dyn SecretStore>,
     account: String,
     skew: Duration,
-    cache: Mutex<Option<TokenSet>>,
+    cache: Mutex<Cached>,
+}
+
+/// The in-memory copy. `unsaved` is set when a refresh succeeded but the keychain write failed:
+/// with refresh-token rotation the old stored refresh token is already dead, so the cached set
+/// is the only good copy and must win over the keychain until it is written back.
+#[derive(Default)]
+struct Cached {
+    tokens: Option<TokenSet>,
+    unsaved: bool,
 }
 
 impl std::fmt::Debug for TokenSource {
@@ -103,7 +117,7 @@ impl TokenSource {
             secrets,
             account: account.into(),
             skew: Duration::from_secs(120),
-            cache: Mutex::new(None),
+            cache: Mutex::new(Cached::default()),
         }
     }
 
@@ -120,42 +134,61 @@ impl TokenSource {
     /// `Error::Unauthorized`.
     pub async fn access_token(&self) -> Result<String> {
         let mut cache = self.cache.lock().await;
+        self.retry_unsaved(&mut cache).await;
         // Taken out of the cache: a failed refresh leaves it empty, so the next call re-reads
-        // the keychain (the user may have reconnected meanwhile).
-        let current = match cache.take() {
+        // the keychain (the user may have reconnected meanwhile) — unless it holds the only
+        // copy of rotated tokens.
+        let current = match cache.tokens.take() {
             Some(t) => t,
             None => self.load().await?,
         };
         if !current.expires_within(self.skew) {
             let token = current.access_token.clone();
-            *cache = Some(current);
+            cache.tokens = Some(current);
             return Ok(token);
         }
-        let fresh = self.refresh_from(&current).await?;
-        let token = fresh.access_token.clone();
-        *cache = Some(fresh);
-        Ok(token)
+        match self.refresh_from(&current, &mut cache).await {
+            Ok(token) => Ok(token),
+            // Refreshing early (inside the skew) failed for a transient reason: the current token
+            // still works, so keep using it rather than failing the sync.
+            Err(e) if !matches!(e, Error::Unauthorized(_)) && !current.expired() => {
+                tracing::warn!(account = %self.account, error = %e, "early OAuth refresh failed; using the current token");
+                let token = current.access_token.clone();
+                cache.tokens = Some(current);
+                Ok(token)
+            }
+            Err(e) => {
+                if cache.unsaved {
+                    cache.tokens = Some(current);
+                }
+                Err(e)
+            }
+        }
     }
 
     /// Call after the API rejected `rejected` (HTTP 401): reloads the keychain (the user may have
     /// reconnected) and refreshes unless a different token is already available.
     pub async fn force_refresh(&self, rejected: &str) -> Result<String> {
         let mut cache = self.cache.lock().await;
-        let stored = self.load().await?;
+        self.retry_unsaved(&mut cache).await;
+        let stored = match cache.tokens.clone() {
+            Some(t) if cache.unsaved => t,
+            _ => self.load().await?,
+        };
         if stored.access_token != rejected && !stored.expires_within(self.skew) {
             let token = stored.access_token.clone();
-            *cache = Some(stored);
+            cache.tokens = Some(stored);
             return Ok(token);
         }
-        let fresh = self.refresh_from(&stored).await?;
-        let token = fresh.access_token.clone();
-        *cache = Some(fresh);
-        Ok(token)
+        self.refresh_from(&stored, &mut cache).await
     }
 
     /// Forget cached tokens (e.g. after a new authorization stored fresh ones).
     pub async fn clear_cache(&self) {
-        *self.cache.lock().await = None;
+        let mut cache = self.cache.lock().await;
+        if !cache.unsaved {
+            cache.tokens = None;
+        }
     }
 
     /// Whether tokens are stored for this account.
@@ -176,7 +209,22 @@ impl TokenSource {
             })
     }
 
-    async fn refresh_from(&self, current: &TokenSet) -> Result<TokenSet> {
+    /// Write back tokens a previous refresh could not store.
+    async fn retry_unsaved(&self, cache: &mut Cached) {
+        if !cache.unsaved {
+            return;
+        }
+        if let Some(t) = &cache.tokens
+            && store_tokens(self.secrets.clone(), self.account.clone(), t)
+                .await
+                .is_ok()
+        {
+            cache.unsaved = false;
+        }
+    }
+
+    /// Refresh, cache and store the new set; returns the access token.
+    async fn refresh_from(&self, current: &TokenSet, cache: &mut Cached) -> Result<String> {
         let refresh_token = current.refresh_token.as_deref().ok_or_else(|| {
             Error::Unauthorized(
                 "access token expired and no refresh token is stored; reconnect".into(),
@@ -189,8 +237,16 @@ impl TokenSource {
         if fresh.scope.is_none() {
             fresh.scope = current.scope.clone();
         }
-        store_tokens(self.secrets.clone(), self.account.clone(), &fresh).await?;
+        let token = fresh.access_token.clone();
+        // The provider may have rotated the refresh token, invalidating the stored one: keep the
+        // new set in memory even if the keychain write fails, and retry the write later.
+        let stored = store_tokens(self.secrets.clone(), self.account.clone(), &fresh).await;
+        cache.tokens = Some(fresh);
+        cache.unsaved = stored.is_err();
+        if let Err(e) = stored {
+            tracing::warn!(account = %self.account, error = %e, "could not store refreshed OAuth tokens; will retry");
+        }
         tracing::debug!(account = %self.account, "refreshed OAuth access token");
-        Ok(fresh)
+        Ok(token)
     }
 }

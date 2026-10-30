@@ -79,6 +79,15 @@ pub struct State {
     pub logins: usize,
     /// Advertise and serve `UID MOVE` (RFC 6851).
     pub move_cap: bool,
+    /// Body FETCHes to answer before sending `* BYE` and dropping the connection (once).
+    pub bye_after_body_fetches: Option<usize>,
+    /// Answer every body FETCH with `* BYE` and a closed connection.
+    pub bye_every_body_fetch: bool,
+    /// Messages a body FETCH cannot deliver: left out, and the command ends in
+    /// `NO [SERVERBUG]` (as Dovecot does for a corrupt message).
+    pub broken: BTreeSet<u32>,
+    /// Body FETCH commands answered.
+    pub body_fetches: usize,
 }
 
 impl State {
@@ -97,6 +106,10 @@ impl State {
             lie_literal: None,
             logins: 0,
             move_cap: false,
+            bye_after_body_fetches: None,
+            bye_every_body_fetch: false,
+            broken: BTreeSet::new(),
+            body_fetches: 0,
         }
     }
 
@@ -424,6 +437,8 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
         let mut out: Vec<u8> = Vec::new();
         // Raw bytes to send instead of `out`, after which the server goes silent.
         let mut silent_after: Option<Vec<u8>> = None;
+        // Send `* BYE` instead of the answer and drop the connection.
+        let mut bye_close = false;
         let put = |out: &mut Vec<u8>, s: &str| {
             out.extend_from_slice(s.as_bytes());
             out.extend_from_slice(b"\r\n");
@@ -554,9 +569,11 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                                         toks[i + 1]
                                     ))
                                     .unwrap();
+                                    // Unparseable dates match (as servers fall back to the
+                                    // receive time).
                                     uids.retain(|u| {
                                         parse_internal_date(&mb.msgs[u].date)
-                                            .is_some_and(|d| d.date() >= since.date())
+                                            .is_none_or(|d| d.date() >= since.date())
                                     });
                                     i += 1;
                                 }
@@ -590,6 +607,25 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                                 }
                             }
                         }
+                        let wants_body = items.contains("BODY.PEEK[") || items.contains("BODY[");
+                        if wants_body {
+                            s.body_fetches += 1;
+                            bye_close |= s.bye_every_body_fetch;
+                            match s.bye_after_body_fetches {
+                                Some(0) => {
+                                    s.bye_after_body_fetches = None;
+                                    bye_close = true;
+                                }
+                                Some(n) => s.bye_after_body_fetches = Some(n - 1),
+                                None => {}
+                            }
+                        }
+                        let broken = if wants_body {
+                            s.broken.clone()
+                        } else {
+                            BTreeSet::new()
+                        };
+                        let mut refused = false;
                         let condstore = s.condstore;
                         let s_lie = s.lie_literal;
                         let mut lie_out: Option<Vec<u8>> = None;
@@ -618,6 +654,10 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                             || items.contains("RFC822)");
                         let mut bump = mb.modseq;
                         for uid in uids {
+                            if broken.contains(&uid) {
+                                refused = true;
+                                continue;
+                            }
                             let m = mb.msgs.get_mut(&uid).unwrap();
                             if changed_since.is_some_and(|c| m.modseq <= c) {
                                 continue;
@@ -672,7 +712,14 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                         if let Some(raw) = lie_out {
                             silent_after = Some(raw);
                         }
-                        put(&mut out, &format!("{tag} OK fetch done"));
+                        if refused {
+                            put(
+                                &mut out,
+                                &format!("{tag} NO [SERVERBUG] Internal error occurred"),
+                            );
+                        } else {
+                            put(&mut out, &format!("{tag} OK fetch done"));
+                        }
                     }
                     "STORE" => {
                         put(&mut out, &format!("{tag} NO read-only test server"));
@@ -723,6 +770,11 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                 put(&mut out, &format!("{tag} OK IDLE terminated"));
             }
             _ => put(&mut out, &format!("{tag} BAD unknown command")),
+        }
+        if bye_close {
+            w.write_all(b"* BYE server shutting down\r\n").await?;
+            w.flush().await?;
+            return Ok(());
         }
         if let Some(raw) = silent_after {
             w.write_all(&raw).await?;

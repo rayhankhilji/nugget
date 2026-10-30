@@ -29,6 +29,7 @@ url = "2.5"
 percent-encoding = "2.3"
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 tempfile = "3"
 
 [lints]

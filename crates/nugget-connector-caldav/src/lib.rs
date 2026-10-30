@@ -26,9 +26,11 @@ mod xml;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use nugget_connector::http::{MeteredHttp, Response};
+use nugget_connector::retry::{self, Backoff};
 use nugget_connector::{
     AuthKind, CancellationToken, Change, ChangeSink, Connector, ConnectorContext, ConnectorFactory,
     Content, Document, KindInfo,
@@ -51,12 +53,118 @@ pub const ACTION_FEATURE: &str = "action:caldav";
 
 /// Cap on one response body.
 const MAX_BODY: usize = 32 * 1024 * 1024;
+/// Cap on one calendar object after inline attachments are dropped; larger objects are skipped
+/// (logged), never fatal.
+const MAX_EVENT: usize = 8 * 1024 * 1024;
 /// Events per `calendar-multiget`.
 const MULTIGET_BATCH: usize = 50;
 /// Results asked for per `sync-collection` page (servers may return fewer and truncate).
 const SYNC_PAGE: usize = 500;
 /// Guard against a server that truncates forever.
 const MAX_SYNC_PAGES: usize = 10_000;
+
+/// Size limits (tests shrink them).
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    max_body: usize,
+    max_event: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_body: MAX_BODY,
+            max_event: MAX_EVENT,
+        }
+    }
+}
+
+/// Inline retries of throttled or failing requests (429, 408, 500, 502-504): exponential
+/// backoff with jitter, a server `Retry-After` as the floor. A hint longer than `max` is not
+/// waited out here: the error goes to ingest, which schedules the next pass.
+#[derive(Debug, Clone, Copy)]
+struct RetryPolicy {
+    attempts: u32,
+    base: Duration,
+    max: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            attempts: 4,
+            base: Duration::from_secs(1),
+            max: Duration::from_secs(60),
+        }
+    }
+}
+
+/// Error for a transient status after retries: throttling (or a 5xx with a hint) is
+/// `RateLimited`, the rest `Network`. Never `Unauthorized`.
+fn transient_error(resp: &Response, hint: Option<Duration>) -> Error {
+    let status = resp.status.as_u16();
+    match (status, hint) {
+        (429, _) | (_, Some(_)) => Error::RateLimited {
+            retry_after_ms: hint.map(|d| d.as_millis().min(u128::from(u64::MAX)) as u64),
+        },
+        _ => Error::Network(format!("CalDAV server: HTTP {}", resp.status)),
+    }
+}
+
+/// Whether `e` is the HTTP client's response-size cap.
+fn is_body_cap(e: &Error) -> bool {
+    matches!(e, Error::Invalid(m) if m.starts_with("response body exceeds"))
+}
+
+/// An href path with percent-escapes decoded, for comparing hrefs the server spells
+/// differently in different responses (`%40` vs `@`, `%c3%a9` vs `%C3%A9`).
+fn href_bytes(path: &str) -> Vec<u8> {
+    let b = path.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && i + 2 < b.len()
+            && let (Some(h), Some(l)) = (
+                (b[i + 1] as char).to_digit(16),
+                (b[i + 2] as char).to_digit(16),
+            )
+        {
+            out.push((h * 16 + l) as u8);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Drop inline binary attachments (`ATTACH;ENCODING=BASE64` / `VALUE=BINARY`, with their folded
+/// continuation lines): they are what makes calendar objects huge, and they hold no text.
+fn strip_inline_attachments(ics: &str) -> String {
+    let mut out = String::with_capacity(ics.len().min(1 << 20));
+    let mut skipping = false;
+    for line in ics.split_inclusive('\n') {
+        if line.starts_with([' ', '\t']) {
+            if !skipping {
+                out.push_str(line);
+            }
+            continue;
+        }
+        let head = line
+            .split([':', '\r', '\n'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_uppercase();
+        skipping = (head == "ATTACH" || head.starts_with("ATTACH;"))
+            && (head.contains("ENCODING=BASE64") || head.contains("VALUE=BINARY"));
+        if !skipping {
+            out.push_str(line);
+        }
+    }
+    out
+}
 
 // ---------------------------------------------------------------------------------------------
 // Settings
@@ -260,6 +368,8 @@ pub struct CalDavConnector {
     base: Url,
     ctx: ConnectorContext,
     http: MeteredHttp,
+    limits: Limits,
+    retry: RetryPolicy,
 }
 
 impl std::fmt::Debug for CalDavConnector {
@@ -349,13 +459,30 @@ type KnownMap = HashMap<String, Option<String>>;
 impl CalDavConnector {
     pub fn new(settings: CalDavSettings, ctx: ConnectorContext) -> Result<Self> {
         let base = settings.base_url()?;
-        let http = MeteredHttp::new(ctx.egress.clone(), FEATURE)?.with_max_body(MAX_BODY);
+        let limits = Limits::default();
+        let http = MeteredHttp::new(ctx.egress.clone(), FEATURE)?.with_max_body(limits.max_body);
         Ok(Self {
             settings,
             base,
             ctx,
             http,
+            limits,
+            retry: RetryPolicy::default(),
         })
+    }
+
+    #[cfg(test)]
+    fn with_limits(mut self, limits: Limits) -> Result<Self> {
+        self.http =
+            MeteredHttp::new(self.ctx.egress.clone(), FEATURE)?.with_max_body(limits.max_body);
+        self.limits = limits;
+        Ok(self)
+    }
+
+    #[cfg(test)]
+    fn with_retry(mut self, retry: RetryPolicy) -> Self {
+        self.retry = retry;
+        self
     }
 
     fn password(&self) -> Result<String> {
@@ -421,34 +548,54 @@ impl CalDavConnector {
         self.check_url(url)?;
         let m = Method::from_bytes(method.as_bytes())
             .map_err(|e| Error::Invalid(format!("http method: {e}")))?;
-        let mut req = self
-            .http
-            .request(m, url.as_str())
-            .basic_auth(&self.settings.username, Some(password))
-            .header(
-                reqwest::header::CONTENT_TYPE,
-                "application/xml; charset=utf-8",
-            )
-            .body(body);
-        if let Some(d) = depth {
-            req = req.header("Depth", d);
-        }
-        let resp = tokio::select! {
-            r = self.http.send(req, &[]) => r?,
-            _ = cancel.cancelled() => return Err(Error::Cancelled),
+        let backoff = Backoff {
+            base: self.retry.base,
+            max: self.retry.max,
         };
-        if resp.status.is_redirection() {
-            let to = resp
-                .headers
-                .get(reqwest::header::LOCATION)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("?");
-            return Err(Error::Network(format!(
-                "CalDAV server redirected {method} {url} to {to}; redirects are not followed \
-                 (update the source URL)"
-            )));
+        let mut attempt = 0;
+        loop {
+            let mut req = self
+                .http
+                .request(m.clone(), url.as_str())
+                .basic_auth(&self.settings.username, Some(password))
+                .header(
+                    reqwest::header::CONTENT_TYPE,
+                    "application/xml; charset=utf-8",
+                )
+                .body(body.clone());
+            if let Some(d) = depth {
+                req = req.header("Depth", d);
+            }
+            let resp = tokio::select! {
+                r = self.http.send(req, &[]) => r?,
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+            };
+            if resp.status.is_redirection() {
+                let to = resp
+                    .headers
+                    .get(reqwest::header::LOCATION)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("?");
+                return Err(Error::Network(format!(
+                    "CalDAV server redirected {method} {url} to {to}; redirects are not followed \
+                     (update the source URL)"
+                )));
+            }
+            if !matches!(resp.status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504) {
+                return Ok(resp);
+            }
+            let hint = retry::retry_after(&resp.headers);
+            attempt += 1;
+            if attempt >= self.retry.attempts || hint.is_some_and(|h| h > self.retry.max) {
+                return Err(transient_error(&resp, hint));
+            }
+            let delay = backoff.delay(attempt - 1, hint);
+            tracing::debug!(status = %resp.status, ?delay, attempt, "CalDAV request throttled or failed; retrying");
+            tokio::select! {
+                _ = tokio::time::sleep(delay) => {}
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+            }
         }
-        Ok(resp)
     }
 
     async fn propfind(
@@ -749,7 +896,9 @@ impl CalDavConnector {
             let mut truncated = false;
             let mut fetch = Vec::new();
             for r in &ms.responses {
-                let url = self.resolve(&cal.url, &r.href)?;
+                let Some(url) = self.member_url(cal, &r.href) else {
+                    continue;
+                };
                 let key = url.path().to_string();
                 if key.trim_end_matches('/') == cal.path.trim_end_matches('/') {
                     truncated |= r.status == Some(507);
@@ -780,9 +929,17 @@ impl CalDavConnector {
             }
             self.multiget(password, cal, &fetch, known, sink, cancel)
                 .await?;
-            token = ms.sync_token.clone().ok_or_else(|| {
+            let next = ms.sync_token.clone().ok_or_else(|| {
                 Error::Network("sync-collection response without a sync-token".into())
             })?;
+            if truncated && next == token {
+                // Asking again with the same token would return the same page forever.
+                return Err(Error::Network(
+                    "CalDAV server truncated sync-collection without advancing its sync-token"
+                        .into(),
+                ));
+            }
+            token = next;
             let entry = CalCursor {
                 sync_token: Some(token.clone()),
                 ctag: cal.ctag.clone(),
@@ -830,7 +987,9 @@ impl CalDavConnector {
             .await?;
         let mut listing: HashMap<String, Option<String>> = HashMap::new();
         for r in &ms.responses {
-            let url = self.resolve(&cal.url, &r.href)?;
+            let Some(url) = self.member_url(cal, &r.href) else {
+                continue;
+            };
             let key = url.path().to_string();
             if !key.starts_with(&cal.path)
                 || key.trim_end_matches('/') == cal.path.trim_end_matches('/')
@@ -864,6 +1023,18 @@ impl CalDavConnector {
         })
     }
 
+    /// A member href of `cal`, or `None` (logged) when it cannot be used: one bad href skips
+    /// that item, never the sync.
+    fn member_url(&self, cal: &Calendar, href: &str) -> Option<Url> {
+        match self.resolve(&cal.url, href) {
+            Ok(u) => Some(u),
+            Err(e) => {
+                tracing::warn!(calendar = %cal.path, error = %e, "skipping unusable member href");
+                None
+            }
+        }
+    }
+
     async fn multiget(
         &self,
         password: &str,
@@ -873,12 +1044,14 @@ impl CalDavConnector {
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        for chunk in keys.chunks(MULTIGET_BATCH) {
+        // Batches, in order; a response over the size cap is split until the culprit stands
+        // alone, and a single object too big to download is skipped.
+        let mut pending: Vec<&[String]> = keys.chunks(MULTIGET_BATCH).rev().collect();
+        while let Some(chunk) = pending.pop() {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let wanted: HashSet<&str> = chunk.iter().map(String::as_str).collect();
-            let resp = self
+            let resp = match self
                 .send(
                     password,
                     "REPORT",
@@ -887,15 +1060,33 @@ impl CalDavConnector {
                     multiget_body(chunk),
                     cancel,
                 )
-                .await?
-                .error_for_status()?;
-            let ms = xml::multistatus(&resp.body)?;
-            for r in &ms.responses {
-                let url = self.resolve(&cal.url, &r.href)?;
-                let key = url.path().to_string();
-                if !wanted.contains(key.as_str()) {
+                .await
+            {
+                Err(e) if is_body_cap(&e) && chunk.len() > 1 => {
+                    let (a, b) = chunk.split_at(chunk.len() / 2);
+                    pending.push(b);
+                    pending.push(a);
                     continue;
                 }
+                Err(e) if is_body_cap(&e) => {
+                    tracing::warn!(href = %chunk[0], limit = self.limits.max_body, "calendar object too large to download; skipping");
+                    continue;
+                }
+                r => r?.error_for_status()?,
+            };
+            // Requested key by decoded href: servers may spell an href differently than in
+            // their own sync-collection or listing (`%40` vs `@`).
+            let wanted: HashMap<Vec<u8>, &String> =
+                chunk.iter().map(|k| (href_bytes(k), k)).collect();
+            let ms = xml::multistatus(&resp.body)?;
+            for r in &ms.responses {
+                let Some(url) = self.member_url(cal, &r.href) else {
+                    continue;
+                };
+                let Some(&key) = wanted.get(&href_bytes(url.path())) else {
+                    continue;
+                };
+                let key = key.clone();
                 let Some(data) = r.prop(CALDAV, "calendar-data").map(|e| e.text.clone()) else {
                     if r.status == Some(404) && known.remove(&key).is_some() {
                         sink.send(Change::Delete(ItemKey::new(key))).await?;
@@ -906,7 +1097,14 @@ impl CalDavConnector {
                     continue;
                 }
                 // XML parsing normalizes line ends to LF; iCalendar wants CRLF.
-                let data = data.replace("\r\n", "\n").replace('\n', "\r\n");
+                let mut data = data.replace("\r\n", "\n").replace('\n', "\r\n");
+                if data.len() > self.limits.max_event {
+                    data = strip_inline_attachments(&data);
+                }
+                if data.len() > self.limits.max_event {
+                    tracing::warn!(href = %key, size = data.len(), limit = self.limits.max_event, "calendar object too large; skipping");
+                    continue;
+                }
                 let etag = r.prop_text(DAV, "getetag");
                 let mut doc = Document::new(
                     key.clone(),
@@ -945,5 +1143,7 @@ impl Connector for CalDavConnector {
     }
 }
 
+#[cfg(test)]
+mod conformance;
 #[cfg(test)]
 mod tests;

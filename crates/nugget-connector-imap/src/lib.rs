@@ -67,6 +67,8 @@ const MAX_IDLE_VANISHED: u32 = 10_000;
 /// Re-issue IDLE before the 30-minute server inactivity timeout (RFC 2177).
 const IDLE_REFRESH: Duration = Duration::from_secs(25 * 60);
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
+/// Reconnects within one pass after the server dropped the session (BYE, reset).
+const MAX_RECONNECTS: usize = 3;
 
 // ---------------------------------------------------------------------------------------------
 // Factory
@@ -421,14 +423,31 @@ impl ImapConnector {
             sink,
             cancel,
         };
-        for folder in &folders {
+        let mut known = known;
+        let mut reconnects = 0;
+        let mut i = 0;
+        let empty = HashMap::new();
+        while let Some(folder) = folders.get(i) {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let empty = HashMap::new();
             let known_f = known.get(folder).unwrap_or(&empty);
-            run.sync_folder(folder, known_f, &mut cursor, &mut meter)
-                .await?;
+            match run
+                .sync_folder(folder, known_f, &mut cursor, &mut meter)
+                .await
+            {
+                Ok(()) => i += 1,
+                // The server dropped the session (BYE, reset): reconnect and redo this mailbox
+                // from the progress committed so far, against what was applied meanwhile.
+                Err(e) if is_disconnect(&e) && reconnects < MAX_RECONNECTS => {
+                    reconnects += 1;
+                    tracing::warn!(folder, error = %e, reconnects, "IMAP session dropped; reconnecting");
+                    meter.flush();
+                    run.imap = self.connect(&meter, cancel).await?;
+                    known = self.known_tree().await?;
+                }
+                Err(e) => return Err(e),
+            }
             meter.flush();
         }
         run.imap.logout().await;
@@ -549,6 +568,15 @@ impl Connector for ImapConnector {
     async fn watch(&self, sink: Arc<dyn ChangeSink>, cancel: CancellationToken) -> Result<()> {
         self.run_watch(sink, cancel).await
     }
+}
+
+/// Whether `e` means the server dropped the session (worth a reconnect), as opposed to a
+/// timeout, a protocol violation or a refusal.
+fn is_disconnect(e: &Error) -> bool {
+    matches!(e, Error::Network(m) if m.contains("closed the session")
+        || m.contains("closed the connection")
+        || m.contains("connection lost")
+        || m.starts_with("imap i/o"))
 }
 
 async fn send_delete(sink: &dyn ChangeSink, folder: &str, uv: u32, uid: u32) -> Result<()> {
@@ -784,7 +812,30 @@ impl Run<'_> {
         let max_total = BODY_BATCH_BYTES as usize + cap;
         let mut bodies = HashMap::new();
         for set in conn::uid_sets(&uids, MAX_SET_LEN) {
-            bodies.extend(self.imap.fetch_bodies(&set, header_only, max_total).await?);
+            match self.imap.fetch_bodies(&set, header_only, max_total).await {
+                Ok(b) => bodies.extend(b),
+                // The server cannot deliver some message of the group: fetch the rest one by one
+                // and skip only those it refuses, so one broken message never stops the sync.
+                Err(Error::Provider(m)) => {
+                    tracing::warn!(folder, error = %m, "IMAP FETCH refused; retrying one by one");
+                    bodies.clear();
+                    for uid in &uids {
+                        match self
+                            .imap
+                            .fetch_bodies(&uid.to_string(), header_only, max_total)
+                            .await
+                        {
+                            Ok(b) => bodies.extend(b),
+                            Err(Error::Provider(m)) => {
+                                tracing::warn!(folder, uid, error = %m, "skipping a message the server cannot deliver");
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
         }
         let condstore = self.imap.condstore;
         for m in group {
