@@ -486,7 +486,11 @@ jobs:
   #   the desktop asks for consent in its real dialog, accepted over AT-SPI as a user would,
   #   and Ctrl+Alt+Space is pressed on the compositor's virtual keyboard (KWin fake input,
   #   Mutter RemoteDesktop): the shortcut must fire through the desktop's own key handling.
-  #   NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES=1 makes anything short of that a failure.
+  #   NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES=1 makes anything short of that a failure. Test-session
+  #   specifics: KWin runs with its restricted-interface check off
+  #   (KWIN_WAYLAND_NO_PERMISSION_CHECKS) so the test's python3 may use fake input; GNOME Shell's
+  #   startup is awaited ("GNOME Shell started at") before the overview it starts in is closed,
+  #   since app accelerators are ignored until then.
   # sway and kwin also run nugget-a11y over AT-SPI on the GTK 4 app
   # (crates/nugget-a11y/tests/linux_wayland.rs) and Double Tap's read -> draft (scripted
   # provider) -> insert -> read-back path (crates/nugget-hotkey/tests/wayland_it.rs), on kwin
@@ -584,12 +588,14 @@ jobs:
   # The debug .deb (pnpm tauri build --debug --bundles deb: NUGGET_E2E_PROBE works in a debug
   # build) is built once, checked (packaging/scripts/check-linux-desktop-file.sh) and installed
   # with apt in each session; the installed nugget-desktop is started natively on Wayland and
-  # tests/fixtures/native/linux/wayland-app-shortcut.sh requires the probe's `trigger` event:
+  # tests/fixtures/native/linux/wayland-app-shortcut.sh checks:
   # - kwin, gnome: the portal session is created for dev.nugget.Nugget from the installed
-  #   /usr/share/applications/dev.nugget.Nugget.desktop; the desktop's consent dialog is
-  #   accepted over AT-SPI; Ctrl+Alt+Space on the compositor's virtual keyboard fires Double Tap.
+  #   /usr/share/applications/dev.nugget.Nugget.desktop; the desktop's consent dialogs (two:
+  #   Double Tap and the agents' kill switch) are accepted over AT-SPI; Ctrl+Alt+Space on the
+  #   compositor's virtual keyboard must fire Double Tap (the probe's `trigger` event).
   # - sway: no GlobalShortcuts; the listener reports the documented error and the fallback a
-  #   sway user binds (`nugget-desktop --double-tap`, handed to the running app) fires it.
+  #   sway user binds (`nugget-desktop --double-tap`, handed to the running app) must start the
+  #   Double Tap flow (the hand-off records no `trigger` event; the flow's first `view` counts).
   # nuggetd is not bundled in this build (no sidecar): the trigger does not need it.
   wayland-app-deb:
     name: Wayland app (debug .deb)

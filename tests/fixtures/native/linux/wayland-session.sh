@@ -30,7 +30,11 @@
 #
 # NUGGET_WAYLAND_CONSENT=preseed (kwin only) writes the consent a returning user has (the
 # shortcut in kglobalshortcutsrc) before KWin starts, so no dialog is shown. By default the
-# dialog is left to the test.
+# dialog is left to the test (CI accepts the real dialog; the pre-seeded path is not run there).
+#
+# Diagnostics, off by default: NUGGET_WAYLAND_DBUS_MONITOR=1 (dbus-monitor.log),
+# NUGGET_WAYLAND_KWIN_LOGGING (QT_LOGGING_RULES for KWin), NUGGET_WAYLAND_MUTTER_DEBUG
+# (MUTTER_DEBUG topics), NUGGET_WAYLAND_GNOME_PORTAL_DEBUG (G_MESSAGES_DEBUG for the GNOME portal).
 #
 # The command sees WAYLAND_DISPLAY, XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS,
 # XDG_SESSION_TYPE=wayland and XDG_CURRENT_DESKTOP, and no DISPLAY. Logs go to
