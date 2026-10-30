@@ -17,7 +17,7 @@ export interface ShortcutRow {
 export function ShortcutsHelp({ rows, onClose }: { rows: readonly ShortcutRow[]; onClose: () => void }) {
   const t = useT();
   return (
-    <Dialog title={t("shortcuts.title")} description={t("shortcuts.description")} onClose={onClose}>
+    <Dialog title={t("shortcuts.title")} description={t("shortcuts.description")} onClose={onClose} scrollable>
       <dl className="shortcut-list">
         {rows.map((r) => (
           <div key={`${r.combos.map((c) => `${c.mod ? "mod-" : ""}${c.key}`).join("|")}-${r.label}`} className="shortcut-row">

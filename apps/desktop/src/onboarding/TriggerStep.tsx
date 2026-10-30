@@ -52,7 +52,11 @@ export function TriggerKeys({ pref, os }: { pref: TriggerPref; os: Os }) {
   if (pref.kind === "double_tap") {
     return <Trans k="onboarding.trigger.summaryTap" args={{ key: modifierLabel(pref.modifier, os) }} tags={{ kbd: (c) => <kbd>{c}</kbd> }} />;
   }
-  const keys = acceleratorLabel(pref.accelerator, os).split(os === "macos" ? /(?=[⌘⌥⇧⌃])|(?<=[⌘⌥⇧⌃])/u : "+").filter(Boolean);
+  // One cap per key of the accelerator (no regex lookbehind: older macOS WebKit can't parse it).
+  const keys = pref.accelerator
+    .split("+")
+    .filter(Boolean)
+    .map((k) => acceleratorLabel(k, os));
   return (
     <span className="ob-keys" dir="ltr">
       {keys.map((k, i) => (

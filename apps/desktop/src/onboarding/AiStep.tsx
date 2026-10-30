@@ -138,11 +138,9 @@ function LocalModels({ onReady }: { onReady: (model: string) => void }) {
   const visible = (list: ModelInfo[]) => (all || recommended.length === 0 ? list : list.filter((m) => m.recommended));
   const best = bestModel(chat, fit.data?.models);
 
-  // A chat model installed, or installing, sets up this path (Continue then marks the step done).
-  const ready = chat.find((m) => {
-    const phase = progress[m.id]?.phase;
-    return m.installed || phase === "downloading" || phase === "verifying" || phase === "installed";
-  });
+  // Only an installed chat model sets up this path (Continue then marks the step done): a download
+  // can still fail or be cancelled.
+  const ready = chat.find((m) => m.installed || progress[m.id]?.phase === "installed");
   useEffect(() => {
     if (ready) onReady(ready.id);
   }, [ready?.id]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -19,25 +19,31 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-/** What an error means to the user: a translated headline, and the raw text for "Details". */
-function describeError(e: ApiError, t: ReturnType<typeof useT>): { headline: string; detail: string | null } {
+/**
+ * What an error means to the user: the text to show (and announce), and the technical text kept
+ * behind "Details".
+ * - busy / locked, timed out, version mismatch, failed start: a translated sentence.
+ * - any other daemon (rpc) error: the daemon's own message stays visible, since it usually says
+ *   what to fix (a bad path, a duplicate name); its code goes under Details, never number-formatted.
+ * - anything else (shell io errors, script errors): "Something went wrong", raw text under Details.
+ */
+export function describeError(e: ApiError, t: ReturnType<typeof useT>): { headline: string; detail: string | null } {
   const raw = e.message.trim();
   const code = e.kind === "rpc" && e.code !== null ? t("common.errorCode", { code: String(e.code) }) : "";
   const detail = [raw, code].filter(Boolean).join(" ") || null;
   if (e.kind === "rpc" || e.kind === "protocol" || e.kind === "spawn") {
     if (e.isBusy || /\b(locked|busy)\b/i.test(raw)) return { headline: t("common.error.busy"), detail };
     if (/timed? ?out|timeout|deadline/i.test(raw)) return { headline: t("common.error.timeout"), detail };
-    if (e.kind === "protocol") return { headline: t("common.error.protocol"), detail };
-    return { headline: t("common.error.generic"), detail };
   }
-  // Errors raised by the app itself ("other") already read as sentences: show them as they are.
-  return { headline: raw || t("common.error.generic"), detail: null };
+  if (e.kind === "protocol") return { headline: t("common.error.protocol"), detail };
+  if (e.kind === "rpc" && raw) return { headline: raw, detail: code || null };
+  return { headline: t("common.error.generic"), detail };
 }
 
 /**
- * Inline error: a short, translated headline (busy, timed out, or "Something went wrong"), an
- * optional Retry, and the technical text behind "Details". Offline errors are handled app-wide,
- * so they render as a quiet hint here.
+ * Inline error: what went wrong (a translated sentence for known cases, else the daemon's own
+ * message), an optional Retry, and the technical text behind "Details". Offline errors are
+ * handled app-wide, so they render as a quiet hint here.
  */
 export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const t = useT();

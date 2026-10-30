@@ -60,6 +60,7 @@ export function Dialog({
   onClose,
   children,
   wide = false,
+  scrollable = false,
 }: {
   title: string;
   description?: ReactNode;
@@ -67,6 +68,11 @@ export function Dialog({
   onClose: () => void;
   children: ReactNode;
   wide?: boolean;
+  /**
+   * The body holds no focusable content (information only): make it a named Tab stop so the
+   * keyboard can scroll it in a short window.
+   */
+  scrollable?: boolean;
 }) {
   const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
@@ -116,7 +122,10 @@ export function Dialog({
       </div>
       {/* The title bar stays put; this scrolls, and a `.dialog-actions` footer inside it sticks
           to the bottom so the dialog's buttons are always in view. */}
-      <div className="dialog-body">
+      <div
+        className="dialog-body"
+        {...(scrollable ? { tabIndex: 0, role: "region", "aria-labelledby": titleId } : {})}
+      >
         {description && (
           <p id={descId} className="muted dialog-desc">
             {description}

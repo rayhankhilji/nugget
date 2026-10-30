@@ -1060,6 +1060,17 @@ tbody tr:last-child > * {
   padding-block-end: var(--space-5);
 }
 
+/* With a sticky footer, keep a field scrolled into view by Tab clear of it (WCAG 2.4.11):
+   the footer is about 64px, more when its buttons wrap. */
+.dialog-body:has(.dialog-actions) {
+  scroll-padding-block-end: 96px;
+}
+
+/* A scrollable body that is itself a Tab stop (Dialog's `scrollable`): ring inside the frame. */
+.dialog-body:focus-visible {
+  outline-offset: -2px;
+}
+
 .dialog-desc {
   margin-bottom: var(--space-3);
 }
