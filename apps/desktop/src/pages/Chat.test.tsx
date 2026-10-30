@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
-import type { AskStarted, ChatMessage, StoredConversation } from "../api";
+import type { AnswerCheck, AskStarted, ChatMessage, StoredConversation } from "../api";
 import { ChatPage, readUseSources, writeUseSources } from "./Chat";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 
@@ -57,9 +57,11 @@ async function say(container: HTMLElement, text: string) {
   await flush();
 }
 
-async function reply(streamId: string, text: string) {
+async function reply(streamId: string, text: string, check?: AnswerCheck) {
   await act(() => emit("nugget:chat-delta", { stream_id: streamId, text }));
-  await act(() => emit("nugget:chat-done", { stream_id: streamId, input_tokens: 1, output_tokens: 2, error: null }));
+  await act(() =>
+    emit("nugget:chat-done", { stream_id: streamId, input_tokens: 1, output_tokens: 2, error: null, ...(check ? { check } : {}) }),
+  );
   await flush();
 }
 
@@ -260,5 +262,120 @@ describe("Chat with sources", () => {
     });
     const { container } = await render(<ChatPage />);
     expect(container.textContent).toContain("so this is a general answer");
+  });
+});
+
+describe("Chat answer check", () => {
+  beforeEach(() => installDomShims());
+  afterEach(() => cleanup());
+
+  const status = (container: HTMLElement) => container.querySelector('[role="status"][aria-live="polite"]')!.textContent!.trim();
+
+  it("says calmly when nothing in the items answers, keeping the passages behind the toggle", async () => {
+    const { saved } = setup();
+    const { container } = await render(<ChatPage />);
+    await say(container, "When is the dentist?");
+    const check: AnswerCheck = { not_found: true, claims: 0, flagged: [], invalid_citations: 0 };
+    await reply("s-ask-1", "I couldn't find that in your items.", check);
+
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.querySelector(".chat-not-found")!.textContent).toBe("Nothing in your items answers this.");
+    expect(item.querySelector(".chat-check")).toBeNull();
+    expect(status(container)).toBe("Answer ready. Nothing in your items answers this.");
+    // The passage the model saw is still one toggle away.
+    const more = byText(item, "button", "1 more passage the model saw")!;
+    await click(more);
+    expect(item.querySelector(".chat-citations-more")!.textContent).toContain("River walk");
+
+    expect(saved[saved.length - 1]!.messages[1]).toMatchObject({ check: { not_found: true } });
+  });
+
+  it("lists claims not backed by a cited item behind a disclosure", async () => {
+    const { saved } = setup();
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    const check = {
+      not_found: false,
+      claims: 3,
+      flagged: [
+        { text: "It was in May.", reason: "uncited" },
+        { text: "We saw 40 herons [1].", reason: "unsupported" },
+        { text: "Some newer reason.", reason: "something_new" },
+      ],
+      invalid_citations: 0,
+    } as unknown as AnswerCheck;
+    await reply("s-ask-1", "By the river [1]. It was in May. We saw 40 herons [1]. Some newer reason.", check);
+
+    const item = container.querySelector("li.msg-assistant")!;
+    expect(item.querySelector(".chat-not-found")).toBeNull();
+    expect(status(container)).toBe("Answer ready, 1 source.");
+    const toggleBtn = byText(item, "button", "3 statements aren't backed by a cited item")!;
+    expect(toggleBtn.getAttribute("aria-expanded")).toBe("false");
+    expect(item.querySelector(".chat-check-list")).toBeNull();
+
+    await click(toggleBtn);
+    expect(toggleBtn.getAttribute("aria-expanded")).toBe("true");
+    const list = item.querySelector(".chat-check-list")!;
+    expect(toggleBtn.getAttribute("aria-controls")).toBe(list.id);
+    expect([...list.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+      "No source cited: It was in May.",
+      "Not in the cited items: We saw 40 herons [1].",
+      "Not in the cited items: Some newer reason.",
+    ]);
+    expect(list.querySelector('li span[dir="auto"]')!.textContent).toBe("It was in May.");
+
+    // Citations still focus their source.
+    await click(item.querySelector<HTMLButtonElement>("button.cite"));
+    expect(document.activeElement?.textContent).toContain("River walk");
+
+    // Saved with the turn; unknown reasons are kept as `unsupported`.
+    const m = saved[saved.length - 1]!.messages[1]!;
+    expect(m.check!.flagged.map((f) => f.reason)).toEqual(["uncited", "unsupported", "unsupported"]);
+  });
+
+  it("shows nothing extra for an answer without a check or with nothing flagged", async () => {
+    const { saved } = setup();
+    const { container } = await render(<ChatPage />);
+    await say(container, "Where did we watch herons?");
+    await reply("s-ask-1", "By the river [1].", { not_found: false, claims: 1, flagged: [], invalid_citations: 0 });
+    await say(container, "And then?");
+    await reply("s-ask-2", "Home [1].");
+    expect(container.querySelector(".chat-check")).toBeNull();
+    expect(container.querySelector(".chat-not-found")).toBeNull();
+    expect(saved[saved.length - 1]!.messages[3]!.check).toBeUndefined();
+  });
+
+  it("restores the check from history, and turns saved without one still load", async () => {
+    mockDaemon({
+      chat_history_load: [
+        {
+          id: "c-1",
+          title: "q",
+          updated_at: 1,
+          messages: [
+            { role: "user", text: "q1" },
+            { role: "assistant", text: "old answer", state: "done" },
+            { role: "user", text: "q2" },
+            {
+              role: "assistant",
+              text: "It was in May.",
+              state: "done",
+              check: { not_found: false, claims: 1, flagged: [{ text: "It was in May.", reason: "uncited" }], invalid_citations: 0 },
+            },
+            { role: "user", text: "q3" },
+            { role: "assistant", text: "I couldn't find that in your items.", state: "done", check: { not_found: true } },
+            { role: "user", text: "q4" },
+            { role: "assistant", text: "odd", state: "done", check: "garbage" },
+          ],
+        },
+      ],
+    });
+    const { container } = await render(<ChatPage />);
+    const items = container.querySelectorAll("li.msg-assistant");
+    expect(items).toHaveLength(4);
+    expect(items[0]!.querySelector(".chat-check, .chat-not-found")).toBeNull();
+    expect(byText(items[1]!, "button", "1 statement isn't backed by a cited item")).toBeDefined();
+    expect(items[2]!.querySelector(".chat-not-found")!.textContent).toBe("Nothing in your items answers this.");
+    expect(items[3]!.querySelector(".chat-check, .chat-not-found")).toBeNull();
   });
 });

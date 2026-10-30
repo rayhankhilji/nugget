@@ -83,6 +83,8 @@ export interface ChatDone {
   error: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** Post-check of a sourced `retrieve.ask` answer (absent for plain chat and older daemons). */
+  check?: AnswerCheck;
 }
 
 export interface ItemRef {
@@ -2143,3 +2145,33 @@ export const learningApi = {
   /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
+
+// ---- EE3: Ask answer check ----
+
+/** Why the daemon's post-check flagged a claim. Unknown future values are treated like `unsupported`. */
+export type ClaimFlag = "uncited" | "unsupported";
+
+/** One claim of an answer the post-check could not tie to its sources. */
+export interface FlaggedClaim {
+  /** The sentence exactly as it appears in the streamed answer text. */
+  text: string;
+  reason: ClaimFlag;
+}
+
+/** The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`. */
+export interface AnswerCheck {
+  /** The answer says the user's items don't contain what was asked. */
+  not_found: boolean;
+  /** Sentences of the answer that state something. */
+  claims: number;
+  /** Claims to mark, in answer order. */
+  flagged: FlaggedClaim[];
+  /** Citation markers that named a passage the model was not given (removed from the text). */
+  invalid_citations: number;
+}
+
+// Declaration merge: `StoredChatMessage` (chat history) keeps an answer's check.
+export interface StoredChatMessage {
+  /** The answer's post-check, when it came with one (absent from turns saved before EE3). */
+  check?: AnswerCheck | null;
+}

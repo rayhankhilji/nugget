@@ -56,6 +56,9 @@ pub struct StoredMessage {
     /// The reply is a general answer: "Use my sources" found no matching passages.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub general_answer: Option<bool>,
+    /// The daemon's post-check of a sourced answer (`chat.done`'s `check`), kept opaque here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,6 +154,11 @@ pub fn validate(c: &Conversation) -> Result<(), String> {
                 || serde_json::to_vec(cs).map_or(true, |b| b.len() > MAX_MESSAGE_BYTES))
         {
             return Err("too many citations".into());
+        }
+        if let Some(c) = &m.check
+            && serde_json::to_vec(c).map_or(true, |b| b.len() > MAX_MESSAGE_BYTES)
+        {
+            return Err("answer check is too long".into());
         }
     }
     Ok(())
@@ -338,6 +346,7 @@ mod tests {
             output_tokens: None,
             citations: None,
             general_answer: None,
+            check: None,
         }
     }
 
@@ -380,6 +389,21 @@ mod tests {
         clear(&path).unwrap();
         assert!(load(&path).is_empty());
         clear(&path).unwrap();
+    }
+
+    #[test]
+    fn keeps_the_answer_check() {
+        let dir = TempDir::new("check");
+        let path = file_in(&dir.0);
+        let mut c = conv("a", 2);
+        let check = serde_json::json!({"not_found": true, "claims": 0, "flagged": []});
+        c.messages[1].check = Some(check.clone());
+        assert!(validate(&c).is_ok());
+        save(&path, &upsert(Vec::new(), c)).unwrap();
+        assert_eq!(load(&path)[0].messages[1].check, Some(check));
+        let mut big = conv("b", 2);
+        big.messages[1].check = Some(serde_json::json!("x".repeat(MAX_MESSAGE_BYTES)));
+        assert!(validate(&big).is_err());
     }
 
     #[cfg(unix)]
