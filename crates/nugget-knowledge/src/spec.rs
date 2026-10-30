@@ -38,6 +38,17 @@ pub(crate) struct EntitySpec {
     /// The identifiers were asserted together by a trusted record (a contact card): entities
     /// holding them may be merged.
     pub trusted_identifiers: bool,
+    /// Other occurrences folded into this one by a short-name rule ("Maggie" into "Maggie T" on
+    /// the same item): each becomes a merge record on the entity this one resolves to.
+    pub folds: Vec<NameFold>,
+}
+
+/// An occurrence folded into another before resolution, and why.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct NameFold {
+    pub name: String,
+    pub reasons: Vec<String>,
+    pub detail: String,
 }
 
 impl EntitySpec {
@@ -51,6 +62,7 @@ impl EntitySpec {
             mentions: Vec::new(),
             weak_name: false,
             trusted_identifiers: false,
+            folds: Vec::new(),
         }
     }
 
@@ -168,6 +180,11 @@ impl Extraction {
                 }
                 e.mentions.extend(spec.mentions);
                 e.trusted_identifiers |= spec.trusted_identifiers;
+                for f in spec.folds {
+                    if !e.folds.contains(&f) {
+                        e.folds.push(f);
+                    }
+                }
                 i
             }
             None => {

@@ -513,6 +513,84 @@ fn model_kinds_yield_to_known_entities() {
     );
 }
 
+fn run_text(text: &str, answer: Value) -> Extraction {
+    let (it, chunks) = item(text);
+    validate_full(
+        &answer,
+        &it,
+        &chunks,
+        &LlmConfig::default(),
+        Some("Robin Ashgrove"),
+    )
+    .extraction
+}
+
+#[test]
+fn short_names_fold_into_the_one_compatible_person_in_the_response() {
+    let text = "Margaret Thistlewood joined the call. Maggie said M. Thistlewood would send the \
+deck. Mark Thistlewood was away.";
+    let ex = run_text(
+        text,
+        json!({"entities": [
+            {"name": "Margaret Thistlewood", "kind": "person"},
+            {"name": "Maggie", "kind": "person"},
+            {"name": "M. Thistlewood", "kind": "person"},
+            {"name": "Mark Thistlewood", "kind": "person"}
+        ], "claims": []}),
+    );
+    // "Maggie" is a nickname of Margaret only; "M. Thistlewood" fits Margaret and Mark: kept.
+    let people = names(&ex, EntityKind::Person);
+    assert_eq!(
+        people,
+        ["Margaret Thistlewood", "M. Thistlewood", "Mark Thistlewood"]
+    );
+    let m = &ex.entities[0];
+    assert!(m.aliases.contains(&"Maggie".to_string()));
+    assert_eq!(m.folds.len(), 1);
+    assert_eq!(m.folds[0].name, "Maggie");
+    assert_eq!(m.folds[0].reasons, ["nickname", "same_item"]);
+    assert!(ex.entities.iter().skip(1).all(|e| e.folds.is_empty()));
+
+    // Two Sams: a bare "Sam" is neither.
+    let text = "Sam Okafor and Sam Whitlock both came. Sam brought cake.";
+    let ex = run_text(
+        text,
+        json!({"entities": [
+            {"name": "Sam Okafor", "kind": "person"},
+            {"name": "Sam Whitlock", "kind": "person"},
+            {"name": "Sam", "kind": "person"}
+        ], "claims": []}),
+    );
+    assert_eq!(
+        names(&ex, EntityKind::Person),
+        ["Sam Okafor", "Sam Whitlock", "Sam"]
+    );
+    assert!(ex.entities.iter().all(|e| e.folds.is_empty()));
+}
+
+#[test]
+fn the_graph_fold_leaves_people_to_corroborated_resolution() {
+    use nugget_graph::{GraphStore, MemGraph, NewEntity};
+    let g = MemGraph::new();
+    g.create_entity(&NewEntity::new(EntityKind::Person, "Priya Castellane"))
+        .unwrap();
+    g.create_entity(&NewEntity::new(
+        EntityKind::Organization,
+        "Ostrander Freight Cooperative",
+    ))
+    .unwrap();
+    let mut extra = Extraction::default();
+    extra.entity(EntitySpec::new(EntityKind::Person, "Priya"));
+    extra.entity(EntitySpec::new(EntityKind::Organization, "Ostrander"));
+    fold_first_names_in_graph(&g, None, &mut extra);
+    // A first name alone is not enough across items (the resolver needs corroboration).
+    assert_eq!(extra.entities[0].name, "Priya");
+    assert!(extra.entities[0].aliases.is_empty());
+    // Organisations still take the one longer name.
+    assert_eq!(extra.entities[1].name, "Ostrander Freight Cooperative");
+    assert_eq!(extra.entities[1].aliases, ["Ostrander"]);
+}
+
 #[test]
 fn role_synonyms_are_one_single_valued_predicate_and_titles_lose_the_employer() {
     for p in [

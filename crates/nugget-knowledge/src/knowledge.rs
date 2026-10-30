@@ -268,6 +268,7 @@ impl Knowledge {
         }
         let done = (deletes_done + upserts_done) as u64;
         s.resolve_pending_links()?;
+        s.settle_short_names()?;
         if s.retracted_any {
             // Retractions may leave entities with nothing behind them. Every batch is applied
             // by now, so whatever is orphaned really is.
@@ -367,6 +368,8 @@ impl Knowledge {
             None => crate::splits::load(self.inner.feed.as_ref())?,
         };
         list.retain(|s| !(s.from == split.from && s.to == split.to));
+        // The records of the merges the user undid no longer hold.
+        crate::resolve::forget_split(self.inner.graph.as_ref(), &split)?;
         list.push(split);
         let excess = list.len().saturating_sub(crate::splits::MAX_SPLITS);
         list.drain(..excess);

@@ -19,6 +19,9 @@
 //!    providers only by default; every claim must carry a quote found verbatim in the text.
 //! 4. **Entity resolution** (`resolve`): identifiers, then names and aliases,
 //!    then (optionally) embeddings and LLM adjudication; never across conflicting identifiers.
+//!    People's short names and nicknames ("Maggie", "M. Thistlewood", see `names`) join a
+//!    full-name person only when corroborated (shared identifier, item, thread or organisation),
+//!    whatever order items arrive in; every merge records why (`nugget_graph::MergeRecord`).
 //! 5. **Claim lifecycle** (time-aware). Every claim the pipeline writes carries `valid_from`:
 //!    the date of its earliest evidence item (a mail's `Date`, a note's frontmatter date or
 //!    modification time, an item's time; dates more than a day in the future are clamped), or
@@ -67,6 +70,7 @@ mod extract;
 mod feed;
 mod knowledge;
 pub mod llm;
+mod names;
 mod resolve;
 mod session;
 mod spec;
