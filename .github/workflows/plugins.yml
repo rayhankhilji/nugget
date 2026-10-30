@@ -8,7 +8,7 @@ name: Plugins
 
 on:
   push:
-    branches: [main]
+    branches: [main, ff/mcp-plugins] # TEMP-FF4
     paths:
       - "crates/nugget-plugin/**"
       - "crates/nuggetd/src/features/plugins.rs"

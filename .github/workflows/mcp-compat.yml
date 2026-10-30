@@ -19,6 +19,8 @@ name: MCP compatibility
 # Loopback only: nothing but npm and PyPI (dependency install) is reached over the network.
 
 on:
+  push:
+    branches: [ff/mcp-plugins] # TEMP-FF4
   pull_request:
     paths:
       - "crates/nugget-mcp/**"

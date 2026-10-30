@@ -7,6 +7,8 @@ name: Fuzz
 # time; a crash fails the job and its reproducer is uploaded. See fuzz/README.md.
 
 on:
+  push:
+    branches: [ff/mcp-plugins] # TEMP-FF4
   schedule:
     - cron: "41 4 * * *"
   workflow_dispatch:
