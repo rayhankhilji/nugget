@@ -45,18 +45,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 4B (the default chat tier), bench triage on (as the bench runs it), all 81 tasks.
-          - { label: 4b-s0, model: qwen3-4b-q4km, args: "--set all --shard 0 --shard-count 2" }
-          - { label: 4b-s1, model: qwen3-4b-q4km, args: "--set all --shard 1 --shard-count 2" }
-          # 4B with triage off: what the daemon runs today (it does not turn triage on).
-          - { label: 4b-notriage-s0, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 0 --shard-count 2" }
-          - { label: 4b-notriage-s1, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 1 --shard-count 2" }
-          # 8B (agentic tier), slower: four shards.
-          - { label: 8b-s0, model: qwen3-8b-q4km, args: "--set all --shard 0 --shard-count 4" }
-          - { label: 8b-s1, model: qwen3-8b-q4km, args: "--set all --shard 1 --shard-count 4" }
-          - { label: 8b-s2, model: qwen3-8b-q4km, args: "--set all --shard 2 --shard-count 4" }
-          - { label: 8b-s3, model: qwen3-8b-q4km, args: "--set all --shard 3 --shard-count 4" }
-          # The Xvfb desktop (kiosk Chromium windows, AT-SPI) with the GG3 tasks, 4B.
+          # RERUN (temporary matrix): the perturbed GG3 tasks on the fixed harness (time-based slow
+          # pages, overlays as groups), and the xvfb desktop with the AppArmor fix.
+          - { label: 4b-perturbed, model: qwen3-4b-q4km, args: "--set gg3 --tasks gg3-slow-settings,gg3-slow-files-move,gg3-modal-calendar,gg3-modal-shop,gg3-relayout-forward,gg3-relayout-form,gg3-fakelogin-mail-reply,gg3-fakelogin-shop-checkout" }
+          - { label: 8b-perturbed, model: qwen3-8b-q4km, args: "--set gg3 --tasks gg3-slow-settings,gg3-slow-files-move,gg3-modal-calendar,gg3-modal-shop,gg3-relayout-forward,gg3-relayout-form,gg3-fakelogin-mail-reply,gg3-fakelogin-shop-checkout" }
           - { label: 4b-xvfb-gg3, model: qwen3-4b-q4km, args: "--set gg3 --env xvfb", xvfb: true }
     steps:
       - uses: actions/checkout@v5
@@ -79,7 +71,11 @@ jobs:
 
       - name: Desktop packages
         if: matrix.xvfb
-        run: sudo bench/cua/env/setup-debian.sh
+        run: |
+          sudo bench/cua/env/setup-debian.sh
+          # Ubuntu 24.04 runners restrict unprivileged user namespaces (AppArmor), which crashes
+          # Chrome's sandbox at start; the bench only passes --no-sandbox as root.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Build the harness
         run: cargo build --release --manifest-path qa/GG3/harness/Cargo.toml --target-dir target
