@@ -1,0 +1,126 @@
+name: Evals EE1 (temporary)
+
+# Temporary: real-model knowledge runs for EE1 on push to ee/entity-resolution. Removed before
+# the package is handed over.
+
+on:
+  push:
+    branches: [ee/entity-resolution]
+    paths: [".github/workflows/evals-ee1.yml", ".ee1-run"]
+
+permissions:
+  contents: read
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  SCALE: quick
+  CHAT_MODEL: ""
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/eval-results
+
+jobs:
+  eval:
+    name: ${{ matrix.suite }} (real model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: knowledge
+            base_ref: ""
+            args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
+            args2: >-
+              knowledge --knowledge-items 93
+              --knowledge-dump eval-results/knowledge-dump-all.jsonl
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      # Models and llama-server builds, keyed by the signed manifest that pins them. The store
+      # re-verifies SHA-256 on install, so a stale or corrupt cache entry is re-downloaded.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      # A/B jobs: build the bench at `base_ref` in a worktree, so "before" and "after" run on
+      # the same runner (CPU generations differ between runners).
+      - name: Build the bench at ${{ matrix.base_ref }}
+        if: matrix.base_ref != ''
+        run: |
+          git fetch --no-tags --depth=1 origin "${{ matrix.base_ref }}"
+          git worktree add --detach "$RUNNER_TEMP/base" FETCH_HEAD
+          cargo build --release --locked -p nugget-bench \
+            --manifest-path "$RUNNER_TEMP/base/Cargo.toml" --target-dir "$RUNNER_TEMP/base-target"
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: ${{ matrix.suite }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
+
+      - name: Run ${{ matrix.suite }}
+        run: |
+          extra=()
+          if [ -n "$CHAT_MODEL" ] && [[ "${{ matrix.args }}" != *--local-chat-model* ]]; then
+            extra+=(--local-chat-model "$CHAT_MODEL")
+          fi
+          if [ -n "${{ matrix.base_ref }}" ]; then
+            mkdir -p "$RESULTS/before"
+            (cd "$RUNNER_TEMP/base" && "$RUNNER_TEMP/base-target/release/nugget-bench" \
+              ${{ matrix.base_args || matrix.args }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS/before")
+          fi
+          ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "${{ matrix.scale || env.SCALE }}" \
+            "${extra[@]}" --out-dir "$RESULTS"
+          if [ -n "${{ matrix.args2 }}" ]; then
+            ./target/release/nugget-bench ${{ matrix.args2 }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS"
+          fi
+
+      # The metrics and the local-model parameters of every report, in the log.
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json "$RESULTS"/before/*.json; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|model|judge|tasks|items)")))),
+                    metrics: [.metrics[] | {name, value, unit, target, target_met}]}' "$f"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90
