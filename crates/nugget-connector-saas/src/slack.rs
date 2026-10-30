@@ -19,6 +19,9 @@
 //!   refetched only when the parent's reply count or latest reply changed).
 //! - `backfill`: a window rebuild in progress, newest day first. `before` moves down as days
 //!   complete, so an interrupted backfill resumes where it stopped.
+//! - `failed_threads`: threads whose replies failed to load (ts → passes in a row), retried
+//!   at the start of each pass whatever their age; dropped once loaded or deleted, or after
+//!   a few passes. Five threads failing in a row stop the pass.
 //!
 //! A conversation without state (first run, or a reset cursor) gets a reconciling rebuild of
 //! the whole window: indexed days and threads that no longer exist, or fall outside the
@@ -44,7 +47,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::api::{self, Api, Outcome, classify_common, item_error, retry_after_ms};
+use crate::api::{self, Api, ItemFailures, Outcome, classify_common, retry_after_ms};
 use crate::auth::{Credential, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
@@ -192,6 +195,11 @@ struct ChanState {
     checked_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     backfill: Option<Range>,
+    /// Threads (parent ts → passes in a row) whose replies failed to load. They are retried
+    /// at the start of every pass, whatever their age, until they load, vanish, or
+    /// [`api::MAX_ITEM_ATTEMPTS`] is reached.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    failed_threads: BTreeMap<String, u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -483,6 +491,34 @@ struct PassInfo {
     team_url: Option<String>,
 }
 
+/// Per-pass bookkeeping shared by every conversation.
+#[derive(Default)]
+struct PassState {
+    /// `users.info` lookups made.
+    lookups: usize,
+    /// Consecutive threads that failed to load.
+    failures: ItemFailures,
+    /// Threads of the current conversation that failed / loaded since the last
+    /// [`absorb_threads`].
+    failed: Vec<String>,
+    loaded: Vec<String>,
+}
+
+/// Move the current conversation's failed / loaded threads into its cursor state.
+fn absorb_threads(cur: &mut Cursor, chan: &str, ps: &mut PassState) {
+    let Some(state) = cur.channels.get_mut(chan) else {
+        ps.failed.clear();
+        ps.loaded.clear();
+        return;
+    };
+    for ts in ps.loaded.drain(..) {
+        state.failed_threads.remove(&ts);
+    }
+    for ts in ps.failed.drain(..) {
+        api::note_item_failure(&mut state.failed_threads, &ts, SERVICE);
+    }
+}
+
 /// One UTC day of top-level messages being collected.
 struct DayBucket {
     day: i64,
@@ -578,22 +614,14 @@ impl Connector for SlackConnector {
             sink.checkpoint(cur.to_value()).await?;
         }
 
-        let mut lookups = 0usize;
+        let mut ps = PassState::default();
         for conv in &convs {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             let mut known = by_conv.remove(&conv.id).unwrap_or_default();
             let r = self
-                .sync_conversation(
-                    conv,
-                    &info,
-                    &mut cur,
-                    &mut known,
-                    &mut lookups,
-                    sink,
-                    cancel,
-                )
+                .sync_conversation(conv, &info, &mut cur, &mut known, &mut ps, sink, cancel)
                 .await;
             match r {
                 Ok(()) => {}
@@ -904,12 +932,14 @@ impl SlackConnector {
         info: &PassInfo,
         cur: &mut Cursor,
         known: &mut KnownConv,
-        lookups: &mut usize,
+        ps: &mut PassState,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
         let now = now_unix();
         let window_from = day_start(now - i64::from(self.settings.window_days) * DAY_SECS);
+        self.retry_failed_threads(conv, info, cur, known, ps, sink, cancel)
+            .await?;
         let mut state = cur.channels.get(&conv.id).cloned().unwrap_or_default();
         if state.latest.is_none() && state.backfill.is_none() {
             // First sync of this conversation, or a reset cursor: rebuild the whole window and
@@ -963,7 +993,7 @@ impl SlackConnector {
                     false,
                     cur,
                     known,
-                    lookups,
+                    ps,
                     sink,
                     cancel,
                 )
@@ -976,7 +1006,7 @@ impl SlackConnector {
         let backfill = cur.channels.get(&conv.id).and_then(|s| s.backfill);
         if let Some(r) = backfill {
             self.rebuild(
-                conv, info, r.from, r.before, true, cur, known, lookups, sink, cancel,
+                conv, info, r.from, r.before, true, cur, known, ps, sink, cancel,
             )
             .await?;
             if let Some(s) = cur.channels.get_mut(&conv.id) {
@@ -1027,7 +1057,7 @@ impl SlackConnector {
         backfill: bool,
         cur: &mut Cursor,
         known: &mut KnownConv,
-        lookups: &mut usize,
+        ps: &mut PassState,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -1088,10 +1118,9 @@ impl SlackConnector {
                     }
                     _ => {
                         if let Some(done) = bucket.take() {
-                            self.finish_day(
-                                conv, info, done, &mut upper, known, lookups, sink, cancel,
-                            )
-                            .await?;
+                            self.finish_day(conv, info, done, &mut upper, known, ps, sink, cancel)
+                                .await?;
+                            absorb_threads(cur, &conv.id, ps);
                             finished_any = true;
                         }
                         bucket = Some(DayBucket {
@@ -1128,8 +1157,9 @@ impl SlackConnector {
             }
         }
         if let Some(done) = bucket.take() {
-            self.finish_day(conv, info, done, &mut upper, known, lookups, sink, cancel)
+            self.finish_day(conv, info, done, &mut upper, known, ps, sink, cancel)
                 .await?;
+            absorb_threads(cur, &conv.id, ps);
         }
         // Nothing left in [from, upper): whatever is indexed there is gone.
         self.delete_span(from, upper, None, known, sink).await?;
@@ -1183,7 +1213,7 @@ impl SlackConnector {
         mut bucket: DayBucket,
         upper: &mut i64,
         known: &mut KnownConv,
-        lookups: &mut usize,
+        ps: &mut PassState,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -1193,7 +1223,7 @@ impl SlackConnector {
             .await?;
         bucket.msgs.sort_by_key(|m| ts_secs_frac(&m.ts));
         let ids = author_and_mention_ids(&bucket.msgs);
-        self.ensure_users(&ids, lookups, cancel).await?;
+        self.ensure_users(&ids, &mut ps.lookups, cancel).await?;
 
         let mut threads_seen: HashSet<String> = HashSet::new();
         for parent in bucket
@@ -1202,7 +1232,7 @@ impl SlackConnector {
             .filter(|m| m.reply_count > 0 && m.thread_ts.as_deref() == Some(m.ts.as_str()))
         {
             threads_seen.insert(parent.ts.clone());
-            self.sync_thread(conv, info, parent, known, lookups, sink, cancel)
+            self.sync_thread(conv, info, parent, known, ps, sink, cancel)
                 .await?;
         }
         // Threads that started this day but whose parent is gone (the day itself is upserted
@@ -1223,20 +1253,11 @@ impl SlackConnector {
         info: &PassInfo,
         parent: &Msg,
         known: &mut KnownConv,
-        lookups: &mut usize,
+        ps: &mut PassState,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let meta = format!(
-            "{}:{}:{}",
-            parent.reply_count,
-            parent.latest_reply.as_deref().unwrap_or_default(),
-            parent
-                .edited
-                .as_ref()
-                .and_then(|e| e.ts.as_deref())
-                .unwrap_or_default()
-        );
+        let meta = thread_meta(parent);
         let key = format!("{}/thread/{}", conv.id, parent.ts);
         let unchanged = ts_secs(&parent.ts)
             .and_then(|t| known.threads.get(&t))
@@ -1246,22 +1267,91 @@ impl SlackConnector {
         if unchanged {
             return Ok(());
         }
-        let (mut msgs, dropped) = match self.replies(conv, parent, cancel).await {
-            Ok(r) => r,
-            // One thread that fails to load must not stop the sync: the parent stays in its
-            // day document, and the thread is read again at the next re-check.
-            Err(e) if item_error(&e) => {
-                tracing::warn!(source = %self.ctx.source, channel = %conv.id, "skipping a slack thread that failed to load: {e}");
+        let (msgs, dropped) = match self.replies(conv, parent, cancel).await {
+            Ok(r) => {
+                ps.failures.ok();
+                r
+            }
+            // One thread that fails to load must not stop the sync (five in a row do): the
+            // parent stays in its day document, and the thread is remembered in the cursor and
+            // retried at the start of the next passes.
+            Err(e) => {
+                ps.failures.skip(e, SERVICE, &key)?;
+                ps.failed.push(parent.ts.clone());
                 return Ok(());
             }
-            Err(e) => return Err(e),
         };
+        ps.loaded.push(parent.ts.clone());
+        self.emit_thread(conv, info, parent, msgs, dropped, known, ps, sink, cancel)
+            .await
+    }
+
+    /// Retry the threads that failed to load in earlier passes.
+    #[allow(clippy::too_many_arguments)]
+    async fn retry_failed_threads(
+        &self,
+        conv: &Conversation,
+        info: &PassInfo,
+        cur: &mut Cursor,
+        known: &mut KnownConv,
+        ps: &mut PassState,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let pending: Vec<String> = cur
+            .channels
+            .get(&conv.id)
+            .map(|s| s.failed_threads.keys().cloned().collect())
+            .unwrap_or_default();
+        for ts in pending {
+            let probe = Msg {
+                ts: ts.clone(),
+                ..Msg::default()
+            };
+            match self.replies(conv, &probe, cancel).await {
+                Ok((msgs, dropped)) => {
+                    ps.failures.ok();
+                    ps.loaded.push(ts.clone());
+                    // No parent: the thread was deleted (or `thread_not_found`); drop it.
+                    if let Some(parent) = msgs.iter().find(|m| m.ts == ts).cloned() {
+                        self.emit_thread(
+                            conv, info, &parent, msgs, dropped, known, ps, sink, cancel,
+                        )
+                        .await?;
+                    }
+                }
+                Err(e) => {
+                    ps.failures.skip(e, SERVICE, &ts)?;
+                    ps.failed.push(ts);
+                }
+            }
+        }
+        absorb_threads(cur, &conv.id, ps);
+        Ok(())
+    }
+
+    /// Build and send a thread's document from its messages.
+    #[allow(clippy::too_many_arguments)]
+    async fn emit_thread(
+        &self,
+        conv: &Conversation,
+        info: &PassInfo,
+        parent: &Msg,
+        mut msgs: Vec<Msg>,
+        dropped: usize,
+        known: &mut KnownConv,
+        ps: &mut PassState,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let meta = thread_meta(parent);
+        let key = format!("{}/thread/{}", conv.id, parent.ts);
         if !msgs.iter().any(|m| m.ts == parent.ts) {
             msgs.push(parent.clone());
         }
         msgs.sort_by_key(|m| ts_secs_frac(&m.ts));
         let ids = author_and_mention_ids(&msgs);
-        self.ensure_users(&ids, lookups, cancel).await?;
+        self.ensure_users(&ids, &mut ps.lookups, cancel).await?;
 
         let users = self.users_snapshot();
         let first = render_mrkdwn(&parent.text, &users);
@@ -1394,6 +1484,21 @@ impl SlackConnector {
         }
         m
     }
+}
+
+/// What a thread document's version starts with: changes when a reply is added or the parent
+/// is edited.
+fn thread_meta(parent: &Msg) -> String {
+    format!(
+        "{}:{}:{}",
+        parent.reply_count,
+        parent.latest_reply.as_deref().unwrap_or_default(),
+        parent
+            .edited
+            .as_ref()
+            .and_then(|e| e.ts.as_deref())
+            .unwrap_or_default()
+    )
 }
 
 fn not_found_or_other(code: String) -> Error {

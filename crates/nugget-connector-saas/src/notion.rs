@@ -120,6 +120,10 @@ struct Cursor {
     since: Option<String>,
     #[serde(default)]
     reconciled_at: i64,
+    /// Pages that failed to load: key → passes in a row. `since` is held for them until they
+    /// load or [`api::MAX_ITEM_ATTEMPTS`] is reached.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    failed: std::collections::BTreeMap<String, u32>,
 }
 
 impl Cursor {
@@ -341,13 +345,16 @@ impl Connector for NotionConnector {
                 let doc = match doc {
                     Ok(d) => {
                         failures.ok();
+                        cur.failed.remove(r.key.as_str());
                         d
                     }
                     Err(e) => {
                         // One page that fails to load (a 500 on its blocks, a malformed
                         // answer) must not stop the sync; it is retried next pass.
                         failures.skip(e, SERVICE, r.key.as_str())?;
-                        hold = Some(hold.map_or(r.edited, |h| h.min(r.edited)));
+                        if api::note_item_failure(&mut cur.failed, r.key.as_str(), SERVICE) {
+                            hold = Some(hold.map_or(r.edited, |h| h.min(r.edited)));
+                        }
                         continue;
                     }
                 };
@@ -369,6 +376,8 @@ impl Connector for NotionConnector {
                 sink.send(Change::Delete(key.clone())).await?;
             }
             cur.reconciled_at = now;
+            cur.failed
+                .retain(|k, _| live.contains(&ItemKey::new(k.as_str())));
         }
         if let Some(m) = max_seen {
             cur.since = rfc3339(hold.map_or(m, |h| h.min(m)));

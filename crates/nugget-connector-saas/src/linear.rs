@@ -22,7 +22,7 @@
 //! **Rate limits.** Linear answers HTTP 400 with `RATELIMITED` (or 429); the reset time comes
 //! from `X-RateLimit-Requests-Reset` (Unix ms) or `Retry-After`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -173,6 +173,10 @@ struct Cursor {
     reconciled_at: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pass: Option<Pass>,
+    /// Issues that failed to load: key → passes in a row. `since` is held for them until
+    /// they load or [`api::MAX_ITEM_ATTEMPTS`] is reached.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    failed: BTreeMap<String, u32>,
 }
 
 impl Cursor {
@@ -415,6 +419,7 @@ impl Connector for LinearConnector {
                 since: rfc3339(from),
                 reconciled_at: 0,
                 pass: None,
+                failed: BTreeMap::new(),
             };
         }
         cur.v = 1;
@@ -435,6 +440,8 @@ impl Connector for LinearConnector {
                 sink.send(Change::Delete(key.clone())).await?;
             }
             cur.reconciled_at = now;
+            cur.failed
+                .retain(|k, _| live.contains(&ItemKey::new(k.as_str())));
         }
         Ok(cur.to_value())
     }
@@ -554,20 +561,28 @@ impl LinearConnector {
         let mut failures = ItemFailures::default();
         let mut pass = cur.pass.clone().unwrap_or_default();
         let mut retried = false;
-        for _ in 0..MAX_PAGES {
+        for requests in 0..MAX_PAGES {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
             let vars = json!({"filter": filter, "first": PAGE_SIZE, "after": pass.after});
+            let resumed = requests == 0 && pass.after.is_some();
             let v = match self.graphql(ISSUES_QUERY, vars, cancel).await {
                 Ok(v) => v,
-                // A stale page cursor from an interrupted pass: start the pass over. Linear
+                // A stale page cursor saved by an interrupted pass: start the pass over. Linear
                 // reports GraphQL errors as HTTP 400 (`Invalid`) or in a 200 (`Other`).
-                Err(Error::Other(m) | Error::Invalid(m)) if pass.after.is_some() && !retried => {
+                Err(Error::Other(m) | Error::Invalid(m)) if resumed && !retried => {
                     tracing::info!(source = %self.ctx.source, "linear: restarting pass ({m})");
                     retried = true;
-                    pass.after = None;
+                    pass = Pass::default();
                     continue;
+                }
+                // The restarted pass fails as well: the saved position is not the problem, so
+                // forget it rather than restart from it on every poll.
+                Err(e @ (Error::Other(_) | Error::Invalid(_))) if retried => {
+                    cur.pass = None;
+                    sink.checkpoint(cur.to_value()).await?;
+                    return Err(e);
                 }
                 Err(e) => return Err(e),
             };
@@ -598,14 +613,19 @@ impl LinearConnector {
                 let doc = match self.document(n, key.clone(), viewer, cancel).await {
                     Ok(d) => {
                         failures.ok();
+                        cur.failed.remove(key.as_str());
                         d
                     }
                     Err(e) => {
                         failures.skip(e, SERVICE, key.as_str())?;
-                        if let Some(u) = updated
-                            && pass.hold.as_deref().is_none_or(|h| later(h, u))
-                        {
-                            pass.hold = Some(u.to_string());
+                        if api::note_item_failure(&mut cur.failed, key.as_str(), SERVICE) {
+                            // Without a readable `updatedAt`, hold at the current `since`.
+                            let at = updated.map(str::to_string).or_else(|| cur.since.clone());
+                            if let Some(u) = at
+                                && pass.hold.as_deref().is_none_or(|h| later(h, &u))
+                            {
+                                pass.hold = Some(u);
+                            }
                         }
                         continue;
                     }

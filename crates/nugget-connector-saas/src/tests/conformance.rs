@@ -135,6 +135,44 @@ fn unique_upserts(sink: &RecSink) -> Vec<String> {
     keys
 }
 
+/// A GraphQL listing responder that honours the request's updated-since filter (GitHub
+/// `updated:>=` in `q`, Linear `updatedAt.gte`), so tests prove what the watermark lets in.
+struct UpdatedSince {
+    nodes: Vec<Value>,
+    wrap: fn(Value) -> ResponseTemplate,
+}
+
+fn since_of(body: &Value) -> Option<OffsetDateTime> {
+    if let Some(q) = body["variables"]["q"].as_str() {
+        let rest = q.split("updated:>=").nth(1)?;
+        return crate::text::parse_rfc3339(rest.split_whitespace().next()?);
+    }
+    body["variables"]["filter"]["and"]
+        .as_array()?
+        .iter()
+        .find_map(|c| c["updatedAt"]["gte"].as_str())
+        .and_then(crate::text::parse_rfc3339)
+}
+
+impl wiremock::Respond for UpdatedSince {
+    fn respond(&self, req: &wiremock::Request) -> ResponseTemplate {
+        let body: Value = serde_json::from_slice(&req.body).unwrap_or(Value::Null);
+        let from = since_of(&body).expect("the listing carries an updated-since filter");
+        let nodes: Vec<Value> = self
+            .nodes
+            .iter()
+            .filter(|n| {
+                n["updatedAt"]
+                    .as_str()
+                    .and_then(crate::text::parse_rfc3339)
+                    .is_none_or(|t| t >= from)
+            })
+            .cloned()
+            .collect();
+        (self.wrap)(json!(nodes))
+    }
+}
+
 fn rate_limited_ms<T: std::fmt::Debug>(r: &Result<T>) -> Option<u64> {
     match r {
         Err(Error::RateLimited { retry_after_ms }) => *retry_after_ms,
@@ -1325,10 +1363,10 @@ mod github {
         }))
     }
 
-    pub(super) async fn mount_search(
+    pub(super) async fn mount_search<R: wiremock::Respond + 'static>(
         server: &MockServer,
         after: Option<&str>,
-        resp: ResponseTemplate,
+        resp: R,
     ) {
         Mock::given(method("POST"))
             .and(path(GQL))
@@ -1755,7 +1793,16 @@ mod github {
 
         h.server.reset().await;
         mount_viewer(&h.server).await;
-        mount_search(&h.server, None, search(nodes, None)).await;
+        // Honours `updated:>=`: #2 is only listed because the watermark held at it.
+        mount_search(
+            &h.server,
+            None,
+            UpdatedSince {
+                nodes: nodes.as_array().unwrap().clone(),
+                wrap: |n| search(n, None),
+            },
+        )
+        .await;
         Mock::given(method("POST"))
             .and(path(GQL))
             .and(body_partial_json(json!({"variables": {"after": "cc"}})))
@@ -1855,10 +1902,10 @@ mod linear {
         )
     }
 
-    pub(super) async fn mount_issues(
+    pub(super) async fn mount_issues<R: wiremock::Respond + 'static>(
         server: &MockServer,
         after: Option<&str>,
-        resp: ResponseTemplate,
+        resp: R,
     ) {
         Mock::given(method("POST"))
             .and(path(GQL))
@@ -2078,6 +2125,8 @@ mod linear {
         );
         let r = run(&conn, None, &h.sink()).await;
         assert!(is_unauthorized(&r), "{r:?}");
+        // The refused refresh is in the egress ledger too.
+        h.assert_egress("sync:linear").await;
 
         // An expired OAuth token that cannot be refreshed before the pass starts.
         let h = Harness::new().await;
@@ -2295,7 +2344,16 @@ mod linear {
 
         h.server.reset().await;
         mount_viewer(&h.server).await;
-        mount_issues(&h.server, None, issues(nodes, None)).await;
+        // Honours `updatedAt.gte`: i2 is only listed because `since` held at it.
+        mount_issues(
+            &h.server,
+            None,
+            UpdatedSince {
+                nodes: nodes.as_array().unwrap().clone(),
+                wrap: |n| issues(n, None),
+            },
+        )
+        .await;
         Mock::given(method("POST"))
             .and(path(GQL))
             .and(body_partial_json(json!({"variables": {"id": "i2"}})))
@@ -2433,4 +2491,508 @@ async fn regression_retry_after_http_date_is_honoured_by_every_connector() {
         rate_limited_ms(&run(&conn, None, &h.sink()).await),
         Some(30_000)
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review follow-ups: failing items, watermarks, cursors
+// ---------------------------------------------------------------------------------------------
+
+mod followups {
+    use super::*;
+    use crate::api::MAX_ITEM_ATTEMPTS;
+    use crate::text::parse_rfc3339;
+
+    fn unix(rfc: &str) -> i64 {
+        parse_rfc3339(rfc).unwrap().unix_timestamp()
+    }
+
+    // ---- Slack ----
+
+    fn slack_thread(parent: &str, text: &str) -> Value {
+        json!({"ts": parent, "user": "U2", "text": text, "thread_ts": parent,
+               "reply_count": 1, "latest_reply": parent})
+    }
+
+    async fn mount_replies(server: &MockServer, resp: ResponseTemplate) {
+        Mock::given(method("GET"))
+            .and(path("/slack/conversations.replies"))
+            .respond_with(resp)
+            .mount(server)
+            .await;
+    }
+
+    /// A thread that failed on a day older than `recheck_days` was never read again: the
+    /// backfill moved past its day. It is now kept in the cursor and retried next pass.
+    #[tokio::test]
+    async fn regression_slack_failed_thread_older_than_recheck_is_retried_next_pass() {
+        let h = Harness::new().await;
+        h.paste("xoxp-1");
+        slack::mount_base(&h.server, json!([{"id": "C1", "name": "general"}])).await;
+        let parent = slack::ts(5, 0);
+        slack::mount_history(
+            &h.server,
+            "C1",
+            None,
+            slack::page(json!([slack_thread(&parent, "old thread")]), None),
+        )
+        .await;
+        mount_replies(&h.server, server_error(500, None)).await;
+        let settings = json!({"window_days": 30, "recheck_days": 1});
+        let conn = h.build(&slack::factory(&h, 0), settings);
+        let sink = h.sink();
+        let cursor = run(&conn, None, &sink).await.unwrap();
+        assert_eq!(
+            sink.summary(),
+            vec![format!("+{}", slack::day_key("C1", 5))]
+        );
+        assert_eq!(
+            cursor["channels"]["C1"]["failed_threads"][&parent],
+            json!(1)
+        );
+        assert!(cursor["channels"]["C1"].get("backfill").is_none());
+
+        h.server.reset().await;
+        slack::mount_base(&h.server, json!([{"id": "C1", "name": "general"}])).await;
+        mount_replies(
+            &h.server,
+            slack::ok(json!({"messages": [
+                slack_thread(&parent, "old thread"),
+                {"ts": slack::ts(5, 1), "user": "U2", "text": "the reply", "thread_ts": parent}
+            ], "has_more": false})),
+        )
+        .await;
+        let sink = h.sink();
+        let cursor = run(&conn, Some(cursor), &sink).await.unwrap();
+        let key = format!("C1/thread/{parent}");
+        assert_eq!(sink.summary(), vec![format!("+{key}")]);
+        assert!(sink.text(&key).contains("the reply"));
+        assert!(cursor["channels"]["C1"].get("failed_threads").is_none());
+    }
+
+    /// A thread that keeps failing is retried a bounded number of passes, then dropped.
+    #[tokio::test]
+    async fn regression_slack_thread_failing_every_pass_is_given_up() {
+        let h = Harness::new().await;
+        h.paste("xoxp-1");
+        slack::mount_base(&h.server, json!([{"id": "C1", "name": "general"}])).await;
+        let parent = slack::ts(5, 0);
+        slack::mount_history(
+            &h.server,
+            "C1",
+            None,
+            slack::page(json!([slack_thread(&parent, "cursed")]), None),
+        )
+        .await;
+        mount_replies(&h.server, server_error(500, None)).await;
+        let conn = h.build(
+            &slack::factory(&h, 0),
+            json!({"window_days": 30, "recheck_days": 1}),
+        );
+        let mut cursor = None;
+        for pass in 1..=MAX_ITEM_ATTEMPTS {
+            let next = run(&conn, cursor, &h.sink()).await.unwrap();
+            let failed = &next["channels"]["C1"]["failed_threads"];
+            if pass < MAX_ITEM_ATTEMPTS {
+                assert_eq!(failed[&parent], json!(pass), "pass {pass}");
+            } else {
+                assert!(failed.is_null(), "pass {pass}: {next}");
+            }
+            cursor = Some(next);
+        }
+    }
+
+    /// Slack skipped every failing thread without limit, so a broken `conversations.replies`
+    /// "succeeded". Five failures in a row now stop the pass.
+    #[tokio::test]
+    async fn regression_slack_threads_failing_in_a_row_stop_the_pass() {
+        let h = Harness::new().await;
+        h.paste("xoxp-1");
+        slack::mount_base(&h.server, json!([{"id": "C1", "name": "general"}])).await;
+        let threads: Vec<Value> = (0..6)
+            .rev()
+            .map(|i| slack_thread(&slack::ts(1, i), &format!("t{i}")))
+            .collect();
+        slack::mount_history(&h.server, "C1", None, slack::page(json!(threads), None)).await;
+        mount_replies(&h.server, server_error(500, None)).await;
+        let conn = h.build(&slack::factory(&h, 0), json!({"window_days": 7}));
+        let r = run(&conn, None, &h.sink()).await;
+        assert!(matches!(r, Err(Error::Network(_))), "{r:?}");
+    }
+
+    // ---- items that fail on every pass stop holding the watermark ----
+
+    #[tokio::test]
+    async fn regression_github_item_failing_every_pass_stops_holding_the_watermark() {
+        let h = Harness::new().await;
+        h.paste("github_pat_1");
+        github::mount_viewer(&h.server).await;
+        let (t1, t2, t3) = (ago(9000), ago(8000), ago(7000));
+        let mut broken = github::issue("o/r", 2, &t2, "Broken");
+        broken["comments"]["pageInfo"] = json!({"hasNextPage": true, "endCursor": "cc"});
+        github::mount_search(
+            &h.server,
+            None,
+            UpdatedSince {
+                nodes: vec![
+                    github::issue("o/r", 1, &t1, "One"),
+                    broken,
+                    github::issue("o/r", 3, &t3, "Three"),
+                ],
+                wrap: |n| github::search(n, None),
+            },
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/github/graphql"))
+            .and(body_partial_json(json!({"variables": {"after": "cc"}})))
+            .respond_with(server_error(500, None))
+            .mount(&h.server)
+            .await;
+        let conn = h.build(&github::factory(&h, 0), github::settings());
+        let mut cursor = None;
+        for pass in 1..=MAX_ITEM_ATTEMPTS {
+            let next = run(&conn, cursor, &h.sink()).await.unwrap();
+            let since = next["scopes"]["issue|involves:ada"]["since"]
+                .as_i64()
+                .unwrap();
+            if pass < MAX_ITEM_ATTEMPTS {
+                assert_eq!(since, unix(&t2), "pass {pass}");
+                assert_eq!(next["failed"]["issue/o/r/2"], json!(pass));
+            } else {
+                assert_eq!(since, unix(&t3), "pass {pass}: the watermark moves on");
+                assert!(next.get("failed").is_none());
+            }
+            cursor = Some(next);
+        }
+    }
+
+    #[tokio::test]
+    async fn regression_linear_issue_failing_every_pass_stops_holding_the_watermark() {
+        let h = Harness::new().await;
+        h.paste("lin_api_1");
+        linear::mount_viewer(&h.server).await;
+        let (t1, t2, t3) = (ago(9000), ago(8000), ago(7000));
+        let mut broken = linear::issue("i2", "ENG-2", &t2, "Broken");
+        broken["comments"]["pageInfo"] = json!({"hasNextPage": true, "endCursor": "cc"});
+        linear::mount_issues(
+            &h.server,
+            None,
+            UpdatedSince {
+                nodes: vec![
+                    linear::issue("i3", "ENG-3", &t3, "Three"),
+                    broken,
+                    linear::issue("i1", "ENG-1", &t1, "One"),
+                ],
+                wrap: |n| linear::issues(n, None),
+            },
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/linear/graphql"))
+            .and(body_partial_json(json!({"variables": {"id": "i2"}})))
+            .respond_with(server_error(500, None))
+            .mount(&h.server)
+            .await;
+        let conn = h.build(&linear::factory(&h, 0), linear::settings());
+        let mut cursor = None;
+        for pass in 1..=MAX_ITEM_ATTEMPTS {
+            let next = run(&conn, cursor, &h.sink()).await.unwrap();
+            if pass < MAX_ITEM_ATTEMPTS {
+                assert_eq!(next["since"], json!(t2), "pass {pass}");
+                assert_eq!(next["failed"]["issue/i2"], json!(pass));
+            } else {
+                assert_eq!(
+                    next["since"],
+                    json!(t3),
+                    "pass {pass}: the watermark moves on"
+                );
+                assert!(next.get("failed").is_none());
+            }
+            cursor = Some(next);
+        }
+    }
+
+    #[tokio::test]
+    async fn regression_notion_page_failing_every_pass_stops_holding_the_watermark() {
+        let h = Harness::new().await;
+        h.paste("ntn_1");
+        notion::mount_me(&h.server).await;
+        let (p0, p1) = (notion::id(0), notion::id(1));
+        let (e0, e1) = (ago(3600), ago(7200));
+        notion::mount_search(
+            &h.server,
+            None,
+            notion::search_page(
+                json!([
+                    notion::page(&p0, &e0, "Fine"),
+                    notion::page(&p1, &e1, "Broken")
+                ]),
+                None,
+            ),
+        )
+        .await;
+        notion::mount_children(&h.server, &p0, None, json!([notion::para("a", "x")]), None).await;
+        Mock::given(method("GET"))
+            .and(path(format!("/notion/v1/blocks/{p1}/children")))
+            .respond_with(server_error(500, None))
+            .mount(&h.server)
+            .await;
+        let conn = h.build(&notion::factory(&h, 0), json!({}));
+        let mut cursor = None;
+        for pass in 1..=MAX_ITEM_ATTEMPTS {
+            let next = run(&conn, cursor, &h.sink()).await.unwrap();
+            if pass < MAX_ITEM_ATTEMPTS {
+                assert_eq!(next["since"], json!(e1), "pass {pass}");
+                assert_eq!(next["failed"][format!("page/{p1}")], json!(pass));
+            } else {
+                assert_eq!(
+                    next["since"],
+                    json!(e0),
+                    "pass {pass}: the watermark moves on"
+                );
+                assert!(next.get("failed").is_none());
+            }
+            cursor = Some(next);
+        }
+    }
+
+    // ---- watermarks and cursors ----
+
+    /// The saved watermark was the overlapped start (stored − 300 s), so it crept backwards
+    /// on every pass that found nothing newer.
+    #[tokio::test]
+    async fn regression_github_watermark_never_moves_back() {
+        let h = Harness::new().await;
+        h.paste("github_pat_1");
+        github::mount_viewer(&h.server).await;
+        let since = now_unix() - 7200;
+        // An already-indexed item inside the overlap is listed again.
+        let inside = rfc3339(since - 60).unwrap();
+        h.know("issue/o/r/1", &inside);
+        github::mount_search(
+            &h.server,
+            None,
+            github::search(json!([github::issue("o/r", 1, &inside, "Old")]), None),
+        )
+        .await;
+        let cursor = json!({"v": 1, "viewer": "ada", "window_from": since - 86_400,
+            "reconciled_at": now_unix(), "scopes": {"issue|involves:ada": {"since": since}}});
+        let conn = h.build(&github::factory(&h, 0), github::settings());
+        let sink = h.sink();
+        let next = run(&conn, Some(cursor), &sink).await.unwrap();
+        assert!(sink.summary().is_empty());
+        assert_eq!(next["scopes"]["issue|involves:ada"]["since"], json!(since));
+    }
+
+    /// A failing issue whose `updatedAt` cannot be read did not hold `since`.
+    #[tokio::test]
+    async fn regression_linear_failing_issue_without_a_time_holds_since() {
+        let h = Harness::new().await;
+        h.paste("lin_api_1");
+        linear::mount_viewer(&h.server).await;
+        let since = ago(20_000);
+        let mut broken = linear::issue("i2", "ENG-2", "not a time", "Broken");
+        broken["comments"]["pageInfo"] = json!({"hasNextPage": true, "endCursor": "cc"});
+        linear::mount_issues(
+            &h.server,
+            None,
+            linear::issues(
+                json!([linear::issue("i3", "ENG-3", &ago(7000), "Three"), broken]),
+                None,
+            ),
+        )
+        .await;
+        Mock::given(method("POST"))
+            .and(path("/linear/graphql"))
+            .and(body_partial_json(json!({"variables": {"id": "i2"}})))
+            .respond_with(server_error(500, None))
+            .mount(&h.server)
+            .await;
+        let cursor = json!({"v": 1, "viewer": "me", "window_from": now_unix() - 86_400 * 30,
+            "since": since, "reconciled_at": now_unix()});
+        let conn = h.build(&linear::factory(&h, 0), linear::settings());
+        let sink = h.sink();
+        let next = run(&conn, Some(cursor), &sink).await.unwrap();
+        assert_eq!(sink.summary(), vec!["+issue/i3"]);
+        assert_eq!(next["since"], json!(since));
+    }
+
+    fn invalid_input() -> ResponseTemplate {
+        ResponseTemplate::new(400).set_body_json(json!({"errors": [{"message": "Bad filter",
+            "extensions": {"code": "INVALID_INPUT"}}]}))
+    }
+
+    async fn issue_requests(h: &Harness) -> usize {
+        h.server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| String::from_utf8_lossy(&r.body).contains("\"first\":50"))
+            .count()
+    }
+
+    /// After restarting from a stale saved cursor, a second 400 used to leave the stale
+    /// position in the cursor, so every poll restarted from it. It is now cleared.
+    #[tokio::test]
+    async fn regression_linear_second_400_after_restart_clears_the_saved_pass() {
+        let h = Harness::new().await;
+        h.paste("lin_api_1");
+        linear::mount_viewer(&h.server).await;
+        linear::mount_issues(&h.server, Some("stale"), invalid_input()).await;
+        linear::mount_issues(&h.server, None, invalid_input()).await;
+        let cursor = json!({"v": 1, "viewer": "me", "window_from": now_unix() - 86_400 * 30,
+            "since": ago(86_400), "reconciled_at": now_unix(), "pass": {"after": "stale"}});
+        let conn = h.build(&linear::factory(&h, 0), linear::settings());
+        let sink = h.sink();
+        let r = run(&conn, Some(cursor), &sink).await;
+        assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+        let saved = sink.checkpoints.lock().unwrap().last().cloned().unwrap();
+        assert!(saved.get("pass").is_none(), "{saved}");
+        assert_eq!(issue_requests(&h).await, 2);
+    }
+
+    /// A 400 that is not about a saved cursor (first page of a fresh pass, or a page whose
+    /// cursor Linear just returned) surfaces as `Invalid`, with no restart.
+    #[tokio::test]
+    async fn linear_non_stale_400_surfaces_as_invalid() {
+        let h = Harness::new().await;
+        h.paste("lin_api_1");
+        linear::mount_viewer(&h.server).await;
+        linear::mount_issues(&h.server, None, invalid_input()).await;
+        let conn = h.build(&linear::factory(&h, 0), linear::settings());
+        let r = run(&conn, None, &h.sink()).await;
+        assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+        assert_eq!(issue_requests(&h).await, 1);
+
+        let h = Harness::new().await;
+        h.paste("lin_api_1");
+        linear::mount_viewer(&h.server).await;
+        linear::mount_issues(
+            &h.server,
+            None,
+            linear::issues(
+                json!([linear::issue("i1", "ENG-1", &ago(5000), "One")]),
+                Some("l1"),
+            ),
+        )
+        .await;
+        linear::mount_issues(&h.server, Some("l1"), invalid_input()).await;
+        let conn = h.build(&linear::factory(&h, 0), linear::settings());
+        let r = run(&conn, None, &h.sink()).await;
+        assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+        assert_eq!(issue_requests(&h).await, 2);
+    }
+
+    // ---- credentials and rate limits while loading one item stop the pass ----
+
+    fn throttled_long() -> ResponseTemplate {
+        ResponseTemplate::new(429).insert_header("Retry-After", "3600")
+    }
+
+    #[tokio::test]
+    async fn unauthorized_or_rate_limited_while_loading_an_item_stops_the_pass() {
+        // Slack: one thread's replies.
+        for (resp, want_auth) in [
+            (ResponseTemplate::new(401), true),
+            (throttled_long(), false),
+        ] {
+            let h = Harness::new().await;
+            h.paste("xoxp-1");
+            slack::mount_base(&h.server, json!([{"id": "C1", "name": "general"}])).await;
+            let parent = slack::ts(1, 0);
+            slack::mount_history(
+                &h.server,
+                "C1",
+                None,
+                slack::page(json!([slack_thread(&parent, "t")]), None),
+            )
+            .await;
+            mount_replies(&h.server, resp).await;
+            let conn = h.build(&slack::factory(&h, 2), json!({"window_days": 7}));
+            let r = run(&conn, None, &h.sink()).await;
+            if want_auth {
+                assert!(is_unauthorized(&r), "slack: {r:?}");
+            } else {
+                assert!(matches!(r, Err(Error::RateLimited { .. })), "slack: {r:?}");
+            }
+        }
+
+        // Notion: one page's blocks.
+        for (resp, want_auth) in [
+            (ResponseTemplate::new(401), true),
+            (throttled_long(), false),
+        ] {
+            let h = Harness::new().await;
+            h.paste("ntn_1");
+            notion::mount_me(&h.server).await;
+            notion::mount_search(
+                &h.server,
+                None,
+                notion::search_page(json!([notion::page(&notion::id(1), &ago(7200), "A")]), None),
+            )
+            .await;
+            Mock::given(method("GET"))
+                .and(path(format!(
+                    "/notion/v1/blocks/{}/children",
+                    notion::id(1)
+                )))
+                .respond_with(resp)
+                .mount(&h.server)
+                .await;
+            let conn = h.build(&notion::factory(&h, 2), json!({}));
+            let r = run(&conn, None, &h.sink()).await;
+            if want_auth {
+                assert!(is_unauthorized(&r), "notion: {r:?}");
+            } else {
+                assert!(matches!(r, Err(Error::RateLimited { .. })), "notion: {r:?}");
+            }
+        }
+
+        // GitHub and Linear: one item's extra comments.
+        for (resp, want_auth) in [
+            (ResponseTemplate::new(401), true),
+            (throttled_long(), false),
+        ] {
+            let h = Harness::new().await;
+            h.paste("github_pat_1");
+            github::mount_viewer(&h.server).await;
+            let mut i = github::issue("o/r", 1, &ago(5000), "One");
+            i["comments"]["pageInfo"] = json!({"hasNextPage": true, "endCursor": "cc"});
+            github::mount_search(&h.server, None, github::search(json!([i]), None)).await;
+            Mock::given(method("POST"))
+                .and(path("/github/graphql"))
+                .and(body_partial_json(json!({"variables": {"after": "cc"}})))
+                .respond_with(resp.clone())
+                .mount(&h.server)
+                .await;
+            let conn = h.build(&github::factory(&h, 2), github::settings());
+            let r = run(&conn, None, &h.sink()).await;
+            if want_auth {
+                assert!(is_unauthorized(&r), "github: {r:?}");
+            } else {
+                assert!(matches!(r, Err(Error::RateLimited { .. })), "github: {r:?}");
+            }
+
+            let h = Harness::new().await;
+            h.paste("lin_api_1");
+            linear::mount_viewer(&h.server).await;
+            let mut i = linear::issue("i1", "ENG-1", &ago(5000), "One");
+            i["comments"]["pageInfo"] = json!({"hasNextPage": true, "endCursor": "cc"});
+            linear::mount_issues(&h.server, None, linear::issues(json!([i]), None)).await;
+            Mock::given(method("POST"))
+                .and(path("/linear/graphql"))
+                .and(body_partial_json(json!({"variables": {"id": "i1"}})))
+                .respond_with(resp)
+                .mount(&h.server)
+                .await;
+            let conn = h.build(&linear::factory(&h, 2), linear::settings());
+            let r = run(&conn, None, &h.sink()).await;
+            if want_auth {
+                assert!(is_unauthorized(&r), "linear: {r:?}");
+            } else {
+                assert!(matches!(r, Err(Error::RateLimited { .. })), "linear: {r:?}");
+            }
+        }
+    }
 }

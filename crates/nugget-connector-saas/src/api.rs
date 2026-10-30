@@ -248,6 +248,44 @@ pub(crate) fn metered(
     Ok(MeteredHttp::new(egress, feature)?.with_max_body(MAX_BODY))
 }
 
+/// Passes an item may fail in a row before the connector stops holding its watermark for it
+/// (and stops retrying it): a permanently broken item must not pin the cursor forever. The
+/// periodic full listing still covers it.
+pub(crate) const MAX_ITEM_ATTEMPTS: u32 = 5;
+/// Failing items remembered in a cursor, at most.
+pub(crate) const MAX_TRACKED_FAILURES: usize = 200;
+
+/// Record that `key` failed to load in this pass (`failed` is the cursor's per-item count of
+/// failed passes). `true`: hold the watermark at the item so the next pass retries it.
+/// `false`: give up on it (too many attempts, or too many failing items tracked).
+pub(crate) fn note_item_failure(
+    failed: &mut std::collections::BTreeMap<String, u32>,
+    key: &str,
+    service: &str,
+) -> bool {
+    let n = failed.get(key).copied().unwrap_or(0) + 1;
+    if n >= MAX_ITEM_ATTEMPTS {
+        failed.remove(key);
+        tracing::warn!(
+            service,
+            item = key,
+            attempts = n,
+            "giving up on an item that keeps failing to load"
+        );
+        return false;
+    }
+    if !failed.contains_key(key) && failed.len() >= MAX_TRACKED_FAILURES {
+        tracing::warn!(
+            service,
+            item = key,
+            "too many failing items; not retrying this one"
+        );
+        return false;
+    }
+    failed.insert(key.to_string(), n);
+    true
+}
+
 #[cfg(test)]
 mod unit {
     use super::*;

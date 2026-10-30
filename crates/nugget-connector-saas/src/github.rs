@@ -206,6 +206,10 @@ struct Cursor {
     reconciled_at: i64,
     #[serde(default)]
     scopes: BTreeMap<String, ScopeState>,
+    /// Items that failed to load: key → passes in a row. The watermark is held for them
+    /// until they load or [`api::MAX_ITEM_ATTEMPTS`] is reached.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    failed: BTreeMap<String, u32>,
 }
 
 impl Cursor {
@@ -485,6 +489,7 @@ impl Connector for GitHubConnector {
                 window_from: now - i64::from(self.settings.window_days) * DAY_SECS,
                 reconciled_at: 0,
                 scopes: BTreeMap::new(),
+                failed: BTreeMap::new(),
             };
         }
         let scopes = self.settings.scopes(&viewer);
@@ -516,6 +521,7 @@ impl Connector for GitHubConnector {
                 sink.send(Change::Delete(key.clone())).await?;
             }
             cur.reconciled_at = now;
+            cur.failed.retain(|k, _| live.contains(k.as_str()));
         }
         Ok(cur.to_value())
     }
@@ -665,11 +671,12 @@ impl GitHubConnector {
     ) -> Result<()> {
         // Re-read a little before the watermark: search indexing lags behind `updatedAt`, so an
         // item updated just before the last item seen can show up in search after it.
-        let mut since = cur
-            .scopes
-            .get(id)
-            .map_or(cur.window_from, |s| s.since - WATERMARK_OVERLAP_SECS)
+        let stored = cur.scopes.get(id).map(|s| s.since);
+        let mut since = stored
+            .map_or(cur.window_from, |s| s - WATERMARK_OVERLAP_SECS)
             .max(cur.window_from);
+        // The watermark never moves back because of the overlap.
+        let floor = stored.unwrap_or(cur.window_from).max(cur.window_from);
         let mut after: Option<String> = None;
         let mut in_query = 0usize;
         let mut failures = ItemFailures::default();
@@ -693,7 +700,7 @@ impl GitHubConnector {
                 .await?;
             let search = &v["data"]["search"];
             let nodes = search["nodes"].as_array().cloned().unwrap_or_default();
-            let mut last = since;
+            let mut last = since.max(floor);
             for n in &nodes {
                 let Some(key) = item_key(n) else { continue };
                 live.insert(key.clone());
@@ -710,12 +717,15 @@ impl GitHubConnector {
                 let doc = match self.document(n, key.clone(), viewer, cancel).await {
                     Ok(d) => {
                         failures.ok();
+                        cur.failed.remove(&key);
                         d
                     }
                     Err(e) => {
                         failures.skip(e, SERVICE, &key)?;
-                        let t = parse_rfc3339(updated).map_or(since, |t| t.unix_timestamp());
-                        hold = Some(hold.map_or(t, |h| h.min(t)));
+                        if api::note_item_failure(&mut cur.failed, &key, SERVICE) {
+                            let t = parse_rfc3339(updated).map_or(since, |t| t.unix_timestamp());
+                            hold = Some(hold.map_or(t, |h| h.min(t)));
+                        }
                         continue;
                     }
                 };
