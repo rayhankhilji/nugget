@@ -1,0 +1,270 @@
+[
+ {
+  "day": 10,
+  "date": "2026-11-04",
+  "tz": "America/New_York",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-04 13:00:01 GMT",
+  "cmp_real": {
+   "expected": [
+    [
+     "Design standup",
+     "14:30"
+    ]
+   ],
+   "optional": [
+    [
+     "Flight BA178 JFK to LHR",
+     "00:00"
+    ]
+   ],
+   "got": [],
+   "missing": [
+    {
+     "title": "Design standup",
+     "want": "14:30"
+    }
+   ],
+   "wrong_time": [],
+   "extra": [],
+   "invented": [],
+   "duplicates": [],
+   "sorted": true,
+   "ok": false
+  },
+  "truth": [],
+  "ready_meetings": []
+ },
+ {
+  "day": 11,
+  "date": "2026-11-05",
+  "tz": "America/New_York",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-05 13:00:00 GMT",
+  "cmp_real": {
+   "expected": [
+    [
+     "Foundry service design workshop",
+     "10:00"
+    ],
+    [
+     "Design standup",
+     "14:30"
+    ]
+   ],
+   "optional": [],
+   "got": [
+    [
+     "Foundry service design workshop",
+     "15:00"
+    ]
+   ],
+   "missing": [
+    {
+     "title": "Design standup",
+     "want": "14:30"
+    }
+   ],
+   "wrong_time": [
+    {
+     "title": "Foundry service design workshop",
+     "want": "10:00",
+     "got": "15:00",
+     "start": "2026-11-05T10:00:00-05:00"
+    }
+   ],
+   "extra": [],
+   "invented": [],
+   "duplicates": [],
+   "sorted": true,
+   "ok": false
+  },
+  "truth": [
+   {
+    "check": {
+     "date": "2026-11-05",
+     "meeting": "Foundry service design workshop",
+     "local": "10:00",
+     "tz": "Europe/London"
+    },
+    "ok": false,
+    "got": [
+     [
+      "Foundry service design workshop",
+      "2026-11-05T10:00:00-05:00",
+      false,
+      "15:00"
+     ]
+    ]
+   }
+  ],
+  "ready_meetings": [
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-05T16:00:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-05T10:00:00-05:00",
+    "title": "Foundry service design workshop"
+   }
+  ]
+ },
+ {
+  "day": 12,
+  "date": "2026-11-06",
+  "tz": "America/New_York",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-06 13:00:01 GMT",
+  "cmp_real": {
+   "expected": [
+    [
+     "Studio retro",
+     "21:00"
+    ],
+    [
+     "Design standup",
+     "14:30"
+    ]
+   ],
+   "optional": [],
+   "got": [
+    [
+     "Coffee with Kelsey (TalentBridge)",
+     "14:00"
+    ],
+    [
+     "Coffee with Kelsey (TalentBridge)",
+     "14:00"
+    ],
+    [
+     "Studio retro",
+     "21:00"
+    ]
+   ],
+   "missing": [
+    {
+     "title": "Design standup",
+     "want": "14:30"
+    }
+   ],
+   "wrong_time": [],
+   "extra": [
+    {
+     "title": "Coffee with Kelsey (TalentBridge)",
+     "when": "14:00",
+     "date": "2026-11-06",
+     "start": "2026-11-06T09:00:00-05:00",
+     "end": "2026-11-06T09:30:00-05:00"
+    },
+    {
+     "title": "Coffee with Kelsey (TalentBridge)",
+     "when": "14:00",
+     "date": "2026-11-06",
+     "start": "2026-11-06T09:00:00-05:00",
+     "end": "2026-11-06T09:30:00-05:00"
+    }
+   ],
+   "invented": [],
+   "duplicates": [
+    "Coffee with Kelsey (TalentBridge)"
+   ],
+   "sorted": true,
+   "ok": false
+  },
+  "truth": [
+   {
+    "check": {
+     "date": "2026-11-06",
+     "absent": "Kelsey"
+    },
+    "ok": false,
+    "got": [
+     [
+      "Coffee with Kelsey (TalentBridge)",
+      "2026-11-06T09:00:00-05:00"
+     ],
+     [
+      "Coffee with Kelsey (TalentBridge)",
+      "2026-11-06T09:00:00-05:00"
+     ]
+    ]
+   },
+   {
+    "check": {
+     "date": "2026-11-06",
+     "meeting": "Studio retro",
+     "local": "21:00",
+     "tz": "Europe/London"
+    },
+    "ok": true,
+    "got": [
+     [
+      "Studio retro",
+      "2026-11-06T16:00:00-05:00",
+      false,
+      "21:00"
+     ]
+    ]
+   }
+  ],
+  "ready_meetings": [
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-06T09:30:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-06T09:00:00-05:00",
+    "title": "Coffee with Kelsey (TalentBridge)"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-06T09:30:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-06T09:00:00-05:00",
+    "title": "Coffee with Kelsey (TalentBridge)"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-06T17:00:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-06T16:00:00-05:00",
+    "title": "Studio retro"
+   }
+  ]
+ },
+ {
+  "day": 13,
+  "date": "2026-11-07",
+  "tz": "America/New_York",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-07 13:00:00 GMT",
+  "cmp_real": {
+   "expected": [],
+   "optional": [],
+   "got": [],
+   "missing": [],
+   "wrong_time": [],
+   "extra": [],
+   "invented": [],
+   "duplicates": [],
+   "sorted": true,
+   "ok": true
+  },
+  "truth": [],
+  "ready_meetings": []
+ }
+]

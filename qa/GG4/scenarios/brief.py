@@ -684,7 +684,9 @@ def part_dst(out: Path):
                 f2.append(loc(n["params"]["generated_at"], NY).isoformat())
     nov1 = [f for f in f2 if f.startswith("2026-11-01")]
     check("dst.brief_at_0130_fires_once_on_fallback_night", len(nov1) == 1, fired=f2)
-    # Zone change while running: OS zone file swapped NY -> London on the flight (x600).
+def part_zoneswap(out: Path):
+    """Zone change while running: the OS zone file is swapped NY -> London mid-flight (x600)."""
+    print("== zone swap while running (x600)", flush=True)
     w3 = out / "zone-swap"
     root3 = w3 / "maya"
     root3.mkdir(parents=True, exist_ok=True)
@@ -696,32 +698,34 @@ def part_dst(out: Path):
     link.unlink(missing_ok=True)
     link.symlink_to(zi / NY)
     f3 = []
+    t_start = time.time()
     with SpeedDaemon(h3, sim=st3, tz=f":{link}", env=speed_env(st3, 600), log_name="zoneswap") as d:
         s = d.add_files_source(root3)["id"]
         d.sync(s)
-        # Tuesday's brief already fired? It is 18:00 on a fresh install: it catches up now.
-        n = d.wait_note("brief.ready", timeout=30)
-        catch = n and n["params"]["generated_at"]
-        t0 = time.time()
-        swapped = False
-        while time.time() - t0 < 140:  # ~23 simulated hours
-            el = (time.time() - t0) * 600
-            if not swapped and el > 5 * 3600:  # ~23:00 NY: she lands in London's timezone mentally
+        catch = None
+        swapped = None
+        while time.time() - t_start < 150:  # ~25 simulated hours
+            sim_now = st3 + timedelta(seconds=(time.time() - t_start) * 600)
+            # 21:30 EST (02:30 London): mid-flight she sets the laptop to London time.
+            if not swapped and sim_now >= datetime(2026, 11, 3, 21, 30, tzinfo=ZoneInfo(NY)):
                 tmp = w3 / "localtime.new"
                 tmp.unlink(missing_ok=True)
                 tmp.symlink_to(zi / LDN)
                 os.replace(tmp, link)
-                swapped = True
-            n = d.wait_note("brief.ready", timeout=2)
-            if n:
+                swapped = sim_now.isoformat()
+            n = d.wait_note("brief.ready", timeout=0.5)
+            if n and n["params"]["date"] == "2026-11-03":
+                catch = n["params"]["generated_at"]
+            elif n:
                 f3.append(n["params"])
                 break
     got = f3[0] if f3 else None
     check("trip.zone_change_while_running_fires_0800_london",
           bool(got) and loc(got["generated_at"], LDN).strftime("%Y-%m-%d %H:%M") == "2026-11-04 08:00" and got["date"] == "2026-11-04",
-          catch_up=catch and loc(catch, NY).isoformat(),
+          catch_up=catch and loc(catch, NY).isoformat(), swapped_at_sim=swapped,
           fired=got and (got["date"], loc(got["generated_at"], LDN).isoformat()),
           meetings=got and [(m["title"], m["start"], m.get("end")) for m in got["meetings"]])
+
 
 
 def part_config(out: Path):
@@ -846,7 +850,7 @@ def part_snooze(out: Path):
           snoozed_until=su)
 
 
-PARTS = ["accuracy", "fixed", "explicit", "timing", "runover", "dst", "config", "edge", "snooze"]
+PARTS = ["accuracy", "fixed", "explicit", "timing", "runover", "dst", "zoneswap", "config", "edge", "snooze"]
 
 
 def main():
@@ -882,6 +886,8 @@ def main():
                 part_runover(out)
             elif p == "dst":
                 part_dst(out)
+            elif p == "zoneswap":
+                part_zoneswap(out)
             elif p == "config":
                 part_config(out)
             elif p == "edge":

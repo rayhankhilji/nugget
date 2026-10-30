@@ -1,0 +1,135 @@
+{
+ "brief": {
+  "date": "2026-11-09",
+  "generated_at": "2026-11-09T13:00:01.066446954Z",
+  "meetings": [
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-09T11:00:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-09T10:00:00-05:00",
+    "title": "Call with LA client (10:00 PT)"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-09T12:00:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-09T11:00:00-05:00",
+    "title": "Vendor pitch (declined)"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-09T13:30:00-05:00",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-09T12:30:00-05:00",
+    "title": "Lunch with Priya"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-09T23:30:00Z",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-09T23:00:00Z",
+    "title": "Call with Tokyo (UTC 23:00)"
+   },
+   {
+    "all_day": false,
+    "attendees": [],
+    "end": "2026-11-10T04:00:00Z",
+    "external": [],
+    "location": null,
+    "prep": [],
+    "prep_card": null,
+    "start": "2026-11-10T03:00:00Z",
+    "title": "Late call (UTC Nov 10 03:00)"
+   }
+  ],
+  "open_cards": 0,
+  "overdue": [],
+  "renewals": [],
+  "top": []
+ },
+ "cmp": {
+  "expected": [
+   [
+    "Design conference (3 days)",
+    "all-day"
+   ],
+   [
+    "Call with LA client (10:00 PT)",
+    "13:00"
+   ],
+   [
+    "Lunch with Priya",
+    "12:30"
+   ],
+   [
+    "Call with Tokyo (UTC 23:00)",
+    "18:00"
+   ],
+   [
+    "Late call (UTC Nov 10 03:00)",
+    "22:00"
+   ]
+  ],
+  "got": [
+   [
+    "Call with LA client (10:00 PT)",
+    "10:00"
+   ],
+   [
+    "Vendor pitch (declined)",
+    "11:00"
+   ],
+   [
+    "Lunch with Priya",
+    "12:30"
+   ],
+   [
+    "Call with Tokyo (UTC 23:00)",
+    "18:00"
+   ],
+   [
+    "Late call (UTC Nov 10 03:00)",
+    "22:00"
+   ]
+  ],
+  "missing": [],
+  "wrong_time": [
+   {
+    "title": "Call with LA client (10:00 PT)",
+    "want": "13:00",
+    "got": "10:00",
+    "start": "2026-11-09T10:00:00-05:00"
+   }
+  ],
+  "extra": [
+   {
+    "title": "Vendor pitch (declined)",
+    "when": "11:00",
+    "date": "2026-11-09",
+    "start": "2026-11-09T11:00:00-05:00",
+    "end": "2026-11-09T12:00:00-05:00"
+   }
+  ],
+  "invented": [],
+  "duplicates": [],
+  "sorted": true,
+  "ok": false
+ }
+}

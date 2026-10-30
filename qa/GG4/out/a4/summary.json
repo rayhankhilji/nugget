@@ -1,0 +1,1875 @@
+{
+ "report": {
+  "edge.utc_event_evening_today": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.utc_event_next_utc_day_is_today_local": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.utc_event_prev_local_day_absent": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.multi_day_all_day_shown_each_day": {
+   "ok": false,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ],
+    "note": "all-day Nov 8-10; brief on Nov 9"
+   }
+  },
+  "edge.declined_absent": {
+   "ok": false,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.tomorrow_after_midnight_absent": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.other_zone_tzid_converted": {
+   "ok": false,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ]
+   }
+  },
+  "edge.overnight_in_progress_shown": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "Call with LA client (10:00 PT)",
+      "10:00"
+     ],
+     [
+      "Vendor pitch (declined)",
+      "11:00"
+     ],
+     [
+      "Lunch with Priya",
+      "12:30"
+     ],
+     [
+      "Call with Tokyo (UTC 23:00)",
+      "18:00"
+     ],
+     [
+      "Late call (UTC Nov 10 03:00)",
+      "22:00"
+     ]
+    ],
+    "note": "23:00 Sun to 02:00 Mon: optional (still running at midnight, over by the brief)"
+   }
+  },
+  "snooze.default_tomorrow_0800_ordinary_day": {
+   "ok": true,
+   "evidence": {
+    "snoozed_until": "2026-10-30T08:00:00-04:00"
+   }
+  },
+  "config.valid_offsets_accepted": {
+   "ok": true,
+   "evidence": {
+    "detail": {
+     "utc_offset=+14:00(valid)": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "ok",
+      "cards.list": "ok",
+      "exit": "running",
+      "log": []
+     },
+     "utc_offset=-0500(valid)": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "ok",
+      "cards.list": "ok",
+      "exit": "running",
+      "log": []
+     }
+    }
+   }
+  },
+  "config.invalid_values_logged_with_section": {
+   "ok": true,
+   "evidence": {
+    "logged": [
+     "brief_time=25:00",
+     "brief_time=8am",
+     "brief_time=08:00:00",
+     "brief_time=empty",
+     "brief_time=int",
+     "utc_offset=EST",
+     "utc_offset=America/New_York",
+     "utc_offset=+5",
+     "timezone=(unknown key)"
+    ],
+    "not_logged": []
+   }
+  },
+  "config.invalid_values_visible_to_client": {
+   "ok": false,
+   "evidence": {
+    "surfaced": [],
+    "example": {
+     "brief_time=25:00": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list"
+     }
+    }
+   }
+  },
+  "config.invalid_values_refused_at_start": {
+   "ok": false,
+   "evidence": {
+    "refused": [],
+    "not_refused": [
+     "brief_time=25:00",
+     "brief_time=8am",
+     "brief_time=08:00:00",
+     "brief_time=empty",
+     "brief_time=int",
+     "utc_offset=EST",
+     "utc_offset=America/New_York",
+     "utc_offset=+5",
+     "timezone=(unknown key)"
+    ],
+    "detail": {
+     "brief_time=25:00": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: brief_time \"25:00\" is not HH:MM"
+       }
+      ]
+     },
+     "brief_time=8am": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: brief_time \"8am\" is not HH:MM"
+       }
+      ]
+     },
+     "brief_time=08:00:00": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: brief_time \"08:00:00\" is not HH:MM"
+       }
+      ]
+     },
+     "brief_time=empty": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: brief_time \"\" is not HH:MM"
+       }
+      ]
+     },
+     "brief_time=int": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: invalid type: integer `8`, expected a string\nin `brief_time`\n"
+       }
+      ]
+     },
+     "utc_offset=EST": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: utc_offset \"EST\" is not \u00b1HH:MM"
+       }
+      ]
+     },
+     "utc_offset=America/New_York": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: utc_offset \"America/New_York\" is not \u00b1HH:MM"
+       }
+      ]
+     },
+     "utc_offset=+5": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: utc_offset \"+5\" is not \u00b1HH:MM"
+       }
+      ]
+     },
+     "utc_offset=+14:00(valid)": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "ok",
+      "cards.list": "ok",
+      "exit": "running",
+      "log": []
+     },
+     "utc_offset=-0500(valid)": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "ok",
+      "cards.list": "ok",
+      "exit": "running",
+      "log": []
+     },
+     "timezone=(unknown key)": {
+      "status": {
+       "audit_chain_ok": true,
+       "chunks": 0,
+       "items": 0,
+       "protocol": 1,
+       "providers": [],
+       "uptime_secs": 0,
+       "version": "0.0.1"
+      },
+      "brief.get": "-32601: method not found: brief.get",
+      "cards.list": "-32601: method not found: cards.list",
+      "exit": "running",
+      "log": [
+       {
+        "message": "feature did not start",
+        "feature": "proactive",
+        "error": "invalid input: [proactive]: unknown field `timezone`, expected one of `enabled`, `brief_time`, `judge`, `refresh_minutes`, `debounce_secs`, `utc_offset`, `engine`\n"
+       }
+      ]
+     }
+    }
+   }
+  },
+  "acc.brief_ready_each_morning": {
+   "ok": true,
+   "evidence": {
+    "fired": 14,
+    "n": 14,
+    "missing": []
+   }
+  },
+  "acc.fires_at_0800_local": {
+   "ok": true,
+   "evidence": {
+    "ok": 14,
+    "n": 14,
+    "times": [
+     [
+      "2026-10-26",
+      "2026-10-26 08:00:00 EDT"
+     ],
+     [
+      "2026-10-27",
+      "2026-10-27 08:00:01 EDT"
+     ],
+     [
+      "2026-10-28",
+      "2026-10-28 08:00:00 EDT"
+     ],
+     [
+      "2026-10-29",
+      "2026-10-29 08:00:00 EDT"
+     ],
+     [
+      "2026-10-30",
+      "2026-10-30 08:00:00 EDT"
+     ],
+     [
+      "2026-10-31",
+      "2026-10-31 08:00:00 EDT"
+     ],
+     [
+      "2026-11-01",
+      "2026-11-01 08:00:00 EST"
+     ],
+     [
+      "2026-11-02",
+      "2026-11-02 08:00:00 EST"
+     ],
+     [
+      "2026-11-03",
+      "2026-11-03 08:00:01 EST"
+     ],
+     [
+      "2026-11-04",
+      "2026-11-04 08:00:01 GMT"
+     ],
+     [
+      "2026-11-05",
+      "2026-11-05 08:00:00 GMT"
+     ],
+     [
+      "2026-11-06",
+      "2026-11-06 08:00:00 GMT"
+     ],
+     [
+      "2026-11-07",
+      "2026-11-07 08:00:00 GMT"
+     ],
+     [
+      "2026-11-08",
+      "2026-11-08 08:00:00 EST"
+     ]
+    ]
+   }
+  },
+  "acc.brief_date_is_local_today": {
+   "ok": true,
+   "evidence": {
+    "ok": 14,
+    "n": 14,
+    "bad": []
+   }
+  },
+  "acc.no_second_brief_ready": {
+   "ok": true,
+   "evidence": {
+    "bad": []
+   }
+  },
+  "acc.meetings_match_calendar_truth": {
+   "ok": false,
+   "evidence": {
+    "ok": 4,
+    "n": 14,
+    "per_day": {
+     "2026-10-26": {
+      "expected": [
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-10-27": {
+      "expected": [
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-10-28": {
+      "expected": [
+       [
+        "Northwind checkout review",
+        "14:00"
+       ],
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [
+       [
+        "Northwind checkout review",
+        "14:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-10-29": {
+      "expected": [
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-10-30": {
+      "expected": [
+       [
+        "Northwind design QA",
+        "15:00"
+       ],
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [
+       [
+        "Northwind design QA",
+        "13:00"
+       ],
+       [
+        "Northwind design QA",
+        "15:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [
+       {
+        "title": "Northwind design QA",
+        "when": "13:00",
+        "date": "2026-10-30",
+        "start": "2026-10-30T13:00:00-04:00",
+        "end": "2026-10-30T14:00:00-04:00"
+       }
+      ],
+      "invented": [],
+      "duplicates": [
+       "Northwind design QA"
+      ]
+     },
+     "2026-11-02": {
+      "expected": [
+       [
+        "Northwind sprint planning",
+        "10:00"
+       ],
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [
+       [
+        "Run club",
+        "07:00"
+       ],
+       [
+        "Northwind sprint planning",
+        "10:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-11-03": {
+      "expected": [
+       [
+        "Flight BA178 JFK to LHR",
+        "19:00"
+       ],
+       [
+        "Design standup",
+        "09:30"
+       ]
+      ],
+      "got": [
+       [
+        "Flight BA178 JFK to LHR",
+        "19:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "09:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-11-04": {
+      "expected": [
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "got": [],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-11-05": {
+      "expected": [
+       [
+        "Foundry service design workshop",
+        "10:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "got": [
+       [
+        "Foundry service design workshop",
+        "10:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "invented": [],
+      "duplicates": []
+     },
+     "2026-11-06": {
+      "expected": [
+       [
+        "Studio retro",
+        "21:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "got": [
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "09:00"
+       ],
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "09:00"
+       ],
+       [
+        "Studio retro",
+        "16:00"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [
+       {
+        "title": "Studio retro",
+        "want": "21:00",
+        "got": "16:00",
+        "start": "2026-11-06T16:00:00Z"
+       }
+      ],
+      "extra": [
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "09:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00Z",
+        "end": "2026-11-06T09:30:00Z"
+       },
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "09:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00Z",
+        "end": "2026-11-06T09:30:00Z"
+       }
+      ],
+      "invented": [],
+      "duplicates": [
+       "Coffee with Kelsey (TalentBridge)"
+      ]
+     }
+    }
+   }
+  },
+  "acc.truth_S4_brief_checks": {
+   "ok": false,
+   "evidence": {
+    "ok": 10,
+    "n": 15,
+    "failed": [
+     {
+      "check": {
+       "date": "2026-10-26",
+       "meeting": "Design standup",
+       "local": "09:30",
+       "tz": "America/New_York"
+      },
+      "ok": false,
+      "got": []
+     },
+     {
+      "check": {
+       "date": "2026-10-30",
+       "meeting": "Northwind design QA",
+       "local": "15:00",
+       "tz": "America/New_York",
+       "not_local": "13:00"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Northwind design QA",
+        "2026-10-30T13:00:00-04:00",
+        false,
+        "13:00"
+       ],
+       [
+        "Northwind design QA",
+        "2026-10-30T15:00:00-04:00",
+        false,
+        "15:00"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-11-02",
+       "meeting": "Design standup",
+       "local": "09:30",
+       "tz": "America/New_York"
+      },
+      "ok": false,
+      "got": []
+     },
+     {
+      "check": {
+       "date": "2026-11-06",
+       "absent": "Kelsey"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "2026-11-06T09:00:00Z"
+       ],
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "2026-11-06T09:00:00Z"
+       ]
+      ]
+     },
+     {
+      "check": {
+       "date": "2026-11-06",
+       "meeting": "Studio retro",
+       "local": "21:00",
+       "tz": "Europe/London"
+      },
+      "ok": false,
+      "got": [
+       [
+        "Studio retro",
+        "2026-11-06T16:00:00Z",
+        false,
+        "16:00"
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  "acc.no_invented_meetings": {
+   "ok": true,
+   "evidence": {
+    "n": 14,
+    "invented": []
+   }
+  },
+  "acc.moved_event_once_at_new_time": {
+   "ok": false,
+   "evidence": {
+    "dups": [
+     [
+      "2026-10-30",
+      [
+       "Northwind design QA"
+      ]
+     ],
+     [
+      "2026-11-06",
+      [
+       "Coffee with Kelsey (TalentBridge)"
+      ]
+     ]
+    ],
+    "oct30": [
+     [
+      [
+       "Northwind design QA",
+       "13:00"
+      ],
+      [
+       "Northwind design QA",
+       "15:00"
+      ]
+     ]
+    ]
+   }
+  },
+  "acc.cancelled_event_absent": {
+   "ok": false,
+   "evidence": {
+    "nov6": [
+     [
+      [
+       "Coffee with Kelsey (TalentBridge)",
+       "09:00"
+      ],
+      [
+       "Coffee with Kelsey (TalentBridge)",
+       "09:00"
+      ],
+      [
+       "Studio retro",
+       "16:00"
+      ]
+     ]
+    ]
+   }
+  },
+  "acc.meetings_sorted": {
+   "ok": true,
+   "evidence": {
+    "unsorted": []
+   }
+  },
+  "acc.all_day_on_right_date": {
+   "ok": true,
+   "evidence": {
+    "got": [
+     [
+      "2026-10-30",
+      [
+       [
+        "Northwind design QA",
+        "13:00"
+       ],
+       [
+        "Northwind design QA",
+        "15:00"
+       ]
+      ]
+     ],
+     [
+      "2026-10-31",
+      [
+       [
+        "Mom's birthday",
+        "all-day"
+       ]
+      ]
+     ],
+     [
+      "2026-11-01",
+      [
+       [
+        "Studio server maintenance",
+        "01:30"
+       ]
+      ]
+     ]
+    ]
+   }
+  },
+  "acc.cited_cards_resolve": {
+   "ok": true,
+   "evidence": {
+    "n": 85,
+    "bad": []
+   }
+  },
+  "acc.cited_meetings_traceable": {
+   "ok": false,
+   "evidence": {
+    "n_meetings": 12,
+    "example": [
+     [
+      "2026-10-28",
+      {
+       "sec": "meetings",
+       "title": "Northwind checkout review",
+       "why": "no item ref/uid/url on BriefMeetingView"
+      }
+     ],
+     [
+      "2026-10-30",
+      {
+       "sec": "meetings",
+       "title": "Northwind design QA",
+       "why": "no item ref/uid/url on BriefMeetingView"
+      }
+     ],
+     [
+      "2026-10-30",
+      {
+       "sec": "meetings",
+       "title": "Northwind design QA",
+       "why": "no item ref/uid/url on BriefMeetingView"
+      }
+     ]
+    ]
+   }
+  },
+  "acc.renewals_section": {
+   "ok": false,
+   "evidence": {
+    "renewals": {
+     "2026-10-26": [],
+     "2026-10-27": [],
+     "2026-10-28": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-10-29": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-10-30": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-10-31": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-11-01": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-11-02": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-11-03": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-11-04": [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00"
+     ],
+     "2026-11-05": [],
+     "2026-11-06": [],
+     "2026-11-07": [],
+     "2026-11-08": []
+    },
+    "cloudvault_days": [],
+    "wrong": [
+     "2026-11-04"
+    ]
+   }
+  },
+  "acc.overdue_section": {
+   "ok": true,
+   "evidence": {
+    "overdue": {
+     "2026-10-26": [],
+     "2026-10-27": [],
+     "2026-10-28": [],
+     "2026-10-29": [],
+     "2026-10-30": [],
+     "2026-10-31": [
+      [
+       "You told Theo Brandt: \"Sure, I'll send the budget estimate b",
+       "2026-10-30T17:00:00-04:00"
+      ]
+     ],
+     "2026-11-01": [
+      [
+       "You told Theo Brandt: \"Sure, I'll send the budget estimate b",
+       "2026-10-30T17:00:00-05:00"
+      ]
+     ],
+     "2026-11-02": [
+      [
+       "You told Theo Brandt: \"Sure, I'll send the budget estimate b",
+       "2026-10-30T17:00:00-05:00"
+      ]
+     ],
+     "2026-11-03": [],
+     "2026-11-04": [],
+     "2026-11-05": [
+      [
+       "Overdue since 2026-11-04: Send Jonah the final brochure file",
+       "2026-11-04T17:00:00Z"
+      ]
+     ],
+     "2026-11-06": [
+      [
+       "Overdue since 2026-11-04: Send Jonah the final brochure file",
+       "2026-11-04T17:00:00Z"
+      ]
+     ],
+     "2026-11-07": [
+      [
+       "Overdue since 2026-11-04: Send Jonah the final brochure file",
+       "2026-11-04T17:00:00Z"
+      ]
+     ],
+     "2026-11-08": [
+      [
+       "Overdue since 2026-11-04: Send Jonah the final brochure file",
+       "2026-11-04T17:00:00-05:00"
+      ]
+     ]
+    },
+    "not_past_due": [],
+    "budget_wrong": []
+   }
+  },
+  "acc.brief_sections_disjoint": {
+   "ok": false,
+   "evidence": {
+    "overlaps": [
+     [
+      "2026-10-28",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-10-29",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-10-30",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-10-31",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-11-01",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-11-02",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-11-03",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ],
+     [
+      "2026-11-04",
+      [
+       "Pixelboard renews 2026-11-03 \u2014 $144.00"
+      ]
+     ]
+    ]
+   }
+  },
+  "acc.redeye_flight_times": {
+   "ok": false,
+   "evidence": {
+    "flight": [
+     [
+      "2026-11-03",
+      "2026-11-03T19:00:00-05:00",
+      "2026-11-04T07:00:00-05:00"
+     ]
+    ],
+    "want_end": "2026-11-04T07:00:00+00:00 (= 2026-11-04T02:00:00-05:00)"
+   }
+  },
+  "trip.fixed.fires_0800_london": {
+   "ok": false,
+   "evidence": {
+    "ok": 0,
+    "n": 4,
+    "rows": [
+     {
+      "date": "2026-11-04",
+      "fired_at_london": "2026-11-04 13:00:01 GMT",
+      "brief_date": "2026-11-04",
+      "got": [],
+      "expected_london": [
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "truth": []
+     },
+     {
+      "date": "2026-11-05",
+      "fired_at_london": "2026-11-05 13:00:00 GMT",
+      "brief_date": "2026-11-05",
+      "got": [
+       [
+        "Foundry service design workshop",
+        "15:00"
+       ]
+      ],
+      "expected_london": [
+       [
+        "Foundry service design workshop",
+        "10:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [
+       {
+        "title": "Foundry service design workshop",
+        "want": "10:00",
+        "got": "15:00",
+        "start": "2026-11-05T10:00:00-05:00"
+       }
+      ],
+      "extra": [],
+      "truth": [
+       [
+        "Foundry service design workshop",
+        false,
+        [
+         [
+          "Foundry service design workshop",
+          "2026-11-05T10:00:00-05:00",
+          false,
+          "15:00"
+         ]
+        ]
+       ]
+      ]
+     },
+     {
+      "date": "2026-11-06",
+      "fired_at_london": "2026-11-06 13:00:01 GMT",
+      "brief_date": "2026-11-06",
+      "got": [
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "14:00"
+       ],
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "14:00"
+       ],
+       [
+        "Studio retro",
+        "21:00"
+       ]
+      ],
+      "expected_london": [
+       [
+        "Studio retro",
+        "21:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "14:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00-05:00",
+        "end": "2026-11-06T09:30:00-05:00"
+       },
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "14:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00-05:00",
+        "end": "2026-11-06T09:30:00-05:00"
+       }
+      ],
+      "truth": [
+       [
+        "Kelsey",
+        false,
+        [
+         [
+          "Coffee with Kelsey (TalentBridge)",
+          "2026-11-06T09:00:00-05:00"
+         ],
+         [
+          "Coffee with Kelsey (TalentBridge)",
+          "2026-11-06T09:00:00-05:00"
+         ]
+        ]
+       ],
+       [
+        "Studio retro",
+        true,
+        [
+         [
+          "Studio retro",
+          "2026-11-06T16:00:00-05:00",
+          false,
+          "21:00"
+         ]
+        ]
+       ]
+      ]
+     },
+     {
+      "date": "2026-11-07",
+      "fired_at_london": "2026-11-07 13:00:00 GMT",
+      "brief_date": "2026-11-07",
+      "got": [],
+      "expected_london": [],
+      "missing": [],
+      "wrong_time": [],
+      "extra": [],
+      "truth": []
+     }
+    ]
+   }
+  },
+  "trip.fixed.meetings_in_london_time": {
+   "ok": false,
+   "evidence": {
+    "ok": 1,
+    "n": 4
+   }
+  },
+  "trip.explicit.fires_0800_london": {
+   "ok": true,
+   "evidence": {
+    "ok": 4,
+    "n": 4,
+    "rows": [
+     {
+      "date": "2026-11-04",
+      "fired_at_london": "2026-11-04 08:00:01 GMT",
+      "brief_date": "2026-11-04",
+      "got": [],
+      "expected_london": [
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "truth": []
+     },
+     {
+      "date": "2026-11-05",
+      "fired_at_london": "2026-11-05 08:00:00 GMT",
+      "brief_date": "2026-11-05",
+      "got": [
+       [
+        "Foundry service design workshop",
+        "10:00"
+       ]
+      ],
+      "expected_london": [
+       [
+        "Foundry service design workshop",
+        "10:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [],
+      "extra": [],
+      "truth": [
+       [
+        "Foundry service design workshop",
+        true,
+        [
+         [
+          "Foundry service design workshop",
+          "2026-11-05T10:00:00Z",
+          false,
+          "10:00"
+         ]
+        ]
+       ]
+      ]
+     },
+     {
+      "date": "2026-11-06",
+      "fired_at_london": "2026-11-06 08:00:00 GMT",
+      "brief_date": "2026-11-06",
+      "got": [
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "09:00"
+       ],
+       [
+        "Coffee with Kelsey (TalentBridge)",
+        "09:00"
+       ],
+       [
+        "Studio retro",
+        "16:00"
+       ]
+      ],
+      "expected_london": [
+       [
+        "Studio retro",
+        "21:00"
+       ],
+       [
+        "Design standup",
+        "14:30"
+       ]
+      ],
+      "missing": [
+       {
+        "title": "Design standup",
+        "want": "14:30"
+       }
+      ],
+      "wrong_time": [
+       {
+        "title": "Studio retro",
+        "want": "21:00",
+        "got": "16:00",
+        "start": "2026-11-06T16:00:00Z"
+       }
+      ],
+      "extra": [
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "09:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00Z",
+        "end": "2026-11-06T09:30:00Z"
+       },
+       {
+        "title": "Coffee with Kelsey (TalentBridge)",
+        "when": "09:00",
+        "date": "2026-11-06",
+        "start": "2026-11-06T09:00:00Z",
+        "end": "2026-11-06T09:30:00Z"
+       }
+      ],
+      "truth": [
+       [
+        "Kelsey",
+        false,
+        [
+         [
+          "Coffee with Kelsey (TalentBridge)",
+          "2026-11-06T09:00:00Z"
+         ],
+         [
+          "Coffee with Kelsey (TalentBridge)",
+          "2026-11-06T09:00:00Z"
+         ]
+        ]
+       ],
+       [
+        "Studio retro",
+        false,
+        [
+         [
+          "Studio retro",
+          "2026-11-06T16:00:00Z",
+          false,
+          "16:00"
+         ]
+        ]
+       ]
+      ]
+     },
+     {
+      "date": "2026-11-07",
+      "fired_at_london": "2026-11-07 08:00:00 GMT",
+      "brief_date": "2026-11-07",
+      "got": [],
+      "expected_london": [],
+      "missing": [],
+      "wrong_time": [],
+      "extra": [],
+      "truth": []
+     }
+    ]
+   }
+  },
+  "trip.explicit.meetings_in_london_time": {
+   "ok": false,
+   "evidence": {
+    "ok": 1,
+    "n": 4
+   }
+  },
+  "trip.explicit.after_trip_offset_left_on": {
+   "ok": false,
+   "evidence": {
+    "back": [
+     {
+      "date": "2026-11-08",
+      "fired_at_london": "2026-11-08 03:00:00 EST",
+      "brief_date": "2026-11-08",
+      "got": [],
+      "expected_london": [],
+      "missing": [],
+      "wrong_time": [],
+      "extra": [],
+      "truth": []
+     }
+    ],
+    "note": "utc_offset +00:00 left in config after flying home: started 02:59:45 EST; a brief at 03:00 EST is wrong"
+   }
+  },
+  "time.fires_once_at_brief_time": {
+   "ok": true,
+   "evidence": {
+    "ready_at": "2026-10-27T12:00:00.077519436Z",
+    "more": []
+   }
+  },
+  "time.restart_same_day_no_second_brief": {
+   "ok": true,
+   "evidence": {
+    "ready": null
+   }
+  },
+  "time.after_midnight_waits_for_brief_time": {
+   "ok": true,
+   "evidence": {
+    "ready": null
+   }
+  },
+  "time.fires_next_day": {
+   "ok": true,
+   "evidence": {
+    "ready": [
+     "2026-10-28",
+     "2026-10-28T12:00:00.067436284Z"
+    ]
+   }
+  },
+  "time.brief_time_change_0915": {
+   "ok": true,
+   "evidence": {
+    "fired": "2026-10-29T09:15:00.003150-04:00"
+   }
+  },
+  "time.brief_time_moved_later_same_day_no_repeat": {
+   "ok": true,
+   "evidence": {
+    "ready": null
+   }
+  },
+  "time.catch_up_late_start": {
+   "ok": true,
+   "evidence": {
+    "info": "observation",
+    "fired": "2026-10-30T22:30:15.063704-04:00",
+    "note": "a brief that missed 08:00 fires at start, whatever the hour"
+   }
+  },
+  "time.brief_time_H_MM_accepted": {
+   "ok": true,
+   "evidence": {
+    "fired": "2026-10-31T11:05:00.062929108Z"
+   }
+  },
+  "time.empty_brief_not_announced": {
+   "ok": true,
+   "evidence": {
+    "brief": {
+     "date": "2026-10-27",
+     "generated_at": "2026-10-27T12:00:30.215875746Z",
+     "meetings": [],
+     "open_cards": 0,
+     "overdue": [],
+     "renewals": [],
+     "top": []
+    }
+   }
+  },
+  "time.first_data_same_day_gets_a_brief": {
+   "ok": false,
+   "evidence": {
+    "ready": null,
+    "brief_get_meetings": 0,
+    "brief_get_top": 2,
+    "note": "first brief of a fresh install was 'empty' at 08:00 and marked as fired; data synced at 09:00"
+   }
+  },
+  "time.disabled_no_brief": {
+   "ok": true,
+   "evidence": {
+    "ready": null,
+    "brief": {
+     "date": "2026-10-28",
+     "generated_at": "2026-10-28T12:00:25.301081719Z",
+     "meetings": [],
+     "open_cards": 0,
+     "overdue": [],
+     "renewals": [],
+     "top": []
+    },
+    "cards": 0
+   }
+  },
+  "time.runs_through_midnight_one_per_day": {
+   "ok": true,
+   "evidence": {
+    "fired_local": [
+     "2026-10-27 08:00:00",
+     "2026-10-28 08:00:00",
+     "2026-10-29 08:00:00"
+    ],
+    "want": "2026-10-27/28/29 at 08:00 EDT, once each"
+   }
+  },
+  "dst.sunday_brief_0800_EST": {
+   "ok": true,
+   "evidence": {
+    "fired_local": [
+     "2026-11-01T08:00:00.068616-05:00",
+     "2026-11-02T08:00:00.580795-05:00"
+    ],
+    "sat_fired": "2026-10-31T08:00:00.075089-04:00"
+   }
+  },
+  "dst.monday_brief_0800_EST": {
+   "ok": true,
+   "evidence": {
+    "fired_local": [
+     "2026-11-01T08:00:00.068616-05:00",
+     "2026-11-02T08:00:00.580795-05:00"
+    ]
+   }
+  },
+  "dst.snooze_default_tomorrow_at_brief_time": {
+   "ok": false,
+   "evidence": {
+    "snooze": {
+     "card": "b7fb6a531ef6b4fc",
+     "title": "You told Theo Brandt: \"Sure, I'll send the budget estimate by Friday.\"",
+     "snoozed_until": "2026-11-01T08:00:00-04:00",
+     "at": null,
+     "state_at_sunday_brief": "new"
+    },
+    "snoozed_until_local": "2026-11-01T07:00:00-05:00",
+    "want": "2026-11-01T08:00:00-05:00"
+   }
+  },
+  "dst.future_times_use_future_offset": {
+   "ok": false,
+   "evidence": {
+    "edt_offsets_after_change": [
+     [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00",
+      "Remind me 2026-11-02T09:00:00-04:00"
+     ],
+     [
+      "Pixelboard renews 2026-11-03 \u2014 $144.00",
+      "due 2026-11-03T09:00:00-04:00"
+     ]
+    ],
+    "note": "09:00 on Nov 2/3 written as -04:00 is 08:00 EST"
+   }
+  },
+  "dst.brief_at_0130_fires_once_on_fallback_night": {
+   "ok": true,
+   "evidence": {
+    "fired": [
+     "2026-11-01T01:30:00.023041-04:00"
+    ]
+   }
+  },
+  "trip.zone_change_while_running_fires_0800_london": {
+   "ok": true,
+   "evidence": {
+    "catch_up": null,
+    "swapped_at_sim": "2026-11-03T21:34:22.650776-05:00",
+    "fired": [
+     "2026-11-04",
+     "2026-11-04T08:00:00.123202+00:00"
+    ],
+    "meetings": []
+   }
+  }
+ }
+}
