@@ -391,7 +391,14 @@ impl Proactive {
             .ok_or_else(|| Error::NotFound(format!("card {id}")))?;
         let already_accepted = card.was_accepted;
         f(card)?;
-        let (features, kind, title) = (card.features.clone(), card.kind, card.title.clone());
+        // A sensitive card's title (its mail subject) is not kept as a thread label: the
+        // learned layer outlives the card and is listed by `proactive.learning`.
+        let title = if card.sensitive {
+            String::new()
+        } else {
+            card.title.clone()
+        };
+        let (features, kind) = (card.features.clone(), card.kind);
         // One accept per card counts; repeated accepts are no-ops.
         if !(fb == Feedback::Accepted && already_accepted) {
             state

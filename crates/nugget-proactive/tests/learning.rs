@@ -312,3 +312,41 @@ async fn legacy_per_sender_weights_move_into_the_learned_layer() {
     assert_eq!((e.scope, e.key.as_str()), (Scope::Sender, "ana@acme.io"));
     assert!((e.contribution + 2.0).abs() < 1e-6, "{e:?}");
 }
+
+/// PL-2: a sensitive card's title (its mail subject) is not kept in the learned layer, which
+/// outlives the card and is listed by `proactive.learning`.
+#[tokio::test]
+async fn a_sensitive_cards_subject_is_not_kept_as_a_learned_label() {
+    let f = fixture();
+    put_mail(
+        &f.store,
+        Mail {
+            key: "m-lab",
+            from: "Dana Lee <dana@clinic.test>",
+            subject: "Your biopsy results 884213",
+            body: "Could you call me about the biopsy results before Friday?",
+            days_ago: 1.5,
+            message_id: "<lab-1@clinic.test>",
+            sensitive: true,
+            ..Default::default()
+        },
+    );
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let card = find(&p, |c| c.title.contains("biopsy"));
+    assert!(card.sensitive);
+    p.dismiss(&card.id, DismissReason::NotImportant, now())
+        .unwrap();
+    let listed = p.learned(now()).unwrap();
+    let thread = listed
+        .iter()
+        .find(|e| e.scope == Scope::Thread)
+        .expect("the thread is learned");
+    assert!(thread.label.is_none(), "{:?}", thread.label);
+    assert!(
+        listed
+            .iter()
+            .all(|e| !e.key.contains("884213")
+                && !e.label.as_deref().unwrap_or("").contains("884213"))
+    );
+}
