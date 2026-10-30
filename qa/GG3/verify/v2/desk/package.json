@@ -1,0 +1,44 @@
+{
+  "name": "nugget-desktop",
+  "private": true,
+  "version": "0.0.1",
+  "license": "Apache-2.0",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tests",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:flows": "vitest run tests",
+    "e2e": "node e2e/run.mjs",
+    "screenshots": "node e2e/screenshots.mjs",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "~2.11.1",
+    "d3-force": "3.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "~2.11.5",
+    "@types/d3-force": "3.0.10",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "axe-core": "4.14.0",
+    "jsdom": "29.1.1",
+    "playwright": "1.63.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.0",
+    "vitest": "4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

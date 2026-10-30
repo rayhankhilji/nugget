@@ -1,5 +1,6 @@
 use nugget_policy::{PolicyGate, ActionContext, ActionDescriptor, KillSwitch, PolicyEngine, RiskClass};
 fn main() {
+    keys_check();
     let eng = PolicyEngine::builder().kill_switch(KillSwitch::new()).build();
     let cases: &[(&str, &str, &str, Option<&str>, &str)] = &[
         // app, verb, label, preview, role
@@ -30,5 +31,23 @@ fn main() {
         let d = eng.evaluate_with_context(&a, &ctx);
         let c = nugget_policy::RiskClassifier::global().classify_with_context(&a, &ctx);
         println!("{app:30} {verb:10} {label:30} {prev:?} -> risk={:?} decision={:?}", c.risk, d);
+    }
+}
+
+#[allow(dead_code)]
+fn _unused() {}
+
+pub fn keys_check() {
+    use nugget_a11y::computer::{KeyChord, UiNode};
+    use nugget_a11y::role::Role;
+    let kw = nugget_computer::RiskKeywords::default();
+    for label in ["Delete", "Löschen", "Revoke access", "Make admin", "Checkout", "Firewall", "Send", "Senden"] {
+        let n = UiNode { role: Role::Button, name: Some(label.into()), ..UiNode::default() };
+        let space = KeyChord::parse_list("space").unwrap();
+        let enter = KeyChord::parse_list("enter").unwrap();
+        println!("computer keys_risk {label:15} space={:?} enter={:?} click={:?}",
+            nugget_computer::risk::keys_risk(&space, Some(&n), &[], &kw),
+            nugget_computer::risk::keys_risk(&enter, Some(&n), &[], &kw),
+            nugget_computer::risk::click_risk(Some(&n), &[], &kw));
     }
 }

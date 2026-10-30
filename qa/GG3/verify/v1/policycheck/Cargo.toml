@@ -7,3 +7,5 @@ publish = false
 [workspace]
 [dependencies]
 nugget-policy = { path = "../../../../../crates/nugget-policy" }
+nugget-computer = { path = "../../../../../crates/nugget-computer" }
+nugget-a11y = { path = "../../../../../crates/nugget-a11y" }

@@ -1,0 +1,211 @@
+/* Today page (morning brief, card inbox, action preview). Uses the app's tokens only. */
+
+.today-brief {
+  margin-bottom: 8px;
+}
+
+.today-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.today-brief-block {
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.today-brief-block h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.today-brief-list,
+.today-cards,
+.today-why ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.today-brief-list {
+  display: grid;
+  gap: 8px;
+}
+
+.today-brief-title {
+  display: block;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.today-cards {
+  display: grid;
+  gap: 12px;
+}
+
+.today-card-title {
+  margin: 0;
+  font-size: 14px;
+}
+
+.today-card-summary,
+.today-card-detail {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.today-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.today-card-meta:empty {
+  display: none;
+}
+
+.today-why {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.today-row-start {
+  justify-content: flex-start;
+}
+
+.today-dismiss fieldset {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.today-dismiss legend {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.today-preview-summary {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.today-diff {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 8px 0;
+  max-height: 40vh;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+.today-diff li {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.today-diff-add {
+  background: var(--good-soft);
+  color: var(--good);
+}
+
+.today-diff-remove {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.today-diff-marker {
+  flex: none;
+  width: 1ch;
+  user-select: none;
+}
+
+.today-draft {
+  margin: 8px 0;
+  padding: 10px 12px;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border-radius: var(--radius-small);
+}
+
+.today-artifact code.block {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+/* BB2: what feedback taught the ranking. */
+
+.today-learned ul,
+.today-learning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.today-learned li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.today-learned-less,
+.today-learned-hidden {
+  color: var(--muted);
+}
+
+.today-learning {
+  margin-top: 16px;
+}
+
+.today-learning-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.today-learning-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.today-learning-what {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.today-learning-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
