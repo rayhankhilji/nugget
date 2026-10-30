@@ -121,7 +121,7 @@ export function ModelsPage() {
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && (
         <>
-          <Loading label={t("models.loading")} lines={1} />
+          <Loading label={t("models.loading")} lines={0} />
           <ul className="cards" aria-hidden="true">
             {[0, 1, 2, 3].map((i) => (
               <li key={i} className="card pg-skeleton-card">

@@ -180,7 +180,7 @@ export function TodayPage() {
           {cards.loading && !list && <Loading label={t("today.loading")} lines={3} />}
           {list && visible.length === 0 &&
             (sources.data?.length === 0 ? (
-              <EmptyState title={t("today.noSourcesTitle")} action={<GoToPage page="sources" />}>
+              <EmptyState title={t("today.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
                 {t("today.noSourcesBody")}
               </EmptyState>
             ) : (

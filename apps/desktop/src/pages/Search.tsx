@@ -132,7 +132,7 @@ export function SearchPage() {
         </h2>
       )}
       {hits && hits.length === 0 && (
-        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" /> : undefined}>
+        <EmptyState title={t("search.noResults", { query: searched })} action={nothingIndexed ? <GoToPage page="sources" className="btn btn-primary" /> : undefined}>
           {nothingIndexed ? nothingHint : t("search.noResultsHint")}
         </EmptyState>
       )}
@@ -168,7 +168,7 @@ export function SearchPage() {
       )}
       {!hits && !busy && !error &&
         (nothingIndexed ? (
-          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" />}>
+          <EmptyState title={stillIndexing ? t("search.indexingTitle") : t("search.noSourcesTitle")} action={<GoToPage page="sources" className="btn btn-primary" />}>
             {nothingHint}
           </EmptyState>
         ) : (

@@ -1806,6 +1806,11 @@ h4.ask-sub {
   min-width: 0;
 }
 
+/* Nothing to show beside the list (no entities yet): the list and its empty state take the width. */
+.kb-layout:not(:has(> .kb-detail)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .kb-list .field {
   margin-bottom: var(--space-2);
 }

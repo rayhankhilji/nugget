@@ -162,12 +162,12 @@ const VIEWS = {
 
 const OVERLAY_VIEWS = {
   reading: { phase: "reading", text: "" },
-  streaming: { phase: "streaming", text: "Thanks Ines, the Tidewater Billing contract is with Vellum & Thistle; I'll", provider: "local", locality: "local", citations: 2 },
+  streaming: { phase: "streaming", text: "Thanks Ines, the Tidewater Billing contract is with Vellum & Thistle; I'll", provider: "local-chat", locality: "on_device", citations: 2 },
   done: {
     phase: "done",
     text: "Thanks Ines, the Tidewater Billing contract is with Vellum & Thistle LLP for review. Lucia expects to send comments by Friday, and I'll forward them as soon as they land.",
-    provider: "local",
-    locality: "local",
+    provider: "local-chat",
+    locality: "on_device",
     citations: 2,
     excluded_sensitive: 1,
   },

@@ -230,7 +230,7 @@ function EntityBrowser({
 
   return (
     <section className="kb-list" aria-label={t("knowledge.entitiesLabel")}>
-      {!nothing && !(firstLoad && !filtered) && (
+      {!nothing && !(firstLoad && !filtered) && !(list.error != null && !list.data) && (
         <>
       <div className="field">
         <label htmlFor="kb-search" className="visually-hidden">

@@ -141,7 +141,9 @@ export function StatusPage() {
         </>
       )}
 
-      <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />
+      {/* While the page shows its one error or loading state, sections with nothing to show are left out. */}
+      {(!quiet || ingest.data) && <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />}
+      {(!quiet || runtime.data) && (
       <RuntimeCard
         data={runtime.data}
         error={quiet ? null : runtime.error}
@@ -150,7 +152,8 @@ export function StatusPage() {
         // "No AI providers" above already offers Go to Models: one button per next step.
         offerModels={!s || s.providers.length > 0}
       />
-      <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />
+      )}
+      {(!quiet || knowledge.data) && <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />}
       <UpdateSettings />
 
       <h2>{t("status.connection")}</h2>
