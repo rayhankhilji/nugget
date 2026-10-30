@@ -1,0 +1,8 @@
+suite: doubletap-macos
+runner: GitHub Actions 1000010003 (macOS ARM64)
+commit: 17990594d17c1bd5ef929e5df4addb28207ccb90
+date: 2026-10-30T00:31:55Z
+Apple M2 Pro (Virtual)
+5
+5
+15032385536

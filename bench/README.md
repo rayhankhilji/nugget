@@ -1489,6 +1489,18 @@ cut and the model pasted it into the draft. Fixed after this run: local prompts 
 marked sensitive out unless `[draft.local] include_sensitive = true` (the draft bench's local arm
 follows the engine).
 
+**Confirmation run** [40979809226](https://github.com/rayhankhilji/nugget/actions/runs/40979809226)
+at `1799059` (with that fix; reports in
+[`results/real-models/run-40979809226/`](results/real-models/run-40979809226/)), budget off / on:
+sensitive leak rate **0 / 0** and sensitive passages in the prompt 0.375 / **0**; voice match 0.95 /
+0.91, fact recall 0.70 / 0.70, hallucination rate 0.0 / **0.33**, rule-based win rate 0.625 /
+0.625, judge win rate 0.625 / 0.50 (inconsistent 0.125 / 0.50), time to first token p50 26.6 /
+18.9 s. Across the two runs the budget leaves voice and recall unchanged; hallucination was 0.33
+with the budget on both times and 0.33 then 0.0 with it off, so the smaller context may cost some
+factuality, which 8 tasks cannot settle. Double Tap reproduced within 1 s: first inserted
+character p50 40.6 → 29.7 s (EPYC 7763) and 14.1 → 9.3 s (virtual M2 Pro); a repeat draft 0.15 s
+and 0.23 s.
+
 ### Drafting quality
 
 `draft --local-models --draft-judge model`, 8 tasks, both arms on the same model. The baseline's
