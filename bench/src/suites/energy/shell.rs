@@ -359,8 +359,11 @@ struct TextWindows {
     #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     procs: Vec<Child>,
     /// Linux: X window ids; macOS: document names.
-    #[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     ids: Vec<String>,
+    /// macOS: the documents, reopened to bring each window to the front.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    files: Vec<PathBuf>,
     /// What drives them, for the params.
     driver: &'static str,
 }
@@ -373,10 +376,7 @@ impl Drop for TextWindows {
         }
         #[cfg(target_os = "macos")]
         {
-            let _ = run_bounded(
-                Command::new("osascript")
-                    .args(["-e", "tell application \"TextEdit\" to quit saving no"]),
-            );
+            let _ = run_bounded(Command::new("/usr/bin/pkill").args(["-x", "TextEdit"]));
         }
     }
 }
@@ -445,6 +445,7 @@ impl TextWindows {
         let mut me = Self {
             procs: Vec::new(),
             ids: Vec::new(),
+            files: Vec::new(),
             driver: "xdotool windowactivate --sync (GTK 3 windows, AT-SPI)",
         };
         for (title, text) in WINDOWS {
@@ -508,28 +509,14 @@ impl TextWindows {
         let me = Self {
             procs: Vec::new(),
             ids,
-            driver: "osascript (TextEdit documents, Accessibility)",
+            files,
+            driver: "open -a TextEdit (three documents, reopened to bring each to the front)",
         };
-        let t = Instant::now();
-        loop {
-            let n = run_bounded(Command::new("osascript").args([
-                "-e",
-                "tell application \"TextEdit\" to count (windows whose name starts with \"nugget-bench-\")",
-            ]))
-            .ok()
-            .and_then(|s| s.trim().parse::<usize>().ok())
-            .unwrap_or(0);
-            if n >= WINDOWS.len() {
-                return Ok(me);
-            }
-            if t.elapsed() > HELPER_LIMIT {
-                return Err(BenchError::Failed(format!(
-                    "TextEdit shows {n} of the {} documents",
-                    WINDOWS.len()
-                )));
-            }
-            std::thread::sleep(Duration::from_millis(250));
-        }
+        // No AppleScript: sending TextEdit Apple Events needs an Automation grant that a CI
+        // runner does not have. `open` on a document that is already open brings its window
+        // to the front, which is all the focus script needs.
+        std::thread::sleep(Duration::from_secs(3));
+        Ok(me)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
@@ -548,12 +535,12 @@ impl TextWindows {
         }
         #[cfg(target_os = "macos")]
         {
-            let script = format!(
-                "tell application \"TextEdit\"\nactivate\nset index of (first window whose name \
-                 starts with \"{}\") to 1\nend tell",
-                self.ids[i]
-            );
-            run_bounded(Command::new("osascript").args(["-e", &script])).map(|_| ())
+            run_bounded(
+                Command::new("/usr/bin/open")
+                    .args(["-a", "TextEdit"])
+                    .arg(&self.files[i]),
+            )
+            .map(|_| ())
         }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         {

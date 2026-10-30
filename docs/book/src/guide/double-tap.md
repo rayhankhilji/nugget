@@ -59,6 +59,7 @@ On the **Double Tap** settings page:
 | Provider per app | Which model to use in a given app or site, for example a local model in your work mail and a cloud model in a chat app. Otherwise the `synthesis` tier is used, like Ask |
 | Excluded apps | Apps and sites where Double Tap never reads or drafts |
 | Read ahead while you reply | Read a reply field early so a local model can start on it before the trigger. On by default; see [Read-ahead](#read-ahead) |
+| Read ahead on battery | Off: read-ahead pauses while the computer runs on battery. On by default. Low power mode / battery saver always pauses it |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/double-tap-dark.png">
@@ -92,6 +93,14 @@ read-ahead makes the local model read a prompt of several hundred tokens. Measur
 cloud CPU, that is about 15 CPU-seconds per newly focused reply field with the 4B model, 8 with
 the 1.7B. When you then draft, the draft skips that same reading, so it mostly moves work rather
 than adding it; it is wasted only for fields you focus and don't draft in. See [Latency](#latency).
+Read-ahead pauses in low power mode (macOS) or battery saver (Windows, or the `low-power` platform
+profile on Linux), and on battery when **Read ahead on battery** is off.
+
+**Watching focus.** On macOS and Windows the app is told by the system when another app or window
+comes to the front, and otherwise looks again only every 5 seconds (to catch a window or tab change
+inside the same app). On Linux there is no such notice, so it checks what is in front every second
+while a field is about to be read and every 2 seconds otherwise. The energy measurements are in
+the benchmark notes ([`bench/README.md`, Energy](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md#energy)).
 
 **Turning it off.** Switch off **Read ahead while you reply** on the Double Tap page. To turn it off
 for every client of the daemon, set `enabled = false` under `[draft.read_ahead]` in `config.toml`

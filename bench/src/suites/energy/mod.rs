@@ -278,11 +278,18 @@ fn shell_hook(
     s: Scenario,
     source: EnergySource,
 ) -> Result<Vec<Metric>, BenchError> {
-    if s == Scenario::ShellIdle {
-        shell::shell_idle(ctx, p, source)
+    let (name, run) = if s == Scenario::ShellIdle {
+        ("shell_idle", shell::shell_idle(ctx, p, source))
     } else {
-        shell::shell_focus(ctx, p, source)
-    }
+        ("shell_focus", shell::shell_focus(ctx, p, source))
+    };
+    // A desktop that cannot be driven (window system, permissions) must not cost the report its
+    // other scenarios: the failure is recorded, like a skip.
+    run.or_else(|e| {
+        eprintln!("energy {name}: failed: {e}");
+        ctx.param(name, format!("failed: {e}"));
+        Ok(Vec::new())
+    })
 }
 
 /// Environment variable naming the desktop shell binary the shell scenarios launch.
