@@ -5,7 +5,7 @@
     "typed_body_shown_in_dialog": false,
     "A": {
       "approve_enabled_before_kill": true,
-      "dialog_gone_after_kill_ms": 8,
+      "dialog_gone_after_kill_ms": 31,
       "approve_disabled_while_dialog_open_after_kill": false,
       "halted_banner": 1,
       "submits": 0,
@@ -15,7 +15,43 @@
       "approve_had_focus": true,
       "enter_after_kill_reply_ms": 0,
       "ui_sent_agent_confirm": true,
-      "agent_confirm_result": "error: no open confirmation act_73d9387208b8b55ddb8d315b0919b152:8",
+      "agent_confirm_result": "accepted",
+      "resolved_event": "approved",
+      "finished": "halted",
+      "log_tail": [
+        "decision(browser_submit):approved",
+        "executed(browser_submit):INTERRUPTED",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
+    },
+    "B_gap20ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 20.5,
+      "ui_sent_agent_confirm": true,
+      "agent_confirm_result": "accepted",
+      "resolved_event": "approved",
+      "finished": "halted",
+      "log_tail": [
+        "decision(browser_submit):approved",
+        "executed(browser_submit):INTERRUPTED",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
+    },
+    "B_gap60ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 60.1,
+      "ui_sent_agent_confirm": false,
+      "agent_confirm_result": "not sent",
       "resolved_event": "none",
       "finished": "halted",
       "log_tail": [
@@ -28,10 +64,41 @@
         "All agents are stopped. Nothing runs until you resume.\nResume agents"
       ],
       "page_errors": []
+    }
+  },
+  {
+    "rep": 2,
+    "dialog_facts": "Risk\nSend\nApp or site\nmail.example.test\nAction\nsubmit (browser_submit)\nOn\nbutton \"Send\"",
+    "typed_body_shown_in_dialog": false,
+    "A": {
+      "approve_enabled_before_kill": true,
+      "dialog_gone_after_kill_ms": 49,
+      "approve_disabled_while_dialog_open_after_kill": false,
+      "halted_banner": 1,
+      "submits": 0,
+      "page_errors": []
+    },
+    "B_gap0ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 0,
+      "ui_sent_agent_confirm": true,
+      "agent_confirm_result": "accepted",
+      "resolved_event": "approved",
+      "finished": "halted",
+      "log_tail": [
+        "decision(browser_submit):approved",
+        "executed(browser_submit):INTERRUPTED",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
     },
     "B_gap20ms": {
       "approve_had_focus": true,
-      "enter_after_kill_reply_ms": 21.8,
+      "enter_after_kill_reply_ms": 20.6,
       "ui_sent_agent_confirm": false,
       "agent_confirm_result": "not sent",
       "resolved_event": "none",
@@ -49,7 +116,74 @@
     },
     "B_gap60ms": {
       "approve_had_focus": true,
-      "enter_after_kill_reply_ms": 60,
+      "enter_after_kill_reply_ms": 60.5,
+      "ui_sent_agent_confirm": false,
+      "agent_confirm_result": "not sent",
+      "resolved_event": "none",
+      "finished": "halted",
+      "log_tail": [
+        "model_turn",
+        "decision(browser_submit):rejected",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
+    }
+  },
+  {
+    "rep": 3,
+    "dialog_facts": "Risk\nSend\nApp or site\nmail.example.test\nAction\nsubmit (browser_submit)\nOn\nbutton \"Send\"",
+    "typed_body_shown_in_dialog": false,
+    "A": {
+      "approve_enabled_before_kill": true,
+      "dialog_gone_after_kill_ms": 38,
+      "approve_disabled_while_dialog_open_after_kill": false,
+      "halted_banner": 1,
+      "submits": 0,
+      "page_errors": []
+    },
+    "B_gap0ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 0,
+      "ui_sent_agent_confirm": true,
+      "agent_confirm_result": "accepted",
+      "resolved_event": "approved",
+      "finished": "halted",
+      "log_tail": [
+        "decision(browser_submit):approved",
+        "executed(browser_submit):INTERRUPTED",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
+    },
+    "B_gap20ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 20.1,
+      "ui_sent_agent_confirm": true,
+      "agent_confirm_result": "error: no open confirmation act_7a46ec8e242d8a20451eb84b8201481e:8",
+      "resolved_event": "none",
+      "finished": "halted",
+      "log_tail": [
+        "model_turn",
+        "decision(browser_submit):rejected",
+        "finished"
+      ],
+      "submits": 0,
+      "error_note_shown": [
+        "All agents are stopped. Nothing runs until you resume.\nResume agents"
+      ],
+      "page_errors": []
+    },
+    "B_gap60ms": {
+      "approve_had_focus": true,
+      "enter_after_kill_reply_ms": 60.6,
       "ui_sent_agent_confirm": false,
       "agent_confirm_result": "not sent",
       "resolved_event": "none",

@@ -1,12 +1,44 @@
 {
-  "commit": null,
+  "commit": "0d81796",
   "runs": [
     {
       "task_approvals_while_running": [
         {
           "risk": "send",
           "target": "mail.example.test",
-          "task_id": "d0e80dafbd964099ab86f75dd86f01a5"
+          "task_id": "a547f775bcad4552ab605e1d42fc2eb8"
+        }
+      ],
+      "task_approvals_after_kill_resume": [],
+      "finished": {
+        "outcome": "halted"
+      },
+      "submits": 1,
+      "submits_after_kill": 0,
+      "ok": true
+    },
+    {
+      "task_approvals_while_running": [
+        {
+          "risk": "send",
+          "target": "mail.example.test",
+          "task_id": "8d7aac878638476aa02f31aeb374aad9"
+        }
+      ],
+      "task_approvals_after_kill_resume": [],
+      "finished": {
+        "outcome": "halted"
+      },
+      "submits": 1,
+      "submits_after_kill": 0,
+      "ok": true
+    },
+    {
+      "task_approvals_while_running": [
+        {
+          "risk": "send",
+          "target": "mail.example.test",
+          "task_id": "fe7411d7d0ec477b82969255cab2fe23"
         }
       ],
       "task_approvals_after_kill_resume": [],

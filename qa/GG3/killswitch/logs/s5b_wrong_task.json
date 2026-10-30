@@ -1,8 +1,32 @@
 {
-  "commit": null,
+  "commit": "0d81796",
   "runs": [
     {
-      "other_task_reply": "no open confirmation act_5524c2644c87390cb6612ebb020989a6:8",
+      "other_task_reply": "no open confirmation act_b62c2907edb9c89e3b33b628d317fc37:8",
+      "unknown_task_reply": "unknown agent task 0000",
+      "submits_before_right_answer": 0,
+      "deny_reply": "ok",
+      "finished": {
+        "detail": "script ended",
+        "outcome": "failed"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    },
+    {
+      "other_task_reply": "no open confirmation act_0165377836384a1404c651a84a6a4601:8",
+      "unknown_task_reply": "unknown agent task 0000",
+      "submits_before_right_answer": 0,
+      "deny_reply": "ok",
+      "finished": {
+        "detail": "script ended",
+        "outcome": "failed"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    },
+    {
+      "other_task_reply": "no open confirmation act_ebd0f7352faee3d777112592646ee22d:8",
       "unknown_task_reply": "unknown agent task 0000",
       "submits_before_right_answer": 0,
       "deny_reply": "ok",

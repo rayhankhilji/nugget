@@ -157,6 +157,8 @@ const scenarios = {
         submit_after_kill_reply: sub.filter((s) => s.t > kill.t).length,
         submit_after_kill_sent: sub.filter((s) => s.t > kill.t0).length,
         log_tail: log.slice(-4),
+        ext_requests: env.fake.st.requests.map((x) => x.type + (x.action ? `:${x.action.kind}` : "") + `@${(x.t - kill.t0).toFixed(1)}ms`),
+        extension_left_halted: env.fake.st.halted,
       });
     }
     return { runs: out, ok: out.every((o) => o.submit_after_kill_reply === 0) };
@@ -232,7 +234,9 @@ const scenarios = {
     const r = await startTask(script);
     const id = r.result.task_id;
     env.fake.st.actDelayMs = { type: 1500 };
-    const first = await waitFor(() => env.fake.st.acts[0], 15000);
+    const first = await waitFor(() => env.fake.st.acts[0], 15000).catch((e) => {
+      throw new Error(`no act reached the extension; events: ${JSON.stringify(agentEvents(env.ipc, id).map((x) => x.event + ":" + (x.reason ?? x.summary ?? JSON.stringify(x.outcome ?? "")).slice(0, 160)))}`);
+    });
     await sleep(200);
     const kill = await env.ipc.call("policy.kill");
     const fin = await finishedOf(id, 5000);
@@ -306,6 +310,78 @@ const scenarios = {
       finished: fin?.params.event.outcome,
       ok: after.length === 0,
     };
+  },
+
+  // 9. kill during a busy browser loop, Resume in the desktop app (policy.resume), run a fresh
+  // browser task. Does the browser stay stopped although the daemon says agents may run?
+  async s9_resume_vs_extension_halt(rep) {
+    const tries = [];
+    for (let k = 0; k < 10; k++) {
+      await ensureResumed();
+      env.fake.resume(); // the user also pressed Resume in the extension popup (clean start)
+      const turn = (i) => ({ calls: [{ name: "browser_type", args: { element: "n2", text: `loop ${i}` } }] });
+      const r = await startTask([{ calls: [{ name: "browser_snapshot", args: {} }] }, ...Array.from({ length: 28 }, (_, i) => turn(i))], "Type repeatedly (synthetic)");
+      const id = r.result.task_id;
+      await waitFor(() => env.fake.st.acts.length >= 2, 15000);
+      await sleep(Math.floor(Math.random() * 15));
+      await env.ipc.call("policy.kill");
+      await finishedOf(id, 5000);
+      const haltSent = env.fake.st.requests.some((x) => x.type === "halt");
+      await env.ipc.call("policy.resume");
+      const pol = await env.ipc.rpc("policy.get");
+      // A fresh task after Resume (the extension popup was NOT touched).
+      const r2 = await startTask([{ calls: [{ name: "browser_snapshot", args: {} }] }, { calls: [{ name: "finish", args: { outcome: "done", summary: "read" } }] }], "Read the page (synthetic)");
+      const id2 = r2.result.task_id;
+      const fin2 = await finishedOf(id2, 10000);
+      const snapDone = agentEvents(env.ipc, id2).find((e) => e.event === "action_done" && e.tool === "browser_snapshot");
+      tries.push({
+        halt_pushed_to_extension_by_kill: haltSent,
+        daemon_halted_after_resume: pol.halted,
+        next_task_snapshot_result: snapDone?.summary?.slice(0, 120),
+        next_task_finished: fin2?.params.event.outcome,
+      });
+    }
+    const stuck = tries.filter((x) => x.halt_pushed_to_extension_by_kill).length;
+    return { extension_halted_by_kill: `${stuck}/10`, tries, ok: tries.every((x) => !/kill switch is engaged/.test(x.next_task_snapshot_result ?? "")) };
+  },
+
+  // 10. approve and Stop pipelined (approve first), 30 tries: how often is the extension left
+  // halted, and what does the next task (after Resume in the app) get?
+  async s10_extension_left_halted(rep) {
+    let halted = 0;
+    const examples = [];
+    for (let k = 0; k < 30; k++) {
+      await ensureResumed();
+      env.fake.resume();
+      const r = await startTask(SEND_SCRIPT);
+      const id = r.result.task_id;
+      const req = await untilConfirm(id);
+      const [, kill] = await Promise.all([
+        env.ipc.call("agent.confirm", { task_id: id, request_id: req.request_id, choice: "once" }),
+        env.ipc.call("policy.kill"),
+      ]);
+      await finishedOf(id, 5000);
+      if (!env.fake.st.halted) continue;
+      halted++;
+      const haltReq = env.fake.st.requests.find((x) => x.type === "halt");
+      await env.ipc.call("policy.resume");
+      const pol = await env.ipc.rpc("policy.get");
+      const r2 = await startTask([{ calls: [{ name: "browser_snapshot", args: {} }] }, { calls: [{ name: "finish", args: { outcome: "done", summary: "read" } }] }], "Read the page (synthetic)");
+      const id2 = r2.result.task_id;
+      const fin2 = await finishedOf(id2, 10000);
+      if (examples.length < 3)
+        examples.push({
+          try: k + 1,
+          halt_request_at_ms_after_kill_sent: +(haltReq.t - kill.t0).toFixed(2),
+          first_task_log_tail: summarizeLog(await taskLog(id)).slice(-3),
+          daemon_halted_after_resume: pol.halted,
+          next_task_snapshot_result: agentEvents(env.ipc, id2).find((e) => e.event === "action_done" && e.tool === "browser_snapshot")?.summary,
+          next_task_finished: fin2?.params.event.outcome,
+          next_task_policy_still_resumed: !(await env.ipc.rpc("policy.get")).halted,
+        });
+    }
+    env.fake.resume();
+    return { extension_left_halted: `${halted}/30`, examples, ok: halted === 0 };
   },
 
   // 4. agent.run while killed; then resume.

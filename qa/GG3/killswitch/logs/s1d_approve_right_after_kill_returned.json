@@ -1,163 +1,6 @@
 {
-  "commit": "0d81796",
+  "commit": null,
   "runs": [
-    {
-      "accepted_after_kill": "6/10",
-      "submits_total": 0,
-      "tries": [
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "error: no open confirmation act_d71bc0151c0dd06b12dd5229699afe27:8",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.04,
-          "approve_reply": "error: no open confirmation act_6e000c48cafcff59281b0fafa576b432:8",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.05,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.01,
-          "approve_reply": "error: no open confirmation act_962727615f196e61b134524e4b9da2ee:8",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.04,
-          "approve_reply": "error: confirmation act_a3c547947b21ba2543d866928064dd8f:8 is no longer open",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        }
-      ],
-      "ok": false
-    },
     {
       "accepted_after_kill": "8/10",
       "submits_total": 0,
@@ -166,21 +9,6 @@
           "kill_result": {
             "halted": true
           },
-          "approve_sent_after_kill_reply_ms": 0.05,
-          "approve_reply": "error: confirmation act_4ff63a07e6d33c32aeeef97836fcd3b2:8 is no longer open",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
           "approve_sent_after_kill_reply_ms": 0.03,
           "approve_reply": "ACCEPTED (null)",
           "resolved_event": "approved",
@@ -196,53 +24,98 @@
           "kill_result": {
             "halted": true
           },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.02,
+          "approve_reply": "ACCEPTED (null)",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
+          "approve_sent_after_kill_reply_ms": 0.09,
+          "approve_reply": "error: confirmation act_cb569bd2e97e09c50703863fda74a418:8 is no longer open",
+          "resolved_event": "none",
+          "finished": "halted",
+          "submits": 0,
+          "log_tail": [
+            "model_turn",
+            "decision(browser_submit):rejected",
+            "finished:halted"
+          ]
+        },
+        {
+          "kill_result": {
+            "halted": true
+          },
           "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
+          "approve_reply": "error: confirmation act_1cb18e47c884800b6edd646b7bcbc79c:8 is no longer open",
           "resolved_event": "none",
           "finished": "halted",
           "submits": 0,
@@ -258,21 +131,6 @@
           },
           "approve_sent_after_kill_reply_ms": 0.01,
           "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "error: no open confirmation act_87a8135f7ea8029e28adce949550ab1a:8",
           "resolved_event": "none",
           "finished": "halted",
           "submits": 0,
@@ -288,178 +146,6 @@
           },
           "approve_sent_after_kill_reply_ms": 0.02,
           "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        }
-      ],
-      "ok": false
-    },
-    {
-      "accepted_after_kill": "6/10",
-      "submits_total": 0,
-      "tries": [
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.01,
-          "approve_reply": "error: no open confirmation act_10c213f5bbc402a8af5db80582fcdb02:8",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.03,
-          "approve_reply": "error: confirmation act_a418fbf34dbd0a2f7eeedd1fee7ca700:8 is no longer open",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "approved",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "decision(browser_submit):approved",
-            "executed(browser_submit):INTERRUPTED(interrupted (halted))",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "error: confirmation act_246350b73c891b769753fd6b5b2ace27:8 is no longer open",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "ACCEPTED (null)",
-          "resolved_event": "none",
-          "finished": "halted",
-          "submits": 0,
-          "log_tail": [
-            "model_turn",
-            "decision(browser_submit):rejected",
-            "finished:halted"
-          ]
-        },
-        {
-          "kill_result": {
-            "halted": true
-          },
-          "approve_sent_after_kill_reply_ms": 0.02,
-          "approve_reply": "error: no open confirmation act_a49e7c11ab49def4430dec98f23c9243:8",
           "resolved_event": "none",
           "finished": "halted",
           "submits": 0,

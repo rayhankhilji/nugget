@@ -1,54 +1,18 @@
 {
-  "commit": "0d81796",
+  "commit": null,
   "runs": [
     {
-      "task": "dc8ceb0b5bb945828f004a0f5431eaf7",
+      "task": "52de1698ab314977b2c27462e625c4e4",
       "finished": {
         "outcome": "halted"
       },
       "approve_once_reply": {
         "code": -32001,
-        "message": "no open confirmation act_2aa55c8109d23a5b9d47a469a73337a9:8"
+        "message": "no open confirmation act_38a80bec517c4f5bb750a2fd410c0770:8"
       },
       "approve_task_reply": {
         "code": -32001,
-        "message": "no open confirmation act_2aa55c8109d23a5b9d47a469a73337a9:8"
-      },
-      "task_approvals_after": [],
-      "submits_at_extension": 0,
-      "model_requests": 3,
-      "ok": true
-    },
-    {
-      "task": "e7a49131a2ae40c8b4d84909614f8da5",
-      "finished": {
-        "outcome": "halted"
-      },
-      "approve_once_reply": {
-        "code": -32001,
-        "message": "no open confirmation act_8654aaf37398b3cab8846dfa7f01ae30:8"
-      },
-      "approve_task_reply": {
-        "code": -32001,
-        "message": "no open confirmation act_8654aaf37398b3cab8846dfa7f01ae30:8"
-      },
-      "task_approvals_after": [],
-      "submits_at_extension": 0,
-      "model_requests": 3,
-      "ok": true
-    },
-    {
-      "task": "25e97d11aca947f5bbe6047ba195663c",
-      "finished": {
-        "outcome": "halted"
-      },
-      "approve_once_reply": {
-        "code": -32001,
-        "message": "no open confirmation act_fae6773c217d7dd7d65e1ba5b18cfaa9:8"
-      },
-      "approve_task_reply": {
-        "code": -32001,
-        "message": "no open confirmation act_fae6773c217d7dd7d65e1ba5b18cfaa9:8"
+        "message": "no open confirmation act_38a80bec517c4f5bb750a2fd410c0770:8"
       },
       "task_approvals_after": [],
       "submits_at_extension": 0,
