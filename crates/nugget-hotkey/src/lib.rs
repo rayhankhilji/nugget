@@ -170,6 +170,43 @@ pub const WINDOW_MS_RANGE: std::ops::RangeInclusive<u32> = 100..=2_000;
 /// A running listener; dropping it stops listening.
 pub trait Listener: Send {
     fn trigger(&self) -> &Trigger;
+
+    /// Where the trigger stands now. Only a desktop-owned shortcut (the Wayland GlobalShortcuts
+    /// portal) moves through the states; every other backend is active once [`start`] returns.
+    fn state(&self) -> ShortcutState {
+        ShortcutState::Active { trigger: None }
+    }
+}
+
+/// The app id Nugget registers with the XDG desktop portal on Wayland: the Tauri `identifier`.
+/// The portal (1.19+) accepts it only when a desktop file named `dev.nugget.desktop.desktop`,
+/// whose `Exec` program exists, is installed in its `XDG_DATA_DIRS`; desktops key the shortcut's
+/// consent and settings by it.
+pub const APP_ID: &str = "dev.nugget.desktop";
+
+/// The portal shortcut ids, stable across runs so a desktop that remembers a consent (GNOME,
+/// Plasma 6) binds a returning shortcut without asking again.
+pub const DOUBLE_TAP_SHORTCUT_ID: &str = "double-tap";
+/// See [`DOUBLE_TAP_SHORTCUT_ID`].
+pub const KILL_SWITCH_SHORTCUT_ID: &str = "stop-agents";
+
+/// Where a desktop-owned shortcut stands ([`Listener::state`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ShortcutState {
+    /// Listening. `trigger` is the key the desktop reports it bound (it may differ from the
+    /// preferred one), when the backend knows it.
+    Active { trigger: Option<String> },
+    /// The bind request is open: the desktop is asking the user (GNOME, Plasma 6).
+    AwaitingConsent,
+    /// The desktop answered without assigning keys: the user declined, or must assign them in
+    /// the desktop's keyboard shortcut settings. The session stays open, so an assignment made
+    /// there later works.
+    NotAssigned,
+    /// The desktop closed the session or dropped the shortcut; Nugget is binding it again.
+    Rebinding,
+    /// The portal stopped working after [`start`] succeeded; the message says why.
+    Failed(String),
 }
 
 /// Start listening; `on_fire` runs (on a background thread) each time the trigger fires.
