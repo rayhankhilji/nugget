@@ -12,14 +12,15 @@ use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router};
 use nugget_store::{Chunk, ChunkId, Item, Store};
 use time::{OffsetDateTime, UtcOffset};
 
-use crate::config::RetrieveConfig;
+use crate::config::{Fusion, RetrieveConfig};
 use crate::dates::{DateRange, parse_date_query};
 use crate::embed::{embed_first, embedding_candidates, validate_vectors};
 use crate::pack::{PackItem, PackOptions, pack};
 use crate::rank::{
-    Candidate, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query, token_set,
+    Candidate, convex_fuse, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query,
+    token_set,
 };
-use crate::rerank::{Reranker, normalise_scores};
+use crate::rerank::{RerankGovernor, RerankStatus, Reranker, normalise_scores};
 use crate::rewrite::{
     FEATURE_REWRITE, QueryRewrite, RewriteMethod, clean_reply, heuristic_rewrite,
     looks_like_followup, system_prompt, user_prompt,
@@ -46,6 +47,8 @@ pub struct Retriever {
     config: RetrieveConfig,
     now: Option<OffsetDateTime>,
     reranker: Option<Arc<dyn Reranker>>,
+    /// Keeps reranking within its budget; shared by clones.
+    rerank_gov: Arc<RerankGovernor>,
 }
 
 impl std::fmt::Debug for Retriever {
@@ -90,7 +93,16 @@ impl Retriever {
             config,
             now: None,
             reranker: None,
+            rerank_gov: Arc::default(),
         }
+    }
+
+    /// The adaptive reranker's state (see [`RetrieveConfig::rerank_adaptive`]); `None` without a
+    /// reranker.
+    pub fn rerank_status(&self) -> Option<RerankStatus> {
+        self.reranker
+            .as_ref()
+            .map(|_| self.rerank_gov.status(&self.config))
     }
 
     /// Rerank the top candidates with `reranker` (see [`crate::rerank`]).
@@ -440,10 +452,18 @@ impl Retriever {
                 )
             }
             (_, Ok((p, v))) => {
-                match self
-                    .store
-                    .search_hybrid_with_depth(&fts, Some(&v), n, fusion_depth)
-                {
+                let fused = match self.config.fusion {
+                    Fusion::Rrf => {
+                        self.store
+                            .search_hybrid_with_depth(&fts, Some(&v), n, fusion_depth)
+                    }
+                    Fusion::Convex => self.store.search_text(&fts, fusion_depth).and_then(|t| {
+                        // sqlite-vec caps kNN at 4096.
+                        let v = self.store.search_vector(&v, fusion_depth.min(4096))?;
+                        Ok(convex_fuse(t, v, self.config.fusion_text_weight, n))
+                    }),
+                };
+                match fused {
                     Ok(hits) => (
                         RetrievalMode::Hybrid {
                             provider: p.id().clone(),
@@ -548,10 +568,13 @@ impl Retriever {
         }
 
         // 6. Rerank the head of the list.
-        let reranked = match &self.reranker {
-            Some(reranker) if rerank_len > 0 && !pool.is_empty() => {
-                self.rerank(reranker.as_ref(), query, &mut pool, rerank_len)
-                    .await?
+        let plan = match &self.reranker {
+            Some(_) if rerank_len > 0 && !pool.is_empty() => self.rerank_gov.plan(&self.config),
+            _ => None,
+        };
+        let reranked = match (&self.reranker, plan) {
+            (Some(reranker), Some(n)) if n > 0 => {
+                self.rerank(reranker.as_ref(), query, &mut pool, n).await?
             }
             _ => false,
         };
@@ -604,8 +627,13 @@ impl Retriever {
         let items: Vec<_> = pool[..n].iter().map(|r| r.cand.item.clone()).collect();
         let timeout = Duration::from_millis(self.config.rerank_timeout_ms.max(1));
         let call = reranker.rerank_items(query, &passages, &items);
+        let started = tokio::time::Instant::now();
         let scores = match tokio::time::timeout(timeout, call).await {
-            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => s,
+            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => {
+                self.rerank_gov
+                    .completed(&self.config, n, started.elapsed());
+                s
+            }
             Ok(Ok(s)) => {
                 tracing::warn!(
                     reranker = reranker.name(),
@@ -624,6 +652,7 @@ impl Retriever {
                     reranker = reranker.name(),
                     "reranking timed out; keeping first-stage order"
                 );
+                self.rerank_gov.timed_out(&self.config, n);
                 return Ok(false);
             }
         };

@@ -400,6 +400,164 @@ impl Drop for Meter {
     }
 }
 
+/// What the adaptive reranker is doing ([`Retriever::rerank_status`](crate::Retriever::rerank_status)).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RerankStatus {
+    /// Candidates the next search will rerank (0 while paused).
+    pub pool: usize,
+    /// Measured time per passage (moving average), once a rerank has completed.
+    pub per_passage_ms: Option<f64>,
+    /// Reranking is paused for this much longer (milliseconds), because it could not meet its
+    /// budget.
+    pub paused_for_ms: Option<u64>,
+    /// Why reranking is paused or its pool was cut, for status displays and logs.
+    pub reason: Option<String>,
+}
+
+/// Keeps the reranker within its budget
+/// ([`RetrieveConfig::rerank_adaptive`](crate::RetrieveConfig::rerank_adaptive)). A slow machine
+/// (a cross-encoder on a few CPU cores) cannot score the configured pool in time, and a rerank
+/// that times out costs the whole timeout and changes nothing. So:
+///
+/// - after a rerank completes, the pool becomes what fits in 80% of the timeout at the measured
+///   time per passage (never above the configured pool);
+/// - after a timeout, the pool halves;
+/// - when fewer than `rerank_min_pool` passages would fit, reranking pauses for
+///   `rerank_cooldown_ms` (doubling on each consecutive pause, up to 8×), then one search probes
+///   it again with the minimum pool.
+///
+/// Shared by clones of a retriever.
+#[derive(Debug, Default)]
+pub(crate) struct RerankGovernor {
+    state: std::sync::Mutex<GovernorState>,
+}
+
+#[derive(Debug, Default)]
+struct GovernorState {
+    pool: Option<usize>,
+    per_passage_ms: Option<f64>,
+    paused_until: Option<tokio::time::Instant>,
+    pauses: u32,
+    reason: Option<String>,
+}
+
+/// Share of the timeout the adaptive pool is sized to fill.
+const BUDGET_SHARE: f64 = 0.8;
+
+impl RerankGovernor {
+    fn lock(&self) -> std::sync::MutexGuard<'_, GovernorState> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn min_pool(cfg: &crate::RetrieveConfig) -> usize {
+        cfg.rerank_min_pool.min(cfg.rerank_pool).max(1)
+    }
+
+    /// How many candidates to rerank now; `None` to skip (paused).
+    pub(crate) fn plan(&self, cfg: &crate::RetrieveConfig) -> Option<usize> {
+        if !cfg.rerank_adaptive {
+            return Some(cfg.rerank_pool);
+        }
+        let mut st = self.lock();
+        if let Some(until) = st.paused_until {
+            if tokio::time::Instant::now() < until {
+                return None;
+            }
+            st.paused_until = None;
+        }
+        Some(st.pool.unwrap_or(cfg.rerank_pool).min(cfg.rerank_pool))
+    }
+
+    /// A rerank of `n` passages completed in `elapsed`.
+    pub(crate) fn completed(&self, cfg: &crate::RetrieveConfig, n: usize, elapsed: Duration) {
+        if !cfg.rerank_adaptive || n == 0 {
+            return;
+        }
+        let mut st = self.lock();
+        let per = elapsed.as_secs_f64() * 1000.0 / n as f64;
+        let per = match st.per_passage_ms {
+            Some(prev) => 0.5 * prev + 0.5 * per,
+            None => per,
+        };
+        st.per_passage_ms = Some(per);
+        let budget = cfg.rerank_timeout_ms.max(1) as f64 * BUDGET_SHARE;
+        let fit = ((budget / per.max(1e-3)).floor() as usize).min(cfg.rerank_pool);
+        if fit < Self::min_pool(cfg) {
+            let reason = format!(
+                "reranking takes {per:.0} ms per passage; fewer than {} passages fit the {} ms \
+                 budget",
+                Self::min_pool(cfg),
+                cfg.rerank_timeout_ms
+            );
+            Self::pause(&mut st, cfg, reason);
+        } else {
+            st.pauses = 0;
+            st.reason = (fit < cfg.rerank_pool).then(|| {
+                format!(
+                    "reranking {fit} of {} candidates to fit the {} ms budget ({per:.0} ms per \
+                     passage)",
+                    cfg.rerank_pool, cfg.rerank_timeout_ms
+                )
+            });
+            st.pool = Some(fit);
+        }
+    }
+
+    /// A rerank of `n` passages timed out.
+    pub(crate) fn timed_out(&self, cfg: &crate::RetrieveConfig, n: usize) {
+        if !cfg.rerank_adaptive {
+            return;
+        }
+        let mut st = self.lock();
+        let half = n / 2;
+        if half < Self::min_pool(cfg) {
+            let reason = format!(
+                "reranking {n} passages timed out after {} ms",
+                cfg.rerank_timeout_ms
+            );
+            Self::pause(&mut st, cfg, reason);
+        } else {
+            st.reason = Some(format!(
+                "reranking {n} passages timed out after {} ms; trying {half}",
+                cfg.rerank_timeout_ms
+            ));
+            st.pool = Some(half);
+        }
+    }
+
+    fn pause(st: &mut GovernorState, cfg: &crate::RetrieveConfig, reason: String) {
+        let factor = 1u64 << st.pauses.min(3);
+        st.pauses = st.pauses.saturating_add(1);
+        let cooldown = Duration::from_millis(cfg.rerank_cooldown_ms.saturating_mul(factor));
+        st.paused_until = Some(tokio::time::Instant::now() + cooldown);
+        // The next probe asks for as little as is worth reranking.
+        st.pool = Some(Self::min_pool(cfg));
+        tracing::info!(%reason, cooldown_ms = cooldown.as_millis() as u64, "search reranking paused");
+        st.reason = Some(format!("{reason}; paused for {} s", cooldown.as_secs()));
+    }
+
+    pub(crate) fn status(&self, cfg: &crate::RetrieveConfig) -> RerankStatus {
+        let st = self.lock();
+        let now = tokio::time::Instant::now();
+        let paused_for_ms = st
+            .paused_until
+            .filter(|u| *u > now)
+            .map(|u| (u - now).as_millis() as u64);
+        RerankStatus {
+            pool: if paused_for_ms.is_some() {
+                0
+            } else {
+                st.pool.unwrap_or(cfg.rerank_pool).min(cfg.rerank_pool)
+            },
+            per_passage_ms: st.per_passage_ms,
+            paused_for_ms,
+            reason: st.reason.clone(),
+        }
+    }
+}
+
 /// Map raw reranker scores into `[0, 1]`, best = 1. Scores already in `[0, 1]` (probabilities)
 /// are kept as they are; anything else (logits) goes through a logistic first. Then divide by
 /// the maximum, as first-stage relevance is.
@@ -576,5 +734,69 @@ mod tests {
         assert!(logits[0] < logits[1] && logits[1] < logits[2]);
         assert_eq!(normalise_scores(&[0.0, 0.0]), vec![0.0, 0.0]);
         assert!(normalise_scores(&[]).is_empty());
+    }
+
+    fn adaptive() -> crate::RetrieveConfig {
+        crate::RetrieveConfig {
+            rerank_pool: 30,
+            rerank_min_pool: 8,
+            rerank_timeout_ms: 2_500,
+            rerank_cooldown_ms: 60_000,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn governor_halves_on_timeouts_then_pauses() {
+        let cfg = adaptive();
+        let g = RerankGovernor::default();
+        assert_eq!(g.plan(&cfg), Some(30));
+        g.timed_out(&cfg, 30);
+        assert_eq!(g.plan(&cfg), Some(15));
+        g.timed_out(&cfg, 15);
+        // 7 would be below the minimum pool: pause.
+        assert_eq!(g.plan(&cfg), None);
+        let st = g.status(&cfg);
+        assert_eq!(st.pool, 0);
+        assert!(
+            st.paused_for_ms
+                .is_some_and(|ms| ms > 50_000 && ms <= 60_000)
+        );
+        assert!(st.reason.unwrap().contains("timed out"));
+    }
+
+    #[test]
+    fn governor_sizes_the_pool_from_measured_time() {
+        let cfg = adaptive();
+        let g = RerankGovernor::default();
+        // 30 passages in 3 s: 100 ms each; 80% of 2.5 s fits 20.
+        g.completed(&cfg, 30, Duration::from_secs(3));
+        assert_eq!(g.plan(&cfg), Some(20));
+        assert!(g.status(&cfg).reason.unwrap().contains("20 of 30"));
+        // Fast again: back to the configured pool (moving average 55 ms → fits 36, capped).
+        g.completed(&cfg, 20, Duration::from_millis(200));
+        assert_eq!(g.plan(&cfg), Some(30));
+        assert_eq!(g.status(&cfg).reason, None);
+        // Far too slow (500 ms per passage on average): pause, then probe with the minimum.
+        g.completed(&cfg, 10, Duration::from_secs(10));
+        assert_eq!(g.plan(&cfg), None);
+    }
+
+    #[test]
+    fn a_paused_governor_probes_with_the_minimum_pool_after_its_cooldown() {
+        let cfg = crate::RetrieveConfig {
+            rerank_cooldown_ms: 0,
+            ..adaptive()
+        };
+        let g = RerankGovernor::default();
+        g.timed_out(&cfg, 10);
+        assert_eq!(g.plan(&cfg), Some(8));
+        // Not adaptive: always the configured pool.
+        let fixed = crate::RetrieveConfig {
+            rerank_adaptive: false,
+            ..adaptive()
+        };
+        g.timed_out(&fixed, 30);
+        assert_eq!(g.plan(&fixed), Some(30));
     }
 }

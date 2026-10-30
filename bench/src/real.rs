@@ -51,7 +51,7 @@ use nugget_ingest::{Ingest, IngestConfig, MemorySecrets, NoPowerPolicy};
 use nugget_retrieve::eval::{
     self, EVAL_DEPTH, EvalMode, EvalSet, HashEmbedder, mrr_at, ndcg_at, recall_at,
 };
-use nugget_retrieve::{Reranker, RetrieveConfig, Retriever, SearchOptions, Strategy};
+use nugget_retrieve::{Fusion, Reranker, RetrieveConfig, Retriever, SearchOptions, Strategy};
 use nugget_store::{Store, StoreKey};
 use serde_json::json;
 
@@ -378,11 +378,28 @@ impl Embedder {
         Retriever::new(store, Some(router), self.retrieve.clone())
     }
 
-    /// The same with the reranker (`--memory-rerank local`), as the app builds it with
-    /// `[runtime] rerank_model`.
-    fn reranking(&self, store: Store, router: Arc<Router>) -> Option<Retriever> {
-        let rr = self.reranker.as_ref()?;
-        Some(self.retriever(store, router).with_reranker(rr.clone()))
+    /// The retrievers of every [`Variant`] over `store`.
+    fn variants(&self, store: &Store, router: &Arc<Router>) -> Variants {
+        let with = |cfg: RetrieveConfig| Retriever::new(store.clone(), Some(router.clone()), cfg);
+        let reranking = |cfg: RetrieveConfig| {
+            self.reranker
+                .as_ref()
+                .map(|rr| with(cfg).with_reranker(rr.clone()))
+        };
+        Variants {
+            plain: self.retriever(store.clone(), router.clone()),
+            convex: with(RetrieveConfig {
+                fusion: Fusion::Convex,
+                ..self.retrieve.clone()
+            }),
+            // As the app builds it with `[runtime] rerank_model`.
+            rerank: reranking(self.retrieve.clone()),
+            // Before the adaptive reranker: every search waits for it.
+            rerank_fixed: reranking(RetrieveConfig {
+                rerank_adaptive: false,
+                ..self.retrieve.clone()
+            }),
+        }
     }
 }
 
@@ -469,8 +486,8 @@ struct Stack {
     store: Store,
     ingest: Ingest,
     retriever: Retriever,
-    /// `retriever` with the reranker, when one runs.
-    reranking: Option<Retriever>,
+    /// The measured retrieval variants (`retriever` is `variants.plain`).
+    variants: Variants,
     source: SourceId,
     // Last: removed after everything above is dropped.
     _home: tempfile::TempDir,
@@ -508,15 +525,15 @@ impl Stack {
             .power(Arc::new(NoPowerPolicy))
             .start()
             .await?;
-        let retriever = embedder.retriever(store.clone(), router.clone());
-        let reranking = embedder.reranking(store.clone(), router);
+        let variants = embedder.variants(&store, &router);
+        let retriever = variants.plain.clone();
         Ok(Self {
             root,
             db_path,
             store,
             ingest,
             retriever,
-            reranking,
+            variants,
             source: SourceId::new(source),
             _home: home,
         })
@@ -642,24 +659,53 @@ fn opts(strategy: Strategy, mmr: bool) -> SearchOptions {
     }
 }
 
-/// The retrieval modes measured: name, search options, and whether through the reranking
-/// retriever (measured only when a reranker runs).
-const MODES: [(&str, Strategy, bool, bool); 6] = [
-    ("bm25", Strategy::TextOnly, false, false),
-    ("vector", Strategy::VectorOnly, false, false),
-    ("hybrid", Strategy::Auto, false, false),
-    ("hybrid_mmr", Strategy::Auto, true, false),
-    ("hybrid_rerank", Strategy::Auto, false, true),
-    ("hybrid_mmr_rerank", Strategy::Auto, true, true),
+/// A retriever configuration measured on the same index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Variant {
+    /// `RetrieveConfig::default()` (reciprocal-rank fusion, no reranker).
+    Plain,
+    /// Score-aware fusion (`Fusion::Convex`).
+    Convex,
+    /// With the reranker, adaptive (the app's default).
+    Rerank,
+    /// With the reranker, not adaptive (every search waits for it; before the adaptive one).
+    RerankFixed,
+}
+
+struct Variants {
+    plain: Retriever,
+    convex: Retriever,
+    rerank: Option<Retriever>,
+    rerank_fixed: Option<Retriever>,
+}
+
+/// The retrieval modes measured: name, search options, and the retriever variant (reranking
+/// variants only when a reranker runs).
+const MODES: [(&str, Strategy, bool, Variant); 9] = [
+    ("bm25", Strategy::TextOnly, false, Variant::Plain),
+    ("vector", Strategy::VectorOnly, false, Variant::Plain),
+    ("hybrid", Strategy::Auto, false, Variant::Plain),
+    ("hybrid_mmr", Strategy::Auto, true, Variant::Plain),
+    ("hybrid_convex", Strategy::Auto, false, Variant::Convex),
+    ("hybrid_mmr_convex", Strategy::Auto, true, Variant::Convex),
+    ("hybrid_rerank", Strategy::Auto, false, Variant::Rerank),
+    ("hybrid_mmr_rerank", Strategy::Auto, true, Variant::Rerank),
+    (
+        "hybrid_mmr_rerank_fixed",
+        Strategy::Auto,
+        true,
+        Variant::RerankFixed,
+    ),
 ];
 
 impl Stack {
-    /// The retriever for a mode; `None` for a reranking mode without a reranker.
-    fn retriever_for(&self, rerank: bool) -> Option<&Retriever> {
-        if rerank {
-            self.reranking.as_ref()
-        } else {
-            Some(&self.retriever)
+    /// The retriever of a variant; `None` for a reranking variant without a reranker.
+    fn retriever_for(&self, v: Variant) -> Option<&Retriever> {
+        match v {
+            Variant::Plain => Some(&self.variants.plain),
+            Variant::Convex => Some(&self.variants.convex),
+            Variant::Rerank => self.variants.rerank.as_ref(),
+            Variant::RerankFixed => self.variants.rerank_fixed.as_ref(),
         }
     }
 }
@@ -689,14 +735,17 @@ async fn eval_phase(
     };
     let mut out = Vec::new();
     let modes = [
-        ("text_only", Strategy::TextOnly, false, false),
-        ("hybrid", Strategy::Auto, false, false),
-        ("hybrid_mmr", Strategy::Auto, true, false),
-        ("hybrid_rerank", Strategy::Auto, false, true),
+        ("text_only", Strategy::TextOnly, false, Variant::Plain),
+        ("hybrid", Strategy::Auto, false, Variant::Plain),
+        ("hybrid_mmr", Strategy::Auto, true, Variant::Plain),
+        ("hybrid_convex", Strategy::Auto, false, Variant::Convex),
+        ("hybrid_mmr_convex", Strategy::Auto, true, Variant::Convex),
+        // What the reranker can do: the eval set is too small for the adaptive pool to matter.
+        ("hybrid_rerank", Strategy::Auto, false, Variant::RerankFixed),
     ];
     let mut recall10 = HashMap::new();
-    for (mode, strategy, mmr, rerank) in modes {
-        let Some(retriever) = stack.retriever_for(rerank) else {
+    for (mode, strategy, mmr, variant) in modes {
+        let Some(retriever) = stack.retriever_for(variant) else {
             continue;
         };
         let (mut r1, mut r5, mut r10, mut mrr, mut ndcg) = (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -1050,8 +1099,8 @@ async fn known_item(
     } else {
         HashMap::new()
     };
-    for (mode, strategy, mmr, rerank) in MODES {
-        let Some(retriever) = stack.retriever_for(rerank) else {
+    for (mode, strategy, mmr, variant) in MODES {
+        let Some(retriever) = stack.retriever_for(variant) else {
             continue;
         };
         let mut hits_at = [0usize; KS.len()];
@@ -1186,14 +1235,48 @@ async fn known_item(
         }
         d.write(&path, queries)?;
     }
+    if let Some(st) = stack
+        .variants
+        .rerank
+        .as_ref()
+        .and_then(Retriever::rerank_status)
+    {
+        let why = st.reason.clone().unwrap_or_else(|| "within budget".into());
+        out.push(Metric::new(
+            "rerank.adaptive.pool",
+            st.pool as f64,
+            "count",
+            Direction::Info,
+            format!("Adaptive reranker's pool after the known-item queries (0: paused): {why}"),
+        ));
+        if let Some(ms) = st.per_passage_ms {
+            out.push(Metric::new(
+                "rerank.adaptive.per_passage_ms",
+                ms,
+                "ms",
+                Direction::Info,
+                "Adaptive reranker's measured time per passage (moving average)",
+            ));
+        }
+    }
     // `query.latency.*` is the app's default search (hybrid + MMR); `query.latency_rerank.*`
     // the same with the reranker.
     for (mode, key, what) in [
         ("hybrid_mmr", "latency", "hybrid + MMR"),
         (
+            "hybrid_mmr_convex",
+            "latency_convex",
+            "hybrid with convex fusion + MMR",
+        ),
+        (
             "hybrid_mmr_rerank",
             "latency_rerank",
-            "hybrid + rerank + MMR",
+            "hybrid + adaptive rerank + MMR",
+        ),
+        (
+            "hybrid_mmr_rerank_fixed",
+            "latency_rerank_fixed",
+            "hybrid + rerank on every search + MMR",
         ),
     ] {
         let Some(s) = latencies_ms.get(mode).and_then(|l| summarize(l)) else {
