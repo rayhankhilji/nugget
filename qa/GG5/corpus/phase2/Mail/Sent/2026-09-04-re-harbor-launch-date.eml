@@ -1,0 +1,20 @@
+From: Mara Okafor <mara.okafor@brightwell.example>
+To: Robert Chen <robert.chen@brightwell.example>
+Cc: Sam Patel <sam.patel@brightwell.example>
+Subject: Re: Harbor launch date
+Date: Fri, 04 Sep 2026 08:55:00 +0100
+Message-ID: <re-launch-date-20260904@brightwell.example>
+In-Reply-To: <launch-date-20260903@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Thanks Bob. 12 November works from our side.
+
+Sam said the pipeline is green again after last night's schema change, and the reconciliation
+report is scheduled. I'll circulate the launch checklist on Monday.
+
+One risk: Lumenfold (the renamed Tessellate) want to migrate our bucket region in October.
+I'm asking Gus for a firm date.
+
+Mara

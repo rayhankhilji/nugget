@@ -1,0 +1,21 @@
+From: Robert Chen <robert.chen@brightwell.example>
+To: Mara Okafor <mara.okafor@brightwell.example>, Sam Patel <sam.patel@brightwell.example>
+Cc: Priyanka Rao <priyanka.rao@brightwell.example>
+Subject: Harbor launch date
+Date: Thu, 03 Sep 2026 10:15:00 +0100
+Message-ID: <launch-date-20260903@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+All,
+
+After this morning's review we're locking the Harbor launch for Thursday 12 November 2026.
+Cut-over runs overnight on the 11th; the old warehouse goes read-only on the 12th.
+
+Mara owns the launch checklist. Sam, please make sure the dual-write reconciliation report runs
+nightly from now until launch.
+
+Priyanka, copying you because the launch week overlaps the promotion calibration.
+
+Bob

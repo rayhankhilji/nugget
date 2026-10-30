@@ -1,0 +1,21 @@
+From: Dana Whitfield <dana.whitfield@brightwell.example>
+To: Mara Okafor <mara.okafor@brightwell.example>
+Cc: Sam Patel <sam.patel@brightwell.example>
+Subject: Harbor dashboards: first design review
+Date: Fri, 20 Mar 2026 16:30:00 +0000
+Message-ID: <dash-review-20260320@brightwell.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+Hi Mara,
+
+First pass at the Harbor self-serve dashboards is up on the design board. I went with three
+entry points (finance, ops, product) rather than one giant explorer.
+
+Could you and Sam check the lineage panel makes sense from a data point of view? I'd like to
+review it properly next Wednesday.
+
+Dana
+Dana Whitfield
+Design Lead, Brightwell Analytics

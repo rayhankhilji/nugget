@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:counselling-20260617@albers-counselling.example
+DTSTAMP:20260601T090000Z
+DTSTART:20260617T170000Z
+DTEND:20260617T175000Z
+RRULE:FREQ=WEEKLY;COUNT=8
+SUMMARY:Counselling session
+LOCATION:Albers Counselling, 3 Quay Lane, Halden Bay
+DESCRIPTION:Weekly session with Jonas Albers, counsellor. Bring the sleep diary.
+ORGANIZER;CN="Jonas Albers":mailto:jonas@albers-counselling.example
+ATTENDEE;CN="Jonas Albers";PARTSTAT=ACCEPTED:mailto:jonas@albers-counselling.example
+ATTENDEE;CN="Mara Okafor";PARTSTAT=ACCEPTED:mailto:mara.okafor@mailbox.example
+END:VEVENT
+END:VCALENDAR

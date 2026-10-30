@@ -1,0 +1,16 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:climbing-thursdays-20260416@mailbox.example
+DTSTAMP:20260410T080000Z
+DTSTART:20260416T173000Z
+DTEND:20260416T200000Z
+RRULE:FREQ=WEEKLY;BYDAY=TH
+SUMMARY:Climbing with Sam
+LOCATION:Halden Bay Bouldering
+ORGANIZER;CN="Mara Okafor":mailto:mara.okafor@mailbox.example
+ATTENDEE;CN="Mara Okafor";PARTSTAT=ACCEPTED:mailto:mara.okafor@mailbox.example
+ATTENDEE;CN="Sam";PARTSTAT=ACCEPTED:mailto:sokonkwo@mailbox.example
+END:VEVENT
+END:VCALENDAR

@@ -1,0 +1,118 @@
+name: QA GG5 (knowledge graph and vault, real models)
+
+# GG5 quality assurance (docs/qa/GG5.md): the real daemon indexes the synthetic persona corpus
+# (qa/GG5/corpus/) through a `files` source, extracts with the signed manifest's local models as
+# the app runs them, renders the vault, then takes the user's edits and re-extraction. The
+# harness (qa/GG5/harness/nugget_qa.py) snapshots every step; the grader scores the snapshots
+# against qa/GG5/corpus/gold.json. Everything is uploaded as an artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      models:
+        description: "Chat models to run, comma-separated manifest ids"
+        default: "qwen3-4b-q4km,qwen3-8b-q4km"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The daemon installs models from the dev-signed bundled manifest (as evals.yml does).
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      models: ${{ steps.m.outputs.models }}
+    steps:
+      - id: m
+        run: |
+          models="${{ inputs.models || 'qwen3-4b-q4km,qwen3-8b-q4km' }}"
+          echo "models=$(jq -cn --arg m "$models" '$m | split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
+
+  knowledge:
+    name: knowledge (${{ matrix.model }})
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJson(needs.setup.outputs.models) }}
+    env:
+      QA_HOME: ${{ github.workspace }}/qa-home
+      QA_OUT: ${{ github.workspace }}/qa-out
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg5
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config libxdo-dev libssl-dev
+
+      # Models and llama-server builds, keyed by the signed manifest that pins them; the store
+      # re-verifies SHA-256 on install.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: qa-home/data/models
+          key: qa-gg5-models-${{ runner.os }}-${{ matrix.model }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build nuggetd
+        run: cargo build --release --locked -p nuggetd
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$QA_OUT"
+          {
+            echo "model: ${{ matrix.model }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160
+            free -g
+          } | tee "$QA_OUT/hardware.txt"
+
+      - name: Run the GG5 scenarios
+        run: |
+          python3 qa/GG5/harness/nugget_qa.py --nuggetd target/release/nuggetd \
+            --home "$QA_HOME" --out "$QA_OUT" \
+            --chat-model "${{ matrix.model }}" --embed-model nomic-embed-text-v1.5-q8 \
+            --settle-timeout 9000
+
+      - name: Grade
+        if: always()
+        run: |
+          python3 qa/GG5/harness/grade.py --gold qa/GG5/corpus/gold.json --run "$QA_OUT" \
+            --out "$QA_OUT/grade.json" | tee "$QA_OUT/grade.txt"
+
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-gg5-${{ matrix.model }}
+          path: |
+            ${{ env.QA_OUT }}
+            qa-home/data/logs
+          if-no-files-found: warn
+          retention-days: 30
