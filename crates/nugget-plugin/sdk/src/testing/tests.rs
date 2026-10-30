@@ -386,7 +386,7 @@ fn disk_roots_come_from_settings_and_hide_escaping_symlinks() {
     #[cfg(unix)]
     assert!(matches!(
         fs::read_file("folder", "leak"),
-        Err(Error::Unauthorized(_))
+        Err(Error::Denied(_))
     ));
     assert!(fs::stat("folder", "sub").unwrap().is_dir);
 }
@@ -522,4 +522,39 @@ fn tool_output_goes_through_json() {
         h.call::<Probe>("probe", json!({ "op": "noop" })).unwrap(),
         Value::Null
     );
+}
+
+#[test]
+fn fs_budgets_and_settings() {
+    struct V;
+    impl Connector for V {
+        fn validate(_: &Value) -> Result<()> {
+            assert_eq!(fs::read_file("folder", "a")?, b"abc");
+            assert!(matches!(
+                fs::read_file("folder", "a"),
+                Err(Error::Denied(_))
+            ));
+            assert!(matches!(fs::stat("folder", "a"), Err(Error::Denied(_))));
+            Ok(())
+        }
+        fn sync(_: &Value, _: Option<Value>) -> Result<Value> {
+            fs::stat("folder", "")?;
+            Ok(Value::Null)
+        }
+    }
+    let h = host();
+    h.set_limits(Limits {
+        max_fs_ops_per_call: 2,
+        max_fs_read_bytes_per_call: 5,
+        ..Limits::default()
+    });
+    h.mount("folder", MemFs::new().file("a", "abc"));
+    // In validate (per-call budgets): two operations, five bytes.
+    h.validate::<V>(json!({ "folder": "/x" })).unwrap();
+    // The settings must name the root, even when a test mounts it.
+    assert!(matches!(
+        h.sync::<V>(json!({}), None),
+        Err(Error::Invalid(_))
+    ));
+    assert!(h.sync::<V>(json!({ "folder": "/x" }), None).is_ok());
 }

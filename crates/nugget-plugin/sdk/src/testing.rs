@@ -96,7 +96,12 @@ pub struct Limits {
     pub max_tool_io_bytes: usize,
     pub max_fs_file_bytes: u64,
     pub max_fs_dir_entries: usize,
+    /// File bytes one `validate` may read.
+    pub max_fs_read_bytes_per_call: u64,
     pub max_fs_read_bytes_per_sync: u64,
+    /// File operations (`read_dir`, `read_file`, `stat`) one `validate` may make.
+    pub max_fs_ops_per_call: u32,
+    pub max_fs_ops_per_sync: u32,
 }
 
 impl Default for Limits {
@@ -110,7 +115,10 @@ impl Default for Limits {
             max_tool_io_bytes: 1024 * 1024,
             max_fs_file_bytes: 16 * 1024 * 1024,
             max_fs_dir_entries: 10_000,
+            max_fs_read_bytes_per_call: 4 * 1024 * 1024,
             max_fs_read_bytes_per_sync: 4 * 1024 * 1024 * 1024,
+            max_fs_ops_per_call: 1_000,
+            max_fs_ops_per_sync: 1_000_000,
         }
     }
 }
@@ -410,7 +418,8 @@ struct State {
     now: i64,
     logs: Vec<(Level, String)>,
     mounts: BTreeMap<String, Mount>,
-    fs_read_this_sync: u64,
+    fs_read_this_call: u64,
+    fs_ops_this_call: u32,
     store: BTreeMap<String, Document>,
     seeded: BTreeMap<String, Option<String>>,
     events: Vec<SinkEvent>,
@@ -504,7 +513,8 @@ impl TestHost {
             now: DEFAULT_NOW_MS,
             logs: Vec::new(),
             mounts: BTreeMap::new(),
-            fs_read_this_sync: 0,
+            fs_read_this_call: 0,
+            fs_ops_this_call: 0,
             store: BTreeMap::new(),
             seeded: BTreeMap::new(),
             events: Vec::new(),
@@ -737,6 +747,8 @@ impl TestHost {
         st.mode = mode;
         st.settings = settings;
         st.requests_this_call = 0;
+        st.fs_read_this_call = 0;
+        st.fs_ops_this_call = 0;
         guard
     }
 
@@ -758,7 +770,6 @@ impl TestHost {
         let first_event = {
             let mut st = self.st();
             st.upserts_this_pass = 0;
-            st.fs_read_this_sync = 0;
             st.events.len()
         };
         let guard = self.enter(Mode::Sync, Some(settings.clone()));
@@ -1250,24 +1261,48 @@ pub(crate) mod sys {
         Ok(segs)
     }
 
-    /// The mount for `root`, checking the mode and the declaration.
-    fn mount_of(st: &State, root: &str) -> Result<Mount> {
+    /// The mount for `root`, checking the mode, the declaration, the settings field and the
+    /// operation budget (one operation per call, as the host counts them).
+    fn mount_of(st: &mut State, root: &str) -> Result<Mount> {
         if st.mode == Mode::Tool {
-            return Err(deny("tools have no file access"));
+            return Err(deny(
+                "file access is only available to connectors (validate and sync)",
+            ));
         }
         if !st.caps.file_roots.contains(root) {
             return Err(deny(format!(
-                "`{root}` is not a file root declared in the manifest"
+                "file root `{root}` is not declared in the manifest or not approved"
             )));
         }
+        let max_ops = match st.mode {
+            Mode::Sync => st.limits.max_fs_ops_per_sync,
+            _ => st.limits.max_fs_ops_per_call,
+        };
+        if st.fs_ops_this_call >= max_ops {
+            return Err(deny("the file operation budget for this call is spent"));
+        }
+        st.fs_ops_this_call += 1;
+        // Like the host, the settings must name a path for the root (when the call has
+        // settings); a mount then stands in for that path.
+        let setting = match st.settings.as_ref().map(|s| &s[root]) {
+            Some(Value::String(p)) if !p.is_empty() => Some(p.clone()),
+            Some(Value::String(_)) | Some(Value::Null) => {
+                return Err(Error::invalid(format!(
+                    "the source setting `{root}` (a folder or file path) is not set"
+                )));
+            }
+            Some(_) => {
+                return Err(Error::invalid(format!(
+                    "the source setting `{root}` must be a path string"
+                )));
+            }
+            None => None,
+        };
         if let Some(m) = st.mounts.get(root) {
             return Ok(m.clone());
         }
-        match st.settings.as_ref().map(|s| &s[root]) {
-            Some(Value::String(p)) if !p.trim().is_empty() => Ok(Mount::Disk(PathBuf::from(p))),
-            Some(_) => Err(Error::invalid(format!(
-                "settings field `{root}` does not hold a path"
-            ))),
+        match setting {
+            Some(p) => Ok(Mount::Disk(PathBuf::from(p))),
             None => Err(Error::NotFound(format!(
                 "TestHost: file root `{root}` is not mounted (use TestHost::mount) and no \
                  settings name a path for it"
@@ -1313,7 +1348,8 @@ pub(crate) mod sys {
         }
         let canon = p.canonicalize().map_err(|_| not_found(root, path))?;
         if !canon.starts_with(&base) {
-            return Err(Error::Unauthorized(format!(
+            // The host reports this as `denied`.
+            return Err(Error::Denied(format!(
                 "`{path}` leads outside the folder the user chose"
             )));
         }
@@ -1378,6 +1414,10 @@ pub(crate) mod sys {
                     let Ok(name) = e.file_name().into_string() else {
                         continue;
                     };
+                    // Names a plugin could not address again are left out, as the host does.
+                    if segments(&name).is_err() {
+                        continue;
+                    }
                     // Follow symlinks, but leave out the ones that leave the root.
                     let Ok(target) = e.path().canonicalize() else {
                         continue;
@@ -1434,12 +1474,14 @@ pub(crate) mod sys {
             }
         };
         with(|st| {
-            st.fs_read_this_sync += data.len() as u64;
-            if st.mode == Mode::Sync && st.fs_read_this_sync > limits.max_fs_read_bytes_per_sync {
-                return Err(Error::invalid(
-                    "read more file bytes than one sync pass allows",
-                ));
+            let budget = match st.mode {
+                Mode::Sync => limits.max_fs_read_bytes_per_sync,
+                _ => limits.max_fs_read_bytes_per_call,
+            };
+            if st.fs_read_this_call + data.len() as u64 > budget {
+                return Err(deny("the file read budget for this call is spent"));
             }
+            st.fs_read_this_call += data.len() as u64;
             Ok(())
         })?;
         Ok(data)

@@ -22,10 +22,8 @@ use nugget_plugin::fs::{check_relative, resolve};
 fn root() -> &'static Path {
     static ROOT: OnceLock<PathBuf> = OnceLock::new();
     ROOT.get_or_init(|| {
-        let base = std::env::temp_dir().join(format!(
-            "nugget-fuzz-plugin-fs-path-{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("nugget-fuzz-plugin-fs-path-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         let root = base.join("root");
         std::fs::create_dir_all(root.join("sub").join("deeper")).expect("create the scratch root");
@@ -55,14 +53,21 @@ fuzz_target!(|data: &[u8]| {
         assert!(!rel.contains('\0'), "accepted a NUL: {rel:?}");
         assert!(!rel.contains('\\'), "accepted a backslash: {rel:?}");
         assert!(!rel.starts_with('/'), "accepted an absolute path: {rel:?}");
-        assert!(!Path::new(rel).is_absolute(), "accepted an absolute path: {rel:?}");
+        assert!(
+            !Path::new(rel).is_absolute(),
+            "accepted an absolute path: {rel:?}"
+        );
         assert!(!rel.split('/').any(|s| s == ".."), "accepted `..`: {rel:?}");
         assert!(
             !rel.contains(':') && !rel.chars().any(char::is_control),
             "accepted `:` or a control character: {rel:?}"
         );
         assert_eq!(parts.join("/"), rel, "parts do not rebuild the path");
-        assert_eq!(parts.is_empty(), rel.is_empty(), "only `\"\"` names the root itself");
+        assert_eq!(
+            parts.is_empty(),
+            rel.is_empty(),
+            "only `\"\"` names the root itself"
+        );
         let mut segments = rel.split('/');
         for part in parts {
             assert!(
@@ -81,7 +86,10 @@ fuzz_target!(|data: &[u8]| {
     }
 
     if let Ok(path) = resolve(root, rel) {
-        assert!(checked.is_ok(), "resolve accepted {rel:?}, check_relative refused it");
+        assert!(
+            checked.is_ok(),
+            "resolve accepted {rel:?}, check_relative refused it"
+        );
         assert!(
             path.starts_with(root),
             "{rel:?} resolved to {} outside {}",
@@ -101,7 +109,11 @@ fuzz_target!(|data: &[u8]| {
     // A root that is a single file: only `""` resolves, to the file itself.
     let file_root = root.join("a.txt");
     if let Ok(path) = resolve(&file_root, rel) {
-        assert!(rel.is_empty(), "{rel:?} resolved below a file root to {}", path.display());
+        assert!(
+            rel.is_empty(),
+            "{rel:?} resolved below a file root to {}",
+            path.display()
+        );
         assert_eq!(path, file_root);
     }
 });

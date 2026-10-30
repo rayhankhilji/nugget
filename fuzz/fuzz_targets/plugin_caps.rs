@@ -33,7 +33,6 @@ const MAX_HOSTS: usize = 64;
 const MAX_SECRETS: usize = 16;
 const MAX_KV_BYTES: u64 = 16 * 1024 * 1024;
 
-
 /// The host part of `url` as `HostRule::matches` compares it.
 fn match_host(url: &Url) -> Option<String> {
     let host = match url.host()? {
@@ -54,7 +53,10 @@ fn check_rule(rule: &HostRule, url: Option<&Url>) {
     let canonical = rule.to_string();
     let again = HostRule::parse(&canonical)
         .unwrap_or_else(|e| panic!("canonical rule `{canonical}` does not parse: {e}"));
-    assert_eq!(&again, rule, "rule does not round-trip through `{canonical}`");
+    assert_eq!(
+        &again, rule,
+        "rule does not round-trip through `{canonical}`"
+    );
     assert_eq!(again.to_string(), canonical);
 
     // The apex of a wildcard rule never matches; the apex of a plain rule always does (unless
@@ -67,14 +69,20 @@ fn check_rule(rule: &HostRule, url: Option<&Url>) {
     let port = rule.port.map(|p| format!(":{p}")).unwrap_or_default();
     if let Ok(apex) = Url::parse(&format!("{}://{apex_spelled}{port}/x", rule.scheme)) {
         if rule.wildcard {
-            assert!(!rule.matches(&apex), "wildcard {rule} matches its apex {apex}");
+            assert!(
+                !rule.matches(&apex),
+                "wildcard {rule} matches its apex {apex}"
+            );
             if let Ok(sub) = Url::parse(&format!("{}://sub.{apex_spelled}{port}/", rule.scheme))
                 && match_host(&sub).is_some_and(|h| h.ends_with(&format!(".{}", rule.host)))
             {
                 assert!(rule.matches(&sub), "wildcard {rule} does not match {sub}");
             }
         } else if !rule.host.ends_with('.') {
-            assert!(rule.matches(&apex), "{rule} does not match its own host {apex}");
+            assert!(
+                rule.matches(&apex),
+                "{rule} does not match its own host {apex}"
+            );
         }
         // Userinfo on the same destination is always refused.
         let mut with_user = apex.clone();
@@ -88,8 +96,15 @@ fn check_rule(rule: &HostRule, url: Option<&Url>) {
         return;
     }
     assert_eq!(url.scheme(), rule.scheme, "{rule} matches {url}");
-    assert!(url.username().is_empty() && url.password().is_none(), "{rule} matches {url}");
-    assert_eq!(url.port(), rule.port, "{rule} matches {url} on another port");
+    assert!(
+        url.username().is_empty() && url.password().is_none(),
+        "{rule} matches {url}"
+    );
+    assert_eq!(
+        url.port(),
+        rule.port,
+        "{rule} matches {url} on another port"
+    );
     let host = match_host(url).expect("a matched URL has a host");
     if rule.wildcard {
         assert!(
@@ -142,7 +157,10 @@ fuzz_target!(|data: &[u8]| {
             if let Ok(rule) = HostRule::parse(&spelled) {
                 check_rule(&rule, Some(url));
                 if !rule.wildcard && !rule.host.ends_with('.') {
-                    assert!(rule.matches(url), "{rule} (from `{spelled}`) does not match {url}");
+                    assert!(
+                        rule.matches(url),
+                        "{rule} (from `{spelled}`) does not match {url}"
+                    );
                 }
             }
         }
@@ -239,13 +257,19 @@ fuzz_target!(|data: &[u8]| {
         && unique(&file_roots);
     match Manifest::parse(manifest.as_bytes()) {
         Ok(m) => {
-            assert!(expect_ok, "manifest accepted invalid capabilities: {caps:?}");
+            assert!(
+                expect_ok,
+                "manifest accepted invalid capabilities: {caps:?}"
+            );
             assert_eq!(m.capabilities, caps, "parsing changed the capabilities");
         }
         Err(e) => {
             // Over-long manifests are refused before validation.
             if manifest.len() <= 64 * 1024 {
-                assert!(!expect_ok, "manifest refused valid capabilities {caps:?}: {e}");
+                assert!(
+                    !expect_ok,
+                    "manifest refused valid capabilities {caps:?}: {e}"
+                );
             }
         }
     }
