@@ -32,11 +32,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Before/after on one runner (EE1): the extractor before EE1 (`base_ref`) on the
+          # scale's subset and on all 93 items of its corpus, then this commit on the same items
+          # (`--knowledge-corpus original` reproduces that corpus and selection), then this
+          # commit on the whole corpus with the EE1 hard cases.
           - suite: knowledge
-            base_ref: ""
-            args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
+            base_ref: 4b98b901d49f808f9e28daeec5169d03ae7e4fbd
+            base_args: knowledge
+            base_args2: knowledge --knowledge-items 93
+            args: >-
+              knowledge --knowledge-corpus original
+              --knowledge-dump eval-results/knowledge-dump.jsonl
             args2: >-
-              knowledge --knowledge-items 93
+              knowledge --knowledge-corpus original --knowledge-items all
+              --knowledge-dump eval-results/knowledge-dump-original-all.jsonl
+            args3: >-
+              knowledge --knowledge-items all
               --knowledge-dump eval-results/knowledge-dump-all.jsonl
     steps:
       - uses: actions/checkout@v5
@@ -94,11 +105,20 @@ jobs:
             (cd "$RUNNER_TEMP/base" && "$RUNNER_TEMP/base-target/release/nugget-bench" \
               ${{ matrix.base_args || matrix.args }} --local-models --scale "$SCALE" \
               "${extra[@]}" --out-dir "$RESULTS/before")
+            if [ -n "${{ matrix.base_args2 }}" ]; then
+              (cd "$RUNNER_TEMP/base" && "$RUNNER_TEMP/base-target/release/nugget-bench" \
+                ${{ matrix.base_args2 }} --local-models --scale "$SCALE" \
+                "${extra[@]}" --out-dir "$RESULTS/before")
+            fi
           fi
           ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "${{ matrix.scale || env.SCALE }}" \
             "${extra[@]}" --out-dir "$RESULTS"
           if [ -n "${{ matrix.args2 }}" ]; then
             ./target/release/nugget-bench ${{ matrix.args2 }} --local-models --scale "$SCALE" \
+              "${extra[@]}" --out-dir "$RESULTS"
+          fi
+          if [ -n "${{ matrix.args3 }}" ]; then
+            ./target/release/nugget-bench ${{ matrix.args3 }} --local-models --scale "$SCALE" \
               "${extra[@]}" --out-dir "$RESULTS"
           fi
 
