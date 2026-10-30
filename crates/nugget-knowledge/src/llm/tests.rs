@@ -480,3 +480,35 @@ fn review_explains_an_answer() {
     let v = review("Sure!", &it, &chunks, &LlmConfig::default(), None);
     assert_eq!(v[0].what, "answer");
 }
+
+#[test]
+fn model_kinds_yield_to_known_entities() {
+    use nugget_graph::{GraphStore, MemGraph, NewEntity};
+    let g = MemGraph::new();
+    g.create_entity(&NewEntity::new(EntityKind::Project, "Lodestar"))
+        .unwrap();
+    // Same name with two kinds in the graph: ambiguous, left alone.
+    g.create_entity(&NewEntity::new(EntityKind::Project, "Harbourline"))
+        .unwrap();
+    g.create_entity(&NewEntity::new(EntityKind::Organization, "Harbourline"))
+        .unwrap();
+
+    let mut base = Extraction::default();
+    base.entity(EntitySpec::new(EntityKind::Person, "Robin Ashgrove"));
+    let mut extra = Extraction::default();
+    extra.entity(EntitySpec::new(EntityKind::Organization, "Robin Ashgrove"));
+    extra.entity(EntitySpec::new(EntityKind::Place, "Lodestar"));
+    extra.entity(EntitySpec::new(EntityKind::Place, "Harbourline"));
+    extra.entity(EntitySpec::new(EntityKind::Place, "Quarry Bridge"));
+    adopt_known_kinds(&g, None, &base, &mut extra);
+    let kinds: Vec<EntityKind> = extra.entities.iter().map(|e| e.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            EntityKind::Person,
+            EntityKind::Project,
+            EntityKind::Place,
+            EntityKind::Place
+        ]
+    );
+}

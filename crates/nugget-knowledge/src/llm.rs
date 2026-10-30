@@ -779,6 +779,13 @@ const GENERIC: &[&str] = &[
     "everyone",
     "all",
     "team members",
+    "event",
+    "the event",
+    "follow-up",
+    "follow up",
+    "reminder",
+    "invite",
+    "invitation",
 ];
 
 const MONTHS: &[(&str, u8)] = &[
@@ -1800,6 +1807,63 @@ fn validate_full(
         extraction: ex,
         gate,
         verdicts,
+    }
+}
+
+/// The model's kind for an entity whose name is already known with another kind: an attendee
+/// the calendar extractor knows as a person but the model calls an organisation, a project the
+/// model calls a place. The deterministic extractors and the graph win: the entity takes the
+/// kind of the same-named entity in this item (`base`), else of the graph's entities with that
+/// name or alias when they all share one kind (the user excluded). Run before the first-name
+/// folds, so a re-kinded person can still be folded.
+pub(crate) fn adopt_known_kinds(
+    graph: &dyn GraphStore,
+    me: Option<&EntityId>,
+    base: &Extraction,
+    extra: &mut Extraction,
+) {
+    for e in &mut extra.entities {
+        if e.weak_name {
+            continue;
+        }
+        let name = normalize_name(&e.name);
+        if name.is_empty() {
+            continue;
+        }
+        let mut local: Vec<EntityKind> = base
+            .entities
+            .iter()
+            .filter(|b| !b.weak_name)
+            .filter(|b| {
+                std::iter::once(&b.name)
+                    .chain(&b.aliases)
+                    .any(|n| normalize_name(n) == name)
+            })
+            .map(|b| b.kind)
+            .collect();
+        local.sort_by_key(|k| k.as_str());
+        local.dedup();
+        if let [k] = local[..] {
+            e.kind = k;
+            continue;
+        }
+        if !local.is_empty() {
+            continue;
+        }
+        let Ok(ids) = graph.find_by_name(&e.name, None) else {
+            continue;
+        };
+        let mut kinds: Vec<EntityKind> = ids
+            .iter()
+            .filter(|id| Some(*id) != me)
+            .filter_map(|id| graph.get_entity(id).ok().flatten())
+            .map(|x| x.kind)
+            .collect();
+        kinds.sort_by_key(|k| k.as_str());
+        kinds.dedup();
+        if let [k] = kinds[..] {
+            e.kind = k;
+        }
     }
 }
 
