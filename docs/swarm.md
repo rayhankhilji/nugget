@@ -112,7 +112,7 @@ Briefs in `docs/waves/wave-dd/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) |
+| DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) (merged) |
 | DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste |
 | DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence |
 | DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker |
