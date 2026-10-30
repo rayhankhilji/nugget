@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: false
 
 env:
@@ -58,21 +58,13 @@ jobs:
       matrix:
         include:
           - suite: draft
+            scale: standard
             # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
             # agentic-tier model rather than the drafting model (AA3).
             args: >-
               draft --draft-grounding both --draft-temperature 0 --draft-judge model
               --draft-judge-model qwen3-8b-q4km --draft-judge-timeout-s 240
               --draft-dump eval-results/draft-drafts.jsonl
-          # Before/after on one runner (AA3): the extractor at `base_ref` on the 30-item subset,
-          # then this commit on the same subset, then this commit on every item.
-          - suite: knowledge
-            base_ref: 50e9b751793bcd217e49408189f21559f763d5fd
-            base_args: knowledge
-            args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
-            args2: >-
-              knowledge --knowledge-items 93
-              --knowledge-dump eval-results/knowledge-dump-all.jsonl
     steps:
       - uses: actions/checkout@v5
         with:
@@ -130,7 +122,7 @@ jobs:
               ${{ matrix.base_args || matrix.args }} --local-models --scale "$SCALE" \
               "${extra[@]}" --out-dir "$RESULTS/before")
           fi
-          ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
+          ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "${{ matrix.scale || env.SCALE }}" \
             "${extra[@]}" --out-dir "$RESULTS"
           if [ -n "${{ matrix.args2 }}" ]; then
             ./target/release/nugget-bench ${{ matrix.args2 }} --local-models --scale "$SCALE" \
