@@ -474,8 +474,15 @@ export async function keyboardScenario({ browser, bin }) {
 
       await page.keyboard.press(`${MOD}+1`);
       await pageMain(page, "app.nav.today").waitFor();
-      const actionBtn = page.locator("main").getByRole("button", { name: action.label, exact: true });
-      await tabTo(page, actionBtn, { what: `the card action "${action.label}"`, max: 80 });
+      // Known action kinds show a short verb ("Draft reply"); the daemon's full label is the tooltip.
+      let actionName = action.label;
+      try {
+        actionName = t(`today.actionKind.${action.kind}`);
+      } catch {
+        /* an unknown kind keeps the daemon's label */
+      }
+      const actionBtn = page.locator("main").getByRole("button", { name: actionName, exact: true });
+      await tabTo(page, actionBtn, { what: `the card action "${actionName}"`, max: 80 });
       await markOpener(page);
       await page.keyboard.press("Enter");
       await expectDialogFocused(page, "the card action dialog");
