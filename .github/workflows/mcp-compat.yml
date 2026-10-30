@@ -83,6 +83,15 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # SQLCipher's vendored OpenSSL needs a Windows-native Perl; Git's MSYS Perl breaks its build
+      # (same as ci.yml).
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
       - name: Build nuggetd
         id: build
         run: cargo build --locked -p nuggetd --bin nuggetd
