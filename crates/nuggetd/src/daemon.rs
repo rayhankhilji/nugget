@@ -400,7 +400,12 @@ impl Daemon {
         }
 
         // Ingest: every M1 connector kind, credentials in the keychain.
+        // Recovery mode (damaged database, empty temporary store): no source kinds and no
+        // keychain, so nothing runs and source ids reused in the empty store can never touch the
+        // real credentials (see `features::backup`).
+        let recovery = crate::features::backup::in_recovery(&paths);
         let secrets: Arc<dyn SecretStore> = match opts.source_secrets {
+            _ if recovery => Arc::new(MemorySecrets::new()),
             Some(s) => s,
             None if sources::keychain_disabled() => {
                 tracing::warn!(
@@ -424,6 +429,9 @@ impl Daemon {
         plugin_factories
             .into_iter()
             .for_each(|f| registry.register(f));
+        if recovery {
+            registry = Registry::new();
+        }
         let resolver =
             sources::client_secret_resolver(secrets.clone(), sources::oauth_kinds(&registry));
         let power: Arc<dyn PowerPolicy> = opts.power.unwrap_or_else(|| {
@@ -474,7 +482,7 @@ impl Daemon {
             .clone()
             .unwrap_or_else(|| crate::knowledge::default_vault_dir(&paths));
         let vault_dir = crate::knowledge::vault_root(&config.vault, &default_vault)?;
-        crate::features::backup::prepare_config(&paths, &mut config, &vault_dir);
+        crate::features::backup::prepare_config(&paths, &mut config, &vault_dir, &default_vault);
         let knowledge = {
             let (store, router, hub, power) =
                 (store.clone(), router.clone(), hub.clone(), power.clone());

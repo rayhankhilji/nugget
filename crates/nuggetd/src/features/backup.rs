@@ -17,18 +17,35 @@
 //!   notifications.
 //! - Notification `backup.changed` (params: status) when a backup starts, finishes or fails.
 //!
-//! **Before the store opens** ([`open_store`], called by the daemon): a staged restore is
-//! applied; otherwise the database is checked read-only with [`nugget_store::check_file`]. A
-//! damaged database is never opened or written: the daemon runs on an empty in-memory store in
-//! *recovery mode* (`backup.status.recovery`), with knowledge extraction and the vault turned
-//! off ([`prepare_config`]) so the empty graph can never prune the user's vault pages. Sources
-//! live in the store, so none run. Backups and exports are refused in recovery mode (a backup
-//! of the empty store would rotate good backups out); restoring moves the damaged file aside
-//! as `nugget.db.corrupt-<ts>`.
+//! **Before the store opens** ([`open_store`], called by the daemon): an interrupted staging
+//! folder is removed, a staged restore is applied, otherwise the database is checked read-only
+//! with [`nugget_store::check_file`]. A database that is damaged, or that this home's key does
+//! not open (a damaged first page, or a file from another install), is never opened or
+//! written: the daemon runs on an empty in-memory store in *recovery mode*
+//! (`backup.status.recovery`). Then:
+//! - knowledge extraction and the vault are off ([`prepare_config`]), so the empty graph can
+//!   never re-render or prune the user's vault pages;
+//! - no connector kinds are registered and source credentials are kept in memory only
+//!   ([`in_recovery`], used by the daemon), so no source runs and `sources.add`/`remove` in the
+//!   empty store can never reuse a source id and overwrite or delete the real keychain
+//!   credentials stored under it;
+//! - backups and exports are refused (a backup of the empty store would rotate good backups
+//!   out). Restoring moves the unopened file aside as `nugget.db.corrupt-<ts>`.
+//!
+//! **Folders.** Backup and export folders inside (or containing) the data, config or vault
+//! directory are refused.
 //!
 //! **Scheduler.** One task: the next backup is due `interval_hours` after the last one (a
 //! failed attempt is retried after at most an hour); nothing runs with `interval_hours = 0`,
-//! without a folder or passphrase, or in recovery mode. One backup runs at a time.
+//! without a folder or passphrase, or in recovery mode. One backup runs at a time: when another
+//! backup, export or restore holds the lock, the scheduler retries a minute later; repeated
+//! failures back off exponentially (from a minute up to an hour), also when they cannot be
+//! recorded in `backup.json`. The very first scheduled backup waits a minute after the folder or
+//! passphrase is set (or the daemon starts, e.g. on a just-restored home), so setting up does not immediately run one beside the user's own; a manual
+//! `backup.run` that finds a backup running waits for it (up to 30 minutes) and then runs its
+//! own, while export and restore refuse while busy. It never sleeps more than 15 minutes at once and recomputes the due
+//! time from the wall clock each time, so a laptop that slept through the due time backs up
+//! soon after waking.
 //!
 //! **Test hook.** `NUGGET_BACKUP_TEST_HOUR_SECS` (read once) makes one "hour" of the schedule
 //! that many seconds. Test-only; never set it in a real install.
@@ -46,6 +63,7 @@ use nugget_store::{FileHealth, Store, StoreKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use time::OffsetDateTime;
+use zeroize::Zeroizing;
 
 use super::{Feature, FeatureContext};
 use crate::config::Config;
@@ -103,6 +121,8 @@ struct Boot {
     key: Option<StoreKey>,
     recovery: Option<Recovery>,
     vault_root: Option<PathBuf>,
+    /// The vault directory used when `[vault] path` is unset.
+    default_vault: Option<PathBuf>,
 }
 
 fn boots() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Boot>> {
@@ -115,7 +135,7 @@ fn boots() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Boot>> {
 
 /// Open the daemon's store: apply a staged restore first, then check the database read-only.
 /// A damaged database is left untouched and an empty in-memory store is returned instead
-/// (recovery mode, see the module docs). A wrong key fails as [`Store::open`] does. Blocking.
+/// (recovery mode, see the module docs). Blocking.
 pub(crate) fn open_store(paths: &Paths, key: StoreKey) -> Result<Store> {
     let (store, key, recovery) = open_checked(paths, key)?;
     boots().insert(
@@ -124,6 +144,7 @@ pub(crate) fn open_store(paths: &Paths, key: StoreKey) -> Result<Store> {
             key: Some(key),
             recovery,
             vault_root: None,
+            default_vault: None,
         },
     );
     Ok(store)
@@ -131,6 +152,8 @@ pub(crate) fn open_store(paths: &Paths, key: StoreKey) -> Result<Store> {
 
 fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option<Recovery>)> {
     let db = paths.db_file();
+    // The daemon holds its socket here, so no restore can be staging meanwhile.
+    restore::sweep_partial(paths);
     let applied = match restore::apply_pending(paths, Some(&key)) {
         Ok(a) => a,
         Err(e) => {
@@ -153,12 +176,15 @@ fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option
         return Ok((store, key, None));
     }
     match nugget_store::check_file(&db, &key, false)? {
-        FileHealth::Missing | FileHealth::Healthy | FileHealth::WrongKey => {
-            // WrongKey: `open` reports it as it always has.
+        FileHealth::Missing | FileHealth::Healthy => {
             let store = Store::open(&db, &key)?;
             Ok((store, key, None))
         }
-        FileHealth::Corrupt(reason) => {
+        health @ (FileHealth::Corrupt(_) | FileHealth::WrongKey) => {
+            let reason = match health {
+                FileHealth::Corrupt(r) => r,
+                _ => "the database cannot be opened with this computer's store key: it is damaged, or it comes from another install".into(),
+            };
             tracing::error!(db = %db.display(), %reason,
                 "DATABASE DAMAGED: not opening or writing it; running on an empty temporary store until it is restored from a backup");
             let recovery = Recovery {
@@ -172,13 +198,27 @@ fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option
     }
 }
 
+/// Whether [`open_store`] put this home in recovery mode (the daemon then registers no
+/// connector kinds and keeps source credentials in memory; see the module docs).
+pub(crate) fn in_recovery(paths: &Paths) -> bool {
+    boots()
+        .get(&paths.data)
+        .is_some_and(|b| b.recovery.is_some())
+}
+
 /// Adjust the daemon's config before knowledge and the vault are built: in recovery mode turn
 /// both off (an empty graph must never re-render or prune the vault). Also records the vault
-/// directory for restores.
-pub(crate) fn prepare_config(paths: &Paths, config: &mut Config, vault_dir: &Path) {
+/// directory (resolved, and the default used without `[vault] path`) for backups and restores.
+pub(crate) fn prepare_config(
+    paths: &Paths,
+    config: &mut Config,
+    vault_dir: &Path,
+    default_vault: &Path,
+) {
     let mut boots = boots();
     let boot = boots.entry(paths.data.clone()).or_default();
     boot.vault_root = Some(vault_dir.to_path_buf());
+    boot.default_vault = Some(default_vault.to_path_buf());
     if boot.recovery.is_some() {
         tracing::warn!("recovery mode: knowledge extraction and the vault are off");
         config.knowledge.enabled = false;
@@ -201,7 +241,13 @@ pub(crate) fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
             key,
             recovery: boot.recovery,
             vault_root: boot.vault_root,
+            default_vault: boot.default_vault,
             lock: tokio::sync::Mutex::new(()),
+            backoff: Mutex::new(Backoff::default()),
+            // A start counts as setting up: a home whose settings name a folder but record no
+            // backup yet (e.g. just restored, taking the backup's `backup.json`) must not back
+            // up the moment it starts, beside whatever else is starting.
+            setup_at: Mutex::new(Some(OffsetDateTime::now_utc())),
             settings_lock: Mutex::new(()),
             changed: tokio::sync::Notify::new(),
         }),
@@ -225,6 +271,13 @@ struct Inner {
     recovery: Option<Recovery>,
     /// The configured vault directory (from the daemon's config).
     vault_root: Option<PathBuf>,
+    /// The vault directory used without `[vault] path`.
+    default_vault: Option<PathBuf>,
+    /// Scheduler retries (in memory, so they work even when `backup.json` cannot be written).
+    backoff: Mutex<Backoff>,
+    /// When the folder or passphrase was last set here, or the daemon started (grace before
+    /// the first scheduled backup, one schedule minute).
+    setup_at: Mutex<Option<OffsetDateTime>>,
     /// Held while a backup, export or restore runs.
     lock: tokio::sync::Mutex<()>,
     /// Serialises read-modify-write of `backup.json`.
@@ -255,9 +308,9 @@ struct ConfigureParams {
     keep: Option<u32>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct PassphraseParams {
-    passphrase: String,
+    passphrase: Zeroizing<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -265,10 +318,10 @@ struct FolderParams {
     folder: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct RestoreParams {
     path: String,
-    passphrase: Option<String>,
+    passphrase: Option<Zeroizing<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -469,7 +522,11 @@ impl Inner {
         let folder = match p.folder.as_deref().map(str::trim) {
             None => None,
             Some("") => Some(None),
-            Some(f) => Some(Some(folder_param(f)?.display().to_string())),
+            Some(f) => {
+                let f = folder_param(f)?;
+                self.check_outside(&f)?;
+                Some(Some(f.display().to_string()))
+            }
         };
         if let Some(h) = p.interval_hours
             && h > disk::MAX_INTERVAL_HOURS
@@ -499,27 +556,31 @@ impl Inner {
             }
         })
         .await?;
+        self.mark_setup();
         self.changed.notify_one();
         self.status().await
     }
 
-    async fn set_passphrase(self: &Arc<Self>, passphrase: String) -> Result<()> {
+    async fn set_passphrase(self: &Arc<Self>, passphrase: Zeroizing<String>) -> Result<()> {
         disk::check_passphrase(&passphrase)?;
         let key = self.key()?.clone();
         let paths = self.paths().clone();
         blocking(move || disk::set_passphrase(&paths, &key, &passphrase)).await?;
         tracing::info!("backup passphrase set");
+        self.mark_setup();
         self.changed.notify_one();
         Ok(())
     }
 
     /// One backup (to `to`, else the configured folder), recorded in the settings and
-    /// broadcast. Fails at once if one is already running.
+    /// broadcast. If another backup, export or restore is running, waits for it (up to
+    /// [`MANUAL_WAIT`]) and then runs its own: "Back up now" right after the passphrase was set
+    /// may meet the first scheduled backup.
     async fn backup(self: Arc<Self>, to: Option<PathBuf>) -> Result<BackupInfo> {
         self.refuse_in_recovery("back up")?;
-        let Ok(guard) = self.lock.try_lock() else {
+        let Ok(guard) = tokio::time::timeout(MANUAL_WAIT, self.lock.lock()).await else {
             return Err(Error::Other(
-                "a backup, export or restore is already running".into(),
+                "another backup, export or restore is still running; try again later".into(),
             ));
         };
         let settings = self.settings().await?;
@@ -532,6 +593,7 @@ impl Inner {
                 ));
             }
         };
+        self.check_outside(&folder)?;
         let keep = (configured.as_ref() == Some(&folder)).then_some(settings.keep);
         self.broadcast().await;
         let key = self.key()?.clone();
@@ -602,7 +664,7 @@ impl Inner {
         } else {
             restore::Aside::PreRestore
         };
-        let vault = self.live_vault().or_else(|| self.vault_root.clone());
+        let default_vault = self.default_vault.clone();
         let passphrase = p.passphrase;
         blocking(move || {
             restore::stage(
@@ -610,9 +672,9 @@ impl Inner {
                 &restore::StageRequest {
                     dir: &dir,
                     current: key.as_ref(),
-                    passphrase: passphrase.as_deref(),
+                    passphrase: passphrase.as_deref().map(String::as_str),
                     aside,
-                    vault_root: vault.as_deref(),
+                    default_vault: default_vault.as_deref(),
                 },
             )
         })
@@ -629,6 +691,7 @@ impl Inner {
 
     async fn export(self: Arc<Self>, folder: PathBuf) -> Result<export::ExportResult> {
         self.refuse_in_recovery("export")?;
+        self.check_outside(&folder)?;
         let Ok(_guard) = self.lock.try_lock() else {
             return Err(Error::Other(
                 "a backup, export or restore is already running".into(),
@@ -647,44 +710,132 @@ impl Inner {
         .await
     }
 
+    /// Settings or the passphrase changed: the first scheduled backup waits [`FIRST_GRACE`]
+    /// after this, so setting up does not immediately run one beside the user's own.
+    fn mark_setup(&self) {
+        *self.setup_at.lock().unwrap_or_else(PoisonError::into_inner) =
+            Some(OffsetDateTime::now_utc());
+    }
+
+    /// Refuse `folder` inside (or containing) Nugget's data, config or vault directory.
+    fn check_outside(&self, folder: &Path) -> Result<()> {
+        let paths = self.paths();
+        let vault = self.live_vault().or_else(|| self.vault_root.clone());
+        let mut protected: Vec<(&str, &Path)> =
+            vec![("data", &paths.data), ("config", &paths.config)];
+        if let Some(v) = vault.as_deref() {
+            protected.push(("vault", v));
+        }
+        disk::check_folder_outside(folder, &protected)
+    }
+
     /// Run scheduled backups until `stop`.
     async fn scheduler(self: Arc<Self>, stop: tokio_util::sync::CancellationToken) {
         if self.recovery.is_some() {
             return;
         }
         loop {
-            let wait = match self.due_in().await {
-                Some(d) => d,
-                None => Duration::from_secs(365 * 24 * 3600),
-            };
+            let wait = self.due_in().await.unwrap_or(MAX_SLEEP).min(MAX_SLEEP);
             tokio::select! {
                 () = stop.cancelled() => return,
                 () = self.changed.notified() => continue,
                 () = tokio::time::sleep(wait) => {}
             }
-            if self.due_in().await.is_some_and(|d| d.is_zero()) {
-                tracing::info!("scheduled backup");
-                let _ = self.clone().backup(None).await;
+            if !self.due_in().await.is_some_and(|d| d.is_zero()) {
+                continue;
             }
+            let busy = self.lock.try_lock().is_err();
+            let outcome = if busy {
+                tracing::debug!("scheduled backup waits: another backup, export or restore runs");
+                Err(Miss::Busy)
+            } else {
+                tracing::info!("scheduled backup");
+                self.clone()
+                    .backup(None)
+                    .await
+                    .map(drop)
+                    .map_err(|_| Miss::Failed)
+            };
+            self.backoff
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .record(outcome, OffsetDateTime::now_utc(), hour());
         }
     }
 
-    /// How long until the next scheduled backup (`None`: nothing scheduled).
+    /// How long until the next scheduled backup (`None`: nothing scheduled), from the wall clock.
     async fn due_in(&self) -> Option<Duration> {
         let key = self.key.clone()?;
         let paths = self.paths().clone();
-        let at = blocking(move || {
+        let (at, first) = blocking(move || {
             let s = disk::Settings::load(&paths)?;
             if disk::envelope_for(&paths, &key)?.is_none() {
                 return Ok(None);
             }
-            Ok(next_due(&s))
+            Ok(next_due(&s).map(|at| (at, s.last_backup.is_none())))
         })
         .await
         .ok()
         .flatten()?;
+        let setup = *self.setup_at.lock().unwrap_or_else(PoisonError::into_inner);
+        let at = match setup {
+            Some(t) if first => at.max(t + hour() / 60),
+            _ => at,
+        };
+        let until = self
+            .backoff
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .until;
+        let at = until.map_or(at, |u| at.max(u));
         let left = at - OffsetDateTime::now_utc();
         Some(left.try_into().unwrap_or(Duration::ZERO))
+    }
+}
+
+/// How long a manual backup waits for one already running.
+const MANUAL_WAIT: Duration = Duration::from_secs(30 * 60);
+
+/// Longest single scheduler sleep (the due time is recomputed from the wall clock after it).
+const MAX_SLEEP: Duration = Duration::from_secs(15 * 60);
+
+/// A scheduled attempt that did not back up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Miss {
+    /// Another backup, export or restore held the lock.
+    Busy,
+    /// The backup failed.
+    Failed,
+}
+
+/// Scheduler retries after a busy lock or a failure.
+#[derive(Debug, Default)]
+struct Backoff {
+    /// No scheduled attempt before this.
+    until: Option<OffsetDateTime>,
+    /// Failures in a row.
+    failures: u32,
+}
+
+impl Backoff {
+    /// Record an attempt at `now`; `hour` is one schedule hour. Busy: retry in a minute.
+    /// Failed: a minute, doubling per failure in a row, at most an hour. Success: clear.
+    fn record(
+        &mut self,
+        outcome: std::result::Result<(), Miss>,
+        now: OffsetDateTime,
+        hour: Duration,
+    ) {
+        let minute = (hour / 60).max(Duration::from_millis(100));
+        match outcome {
+            Ok(()) => *self = Self::default(),
+            Err(Miss::Busy) => self.until = Some(now + minute),
+            Err(Miss::Failed) => {
+                self.failures = self.failures.saturating_add(1);
+                let doubled = minute.saturating_mul(1u32 << self.failures.saturating_sub(1).min(6));
+                self.until = Some(now + doubled.min(hour.max(minute)));
+            }
+        }
     }
 }
 
@@ -706,4 +857,41 @@ fn next_due(s: &disk::Settings) -> Option<OffsetDateTime> {
         due = Some(due.map_or(retry, |d| d.max(retry)));
     }
     Some(due.unwrap_or_else(OffsetDateTime::now_utc))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_busy_or_failing_scheduler_backs_off() {
+        let now = OffsetDateTime::now_utc();
+        let hour = Duration::from_secs(3600);
+        let mut b = Backoff::default();
+        b.record(Err(Miss::Busy), now, hour);
+        assert_eq!(
+            b.until,
+            Some(now + Duration::from_secs(60)),
+            "busy: a minute, not a spin"
+        );
+        assert_eq!(b.failures, 0);
+        let mut waits = Vec::new();
+        for _ in 0..10 {
+            b.record(Err(Miss::Failed), now, hour);
+            waits.push((b.until.unwrap() - now).whole_seconds());
+        }
+        assert_eq!(&waits[..4], &[60, 120, 240, 480]);
+        assert_eq!(*waits.last().unwrap(), 3600, "capped at an hour");
+        b.record(Ok(()), now, hour);
+        assert!(b.until.is_none() && b.failures == 0);
+        // Even with a tiny test hour, never a zero wait.
+        let mut b = Backoff::default();
+        b.record(Err(Miss::Busy), now, Duration::from_secs(1));
+        assert!(b.until.unwrap() > now);
+    }
+
+    #[test]
+    fn sleeps_are_capped() {
+        assert!(MAX_SLEEP <= Duration::from_secs(15 * 60));
+    }
 }

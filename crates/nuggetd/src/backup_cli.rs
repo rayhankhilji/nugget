@@ -18,6 +18,7 @@ use nugget_core::{Error, Result};
 use nugget_ipc::{Client, Listener};
 use nugget_store::{FileHealth, Store, StoreKey};
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
 use crate::config::Config;
 use crate::features::backup::{disk, export, restore};
@@ -50,6 +51,7 @@ pub async fn backup(paths: &Paths, to: Option<PathBuf>, default_vault: &Path) ->
             .ok_or_else(|| Error::Invalid("no backup folder configured: pass --to DIR".into()))?;
         let keep = (configured.as_ref() == Some(&folder)).then_some(settings.keep);
         let vault = vault_root(&paths, &default_vault)?;
+        check_outside(&paths, &folder, vault.as_deref())?;
         let result = disk::run_backup(&disk::BackupRequest {
             paths: &paths,
             store: &store,
@@ -93,7 +95,7 @@ pub async fn set_passphrase(paths: &Paths, file: Option<&Path>) -> Result<String
         rpc(
             &client,
             "backup.set_passphrase",
-            json!({"passphrase": passphrase}),
+            json!({"passphrase": passphrase.as_str()}),
         )
         .await?;
         return Ok("backup passphrase set".into());
@@ -121,6 +123,7 @@ pub async fn export(paths: &Paths, to: PathBuf, default_vault: &Path) -> Result<
     let r = crate::daemon::blocking(move || {
         let (store, _) = open_offline(&paths)?;
         let vault = vault_root(&paths, &default_vault)?;
+        check_outside(&paths, &to, vault.as_deref())?;
         let r = export::run_export(&store, &to, vault.as_deref(), &mut |phase, done| {
             tracing::debug!(phase, done, "export progress");
         })?;
@@ -177,20 +180,19 @@ pub async fn restore(
         let db = paths.db_file();
         let aside = match &current {
             Some(k) => match nugget_store::check_file(&db, k, false) {
-                Ok(FileHealth::Corrupt(_)) => restore::Aside::Corrupt,
+                Ok(FileHealth::Corrupt(_) | FileHealth::WrongKey) => restore::Aside::Corrupt,
                 _ => restore::Aside::PreRestore,
             },
             None => restore::Aside::PreRestore,
         };
-        let vault = vault_root(&paths, &default_vault)?;
         let ready = restore::stage(
             &paths,
             &restore::StageRequest {
                 dir: &from,
                 current: current.as_ref(),
-                passphrase: pass.as_deref(),
+                passphrase: pass.as_deref().map(String::as_str),
                 aside,
-                vault_root: vault.as_deref(),
+                default_vault: Some(&default_vault),
             },
         )?;
         let (key, applied) = restore::apply_pending(&paths, current.as_ref())?
@@ -265,6 +267,15 @@ fn open_offline(paths: &Paths) -> Result<(Store, StoreKey)> {
     Ok((Store::open(&db, &key)?, key))
 }
 
+/// Refuse a folder inside (or containing) this home's data, config or vault directory.
+fn check_outside(paths: &Paths, folder: &Path, vault: Option<&Path>) -> Result<()> {
+    let mut protected: Vec<(&str, &Path)> = vec![("data", &paths.data), ("config", &paths.config)];
+    if let Some(v) = vault {
+        protected.push(("vault", v));
+    }
+    disk::check_folder_outside(folder, &protected)
+}
+
 /// The vault directory the daemon would use, if the vault is enabled.
 fn vault_root(paths: &Paths, default_vault: &Path) -> Result<Option<PathBuf>> {
     let config = if paths.config_file().exists() {
@@ -290,16 +301,18 @@ fn no_passphrase() -> Error {
 
 /// The passphrase from `file`, the environment, or a no-echo prompt (asked twice when
 /// `confirm`). `None` when none of them is available.
-fn passphrase(file: Option<&Path>, confirm: bool) -> Result<Option<String>> {
+fn passphrase(file: Option<&Path>, confirm: bool) -> Result<Option<Zeroizing<String>>> {
     if let Some(f) = file {
-        let s = std::fs::read_to_string(f)
-            .map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?;
-        return Ok(Some(strip_newline(&s).to_string()));
+        let s = Zeroizing::new(
+            std::fs::read_to_string(f)
+                .map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?,
+        );
+        return Ok(Some(Zeroizing::new(strip_newline(&s).to_string())));
     }
     if let Ok(s) = std::env::var(PASSPHRASE_ENV)
         && !s.is_empty()
     {
-        return Ok(Some(s));
+        return Ok(Some(Zeroizing::new(s)));
     }
     if !std::io::stdin().is_terminal() {
         return Ok(None);
@@ -308,7 +321,7 @@ fn passphrase(file: Option<&Path>, confirm: bool) -> Result<Option<String>> {
     let Some(first) = first else { return Ok(None) };
     if confirm {
         let again = prompt("Again: ")?.unwrap_or_default();
-        if again != first {
+        if *again != *first {
             return Err(Error::Invalid("the passphrases do not match".into()));
         }
     }
@@ -322,9 +335,10 @@ fn strip_newline(s: &str) -> &str {
 }
 
 /// Read a line from the terminal without echo (Unix, through `stty`). `None` where that is
-/// not possible.
+/// not possible. (Interrupted with Ctrl-C, the terminal keeps echo off until `stty echo` or
+/// `reset`.)
 #[cfg(unix)]
-fn prompt(label: &str) -> Result<Option<String>> {
+fn prompt(label: &str) -> Result<Option<Zeroizing<String>>> {
     use std::io::Write;
     use std::process::{Command, Stdio};
     let stty = |arg: &str| {
@@ -340,15 +354,15 @@ fn prompt(label: &str) -> Result<Option<String>> {
         eprintln!();
         return Ok(None);
     }
-    let mut line = String::new();
+    let mut line = Zeroizing::new(String::new());
     let read = std::io::stdin().read_line(&mut line);
     stty("echo");
     eprintln!();
     read.map_err(Error::Io)?;
-    Ok(Some(strip_newline(&line).to_string()))
+    Ok(Some(Zeroizing::new(strip_newline(&line).to_string())))
 }
 
 #[cfg(not(unix))]
-fn prompt(_label: &str) -> Result<Option<String>> {
+fn prompt(_label: &str) -> Result<Option<Zeroizing<String>>> {
     Ok(None)
 }

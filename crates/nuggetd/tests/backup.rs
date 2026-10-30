@@ -243,6 +243,15 @@ async fn backups_are_verified_listed_and_rotated() {
     assert_eq!(e.code, nugget_ipc::code::INVALID_PARAMS);
     let e = call_err(&d.client, "backup.configure", json!({"keep": 0})).await;
     assert_eq!(e.code, nugget_ipc::code::INVALID_PARAMS);
+    // Never inside Nugget's own folders.
+    let inside = h.paths.data.join("backups");
+    let e = call_err(&d.client, "backup.configure", json!({"folder": inside})).await;
+    assert_eq!(e.code, nugget_ipc::code::INVALID_PARAMS, "{e:?}");
+    let vault = d.vault.clone().unwrap().join("b");
+    let e = call_err(&d.client, "backup.run", json!({"folder": vault})).await;
+    assert_eq!(e.code, nugget_ipc::code::INVALID_PARAMS, "{e:?}");
+    let e = call_err(&d.client, "export.run", json!({"folder": h.paths.config})).await;
+    assert_eq!(e.code, nugget_ipc::code::INVALID_PARAMS);
     // The real passphrase call (default Argon2 cost), once.
     assert_eq!(
         call(
@@ -666,6 +675,14 @@ async fn a_damaged_database_is_left_alone_and_restored_from_a_backup() {
     assert!(st["next_due"].is_null());
     assert_eq!(status(&d.client).await.items, 0, "an empty temporary store");
     assert!(d.vault.is_none(), "no vault in recovery mode");
+    // No source kinds: nothing can reuse a real source's id (and its keychain credentials).
+    let e = call_err(
+        &d.client,
+        method::SOURCES_ADD,
+        json!({"kind": "files", "name": "x", "settings": {"roots": [h.root], "exclude": []}}),
+    )
+    .await;
+    assert_ne!(e.code, 0, "{e:?}");
     let e = call_err(&d.client, "backup.run", json!({})).await;
     assert!(e.message.contains("damaged"), "{e:?}");
     let e = call_err(&d.client, "export.run", json!({"folder": h.dir("x")})).await;
@@ -689,6 +706,38 @@ async fn a_damaged_database_is_left_alone_and_restored_from_a_backup() {
         "the damaged file is kept byte for byte"
     );
     d.stop().await;
+}
+
+// Unix only, for the same reason as `restore_on_the_same_home_restarts_and_keeps_the_old_data`.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_database_the_key_does_not_open_starts_in_recovery_mode() {
+    let h = home("wrongkey");
+    let d = start(&h.paths, KEY).await;
+    seed(&d.store, 0, 10, "ochre");
+    d.stop().await;
+    let db = h.paths.db_file();
+    checkpointed_copy_in_place(&db, KEY);
+    // Damage the first page: the key no longer "opens" the file.
+    let mut bytes = std::fs::read(&db).unwrap();
+    for b in bytes.iter_mut().take(4096) {
+        *b ^= 0x5A;
+    }
+    std::fs::write(&db, bytes).unwrap();
+    let before = sha256(&db);
+    let d = start(&h.paths, KEY).await;
+    let st = call(&d.client, "backup.status", json!({})).await;
+    assert!(
+        st["recovery"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("store key"),
+        "{st}"
+    );
+    assert_eq!(status(&d.client).await.items, 0);
+    assert_eq!(sha256(&db), before, "never written");
+    d.stop().await;
+    assert_eq!(sha256(&db), before);
 }
 
 // ---- the real binary ----
@@ -1013,6 +1062,159 @@ async fn cli_backup_restore_and_export() {
     ));
     assert!(out.contains("kept as"), "{out}");
     assert!(!data_files_starting(&h.paths, "nugget.db.pre-restore-").is_empty());
+}
+
+/// A backup (key [`KEY`], passphrase [`PASS`]) of `n` items with two vault pages, whose
+/// `config.toml` sets `vault_path` when given (written after the daemon started, as if edited).
+async fn make_backup_with_vault(h: &Home, n: usize, vault_path: Option<&str>) -> PathBuf {
+    let folder = h.dir("backups");
+    write_envelope(&h.paths, KEY, PASS);
+    let d = start(&h.paths, KEY).await;
+    seed(&d.store, 0, n, "tamarind");
+    let vault = d.vault.clone().unwrap();
+    std::fs::create_dir_all(vault.join("people")).unwrap();
+    std::fs::write(vault.join("people").join("Sam Lee.md"), "# Sam Lee\n").unwrap();
+    std::fs::write(vault.join("Index.md"), "# Index\n").unwrap();
+    if let Some(p) = vault_path {
+        let text = format!("{CONFIG}\n[vault]\npath = {}\n", toml_string(p));
+        std::fs::write(h.paths.config_file(), text).unwrap();
+    }
+    call(&d.client, "backup.configure", json!({"folder": folder})).await;
+    let info = call(&d.client, "backup.run", json!({})).await;
+    d.stop().await;
+    PathBuf::from(info["path"].as_str().unwrap())
+}
+
+fn toml_string(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// The restored home serves the backup: items, vault pages, passphrase, nothing pending.
+async fn check_restored(paths: &Paths, items: u64) {
+    let home_dir = paths.data.parent().unwrap().to_path_buf();
+    let (p, client) = Proc::spawn(&home_dir, &[]).await;
+    assert_eq!(
+        status(&client).await.items,
+        items,
+        "{}",
+        paths.data.display()
+    );
+    assert!(audit_ok(&client).await);
+    let st = call(&client, "backup.status", json!({})).await;
+    assert_eq!(st["restore_pending"], false);
+    assert_eq!(st["passphrase_set"], true, "{st}");
+    assert!(st["recovery"].is_null());
+    drop(client);
+    p.stop().await;
+    assert!(!paths.data.join("restore-pending").exists());
+    let vault = paths.data.join("vault");
+    assert!(
+        vault.join("people").join("Sam Lee.md").is_file(),
+        "vault restored"
+    );
+    assert!(vault.join("Index.md").is_file());
+}
+
+/// A crash after any step of applying a restore is finished by the next start.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_interrupted_restore_is_finished_at_the_next_start() {
+    let a = home("crash-src");
+    let backup = make_backup_with_vault(&a, 4, None).await;
+    let pass = a.root.join("pass.txt");
+    std::fs::write(&pass, PASS).unwrap();
+    let restore_args = |b: &Path| {
+        vec![
+            "restore".to_string(),
+            "--from".into(),
+            b.display().to_string(),
+            "--passphrase-file".into(),
+            pass.display().to_string(),
+        ]
+    };
+    // An empty home (no key): the key is installed first.
+    for step in [
+        "key-first",
+        "db",
+        "config",
+        "vault-copied",
+        "vault",
+        "envelope",
+    ] {
+        let h = home(&format!("crash-{step}"));
+        let home_dir = h.paths.data.parent().unwrap().to_path_buf();
+        let args = restore_args(&backup);
+        let out = nuggetd(&home_dir)
+            .env("NUGGET_RESTORE_TEST_STOP_AFTER", step)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(
+            !out.status.success(),
+            "{step}: the injected crash should fail the command"
+        );
+        assert!(
+            text(&out.stderr).contains(step),
+            "{step}: {}",
+            text(&out.stderr)
+        );
+        check_restored(&h.paths, 4).await;
+    }
+    // A home with its own key and data: the key is installed after the database moved in.
+    for step in ["db", "key"] {
+        let h = home(&format!("crash-keyed-{step}"));
+        let home_dir = h.paths.data.parent().unwrap().to_path_buf();
+        let (p, client) = Proc::spawn(&home_dir, &[]).await;
+        drop(client);
+        p.stop().await;
+        let args = restore_args(&backup);
+        let out = nuggetd(&home_dir)
+            .env("NUGGET_RESTORE_TEST_STOP_AFTER", step)
+            .args(&args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{step}");
+        assert!(
+            text(&out.stderr).contains(step),
+            "{step}: {}",
+            text(&out.stderr)
+        );
+        // Its vault directory is still empty (nothing to render yet), so the backup's goes in.
+        check_restored(&h.paths, 4).await;
+        assert!(!data_files_starting(&h.paths, "nugget.db.pre-restore-").is_empty());
+        assert_eq!(
+            data_files_starting(&h.paths, "store.key.replaced-").len(),
+            1
+        );
+    }
+}
+
+/// A config from another OS (its vault path is not a path here) is made to work, not refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_config_from_another_os_is_localised() {
+    let foreign = if cfg!(windows) {
+        "/Users/sam/Nugget Vault"
+    } else {
+        "C:\\Users\\sam\\Nugget Vault"
+    };
+    let a = home("foreign-src");
+    let backup = make_backup_with_vault(&a, 3, Some(foreign)).await;
+    let pass = a.root.join("pass.txt");
+    std::fs::write(&pass, PASS).unwrap();
+    let h = home("foreign");
+    let home_dir = h.paths.data.parent().unwrap().to_path_buf();
+    ok(run(
+        &home_dir,
+        &[
+            "restore",
+            "--from",
+            backup.to_str().unwrap(),
+            "--passphrase-file",
+            pass.to_str().unwrap(),
+        ],
+    ));
+    let config = std::fs::read_to_string(h.paths.config_file()).unwrap();
+    assert!(config.contains("# path = "), "{config}");
+    check_restored(&h.paths, 3).await;
 }
 
 // ---- golden fixture ----

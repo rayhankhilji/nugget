@@ -360,7 +360,12 @@ pub(crate) fn run_backup(req: &BackupRequest<'_>) -> Result<BackupInfo> {
     let result = (|| {
         write_synced(
             &partial.join(PARTIAL_MARKER),
-            format!("{{\"created_at\":\"{}\"}}\n", rfc3339(now)).as_bytes(),
+            format!(
+                "{{\"created_at\":\"{}\",\"key_id\":\"{}\"}}\n",
+                rfc3339(now),
+                req.key.key_id()
+            )
+            .as_bytes(),
         )?;
         let files = collect_files(req.paths, req.vault_root)?;
         let stats = req.store.backup_into(&partial.join(STORE_FILE), &files)?;
@@ -399,7 +404,7 @@ pub(crate) fn run_backup(req: &BackupRequest<'_>) -> Result<BackupInfo> {
     match result {
         Ok(info) => {
             if let Some(keep) = req.keep {
-                retain(folder, keep, &done);
+                retain(folder, keep, &done, &req.key.key_id());
             }
             Ok(info)
         }
@@ -431,8 +436,14 @@ pub(crate) fn collect_files(
     if let Some(root) = vault_root.filter(|r| r.is_dir()) {
         let mut found = Vec::new();
         walk_files(root, root, &mut found)?;
+        let mut names = FoldedNames::default();
         for (rel, path) in found {
-            if rel.ends_with(VAULT_TMP_SUFFIX) || !safe_rel(&rel) {
+            if rel.ends_with(VAULT_TMP_SUFFIX) {
+                continue;
+            }
+            if !safe_rel(&rel) || !names.insert(&rel) {
+                tracing::warn!(file = %path.display(),
+                    "vault file name cannot be restored on every OS (reserved, or clashes with another by case); not in the backup");
                 continue;
             }
             match fs::metadata(&path) {
@@ -480,14 +491,103 @@ pub(crate) fn walk_files(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf
     Ok(())
 }
 
-/// A relative `/`-separated path that is safe to store and to write back out (the rules of
-/// `nugget_store::backup`: no empty, `.` or `..` segments, backslashes, colons or NULs).
+/// Windows device names, reserved with any extension and in any case.
+const RESERVED_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// A relative `/`-separated path that can be stored in a backup and written back out on every
+/// OS: the rules `nugget_store` enforces in `backup_into` and `read_backup_files` (no empty,
+/// `.` or `..` segments, no backslash, colon, `<>"|?*` or control characters, no segment ending
+/// in `.` or a space, no Windows device name).
 pub(crate) fn safe_rel(rel: &str) -> bool {
-    !rel.is_empty()
-        && !rel.contains(['\\', ':', '\0'])
-        && rel
-            .split('/')
-            .all(|s| !s.is_empty() && s != "." && s != "..")
+    if rel.is_empty()
+        || rel
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+    {
+        return false;
+    }
+    rel.split('/').all(|seg| {
+        let stem = seg.split('.').next().unwrap_or(seg).trim_end();
+        !seg.is_empty()
+            && seg != "."
+            && seg != ".."
+            && !seg.ends_with('.')
+            && !seg.ends_with(' ')
+            && !RESERVED_NAMES.iter().any(|r| stem.eq_ignore_ascii_case(r))
+    })
+}
+
+/// How a path compares on case-insensitive, normalising file systems (macOS, Windows), as
+/// `nugget_store` folds them: NFC, lowercased.
+fn fold(name: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    name.nfc().collect::<String>().to_lowercase()
+}
+
+/// Paths accepted so far, folded: refuses one that would land on the same file as another, or
+/// where one is a file and the other needs it as a directory (what `backup_into` refuses).
+#[derive(Default)]
+pub(crate) struct FoldedNames {
+    files: std::collections::HashSet<String>,
+    dirs: std::collections::HashSet<String>,
+}
+
+impl FoldedNames {
+    /// Accept `name` unless it clashes with an accepted one.
+    pub fn insert(&mut self, name: &str) -> bool {
+        let f = fold(name);
+        let prefixes: Vec<&str> = f.match_indices('/').map(|(i, _)| &f[..i]).collect();
+        if self.files.contains(&f)
+            || self.dirs.contains(&f)
+            || prefixes.iter().any(|p| self.files.contains(*p))
+        {
+            return false;
+        }
+        self.dirs.extend(prefixes.into_iter().map(str::to_string));
+        self.files.insert(f);
+        true
+    }
+}
+
+/// Refuse a backup or export folder inside (or containing) Nugget's own data, config or
+/// vault directory: a backup must survive the loss of what it backs up, and one inside the
+/// vault would be indexed as notes.
+pub(crate) fn check_folder_outside(folder: &Path, protected: &[(&str, &Path)]) -> Result<()> {
+    let f = resolve(folder);
+    for (what, p) in protected {
+        let p = resolve(p);
+        if f.starts_with(&p) || p.starts_with(&f) {
+            return Err(Error::Invalid(format!(
+                "{} is inside (or contains) Nugget's {what} folder {}; pick a folder elsewhere, ideally on another drive",
+                folder.display(),
+                p.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// `path` with its longest existing ancestor canonicalised (so symlinks and `..` compare
+/// correctly even when the rest does not exist yet).
+fn resolve(path: &Path) -> PathBuf {
+    let abs = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+    let mut rest = Vec::new();
+    let mut cur = abs.as_path();
+    loop {
+        if let Ok(c) = cur.canonicalize() {
+            return rest.iter().rev().fold(c, |p: PathBuf, s| p.join(s));
+        }
+        match (cur.parent(), cur.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                cur = parent;
+            }
+            _ => return abs,
+        }
+    }
 }
 
 /// The complete backups in `folder`, newest first. A missing folder has none; unreadable or
@@ -520,10 +620,12 @@ fn complete_backups(folder: &Path) -> Vec<(String, PathBuf, Manifest)> {
         .collect()
 }
 
-/// Delete complete backups beyond the newest `keep` (never `current`) and abandoned `.partial`
-/// directories. Failures are logged.
-pub(crate) fn retain(folder: &Path, keep: u32, current: &Path) {
+/// Delete this install's complete backups (manifest `key_id` = `key_id`) beyond the newest
+/// `keep` (never `current`), and its abandoned `.partial` directories. Backups of other
+/// installs sharing the folder are never touched. Failures are logged.
+pub(crate) fn retain(folder: &Path, keep: u32, current: &Path, key_id: &str) {
     let mut all = complete_backups(folder);
+    all.retain(|(_, _, m)| m.key_id == key_id);
     all.sort_by(|a, b| (&b.2.created_at, &b.0).cmp(&(&a.2.created_at, &a.0)));
     for (_, dir, _) in all.into_iter().skip(keep.max(1) as usize) {
         if dir == current {
@@ -545,11 +647,23 @@ pub(crate) fn retain(folder: &Path, keep: u32, current: &Path) {
         }
         let dir = e.path();
         let marker = dir.join(PARTIAL_MARKER);
-        let stamp = fs::metadata(&marker)
-            .or_else(|_| fs::metadata(dir.join(MANIFEST_FILE)))
-            .and_then(|m| m.modified());
-        let Ok(stamp) = stamp else {
-            continue; // not ours
+        let (file, owner) = match fs::read(&marker) {
+            Ok(b) => (
+                marker.clone(),
+                serde_json::from_slice::<serde_json::Value>(&b)
+                    .ok()
+                    .and_then(|v| v.get("key_id").and_then(|k| k.as_str()).map(str::to_string)),
+            ),
+            Err(_) => (
+                dir.join(MANIFEST_FILE),
+                Manifest::read(&dir).ok().map(|m| m.key_id),
+            ),
+        };
+        if owner.as_deref() != Some(key_id) {
+            continue; // not ours (or another install's)
+        }
+        let Ok(stamp) = fs::metadata(&file).and_then(|m| m.modified()) else {
+            continue;
         };
         let age = SystemTime::now().duration_since(stamp).unwrap_or_default();
         if age >= STALE_PARTIAL {
@@ -686,7 +800,10 @@ mod tests {
     fn safe_relative_paths() {
         assert!(safe_rel("entities/a.md"));
         assert!(safe_rel(".nugget/state.json"));
-        for bad in ["", "/a", "a//b", "../a", "a/./b", "a\\b", "c:x", "a/"] {
+        for bad in [
+            "", "/a", "a//b", "../a", "a/./b", "a\\b", "c:x", "a/", "con.md", "a/NUL", "x./y",
+            "y /z", "a?b", "t\tb",
+        ] {
             assert!(!safe_rel(bad), "{bad}");
         }
     }
@@ -695,7 +812,7 @@ mod tests {
     fn retention_only_touches_our_backups() {
         let tmp = tempfile::tempdir().unwrap();
         let f = tmp.path();
-        let mk = |name: &str, created: &str| {
+        let mk = |name: &str, created: &str, key_id: &str| {
             let d = f.join(name);
             fs::create_dir(&d).unwrap();
             let m = Manifest {
@@ -704,7 +821,7 @@ mod tests {
                 app_version: "0".into(),
                 schema_version: 1,
                 os: "linux".into(),
-                key_id: "00".into(),
+                key_id: key_id.into(),
                 items: 1,
                 chunks: 0,
                 entities: 0,
@@ -715,22 +832,94 @@ mod tests {
             fs::write(d.join(STORE_FILE), b"x").unwrap();
             d
         };
-        let a = mk("nugget-backup-20260101T000000Z", "2026-01-01T00:00:00Z");
-        let b = mk("nugget-backup-20260102T000000Z", "2026-01-02T00:00:00Z");
-        let c = mk("nugget-backup-20260103T000000Z", "2026-01-03T00:00:00Z");
+        let a = mk(
+            "nugget-backup-20260101T000000Z",
+            "2026-01-01T00:00:00Z",
+            "00",
+        );
+        let b = mk(
+            "nugget-backup-20260102T000000Z",
+            "2026-01-02T00:00:00Z",
+            "00",
+        );
+        let c = mk(
+            "nugget-backup-20260103T000000Z",
+            "2026-01-03T00:00:00Z",
+            "00",
+        );
         // Foreign: our name but no manifest; our manifest under another name; ours with an
-        // extra file.
+        // extra file; another install's (another key id) backups sharing the folder.
         fs::create_dir(f.join("nugget-backup-19990101T000000Z")).unwrap();
-        let other = mk("holiday-photos", "2000-01-01T00:00:00Z");
-        let extra = mk("nugget-backup-20250101T000000Z", "2025-01-01T00:00:00Z");
+        let other = mk("holiday-photos", "2000-01-01T00:00:00Z", "00");
+        let extra = mk(
+            "nugget-backup-20250101T000000Z",
+            "2025-01-01T00:00:00Z",
+            "00",
+        );
         fs::write(extra.join("notes.txt"), b"mine").unwrap();
-        retain(f, 2, &c);
+        let theirs = mk(
+            "nugget-backup-20240101T000000Z",
+            "2024-01-01T00:00:00Z",
+            "ff",
+        );
+        let theirs_partial = f.join("nugget-backup-20240102T000000Z.partial");
+        fs::create_dir(&theirs_partial).unwrap();
+        fs::write(theirs_partial.join(PARTIAL_MARKER), br#"{"key_id":"ff"}"#).unwrap();
+        let ours_partial = f.join("nugget-backup-20240103T000000Z.partial");
+        fs::create_dir(&ours_partial).unwrap();
+        let marker = ours_partial.join(PARTIAL_MARKER);
+        fs::write(&marker, br#"{"key_id":"00"}"#).unwrap();
+        let old = SystemTime::now() - Duration::from_secs(13 * 3600);
+        for m in [&marker, &theirs_partial.join(PARTIAL_MARKER)] {
+            File::options()
+                .write(true)
+                .open(m)
+                .unwrap()
+                .set_modified(old)
+                .unwrap();
+        }
+        retain(f, 2, &c, "00");
         assert!(c.exists() && b.exists());
         assert!(!a.exists());
         assert!(f.join("nugget-backup-19990101T000000Z").exists());
         assert!(other.join(STORE_FILE).exists());
         assert!(extra.join("notes.txt").exists() && !extra.join(STORE_FILE).exists());
-        assert_eq!(list_backups(f).len(), 2);
+        assert!(
+            theirs.join(STORE_FILE).exists(),
+            "another install's backup is kept"
+        );
+        assert!(theirs_partial.exists(), "another install's partial is kept");
+        assert!(!ours_partial.exists(), "our stale partial is removed");
+        assert_eq!(list_backups(f).len(), 3);
         assert_eq!(list_backups(f)[0].created_at, "2026-01-03T00:00:00Z");
+    }
+
+    #[test]
+    fn folded_names_refuse_clashes() {
+        let mut n = FoldedNames::default();
+        assert!(n.insert("Notes/a.md"));
+        assert!(!n.insert("notes/A.md"), "case clash");
+        assert!(!n.insert("notes"), "a file where a directory is needed");
+        assert!(n.insert("b.md"));
+        assert!(!n.insert("b.md/c.md"), "a directory where a file is");
+        assert!(n.insert("caf\u{e9}.md"));
+        assert!(!n.insert("cafe\u{301}.md"), "NFC clash");
+    }
+
+    #[test]
+    fn folders_inside_nugget_dirs_are_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("home").join("data");
+        let vault = tmp.path().join("vault");
+        fs::create_dir_all(&data).unwrap();
+        let protected = [("data", data.as_path()), ("vault", vault.as_path())];
+        assert!(check_folder_outside(&data.join("backups"), &protected).is_err());
+        assert!(check_folder_outside(&vault.join("x").join("y"), &protected).is_err());
+        assert!(check_folder_outside(&tmp.path().join("home"), &protected).is_err());
+        assert!(check_folder_outside(&tmp.path().join("backups"), &protected).is_ok());
+        assert!(
+            check_folder_outside(&data.join("..").join("..").join("elsewhere"), &protected).is_ok()
+        );
+        assert!(check_folder_outside(&data.join("..").join("data").join("b"), &protected).is_err());
     }
 }

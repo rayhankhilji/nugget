@@ -5,6 +5,7 @@
 use std::fs::{self, File};
 use std::io::BufWriter;
 use std::path::Path;
+use std::time::{Duration, SystemTime};
 
 use nugget_core::{Error, Result};
 use nugget_store::Store;
@@ -15,6 +16,10 @@ use super::disk::{self, EXPORT_PREFIX, io_err};
 
 /// Items read per page.
 const PAGE: usize = 256;
+/// Marks an export directory being written (removed before it is renamed into place).
+const PARTIAL_MARKER: &str = ".nugget-export-partial";
+/// An unfinished export this old is abandoned.
+const STALE_PARTIAL: Duration = Duration::from_secs(3600);
 /// Progress is reported every this many items.
 const PROGRESS_EVERY: u64 = 500;
 
@@ -63,11 +68,20 @@ pub(crate) fn run_export(
             folder.display()
         )));
     }
+    sweep_stale(folder);
     let name = disk::fresh_name(folder, EXPORT_PREFIX, OffsetDateTime::now_utc())?;
     let partial = folder.join(format!("{name}.partial"));
     let done = folder.join(&name);
     crate::fsutil::create_private_dir(&partial).map_err(|e| io_err(&partial, e))?;
-    let written = write_all(store, &partial, vault_root, progress);
+    let marker = partial.join(PARTIAL_MARKER);
+    let written = fs::write(&marker, b"")
+        .map_err(|e| io_err(&marker, e))
+        .and_then(|()| write_all(store, &partial, vault_root, progress))
+        .and_then(|r| {
+            fs::remove_file(&marker)
+                .map(|()| r)
+                .map_err(|e| io_err(&marker, e))
+        });
     match written {
         Ok(mut r) => {
             fs::rename(&partial, &done).map_err(|e| io_err(&done, e))?;
@@ -79,6 +93,33 @@ pub(crate) fn run_export(
             // Ours entirely (just created); the output is invalid after an error.
             let _ = fs::remove_dir_all(&partial);
             Err(e)
+        }
+    }
+}
+
+/// Remove unfinished exports (`nugget-export-<ts>.partial` holding our marker) older than
+/// [`STALE_PARTIAL`], left by a crash or a killed process.
+fn sweep_stale(folder: &Path) {
+    let Ok(rd) = fs::read_dir(folder) else { return };
+    for e in rd.filter_map(|e| e.ok()) {
+        let name = e.file_name();
+        let Some(base) = name.to_str().and_then(|n| n.strip_suffix(".partial")) else {
+            continue;
+        };
+        if !disk::is_dated_name(base, EXPORT_PREFIX) || !e.file_type().is_ok_and(|t| t.is_dir()) {
+            continue;
+        }
+        let dir = e.path();
+        let stale = fs::metadata(dir.join(PARTIAL_MARKER))
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| {
+                SystemTime::now().duration_since(t).unwrap_or_default() >= STALE_PARTIAL
+            });
+        if stale {
+            tracing::info!(dir = %dir.display(), "removing an unfinished export");
+            if let Err(err) = fs::remove_dir_all(&dir) {
+                tracing::warn!(dir = %dir.display(), error = %err, "cannot remove an unfinished export");
+            }
         }
     }
 }

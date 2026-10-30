@@ -12,8 +12,11 @@ Open **Status → Backup and export** in the app (or use `nuggetd backup` on the
    uses it to lock a copy of the database key that goes into every backup.
 2. **Pick a folder.** An external drive, a NAS share or a folder your own cloud-sync tool watches all
    work. The backup is encrypted before it is written, so the folder does not need to be private.
+   A folder inside Nugget's own data, settings or vault folder is refused: a backup must survive
+   losing what it backs up.
 3. **Pick a schedule** (manual, daily or weekly) and **how many backups to keep** (default 7; older
-   ones are deleted after a new one succeeds).
+   ones are deleted after a new one succeeds). Only this computer's own backups count and are ever
+   deleted, so several computers can share one backup folder.
 
 Then press **Back up now**, or wait for the schedule. Nugget keeps working while it backs up.
 
@@ -81,7 +84,18 @@ this is why the audit check does not report the rollback as tampering.
 
 Backups restore across operating systems: a backup made on macOS restores on Windows or Linux and
 the other way round. File-source folders point at paths on the old computer; edit or re-add those
-sources on the **Sources** page.
+sources on the **Sources** page. A vault folder set in `config.toml` (`[vault] path`) that is not a
+valid path on the new computer (a macOS path on Windows, say) is commented out in the restored
+`config.toml`, so the default vault folder is used; set it again if you want another one. A
+restored `config.toml` that still does not load on this computer is not installed: it is kept next
+to yours as `config.toml.restored-<date and time>` and your current one stays in use. The vault's
+pages are restored only into an empty (or missing) vault folder; otherwise your pages stay and are
+updated from the restored data.
+
+A restore that is interrupted (a crash or power cut while it swaps the files) is finished at the
+next start; at every point either the old or the restored data is in place and opens with the key
+next to it. Between staging a restore in the app and the restart, the backup's key waits in the
+restore folder inside Nugget's data folder, protected like the key file.
 
 ## Export everything
 
@@ -104,11 +118,16 @@ and delete it when you are done.
 ## If the database is damaged
 
 At every start Nugget checks the database before using it. If the check fails (for example after a
-disk error), Nugget:
+disk error), or this computer's key cannot open it (a damaged first page looks the same as a
+database from another install), Nugget:
 
 1. **does not write to it**: it starts with an empty, temporary store so the app still opens;
 2. **keeps the file exactly as it was**, so nothing more is lost;
 3. shows a banner in the app offering to **restore from your latest backup**.
+
+Until then it runs no sources (adding one is refused) and does not touch the sign-in tokens in
+your keychain, does not update the vault, and does not back up or export the empty temporary
+store.
 
 Restoring moves the damaged file aside (`nugget.db.corrupt-<date and time>`), never deletes it. If you
 have no backup, keep the damaged file and ask for help on the issue tracker: SQLite can often recover
