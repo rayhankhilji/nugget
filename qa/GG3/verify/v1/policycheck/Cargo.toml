@@ -1,0 +1,9 @@
+# Verification scratch (GG3 verify v1): calls the real policy engine directly. Own workspace.
+[package]
+name = "gg3-v1-policycheck"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+nugget-policy = { path = "../../../../../crates/nugget-policy" }

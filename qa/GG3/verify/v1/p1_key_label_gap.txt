@@ -1,0 +1,15 @@
+
+=== p1_key_label_gap ===
+[OK     ] button "Delete": ["click:Destroy:rejected", "space:Destroy:rejected", "enter:Destroy:rejected"]
+[FINDING] button "Löschen": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Supprimer": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Eliminar": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "删除": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Senden": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Envoyer": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Bezahlen": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Firewall": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+[FINDING] button "Kaufen": ["click:Edit:rejected", "space:Edit:allowed", "enter:Send:rejected"] (space presses it unasked)
+--- p1_key_label_gap: verdicts identical in 3/3 runs
+
+9 finding check(s); unstable probes: []

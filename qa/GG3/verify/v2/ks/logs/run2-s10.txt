@@ -1,0 +1,7 @@
+s10_extension_left_halted #1: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+s10_extension_left_halted #2: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+s10_extension_left_halted #3: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+s10_extension_left_halted #4: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+s10_extension_left_halted #5: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+s10_extension_left_halted #6: as expected {"extension_left_halted":"0/30","examples":[],"ok":true}
+EXIT 0
