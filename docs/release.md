@@ -326,10 +326,10 @@ with throwaway keys. Use a prerelease tag, which only the beta channel receives.
     under `[workspace.dependencies]` next to it (`cargo-deny` needs them in step);
   - `version` in `apps/desktop/package.json`;
   - then `cargo update -w` so `Cargo.lock` follows.
-  - **MSI**: Tauri's MSI bundler accepts a prerelease only if it is numeric (`1.0.0-1`), and fails
-    on `1.0.0-rc.1`. For the RC also set `"wix": {"version": "1.0.0.1"}` under
-    `bundle.windows` in `tauri.conf.json` (the MSI's ProductVersion), and remove it again in the
-    v1.0.0 bump. The dry run in Step 6 catches this if it is forgotten.
+  - **MSI**: nothing to do. Tauri's MSI bundler accepts only a numeric prerelease (`1.0.0-1`),
+    so `release.yml` derives the MSI version itself (`packaging/windows/wix-version.ps1`):
+    `1.0.0-rc.1` builds an MSI with ProductVersion `1.0.0.1`. Windows Installer ignores the fourth
+    field when upgrading, so v1.0.0 still replaces the RC.
 - [ ] Merge, then **Step 6** on the merge commit.
 - [ ] **Tag** the merge commit with an annotated, signed tag. The message is the release notes.
 
@@ -408,7 +408,7 @@ maintainer login) and check:
 
 - [ ] **Bump the version** to `1.0.0` exactly as in Step 7 (`tauri.conf.json`, the root
   `Cargo.toml` workspace and internal dependency versions, `apps/desktop/package.json`,
-  `cargo update -w`), and remove the RC's `bundle.windows.wix.version`. Merge.
+  `cargo update -w`). Merge.
 - [ ] **Step 6** on the merge commit.
 - [ ] **Tag**: `git tag -s v1.0.0 -m "Nugget 1.0.0 …"` and `git push origin v1.0.0`.
 - [ ] **Watch** the build, as in Step 7. **Approve** `sign` (second maintainer, `git tag -v`).
@@ -421,8 +421,8 @@ maintainer login) and check:
 - [ ] Update the README and `docs/book/src/guide/install.md` (the "no release has been published
   yet" note), and `docs/PLAN.md`.
 
-**Later releases** repeat Steps 6, 7 (without the MSI note for numeric versions) and 9: bump, prove
-the commit, tag (`vX.Y.Z`, or `vX.Y.Z-beta.N` with a `wix.version` override for a prerelease),
+**Later releases** repeat Steps 6, 7 and 9: bump, prove
+the commit, tag (`vX.Y.Z`, or `vX.Y.Z-beta.N` for a prerelease),
 approve, review, publish. If `manifests/default.json` changed, redo its signatures first
 (Step 5, last item).
 
@@ -480,9 +480,10 @@ The updater picks the payload that matches how it was installed (`tauri` patches
 into each binary): an AppImage updates its AppImage, a `.deb` install updates through the `.deb`
 (with a `pkexec` prompt), the NSIS install through the NSIS installer, and so on.
 
-The MSI's version must be numeric (`major.minor.patch[.build]`); Tauri derives it from the app
-version and refuses a non-numeric prerelease such as `-rc.1` unless `bundle.windows.wix.version`
-is set (Step 7).
+The MSI's version must be numeric (`major.minor.patch[.build]`). Tauri refuses a non-numeric
+prerelease such as `-rc.1`, so `release.yml` sets `bundle.windows.wix.version` to
+`MAJOR.MINOR.PATCH.N` (N = the prerelease's trailing number) with
+`packaging/windows/wix-version.ps1`; NSIS needs nothing.
 
 ## 2. The `nuggetd` sidecar
 
@@ -1012,9 +1013,9 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
   step of the macOS legs. Scope the Entra app's role to the single certificate profile (Step 3)
   so a stolen token can do nothing else. The proper fix, not done yet, is to split compiling
   from `tauri bundle` and signing, so third-party code never runs in a job that can sign.
-- **Prerelease versions and the MSI.** A non-numeric prerelease (`-rc.1`, `-beta.1`) fails the MSI
-  build unless `bundle.windows.wix.version` is set by hand (Step 7); nothing derives it
-  automatically yet.
+- **Prerelease versions and the MSI.** `release.yml` maps `-rc.N`/`-beta.N` to MSI version
+  `X.Y.Z.N`, so `1.0.0-beta.2` and `1.0.0-rc.2` get the same ProductVersion; Windows Installer
+  ignores the fourth field for upgrades anyway, and the updater uses NSIS, not the MSI.
 - `actionlint` (1.7.7) passes on `windows-signing.yml` and `release-rehearsal.yml`; on
   `release.yml` its only complaint is the `macos-15-intel` runner label, which it doesn't know
   yet. It was run without `shellcheck`, so the `run:` scripts weren't linted.
