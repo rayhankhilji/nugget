@@ -123,7 +123,8 @@ impl Platform for Fake {
         }))
     }
     fn read_field(&self, el: &El, _max: usize) -> Result<FieldRead> {
-        let f = self.fields.lock().unwrap()[self.idx(el)].clone();
+        let i = self.idx(el);
+        let f = self.fields.lock().unwrap()[i].clone();
         Ok(FieldRead {
             node: el.node.clone(),
             label: None,
