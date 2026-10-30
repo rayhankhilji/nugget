@@ -17,7 +17,7 @@ use crate::config::{KnowledgeConfig, RunBudget};
 use crate::feed::ItemFeed;
 use crate::session::{Plan, Session, plan};
 use crate::splits::Split;
-use crate::state::{SourceLedger, State};
+use crate::state::{SourceLedger, State, TEMPORAL_VERSION};
 
 /// Counters for one [`Knowledge::run_once`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -170,6 +170,11 @@ impl Knowledge {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn inner_for_tests(&self) -> &Inner {
+        &self.inner
+    }
+
     pub fn config(&self) -> &KnowledgeConfig {
         &self.inner.cfg
     }
@@ -237,6 +242,11 @@ impl Knowledge {
             budget.max_llm_requests,
         );
         s.stats.planned = total;
+        // A graph from before validity intervals: migrate it once, before any item (resumable:
+        // a run out of time continues it next time).
+        if s.state.temporal < TEMPORAL_VERSION && s.backfill_validity(deadline)? {
+            s.state.temporal = TEMPORAL_VERSION;
+        }
         let (mut deletes_done, mut upserts_done) = (0usize, 0usize);
         let mut spent = 0usize;
         for item in &p.deletes {
