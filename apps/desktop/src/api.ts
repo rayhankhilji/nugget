@@ -1819,7 +1819,7 @@ export type AgentEvent =
   | { event: "action_done"; task_id: string; action_id: string; tool: string; is_error: boolean; summary: string; replayed: boolean }
   | { event: "verification"; task_id: string; action_id: string; tool: string; verification: Verification }
   | { event: "injection_suspected"; task_id: string; action_id: string; tool: string; finding: InjectionFinding }
-  | { event: "suspended"; task_id: string; question: string }
+  | { event: "suspended"; task_id: string; question: string; options?: string[] }
   | { event: "finished"; task_id: string; outcome: AgentOutcome; summary: string | null };
 
 /** One `agent.event` notification. */
@@ -1879,6 +1879,8 @@ export interface AgentTaskDetail {
   explain: string;
   pending: ConfirmationRequest[];
   question?: string | null;
+  /** Candidate answers offered with `question` (untrusted screen text: render as plain text). */
+  options?: string[];
 }
 
 export type PolicyEffect = "allow" | "confirm" | "deny";

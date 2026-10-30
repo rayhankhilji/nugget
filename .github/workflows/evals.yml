@@ -401,3 +401,113 @@ jobs:
             bench/.local-models/data/logs
           if-no-files-found: warn
           retention-days: 90
+
+  # Computer-use judgement (DD3), each comparison on one runner so before and after share a CPU:
+  # asking when the target is ambiguous (the agent's clarify guard off, then on, on the
+  # ambiguous, unambiguous and ask tasks) and the harm triage (a triage-only pass over harmful
+  # and benign goals, then the real loop with triage off and on over the quick subset plus every
+  # refuse task). `runs` holds one run per line: a label (the report's subdirectory), the
+  # environment for that run, `--`, then the bench arguments.
+  cua-judgement:
+    name: ${{ matrix.suite }} (real model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: judgement-4b
+            runs: |
+              triage-eval NUGGET_BENCH_CUA_TRIAGE_EVAL=1 -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km
+              clarify-off NUGGET_BENCH_CUA_CLARIFY=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks ambiguous,unambiguous,ask
+              clarify-on NUGGET_BENCH_CUA_CLARIFY=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks ambiguous,unambiguous,ask
+              triage-off NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
+              triage-on NUGGET_BENCH_CUA_TRIAGE=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
+          # The agentic-tier model is about 2.5 times slower per turn: its two comparisons get
+          # a runner each.
+          - suite: judgement-8b-ask
+            runs: |
+              clarify-off NUGGET_BENCH_CUA_CLARIFY=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks ambiguous,unambiguous,ask
+              clarify-on NUGGET_BENCH_CUA_CLARIFY=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks ambiguous,unambiguous,ask
+          - suite: judgement-8b-triage
+            runs: |
+              triage-eval NUGGET_BENCH_CUA_TRIAGE_EVAL=1 -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
+              triage-off NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
+              triage-on NUGGET_BENCH_CUA_TRIAGE=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: ${{ matrix.suite }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
+
+      # Every run, in order, on this runner; one that fails does not stop the others, but fails
+      # the step at the end.
+      - name: Run ${{ matrix.suite }}
+        env:
+          RUNS: ${{ matrix.runs }}
+        run: |
+          failed=0
+          while read -r -u 3 label rest; do
+            [ -n "$label" ] || continue
+            vars="${rest%% -- *}"
+            args="${rest#* -- }"
+            echo "::group::$label: $vars $args"
+            mkdir -p "$RESULTS/$label"
+            # Word splitting of $vars and $args is intended: assignments and arguments.
+            # shellcheck disable=SC2086
+            if ! env $vars ./target/release/nugget-bench $args --local-models --scale "$SCALE" \
+                --out-dir "$RESULTS/$label" < /dev/null; then
+              echo "::warning::$label failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done 3<<< "$RUNS"
+          exit "$failed"
+
+      - name: Summary
+        if: always()
+        run: |
+          find "$RESULTS" -name '*.json' | sort | while read -r f; do
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|model|tasks|task_subset|clarify|triage)")))),
+                    metrics: [.metrics[] | select(.name | test("^(success_rate|judgement|triage|safety|steps.mean|time)")) | {name, value, unit, target, target_met}]}' "$f"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90

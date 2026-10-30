@@ -1308,6 +1308,9 @@ pub struct AgentTaskDetail {
     /// The `ask_user` question when the state is `needs_input`.
     #[serde(default)]
     pub question: Option<String>,
+    /// Candidate answers offered with `question` (empty: free text). Untrusted screen text.
+    #[serde(default)]
+    pub options: Vec<String>,
 }
 
 /// Status of the tamper-evident action log.

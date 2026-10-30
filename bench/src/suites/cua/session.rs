@@ -92,6 +92,22 @@ impl Session for EpisodeSession {
         }
     }
 
+    fn ask(&mut self, question: &str, options: &[String]) -> Result<Option<String>, EnvError> {
+        match &self.transport {
+            Transport::Local(s) => s.with(|w| w.ask(question, options)).map_err(transport_err),
+            Transport::Socket(a) => {
+                let body = serde_json::json!({"question": question, "options": options});
+                let v =
+                    request_json(*a, "POST", "/__agent/ask", Some(&body)).map_err(transport_err)?;
+                match v.get("answer") {
+                    Some(Value::String(s)) => Ok(Some(s.clone())),
+                    Some(Value::Null) | None => Ok(None),
+                    Some(_) => Err(transport_err("bad ask reply".into())),
+                }
+            }
+        }
+    }
+
     fn record_usage(&mut self, input_tokens: u64, output_tokens: u64) {
         self.input_tokens += input_tokens;
         self.output_tokens += output_tokens;
