@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:dana-farewell-drinks-20260821@mailbox.example
+DTSTAMP:20260815T100000Z
+DTSTART:20260821T180000Z
+DTEND:20260821T210000Z
+SUMMARY:Drinks with Dana (new job!)
+LOCATION:The Anchor, Halden Bay
+ORGANIZER;CN="Mara Okafor":mailto:mara.okafor@mailbox.example
+ATTENDEE;CN="Mara Okafor";PARTSTAT=ACCEPTED:mailto:mara.okafor@mailbox.example
+ATTENDEE;CN="Dana Whitfield";PARTSTAT=ACCEPTED:mailto:dana@corvidlabs.example
+END:VEVENT
+END:VCALENDAR

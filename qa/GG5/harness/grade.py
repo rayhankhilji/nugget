@@ -73,18 +73,27 @@ def match_entity(gold_e: dict, ent: dict) -> bool:
 
 
 def resolve(snap: Snap, gold: dict):
-    """gold key -> list of graph entity ids it maps to (kind-agnostic for orgs/people)."""
-    out = {}
-    for g in gold["entities"]:
-        hits = []
-        for eid, ent in snap.details.items():
-            if g.get("kind") and ent["kind"] != g["kind"] and not (g["kind"] in ("person", "organization") and ent["kind"] in ("person", "organization")):
-                # Allow kind mismatch only for reporting; a person shown as an org is its own error.
-                if not match_entity(g, ent):
-                    continue
-            if match_entity(g, ent):
-                hits.append(eid)
-        out[g["key"]] = hits
+    """gold key -> list of graph entity ids it maps to.
+
+    An entity carrying a gold person's mail address maps to that person only (a calendar
+    attendee shown as "Sam" with Sam Okonkwo's address is Sam Okonkwo). Otherwise names and
+    aliases match, except aliases two gold entities share (a bare "Sam")."""
+    from collections import Counter
+
+    alias_count = Counter(norm(a) for g in gold["entities"] for a in {g["name"], *g.get("aliases", [])})
+    out = {g["key"]: [] for g in gold["entities"]}
+    for eid, ent in snap.details.items():
+        emails = {v.lower() for sch, v in ent.get("identifiers", []) if sch == "email"}
+        by_mail = [g for g in gold["entities"] if emails & {e.lower() for e in g.get("emails", [])}]
+        if by_mail:
+            for g in by_mail:
+                out[g["key"]].append(eid)
+            continue
+        for g in gold["entities"]:
+            names = {norm(x) for x in {g["name"], *g.get("aliases", [])} if alias_count[norm(x)] == 1}
+            ent_names = {norm(ent["name"])} | {norm(a) for a in ent.get("aliases", [])}
+            if norm(ent["name"]) in names or norm(g["name"]) in ent_names:
+                out[g["key"]].append(eid)
     return out
 
 
@@ -107,14 +116,15 @@ def obj_matches(claim: dict, obj, keymap: dict, gold_by_key: dict) -> bool:
 
 def find_claims(snap: Snap, fact: dict, keymap: dict, gold_by_key: dict):
     subj_ids = set(keymap.get(fact["subject"], []))
-    preds = fact["predicate"] if isinstance(fact["predicate"], list) else [fact["predicate"]]
+    preds = fact.get("predicate_any") or [fact.get("predicate", "*")]
     hits = []
     for c in snap.claims():
         if c["subject"]["id"] not in subj_ids:
             continue
         if preds != ["*"] and c["predicate"] not in preds:
             continue
-        if "object" in fact and fact["object"] is not None and not obj_matches(c, fact["object"], keymap, gold_by_key):
+        objs = fact.get("object_any") or ([fact["object"]] if fact.get("object") is not None else [])
+        if objs and not any(obj_matches(c, o, keymap, gold_by_key) for o in objs):
             continue
         hits.append(c)
     return hits
@@ -171,7 +181,7 @@ def grade_snap(snap: Snap, gold: dict, corpus: Path) -> dict:
             continue
         hits = find_claims(snap, f, keymap, gold_by_key)
         cur = [c for c in hits if c["status"] in CURRENT]
-        facts.append({"id": f["id"], "desc": f"{f['subject']} {f['predicate']} {f.get('object')}",
+        facts.append({"id": f["id"], "desc": f"{f['subject']} {f.get('predicate') or f.get('predicate_any')} {f.get('object')}",
                       "current": bool(cur), "found": bool(hits),
                       "claims": [{"id": c["id"], "status": c["status"], "text": c["text"]} for c in hits]})
     r["facts"] = facts

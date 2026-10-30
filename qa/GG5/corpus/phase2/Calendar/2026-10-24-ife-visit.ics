@@ -1,0 +1,15 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Nugget QA//GG5//EN
+BEGIN:VEVENT
+UID:ife-visit-20261024@mailbox.example
+DTSTAMP:20261015T090000Z
+DTSTART;VALUE=DATE:20261024
+DTEND;VALUE=DATE:20261026
+SUMMARY:Ife staying (Gull Point Sunday)
+LOCATION:12 Saltmarsh Row, Halden Bay
+ORGANIZER;CN="Mara Okafor":mailto:mara.okafor@mailbox.example
+ATTENDEE;CN="Ife Okafor";PARTSTAT=ACCEPTED:mailto:ife.okafor@mailbox.example
+ATTENDEE;CN="Sam Okonkwo";PARTSTAT=TENTATIVE:mailto:sokonkwo@mailbox.example
+END:VEVENT
+END:VCALENDAR

@@ -7,6 +7,10 @@ name: QA GG5 (knowledge graph and vault, real models)
 # against qa/GG5/corpus/gold.json. Everything is uploaded as an artifact.
 
 on:
+  # TEMPORARY: removed before the final push.
+  push:
+    branches: [qa/knowledge]
+    paths: [".github/workflows/qa-GG5.yml", "qa/GG5/harness/**", "qa/GG5/corpus/**"]
   workflow_dispatch:
     inputs:
       models:

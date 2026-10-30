@@ -297,8 +297,35 @@ FACT_RE = re.compile(r"^- (?P<text>.*?)(?P<foot>(?: \[\^\d+\])*) <!-- c:(?P<id>\
 
 
 def find_page(vault: Path, name: str) -> Path | None:
+    """The page titled `name`, else the first page listing `name` among its aliases."""
     hits = sorted(vault.glob(f"*/{name} (*).md"))
-    return hits[0] if hits else None
+    if hits:
+        return hits[0]
+    for p in sorted(vault.glob("*/*.md")):
+        m = re.search(r"^aliases: \[(.*)\]$", p.read_text(errors="replace"), re.M)
+        if m and f'"{name}"' in m.group(1):
+            return p
+    return None
+
+
+DATE_RE = re.compile(r"(20\d\d-\d\d-\d\d)")
+
+
+def set_item_dates(root: Path):
+    """git does not keep modification times, and Nugget dates Markdown and calendar items by
+    them; give each file the date its name (or `date:` frontmatter) says, at 09:00 UTC."""
+    import calendar
+
+    for f in root.rglob("*"):
+        if not f.is_file():
+            continue
+        m = DATE_RE.search(f.name)
+        if not m and f.suffix == ".md":
+            fm = re.search(r"^date:\s*\"?(20\d\d-\d\d-\d\d)", f.read_text(errors="replace"), re.M)
+            m = fm
+        if m:
+            t = calendar.timegm(time.strptime(m.group(1), "%Y-%m-%d")) + 9 * 3600
+            os.utime(f, (t, t))
 
 
 def fact_lines(text: str):
@@ -450,12 +477,14 @@ def main():
             shutil.rmtree(work)
         work.mkdir()
         shutil.copytree(CORPUS / "phase1", work, dirs_exist_ok=True)
+        set_item_dates(work)
         src = d.call("sources.add", {"kind": "files", "name": "Mara's files", "settings": {"roots": [str(work)]}})
         d.note("sources.add", source=src)
         d.settle("phase1", args.settle_timeout)
         d.snapshot("phase1")
         if "phase2" in phases:
             shutil.copytree(CORPUS / "phase2", work, dirs_exist_ok=True)
+            set_item_dates(work)
             d.note("corpus.phase2.copied")
             time.sleep(5)
             d.settle("phase2", args.settle_timeout)
