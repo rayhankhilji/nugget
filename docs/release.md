@@ -696,8 +696,8 @@ On Linux x64 (AppImage) and Windows x64 (NSIS), each job (scripts in `packaging/
 The evidence (a PASS/FAIL report, public keys, feeds, signatures, `SHA256SUMS`, app, daemon and
 server logs; no installers, no private keys) is uploaded as `rehearsal-evidence-<os>` and shown
 in the job summary. Last green run:
-[41027356941](https://github.com/rayhankhilji/nugget/actions/runs/41027356941) (made before the
-switch to the beta channel, when it published `stable.json`). Its limits are listed in §8.
+[41071490514](https://github.com/rayhankhilji/nugget/actions/runs/41071490514) (Linux x64 and
+Windows x64, every check PASS). Its limits are listed in §8.
 
 ### Windows signing proof
 
@@ -716,8 +716,10 @@ non-exportable self-signed certificate is made in the job and deleted at the end
   binaries extracted from the MSI: each must fail while the throwaway root is untrusted, then
   verify, timestamped, once it is trusted (test only).
 
-Last green run: [41029408486](https://github.com/rayhankhilji/nugget/actions/runs/41029408486);
-its summary lists the 13 files Tauri passed to `sign.ps1`. The real Azure path (OIDC login,
+Last green run: [41072663245](https://github.com/rayhankhilji/nugget/actions/runs/41072663245),
+built as `0.0.1-rc.1` so the MSI takes the prerelease path (`packaging/windows/wix-version.ps1`);
+its summary lists the files Tauri passed to `sign.ps1`. The `azure-oidc` job (a real GitHub OIDC
+token against a fake Azure identity) runs only on manual runs, which GitHub allows once the workflow is on the default branch; it has not run yet. The real Azure path (OIDC login,
 Microsoft's plugin, the real profile) has not signed anything yet; the first tag is its first
 real test, hence the RC in Step 7.
 
