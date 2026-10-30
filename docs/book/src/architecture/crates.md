@@ -43,7 +43,7 @@ place; no feature is registered in it yet.
 | `nugget-ingest` | M1 | in use | The ingest runtime: `sources.toml`, a supervisor per source, the pipeline (extract, PII scan, triage, chunk, embed, store), cursor-after-persistence, power policy, freshness metrics, re-embedding |
 | `nugget-connector-files` | M1 | in use | `files` and `obsidian`: scan, ignore files, native watcher with debounce, reconcile |
 | `nugget-oauth` | M1 | in use | OAuth 2.0 authorization code with PKCE and loopback redirect, token storage and refresh |
-| `nugget-connector-google` | M1 | in use | `gmail` (history deltas) and `gcal` (sync tokens) |
+| `nugget-connector-google` | M1 | in use | `gmail` (history deltas), `gcal` (sync tokens) and `gdrive` (Drive changes feed) |
 | `nugget-connector-imap` | M1 | in use | `imap`: TLS only, UIDVALIDITY, CONDSTORE and QRESYNC, IDLE |
 | `nugget-connector-caldav` | M1 | in use | `caldav`: discovery, RFC 6578 sync, ETag fallback |
 | `nugget-retrieve` | M1 | in use | Query embedding, over-fetched hybrid search, per-item grouping, MMR, token-budgeted packing with `[n]` citations, the sensitive filter, an eval harness |

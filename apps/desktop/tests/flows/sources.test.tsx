@@ -89,6 +89,44 @@ describe("sources flow", () => {
     await findByRole("heading", { name: "Projects", level: 2 });
   });
 
+  it("adds Google Drive with its opt-ins, saves the secret and starts sign-in", async () => {
+    const added: SourceInfo = { id: "gdrive-1", kind: "gdrive", name: "Google Drive", enabled: true, state: "needs_auth", items: 0, chunks: 0, last_sync: null };
+    const url = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x";
+    const d = daemon({ sources_add: added, sources_secret_set: null, sources_auth_begin: { url }, open_url: "opened" });
+    await renderApp({ page: "sources" });
+
+    await click(getByRole("button", { name: t("sources.add") }));
+    await click(within(getByRole("dialog")).getByRole("radio", { name: /Google Drive/ }));
+    await click(within(getByRole("dialog")).getByRole("button", { name: t("common.next") }));
+    const dialog = getByRole("dialog", { name: t("addSource.addTitle.gdrive") });
+    await type(within(dialog).getByRole("textbox", { name: t("addSource.google.clientId") }), "1234-abc.apps.googleusercontent.com");
+    const secret = dialog.querySelector<HTMLInputElement>('input[type="password"]')!;
+    await type(secret, "s3cret");
+    await click(within(dialog).getByRole("checkbox", { name: new RegExp(t("addSource.gdrive.sharedWithMe")) }));
+    await click(within(dialog).getByRole("button", { name: t("addSource.google.submit") }));
+
+    expect(d.callsTo("sources_add")).toEqual([
+      {
+        request: {
+          id: null,
+          kind: "gdrive",
+          name: "Google Drive",
+          settings: { client_id: "1234-abc.apps.googleusercontent.com", include_shared_with_me: true, include_shared_drives: false },
+        },
+      },
+    ]);
+    expect(d.callsTo("sources_secret_set")).toEqual([{ request: { id: "gdrive-1", secret: "s3cret" } }]);
+    expect(d.callsTo("sources_auth_begin")).toEqual([{ request: { id: "gdrive-1" } }]);
+    expect(d.callsTo("open_url")).toEqual([{ url }]);
+  });
+
+  it("explains a Google rate limit on the row", async () => {
+    daemon({ sources_list: [{ ...fixtureSources[1]!, state: "error", last_error: "rate limited (retry after 3600000 ms)" }, fixtureSources[0]!] });
+    await renderApp({ page: "sources" });
+    expect(row("Work mail").textContent).toContain(t("sources.googleQuotaHint"));
+    expect(row("Documents").textContent).not.toContain(t("sources.googleQuotaHint"));
+  });
+
   it("syncs one source by id, and all sources with a null id", async () => {
     const d = daemon({ sources_sync: null });
     await renderApp({ page: "sources" });

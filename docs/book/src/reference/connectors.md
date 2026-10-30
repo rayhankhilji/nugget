@@ -14,6 +14,7 @@ uses to build its forms.
 | `obsidian` | Obsidian vault | none | none |
 | `gmail` | Gmail | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
 | `gcal` | Google Calendar | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
+| `gdrive` | Google Drive | OAuth | `oauth:<source id>` (tokens), `oauth_client_secret:<source id>` |
 | `imap` | IMAP mail | password | `password:<source id>` |
 | `caldav` | CalDAV calendar | password | `password:<source id>` |
 
@@ -57,7 +58,7 @@ Item URLs are `obsidian://open?vault=…&file=…` links; the `file://` URL is i
 
 ## `gmail`
 
-Scope `gmail.readonly`. See [Gmail and Google Calendar](../guide/sources-google.md) for creating the
+Scope `gmail.readonly`. See [Gmail, Google Calendar and Google Drive](../guide/sources-google.md) for creating the
 OAuth client.
 
 <!-- check-refs: connector.gmail -->
@@ -89,6 +90,31 @@ Scope `calendar.readonly`.
 
 Sync: `events.list` with recurring events expanded, then `syncToken` deltas every 5 minutes. A
 `410 Gone` triggers a full resync. Cancelled events become deletes.
+
+## `gdrive`
+
+Scope `drive.readonly` (the narrowest scope that can read and export file content). See
+[Google Drive](../guide/sources-google.md#google-drive) for what is indexed.
+
+<!-- check-refs: connector.gdrive -->
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `client_id` | string | required | As for `gmail` |
+| `client_secret` | string | none | As for `gmail`: set it with `sources.secret.set` |
+| `account_hint` | string | none | As for `gmail` |
+| `include_shared_with_me` | bool | `false` | Also index files other people shared with you (outside shared drives) |
+| `include_shared_drives` | bool | `false` | Also index files in shared drives you are a member of |
+| `max_file_mb` | integer, 1 to 200 | `25` | Largest file downloaded or exported. Bigger files are indexed as a stub with their name and a "Not indexed" reason |
+
+Sync: `changes.getStartPageToken`, then a paged `files.list` of everything in scope (checkpointed, so
+a restart resumes it), then `changes.list` deltas every 5 minutes. A token Google no longer accepts
+(`404`, `410`) triggers a reconciling full listing. Trashed, deleted and no-longer-shared files become
+deletes; renames and moves are updates. Google Docs are exported as Markdown (plain text fallback),
+Sheets as CSV per sheet through the Sheets API (first sheet only through Drive's export when that API
+is off), Slides as text per slide with speaker notes through the Slides API (plain export fallback).
+PDF, `docx`, `xlsx`, `pptx` and text formats go through the normal extraction; anything else, and files
+over `max_file_mb`, become stubs with `metadata.skipped` set to the reason. Item keys are Drive file
+ids, item URLs are the file's `webViewLink`, and every request is metered as `sync:gdrive`.
 
 ## `imap`
 

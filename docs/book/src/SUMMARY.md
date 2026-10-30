@@ -11,7 +11,7 @@
 - [Adding sources](guide/sources.md)
   - [Folders and files](guide/sources-files.md)
   - [Obsidian](guide/sources-obsidian.md)
-  - [Gmail and Google Calendar](guide/sources-google.md)
+  - [Gmail, Google Calendar and Google Drive](guide/sources-google.md)
   - [IMAP and CalDAV](guide/sources-imap-caldav.md)
   - [Microsoft 365](guide/sources-microsoft.md)
   - [Slack, Notion, GitHub and Linear](guide/sources-saas.md)

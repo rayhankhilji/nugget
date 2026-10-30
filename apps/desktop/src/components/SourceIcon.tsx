@@ -43,6 +43,13 @@ export function SourceIcon({ kind, size = 20 }: { kind: string; size?: number })
           <path d="M3.5 9.5h17M8 3v4M16 3v4M8 13.5h2M14 13.5h2M8 17h2" />
         </svg>
       );
+    case "gdrive":
+      return (
+        <svg {...common}>
+          <path d="M8.5 3.5h7l6 10.5-3.5 6h-12L2.5 14z" />
+          <path d="M8.5 3.5 15 14.5H2.5M15.5 3.5 9 14.5l-3 5.5" />
+        </svg>
+      );
     default:
       return (
         <svg {...common}>

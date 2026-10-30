@@ -15,6 +15,8 @@ import { t as tGlobal, Trans, useT, type MessageKey, type TagRenderer } from "..
 import { baseName, sourceKindLabel, splitList } from "../format";
 import { KindPicker } from "../sources/KindPicker";
 import { NEW_KIND_TITLE, NewKindForm, isNewKind } from "../sources/forms";
+import { Check } from "../sources/form";
+import { EMPTY_GOOGLE, GDRIVE_SCOPE, GOOGLE_API, googleSettings, type GoogleKind } from "../sources/kinds";
 import { Dialog } from "./Dialog";
 import { Spinner } from "./ui";
 
@@ -23,6 +25,7 @@ const KIND_BLURB: Record<SourceKind, MessageKey> = {
   obsidian: "addSource.blurb.obsidian",
   gmail: "addSource.blurb.gmail",
   gcal: "addSource.blurb.gcal",
+  gdrive: "addSource.blurb.gdrive",
   imap: "addSource.blurb.imap",
   caldav: "addSource.blurb.caldav",
 };
@@ -66,6 +69,7 @@ const ADD_TITLE: Record<SourceKind, MessageKey> = {
   obsidian: "addSource.addTitle.obsidian",
   gmail: "addSource.addTitle.gmail",
   gcal: "addSource.addTitle.gcal",
+  gdrive: "addSource.addTitle.gdrive",
   imap: "addSource.addTitle.imap",
   caldav: "addSource.addTitle.caldav",
 };
@@ -95,7 +99,8 @@ function KindForm(props: FormProps) {
       return <VaultForm {...props} />;
     case "gmail":
     case "gcal":
-      return <GoogleForm {...props} />;
+    case "gdrive":
+      return <GoogleForm {...props} kind={props.kind} />;
     case "imap":
       return <ImapForm {...props} />;
     case "caldav":
@@ -394,16 +399,17 @@ function VaultForm({ kind, onBack, onClose, onAdded }: FormProps) {
   );
 }
 
-// -- Google (Gmail, Calendar) --
+// -- Google (Gmail, Calendar, Drive) --
 
 type AuthPhase = "form" | "waiting" | "done";
 
-function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
+function GoogleForm({ kind, onBack, onClose, onAdded }: Omit<FormProps, "kind"> & { kind: GoogleKind }) {
   const t = useT();
   const label = sourceKindLabel(kind);
-  // i18n-ignore: Google's product names for the APIs, as shown in the Cloud console.
-  const apiName = kind === "gmail" ? "Gmail API" : "Google Calendar API";
+  const apiName = GOOGLE_API[kind];
   const [clientId, setClientId] = useState("");
+  const [includeSharedWithMe, setIncludeSharedWithMe] = useState(EMPTY_GOOGLE.includeSharedWithMe);
+  const [includeSharedDrives, setIncludeSharedDrives] = useState(EMPTY_GOOGLE.includeSharedDrives);
   const [name, setName] = useState("");
   const [fieldErrors, setFieldErrors] = useState<{ clientId?: string; secret?: string }>({});
   const [secretSaved, setSecretSaved] = useState(false);
@@ -441,7 +447,7 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
     setBusy(true);
     setError(null);
     try {
-      const s = await save(name.trim() || label, { client_id: id });
+      const s = await save(name.trim() || label, googleSettings(kind, { clientId: id, includeSharedWithMe, includeSharedDrives }));
       setSource(s);
       if (secret) {
         await api.sourcesSecretSet({ id: s.id, secret });
@@ -517,6 +523,12 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
           <li>{t("addSource.google.step1")}</li>
           <li>
             <Trans k="addSource.google.step2" args={{ api: apiName }} tags={BOLD} />
+            {kind === "gdrive" && (
+              <>
+                {" "}
+                <Trans k="addSource.gdrive.step2Extra" tags={BOLD} />
+              </>
+            )}
           </li>
           <li>
             <Trans k="addSource.google.step3" tags={BOLD} />
@@ -527,6 +539,11 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
           <li>{t("addSource.google.step5")}</li>
         </ol>
         <p className="small muted">{t("addSource.google.privacy")}</p>
+        {kind === "gdrive" && (
+          <p className="small muted">
+            <Trans k="addSource.gdrive.readOnly" args={{ scope: GDRIVE_SCOPE }} tags={BOLD} />
+          </p>
+        )}
         <button type="button" className="btn btn-small" onClick={() => void api.openUrl(GOOGLE_CREDENTIALS_URL).catch(() => {})}>
           {t("addSource.google.openConsole")}
         </button>
@@ -555,6 +572,12 @@ function GoogleForm({ kind, onBack, onClose, onAdded }: FormProps) {
       >
         {(a) => <input {...a} ref={secretRef} type="password" autoComplete="off" spellCheck={false} />}
       </Field>
+      {kind === "gdrive" && (
+        <div className="field">
+          <Check checked={includeSharedWithMe} onChange={setIncludeSharedWithMe} label={t("addSource.gdrive.sharedWithMe")} hint={t("addSource.gdrive.sharedWithMeHint")} />
+          <Check checked={includeSharedDrives} onChange={setIncludeSharedDrives} label={t("addSource.gdrive.sharedDrives")} hint={t("addSource.gdrive.sharedDrivesHint")} />
+        </div>
+      )}
       <NameField value={name} onChange={setName} placeholder={label} />
       <FormError error={error} />
       <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.google.submit")} />
