@@ -1729,7 +1729,7 @@ and uploads the JSON reports; the reports quoted here are in
 
 | |
 |---|---|
-| Chat model | `qwen3-4b-q4km`: Qwen3-4B, **Q4_K_M** GGUF (2.5 GB), the manifest's smallest chat model; thinking off (see below) |
+| Chat model | `qwen3-4b-q4km`: Qwen3-4B, **Q4_K_M** GGUF (2.5 GB), the default chat model on an 8–16 GB machine and the bench's default (`--local-chat-model`); thinking off (see below) |
 | Agent model (one row) | `qwen3-8b-q4km`: Qwen3-8B, Q4_K_M (5.0 GB), the manifest's agentic-tier model |
 | Runtime | `llama-server-linux-x86_64-cpu` b11940 from the manifest; CPU only; one slot, 8,192-token context; `llama-server`'s default threads (2 on these runners) unless a row says otherwise |
 | Hardware | GitHub-hosted `ubuntu-latest`: **4 vCPUs** (2 cores, SMT), **15.6 GiB RAM**, no GPU. The CPU differs per job (AMD EPYC 7763, 9V74 or 9V45; Intel Xeon 8370C for the 8B job); each report's `local.hardware` and `hardware-*.txt` say which |

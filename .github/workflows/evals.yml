@@ -16,7 +16,7 @@ on:
         type: choice
         options: [smoke, quick, standard, full]
       chat_model:
-        description: "Manifest id of the chat model (empty: the smallest)"
+        description: "Manifest id of the chat model (empty: qwen3-4b-q4km, the app's default on 8–16 GB)"
         default: ""
         type: string
   schedule:
