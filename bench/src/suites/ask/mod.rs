@@ -2,10 +2,10 @@
 //! answer prompt (EE3). See `bench/README.md` for the methodology.
 //!
 //! **Path under test.** Exactly what the daemon runs, from product code: the question is packed
-//! into a context by `nugget_retrieve::Retriever::build_context_with` (sensitive items kept, as
-//! for an on-device model), the request is built by [`nuggetd::ask::ask_request`] (no history),
-//! the stream goes through [`nuggetd::ask::AnswerFilter`] delta by delta, and its
-//! [`AnswerCheck`] is what the client would get on `chat.done`. Nothing of that is
+//! into a context by `nugget_retrieve::Retriever::pack_context_with` (sensitive items kept, as
+//! for an on-device model), the request is built by [`nuggetd::ask::ask_request_packed`] (no
+//! history), the stream goes through [`nuggetd::ask::AnswerFilter::packed`] delta by delta, and
+//! its [`AnswerCheck`] is what the client would get on `chat.done`. Nothing of that is
 //! re-implemented here; the bench only adds the corpus, the model and the scoring.
 //!
 //! **Corpus.** The retrieval eval set (`EvalSet::builtin()`, the labelled set behind
@@ -22,9 +22,30 @@
 //! neither always gets a warm cache. Default `both` with a real model, `grounded` with the
 //! fake one. Real models only with `--local-models` (the manifest's chat model through
 //! `nugget-runtime`, thinking off unless `--local-thinking model`); without it a deterministic
-//! in-process fake ([`fake`]). Requests use a fixed temperature (`--ask-temperature`, default
-//! 0); `ChatRequest` has no seed field, so none is sent. A request that fails or exceeds
-//! `--ask-timeout-s` counts in `failures` and scores as a wrong, non-abstaining empty answer.
+//! in-process fake ([`fake`]) that follows the prompt it gets: `[n]` markers and
+//! `NOT_FOUND_REPLY` under the grounded prompt, `[n, m]` markers and a prose refusal under the
+//! plain one, so a detector bias towards the product's own reply shows in CI. Requests use a
+//! fixed temperature (`--ask-temperature`, default 0); `ChatRequest` has no seed field, so
+//! none is sent. The server's `ChatEvent::Stats` (prompt-cache hits) and stop reason are
+//! recorded per answer.
+//!
+//! **Failures** (see [`metrics`]): every quality rate is over successful requests; failed and
+//! timed-out ones (`--ask-timeout-s`, default 300) are reported as `failures`, `failure_rate`
+//! and `timeouts`, never as wrong answers and never as a crash. Latency percentiles include
+//! timed-out requests as censored samples at the timeout; time to first token is the model's
+//! (retrieval excluded) and skips answers that forwarded no text.
+//!
+//! **Long runs.** Every answer is scored and written to the dump (`--ask-dump`, flushed) as
+//! soon as it arrives. The judge runs after all answers: with a different judge model the
+//! answer server is stopped first, so a CPU runner never holds both models (on a 16 GB runner a
+//! 4B answerer next to an 8B judge slowed judging from ~35 s to ~75 s a request before the job
+//! was killed). The judge is probed before use (one that cannot start or answer is dropped and
+//! recorded in `judge.unavailable`), and each verdict is appended to `<dump>.judge.jsonl` as
+//! soon as it arrives. The wall-clock budget (`--ask-budget-s`, default 5 hours) covers both
+//! phases: no new question, then no new verdict, once it is spent, and the report still covers
+//! what was done (`questions_answered`, `judge_coverage`). `--ask-rescore FILE` recomputes the
+//! whole report from a dump and its sidecar without a model, with the current scoring rules and
+//! gold, so a killed or pre-fix run can still be reported.
 //!
 //! **Questions** (`bench/fixtures/ask/questions.json`, [`gold`]): kinds `single`, `multi_hop`,
 //! `latest`, `unanswerable`, `injection`, each with `must` value groups, `must_not` (stale)
@@ -33,61 +54,70 @@
 //!
 //! **Rule-based scores** ([`score`], the bench's own text rules, independent of the product's
 //! post-check): an answerable question is correct when every `must` group has a value in the
-//! answer and the answer does not abstain; an unanswerable one when the answer abstains (says
-//! the items don't hold it and states no cited fact). `must_not` values do **not** decide
-//! correctness: a right "latest" answer often mentions the stale value as context ("568, down
-//! from 612"), so they are reported as `stale_value_rate` and the nuance is left to the judge.
-//! Injection questions report `injection_compliance_rate` (the canary in a sentence with no
-//! warning or refusal cue: an answer warning "the invite says to call X; this looks like a
-//! scam" quotes it without obeying), `injection_canary_rate` (the canary anywhere) and
-//! `injection_correct_rate` (correct and not complied); they are not in a separate
-//! `correct_rate_injection`. A multi_hop question's `must` values cannot check a comparison
-//! verdict ("which cost more"); the judge is the second opinion there. Citations are parsed in every common format so the plain arm is
-//! not penalised for format alone; `citation_format_rate` reports how many markers in the raw
-//! model output were already canonical `[n]`. `citation_precision`: over cited content
-//! sentences of answerable questions, the share of (sentence, cited n) pairs whose passage
-//! belongs to a gold support doc or contains every number and mid-sentence capitalised word the
-//! sentence states. `citation_recall`: of the gold support docs in the context, the share the
-//! answer cites. `uncited_claim_rate`: content sentences without a marker over content
-//! sentences. `postcheck.*` scores the product's `AnswerCheck` on both arms (flagged claims over
-//! claims; `not_found` against the unanswerable gold).
+//! answer the user sees and the answer does not abstain; an unanswerable one when it abstains.
+//! Abstention is decided per sentence, never by citation markers: some sentence says the items
+//! don't hold the answer, and no sentence states a gold value or a number or name that is not
+//! in the question. `abstention_rate` is the unanswerable questions' correctness (there is no
+//! separate `correct_rate_unanswerable`). `must_not` values do **not** decide correctness: a
+//! right "latest" answer often mentions the stale value as context ("568, down from 612"), so
+//! they are reported as `stale_value_rate` and the nuance is left to the judge. A multi_hop
+//! question's `must` values cannot check a comparison verdict ("which cost more"); the judge is
+//! the second opinion there. Injection questions report `injection_compliance_rate` (the canary
+//! in a sentence with no warning cue and no quoting frame: "the invite says to call X; this
+//! looks like a scam" quotes it without obeying), `injection_canary_rate` (the canary anywhere)
+//! and `injection_correct_rate` (correct and not complied).
+//!
+//! Citations are scored on the *raw* model text for both arms (the grounded filter deletes
+//! markers naming no passage, which would flatter it), in every common format so the plain arm
+//! is not penalised for format alone: `citation_format_rate` (markers already canonical `[n]`),
+//! `invalid_citations` (passage numbers naming no passage), `citation_precision` (over cited
+//! content sentences of answerable questions, the share of (sentence, cited n) pairs whose
+//! passage belongs to a gold support doc or contains every number and mid-sentence capitalised
+//! word the sentence states), `citation_recall` (of the gold support docs in the context, the
+//! share the answer cites), `uncited_claim_rate`. `postcheck.*` scores the product's
+//! `AnswerCheck` on both arms.
 //!
 //! **Judge** (`--ask-judge model`, default with `--local-models`): a pointwise correctness judge
 //! ([`judge`]), both orders, on the answering model or, with `--ask-judge-model`, a second
-//! local server (the same server when the ids match).
+//! local server (the same server when the ids match). `judge_correct_rate` is over every
+//! request, `judge_correct_rate_answered` over answers with both verdicts.
 
+pub mod dump;
 pub mod fake;
 pub mod gold;
 pub mod judge;
+pub mod metrics;
 pub mod score;
+pub mod stream;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use futures::StreamExt;
 use nugget_core::capability::{Capabilities, Tier};
-use nugget_core::ipc::{AnswerCheck, ContextResponse, RuntimeRole};
-use nugget_infer::{ChatEvent, Provider, Router};
+use nugget_core::ipc::{ContextResponse, RuntimeRole};
+use nugget_infer::{Provider, Router};
 use nugget_retrieve::eval::{self, EvalSet, HashEmbedder};
-use nugget_retrieve::{ContextOptions, RetrieveConfig, Retriever};
+use nugget_retrieve::{ContextOptions, PackedPassage, RetrieveConfig, Retriever};
 use nugget_store::Store;
-use nuggetd::ask::{AnswerFilter, AskOptions as ProductAskOptions, AskPrompt, ask_request};
+use nuggetd::ask::{AnswerFilter, AskOptions as ProductAskOptions, AskPrompt, ask_request_packed};
 use serde_json::json;
 
 use crate::local::{LocalModels, Thinking};
-use crate::report::{Direction, Metric};
+use crate::report::Metric;
 use crate::runner::{BenchError, Benchmark, RunContext};
-use crate::stats::summarize;
-use crate::suites::draft::{Temperature, failure_kind};
-use gold::{Gold, Kind, Question};
+use crate::suites::draft::Temperature;
+use gold::{Gold, Question};
 use judge::{AskJudgeMode, JudgeOutcome, Judgement, ModelJudge};
-use score::AnswerScore;
+use metrics::Row;
+use stream::AnswerRun;
 
 /// Default `--ask-budget-tokens` (the desktop's `CHAT_ASK_BUDGET`).
 pub const DEFAULT_BUDGET_TOKENS: u32 = 2000;
 /// Default `--ask-timeout-s`.
 pub const DEFAULT_TIMEOUT_S: u64 = 300;
+/// Default `--ask-budget-s` (5 hours).
+pub const DEFAULT_WALL_BUDGET_S: u64 = 18_000;
 /// Default `--ask-judge-timeout-s` with `--ask-judge-model`.
 pub const DEFAULT_JUDGE_TIMEOUT_S: u64 = 240;
 /// Default temperature of answer requests to a real model.
@@ -100,13 +130,11 @@ pub const REFERENCE_TIME: &str = "2026-10-30T12:00:00Z";
 pub const EMBEDDING_DIM: usize = 256;
 /// Output cap given to a thinking model (`--local-thinking model`), whose reasoning counts.
 pub const MAX_TOKENS_THINKING: u32 = 2048;
-/// Target of the grounded arm's abstention rate on unanswerable questions.
-pub const ABSTENTION_TARGET: f64 = 0.8;
 pub const SEED_NOTE: &str = "not sent: ChatRequest has no seed field, so the provider samples \
      with its own seed (fixed temperature instead)";
-pub const PATH: &str = "product: Retriever::build_context_with (exclude_sensitive false) -> \
-     nuggetd::ask::ask_request (no history) -> provider stream -> nuggetd::ask::AnswerFilter \
-     (push/finish) -> AnswerFilter::check";
+pub const PATH: &str = "product: Retriever::pack_context_with (exclude_sensitive false) -> \
+     nuggetd::ask::ask_request_packed (no history) -> provider stream -> \
+     nuggetd::ask::AnswerFilter::packed (push/finish) -> AnswerFilter::check";
 
 /// `--ask-prompt`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
@@ -195,6 +223,15 @@ pub struct AskOptions {
     /// `ask`: per-request timeout of an answer, in seconds (default 300).
     #[arg(long, value_name = "SECS")]
     pub ask_timeout_s: Option<u64>,
+    /// `ask`: wall-clock budget of the whole run, in seconds (default 18000, 5 hours): no new
+    /// question starts once it is spent, and the report covers the questions answered.
+    #[arg(long, value_name = "SECS")]
+    pub ask_budget_s: Option<u64>,
+    /// `ask`: no model: recompute every metric from this dump (`--ask-dump` output) and its
+    /// judge sidecar (`<FILE>.judge.jsonl`, when present), e.g. after a run was cut short or a
+    /// scoring fix.
+    #[arg(long, value_name = "FILE")]
+    pub ask_rescore: Option<std::path::PathBuf>,
 }
 
 /// Where the judge's verdicts come from.
@@ -242,7 +279,7 @@ struct Answerer {
     model_id: Option<String>,
     thinking: bool,
     /// The servers behind `provider` (`--local-models`); dropping it stops them.
-    local: Option<Box<LocalModels>>,
+    _local: Option<Box<LocalModels>>,
 }
 
 impl Answerer {
@@ -257,7 +294,7 @@ impl Answerer {
                     .into(),
                 model_id: None,
                 thinking: false,
-                local: None,
+                _local: None,
             });
         }
         let models = LocalModels::start(&local, &[RuntimeRole::Chat])?;
@@ -269,26 +306,9 @@ impl Answerer {
             desc: models.chat_label(),
             model_id: models.chat.as_ref().map(|s| s.entry.id.clone()),
             thinking: models.thinking == Thinking::Model,
-            local: Some(Box::new(models)),
+            _local: Some(Box::new(models)),
         })
     }
-}
-
-/// One streamed answer.
-#[derive(Debug, Clone, Default)]
-pub struct AnswerRun {
-    /// The model's own text.
-    pub raw: String,
-    /// What the filter forwarded (what the user sees).
-    pub text: String,
-    pub check: Option<AnswerCheck>,
-    /// First non-empty text the filter forwarded, from the request.
-    pub ttft: Option<Duration>,
-    pub total: Duration,
-    pub input_tokens: Option<u32>,
-    pub output_tokens: Option<u32>,
-    /// `(kind, message)`: `timeout`, `context_overflow` or `error`.
-    pub failure: Option<(&'static str, String)>,
 }
 
 /// Settings of every answer request.
@@ -305,14 +325,16 @@ async fn answer(
     provider: &dyn Provider,
     question: &str,
     ctx: &ContextResponse,
+    passages: &[PackedPassage],
     arm: Arm,
     s: RequestSettings,
     today: time::Date,
 ) -> AnswerRun {
-    let mut req = ask_request(
+    let mut req = ask_request_packed(
         &[],
         question,
         ctx,
+        passages,
         &ProductAskOptions {
             prompt: arm.prompt,
             today: Some(today),
@@ -325,72 +347,8 @@ async fn answer(
         req.max_tokens = Some(req.max_tokens.map_or(m, |x| x.max(m)));
     }
     let started = Instant::now();
-    let mut filter = AnswerFilter::new(ctx, arm.normalise);
-    let mut run = AnswerRun::default();
-    let result = {
-        let (raw, text, ttft) = (&mut run.raw, &mut run.text, &mut run.ttft);
-        let (input, output) = (&mut run.input_tokens, &mut run.output_tokens);
-        let filter = &mut filter;
-        let work = async move {
-            let mut stream = provider.chat(req).await?;
-            while let Some(ev) = stream.next().await {
-                match ev? {
-                    ChatEvent::TextDelta(d) => {
-                        raw.push_str(&d);
-                        let out = filter.push(&d);
-                        if ttft.is_none() && !out.trim().is_empty() {
-                            *ttft = Some(started.elapsed());
-                        }
-                        text.push_str(&out);
-                    }
-                    ChatEvent::Done {
-                        input_tokens,
-                        output_tokens,
-                        ..
-                    } => {
-                        *input = input_tokens;
-                        *output = output_tokens;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            Ok::<_, nugget_core::Error>(())
-        };
-        tokio::time::timeout(s.timeout, work).await
-    };
-    match result {
-        Err(_) => {
-            run.failure = Some((
-                "timeout",
-                format!("no complete answer within {} s", s.timeout.as_secs()),
-            ));
-        }
-        Ok(Err(e)) => {
-            let m = e.to_string();
-            run.failure = Some((failure_kind(&m), m));
-        }
-        Ok(Ok(())) => {
-            let tail = filter.finish();
-            if run.ttft.is_none() && !tail.trim().is_empty() {
-                run.ttft = Some(started.elapsed());
-            }
-            run.text.push_str(&tail);
-            run.check = Some(filter.check());
-        }
-    }
-    run.total = started.elapsed();
-    run
-}
-
-/// One (question, arm).
-#[derive(Debug, Clone)]
-pub struct Row {
-    pub question: usize,
-    pub arm: Arm,
-    pub run: AnswerRun,
-    pub score: AnswerScore,
-    pub judge: Option<Judgement>,
+    let mut filter = AnswerFilter::packed(ctx, passages, Some(today), arm.normalise);
+    stream::stream_answer(provider, req, &mut filter, s.timeout, started).await
 }
 
 /// Build the store and retriever over `set`.
@@ -433,7 +391,10 @@ impl Benchmark for AskBench {
     }
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
         let gold = Gold::builtin().map_err(BenchError::Failed)?;
-        run_with(ctx, &gold)
+        match ctx.config.ask.ask_rescore.clone() {
+            Some(path) => rescore(ctx, &gold, &path),
+            None => run_with(ctx, &gold),
+        }
     }
 }
 
@@ -449,6 +410,18 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
     gold.validate(&base).map_err(BenchError::Failed)?;
     let corpus = gold.corpus(&base);
     let model = Answerer::build(ctx)?;
+    // Stops the local servers, if any, at the end (outside any async context).
+    run_model(ctx, gold, corpus, model)
+}
+
+/// Run the suite on `gold` and `corpus` with `model`.
+fn run_model(
+    ctx: &mut RunContext,
+    gold: &Gold,
+    corpus: EvalSet,
+    model: Answerer,
+) -> Result<Vec<Metric>, BenchError> {
+    let opts = ctx.config.ask.clone();
     let plan = plan_judge(
         opts.ask_judge,
         opts.ask_judge_model.as_deref(),
@@ -527,27 +500,165 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
          with no cited fact; see bench/src/suites/ask/score.rs",
     );
 
+    run_answers(
+        ctx,
+        gold,
+        model,
+        Plan {
+            judge: plan,
+            arms,
+            picked,
+            corpus,
+            budget,
+            timeout,
+            settings,
+            today,
+        },
+    )
+}
+
+/// What [`run_answers`] runs.
+struct Plan {
+    judge: JudgePlan,
+    arms: Vec<Arm>,
+    /// Question indices, in run order.
+    picked: Vec<usize>,
+    corpus: EvalSet,
+    budget: u32,
+    timeout: Duration,
+    settings: RequestSettings,
+    today: time::Date,
+}
+
+/// Start the judge after the answers and check it answers. With a different judge model the
+/// answer server is stopped first (`model`'s servers), so the two never share the machine's
+/// memory. A judge that cannot start or answer is dropped and recorded in `judge.unavailable`;
+/// the answer metrics are reported either way.
+fn start_judge(
+    ctx: &mut RunContext,
+    rt: &tokio::runtime::Runtime,
+    plan: &JudgePlan,
+    model: &mut Answerer,
+    timeout: Duration,
+) -> (Option<ModelJudge>, Option<LocalModels>) {
+    let opts = ctx.config.ask.clone();
+    let local_opts = ctx.config.local.clone();
+    let max_tokens = |thinking: bool| {
+        if thinking {
+            judge::JUDGE_MAX_TOKENS_THINKING
+        } else {
+            judge::JUDGE_MAX_TOKENS
+        }
+    };
+    let (mj, local) = match plan {
+        JudgePlan::None => return (None, None),
+        JudgePlan::SameModel => {
+            ctx.param("judge.model", model.desc.clone());
+            ctx.param("judge.same_model_as_answers", true);
+            let mj = ModelJudge {
+                provider: model.provider.clone(),
+                timeout: opts
+                    .ask_judge_timeout_s
+                    .map_or(timeout, |s| Duration::from_secs(s.max(1))),
+                max_tokens: max_tokens(model.thinking),
+            };
+            (mj, None)
+        }
+        JudgePlan::LocalModel(id) => {
+            // Free the answer server's memory before the judge loads.
+            drop(model._local.take());
+            let started = LocalModels::start_chat_server(&local_opts, id, "judge")
+                .and_then(|m| m.chat().map(|p| (p, m)));
+            let (provider, models) = match started {
+                Ok(x) => x,
+                Err(e) => {
+                    eprintln!("ask: the judge server did not start ({e}); reporting without it");
+                    ctx.param("judge.unavailable", format!("server did not start: {e}"));
+                    return (None, None);
+                }
+            };
+            ctx.param("judge.model", models.chat_label());
+            ctx.param("judge.same_model_as_answers", false);
+            models.record_chat_as(ctx, "judge.local");
+            let mj = ModelJudge {
+                provider,
+                timeout: Duration::from_secs(
+                    opts.ask_judge_timeout_s
+                        .unwrap_or(DEFAULT_JUDGE_TIMEOUT_S)
+                        .max(1),
+                ),
+                max_tokens: max_tokens(models.thinking == Thinking::Model),
+            };
+            (mj, Some(models))
+        }
+    };
+    if let Err(e) = rt.block_on(mj.probe()) {
+        eprintln!("ask: the judge does not answer ({e}); reporting without it");
+        ctx.param("judge.unavailable", e);
+        return (None, None);
+    }
+    (Some(mj), local)
+}
+
+/// Answer the planned questions with `model` (each row dumped as soon as it is scored), then
+/// judge them (each verdict appended to the sidecar as soon as it arrives), both within the
+/// wall-clock budget, then turn the rows into metrics.
+fn run_answers(
+    ctx: &mut RunContext,
+    gold: &Gold,
+    mut model: Answerer,
+    plan: Plan,
+) -> Result<Vec<Metric>, BenchError> {
+    let opts = ctx.config.ask.clone();
+    let Plan {
+        judge: judge_plan,
+        arms,
+        picked,
+        corpus,
+        budget,
+        timeout,
+        settings,
+        today,
+    } = plan;
+    let wall = Duration::from_secs(opts.ask_budget_s.unwrap_or(DEFAULT_WALL_BUDGET_S).max(1));
+    ctx.param("wall_budget_s", wall.as_secs());
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()?;
-    let (contexts, retrieval_s, mut rows) = rt.block_on(async {
+    let mut dump = opts
+        .ask_dump
+        .as_deref()
+        .map(dump::Dump::create)
+        .transpose()?;
+    let run_started = Instant::now();
+    let (contexts, retrieval_s, mut rows, stopped) = rt.block_on(async {
         let retriever = retriever(&corpus).await?;
         let mut contexts = Vec::new();
         let mut retrieval_s = Vec::new();
-        let mut rows = Vec::new();
+        let mut rows: Vec<Row> = Vec::new();
+        let mut stopped = false;
         for (pos, &qi) in picked.iter().enumerate() {
+            if run_started.elapsed() >= wall {
+                eprintln!(
+                    "ask: wall-clock budget of {} s reached after {pos} questions; reporting",
+                    wall.as_secs()
+                );
+                stopped = true;
+                break;
+            }
             let q = &gold.questions[qi];
             let started = Instant::now();
-            let c = retriever
-                .build_context_with(
+            let packed = retriever
+                .pack_context_with(
                     &q.question,
-                    budget,
+                    budget as usize,
                     ContextOptions {
                         exclude_sensitive: false,
                     },
                 )
                 .await?;
+            let (c, passages) = (packed.response, packed.passages);
             retrieval_s.push(started.elapsed().as_secs_f64());
             let mut order = arms.clone();
             if pos % 2 == 1 {
@@ -558,6 +669,7 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
                     model.provider.as_ref(),
                     &q.question,
                     &c,
+                    &passages,
                     arm,
                     settings,
                     today,
@@ -569,35 +681,43 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
                             "ask: {} {} request failed ({kind}): {message}",
                             q.id, arm.name
                         );
-                        score::score_failed(q, &c)
+                        None
                     }
-                    None => score::score(q, &c, &run.text, &run.raw),
+                    None => Some(score::score(q, &c, &run.text, &run.raw)),
                 };
-                if model.real && run.failure.is_none() {
+                if model.real
+                    && let Some(s) = &score
+                {
                     eprintln!(
                         "ask: {} ({}/{}) {}: {}, done {:.1} s",
                         q.id,
                         pos + 1,
                         picked.len(),
                         arm.name,
-                        if score.correct { "correct" } else { "wrong" },
+                        if s.correct { "correct" } else { "wrong" },
                         run.total.as_secs_f64()
                     );
                 }
-                rows.push(Row {
+                let row = Row {
                     question: qi,
                     arm,
                     run,
                     score,
                     judge: None,
-                });
+                };
+                if let Some(d) = dump.as_mut() {
+                    d.write(q, &c, &row, timeout.as_secs())?;
+                }
+                rows.push(row);
             }
             contexts.push(c);
         }
-        Ok::<_, BenchError>((contexts, retrieval_s, rows))
+        Ok::<_, BenchError>((contexts, retrieval_s, rows, stopped))
     })?;
+    ctx.param("questions_answered", contexts.len());
+    ctx.param("stopped_by_wall_budget", stopped);
 
-    let failed = rows.iter().filter(|r| r.run.failure.is_some()).count();
+    let failed = rows.iter().filter(|r| !r.run.ok()).count();
     if model.real && !rows.is_empty() && failed == rows.len() {
         let first = rows[0]
             .run
@@ -610,46 +730,15 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
         )));
     }
 
-    // The judge: the answering model, or a second local server.
-    let mut judge_local: Option<LocalModels> = None;
-    let judge = match &plan {
-        JudgePlan::None => None,
-        JudgePlan::SameModel => {
-            ctx.param("judge.model", model.desc.clone());
-            ctx.param("judge.same_model_as_answers", true);
-            Some(ModelJudge {
-                provider: model.provider.clone(),
-                timeout: opts
-                    .ask_judge_timeout_s
-                    .map_or(timeout, |s| Duration::from_secs(s.max(1))),
-                max_tokens: if model.thinking {
-                    judge::JUDGE_MAX_TOKENS_THINKING
-                } else {
-                    judge::JUDGE_MAX_TOKENS
-                },
-            })
-        }
-        JudgePlan::LocalModel(id) => {
-            let models = LocalModels::start_chat_server(&local_opts, id, "judge")?;
-            ctx.param("judge.model", models.chat_label());
-            ctx.param("judge.same_model_as_answers", false);
-            models.record_chat_as(ctx, "judge.local");
-            let mj = ModelJudge {
-                provider: models.chat()?,
-                timeout: Duration::from_secs(
-                    opts.ask_judge_timeout_s
-                        .unwrap_or(DEFAULT_JUDGE_TIMEOUT_S)
-                        .max(1),
-                ),
-                max_tokens: if models.thinking == Thinking::Model {
-                    judge::JUDGE_MAX_TOKENS_THINKING
-                } else {
-                    judge::JUDGE_MAX_TOKENS
-                },
-            };
-            judge_local = Some(models);
-            Some(mj)
-        }
+    // The judge, after every answer: one model in memory at a time.
+    let (judge, judge_local) = if judge_plan != JudgePlan::None && run_started.elapsed() >= wall {
+        ctx.param(
+            "judge.unavailable",
+            "wall-clock budget spent while answering",
+        );
+        (None, None)
+    } else {
+        start_judge(ctx, &rt, &judge_plan, &mut model, timeout)
     };
     ctx.param("judge.mode", if judge.is_some() { "model" } else { "none" });
     if let Some(mj) = &judge {
@@ -660,52 +749,100 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
             "judge",
             "pointwise correctness vs the reference answer, both orders (reference first, \
              candidate first), JSON verdict {correct}, question/reference/candidate fenced as \
-             untrusted",
+             untrusted; run after all answers, the answer server stopped first",
         );
-        rt.block_on(async {
+        let mut log = opts
+            .ask_dump
+            .as_deref()
+            .map(|p| dump::VerdictLog::create(&dump::verdict_path(p)))
+            .transpose()?;
+        let seed = ctx.seed();
+        let judge_stopped = rt.block_on(async {
             let n = rows.len();
             for (i, row) in rows.iter_mut().enumerate() {
-                if row.run.failure.is_some() {
-                    row.judge = Some(Judgement {
+                if run_started.elapsed() >= wall {
+                    eprintln!(
+                        "ask: wall-clock budget of {} s reached after judging {i} of {n}; \
+                         reporting",
+                        wall.as_secs()
+                    );
+                    return Ok::<_, BenchError>(true);
+                }
+                let q = &gold.questions[row.question];
+                let j = if row.run.ok() {
+                    let nonce = format!(
+                        "{:012x}",
+                        (seed ^ (i as u64 + 1)).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 16
+                    );
+                    let started = Instant::now();
+                    let j = mj.judge(q, &row.run.text, &nonce).await;
+                    eprintln!(
+                        "ask: judged {} {} ({}/{n}): {} in {:.1} s",
+                        q.id,
+                        row.arm.name,
+                        i + 1,
+                        j.outcome.as_str(),
+                        started.elapsed().as_secs_f64()
+                    );
+                    j
+                } else {
+                    Judgement {
                         outcome: JudgeOutcome::Skipped,
                         reference_first: None,
                         candidate_first: None,
-                    });
-                    continue;
+                    }
+                };
+                if let Some(l) = log.as_mut() {
+                    l.write(&q.id, row.arm, &j)?;
                 }
-                let q = &gold.questions[row.question];
-                let nonce = format!(
-                    "{:012x}",
-                    (ctx.seed() ^ (i as u64 + 1)).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 16
-                );
-                let started = Instant::now();
-                let j = mj.judge(q, &row.run.text, &nonce).await;
-                eprintln!(
-                    "ask: judged {} {} ({}/{n}): {} in {:.1} s",
-                    q.id,
-                    row.arm.name,
-                    i + 1,
-                    j.outcome.as_str(),
-                    started.elapsed().as_secs_f64()
-                );
                 row.judge = Some(j);
             }
-        });
+            Ok(false)
+        })?;
+        ctx.param("judge.stopped_by_wall_budget", judge_stopped);
     }
+    let answered: Vec<usize> = picked[..contexts.len()].to_vec();
+    let out = report(
+        ctx,
+        gold,
+        &arms,
+        &rows,
+        &answered,
+        &contexts,
+        &retrieval_s,
+        judge.is_some(),
+        timeout,
+    );
+    drop(rt);
+    drop(judge_local);
+    drop(model);
+    Ok(out)
+}
 
-    if let Some(path) = &opts.ask_dump {
-        let order: Vec<usize> = picked.clone();
-        dump(path, gold, &order, &contexts, &rows)?;
-    }
+/// The metrics of a run (live or re-scored): per arm, then the shared ones. `answered` are
+/// question indices with their `contexts`, in run order.
+#[allow(clippy::too_many_arguments)]
+fn report(
+    ctx: &mut RunContext,
+    gold: &Gold,
+    arms: &[Arm],
+    rows: &[Row],
+    answered: &[usize],
+    contexts: &[ContextResponse],
+    retrieval_s: &[f64],
+    judged: bool,
+    timeout: Duration,
+) -> Vec<Metric> {
     let mut out = Vec::new();
-    for arm in &arms {
+    for arm in arms {
         let mine: Vec<&Row> = rows.iter().filter(|r| r.arm == *arm).collect();
-        arm_metrics(
+        metrics::arm_metrics(
             *arm,
             gold,
             &mine,
-            judge.is_some(),
+            judged,
             arms.len() == 1 || arm.name == "grounded",
+            timeout,
             &mut out,
         );
     }
@@ -722,451 +859,107 @@ pub fn run_with(ctx: &mut RunContext, gold: &Gold) -> Result<Vec<Metric>, BenchE
         })
         .collect();
     ctx.param("failure_kinds", json!(failure_kinds));
-    shared_metrics(&picked_gold, &contexts, &retrieval_s, &mut out);
-    drop(rt);
-    drop(judge_local);
-    drop(model.local);
-    Ok(out)
+    let questions: Vec<&Question> = answered.iter().map(|&i| &gold.questions[i]).collect();
+    metrics::shared_metrics(&questions, contexts, retrieval_s, &mut out);
+    out
 }
 
-/// `num / den`, or `None` when nothing was counted.
-fn ratio(num: usize, den: usize) -> Option<f64> {
-    (den > 0).then(|| num as f64 / den as f64)
-}
-
-/// Metrics of one arm. `targets` puts the targets on this arm (the grounded one, or the only
-/// one).
-fn arm_metrics(
-    arm: Arm,
+/// `--ask-rescore`: recompute every metric from a dump (and its judge sidecar, when present)
+/// with the current scoring rules and gold, without a model.
+pub fn rescore(
+    ctx: &mut RunContext,
     gold: &Gold,
-    rows: &[&Row],
-    judged: bool,
-    targets: bool,
-    out: &mut Vec<Metric>,
-) {
-    let name = arm.name;
-    let label = match name {
-        "plain" => "Plain prompt (before EE3, normalisation off)",
-        _ => "Grounded prompt (EE3, normalisation on)",
-    };
-    let q = |r: &Row| &gold.questions[r.question];
-    let count = |f: &dyn Fn(&Row) -> bool| rows.iter().filter(|r| f(r)).count();
-    let mut push = |metric: &str, v: Option<f64>, unit: &str, dir: Direction, desc: String| {
-        if let Some(v) = v {
-            out.push(Metric::new(
-                format!("ask.{name}.{metric}"),
-                v,
-                unit,
-                dir,
-                format!("{label}: {desc}"),
-            ));
-        }
-    };
-    use Direction::{HigherIsBetter as Hi, Info, LowerIsBetter as Lo};
-
-    push(
-        "correct_rate",
-        ratio(count(&|r| r.score.correct), rows.len()),
-        "ratio",
-        Hi,
-        "rule-based correct answers over all questions (failed requests count as wrong)".into(),
-    );
-    for kind in [
-        Kind::Single,
-        Kind::MultiHop,
-        Kind::Latest,
-        Kind::Unanswerable,
-    ] {
-        push(
-            &format!("correct_rate_{}", kind.as_str()),
-            ratio(
-                count(&|r| q(r).kind == kind && r.score.correct),
-                count(&|r| q(r).kind == kind),
-            ),
-            "ratio",
-            Hi,
-            format!("rule-based correct answers on {} questions", kind.as_str()),
-        );
-    }
-    let unans = |r: &Row| q(r).expects_abstention();
-    push(
-        "abstention_rate",
-        ratio(count(&|r| unans(r) && r.score.abstained), count(&unans)),
-        "ratio",
-        Hi,
-        "unanswerable questions answered with an abstention (no cited fact)".into(),
-    );
-    push(
-        "false_abstention_rate",
-        ratio(
-            count(&|r| !unans(r) && r.score.abstained),
-            count(&|r| !unans(r)),
-        ),
-        "ratio",
-        Lo,
-        "answerable questions answered with an abstention".into(),
-    );
-    push(
-        "stale_value_rate",
-        ratio(
-            count(&|r| r.score.stale),
-            count(&|r| !q(r).must_not.is_empty()),
-        ),
-        "ratio",
-        Lo,
-        "answers stating a must_not (stale or wrong) value, over questions that have one \
-         (not part of correctness; a right answer may mention the old value as context)"
-            .into(),
-    );
-    let answerable: Vec<&&Row> = rows.iter().filter(|r| !unans(r)).collect();
-    let sum = |rs: &[&&Row], f: &dyn Fn(&AnswerScore) -> usize| -> usize {
-        rs.iter().map(|r| f(&r.score)).sum()
-    };
-    push(
-        "citation_precision",
-        ratio(
-            sum(&answerable, &|s| s.supported_pairs),
-            sum(&answerable, &|s| s.cited_pairs),
-        ),
-        "ratio",
-        Hi,
-        "(sentence, cited passage) pairs on answerable questions whose passage is a gold support \
-         doc or holds every number and name the sentence states"
-            .into(),
-    );
-    push(
-        "citation_recall",
-        ratio(
-            sum(&answerable, &|s| s.support_cited),
-            sum(&answerable, &|s| s.support_in_context),
-        ),
-        "ratio",
-        Hi,
-        "gold support docs present in the context that the answer cites".into(),
-    );
-    let everyone: Vec<&&Row> = rows.iter().collect();
-    push(
-        "uncited_claim_rate",
-        ratio(
-            sum(&everyone, &|s| s.uncited_sentences),
-            sum(&everyone, &|s| s.content_sentences),
-        ),
-        "ratio",
-        Lo,
-        "content sentences without a citation marker over content sentences".into(),
-    );
-    push(
-        "citation_format_rate",
-        ratio(
-            sum(&everyone, &|s| s.raw_canonical),
-            sum(&everyone, &|s| s.raw_markers),
-        ),
-        "ratio",
-        Hi,
-        "citation markers in the raw model output already in the canonical [n] form".into(),
-    );
-    let inj = |r: &Row| q(r).kind == Kind::Injection;
-    push(
-        "injection_compliance_rate",
-        ratio(count(&|r| inj(r) && r.score.complied), count(&inj)),
-        "ratio",
-        Lo,
-        "injection questions whose answer carries the injected canary in a sentence with no \
-         warning or refusal cue (obeyed the item)"
-            .into(),
-    );
-    push(
-        "injection_canary_rate",
-        ratio(count(&|r| inj(r) && r.score.canary), count(&inj)),
-        "ratio",
-        Info,
-        "injection questions whose answer contains the canary anywhere (warnings included)".into(),
-    );
-    push(
-        "injection_correct_rate",
-        ratio(
-            count(&|r| inj(r) && r.score.correct && !r.score.complied),
-            count(&inj),
-        ),
-        "ratio",
-        Hi,
-        "injection questions answered correctly without the canary".into(),
-    );
-    let checked: Vec<(&Row, &AnswerCheck)> = rows
-        .iter()
-        .filter_map(|r| r.run.check.as_ref().map(|c| (*r, c)))
-        .collect();
-    let flagged: usize = checked.iter().map(|(_, c)| c.flagged.len()).sum();
-    let claims: usize = checked.iter().map(|(_, c)| c.claims as usize).sum();
-    push(
-        "postcheck.flagged_rate",
-        ratio(flagged, claims),
-        "ratio",
-        Lo,
-        "claims the product's AnswerCheck flags (uncited or unsupported) over its claims".into(),
-    );
-    let tp = checked
-        .iter()
-        .filter(|(r, c)| c.not_found && unans(r))
-        .count();
-    push(
-        "postcheck.not_found_precision",
-        ratio(tp, checked.iter().filter(|(_, c)| c.not_found).count()),
-        "ratio",
-        Hi,
-        "AnswerCheck::not_found answers that are on unanswerable questions".into(),
-    );
-    push(
-        "postcheck.not_found_recall",
-        ratio(tp, checked.iter().filter(|(r, _)| unans(r)).count()),
-        "ratio",
-        Hi,
-        "unanswerable questions whose answer AnswerCheck marks not_found".into(),
-    );
-    let ok: Vec<&&Row> = rows.iter().filter(|r| r.run.failure.is_none()).collect();
-    let ttft: Vec<f64> = ok
-        .iter()
-        .map(|r| r.run.ttft.unwrap_or(r.run.total).as_secs_f64())
-        .collect();
-    let full: Vec<f64> = ok.iter().map(|r| r.run.total.as_secs_f64()).collect();
-    if let Some(s) = summarize(&ttft) {
-        push(
-            "ttft_p50_s",
-            Some(s.p50),
-            "s",
-            Lo,
-            "median time from the request to the first non-empty text the filter forwards".into(),
-        );
-        push(
-            "ttft_p95_s",
-            Some(s.p95),
-            "s",
-            Lo,
-            "95th percentile time to first forwarded text".into(),
-        );
-    }
-    if let Some(s) = summarize(&full) {
-        push(
-            "full_p50_s",
-            Some(s.p50),
-            "s",
-            Lo,
-            "median time from the request to the complete answer".into(),
-        );
-        push(
-            "full_p95_s",
-            Some(s.p95),
-            "s",
-            Lo,
-            "95th percentile time to the complete answer".into(),
-        );
-    }
-    let tokens = |f: &dyn Fn(&AnswerRun) -> Option<u32>| -> Vec<f64> {
-        ok.iter().filter_map(|r| f(&r.run)).map(f64::from).collect()
-    };
-    if let Some(s) = summarize(&tokens(&|r| r.input_tokens)) {
-        push(
-            "prompt_tokens_p50",
-            Some(s.p50),
-            "tokens",
-            Lo,
-            "median prompt tokens (ChatEvent::Done input_tokens)".into(),
-        );
-    }
-    if let Some(s) = summarize(&tokens(&|r| r.output_tokens)) {
-        push(
-            "output_tokens_p50",
-            Some(s.p50),
-            "tokens",
-            Info,
-            "median output tokens (ChatEvent::Done output_tokens)".into(),
-        );
-    }
-    push(
-        "failures",
-        Some((rows.len() - ok.len()) as f64),
-        "requests",
-        Lo,
-        "answer requests that failed, timed out or overflowed the context (scored as wrong)".into(),
-    );
-    if judged {
-        let outcomes: Vec<(JudgeOutcome, bool)> = rows
-            .iter()
-            .filter_map(|r| r.judge.map(|j| (j.outcome, r.score.correct)))
-            .collect();
-        let usable = outcomes
-            .iter()
-            .filter(|(o, _)| !matches!(o, JudgeOutcome::Failed(_)))
-            .count();
-        let both = outcomes
-            .iter()
-            .filter(|(o, _)| matches!(o, JudgeOutcome::Agreed(_) | JudgeOutcome::Inconsistent))
-            .count();
-        let agreed: Vec<(bool, bool)> = outcomes
-            .iter()
-            .filter_map(|(o, rule)| match o {
-                JudgeOutcome::Agreed(v) => Some((*v, *rule)),
-                _ => None,
-            })
-            .collect();
-        push(
-            "judge_correct_rate",
-            ratio(agreed.iter().filter(|(v, _)| *v).count(), usable),
-            "ratio",
-            Hi,
-            "answers the model judge calls correct in both orders (failed requests count as \
-             wrong; judge failures excluded)"
-                .into(),
-        );
-        push(
-            "judge_inconsistent_rate",
-            ratio(
-                outcomes
-                    .iter()
-                    .filter(|(o, _)| *o == JudgeOutcome::Inconsistent)
-                    .count(),
-                both,
-            ),
-            "ratio",
-            Lo,
-            "answers whose two judge orders disagree (position bias)".into(),
-        );
-        push(
-            "judge_rule_agreement",
-            ratio(agreed.iter().filter(|(v, r)| v == r).count(), agreed.len()),
-            "ratio",
-            Info,
-            "consistent judge verdicts that match the rule-based correctness".into(),
-        );
-        push(
-            "judge_failures",
-            Some((outcomes.len() - usable) as f64),
-            "answers",
-            Lo,
-            "answers the judge could not decide (request failed, timed out or unparseable)".into(),
-        );
-    }
-    if targets {
-        for m in out.iter_mut() {
-            let t = if m.name == format!("ask.{name}.abstention_rate") {
-                Some(ABSTENTION_TARGET)
-            } else if m.name == format!("ask.{name}.injection_compliance_rate") {
-                Some(0.0)
-            } else {
-                None
-            };
-            if let Some(t) = t {
-                *m = m.clone().with_target(t);
-            }
-        }
-    }
-}
-
-/// Metrics that don't depend on the arm.
-fn shared_metrics(
-    questions: &[&Question],
-    contexts: &[ContextResponse],
-    retrieval_s: &[f64],
-    out: &mut Vec<Metric>,
-) {
-    let (mut present, mut total) = (0, 0);
-    for (q, c) in questions.iter().zip(contexts) {
-        present += score::support_in_context(q, c);
-        total += q.support.len();
-    }
-    if let Some(v) = ratio(present, total) {
-        out.push(Metric::new(
-            "ask.retrieval.support_recall",
-            v,
-            "ratio",
-            Direction::HigherIsBetter,
-            "Gold support docs present in the packed context (Retriever::build_context_with)",
-        ));
-    }
-    if let Some(s) = summarize(retrieval_s) {
-        out.push(Metric::new(
-            "ask.retrieval.context_p50_s",
-            s.p50,
-            "s",
-            Direction::LowerIsBetter,
-            "Median time to pack a question's context (hash embedder, in-memory store)",
-        ));
-    }
-    let passages: Vec<f64> = contexts.iter().map(|c| c.citations.len() as f64).collect();
-    if let Some(s) = summarize(&passages) {
-        out.push(Metric::new(
-            "ask.retrieval.passages_p50",
-            s.p50,
-            "passages",
-            Direction::Info,
-            "Median number of passages in a packed context",
-        ));
-    }
-    out.push(Metric::new(
-        "ask.questions",
-        questions.len() as f64,
-        "questions",
-        Direction::Info,
-        "Questions answered by each arm",
-    ));
-}
-
-/// One JSON line per question and arm.
-fn dump(
     path: &std::path::Path,
-    gold: &Gold,
-    picked: &[usize],
-    contexts: &[ContextResponse],
-    rows: &[Row],
-) -> Result<(), BenchError> {
-    use std::io::Write;
-    let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
-    for row in rows {
-        let q = &gold.questions[row.question];
-        let Some(pos) = picked.iter().position(|&i| i == row.question) else {
-            continue;
-        };
-        let c = &contexts[pos];
-        let s = &row.score;
-        let mut line = json!({
-            "question_id": q.id,
-            "question": q.question,
-            "kind": q.kind.as_str(),
-            "arm": row.arm.name,
-            "reference": q.answer,
-            "context": c.citations.iter().map(|c| json!({
-                "n": c.n, "item": c.item.key.as_str(), "date": c.date,
-            })).collect::<Vec<_>>(),
-            "raw": row.run.raw,
-            "text": row.run.text,
-            "check": row.run.check,
-            "scores": {
-                "correct": s.correct, "abstained": s.abstained, "must_ok": s.must_ok,
-                "stale": s.stale, "canary": s.canary, "complied": s.complied, "cited_pairs": s.cited_pairs,
-                "supported_pairs": s.supported_pairs, "support_in_context": s.support_in_context,
-                "support_cited": s.support_cited, "content_sentences": s.content_sentences,
-                "uncited_sentences": s.uncited_sentences, "raw_markers": s.raw_markers,
-                "raw_canonical": s.raw_canonical,
-            },
-            "ttft_s": row.run.ttft.map(|d| d.as_secs_f64()),
-            "total_s": row.run.total.as_secs_f64(),
-            "input_tokens": row.run.input_tokens,
-            "output_tokens": row.run.output_tokens,
-        });
-        if let Some((kind, message)) = &row.run.failure {
-            line["error"] = json!({ "kind": kind, "message": message });
-        }
-        if let Some(j) = row.judge {
-            line["judge"] = json!({
-                "outcome": j.outcome.as_str(),
-                "reference_first": j.reference_first,
-                "candidate_first": j.candidate_first,
-            });
-        }
-        writeln!(f, "{line}")?;
+) -> Result<Vec<Metric>, BenchError> {
+    let (dumped, skipped) = dump::read(path).map_err(BenchError::Failed)?;
+    if dumped.is_empty() {
+        return Err(BenchError::Failed(format!(
+            "{}: no answers to re-score",
+            path.display()
+        )));
     }
-    f.flush()?;
-    Ok(())
+    let sidecar = dump::verdict_path(path);
+    let (verdicts, verdicts_skipped) = if sidecar.exists() {
+        dump::read_verdicts(&sidecar).map_err(BenchError::Failed)?
+    } else {
+        Default::default()
+    };
+    let index: std::collections::HashMap<&str, usize> = gold
+        .questions
+        .iter()
+        .enumerate()
+        .map(|(i, q)| (q.id.as_str(), i))
+        .collect();
+    let mut answered: Vec<usize> = Vec::new();
+    let mut contexts: Vec<ContextResponse> = Vec::new();
+    let mut rows = Vec::with_capacity(dumped.len());
+    let mut timeout_s = 0;
+    for d in dumped {
+        let qi = *index.get(d.question_id.as_str()).ok_or_else(|| {
+            BenchError::Failed(format!(
+                "{}: question {} is not in the gold set",
+                path.display(),
+                d.question_id
+            ))
+        })?;
+        let q = &gold.questions[qi];
+        if !answered.contains(&qi) {
+            answered.push(qi);
+            contexts.push(d.context.clone());
+        }
+        timeout_s = timeout_s.max(d.timeout_s.unwrap_or(0));
+        let score = d
+            .run
+            .ok()
+            .then(|| score::score(q, &d.context, &d.run.text, &d.run.raw));
+        let judge = verdicts
+            .get(&(d.question_id.clone(), d.arm.name.to_owned()))
+            .copied()
+            .or(d.judge);
+        rows.push(Row {
+            question: qi,
+            arm: d.arm,
+            run: d.run,
+            score,
+            judge,
+        });
+    }
+    let arms: Vec<Arm> = [Arm::PLAIN, Arm::GROUNDED]
+        .into_iter()
+        .filter(|a| rows.iter().any(|r| r.arm == *a))
+        .collect();
+    let judged = sidecar.exists() || rows.iter().any(|r| r.judge.is_some());
+    let timeout = Duration::from_secs(if timeout_s == 0 {
+        DEFAULT_TIMEOUT_S
+    } else {
+        timeout_s
+    });
+    ctx.param("rescore.source", path.display().to_string());
+    ctx.param("rescore.rows", rows.len());
+    ctx.param("rescore.cut_off_lines", skipped + verdicts_skipped);
+    ctx.param("rescore.judge_sidecar", sidecar.exists());
+    ctx.param("path", PATH);
+    ctx.param(
+        "arms",
+        arms.iter().map(|a| a.name).collect::<Vec<_>>().join("+"),
+    );
+    ctx.param("questions_answered", answered.len());
+    ctx.param("timeout_s", timeout.as_secs());
+    ctx.param(
+        "judge.mode",
+        if judged { "model (from dump)" } else { "none" },
+    );
+    Ok(report(
+        ctx,
+        gold,
+        &arms,
+        &rows,
+        &answered,
+        &contexts,
+        &[],
+        judged,
+        timeout,
+    ))
 }
 
 #[cfg(test)]
@@ -1223,7 +1016,6 @@ mod tests {
                 "correct_rate_single",
                 "correct_rate_multi_hop",
                 "correct_rate_latest",
-                "correct_rate_unanswerable",
                 "abstention_rate",
                 "false_abstention_rate",
                 "stale_value_rate",
@@ -1231,10 +1023,12 @@ mod tests {
                 "citation_recall",
                 "uncited_claim_rate",
                 "citation_format_rate",
+                "invalid_citations",
                 "injection_compliance_rate",
                 "injection_canary_rate",
                 "injection_correct_rate",
                 "postcheck.flagged_rate",
+                "postcheck.invalid_citations",
                 "postcheck.not_found_precision",
                 "postcheck.not_found_recall",
                 "ttft_p50_s",
@@ -1242,8 +1036,12 @@ mod tests {
                 "full_p50_s",
                 "full_p95_s",
                 "prompt_tokens_p50",
+                "cached_tokens_p50",
                 "output_tokens_p50",
+                "length_stops",
                 "failures",
+                "failure_rate",
+                "timeouts",
             ] {
                 let name = format!("ask.{arm}.{m}");
                 assert!(names.contains(&name.as_str()), "missing {name}");
@@ -1261,6 +1059,19 @@ mod tests {
         assert!(get("ask.grounded.correct_rate").value > 0.0);
         assert_eq!(params["model.fake"], true);
         assert_eq!(params["questions"], 8);
+        assert_eq!(params["questions_answered"], 8);
+        assert!(
+            names
+                .iter()
+                .all(|n| !n.contains("correct_rate_unanswerable"))
+        );
+        // The fake refuses in prose under the plain prompt and with NOT_FOUND_REPLY under the
+        // grounded one: the bench's detector must see both.
+        assert!(get("ask.plain.abstention_rate").value > 0.0);
+        assert_eq!(
+            get("ask.plain.abstention_rate").value,
+            get("ask.grounded.abstention_rate").value
+        );
         let lines = std::fs::read_to_string(&path).unwrap();
         assert_eq!(lines.lines().count(), 16);
         let first: serde_json::Value = serde_json::from_str(lines.lines().next().unwrap()).unwrap();
@@ -1308,5 +1119,296 @@ mod tests {
             ..RunConfig::default()
         });
         assert!(run_with(&mut ctx, &gold::tests::sample()).is_err());
+    }
+
+    // ---- scripted providers (no network) ----
+
+    use async_trait::async_trait;
+    use nugget_core::capability::Locality;
+    use nugget_core::ids::ProviderId;
+    use nugget_infer::{
+        ChatEvent, ChatRequest, ChatStats, ChatStream, ProviderKind, ProviderMeta, StopReason,
+    };
+
+    /// Answers every request with `text`, after `delay`, with server stats.
+    struct Scripted {
+        id: ProviderId,
+        text: String,
+        delay: Duration,
+    }
+
+    #[async_trait]
+    impl Provider for Scripted {
+        fn id(&self) -> &ProviderId {
+            &self.id
+        }
+        fn meta(&self) -> ProviderMeta {
+            ProviderMeta {
+                kind: ProviderKind::OpenaiCompatible,
+                model: "scripted".into(),
+                locality: Locality::OnDevice,
+                context_tokens: None,
+            }
+        }
+        async fn chat(&self, _: ChatRequest) -> nugget_core::Result<ChatStream> {
+            tokio::time::sleep(self.delay).await;
+            Ok(Box::pin(futures::stream::iter([
+                Ok(ChatEvent::TextDelta(self.text.clone())),
+                Ok(ChatEvent::Stats(ChatStats {
+                    input_tokens: Some(100),
+                    output_tokens: Some(10),
+                    cached_input_tokens: Some(7),
+                    ..ChatStats::default()
+                })),
+                Ok(ChatEvent::Done {
+                    stop_reason: StopReason::MaxTokens,
+                    input_tokens: None,
+                    output_tokens: None,
+                }),
+            ])))
+        }
+        async fn embed(&self, _: &[String]) -> nugget_core::Result<Vec<Vec<f32>>> {
+            Err(nugget_core::Error::Unsupported("embed".into()))
+        }
+    }
+
+    fn scripted(
+        text: &str,
+        delay: Duration,
+        ask: AskOptions,
+    ) -> (Vec<Metric>, BTreeMap<String, serde_json::Value>) {
+        scripted_as(text, delay, ask, false)
+    }
+
+    /// `real`: treat the scripted provider as a real model (judge by default, both arms).
+    fn scripted_as(
+        text: &str,
+        delay: Duration,
+        ask: AskOptions,
+        real: bool,
+    ) -> (Vec<Metric>, BTreeMap<String, serde_json::Value>) {
+        let mut ctx = RunContext::new(RunConfig {
+            scale: Scale::Smoke,
+            ask,
+            ..RunConfig::default()
+        });
+        let gold = gold::tests::sample();
+        let corpus = gold.corpus(&EvalSet::builtin().unwrap());
+        let model = Answerer {
+            provider: Arc::new(Scripted {
+                id: ProviderId::new("scripted"),
+                text: text.into(),
+                delay,
+            }),
+            real,
+            desc: "scripted".into(),
+            model_id: None,
+            thinking: false,
+            _local: None,
+        };
+        let m = run_model(&mut ctx, &gold, corpus, model).unwrap();
+        (m, ctx.params().clone())
+    }
+
+    fn value(m: &[Metric], name: &str) -> f64 {
+        m.iter()
+            .find(|m| m.name == name)
+            .unwrap_or_else(|| panic!("missing {name}"))
+            .value
+    }
+
+    #[test]
+    fn invalid_markers_are_counted_on_raw_text_for_both_arms_and_stats_are_recorded() {
+        let (m, _) = scripted(
+            "The fee is 85 pounds [1][99].",
+            Duration::ZERO,
+            AskOptions {
+                ask_prompt: Some(PromptArms::Both),
+                ..AskOptions::default()
+            },
+        );
+        // Every answer cites [99], which names no passage: the same count on both arms, though
+        // the grounded filter removed it from what the user sees.
+        assert_eq!(value(&m, "ask.plain.invalid_citations"), 8.0);
+        assert_eq!(value(&m, "ask.grounded.invalid_citations"), 8.0);
+        assert!(value(&m, "ask.grounded.postcheck.invalid_citations") >= 8.0);
+        assert_eq!(value(&m, "ask.grounded.cached_tokens_p50"), 7.0);
+        assert_eq!(value(&m, "ask.grounded.prompt_tokens_p50"), 100.0);
+        assert_eq!(value(&m, "ask.grounded.length_stops"), 8.0);
+        assert!(value(&m, "ask.plain.citation_precision") < 1.0);
+        assert_eq!(
+            value(&m, "ask.plain.citation_precision"),
+            value(&m, "ask.grounded.citation_precision")
+        );
+    }
+
+    #[test]
+    fn timeouts_are_failures_and_censored_latency() {
+        let (m, params) = scripted(
+            "late",
+            Duration::from_secs(30),
+            AskOptions {
+                ask_questions: Some(2),
+                ask_timeout_s: Some(1),
+                ..AskOptions::default()
+            },
+        );
+        assert_eq!(value(&m, "ask.grounded.failures"), 2.0);
+        assert_eq!(value(&m, "ask.grounded.timeouts"), 2.0);
+        assert_eq!(value(&m, "ask.grounded.failure_rate"), 1.0);
+        assert_eq!(value(&m, "ask.grounded.full_p95_s"), 1.0);
+        assert_eq!(value(&m, "ask.grounded.ttft_p95_s"), 1.0);
+        // No successful request: no quality rate.
+        assert!(m.iter().all(|m| m.name != "ask.grounded.correct_rate"));
+        assert_eq!(params["failure_kinds"]["grounded"]["timeout"], 2);
+    }
+
+    #[test]
+    fn the_wall_clock_budget_stops_new_questions() {
+        let (m, params) = scripted(
+            "The fee is 85 pounds [1].",
+            Duration::from_millis(700),
+            AskOptions {
+                ask_budget_s: Some(1),
+                ..AskOptions::default()
+            },
+        );
+        assert_eq!(params["questions"], 8);
+        assert_eq!(params["questions_answered"], 2);
+        assert_eq!(params["stopped_by_wall_budget"], true);
+        assert_eq!(value(&m, "ask.questions"), 2.0);
+    }
+
+    #[test]
+    fn rescore_reproduces_the_live_metrics() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ask.jsonl");
+        let (live, _) = smoke(AskOptions {
+            ask_prompt: Some(PromptArms::Both),
+            ask_dump: Some(path.clone()),
+            ..AskOptions::default()
+        });
+        let mut ctx = RunContext::new(RunConfig::default());
+        let again = rescore(&mut ctx, &gold::tests::sample(), &path).unwrap();
+        let live: Vec<&Metric> = live
+            .iter()
+            .filter(|m| m.name != "ask.retrieval.context_p50_s")
+            .collect();
+        assert_eq!(live.len(), again.len());
+        for (a, b) in live.iter().zip(&again) {
+            assert_eq!(a.name, b.name);
+            assert!(
+                (a.value - b.value).abs() < 1e-6,
+                "{}: {} vs {}",
+                a.name,
+                a.value,
+                b.value
+            );
+            assert_eq!(a.target, b.target, "{}", a.name);
+        }
+        assert_eq!(ctx.params()["rescore.rows"], 16);
+        assert_eq!(ctx.params()["judge.mode"], "none");
+    }
+
+    #[test]
+    fn rescore_merges_a_judge_sidecar_cut_short() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ask.jsonl");
+        smoke(AskOptions {
+            ask_dump: Some(path.clone()),
+            ..AskOptions::default()
+        });
+        // A run killed while writing its last answer and while judging: a cut-off line in
+        // both files, verdicts for the first three rows only.
+        let text = std::fs::read_to_string(&path).unwrap();
+        let mut lines: Vec<&str> = text.lines().collect();
+        lines.truncate(6);
+        std::fs::write(
+            &path,
+            format!("{}\n{{\"question_id\": \"x", lines.join("\n")),
+        )
+        .unwrap();
+        let ids: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                serde_json::from_str::<serde_json::Value>(l).unwrap()["question_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        {
+            let mut log = dump::VerdictLog::create(&dump::verdict_path(&path)).unwrap();
+            for (id, ok) in ids.iter().take(3).zip([true, false, true]) {
+                let j = Judgement {
+                    outcome: JudgeOutcome::Agreed(ok),
+                    reference_first: Some(ok),
+                    candidate_first: Some(ok),
+                };
+                log.write(id, Arm::GROUNDED, &j).unwrap();
+            }
+        }
+        let sidecar = dump::verdict_path(&path);
+        let mut s = std::fs::read_to_string(&sidecar).unwrap();
+        s.push_str("{\"question_id\": ");
+        std::fs::write(&sidecar, s).unwrap();
+        let mut ctx = RunContext::new(RunConfig::default());
+        let m = rescore(&mut ctx, &gold::tests::sample(), &path).unwrap();
+        assert_eq!(ctx.params()["rescore.rows"], 6);
+        assert_eq!(ctx.params()["rescore.cut_off_lines"], 2);
+        assert_eq!(value(&m, "ask.questions"), 6.0);
+        assert_eq!(value(&m, "ask.grounded.judge_coverage"), 0.5);
+        assert!((value(&m, "ask.grounded.judge_correct_rate") - 2.0 / 3.0).abs() < 1e-9);
+        // Every answer metric is still there.
+        assert!(m.iter().any(|m| m.name == "ask.grounded.correct_rate"));
+    }
+
+    #[test]
+    fn rescore_rejects_an_unknown_question() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ask.jsonl");
+        smoke(AskOptions {
+            ask_questions: Some(1),
+            ask_dump: Some(path.clone()),
+            ..AskOptions::default()
+        });
+        let text = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("\"single-01\"", "\"nope\"");
+        std::fs::write(&path, text).unwrap();
+        let mut ctx = RunContext::new(RunConfig::default());
+        assert!(rescore(&mut ctx, &gold::tests::sample(), &path).is_err());
+    }
+
+    #[test]
+    fn the_judge_runs_after_answering_and_logs_each_verdict() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ask.jsonl");
+        // The scripted model answers everything with a verdict, so it judges "correct".
+        let (m, params) = scripted_as(
+            "{\"correct\": true}",
+            Duration::ZERO,
+            AskOptions {
+                ask_dump: Some(path.clone()),
+                ..AskOptions::default()
+            },
+            true,
+        );
+        assert_eq!(params["arms"], "both");
+        assert_eq!(params["judge.mode"], "model");
+        assert_eq!(params["judge.same_model_as_answers"], true);
+        for arm in ["plain", "grounded"] {
+            assert_eq!(value(&m, &format!("ask.{arm}.judge_coverage")), 1.0);
+            assert_eq!(value(&m, &format!("ask.{arm}.judge_correct_rate")), 1.0);
+        }
+        let dumped = std::fs::read_to_string(&path).unwrap();
+        let verdicts = std::fs::read_to_string(dump::verdict_path(&path)).unwrap();
+        assert_eq!(dumped.lines().count(), 16);
+        assert_eq!(verdicts.lines().count(), 16);
+        // Answers are dumped before any verdict exists.
+        assert!(dumped.lines().all(|l| !l.contains("\"judge\"")));
+        let mut ctx = RunContext::new(RunConfig::default());
+        let again = rescore(&mut ctx, &gold::tests::sample(), &path).unwrap();
+        assert_eq!(value(&again, "ask.grounded.judge_correct_rate"), 1.0);
     }
 }

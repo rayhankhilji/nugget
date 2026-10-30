@@ -338,8 +338,7 @@
     "must": [
       [
         "30 days",
-        "thirty days",
-        "a month"
+        "thirty days"
       ]
     ],
     "must_not": [],
@@ -525,7 +524,6 @@
       [
         "twelve months",
         "12 months",
-        "a year",
         "April 2027",
         "April next year"
       ]
@@ -637,8 +635,7 @@
     "must": [
       [
         "12 March",
-        "March 12",
-        "12th"
+        "March 12"
       ],
       [
         "8 percent",

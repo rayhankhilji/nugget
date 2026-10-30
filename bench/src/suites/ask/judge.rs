@@ -266,6 +266,23 @@ impl ModelJudge {
         Ok(parse_verdict(&text))
     }
 
+    /// Check that the judge answers at all (before the answer loop): one short request that
+    /// must return a parseable verdict or at least some text within the timeout.
+    pub async fn probe(&self) -> Result<(), String> {
+        match self
+            .ask_once("Reply with this JSON object: {\"correct\": true}", false)
+            .await
+        {
+            Ok(text) if !text.trim().is_empty() => Ok(()),
+            Ok(_) => Err("the judge returned an empty reply".into()),
+            Err(AskError::Timeout) => Err(format!(
+                "the judge did not reply within {} s",
+                self.timeout.as_secs()
+            )),
+            Err(AskError::Error) => Err("the judge request failed".into()),
+        }
+    }
+
     /// Judge one answer in both orders.
     pub async fn judge(&self, q: &Question, candidate: &str, nonce: &str) -> Judgement {
         let first = self.ask(&judge_prompt(q, candidate, true, nonce)).await;

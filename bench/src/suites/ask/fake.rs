@@ -5,7 +5,14 @@
 //! sentences, and answers with the one sentence sharing the most content words with the
 //! question (its passage title counting half), followed by ` [n]`. With fewer than
 //! [`MIN_OVERLAP`] shared words, or under [`MIN_SHARE`] of the question's content words, it
-//! answers [`nuggetd::ask::NOT_FOUND_REPLY`]. No understanding, no injection handling: it is
+//! refuses. It follows the prompt it gets, so the arms differ in CI as real models do:
+//! - with the grounded prompt (the system prompt asks for [`nuggetd::ask::NOT_FOUND_REPLY`]) it
+//!   cites `[n]` and refuses with exactly that reply;
+//! - with the plain prompt it cites `[n, m]` (`m` the passage of the runner-up sentence, when
+//!   another passage has one) and refuses in prose ([`PLAIN_REFUSAL`]), so a detector that only
+//!   knows the product's reply would show its bias.
+//!
+//! No understanding, no injection handling: it is
 //! enough to drive retrieval, the prompt, the streaming filter, the post-check and every metric
 //! end to end. The answer streams in small fixed-size deltas, so markers split across deltas.
 
@@ -15,8 +22,8 @@ use async_trait::async_trait;
 use nugget_core::capability::Locality;
 use nugget_core::ids::ProviderId;
 use nugget_infer::{
-    ChatEvent, ChatRequest, ChatStream, Part, Provider, ProviderKind, ProviderMeta, Role,
-    StopReason,
+    ChatEvent, ChatRequest, ChatStats, ChatStream, Part, Provider, ProviderKind, ProviderMeta,
+    Role, StopReason,
 };
 
 /// Shared content words a sentence needs to be used.
@@ -75,13 +82,23 @@ pub fn passages(system: &str) -> Vec<(u32, String, String)> {
     out
 }
 
+/// The fake's refusal under the plain prompt.
+pub const PLAIN_REFUSAL: &str = "The passages provided do not include that information.";
+
 /// The fake's answer to `question` given `system`.
 pub fn answer(system: &str, question: &str) -> String {
+    let grounded = system.contains(nuggetd::ask::NOT_FOUND_REPLY);
+    let refusal = if grounded {
+        nuggetd::ask::NOT_FOUND_REPLY
+    } else {
+        PLAIN_REFUSAL
+    };
     let q = words(question);
     if q.is_empty() {
-        return nuggetd::ask::NOT_FOUND_REPLY.to_owned();
+        return refusal.to_owned();
     }
     let mut best: Option<(f64, String, u32)> = None;
+    let mut runner_up: Option<(f64, u32)> = None;
     for (n, title, body) in passages(system) {
         let tw = words(&title);
         let title_score = 0.5 * q.intersection(&tw).count() as f64;
@@ -93,16 +110,28 @@ pub fn answer(system: &str, question: &str) -> String {
             }
             let total = overlap + title_score;
             if best.as_ref().is_none_or(|(b, _, _)| total > *b) {
+                if let Some((b, _, bn)) = &best
+                    && *bn != n
+                {
+                    runner_up = Some((*b, *bn));
+                }
                 best = Some((total, s, n));
+            } else if best.as_ref().is_some_and(|(_, _, bn)| *bn != n)
+                && runner_up.is_none_or(|(r, _)| total > r)
+            {
+                runner_up = Some((total, n));
             }
         }
     }
     match best {
         Some((score, s, n)) if score >= MIN_OVERLAP && score / q.len() as f64 >= MIN_SHARE => {
             let s = s.trim_end_matches(['.', '!', '?']);
-            format!("{s} [{n}].")
+            match runner_up {
+                Some((_, m)) if !grounded && m != n => format!("{s} [{n}, {m}]."),
+                _ => format!("{s} [{n}]."),
+            }
         }
-        _ => nuggetd::ask::NOT_FOUND_REPLY.to_owned(),
+        _ => refusal.to_owned(),
     }
 }
 
@@ -161,10 +190,20 @@ impl Provider for FakeAnswerer {
             .chunks(DELTA_CHARS)
             .map(|c| Ok(ChatEvent::TextDelta(c.iter().collect())))
             .collect();
+        let input = nugget_extract::estimate_tokens(&prompt) as u32;
+        let output = nugget_extract::estimate_tokens(&text) as u32;
+        // As llama-server reports a warm prompt cache: everything but the question.
+        let cached = input.saturating_sub(nugget_extract::estimate_tokens(&question) as u32);
+        events.push(Ok(ChatEvent::Stats(ChatStats {
+            input_tokens: Some(input),
+            output_tokens: Some(output),
+            cached_input_tokens: Some(cached),
+            ..ChatStats::default()
+        })));
         events.push(Ok(ChatEvent::Done {
             stop_reason: StopReason::EndTurn,
-            input_tokens: Some(nugget_extract::estimate_tokens(&prompt) as u32),
-            output_tokens: Some(nugget_extract::estimate_tokens(&text) as u32),
+            input_tokens: Some(input),
+            output_tokens: Some(output),
         }));
         Ok(Box::pin(futures::stream::iter(events)))
     }
@@ -178,7 +217,7 @@ impl Provider for FakeAnswerer {
 mod tests {
     use super::*;
 
-    const SYSTEM: &str = "Answer from the passages.\n\nPassages:\n[1] Car insurance renewal (eval)\n\
+    const SYSTEM: &str = "Answer from the passages. Otherwise reply exactly: I couldn't find that in your items.\n\nPassages:\n[1] Car insurance renewal (eval)\n\
         The car insurance with Harbourline expires on 14 November. The renewal quote came in at \
         612 pounds.\n\n[2] Boiler (eval)\nThe boiler showed fault code F28.";
 
@@ -196,9 +235,23 @@ mod tests {
             answer(SYSTEM, "What is my sister's phone number?"),
             nuggetd::ask::NOT_FOUND_REPLY
         );
+        assert_eq!(answer("", "anything at all here"), PLAIN_REFUSAL);
+    }
+
+    #[test]
+    fn the_plain_prompt_gets_plain_refusals_and_list_markers() {
+        let plain = SYSTEM.replace(nuggetd::ask::NOT_FOUND_REPLY, "say so plainly");
         assert_eq!(
-            answer("", "anything at all here"),
-            nuggetd::ask::NOT_FOUND_REPLY
+            answer(&plain, "What is my sister's phone number?"),
+            PLAIN_REFUSAL
+        );
+        assert_eq!(
+            answer(&plain, "How much was the car insurance renewal quote?"),
+            "The car insurance with Harbourline expires on 14 November [1]."
+        );
+        assert_eq!(
+            answer(&plain, "What fault code did the boiler show for the car?"),
+            "The boiler showed fault code F28 [2, 1]."
         );
     }
 
