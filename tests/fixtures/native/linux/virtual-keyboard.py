@@ -197,6 +197,17 @@ def gnome_press(chords, hold_ms):
     ).unpack()[0]
     if overview:
         print("virtual-keyboard: warning: GNOME Shell is in the overview", flush=True)
+    if os.environ.get("NUGGET_WAYLAND_GNOME_UNSAFE"):
+        # Diagnostics (gnome-shell --unsafe-mode only): the shell's action mode and focus.
+        js = ("`mode=${Main.actionMode} modal=${Main.modalCount} "
+              "focus=${global.display.focus_window?.title} "
+              "inhibited=${global.display.focus_window ? 'n/a' : '-'}`")
+        r = bus.call_sync(
+            "org.gnome.Shell", "/org/gnome/Shell", "org.gnome.Shell", "Eval",
+            GLib.Variant("(s)", (js,)), GLib.VariantType("(bs)"), Gio.DBusCallFlags.NONE, 5000,
+            None,
+        ).unpack()
+        print(f"virtual-keyboard: shell state {r}", flush=True)
 
     (session,) = call(
         "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop", "CreateSession",

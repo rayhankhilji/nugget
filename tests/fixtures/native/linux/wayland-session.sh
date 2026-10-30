@@ -187,6 +187,7 @@ gnome)
     export GSK_RENDERER=cairo
     MUTTER_DEBUG="${NUGGET_WAYLAND_MUTTER_DEBUG:-}" \
         gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 \
+        ${NUGGET_WAYLAND_GNOME_UNSAFE:+--unsafe-mode} \
         --wayland-display wayland-1 >"$logs/gnome-shell.log" 2>&1 &
     pids+=($!)
     ;;

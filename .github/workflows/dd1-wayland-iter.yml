@@ -46,6 +46,7 @@ jobs:
       NUGGET_WAYLAND_DBUS_MONITOR: "1"
       NUGGET_WAYLAND_GNOME_PORTAL_DEBUG: all
       NUGGET_WAYLAND_MUTTER_DEBUG: keybindings
+      NUGGET_WAYLAND_GNOME_UNSAFE: "1"
       NUGGET_GTK4_PYTHON: /usr/bin/python3
       # KDE's and GNOME's portals implement GlobalShortcuts: fail if the session lost it, or if
       # a key press does not fire the bound shortcut.
