@@ -31,7 +31,7 @@ use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{
-    DEFAULT_MANIFEST_JSON, DEFAULT_MANIFEST_SIG, Manifest, trusted_keys, verify_manifest_with_key,
+    DEFAULT_MANIFEST_JSON, DEFAULT_MANIFEST_SIG, Manifest, trusted_keys, verify_manifest_with_keys,
 };
 
 /// File name of the rollback-protection state inside the model store root.
@@ -86,25 +86,40 @@ impl ManifestTrust {
     /// Refuse `version` from `key` if it is older than the version already accepted from that key;
     /// otherwise accept it and record it if it is newer (or the first one seen).
     pub fn check_and_record(&self, key: &VerifyingKey, version: u64) -> Result<()> {
+        self.check_and_record_all(std::slice::from_ref(key), version)
+    }
+
+    /// [`ManifestTrust::check_and_record`] for every key that signed one manifest, all or nothing:
+    /// refused if `version` is older than what any of them already accepted, otherwise recorded
+    /// for each of them.
+    pub fn check_and_record_all(&self, keys: &[VerifyingKey], version: u64) -> Result<()> {
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut state = self.load()?;
-        let hex = key_hex(key);
-        match state.keys.get(&hex) {
-            Some(&seen) if version < seen => Err(Error::Integrity(format!(
-                "manifest version {version} is older than version {seen} already accepted from \
-                 key {}…; refusing a rollback",
-                &hex[..16]
-            ))),
-            Some(&seen) if version == seen => Ok(()),
-            prev => {
-                if let Some(seen) = prev {
-                    tracing::info!(key = %&hex[..16], from = seen, to = version, "manifest version advanced");
+        let mut changed = false;
+        for hex in keys.iter().map(key_hex) {
+            match state.keys.get(&hex) {
+                Some(&seen) if version < seen => {
+                    return Err(Error::Integrity(format!(
+                        "manifest version {version} is older than version {seen} already \
+                         accepted from key {}…; refusing a rollback",
+                        &hex[..16]
+                    )));
                 }
-                state.keys.insert(hex, version);
-                state.format = FORMAT;
-                self.store(&state)
+                Some(&seen) if version == seen => {}
+                prev => {
+                    if let Some(seen) = prev {
+                        tracing::info!(key = %&hex[..16], from = seen, to = version, "manifest version advanced");
+                    }
+                    state.keys.insert(hex, version);
+                    changed = true;
+                }
             }
         }
+        if !changed {
+            return Ok(());
+        }
+        state.format = FORMAT;
+        self.store(&state)
     }
 
     fn load(&self) -> Result<TrustState> {
@@ -171,16 +186,19 @@ impl ManifestTrust {
     }
 }
 
-/// Verify a manifest ([`verify_manifest_with_key`]) and then apply rollback protection with
-/// `trust` for the key that verified it. Use this for every manifest, embedded or downloaded.
+/// Verify a manifest ([`crate::verify_manifest_with_key`]) and then apply rollback protection
+/// with `trust` for every trusted key that signed it. Use this for every manifest, embedded or
+/// downloaded.
 pub fn verify_manifest_checked(
     bytes: &[u8],
     sig: &[u8],
     keys: &[VerifyingKey],
     trust: &ManifestTrust,
 ) -> Result<Manifest> {
-    let (manifest, key) = verify_manifest_with_key(bytes, sig, keys)?;
-    trust.check_and_record(&key, manifest.version)?;
+    // Every key that signed it, not just the first: otherwise a dual-signed manifest advances
+    // only one series, and an older manifest signed by the other key alone still verifies.
+    let (manifest, signers) = verify_manifest_with_keys(bytes, sig, keys)?;
+    trust.check_and_record_all(&signers, manifest.version)?;
     Ok(manifest)
 }
 
