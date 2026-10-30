@@ -322,6 +322,16 @@ onboarding the test chooses "Bring your own key", selects the OpenAI-compatible 
 Then `config.toml` has a `[[providers]]` table with `api_key = "keychain:…"` and neither it nor the
 daemon logs contain the key; `egress.recent` and the Privacy page show requests to 127.0.0.1.
 
+## Design review screenshots
+
+`node e2e/review.mjs` (not part of `pnpm run e2e`; it checks nothing) captures every page, its
+main views and dialogs, every onboarding step and the Double Tap overlay in each phase, in light
+and dark, in English, Arabic and German, at 900×600 and 1600×1000, plus each page's empty,
+loading and error state, into `e2e/artifacts/review/<locale>-<theme>-<size>/`. Scrolled content is
+captured by growing the window to fit. `REVIEW_LOCALES`, `REVIEW_THEMES`, `REVIEW_SIZES`,
+`REVIEW_ONLY` (screen-name prefixes) and `REVIEW_STATES=0` narrow the run; it uses the existing
+`dist/` (`E2E_DIST`) and the same `NUGGETD`. About 20 minutes for the whole matrix.
+
 ## Artifacts
 
 `e2e/artifacts/` (git-ignored; CI uploads it as `desktop-e2e`): a numbered screenshot per page and

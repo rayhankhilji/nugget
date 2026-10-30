@@ -35,7 +35,7 @@ daemon's uptime, so those two change on every run.
 | `search` | Search for "Tidewater budget" | `guide/search-ask.md`, `README.md` |
 | `chat` | Chat, a cited answer | `guide/search-ask.md`, `README.md` |
 | `knowledge` | Knowledge, Ada Wexford | `guide/knowledge.md` |
-| `knowledge-why` | Knowledge, a fact's evidence (Why?) | `guide/knowledge.md`, `README.md` |
+| `knowledge-why` | Knowledge, a fact's evidence (Based on N sources) | `guide/knowledge.md`, `README.md` |
 | `graph` | Knowledge, the graph view | `guide/knowledge.md` |
 | `sources` | Sources | `guide/sources.md` |
 | `safety` | Safety | `guide/safety.md` |
