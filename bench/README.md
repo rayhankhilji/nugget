@@ -13,12 +13,13 @@ cargo run --release -p nugget-bench -- perf memory        # run suites, write re
 cargo run --release -p nugget-bench -- all --scale quick  # every suite, smaller workload
 cargo run --release -p nugget-bench -- memory --backend real --strict  # the M1 gate
 cargo run --release -p nugget-bench -- knowledge --strict                # the M2 gates
+cargo run --release -p nugget-bench -- energy --scale full --energy-scenarios idle,index  # DD2
 cargo run -p nugget-bench -- --schema                     # print the report JSON schema
 ```
 
 | Option | Meaning |
 |---|---|
-| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`, or `all` |
+| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`, `energy`, or `all` |
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
 | `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate in process (`real`). Other suites ignore it |
@@ -32,6 +33,7 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `--cua-agent reference\|null\|naive\|nugget\|nugget-compliant` | `cua`: the agent under test (default `reference`) |
 | `--cua-env inproc\|socket\|xvfb` | `cua`: where the apps run (default `inproc`; `xvfb` is Linux only) |
 | `--cua-tasks TERMS` | `cua`: only tasks matching any comma-separated id, tag, app or difficulty |
+| `--energy-scenarios LIST` | `energy`: comma-separated scenarios (`daemon_idle`, `index_1k`, `a11y_poll`, `prefill`, `shell_idle`, `shell_focus`; short forms `idle`, `index`, `poll`; `all`). Default `daemon_idle,index_1k,a11y_poll,prefill`; env `NUGGET_BENCH_ENERGY_SCENARIOS` |
 | `--out-dir DIR` | Where reports go (default `bench/results/`; env `NUGGET_BENCH_RESULTS_DIR`) |
 | `--no-write` | Do not write report files |
 | `--json` | Print report JSON to stdout; the human summary moves to stderr |
@@ -47,8 +49,8 @@ Exit codes:
 | 3 | `--strict` was given and a selected suite is not implemented |
 | 4 | `--strict` was given and a metric missed its target (takes precedence over 3) |
 
-Debug builds work, but their timings are not representative; the CLI warns when you run `perf`
-or `memory --backend real` on one.
+Debug builds work, but their timings are not representative; the CLI warns when you run `perf`,
+`energy` or `memory --backend real` on one.
 
 ## Reports
 
@@ -104,6 +106,7 @@ citation targets for real pipeline reasons (see the results below). TODO (wave 2
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
 | `cua` | **M4: 51 tasks on six local test apps; in process, over a socket, or on an Xvfb desktop** | Verified task success, steps, wall time, unconfirmed risky actions, false confirmations, injection compliance, token cost |
 | `knowledge` | **M2: the real pipeline** (`nugget-knowledge`, `nugget-vault`, `nugget-mcp`) on a labelled corpus | Entity, claim and resolution quality; citation coverage; unsupported claims; injection resistance; retraction; vault merge fidelity; throughput; MCP `get_context` latency |
+| `energy` | **DD2: the real `nuggetd`, the shell's accessibility poll, local read-ahead** | Idle CPU, wakeups and power; joules and CPU-seconds per 1k items indexed; cost of the 1 Hz frontmost-app read; joules per read-ahead. RAPL (Linux) or `powermetrics` (macOS) when readable, else CPU time and wakeups |
 
 ### The M0 fake index
 
@@ -310,6 +313,92 @@ Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from 
 wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
 Linux on demand (`workflow_dispatch`, with a `scale` input) and weekly, and uploads the reports;
 it is not part of push/PR CI. A run at `full` takes about 30 minutes on 4 vCPUs.
+
+### `energy` (DD2)
+
+What Nugget costs in energy and battery: `docs/PLAN.md`'s "battery cost per 1k items" and idle
+overhead, measured where the machine lets us and reported as CPU time and wakeups where it does
+not. The code is `src/suites/energy/`; build `nuggetd` in the same profile as the bench
+(`cargo build --release -p nuggetd -p nugget-bench`) or set `NUGGET_BENCH_NUGGETD`, as for the
+[daemon profile](#daemon-profile-perf---backend-real-daemon-x5).
+
+**The meter** (`energy/meter.rs`, `Meter::start(&[pid]) … stop() -> Reading`, reusable by later
+scenarios). Per process, each metered pid counts *with its descendants* (all processes are
+walked by parent pid on every sample, so child processes such as a webview count too). A
+sampler thread reads every second and keeps the last value of every thread or process, so ones
+that exit mid-window still count up to their last sample.
+
+| Figure | Linux | macOS | Windows |
+|---|---|---|---|
+| CPU time | `/proc/<pid>/task/*/schedstat` (ns, every thread) | `powermetrics` tasks (`cputime_ms_per_s`), else `ps -o time` | not measured |
+| Wakeups | voluntary + involuntary context switches (`/proc/<pid>/task/*/status`) | `powermetrics` tasks (`idle_wakeups_per_s` + `intr_wakeups_per_s`); none from `ps` | not measured |
+| System energy | RAPL: top-level `package-*` zones of `/sys/class/powercap/intel-rapl:*/energy_uj`, read every second, wraparound handled with `max_energy_range_uj` | `sudo -n powermetrics --samplers cpu_power,tasks --show-process-energy -f plist` as a child for the window: package energy or power from each sample's `processor` dict (`package_energy`, `combined_power`, `cpu_energy`+`gpu_energy`+`ane_energy`, `package_joules`, `package_watts` or `cpu_power`, whichever is there) | none |
+| Per-process energy | – | `energy_impact` of the tasks (unitless, as Activity Monitor) | – |
+
+Every source is optional. RAPL counters are root-only on most kernels since 2020 and absent on
+most VMs; `powermetrics` needs passwordless `sudo` (GitHub's macOS runners have it) and virtual
+Macs may report no processor energy. A missing source never fails a run: the report says which
+source each scenario used (`config.params.<scenario>.energy_source`: `rapl`, `powermetrics` or
+`none`, with `<scenario>.energy_note` saying why there is none) and where the process figures
+came from (`<scenario>.process_source`: `proc`, `powermetrics`, `ps` or `none`). `perf stat -e
+power/energy-pkg/` is not used.
+
+**Attribution.** Package energy is the whole machine's. When a source exists, each scenario also
+meters a baseline window of the same length with nothing launched (before the daemon starts for
+`daemon_idle`; after it stopped for `index_1k`; with the server loaded but idle for `prefill`;
+`a11y_poll` uses its own sleeping arm) and reports `attributable = window − baseline` as mean
+watts, times the window for joules. On a shared VM or a busy laptop this difference is noisy (it
+can even be negative): read it over several runs. The CPU and wakeup figures are per process and
+not affected.
+
+**Scenarios** (metric prefix `energy.<scenario>.`). Windows scale with `--scale`: smoke a few
+seconds, quick about a minute, standard five minutes, full ten (the PLAN's idle window).
+
+- `daemon_idle`: `nuggetd` on a seeded home as in the daemon profile (200 / 2k / 10k / 10k items,
+  vault on, no providers, `[runtime]` and `[mcp]` off); after the startup knowledge run and vault
+  render finished and a settle period (1 / 12 / 15 / 15 s), a window of 2 s / 60 s / 5 min / 10 min
+  with a connected but silent IPC client. `cpu_percent` (share of one core), `wakeups_per_s`,
+  `window_s`; with an energy source `package_w`, `baseline_w`, `attributable_w`, `attributable_j`;
+  on macOS `energy_impact`.
+- `index_1k`: a fresh daemon (empty store, vault off, same config) watches an empty folder; then
+  1,000 Markdown files (100 at smoke) are written into it, metered from the first write until
+  `ingest.status` shows all indexed with an empty queue and `search` finds the last one (polled
+  every 250 ms, so `wall_s` is that coarse). `items`, `wall_s`, `cpu_s_per_1k_items`,
+  `wakeups_per_1k_items`, `cpu_percent`; with an energy source `package_j_per_1k_items`,
+  **`attributable_j_per_1k_items`** (the battery cost per 1k items), `package_w`, `baseline_w`,
+  `attributable_w`. The config has no model providers, so indexing is text-only with no embedding
+  model; indexing with the real local embedding model is not measured yet (a known gap), nor is
+  the knowledge extraction that follows indexing.
+- `a11y_poll`: the desktop shell's per-second "what is in front" read alone, in the bench
+  process: `nugget_a11y::Backend::new(<AT-SPI | AX | UI Automation>, A11yConfig::default())
+  .frontmost_app()`, as the shell's `A11y::frontmost`. One untimed first call (`first_call_ms`,
+  it connects to the accessibility API), then two arms of equal length on a 1 Hz schedule: one
+  only sleeps (`sleep.cpu_percent`, `sleep.wakeups_per_s`, `sleep.window_s`), one calls on every
+  tick. `calls`, `frontmost_found`, `errors`, `call_ms.p50/.p95`, `cpu_ms_per_call` and
+  `cpu_percent_added`, `wakeups_per_s_added` (polling minus sleeping), with an energy source
+  `attributable_w` and `attributable_mj_per_call`. `params.a11y_poll.result` says whether a
+  frontmost app was found; on a headless runner it is not (no accessibility bus, or nothing
+  focused), and the figures are those of the failing call. Work in other processes (the AT-SPI
+  registry, the focused app answering) shows only in system energy. Skipped on other platforms.
+- `prefill` (`--local-models` only, else recorded as skipped): the real local chat model in
+  `llama-server` (fixed seed, temperature 0, the local prompt budget per `--draft-local-budget`),
+  drafters built as `doubletap` builds them with read-ahead on and no minimum interval;
+  `Drafter::prewarm_idle` and one read-ahead unmetered, then 2 / 4 / 8 / 12 read-aheads of
+  distinct fixture tasks back to back, each waited for, metered on the `llama-server` process.
+  `completed`, `skipped`, `timeouts`, `seconds_per_read_ahead`, `cpu_s_per_read_ahead`,
+  `wakeups_per_read_ahead`; with an energy source `package_j_per_read_ahead`,
+  `attributable_j_per_read_ahead` (baseline: the server loaded and idle), `package_w`,
+  `baseline_w`, `attributable_w`.
+- `shell_idle`, `shell_focus`: reserved for the desktop shell (`nugget-desktop --minimized`
+  against a daemon, from `NUGGET_BENCH_SHELL`: ten idle minutes with the window hidden, and a
+  scripted minute of focus changes with read-ahead on and off). Until `energy/shell.rs` lands
+  they are recorded as skipped; they run only when listed.
+
+Daemon scenarios are skipped (`config.params.<scenario> = "skipped: …"`, not failed) without a
+`nuggetd` binary. Pick scenarios with `--energy-scenarios` or `NUGGET_BENCH_ENERGY_SCENARIOS`
+(e.g. `idle,index` on a Linux runner, `poll,prefill --local-models` on a Mac). Report-level
+params record the scenarios run, the energy source found and why not, the sample interval and
+the attribution rule.
 
 ### `knowledge` (M2)
 

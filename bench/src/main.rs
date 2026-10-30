@@ -8,6 +8,7 @@
 //! cargo run --release -p nugget-bench -- doubletap --local-models --scale quick
 //! cargo run -p nugget-bench -- --list
 //! cargo run -p nugget-bench -- cua --cua-agent reference --cua-env xvfb --strict
+//! cargo run --release -p nugget-bench -- energy --scale quick --energy-scenarios idle,index
 //! ```
 
 use std::io::Write;
@@ -31,8 +32,8 @@ const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results"
     about = "Run Nugget benchmark suites and write JSON reports"
 )]
 struct Cli {
-    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`),
-    /// or `all`.
+    /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`,
+    /// `energy`), or `all`.
     #[arg(value_name = "SUITE")]
     suites: Vec<String>,
 
@@ -75,6 +76,10 @@ struct Cli {
 
     #[command(flatten)]
     doubletap: nugget_bench::suites::doubletap::DoubletapOptions,
+
+    #[command(flatten)]
+    energy: nugget_bench::suites::energy::EnergyOptions,
+
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
     #[arg(long, value_enum, default_value_t = CuaAgentKind::Reference)]
@@ -229,7 +234,9 @@ fn main() -> ExitCode {
         }
     };
     let timed = |b: &dyn Benchmark| {
-        b.name() == "perf" || (b.name() == "memory" && cli.backend == Backend::Real)
+        b.name() == "perf"
+            || b.name() == "energy"
+            || (b.name() == "memory" && cli.backend == Backend::Real)
     };
     if cfg!(debug_assertions) && suites.iter().any(|b| timed(b.as_ref())) {
         eprintln!("note: debug build; timings are not representative (use `cargo run --release`)");
@@ -244,6 +251,7 @@ fn main() -> ExitCode {
         draft: cli.draft.clone(),
         local: cli.local.clone(),
         doubletap: cli.doubletap.clone(),
+        energy: cli.energy.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;
@@ -409,7 +417,8 @@ mod tests {
                 "draft",
                 "doubletap",
                 "cua",
-                "knowledge"
+                "knowledge",
+                "energy"
             ]
         );
         assert_eq!(
@@ -421,11 +430,21 @@ mod tests {
                 "draft",
                 "doubletap",
                 "cua",
-                "knowledge"
+                "knowledge",
+                "energy"
             ]
         );
         assert!(names(&[]).is_err());
         assert!(names(&["bogus"]).unwrap_err().contains("unknown suite"));
+    }
+
+    #[test]
+    fn parses_energy_options() {
+        let cli =
+            Cli::try_parse_from(["nugget-bench", "energy", "--energy-scenarios", "idle,index"])
+                .unwrap();
+        assert_eq!(cli.suites, ["energy"]);
+        assert_eq!(cli.energy.energy_scenarios.as_deref(), Some("idle,index"));
     }
 
     #[test]

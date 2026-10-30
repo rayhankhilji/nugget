@@ -16,6 +16,8 @@
 //! real `nugget-proactive` crate with `--backend real`).
 //! `knowledge` ([`suites::knowledge`]) scores the M2 knowledge pipeline on a labelled fixture
 //! corpus ([`knowledge`]); built without the `pipeline` feature it reports `not_implemented`.
+//! `energy` ([`suites::energy`]) meters CPU time, wakeups and system energy of the real daemon,
+//! the desktop shell's accessibility poll and local read-ahead.
 
 pub mod corpus;
 pub mod index;
