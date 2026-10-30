@@ -276,12 +276,13 @@ pub struct ProviderConfig {
     /// prefix match, whereas a pinned request waits whenever its slot is busy.
     #[serde(default)]
     pub slot_affinity: Option<bool>,
-    /// OpenAI-compatible only: text prepended to search queries ([`crate::Provider::embed_query`]).
+    /// OpenAI-compatible only: the model's query task prefix ([`crate::Provider::embed_prefixes`]).
     /// Unset: the model's known default (see [`embed_prefixes`]); `""`: no prefix.
     #[serde(default)]
     pub embed_query_prefix: Option<String>,
-    /// OpenAI-compatible only: text prepended to documents ([`crate::Provider::embed`]). Unset:
-    /// the model's known default (see [`embed_prefixes`]); `""`: no prefix.
+    /// OpenAI-compatible only: the model's document task prefix
+    /// ([`crate::Provider::embed_prefixes`]). Unset: the model's known default (see
+    /// [`embed_prefixes`]); `""`: no prefix.
     #[serde(default)]
     pub embed_document_prefix: Option<String>,
 }
@@ -297,19 +298,37 @@ const EMBED_PREFIXES: &[(&str, &str, &str)] =
 /// `embed_query_prefix`/`embed_document_prefix` where set, else the model's known default from a
 /// small table, else none.
 pub fn embed_prefixes(cfg: &ProviderConfig) -> (String, String) {
-    let model = cfg.model.to_ascii_lowercase();
-    let (query, document) = EMBED_PREFIXES
+    let (query, document) = model_embed_prefixes(&cfg.model);
+    (
+        cfg.embed_query_prefix.clone().unwrap_or(query),
+        cfg.embed_document_prefix.clone().unwrap_or(document),
+    )
+}
+
+/// The `(query, document)` prefixes the model named `model` was trained with, from the table
+/// (none for models not in it).
+pub fn model_embed_prefixes(model: &str) -> (String, String) {
+    let model = model.to_ascii_lowercase();
+    EMBED_PREFIXES
         .iter()
         .find(|(name, _, _)| model.contains(name))
-        .map_or(("", ""), |&(_, q, d)| (q, d));
-    (
-        cfg.embed_query_prefix
-            .clone()
-            .unwrap_or_else(|| query.to_owned()),
-        cfg.embed_document_prefix
-            .clone()
-            .unwrap_or_else(|| document.to_owned()),
-    )
+        .map_or((String::new(), String::new()), |&(_, q, d)| {
+            (q.to_owned(), d.to_owned())
+        })
+}
+
+/// `texts` with `prefix` prepended to each one that does not already start with it.
+pub fn with_prefix(prefix: &str, texts: &[String]) -> Vec<String> {
+    texts
+        .iter()
+        .map(|t| {
+            if t.starts_with(prefix) {
+                t.clone()
+            } else {
+                format!("{prefix}{t}")
+            }
+        })
+        .collect()
 }
 
 /// A TOML file holding `[[providers]]` tables.

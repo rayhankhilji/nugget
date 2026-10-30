@@ -22,9 +22,9 @@
 //!   A request with tools and no `json_schema` also gets `tool_choice: "required"` and
 //!   `parallel_tool_calls: false`: with `--jinja` the server compiles a grammar from the tool
 //!   schemas, so the model can only emit one well-formed call (`extra_body` can override both).
-//! - Embeddings: [`Provider::embed`] prepends the document prefix and [`Provider::embed_query`]
-//!   the query prefix from [`crate::embed_prefixes`] (e.g. `search_document: ` /
-//!   `search_query: ` for nomic-embed-text), unless a text already starts with it.
+//! - Embeddings: texts are sent as given. [`Provider::embed_prefixes`] reports the model's task
+//!   prefixes ([`crate::embed_prefixes`], e.g. `search_query: ` / `search_document: ` for
+//!   nomic-embed-text); callers add them, so an index keeps the scheme it was built with.
 //! - [`Provider::prewarm`] is `GET {base}/models`. With `llama_cpp`, [`Provider::prewarm_prefix`]
 //!   sends the stable prefix to `chat/completions` with `n_predict: 0` (the server evaluates the
 //!   prompt into the slot's KV cache and generates at most one token), `cache_prompt: true`,
@@ -32,7 +32,6 @@
 //!   only prewarms the connection. The warm-up carries the same `tool_choice` fields as the real
 //!   request (they change the sampling grammar, not the prompt; harmless with `n_predict: 0`).
 
-use std::borrow::Cow;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -573,30 +572,11 @@ impl Provider for OpenAiCompatibleProvider {
         Ok(())
     }
 
+    fn embed_prefixes(&self) -> (String, String) {
+        embed_prefixes(&self.common.cfg)
+    }
+
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        let (_, document) = embed_prefixes(&self.common.cfg);
-        self.embed_prefixed(texts, &document).await
-    }
-
-    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        let (query, _) = embed_prefixes(&self.common.cfg);
-        self.embed_prefixed(texts, &query).await
-    }
-}
-
-impl OpenAiCompatibleProvider {
-    /// `POST embeddings` in batches, with `prefix` prepended to each text not already carrying it.
-    async fn embed_prefixed(&self, texts: &[String], prefix: &str) -> Result<Vec<Vec<f32>>> {
-        let texts: Vec<Cow<'_, str>> = texts
-            .iter()
-            .map(|t| {
-                if t.starts_with(prefix) {
-                    Cow::Borrowed(t.as_str())
-                } else {
-                    Cow::Owned(format!("{prefix}{t}"))
-                }
-            })
-            .collect();
         let batch = self
             .common
             .cfg

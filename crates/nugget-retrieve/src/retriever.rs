@@ -647,7 +647,9 @@ impl Retriever {
         Ok(true)
     }
 
-    /// Embed the query with an eligible `Embedding`-tier provider.
+    /// Embed the query with an eligible `Embedding`-tier provider, with the query task prefix of
+    /// the index's scheme ([`Store::embedding_prefixes`]): none for an index built without
+    /// prefixes, whatever the provider's model would take.
     async fn embed_query(
         &self,
         query: &str,
@@ -670,7 +672,14 @@ impl Retriever {
             Ok(None) => return Err(TextOnlyReason::NoVectorsIndexed),
             Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
         };
-        let (p, mut vectors) = embed_first(router, &providers, &[query.to_owned()])
+        let text = match self.store.embedding_prefixes() {
+            Ok(Some((prefix, _))) if !prefix.is_empty() => {
+                nugget_infer::with_prefix(&prefix, &[query.to_owned()])
+            }
+            Ok(_) => vec![query.to_owned()],
+            Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
+        };
+        let (p, mut vectors) = embed_first(router, &providers, &text)
             .await
             .map_err(TextOnlyReason::EmbeddingFailed)?;
         let v = vectors.pop().unwrap_or_default();
@@ -734,6 +743,12 @@ impl Retriever {
         let mut vectors: Vec<Option<Vec<f32>>> = ids.iter().map(|id| stored.remove(id)).collect();
         let missing: Vec<usize> = (0..ids.len()).filter(|&i| vectors[i].is_none()).collect();
         if !missing.is_empty() {
+            // Documents of this index, so its document prefix (if any).
+            let prefix = self
+                .store
+                .embedding_prefixes()?
+                .map(|(_, d)| d)
+                .unwrap_or_default();
             let inputs: Vec<String> = missing
                 .iter()
                 .map(|&i| {
@@ -743,6 +758,7 @@ impl Retriever {
                         .collect()
                 })
                 .collect();
+            let inputs = nugget_infer::with_prefix(&prefix, &inputs);
             match p.embed(&inputs).await {
                 Ok(fresh) if validate_vectors(&fresh, inputs.len()).is_ok() => {
                     for (i, v) in missing.into_iter().zip(fresh) {

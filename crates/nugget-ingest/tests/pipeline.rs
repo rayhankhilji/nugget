@@ -568,3 +568,54 @@ async fn files_changed_since_the_scan_are_skipped_not_stored() {
     );
     h.ingest.shutdown().await;
 }
+
+/// A fresh index adopts the embedder's task prefixes and embeds documents with them; an index
+/// that already holds vectors embedded without prefixes keeps embedding without them, so its
+/// stored vectors and new ones (and the retriever's queries) stay on one scheme.
+#[tokio::test]
+async fn documents_follow_the_index_prefix_scheme() {
+    let nomic = ("search_query: ".to_owned(), "search_document: ".to_owned());
+    for legacy in [false, true] {
+        let embedder = FakeProvider::new("local-embed", Locality::OnDevice);
+        *embedder.prefixes.lock().unwrap() = nomic.clone();
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        if legacy {
+            let it = nugget_store::NewItem::new("old", "x", nugget_store::content_hash("x"))
+                .with_text("x");
+            store
+                .upsert_item_with_chunks(
+                    &it,
+                    &[nugget_store::NewChunk::embedded("x", vec![1.0; 4])],
+                )
+                .unwrap();
+        }
+        let h = start(Opts {
+            router: Some(router(&[(embedder.clone(), vec![Tier::Embedding])])),
+            store: Some(store.clone()),
+            ..Default::default()
+        })
+        .await;
+        h.factory.state("fake-1").script(vec![
+            Step::Send(text_doc("1", "hello world", Some("v"))),
+            Step::Return(json!(1)),
+        ]);
+        h.add("fake-1").await;
+        eventually("item 1 indexed", || h.item("fake-1", "1").is_some()).await;
+        let sent = embedder.embedded();
+        assert!(!sent.is_empty());
+        if legacy {
+            assert!(sent.iter().all(|t| !t.starts_with("search_")), "{sent:?}");
+            assert_eq!(
+                store.embedding_prefixes().unwrap(),
+                Some((String::new(), String::new()))
+            );
+        } else {
+            assert!(
+                sent.iter().all(|t| t.starts_with("search_document: ")),
+                "{sent:?}"
+            );
+            assert_eq!(store.embedding_prefixes().unwrap(), Some(nomic.clone()));
+        }
+        h.ingest.shutdown().await;
+    }
+}

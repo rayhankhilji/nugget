@@ -453,6 +453,10 @@ impl Provider for Timed {
         out
     }
 
+    fn embed_prefixes(&self) -> (String, String) {
+        self.inner.embed_prefixes()
+    }
+
     async fn prewarm(&self) -> nugget_core::Result<()> {
         self.inner.prewarm().await
     }

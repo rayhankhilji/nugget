@@ -252,6 +252,7 @@ async fn reembed_item(
         return Outcome::Skipped;
     }
     let (provider, vectors) = match ai::embed(
+        &inner.store,
         router,
         &providers,
         &texts,

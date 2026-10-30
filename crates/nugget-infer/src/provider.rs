@@ -34,6 +34,13 @@ pub trait Provider: Send + Sync {
     async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         self.embed(texts).await
     }
+    /// The model's task prefixes as `(query, document)` (see [`crate::embed_prefixes`]); empty
+    /// for models without them. Providers send texts as given: callers prepend these, and only
+    /// to texts of an index built with them (see `nugget_store::Store::embedding_prefixes`), so
+    /// an index embedded without prefixes keeps getting prefix-free queries. Wrappers forward it.
+    fn embed_prefixes(&self) -> (String, String) {
+        (String::new(), String::new())
+    }
 
     /// Get ready for an imminent request without sending any user content: resolve, connect and
     /// complete the TLS handshake so the connection sits warm in the pool (HTTP/2 keep-alive),

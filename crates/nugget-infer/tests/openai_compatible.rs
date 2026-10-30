@@ -244,8 +244,8 @@ async fn embed_inputs(server: &MockServer) -> Vec<Vec<String>> {
 }
 
 #[tokio::test]
-async fn embeddings_use_task_prefixes() {
-    let texts = vec!["cats".to_string(), "search_query: dogs".to_string()];
+async fn embeddings_report_task_prefixes_and_send_texts_as_given() {
+    let texts = vec!["cats".to_string(), "dogs".to_string()];
     let run = |toml: String| {
         let texts = texts.clone();
         async move {
@@ -258,43 +258,27 @@ async fn embeddings_use_task_prefixes() {
             let (p, _) = provider(&toml, &format!("{}/v1", server.uri()));
             p.embed(&texts).await.unwrap();
             p.embed_query(&texts).await.unwrap();
-            embed_inputs(&server).await
+            (p.embed_prefixes(), embed_inputs(&server).await)
         }
     };
     let cfg = |model: &str, extra: &str| {
         format!("id = \"e\"\nkind = \"openai_compatible\"\nmodel = \"{model}\"\n{extra}")
     };
+    let pair = |q: &str, d: &str| (q.to_owned(), d.to_owned());
+    let unchanged = vec![vec!["cats", "dogs"], vec!["cats", "dogs"]];
 
-    // The served nomic model: documents and queries get their prefixes, never twice.
-    assert_eq!(
-        run(cfg("nomic-embed-text-v1.5-q8", "")).await,
-        vec![
-            vec![
-                "search_document: cats",
-                "search_document: search_query: dogs"
-            ],
-            vec!["search_query: cats", "search_query: dogs"],
-        ]
-    );
+    // The served nomic model reports its prefixes; the texts go out as given (callers prefix
+    // them per index).
+    let (prefixes, sent) = run(cfg("nomic-embed-text-v1.5-q8", "")).await;
+    assert_eq!(prefixes, pair("search_query: ", "search_document: "));
+    assert_eq!(sent, unchanged);
     // An empty prefix disables it; the other one keeps its default.
-    assert_eq!(
-        run(cfg("nomic-embed-text-v1.5-q8", "embed_query_prefix = \"\"")).await,
-        vec![
-            vec![
-                "search_document: cats",
-                "search_document: search_query: dogs"
-            ],
-            vec!["cats", "search_query: dogs"],
-        ]
-    );
-    // Other models get the inputs unchanged.
-    assert_eq!(
-        run(cfg("test-model", "")).await,
-        vec![
-            vec!["cats", "search_query: dogs"],
-            vec!["cats", "search_query: dogs"],
-        ]
-    );
+    let (prefixes, _) = run(cfg("nomic-embed-text-v1.5-q8", "embed_query_prefix = \"\"")).await;
+    assert_eq!(prefixes, pair("", "search_document: "));
+    // Other models have none.
+    let (prefixes, sent) = run(cfg("test-model", "")).await;
+    assert_eq!(prefixes, pair("", ""));
+    assert_eq!(sent, unchanged);
 }
 
 #[tokio::test]
