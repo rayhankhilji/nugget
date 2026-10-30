@@ -33,7 +33,9 @@ function backupsOnDisk(dir) {
   return fs
     .readdirSync(dir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name.startsWith("nugget-backup-") && fs.existsSync(path.join(dir, e.name, "manifest.json")))
-    .map((e) => path.join(dir, e.name));
+    .map((e) => path.join(dir, e.name))
+    .sort()
+    .reverse();
 }
 
 export async function backupScenario({ browser, bin }) {
@@ -126,12 +128,14 @@ export async function backupScenario({ browser, bin }) {
           return [texts.some((x) => done.test(x.trim())), texts];
         }, BACKUP_TIMEOUT_MS);
         summary.timings.backup_ms = Date.now() - tBackup;
-        await until("the backup is listed with a Restore button", async () => {
-          const n = await restoreButtons.count();
-          return [n === 1, n];
-        });
+        // Setting the passphrase makes the first scheduled backup due at once, so "Back up now"
+        // may add a second one; every backup on disk must be listed.
         const onDisk = backupsOnDisk(backupDir);
-        expect(onDisk.length === 1, `expected one complete backup in ${backupDir}, found ${JSON.stringify(fs.readdirSync(backupDir))}`);
+        expect(onDisk.length >= 1, `expected a complete backup in ${backupDir}, found ${JSON.stringify(fs.readdirSync(backupDir))}`);
+        await until("every backup is listed with a Restore button", async () => {
+          const n = await restoreButtons.count();
+          return [n === backupsOnDisk(backupDir).length, n];
+        });
         const manifest = JSON.parse(fs.readFileSync(path.join(onDisk[0], "manifest.json"), "utf8"));
         expect(manifest.format === 1 && manifest.items === items, `manifest ${JSON.stringify(manifest)} should say format 1 and ${items} items`);
         for (const f of ["store.nbk", "key.json"]) expect(fs.existsSync(path.join(onDisk[0], f)), `${f} missing in ${onDisk[0]}`);
@@ -192,9 +196,9 @@ export async function backupScenario({ browser, bin }) {
 
         await open();
         await setFolder(backupDir);
-        await until("the backup in the folder is listed", async () => {
+        await until("the backups in the folder are listed", async () => {
           const n = await restoreButtons.count();
-          return [n === 1, n];
+          return [n >= 1 && n === backupsOnDisk(backupDir).length, n];
         });
         await restoreButtons.first().click();
         const dialog = page.locator("dialog[open]");
