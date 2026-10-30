@@ -127,7 +127,7 @@ Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent
 | EE3 | `ee/ask-quality` | session_01CTjRSuP6na1rnf1rpacnuU | Ask answer-quality suite with real models (correctness, citations, abstention) and fixes |
 | EE4 | `ee/security-review-2` | session_01CTjRSrVUg4uRkQ2yhjxPSi | security review of AA, BB, CC and manifest v4; fixes with regression tests (merged) |
 | EE5 | `ee/release-readiness` | session_01CTjRSqf3cixr49jrhBuKmL | Windows cloud signing path, throwaway-key release rehearsal, release checklist, status page |
-| EE6 | `ee/ui-polish` | session_01CTjRSuMKsfCZJQtWc4LnsJ | page-by-page UI review in light/dark/RTL/de, fixes, visual regression check |
+| EE6 | `ee/ui-polish` | session_01CTjRSuMKsfCZJQtWc4LnsJ | page-by-page UI review in light/dark/RTL/de, fixes, visual regression check (merged) |
 
 ## Wave FF (alongside DD and EE): cloud sessions from b0ea28f
 Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent review layer of subagents.
