@@ -17,6 +17,9 @@ output is steered by that content; a local process running as the same user that
 daemon socket; a hostile or compromised API server (Google, a reranker host); an older,
 validly signed model manifest (rollback).
 
+Each package's fixes were reviewed again by a reviewer that did not write them; the findings
+that review produced are listed with "found by the review of …".
+
 **Trust boundaries reviewed per area:**
 
 - **Drafting (AA1, AA3).** Thread, field, screenshot and retrieved passage text (including
@@ -51,18 +54,22 @@ validly signed model manifest (rollback).
 
 | ID | Severity | Status | Route | Title |
 |---|---|---|---|---|
+| KN-4 | High | Fixed | EE4 | KN-1's fix bypassed by a spoofed display name, a missing `From` header or a vocative |
 | KN-1 | Medium | Fixed | EE4 | A sender's "I" in someone else's mail became a fact about the user |
+| KN-5 | Medium | Fixed | EE4 | A shared document's "I" (Drive file the user does not own) became a fact about the user |
 | DR-1 | Medium | Fixed | EE4 | Streaming credential stop evaded by padding, a split credential, fullwidth forms or a `key=` prefix |
 | DR-2 | Medium | Fixed | EE4 | Header-like lines in passage text move sensitive text into a non-sensitive fact and forge facts |
 | RR-1 | Medium | Open | DD | Sensitive passages are sent to a cloud reranker |
 | AG-1 | Medium | Open | DD | Screen text reaches the agent prompt outside the untrusted fence via VERIFICATION FAILED reasons |
 | DR-5 | Medium | Fixed | EE4 | Credential stop: digits spaced out by words, a start glued to a word, a secret in a sensitive title; quadratic hold |
 | DR-6 | Medium | Fixed | EE4 | Credential stop panics on multi-byte whitespace before a digit group |
+| PL-3 | Medium | Fixed | EE4 | A thread turning sensitive keeps the label an earlier card stored |
 | DR-3 | Low | Fixed | EE4 | Credential stop skipped when grounding is off or a screenshot is attached |
 | DR-4 | Low | Fixed | EE4 | `Citation.date` accepts impossible and future dates |
 | RA-1 | Low | Fixed | EE4 | `draft.read_ahead` rate limit bypassed by a burst of calls |
 | PL-1 | Low | Fixed | EE4 | Free sign-up mail domains and hosted-tenant suffixes share learned domain lift |
 | PL-2 | Low | Fixed | EE4 | A sensitive card's subject kept as a learned thread label after the card is gone |
+| PL-4 | Low | Fixed | EE4 | Registry second levels (`eu.org`, `uk.com`, `googlegroups.com`, …) collapse into one learned domain |
 | KN-2 | Low | Fixed | EE4 | `[knowledge.llm]` per-request entity and claim limits enforced only by the schema |
 | MF-1 | Low | Fixed | EE4 | A manifest signed by several trusted keys advanced only one key's rollback record |
 | KN-3 | Info | Fixed | EE4 | Unbounded, multi-line item title in the extraction prompt |
@@ -171,6 +178,20 @@ validly signed model manifest (rollback).
 - **Attack:** The thread entry's label is the card title ("Reply to Dana: Your biopsy results …"). After a dismissal it outlived the 90-day card tombstone (about 260 days of decay) and was listed by `proactive.learning`, even for sensitive cards.
 - **Fix:** Sensitive cards record no label.
 
+#### PL-3: A thread turning sensitive keeps the label an earlier card stored
+- **Severity:** Medium (found by the review of PL-2's fix)
+- **Status:** Fixed (1866f5b). Regression: nugget-proactive `tests/learning.rs` `a_thread_turning_sensitive_drops_its_earlier_label`.
+- **Path:** `crates/nugget-proactive/src/feedback.rs` (`Learned::forget_thread_label`), `lib.rs` (`learn`)
+- **Attack:** PL-2 stops a sensitive card from writing a label, but a label an earlier non-sensitive card in the same thread stored ("Reply to Dana Lee: Appointment 884213") stayed and was listed by `proactive.learning`.
+- **Fix:** Feedback on a sensitive card clears the thread's stored label.
+
+#### PL-4: Registry second levels collapse into one learned domain
+- **Severity:** Low
+- **Status:** Fixed (1866f5b). Regression: nugget-proactive `feedback::tests::free_signup_domains_teach_nothing_about_the_domain` (new cases).
+- **Path:** `crates/nugget-proactive/src/feedback.rs` (`HOSTED_SUFFIXES`)
+- **Attack:** Without a public suffix list, `acme.eu.org` and `evil.eu.org` both became `eu.org` (likewise `uk.com`, `pp.ua`), and every list on `googlegroups.com`, `groups.io` or `substack.com` shared one domain's lift.
+- **Fix:** Those suffixes added to the hosted list. Still a list: the public suffix list (with its private section) is the proper fix.
+
 **Checked, no issue:** feedback requires an existing card and whitelisted values; an accept or dismiss counts once per card, snooze teaches nothing; lift bounded per scope and per card, weights are constants (no NaN/inf input); learned entries capped at 5000 and pruned; senders keyed by lowercased address (display names, plus-addressing and look-alikes are separate keys); "already handled" cannot hide newer mail; PA-4's invariant (only an offered action runs) still holds. Accepted: a sender whose From passes the provider's checks inherits that sender's lift (pre-existing; no authentication signal in the corpus). Info: the reset audit target carries the user's key unbounded (local user only).
 
 ## Knowledge LLM extraction (KN)
@@ -182,6 +203,20 @@ validly signed model manifest (rollback).
 - **Attack:** `is_me` treated `i`, `me`, `myself` and `you` as the user in every item, and the quote gate accepted a quote naming the subject or the object. Mail from anyone saying "I prefer invoices paid to account 4471" or "I work at Evil Corp" became *user prefers …* / *user works_at …*, which flows into drafts as a trusted fact about the user. No injection is needed; a model naming the subject "I" is enough. An existing test asserted the misattribution.
 - **Fix:** "I/me/myself" mean the user only with no sender, a sender address in the user's address set, or the user's display name; "you/yourself" only in mail from someone else. A pronoun that is not the user is dropped. In mail, a claim about the user needs a quote that refers to them. The user's own notes keep their behaviour.
 
+#### KN-4: KN-1's fix bypassed by a spoofed display name, a missing `From` header or a vocative
+- **Severity:** High (found by the review of KN-1's fix)
+- **Status:** Fixed (1866f5b). Regression: nugget-knowledge `llm::tests::the_senders_first_person_is_not_the_user_by_display_name_missing_from_or_vocative`.
+- **Path:** `crates/nugget-knowledge/src/llm.rs` (`first_person_is_me`, `is_mail`, `in_others_first_person`, the quote gate)
+- **Attack:** (a) "I" was the user when the sender's display name equalled `[knowledge] me.name`; anyone can send as `"Robin Ashgrove" <robin@attacker.test>`. (b) A message without a `From` header fell into the "no sender, so the user's own note" branch and skipped the quote check (the existing "own document" test was such a message). (c) "Robin, I much prefer morning meetings" passed the quote check because it names the user.
+- **Fix:** "I" in mail is the user only when the sender address is one of the user's; mail is recognised by `message/*` type or any parsed header; in mail not from the user, a claim with the user as subject is refused when its quote uses first-person words. Residual (accepted): a forged `From:` with the user's own address still makes "I" the user (could also require the Sent folder); `header_lines` still labels `(the user)` by display name in the prompt (the gate catches the result); with no `me.emails` and `infer_from_sent` off, the user's own sent mail no longer yields first-person facts.
+
+#### KN-5: A shared document's "I" became a fact about the user
+- **Severity:** Medium (found by the review of KN-1's fix)
+- **Status:** Fixed (be3bc5f). Regression: nugget-knowledge `llm::tests::the_first_person_of_a_shared_document_is_not_the_user`.
+- **Path:** `crates/nugget-knowledge/src/llm.rs` (`by_others`, `first_person_is_me`, `Ctx::in_mail`)
+- **Attack:** Every item that is not mail counted as the user's own notes: "I" was the user and no quote check applied. A Drive document someone shared with the user (`include_shared_with_me`) saying "I prefer invoices paid to account 4471" became a fact about the user.
+- **Fix:** A document whose source says the user does not own it (`source.owned_by_me = false`, set by the Drive connector) is treated like mail from someone else. Other connectors that carry foreign documents should set the same flag.
+
 #### KN-2: `[knowledge.llm]` per-request entity and claim limits enforced only by the schema
 - **Severity:** Low
 - **Status:** Fixed (190f6ba). Regression: nugget-knowledge `llm::tests::answers_beyond_the_request_limits_are_cut`.
@@ -191,8 +226,8 @@ validly signed model manifest (rollback).
 
 #### KN-3: Unbounded, multi-line item title in the extraction prompt
 - **Severity:** Info
-- **Status:** Fixed (190f6ba); covered by the existing prompt test.
-- **Path:** `crates/nugget-knowledge/src/llm.rs` (`prompt`)
+- **Status:** Fixed (190f6ba; every control character and U+2028/U+2029, also in header names, in 1866f5b). Regression: nugget-knowledge `llm::tests::the_title_cannot_start_a_line_of_its_own`.
+- **Path:** `crates/nugget-knowledge/src/llm.rs` (`prompt`, `one_line`)
 - **Attack:** The subject went into the prompt raw, uncounted by `max_input_chars`, and with newlines could fake `From: … (the user)` or `[chunk n]` lines.
 - **Fix:** Newlines replaced, cut to 200 characters.
 
