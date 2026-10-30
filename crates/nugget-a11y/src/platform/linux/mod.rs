@@ -109,6 +109,7 @@ impl AtspiPlatform {
         let conn = zbus::blocking::connection::Builder::address(addr.as_str())
             .and_then(|b| b.method_timeout(CALL_TIMEOUT).build())
             .map_err(zerr)?;
+        register_listener(&conn);
         *guard = Some(conn.clone());
         Ok(conn)
     }
@@ -145,6 +146,10 @@ impl AtspiPlatform {
                 break;
             }
         }
+        let active = match active {
+            Some(a) => Some(a),
+            None => active_by_x11(&conn, &root),
+        };
         let Some((app_el, win)) = active else {
             return Ok(None);
         };
@@ -163,6 +168,73 @@ impl AtspiPlatform {
             element: focused,
         }))
     }
+}
+
+/// Register as an event listener with the registry, as screen readers (and every libatspi
+/// client with a cache) do. The toolkit bridges only start tracking window activation (the
+/// `active` state) and emitting events once some client listens: Chromium's frames never
+/// report `active` before that. The registration lives as long as this connection. Best effort:
+/// older registries take the event name alone.
+fn register_listener(conn: &Connection) {
+    const PATH: &str = "/org/a11y/atspi/registry";
+    const IFACE: &str = "org.a11y.atspi.Registry";
+    for event in ["object:state-changed", "window:"] {
+        let r = conn.call_method(
+            Some(REGISTRY),
+            PATH,
+            Some(IFACE),
+            "RegisterEvent",
+            &(event, Vec::<String>::new(), ""),
+        );
+        if r.is_err() {
+            let r = conn.call_method(
+                Some(REGISTRY),
+                PATH,
+                Some(IFACE),
+                "RegisterEvent",
+                &(event,),
+            );
+            if let Err(e) = r {
+                tracing::debug!(error = %e, event, "AT-SPI RegisterEvent failed");
+            }
+        }
+    }
+}
+
+/// When no toplevel reports `active` (a toolkit that does not track it, or one that only
+/// started to after the window was activated): the X11 window manager's active window, mapped
+/// to the AT-SPI app by process id and to its toplevel by title (else the only showing one).
+fn active_by_x11(conn: &Connection, root: &AtspiEl) -> Option<(AtspiEl, AtspiEl)> {
+    let (pid, title) = x11::active_window().ok()??;
+    for app in root.child_refs(512) {
+        let Some(app_el) = AtspiEl::from_ref(conn, &app) else {
+            continue;
+        };
+        if computer::pid_of(conn, &app_el.dest) != Some(pid) {
+            continue;
+        }
+        let mut showing = Vec::new();
+        for w in app_el.child_refs(64) {
+            let Some(w) = AtspiEl::from_ref(conn, &w) else {
+                continue;
+            };
+            let name = w.acc().name().unwrap_or_default();
+            if title
+                .as_deref()
+                .is_some_and(|t| !name.is_empty() && t == name)
+            {
+                return Some((app_el, w));
+            }
+            if w.states().is_ok_and(|s| s.contains(State::Showing)) {
+                showing.push(w);
+            }
+        }
+        if showing.len() == 1 {
+            let w = showing.pop()?;
+            return Some((app_el, w));
+        }
+    }
+    None
 }
 
 /// The AT-SPI role name (`GetRoleName`: "password text", "text", "push button"...).
@@ -455,22 +527,41 @@ impl Element for AtspiEl {
     }
 }
 
+/// Whether a focused element is where text goes: it has the `Text` interface. LibreOffice
+/// marks the document's container panel `focused` as well as the paragraph holding the caret.
+fn takes_text(el: &AtspiEl) -> bool {
+    el.interfaces().contains(Interface::Text)
+}
+
 /// The focused element inside `win`: a collection match, else a bounded breadth-first search
-/// that skips subtrees which are not showing.
+/// that skips subtrees which are not showing. Several elements can be `focused` at once (an
+/// office document's container and its paragraph): the first one with text wins, else the
+/// first one.
 fn find_focused(win: &AtspiEl) -> Option<AtspiEl> {
+    // A focused element without text: kept while its subtree is searched for one with text.
+    let mut container: Option<AtspiEl> = None;
     if let Some(coll) = win.collection() {
         let rule = ObjectMatchRule::builder()
             .states([State::Focused], MatchType::All)
             .build();
-        if let Ok(found) = coll.get_matches(rule, SortOrder::Canonical, 1, true)
-            && let Some(el) = found.first().and_then(|r| AtspiEl::from_ref(&win.conn, r))
-        {
-            return Some(el);
+        if let Ok(found) = coll.get_matches(rule, SortOrder::Canonical, 8, true) {
+            let els: Vec<AtspiEl> = found
+                .iter()
+                .filter_map(|r| AtspiEl::from_ref(&win.conn, r))
+                .collect();
+            if let Some(el) = els.iter().find(|e| takes_text(e)) {
+                return Some(el.clone());
+            }
+            container = els.into_iter().next();
         }
     }
     let deadline = Instant::now() + FOCUS_SEARCH_TIME;
-    let mut queue = VecDeque::from([win.clone()]);
-    let mut seen = 0usize;
+    let mut queue = match &container {
+        // Only the focused container's subtree.
+        Some(c) => VecDeque::from(c.children(512)),
+        None => VecDeque::from([win.clone()]),
+    };
+    let mut seen = usize::from(container.is_some());
     while let Some(el) = queue.pop_front() {
         seen += 1;
         if seen > FOCUS_SEARCH_NODES || Instant::now() > deadline {
@@ -478,7 +569,16 @@ fn find_focused(win: &AtspiEl) -> Option<AtspiEl> {
         }
         let Ok(st) = el.states() else { continue };
         if st.contains(State::Focused) && seen > 1 {
-            return Some(el);
+            if takes_text(&el) {
+                return Some(el);
+            }
+            if container.is_none() {
+                container = Some(el.clone());
+                // Only the focused container's subtree from now on.
+                queue.clear();
+                queue.extend(el.children(512));
+                continue;
+            }
         }
         if seen > 1 && !st.contains(State::Showing) {
             continue;
@@ -489,7 +589,7 @@ fn find_focused(win: &AtspiEl) -> Option<AtspiEl> {
         }
         queue.extend(el.children(512));
     }
-    None
+    container
 }
 
 /// A desktop-file id for the app owning `bus_name`, from its process: the launcher's

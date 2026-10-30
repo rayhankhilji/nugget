@@ -407,7 +407,7 @@ struct AppScan {
     windows: Vec<(AtspiEl, StateSet, Option<String>)>,
 }
 
-fn pid_of(conn: &Connection, bus_name: &str) -> Option<u32> {
+pub(super) fn pid_of(conn: &Connection, bus_name: &str) -> Option<u32> {
     let dbus = zbus::blocking::fdo::DBusProxy::new(conn).ok()?;
     let name = zbus::names::BusName::try_from(bus_name.to_string()).ok()?;
     dbus.get_connection_unix_process_id(name).ok()
