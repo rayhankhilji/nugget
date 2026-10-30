@@ -1589,6 +1589,113 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+## Energy
+
+DD2 measured what Nugget costs in energy and battery and cut what was wasteful: the daemon idle,
+indexing 1,000 items, the desktop shell hidden in the tray, the shell's "what is in front"
+accessibility read alone, a scripted minute of Double Tap focus changes with read-ahead on and off,
+and the real model's read-ahead prefill. Method and metric names: [`energy` (DD2)](#energy-dd2).
+Reports: [`results/energy/`](results/energy/), one folder per workflow run.
+
+**No energy counter on the CI machines.** The PLAN asks for battery cost, which needs a
+package-energy counter. Neither GitHub runner has one: the Linux VMs expose no RAPL zones
+(`/sys/class/powercap` is empty), and `powermetrics` on the virtual Macs reports no processor
+energy or power (only the per-task `energy_impact` score). So every joule figure below is
+**MISSED (not measured)**, and the numbers are CPU time and wakeups (context switches on Linux,
+`powermetrics` wakeups on macOS), the two things that drain a laptop battery and that energy
+roughly follows. The suite reports joules on its own wherever a counter exists (a Linux laptop
+with readable RAPL, a physical Mac): the weekly `energy` job will, once it lands on such a machine.
+
+**Setup.** `nugget-bench energy --scale quick` (60 s windows, seed 42), release `nuggetd` and bench,
+the **debug** desktop shell (its probe counts the read-aheads; a release shell is a little cheaper).
+Linux: Xvfb + openbox + AT-SPI (`bench/scripts/energy-linux.sh`), three GTK text windows switched
+every 5 s with `xdotool`. "Before" is the shell at `40e1994` (1 s frontmost-app poll), "after" is
+this branch, both built and run in the same job on the same runner.
+
+### Daemon and indexing
+
+Run [41021694231](https://github.com/rayhankhilji/nugget/actions/runs/41021694231) at `2f21533`,
+Linux, AMD EPYC 7763 (4 vCPUs, 2 cores), 15.6 GiB:
+
+| Figure | Value | Target | |
+|---|---|---|---|
+| Daemon idle (2,000 items, vault on), 60 s | 0.086% of one core, 1.6 wakeups/s | idle overhead (X5: 0.03% at 100k items over its window) | measured |
+| Indexing 1,000 files through the daemon (text-only, no embedding model) | 1.56 s, **1.06 CPU-s per 1k items**, 11,800 wakeups per 1k items | battery cost per 1k items | CPU measured; **joules MISSED (not measured)** |
+| Daemon idle energy | – | – | **MISSED (not measured)** |
+
+Indexing with the real local embedding model, and the knowledge extraction that follows indexing,
+are not in these figures (known gap: `index_1k` runs the daemon without model providers).
+
+### Desktop shell: idle in the tray and Double Tap focus changes
+
+**Linux**, same run and runner, shell before → after (shell = `nugget-desktop` with its WebKitGTK
+child processes):
+
+| Scenario (60 s) | Shell CPU before → after | Shell wakeups/s before → after | Read-aheads (sent / started) |
+|---|---|---|---|
+| Idle in the tray, nothing in front (read-ahead on) | 0.096% → **0.065%** | 7.4 → **5.0** (−32%) | 0 |
+| 12 focus switches, read-ahead **off** | 0.045% → 0.044% | 4.0 → 3.5 | 0 |
+| 12 focus switches, read-ahead **on** | 1.53% → **1.46%** | 131 → **120** (−8%) | 4 / 3 (both) |
+
+The daemon stayed at or under 0.005% and 0.6 wakeups/s in every scenario; the fake model server
+(which answers a prefill at once) at 0.002%. The frontmost-app read itself (`a11y_poll`, AT-SPI,
+nothing focused): 0.39 ms per call (p50), **0.34 ms of CPU and ~16 wakeups per call**, so a 1 Hz
+poll alone costs about 0.03% of a core and 16 wakeups/s.
+
+**What changed and what it bought.** The 1 s poll is gone: on macOS and Windows the shell now
+waits for the OS to report a focus change (NSWorkspace app activation; `SetWinEventHook`
+foreground and title changes) and otherwise checks every 5 s; on Linux, where no such notice
+exists for us, it checks every second only while a field is about to be read or a read-ahead is
+running, else every 2 s. The read-ahead planner and its decisions are unchanged (a test replays
+the schedule against 100 ms polling and gets the same reads at the same moments). On Linux this
+cut the idle shell's wakeups by a third. It did not cut the cost of read-ahead itself: **with
+read-ahead on, moving between text fields every 5 s costs the shell about 1.5% of a core and
+~120 wakeups/s**, against 0.04% and 3.5 with it off. That cost is the full accessibility read of
+each newly focused field and its thread (one per field after the 1.5 s dwell, rereads backing off
+from 10 s), not the polling and not the daemon. Making that read cheaper is not done here.
+
+**macOS** (run [41027744669](https://github.com/rayhankhilji/nugget/actions/runs/41027744669) at
+`c361fb7`, Apple M1 virtual, 3 cores, 7 GiB; three TextEdit documents brought to the front with
+`open`; CPU and wakeups from `powermetrics`' tasks sampler; the shell's WebKit processes are XPC
+services, not its children, so they are not in these figures):
+
+| Scenario (60 s) | Shell CPU before → after | Shell wakeups/s before → after | Read-aheads sent |
+|---|---|---|---|
+| Idle in the tray, nothing in front (read-ahead on) | 0.47% → **0.053%** (−89%) | 4.1 → **1.6** (−60%) | 0 |
+| 12 focus switches, read-ahead **off** | 0.009% → 0.005% | 0.10 → 0.10 | 0 |
+| 12 focus switches, read-ahead **on** | 0.38% → **0.18%** (−52%) | 3.7 → **1.7** (−54%) | 4 (both) |
+
+Here the 1 s poll was most of the shell's idle cost (each check is an Accessibility round trip to
+the frontmost app), and the focus notifications remove it: the hidden shell's CPU drops ninefold.
+The same run repeated Linux on another CPU (Intel Xeon 8370C) and reproduced run 41021694231:
+idle shell 6.8 → 5.1 wakeups/s, read-ahead on 130 → 120 wakeups/s (1.39% → 1.25% of a core).
+The macOS daemon: idle 0.059% / 1.5 wakeups/s; indexing 1,000 files 1.06 CPU-s (1.7 s).
+
+### Read-ahead prefill with a real model
+
+`energy-prefill` in the same run, `--scale quick`, 4 read-aheads of distinct fixture tasks after
+one warm-up, metered on `llama-server`:
+
+| Runner | Model | Seconds per read-ahead | CPU-seconds per read-ahead | Energy |
+|---|---|---|---|---|
+| Linux, AMD EPYC 9V74 (4 vCPUs), CPU | qwen3-4b-q4km | 12.9 | 25.7 | **MISSED (not measured)** |
+| Linux, AMD EPYC 9V74 | qwen3-1.7b-q8 | 6.8 | 13.5 | **MISSED (not measured)** |
+| macOS, M2 Pro (virtual, 5 cores), Metal | qwen3-4b-q4km | 7.4 | 34.4 | energy impact 466/s; joules **MISSED** |
+| macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | 2.6 | 12.5 | energy impact 471/s; joules **MISSED** |
+
+This is the cost that matters for battery: one read-ahead of a new reply field with the 4B model takes as
+much CPU (26 s) as about ten hours of the idle daemon and hidden shell together (~2.4 s per hour). It is mostly work the draft would do
+anyway at the trigger (see [CC1](#a-small-double-tap-model-and-read-ahead-wave-cc-cc1)); it is
+wasted for fields that get focus and no draft. Because it cannot be measured in joules here and
+moves rather than adds work for the user who drafts, read-ahead stays on by default, also on
+battery; it **pauses in low power mode / battery saver** (macOS Low Power Mode, Windows battery
+saver, Linux `low-power` platform profile), and **Read ahead on battery** (Double Tap settings,
+`read_ahead_on_battery`, default on) pauses it whenever the computer runs on battery.
+
+**Keeping it measured.** `.github/workflows/perf.yml` runs `energy` (Linux and macOS, every
+scenario but `prefill`) and `energy-prefill` (both OSes, real models) weekly with the daemon
+`perf` job, and on demand with a `before_ref` for before/after comparisons on one runner.
+
 ## Real-model results
 
 Every number elsewhere in this file comes from scripted or fake models. These come from real local

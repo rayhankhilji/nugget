@@ -27,10 +27,6 @@ on:
   schedule:
     # Mondays 04:17 UTC.
     - cron: "17 4 * * 1"
-  # TEMPORARY (DD2): remove before merge. On push the energy, energy-prefill and windows-check
-  # jobs run at `quick` with the shell of 40e1994 as the "before"; perf does not run.
-  push:
-    branches: [dd/energy]
 
 permissions:
   contents: read
@@ -53,8 +49,6 @@ env:
 jobs:
   perf:
     name: Perf, real backend (Linux)
-    # TEMPORARY (DD2): remove before merge (with the push trigger).
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -111,8 +105,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     env:
-      SCALE: ${{ inputs.scale || (github.event_name == 'push' && 'quick') || 'full' }}
-      BEFORE_REF: ${{ inputs.before_ref || (github.event_name == 'push' && '40e1994') || '' }}
+      SCALE: ${{ inputs.scale || 'full' }}
+      BEFORE_REF: ${{ inputs.before_ref || '' }}
       RESULTS: ${{ github.workspace }}/energy-results
       # Every scenario but `prefill` (the energy-prefill job).
       SCENARIOS: daemon_idle,index_1k,a11y_poll,shell_idle,shell_focus
@@ -363,67 +357,3 @@ jobs:
           path: ${{ env.RESULTS }}/
           retention-days: 90
           if-no-files-found: error
-
-  # TEMPORARY (DD2): remove before merge. The shell's per-OS code (focus notifications, power
-  # state) checked on Windows and macOS while the branch is open; ci.yml's desktop job covers it
-  # for good after the merge.
-  windows-check:
-    name: nugget-desktop check (${{ matrix.os }}, TEMPORARY)
-    if: github.event_name != 'schedule'
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            test: true
-          - os: macos-latest
-            test: false
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - name: Install Rust toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy
-
-      - name: Use Strawberry Perl for vendored OpenSSL
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $perl = 'C:\Strawberry\perl\bin\perl.exe'
-          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
-
-      - uses: ilammy/setup-nasm@v1
-        if: runner.os == 'Windows'
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: false
-
-      - uses: pnpm/action-setup@v4
-        with:
-          package_json_file: apps/desktop/package.json
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
-      # nugget-desktop embeds the built frontend.
-      - name: Build frontend
-        working-directory: apps/desktop
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: cargo clippy (desktop)
-        run: cargo clippy --locked -p nugget-desktop --all-targets -- -D warnings
-
-      # The energy suite's per-OS code (meter, shell scenarios).
-      - name: cargo clippy (bench)
-        run: cargo clippy --locked -p nugget-bench --all-targets -- -D warnings
-
-      - name: cargo test (desktop)
-        if: matrix.test
-        run: cargo test --locked -p nugget-desktop
