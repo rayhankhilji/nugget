@@ -32,13 +32,14 @@ jobs:
   # fired by the key press. gnome runs the session and portal tests only: Mutter has no
   # data-control protocol for the Wayland clipboard the insert path uses.
   wayland:
-    name: Wayland (${{ matrix.compositor }})
+    name: Wayland (${{ matrix.compositor }} ${{ matrix.run }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        compositor: [kwin, gnome]
+        compositor: [gnome]
+        run: [1, 2, 3]
     env:
       NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
       NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
@@ -115,7 +116,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: wayland-${{ matrix.compositor }}
+          name: wayland-${{ matrix.compositor }}-${{ matrix.run }}
           path: wayland-artifacts/
           if-no-files-found: ignore
 
@@ -192,7 +193,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        compositor: [kwin, gnome, sway]
+        compositor: [kwin, gnome]
     env:
       NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
       NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts

@@ -195,13 +195,19 @@ struct Bind {
 fn settle(listener: &dyn Listener, t: Instant) -> Bind {
     let mut consent = "none asked (returning shortcut)".to_string();
     let mut asked = false;
+    let mut waiting_since: Option<Instant> = None;
     let deadline = Instant::now() + Duration::from_secs(40);
     loop {
         let state = listener.state();
         match &state {
+            // Every bind waits on the portal briefly; a returning shortcut is bound in
+            // milliseconds, so only a bind still open after 1.5 s is waiting on a dialog.
             ShortcutState::AwaitingConsent if !asked => {
-                asked = true;
-                consent = accept_dialog();
+                let since = *waiting_since.get_or_insert_with(Instant::now);
+                if since.elapsed() > Duration::from_millis(1500) {
+                    asked = true;
+                    consent = accept_dialog();
+                }
             }
             ShortcutState::Active { .. }
             | ShortcutState::NotAssigned

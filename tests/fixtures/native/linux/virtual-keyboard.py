@@ -189,6 +189,15 @@ def gnome_press(chords, hold_ms):
             GLib.VariantType(reply) if reply else None, Gio.DBusCallFlags.NONE, 10000, None,
         )
 
+    # App accelerators (the portal's) only fire in the normal action mode, not in the overview.
+    overview = bus.call_sync(
+        "org.gnome.Shell", "/org/gnome/Shell", "org.freedesktop.DBus.Properties", "Get",
+        GLib.Variant("(ss)", ("org.gnome.Shell", "OverviewActive")), GLib.VariantType("(v)"),
+        Gio.DBusCallFlags.NONE, 5000, None,
+    ).unpack()[0]
+    if overview:
+        print("virtual-keyboard: warning: GNOME Shell is in the overview", flush=True)
+
     (session,) = call(
         "/org/gnome/Mutter/RemoteDesktop", "org.gnome.Mutter.RemoteDesktop", "CreateSession",
         reply="(o)",

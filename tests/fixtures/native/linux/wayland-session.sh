@@ -255,12 +255,20 @@ if [ "$compositor" = gnome ]; then
         gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
             --method org.freedesktop.DBus.Properties.Get org.gnome.Shell "$1" 2>/dev/null
     }
-    for _ in $(seq 1 50); do
-        gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
-            --method org.freedesktop.DBus.Properties.Set org.gnome.Shell OverviewActive '<false>' \
-            >/dev/null 2>&1
-        shell_prop OverviewActive | grep -q false && break
-        sleep 0.2
+    # The startup animation opens the overview a moment after the shell is on the bus: hide it
+    # until it has stayed hidden for 3 s.
+    hidden=0
+    for _ in $(seq 1 100); do
+        if shell_prop OverviewActive | grep -q false; then
+            hidden=$((hidden + 1))
+            [ "$hidden" -ge 6 ] && break
+        else
+            hidden=0
+            gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell \
+                --method org.freedesktop.DBus.Properties.Set org.gnome.Shell OverviewActive '<false>' \
+                >/dev/null 2>&1
+        fi
+        sleep 0.5
     done
     echo "wayland-session: gnome-shell $(shell_prop ShellVersion) overview $(shell_prop OverviewActive)"
     # Start the GNOME portal backend ourselves (rather than by activation) so its log is kept,
