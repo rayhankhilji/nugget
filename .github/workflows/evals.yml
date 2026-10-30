@@ -48,9 +48,6 @@ env:
   CHAT_MODEL: ${{ inputs.chat_model || '' }}
   NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
   RESULTS: ${{ github.workspace }}/eval-results
-  # The bench verifies the signed manifest in a release build: trust the in-repo dev key
-  # (docs/security/manifest-trust.md). Never set for builds shipped to users.
-  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
 
 jobs:
   eval:
