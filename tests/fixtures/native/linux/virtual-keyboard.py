@@ -34,6 +34,13 @@ KEYS = {
 }
 
 
+# X keysyms for the same keys (KWin's keyboard_keysym request, --keysym).
+KEYSYMS = {
+    1: 0xFF1B, 15: 0xFF09, 28: 0xFF0D, 29: 0xFFE3, 42: 0xFFE1, 56: 0xFFE9, 57: 0x20, 125: 0xFFEB,
+    30: 0x61, 31: 0x73, 32: 0x64, 33: 0x66, 16: 0x71, 17: 0x77, 18: 0x65, 19: 0x72, 20: 0x74,
+}
+
+
 def parse(chord):
     codes = []
     for name in chord.split("+"):
@@ -116,7 +123,7 @@ class Wayland:
                 self.done.add(obj)
 
 
-def kwin_press(chords, hold_ms):
+def kwin_press(chords, hold_ms, keysym=False):
     wl = Wayland()
     wl.registry = wl.new_id()
     wl.send(1, 1, struct.pack("<I", wl.registry))  # wl_display.get_registry
@@ -145,16 +152,19 @@ def kwin_press(chords, hold_ms):
     time.sleep(0.3)
     for chord in chords:
         codes = parse(chord)
-        for c in codes:
-            wl.send(fake, 10, struct.pack("<II", c, 1))  # keyboard_key(key, pressed)
+        # keyboard_key(evdev key, state) is opcode 10; keyboard_keysym(keysym, state) 12 (v6).
+        op, vals = (12, [KEYSYMS[c] for c in codes]) if keysym else (10, codes)
+        for v in vals:
+            wl.send(fake, op, struct.pack("<II", v, 1))
             wl.roundtrip()
             time.sleep(0.03)
         time.sleep(hold_ms / 1000)
-        for c in reversed(codes):
-            wl.send(fake, 10, struct.pack("<II", c, 0))
+        for v in reversed(vals):
+            wl.send(fake, op, struct.pack("<II", v, 0))
             wl.roundtrip()
             time.sleep(0.03)
-        print(f"virtual-keyboard: kwin fake_input pressed {chord} (evdev {codes})", flush=True)
+        kind = "keysyms" if keysym else "evdev"
+        print(f"virtual-keyboard: kwin fake_input pressed {chord} ({kind} {vals})", flush=True)
         time.sleep(0.2)
     if bind_version >= 5:
         wl.send(fake, 11)  # destroy
@@ -210,12 +220,13 @@ def main():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--compositor", default=os.environ.get("NUGGET_WAYLAND_COMPOSITOR", ""))
     p.add_argument("--hold-ms", type=int, default=80)
+    p.add_argument("--keysym", action="store_true", help="kwin: send keysyms, not key codes")
     p.add_argument("chords", nargs="+")
     a = p.parse_args()
     for chord in a.chords:
         parse(chord)
     if a.compositor == "kwin":
-        kwin_press(a.chords, a.hold_ms)
+        kwin_press(a.chords, a.hold_ms, a.keysym)
     elif a.compositor == "gnome":
         gnome_press(a.chords, a.hold_ms)
     else:

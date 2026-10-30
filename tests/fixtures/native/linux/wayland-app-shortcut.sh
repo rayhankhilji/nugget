@@ -98,15 +98,18 @@ if [ "$compositor" = sway ]; then
     fi
     session="unavailable (documented error)"
     sleep 2
-    before="$(probe_count trigger)"
+    # The hand-off starts the Double Tap flow (the probe's `trigger` event, or the flow's first
+    # `view` where the hand-off does not record one).
+    started() { echo $(($(probe_count trigger) + $(probe_count view))); }
+    before="$(started)"
     t0="$(date +%s%N)"
     GDK_BACKEND=wayland "$app" --double-tap >"$out/second-instance.log" 2>&1
     log "second instance exited with $?"
     for _ in $(seq 1 50); do
-        [ "$(probe_count trigger)" -gt "$before" ] && break
+        [ "$(started)" -gt "$before" ] && break
         sleep 0.1
     done
-    if [ "$(probe_count trigger)" -gt "$before" ]; then
+    if [ "$(started)" -gt "$before" ]; then
         fired="yes"
         fire_ms="$((($(date +%s%N) - t0) / 1000000)) (launch to probe, upper bound)"
     fi
@@ -129,21 +132,31 @@ else
     registered="dev.nugget.desktop"
 fi
 
-# 2. Consent.
-if python3 "$accept" --timeout 25 --dump >"$out/consent.log" 2>&1; then
-    consent="dialog accepted over AT-SPI"
-    rc=0
-else
+# 2. Consent. Nugget binds two shortcuts in two portal sessions (Double Tap, and the agents'
+# kill switch), so the desktop may ask twice: accept each dialog until none appears.
+consent="none"
+accepted=0
+timeout=25
+: >"$out/consent.log"
+for _ in 1 2 3 4; do
+    python3 "$accept" --timeout "$timeout" >>"$out/consent.log" 2>&1
     rc=$?
-fi
-cat "$out/consent.log"
-if [ "$rc" = 3 ]; then
-    if [ "$consent_mode" = preseed ]; then
-        consent="PRE-SEEDED (returning-user kglobalshortcutsrc, no dialog)"
-    else
-        consent="no dialog appeared"
+    if [ "$rc" = 0 ]; then
+        accepted=$((accepted + 1))
+        timeout=8
+        sleep 0.5
+        continue
     fi
-elif [ "$rc" != 0 ]; then
+    break
+done
+cat "$out/consent.log"
+if [ "$accepted" -gt 0 ]; then
+    consent="$accepted dialog(s) accepted over AT-SPI"
+elif [ "$rc" = 3 ] && [ "$consent_mode" = preseed ]; then
+    consent="PRE-SEEDED (returning-user kglobalshortcutsrc, no dialog)"
+elif [ "$rc" = 3 ]; then
+    consent="no dialog appeared"
+else
     consent="dialog not accepted (rc $rc)"
 fi
 log "consent: $consent"

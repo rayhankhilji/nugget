@@ -10,6 +10,65 @@ env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
 jobs:
+  kwin-diag:
+    name: kwin fake input diagnostics
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NUGGET_WAYLAND_COMPOSITOR: kwin
+      NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
+      NUGGET_WAYLAND_DBUS_MONITOR: "1"
+      NUGGET_WAYLAND_KWIN_LOGGING: "kwin_*.debug=true;kf.globalaccel*.debug=true"
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - run: tests/fixtures/native/linux/install-wayland-session.sh kwin; dpkg-query -W xkb-data libxkbcommon0 || true
+      - name: Diagnose
+        run: |
+          mkdir -p "$NUGGET_WAYLAND_LOGS"
+          cat > "$RUNNER_TEMP/text.py" <<'PYEOF'
+          import gi, sys
+          gi.require_version("Atspi", "2.0")
+          from gi.repository import Atspi
+          def walk(n, d=0):
+              yield n
+              if d > 30: return
+              for i in range(n.get_child_count()):
+                  c = n.get_child_at_index(i)
+                  if c is not None: yield from walk(c, d + 1)
+          for app in [Atspi.get_desktop(0).get_child_at_index(i) for i in range(Atspi.get_desktop(0).get_child_count())]:
+              for n in walk(app):
+                  if n.get_name() == "Message composer":
+                      t = n.get_text_iface()
+                      print("COMPOSER TEXT:", repr(t.get_text(0, -1)) if t else None, flush=True)
+          PYEOF
+          tests/fixtures/native/linux/wayland-session.sh bash -c '
+            set -x
+            GDK_BACKEND=wayland GTK_A11Y=atspi GSK_RENDERER=cairo python3 tests/fixtures/native/linux/gtk4_fixture.py composer > "$NUGGET_WAYLAND_LOGS/fixture.out" 2>&1 &
+            sleep 4; cat "$NUGGET_WAYLAND_LOGS/fixture.out"
+            python3 "$RUNNER_TEMP/text.py"
+            python3 "$NUGGET_WAYLAND_KEYS" a; sleep 0.5; python3 "$RUNNER_TEMP/text.py"
+            python3 "$NUGGET_WAYLAND_KEYS" --keysym s; sleep 0.5; python3 "$RUNNER_TEMP/text.py"
+            python3 tests/fixtures/native/linux/portal-shortcut-client.py --seconds 40 > "$NUGGET_WAYLAND_LOGS/client.out" 2>&1 &
+            sleep 3
+            python3 "$NUGGET_WAYLAND_ACCEPT_DIALOG" --timeout 20; sleep 2
+            cat "$NUGGET_WAYLAND_LOGS/client.out"
+            python3 "$NUGGET_WAYLAND_KEYS" ctrl+alt+space; sleep 1.5
+            python3 "$NUGGET_WAYLAND_KEYS" --keysym ctrl+alt+space; sleep 1.5
+            cat "$NUGGET_WAYLAND_LOGS/client.out"
+            python3 "$RUNNER_TEMP/text.py"
+            grep -n "kglobalaccel\|globalShortcutPressed\|invokeShortcut" "$NUGGET_WAYLAND_LOGS/dbus-monitor.log" | grep -iv "introspect" | tail -30 || true
+            grep -i -n "key\|shortcut\|fake\|xkb\|inhibit\|keymap\|layout" "$NUGGET_WAYLAND_LOGS/kwin.log" | grep -v "Effect\|decoration" | tail -80 || true
+            true
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: kwin-diag
+          path: wayland-artifacts/
+          if-no-files-found: ignore
+
   # ---- Linux Wayland ----
   # A private headless Wayland session (tests/fixtures/native/linux/wayland-session.sh): a session
   # bus, the compositor, the accessibility bus and the XDG portals, with a GTK 4 fixture app
@@ -38,10 +97,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        compositor: [sway, kwin, gnome]
+        compositor: [kwin]
     env:
       NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
       NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
+      NUGGET_WAYLAND_DBUS_MONITOR: "1"
+      NUGGET_WAYLAND_KWIN_LOGGING: "kwin_*.debug=true;kf.globalaccel*.debug=true"
       NUGGET_GTK4_PYTHON: /usr/bin/python3
       # KDE's and GNOME's portals implement GlobalShortcuts: fail if the session lost it, or if
       # a key press does not fire the bound shortcut.

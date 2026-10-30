@@ -14,11 +14,15 @@ appeared before the timeout, 1 on another failure. Prints the tree with --dump (
 import argparse
 import sys
 import time
+import warnings
 
 import gi
 
 gi.require_version("Atspi", "2.0")
 from gi.repository import Atspi  # noqa: E402
+
+# Atspi.Action.get_action_name is deprecated but is the one that takes an index everywhere.
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 TITLES = ("Global Shortcuts Requested", "Add Keyboard Shortcuts")
 ACCEPT = ("OK", "Add", "Allow", "_Add", "&OK")
