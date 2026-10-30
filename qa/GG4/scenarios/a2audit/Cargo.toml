@@ -1,0 +1,14 @@
+# GG4 A2: print the audit log of a stopped daemon's store (no IPC method reads it).
+#   cargo build --manifest-path qa/GG4/scenarios/a2audit/Cargo.toml --target-dir target
+[package]
+name = "gg4-audit"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+nugget-store = { path = "../../../../crates/nugget-store" }
+serde_json = "1"
