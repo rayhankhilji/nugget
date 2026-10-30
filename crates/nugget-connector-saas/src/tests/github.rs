@@ -253,11 +253,12 @@ async fn incremental_skips_unchanged_items_and_uses_repo_scopes() {
         .filter_map(|r| serde_json::from_slice::<Value>(&r.body).ok())
         .find_map(|b| b["variables"]["q"].as_str().map(str::to_string))
         .unwrap();
+    // The search starts a little before the watermark (search indexing lags).
     assert_eq!(
         q,
         format!(
             "repo:o/r updated:>={} sort:updated-asc",
-            rfc3339(since).unwrap()
+            rfc3339(since - crate::github::WATERMARK_OVERLAP_SECS).unwrap()
         )
     );
 }

@@ -1,6 +1,10 @@
 //! `notion`: pages and databases shared with the user's integration, through the Notion REST API
 //! (`Notion-Version: 2022-06-28`).
 //!
+//! Scopes: a Notion internal integration with the *Read content* capability only (no update or
+//! insert), plus *Read user information without email addresses* for author names. It sees only
+//! pages the user shares with it. The secret comes only from the keychain (or `token_env`).
+//!
 //! **Documents.** Each page becomes Markdown (`page/<id>`): its title, then its blocks rendered
 //! recursively (headings, lists, to-dos, toggles, quotes, callouts, code, tables, ...), down to
 //! `max_depth` levels and at most [`MAX_BLOCKS`] blocks / [`MAX_DOC_CHARS`] characters. Child
@@ -38,7 +42,7 @@ use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::api::{self, Api, Outcome, classify_common, snippet};
+use crate::api::{self, Api, ItemFailures, Outcome, classify_common, server_now, snippet};
 use crate::auth::{Credential, Token};
 use crate::settings;
 use crate::text::{clean, now_unix, one_line, parse_rfc3339, rfc3339, safe_id, truncate_chars};
@@ -270,6 +274,10 @@ impl Connector for NotionConnector {
         let mut max_seen = since;
         let mut kept = 0usize;
         let mut start: Option<String> = None;
+        let mut failures = ItemFailures::default();
+        // The earliest edit time of a page that failed to load: `since` stays at or before it
+        // so the next pass reads the page again.
+        let mut hold: Option<i64> = None;
         'listing: for _ in 0..MAX_SEARCH_PAGES {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -285,6 +293,10 @@ impl Connector for NotionConnector {
             if !resp.status.is_success() {
                 return Err(status_error(&resp, "search"));
             }
+            // "Edited recently" is judged by Notion's clock (the response `Date`), not ours: with
+            // a local clock running ahead, a page edited a minute ago would otherwise get a
+            // final version and a second edit within the same (rounded) minute would be missed.
+            let server_clock = server_now(&resp.headers);
             let page: SearchPage = api::json(&resp, "notion search")?;
             for obj in page.results {
                 let Some(r) = Obj::parse(&obj) else { continue };
@@ -308,7 +320,7 @@ impl Connector for NotionConnector {
                 kept += 1;
                 live.insert(r.key.clone());
                 max_seen = Some(max_seen.map_or(r.edited, |m| m.max(r.edited)));
-                let version = if now - r.edited < PROVISIONAL_SECS {
+                let version = if server_clock - r.edited < PROVISIONAL_SECS {
                     format!("{}~", r.edited_raw)
                 } else {
                     r.edited_raw.clone()
@@ -320,12 +332,24 @@ impl Connector for NotionConnector {
                     continue;
                 }
                 let doc = if r.is_database {
-                    Some(
-                        self.database_document(&obj, &r, &info, version, cancel)
-                            .await?,
-                    )
+                    self.database_document(&obj, &r, &info, version, cancel)
+                        .await
+                        .map(Some)
                 } else {
-                    self.page_document(&obj, &r, &info, version, cancel).await?
+                    self.page_document(&obj, &r, &info, version, cancel).await
+                };
+                let doc = match doc {
+                    Ok(d) => {
+                        failures.ok();
+                        d
+                    }
+                    Err(e) => {
+                        // One page that fails to load (a 500 on its blocks, a malformed
+                        // answer) must not stop the sync; it is retried next pass.
+                        failures.skip(e, SERVICE, r.key.as_str())?;
+                        hold = Some(hold.map_or(r.edited, |h| h.min(r.edited)));
+                        continue;
+                    }
                 };
                 match doc {
                     Some(d) => sink.send(Change::Upsert(d)).await?,
@@ -347,7 +371,7 @@ impl Connector for NotionConnector {
             cur.reconciled_at = now;
         }
         if let Some(m) = max_seen {
-            cur.since = rfc3339(m);
+            cur.since = rfc3339(hold.map_or(m, |h| h.min(m)));
         }
         Ok(cur.to_value())
     }

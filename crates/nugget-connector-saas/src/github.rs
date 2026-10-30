@@ -1,6 +1,12 @@
 //! `github`: issues, pull requests and discussions the user takes part in, through the GitHub
 //! GraphQL API (v4).
 //!
+//! Scopes: a fine-grained personal access token with read-only *Issues*, *Pull requests*,
+//! *Discussions* and *Metadata* on the chosen repositories; or, with the device flow, an OAuth
+//! App token with `repo` (read access to private issues and pull requests has no narrower
+//! classic scope) and `read:discussion`, or a GitHub App with the same read-only permissions.
+//! Tokens come only from the keychain (or `token_env`).
+//!
 //! **Why GraphQL.** Discussions exist only in GraphQL, and one GraphQL search page returns each
 //! issue or pull request *with* its labels, comments and reviews, where REST needs a search call
 //! plus two to three calls per item (`/comments`, `/pulls/{n}/reviews`, `/pulls/{n}/comments`).
@@ -45,7 +51,9 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::api::{self, Api, Outcome, classify_common, header_u64, retry_after_ms};
+use crate::api::{
+    self, Api, ItemFailures, Outcome, classify_common, header_u64, retry_after_ms, server_now,
+};
 use crate::auth::{self, Credential, DeviceFlow, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
@@ -67,6 +75,8 @@ const MAX_DOC_CHARS: usize = 400_000;
 /// Stop the pass (and let the supervisor wait) below this many remaining GraphQL points.
 const MIN_POINTS: i64 = 50;
 const MAX_REPOS: usize = 100;
+/// How far before the watermark each incremental search starts (search indexing lag).
+pub(crate) const WATERMARK_OVERLAP_SECS: i64 = 300;
 
 fn default_window() -> u32 {
     365
@@ -317,9 +327,10 @@ impl std::fmt::Debug for GitHubConnector {
 fn classify(resp: Response) -> Outcome {
     let status = resp.status.as_u16();
     let h = &resp.headers;
+    // Measured against the response's `Date`, not the local clock (which may be off).
     let reset_ms = || {
         header_u64(h, "x-ratelimit-reset").map(|reset| {
-            let now = u64::try_from(now_unix()).unwrap_or(0);
+            let now = u64::try_from(server_now(h)).unwrap_or(0);
             reset
                 .saturating_sub(now)
                 .saturating_add(1)
@@ -530,6 +541,7 @@ impl GitHubConnector {
             })
             .await?;
         let v: Value = api::json(&resp, "github graphql")?;
+        let server_clock = server_now(&resp.headers);
         if let Some(errors) = v["errors"].as_array().filter(|e| !e.is_empty()) {
             if v["data"].is_null()
                 || v["data"]
@@ -557,7 +569,7 @@ impl GitHubConnector {
                 .map(|t| t.unix_timestamp());
             return Err(Error::RateLimited {
                 retry_after_ms: reset
-                    .map(|r| u64::try_from((r - now_unix()).max(1)).unwrap_or(60) * 1000),
+                    .map(|r| u64::try_from((r - server_clock).max(1)).unwrap_or(60) * 1000),
             });
         }
         Ok(v)
@@ -651,9 +663,19 @@ impl GitHubConnector {
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        let mut since = cur.scopes.get(id).map_or(cur.window_from, |s| s.since);
+        // Re-read a little before the watermark: search indexing lags behind `updatedAt`, so an
+        // item updated just before the last item seen can show up in search after it.
+        let mut since = cur
+            .scopes
+            .get(id)
+            .map_or(cur.window_from, |s| s.since - WATERMARK_OVERLAP_SECS)
+            .max(cur.window_from);
         let mut after: Option<String> = None;
         let mut in_query = 0usize;
+        let mut failures = ItemFailures::default();
+        // The earliest `updatedAt` of an item that failed to load: the watermark stays at or
+        // below it so the next pass retries the item.
+        let mut hold: Option<i64> = None;
         for _ in 0..MAX_PAGES_PER_SCOPE {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -685,12 +707,27 @@ impl GitHubConnector {
                 {
                     continue;
                 }
-                let doc = self.document(n, key, viewer, cancel).await?;
+                let doc = match self.document(n, key.clone(), viewer, cancel).await {
+                    Ok(d) => {
+                        failures.ok();
+                        d
+                    }
+                    Err(e) => {
+                        failures.skip(e, SERVICE, &key)?;
+                        let t = parse_rfc3339(updated).map_or(since, |t| t.unix_timestamp());
+                        hold = Some(hold.map_or(t, |h| h.min(t)));
+                        continue;
+                    }
+                };
                 sink.send(Change::Upsert(doc)).await?;
             }
             in_query += nodes.len();
-            cur.scopes
-                .insert(id.to_string(), ScopeState { since: last });
+            cur.scopes.insert(
+                id.to_string(),
+                ScopeState {
+                    since: hold.map_or(last, |h| h.min(last)),
+                },
+            );
             sink.checkpoint(cur.to_value()).await?;
             let next = search["pageInfo"]["endCursor"].as_str().map(str::to_string);
             if search["pageInfo"]["hasNextPage"].as_bool() != Some(true)

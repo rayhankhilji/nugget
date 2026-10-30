@@ -1,5 +1,10 @@
 //! `slack`: conversations read through the Slack Web API with the user's own token.
 //!
+//! Scopes: a Slack *user* token (`xoxp-…`) of the user's own app, read-only: `channels:history`,
+//! `groups:history`, `im:history`, `mpim:history` (messages of the conversation types synced),
+//! `channels:read`, `groups:read`, `im:read`, `mpim:read` (list and resolve conversations) and
+//! `users:read` (author names). No write scopes; the token comes only from the keychain (or `token_env`).
+//!
 //! **Documents.** Messages are grouped into *conversation windows*: one document per
 //! conversation per UTC day (`<channel>/day/<YYYY-MM-DD>`, the top-level messages of that day)
 //! and one per thread (`<channel>/thread/<ts>`, the parent and every reply). Author ids are
@@ -39,7 +44,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::api::{self, Api, Outcome, classify_common, retry_after_ms};
+use crate::api::{self, Api, Outcome, classify_common, item_error, retry_after_ms};
 use crate::auth::{Credential, Token};
 use crate::settings::{self, MAX_WINDOW_DAYS};
 use crate::text::{
@@ -62,6 +67,9 @@ const MAX_HISTORY_PAGES: usize = 5_000;
 const MAX_LIST_PAGES: usize = 50;
 const MAX_USER_LOOKUPS_PER_PASS: usize = 500;
 const MAX_USERS_CACHED: usize = 50_000;
+/// Range reads end this far past the local clock: a message stamped by Slack's clock while
+/// ours runs behind must still be read now, not once our clock has caught up.
+pub(crate) const CLOCK_SKEW_SECS: i64 = 3600;
 /// Subtypes that carry no conversation content.
 const SKIP_SUBTYPES: &[&str] = &[
     "channel_join",
@@ -908,7 +916,7 @@ impl SlackConnector {
             // drop what lies outside it.
             state.backfill = Some(Range {
                 from: window_from,
-                before: now + 1,
+                before: now + CLOCK_SKEW_SECS,
             });
             state.checked_at = now;
             for key in known
@@ -951,7 +959,7 @@ impl SlackConnector {
                     conv,
                     info,
                     from,
-                    now + 1,
+                    now + CLOCK_SKEW_SECS,
                     false,
                     cur,
                     known,
@@ -1238,6 +1246,54 @@ impl SlackConnector {
         if unchanged {
             return Ok(());
         }
+        let (mut msgs, dropped) = match self.replies(conv, parent, cancel).await {
+            Ok(r) => r,
+            // One thread that fails to load must not stop the sync: the parent stays in its
+            // day document, and the thread is read again at the next re-check.
+            Err(e) if item_error(&e) => {
+                tracing::warn!(source = %self.ctx.source, channel = %conv.id, "skipping a slack thread that failed to load: {e}");
+                return Ok(());
+            }
+            Err(e) => return Err(e),
+        };
+        if !msgs.iter().any(|m| m.ts == parent.ts) {
+            msgs.push(parent.clone());
+        }
+        msgs.sort_by_key(|m| ts_secs_frac(&m.ts));
+        let ids = author_and_mention_ids(&msgs);
+        self.ensure_users(&ids, lookups, cancel).await?;
+
+        let users = self.users_snapshot();
+        let first = render_mrkdwn(&parent.text, &users);
+        let title = format!("Thread in {}: {}", conv.display, one_line(&first, 80));
+        let (body, stats) = render_messages(&msgs, dropped, &users, info, true);
+        let content = format!("{title}\n\n{body}");
+        let secs = ts_secs(&parent.ts).unwrap_or_default();
+        let mut doc = Document::new(key, "text/plain", Content::Text(content.clone()));
+        doc.title = Some(title);
+        doc.version = Some(format!("{meta}#{}", hash_hex(&content)));
+        doc.modified_at = msgs
+            .iter()
+            .filter_map(|m| ts_secs(&m.ts))
+            .max()
+            .and_then(|t| time::OffsetDateTime::from_unix_timestamp(t).ok());
+        doc.url = permalink(info, &conv.id, &parent.ts);
+        doc.metadata = self.metadata(conv, info, &stats, secs, Some(&parent.ts));
+        sink.send(Change::Upsert(doc)).await?;
+        if let Some(list) = known.threads.get_mut(&secs) {
+            list.retain(|(ts, _, _)| *ts != parent.ts);
+        }
+        Ok(())
+    }
+
+    /// A thread's messages (parent included when Slack returns it), capped, and how many were
+    /// left out.
+    async fn replies(
+        &self,
+        conv: &Conversation,
+        parent: &Msg,
+        cancel: &CancellationToken,
+    ) -> Result<(Vec<Msg>, usize)> {
         let mut msgs: Vec<Msg> = Vec::new();
         let mut next: Option<String> = None;
         let mut dropped = 0usize;
@@ -1274,34 +1330,7 @@ impl SlackConnector {
                 _ => break,
             }
         }
-        if !msgs.iter().any(|m| m.ts == parent.ts) {
-            msgs.push(parent.clone());
-        }
-        msgs.sort_by_key(|m| ts_secs_frac(&m.ts));
-        let ids = author_and_mention_ids(&msgs);
-        self.ensure_users(&ids, lookups, cancel).await?;
-
-        let users = self.users_snapshot();
-        let first = render_mrkdwn(&parent.text, &users);
-        let title = format!("Thread in {}: {}", conv.display, one_line(&first, 80));
-        let (body, stats) = render_messages(&msgs, dropped, &users, info, true);
-        let content = format!("{title}\n\n{body}");
-        let secs = ts_secs(&parent.ts).unwrap_or_default();
-        let mut doc = Document::new(key, "text/plain", Content::Text(content.clone()));
-        doc.title = Some(title);
-        doc.version = Some(format!("{meta}#{}", hash_hex(&content)));
-        doc.modified_at = msgs
-            .iter()
-            .filter_map(|m| ts_secs(&m.ts))
-            .max()
-            .and_then(|t| time::OffsetDateTime::from_unix_timestamp(t).ok());
-        doc.url = permalink(info, &conv.id, &parent.ts);
-        doc.metadata = self.metadata(conv, info, &stats, secs, Some(&parent.ts));
-        sink.send(Change::Upsert(doc)).await?;
-        if let Some(list) = known.threads.get_mut(&secs) {
-            list.retain(|(ts, _, _)| *ts != parent.ts);
-        }
-        Ok(())
+        Ok((msgs, dropped))
     }
 
     fn users_snapshot(&self) -> HashMap<String, String> {
