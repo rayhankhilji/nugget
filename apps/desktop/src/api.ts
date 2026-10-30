@@ -2143,3 +2143,164 @@ export const learningApi = {
   /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
+
+// ---- FF1: backup, restore, export ----
+//
+// `backup.*` and `export.run` (`crates/nuggetd/src/features/backup*`; snake_case like the rest of
+// the IPC). Backups are encrypted with the store key, which is sealed under the user's backup
+// passphrase; exports are plain files and NOT encrypted.
+
+/** One backup on disk (`BackupInfo`). */
+export interface BackupInfo {
+  /** The backup directory (`<folder>/nugget-backup-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  /** RFC 3339. */
+  created_at: string;
+  items: number;
+  bytes: number;
+  schema_version: number;
+  app_version: string;
+  /** `linux`, `macos` or `windows`: the computer the backup was made on. */
+  os: string;
+}
+
+/** The daemon found its database damaged at start and has not written to it. */
+export interface BackupRecovery {
+  /** Why the database was refused (plain text from the daemon). */
+  reason: string;
+  /** The damaged database file. */
+  db_path: string;
+  /** Where the damaged file was set aside, if it was moved. */
+  moved_to: string | null;
+  latest_backup: BackupInfo | null;
+}
+
+export interface BackupStatus {
+  folder: string | null;
+  /** 0 = manual only. */
+  interval_hours: number;
+  keep: number;
+  passphrase_set: boolean;
+  running: boolean;
+  last_backup: BackupInfo | null;
+  last_error: string | null;
+  /** RFC 3339; `null` when manual only or not configured. */
+  next_due: string | null;
+  restore_pending: boolean;
+  recovery: BackupRecovery | null;
+}
+
+/** `backup.configure`: only the fields given change. */
+export interface BackupConfigure {
+  folder?: string;
+  interval_hours?: number;
+  keep?: number;
+}
+
+export interface BackupList {
+  /** Newest first. */
+  backups: BackupInfo[];
+}
+
+export interface BackupRestoreRequest {
+  path: string;
+  /** Needed when the backup's key is not this computer's store key (another computer, lost key). */
+  passphrase?: string;
+}
+
+export interface BackupRestoreResult {
+  staged: boolean;
+  restart_required: boolean;
+}
+
+export interface ExportResult {
+  /** The export directory (`<folder>/nugget-export-YYYYMMDDTHHMMSSZ`). */
+  path: string;
+  items: number;
+  entities: number;
+  claims: number;
+  audit_entries: number;
+  egress_rows: number;
+  vault_files: number;
+}
+
+export type ExportPhase = "items" | "graph" | "audit" | "egress" | "vault";
+export const EXPORT_PHASES: readonly ExportPhase[] = ["items", "graph", "audit", "egress", "vault"];
+
+/** `export.progress` notification params. */
+export interface ExportProgress {
+  phase: ExportPhase | string;
+  done: number;
+}
+
+/** This feature's daemon notifications (they arrive through `events.onNotification`). */
+export const BACKUP_NOTIFICATION = { changed: "backup.changed", exportProgress: "export.progress" } as const;
+
+/** Schedules the UI offers, as `interval_hours`. */
+export const BACKUP_INTERVALS = { manual: 0, daily: 24, weekly: 168 } as const;
+export type BackupSchedule = keyof typeof BACKUP_INTERVALS;
+
+/** The schedule an `interval_hours` value reads as (other values show as the closest choice). */
+export function scheduleOf(hours: number): BackupSchedule {
+  if (hours <= 0) return "manual";
+  return hours < 96 ? "daily" : "weekly";
+}
+
+/** The daemon's minimum passphrase length (`backup.set_passphrase`). */
+export const MIN_BACKUP_PASSPHRASE = 8;
+
+export function isBackupStatus(v: unknown): v is BackupStatus {
+  return isRecord(v) && typeof v.passphrase_set === "boolean" && typeof v.running === "boolean" && isCount(v.keep) && isCount(v.interval_hours);
+}
+
+export function isExportProgress(v: unknown): v is ExportProgress {
+  return isRecord(v) && typeof v.phase === "string" && isCount(v.done);
+}
+
+export const backupApi = {
+  /** Older daemons answer "method not found". */
+  status: () => call<BackupStatus>("backup_status"),
+  configure: (request: BackupConfigure) => call<BackupStatus>("backup_configure", { request }),
+  /** Write-only: callers drop the passphrase from their state right after this resolves. */
+  setPassphrase: (passphrase: string) => call<{ ok: boolean }>("backup_set_passphrase", { request: { passphrase } }),
+  /** Back up now; `backup.changed` follows. Fails without a folder or a passphrase. */
+  run: () => call<BackupInfo>("backup_run", { request: {} }),
+  /** Backups in `folder` (default: the configured folder), newest first. */
+  list: (folder?: string | null) => call<BackupList>("backup_list", { request: folder ? { folder } : {} }),
+  /** Verifies and stages the backup; the daemon then exits by itself and applies it at its next start. */
+  restore: (request: BackupRestoreRequest) => call<BackupRestoreResult>("backup_restore", { request }),
+  /** Progress arrives as `export.progress` notifications. */
+  exportRun: (folder: string) => call<ExportResult>("export_run", { request: { folder } }),
+};
+
+/** How long to wait for the daemon to exit after staging a restore. */
+export const RESTORE_EXIT_TIMEOUT_MS = 15_000;
+const RESTORE_POLL_MS = 250;
+
+export type RestorePhase = "staging" | "restarting" | "done";
+
+/**
+ * Restore a backup end to end: stage it (`backup.restore`), wait until the daemon has shut
+ * itself down, start it again with the app's `start_daemon` (the daemon applies the staged
+ * restore as it starts) and wait until it answers. `onPhase` reports progress. Throws an
+ * `ApiError` from the step that failed. The current data is set aside by the daemon, never deleted.
+ */
+export async function restoreAndRestart(
+  request: BackupRestoreRequest,
+  onPhase: (phase: RestorePhase) => void = () => {},
+  sleep: (ms: number) => Promise<void> = sleepMs,
+): Promise<ConnectionInfo> {
+  onPhase("staging");
+  await backupApi.restore(request);
+  onPhase("restarting");
+  // `start_daemon` returns at once while the old daemon still answers: wait for it to go first.
+  for (let waited = 0; waited < RESTORE_EXIT_TIMEOUT_MS; waited += RESTORE_POLL_MS) {
+    const c = await api.connection().catch(() => null);
+    if (!c?.connected) break;
+    await sleep(RESTORE_POLL_MS);
+  }
+  const conn = await api.startDaemon();
+  if (!conn.connected) throw new ApiError({ kind: "spawn", message: conn.error ?? t("backup.restore.didNotStart") });
+  onPhase("done");
+  return conn;
+}

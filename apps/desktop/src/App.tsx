@@ -6,6 +6,7 @@ import { comboAria, comboLabel, digitOf, hasMod, isComposing, isTypingTarget, le
 import { useT, type MessageKey } from "./i18n";
 import { Logo } from "./components/Logo";
 import { Offline } from "./components/Offline";
+import { RecoveryBanner } from "./components/BackupSettings";
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { ShortcutsHelp, type ShortcutRow } from "./components/ShortcutsHelp";
 import { ChatPage } from "./pages/Chat";
@@ -328,7 +329,10 @@ export function App() {
         ) : !conn.connected ? (
           <Offline conn={conn} onConnected={setConn} onRetry={refreshConnection} />
         ) : (
-          <Current />
+          <>
+            <RecoveryBanner />
+            <Current />
+          </>
         )}
       </main>
       {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}

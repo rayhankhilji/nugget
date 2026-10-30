@@ -937,6 +937,99 @@ pub async fn pick_plugin_file(app: AppHandle) -> Result<Option<String>> {
         .transpose()
 }
 
+// ---- FF1: backup, restore, export ----
+//
+// Pass-through proxies to the daemon's `backup.*` and `export.run` (see `src/api.ts`). Requests
+// are JSON objects whose string fields are paths or a passphrase; the passphrase is passed
+// through, never logged. The daemon validates everything else.
+
+/// Paths beyond this are a UI bug.
+const MAX_PATH_LEN: usize = 4096;
+
+fn check_backup_request(request: &Value) -> Result<()> {
+    let Some(fields) = request.as_object() else {
+        return Err(CmdError::Other("the request must be an object".into()));
+    };
+    for (name, value) in fields {
+        let limit = if name == "passphrase" {
+            MAX_SECRET_LEN
+        } else {
+            MAX_PATH_LEN
+        };
+        if value.as_str().is_some_and(|s| s.len() > limit) {
+            return Err(CmdError::Other(format!("the {name} is too long")));
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn backup_status(app: AppHandle, daemon: State<'_, Daemon>) -> Result<Value> {
+    daemon.call(&app, "backup.status", &json!({})).await
+}
+
+#[tauri::command]
+pub async fn backup_configure(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.configure", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_set_passphrase(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.set_passphrase", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_run(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.run", &request).await
+}
+
+#[tauri::command]
+pub async fn backup_list(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.list", &request).await
+}
+
+/// Stages a restore; the daemon exits by itself right after replying and the UI calls
+/// `start_daemon`, which applies it.
+#[tauri::command]
+pub async fn backup_restore(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "backup.restore", &request).await
+}
+
+#[tauri::command]
+pub async fn export_run(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: Value,
+) -> Result<Value> {
+    check_backup_request(&request)?;
+    daemon.call(&app, "export.run", &request).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

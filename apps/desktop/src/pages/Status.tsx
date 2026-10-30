@@ -19,6 +19,7 @@ import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/An
 import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
+import { BackupSettings } from "../components/BackupSettings";
 import { formatList, formatNumber, Trans, useT, type MessageKey } from "../i18n";
 
 export function StatusPage() {
@@ -136,6 +137,7 @@ export function StatusPage() {
       <IndexingCard data={ingest.data} error={ingest.error} loading={ingest.loading} onRetry={ingest.reload} />
       <RuntimeCard data={runtime.data} error={runtime.error} loading={runtime.loading} onRetry={runtime.reload} />
       <KnowledgeCard data={knowledge.data} error={knowledge.error} loading={knowledge.loading} onRetry={knowledge.reload} />
+      <BackupSettings />
       <UpdateSettings />
 
       <h2>{t("status.connection")}</h2>
