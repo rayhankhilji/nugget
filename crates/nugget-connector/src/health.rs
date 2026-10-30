@@ -19,6 +19,9 @@ pub mod code {
     pub const ITEM_ERRORS: &str = "item_errors";
     pub const ERROR: &str = "error";
     pub const DISABLED: &str = "disabled";
+    pub const SYNCING: &str = "syncing";
+    pub const NOT_SET_UP: &str = "not_set_up";
+    pub const DISK_FULL: &str = "disk_full";
 }
 
 /// Describe a source's health.
@@ -51,11 +54,18 @@ pub fn diagnose(
         );
     }
     if state == SourceState::NeedsAuth {
-        return mk(
-            code::RECONNECT,
-            format!("{} stopped accepting Nugget's sign-in, so syncing is paused.", cap(&service)),
-            reconnect_fix(kind, &service),
-        );
+        // Not every 401/403 is fixed by signing in again (a rejected OAuth client or an API not
+        // enabled in the user's own cloud project is a settings problem).
+        let (c, reason, fix) = match last_error {
+            Some(err) => classify(kind, &service, err),
+            None => reconnect(kind, &service),
+        };
+        let (c, reason, fix) = if matches!(c, code::CONFIG | code::NOT_SET_UP) {
+            (c, reason, fix)
+        } else {
+            reconnect(kind, &service)
+        };
+        return mk(c, reason, fix);
     }
     let failing = matches!(state, SourceState::Error) || last_error.is_some();
     if let (true, Some(err)) = (failing, last_error) {
@@ -74,43 +84,115 @@ pub fn diagnose(
                 .into(),
         );
     }
+    if state == SourceState::Syncing {
+        return mk(code::SYNCING, "Syncing now.".into(), String::new());
+    }
     mk(code::OK, "Up to date.".into(), String::new())
 }
 
-fn classify(kind: &str, service: &str, err: &str) -> (&'static str, String, String) {
+type Diagnosis = (&'static str, String, String);
+
+fn reconnect(kind: &str, service: &str) -> Diagnosis {
+    (
+        code::RECONNECT,
+        format!(
+            "{} stopped accepting Nugget's sign-in, so syncing is paused.",
+            cap(service)
+        ),
+        reconnect_fix(kind, service),
+    )
+}
+
+fn classify(kind: &str, service: &str, err: &str) -> Diagnosis {
     let lower = err.to_ascii_lowercase();
-    if lower.starts_with("authorization required")
-        || lower.contains("invalid_grant")
-        || lower.contains("reconnect")
-    {
+    let has = |needles: &[&str]| needles.iter().any(|n| lower.contains(n));
+
+    // Settings problems that look like auth failures: re-signing in cannot fix them.
+    if has(&[
+        "invalid_client",
+        "unauthorized_client",
+        "accessnotconfigured",
+        "has not been used in project",
+        "admin_consent",
+        "aadsts65001",
+    ]) {
         return (
-            code::RECONNECT,
-            format!("{} stopped accepting Nugget's sign-in, so syncing is paused.", cap(service)),
-            reconnect_fix(kind, service),
+            code::CONFIG,
+            format!(
+                "{} rejected the app registration Nugget signs in with.",
+                cap(service)
+            ),
+            "Check the client ID (and secret) in the source's settings, and that the API is \
+             enabled for your app in the provider's console."
+                .into(),
         );
     }
-    if lower.starts_with("rate limited") || lower.contains("quota") {
+    if lower.starts_with("authorization required")
+        && has(&["not connected", "authorize the source first"])
+    {
+        return (
+            code::NOT_SET_UP,
+            format!("This source is not signed in to {service} yet."),
+            "Sign in from the source to finish setting it up.".into(),
+        );
+    }
+    if lower.starts_with("authorization required") || has(&["invalid_grant"]) {
+        return reconnect(kind, service);
+    }
+    if lower.starts_with("insufficient disk space")
+        || has(&[
+            "no space left",
+            "disk quota exceeded",
+            "os error 28",
+            "os error 122",
+        ])
+    {
+        return (
+            code::DISK_FULL,
+            "This computer is out of disk space, so Nugget cannot store more.".into(),
+            "Free up disk space; syncing resumes on its own.".into(),
+        );
+    }
+    if lower.starts_with("rate limited")
+        || has(&[
+            "ratelimitexceeded",
+            "userratelimitexceeded",
+            "dailylimitexceeded",
+            "quotaexceeded\"",
+        ])
+    {
         return (
             code::RATE_LIMITED,
-            format!("{service} asked Nugget to slow down (rate limit or daily quota)."),
+            format!(
+                "{} asked Nugget to slow down (rate limit or daily quota).",
+                cap(service)
+            ),
             "Nothing to do: Nugget waits and resumes where it stopped.".into(),
         );
     }
-    if lower.contains("exceeds") && (lower.contains("bytes") || lower.contains("size")) {
+    if lower.contains("exceeds") && has(&["bytes", "size"]) {
+        // Oversized *items* are skipped by the connectors; a pass that fails on size hit the
+        // cap on a listing or page, and retrying will not help.
         return (
             code::TOO_LARGE,
-            "A response or item was larger than Nugget's size limit.".into(),
-            "Nothing to do for the source; very large items are skipped.".into(),
+            format!("A response from {service} was larger than Nugget's size limit, so the sync is stuck."),
+            "Please report this (Troubleshooting in the docs); removing the oversized item from the source also unblocks it."
+                .into(),
         );
     }
     if lower.starts_with("network error") {
-        let server = ["http 5", "server error", "bad gateway", "unavailable"]
-            .iter()
-            .any(|p| lower.contains(p));
-        if server {
+        if has(&[
+            "http 5",
+            "server error",
+            "bad gateway",
+            "service unavailable",
+        ]) {
             return (
                 code::SERVER_ERROR,
-                format!("{service} is having trouble right now (server error)."),
+                format!(
+                    "{} is having trouble right now (server error).",
+                    cap(service)
+                ),
                 "Nothing to do: Nugget retries with backoff and resumes where it stopped.".into(),
             );
         }
@@ -120,11 +202,27 @@ fn classify(kind: &str, service: &str, err: &str) -> (&'static str, String, Stri
             "Check your internet connection, VPN or proxy; Nugget retries automatically.".into(),
         );
     }
-    if lower.starts_with("invalid input") || lower.starts_with("not found") {
+    if lower.starts_with("not found")
+        || has(&["http 404", "os error 2)", "os error 3)", "no such file"])
+    {
         return (
             code::CONFIG,
-            format!("{service} rejected this source's settings."),
+            format!("Something this source points at no longer exists in {service}."),
             "Open the source's settings and check the account, folders or paths.".into(),
+        );
+    }
+    if has(&[
+        "permission denied",
+        "os error 13)",
+        "operation not permitted",
+        "os error 1)",
+    ]) {
+        return (
+            code::CONFIG,
+            "Nugget is not allowed to read part of this source.".into(),
+            "Give Nugget access (on macOS: System Settings → Privacy & Security → Full Disk \
+             Access), or remove that folder from the source."
+                .into(),
         );
     }
     (
@@ -199,29 +297,91 @@ mod tests {
 
     #[test]
     fn reconnect_is_never_silent() {
-        let h = d("gmail", SourceState::NeedsAuth, Some("authorization required: x"));
+        let h = d(
+            "gmail",
+            SourceState::NeedsAuth,
+            Some("authorization required: x"),
+        );
         assert_eq!(h.code, code::RECONNECT);
         assert!(h.fix.contains("Sign in again"));
         let h = d("imap", SourceState::NeedsAuth, None);
         assert!(h.reason.starts_with("The mail server"), "{}", h.reason);
         assert!(h.fix.contains("app password"));
         // A refresh failure reported as a plain error still asks to reconnect.
-        let h = d("onedrive", SourceState::Error, Some("provider error: invalid_grant"));
+        let h = d(
+            "onedrive",
+            SourceState::Error,
+            Some("provider error: invalid_grant"),
+        );
         assert_eq!(h.code, code::RECONNECT);
+        // Signing in again cannot fix a rejected client or a disabled API.
+        let h = d(
+            "gmail",
+            SourceState::NeedsAuth,
+            Some("authorization required: the OAuth client was rejected (invalid_client)"),
+        );
+        assert_eq!(h.code, code::CONFIG);
+        let h = d(
+            "gdrive",
+            SourceState::NeedsAuth,
+            Some("authorization required: HTTP 403 accessNotConfigured"),
+        );
+        assert_eq!(h.code, code::CONFIG);
+        let h = d(
+            "gmail",
+            SourceState::NeedsAuth,
+            Some("authorization required: not connected to Google; authorize the source first"),
+        );
+        assert_eq!(h.code, code::NOT_SET_UP);
+        assert_eq!(d("gmail", SourceState::Syncing, None).code, code::SYNCING);
     }
 
     #[test]
     fn classifies_transient_and_config_errors() {
         let cases = [
             ("rate limited (retry after 5000 ms)", code::RATE_LIMITED),
-            ("network error: HTTP 503 Service Unavailable: x", code::SERVER_ERROR),
+            (
+                "network error: HTTP 503 Service Unavailable: x",
+                code::SERVER_ERROR,
+            ),
             ("network error: request failed: dns", code::OFFLINE),
-            ("invalid input: response body exceeds 10 bytes", code::TOO_LARGE),
-            ("invalid input: unknown folder", code::CONFIG),
+            (
+                "invalid input: response body exceeds 10 bytes",
+                code::TOO_LARGE,
+            ),
+            ("not found: folder Work", code::CONFIG),
+            ("HTTP 404: gone", code::CONFIG),
+            ("io error: Permission denied (os error 13)", code::CONFIG),
+            (
+                "io error: No space left on device (os error 28)",
+                code::DISK_FULL,
+            ),
+            (
+                "io error: Disk quota exceeded (os error 122)",
+                code::DISK_FULL,
+            ),
+            (
+                "insufficient disk space: need 5 bytes, 1 available",
+                code::DISK_FULL,
+            ),
+            (
+                "network error: request failed: Resource temporarily unavailable (os error 11)",
+                code::OFFLINE,
+            ),
+            ("network error: reconnecting after reset", code::OFFLINE),
+            (
+                "invalid input: token endpoint returned malformed JSON",
+                code::ERROR,
+            ),
+            ("provider error: storageQuotaExceeded", code::ERROR),
             ("something odd", code::ERROR),
         ];
         for (err, want) in cases {
-            assert_eq!(d("slack", SourceState::Error, Some(err)).code, want, "{err}");
+            assert_eq!(
+                d("slack", SourceState::Error, Some(err)).code,
+                want,
+                "{err}"
+            );
         }
     }
 }

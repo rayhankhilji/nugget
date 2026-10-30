@@ -223,8 +223,16 @@ function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string 
       return { reason: t("sources.health.tooLarge"), fix: "" };
     case "config":
       return { reason: t("sources.health.config", { name }), fix: t("sources.health.configFix") };
-    default:
+    case undefined:
+    case "ok":
+    case "syncing":
+    case "disabled":
+    case "error":
+    case "item_errors":
       return null;
+    default:
+      // A code this build has no translation for: the daemon's English text.
+      return s.health ? { reason: s.health.reason, fix: s.health.fix ?? "" } : null;
   }
 }
 
@@ -339,7 +347,7 @@ function SourceRow({
             ) : (
               <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
             )}
-            {isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
+            {!health && isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
         )}
         {!hasProblem(s) && (s.health?.item_errors ?? 0) > 0 && (

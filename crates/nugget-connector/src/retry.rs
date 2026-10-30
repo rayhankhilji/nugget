@@ -49,6 +49,8 @@ pub fn retry_after_ms(headers: &HeaderMap) -> Option<u64> {
 }
 
 /// Parse an IMF-fixdate (`Sun, 06 Nov 1994 08:49:37 GMT`), the HTTP-date form servers send.
+/// The obsolete RFC 850 and asctime forms are not accepted (`None`: callers fall back to their
+/// own backoff).
 pub fn parse_http_date(s: &str) -> Option<OffsetDateTime> {
     OffsetDateTime::parse(s.trim(), &Rfc2822).ok()
 }
@@ -78,13 +80,13 @@ impl Backoff {
             .base
             .saturating_mul(1u32.checked_shl(attempt.min(20)).unwrap_or(u32::MAX))
             .min(self.max);
-        let quarter = exp.as_millis() as u64 / 4;
+        let quarter = u64::try_from(exp.as_millis()).unwrap_or(u64::MAX) / 4;
         let jitter = if quarter == 0 {
             0
         } else {
             jitter_seed() % (quarter + 1)
         };
-        let d = exp + Duration::from_millis(jitter);
+        let d = exp.saturating_add(Duration::from_millis(jitter));
         match retry_after {
             Some(ra) => d.max(ra),
             None => d,
@@ -119,8 +121,14 @@ mod tests {
 
     #[test]
     fn delta_seconds_and_cap() {
-        assert_eq!(retry_after(&h(&[(RETRY_AFTER, "7")])), Some(Duration::from_secs(7)));
-        assert_eq!(retry_after(&h(&[(RETRY_AFTER, " 0 ")])), Some(Duration::ZERO));
+        assert_eq!(
+            retry_after(&h(&[(RETRY_AFTER, "7")])),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            retry_after(&h(&[(RETRY_AFTER, " 0 ")])),
+            Some(Duration::ZERO)
+        );
         assert_eq!(
             retry_after(&h(&[(RETRY_AFTER, "999999999")])),
             Some(MAX_RETRY_AFTER)
@@ -138,12 +146,18 @@ mod tests {
             (DATE, "Wed, 21 Oct 2026 07:28:00 GMT"),
             (RETRY_AFTER, "Wed, 21 Oct 2026 07:28:30 GMT"),
         ]);
-        assert_eq!(retry_after_at(&headers, local), Some(Duration::from_secs(30)));
+        assert_eq!(
+            retry_after_at(&headers, local),
+            Some(Duration::from_secs(30))
+        );
         // Without a Date header, fall back to the local clock; past dates mean now.
         let headers = h(&[(RETRY_AFTER, "Wed, 21 Oct 2026 07:28:30 GMT")]);
         assert_eq!(retry_after_at(&headers, local), Some(Duration::ZERO));
         let early = parse_http_date("Wed, 21 Oct 2026 07:28:00 GMT").unwrap();
-        assert_eq!(retry_after_at(&headers, early), Some(Duration::from_secs(30)));
+        assert_eq!(
+            retry_after_at(&headers, early),
+            Some(Duration::from_secs(30))
+        );
     }
 
     #[test]
@@ -160,6 +174,25 @@ mod tests {
         assert_eq!(
             b.delay(0, Some(Duration::from_secs(5))),
             Duration::from_secs(5)
+        );
+        let huge = Backoff {
+            base: Duration::MAX,
+            max: Duration::MAX,
+        };
+        assert!(huge.delay(5, None) >= Duration::from_secs(u64::MAX / 2));
+        // Obsolete date forms and a garbage Date header degrade gracefully.
+        assert_eq!(
+            retry_after(&h(&[(RETRY_AFTER, "Sunday, 06-Nov-94 08:49:37 GMT")])),
+            None
+        );
+        let headers = h(&[
+            (DATE, "yesterday"),
+            (RETRY_AFTER, "Wed, 21 Oct 2026 07:28:30 GMT"),
+        ]);
+        let early = parse_http_date("Wed, 21 Oct 2026 07:28:00 GMT").unwrap();
+        assert_eq!(
+            retry_after_at(&headers, early),
+            Some(Duration::from_secs(30))
         );
     }
 }

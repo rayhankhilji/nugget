@@ -172,8 +172,11 @@ export interface SourceInfo {
 /** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
 export type SourceHealthCode =
   | "ok"
+  | "syncing"
   | "disabled"
   | "reconnect"
+  | "not_set_up"
+  | "disk_full"
   | "rate_limited"
   | "offline"
   | "server_error"

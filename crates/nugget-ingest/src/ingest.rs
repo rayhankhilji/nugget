@@ -454,14 +454,18 @@ fn info_of(slot: &Slot, counts: Option<&SourceCounts>) -> SourceInfo {
 }
 
 /// Plain-language health from the slot's state, last error and item errors of the last day.
+/// Item errors are counted per item (a bad item re-sent every pass counts once), and the last
+/// message names its item.
 fn health_of(slot: &Slot) -> nugget_core::ipc::SourceHealth {
     let since = OffsetDateTime::now_utc() - time::Duration::days(1);
-    let recent: Vec<&ItemError> = slot
-        .status
-        .errors
-        .iter()
-        .filter(|e| e.key.is_some() && e.at >= since)
-        .collect();
+    let mut keys = std::collections::HashSet::new();
+    let mut last = None;
+    for e in slot.status.errors.iter().filter(|e| e.at >= since) {
+        if let Some(k) = &e.key {
+            keys.insert(k);
+            last = Some(format!("{k}: {}", e.message));
+        }
+    }
     let state = if slot.entry.enabled {
         slot.status.state
     } else {
@@ -471,8 +475,8 @@ fn health_of(slot: &Slot) -> nugget_core::ipc::SourceHealth {
         &slot.entry.kind,
         state,
         slot.status.last_error.as_deref(),
-        recent.len() as u64,
-        recent.last().map(|e| e.message.as_str()),
+        keys.len() as u64,
+        last.as_deref(),
     )
 }
 

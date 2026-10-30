@@ -132,11 +132,20 @@ impl Replica {
         Arc::new(Self::default())
     }
 
+    /// Apply a change the way ingest does: an upsert whose `version` equals the stored one is
+    /// skipped (so a connector that changes content without changing the version shows up as a
+    /// stale item, as it would in the real index).
     pub fn apply(&self, change: &Change) {
         let mut items = lock(&self.items);
         match change {
             Change::Upsert(d) => {
-                items.insert(d.key.clone(), ReplicaItem::of(d));
+                let unchanged = d.version.is_some()
+                    && items
+                        .get(&d.key)
+                        .is_some_and(|old| old.version == d.version);
+                if !unchanged {
+                    items.insert(d.key.clone(), ReplicaItem::of(d));
+                }
             }
             Change::Delete(k) => {
                 items.remove(k);
@@ -323,7 +332,14 @@ pub struct CrashReport {
 }
 
 /// Crash a pass at every send and every checkpoint, resume from the last committed cursor
-/// (as ingest does after a restart), and require the same final index as a clean run.
+/// (as ingest does after a restart), and require the same final index as a clean run. The
+/// cursor the resumed pass returns is checked too: one more pass from it must produce the same
+/// changes and index as one more pass from the clean run's cursor.
+///
+/// Requirements on the test: the clean pass must send at least one change (else the check
+/// would be vacuous); mocks must answer the same way on every run (no `Sequence`,
+/// `up_to_n_times` or `expect` on the routes this pass uses); and state a connector keeps
+/// outside the cursor (temp files, caches) must come from `build`, fresh per call.
 ///
 /// `build` makes a fresh connector over the given replica (use it as the context's
 /// [`KnownItems`]); it is called once per run, like a daemon restart. `start` is the committed
@@ -351,6 +367,27 @@ where
         .expect("clean pass");
     let want = clean.snapshot();
     let (sends, checkpoints) = (sink.sends(), sink.checkpoint_calls());
+    assert!(
+        sends > 0,
+        "the clean pass sent no changes; the crash matrix would prove nothing (check the mocks)"
+    );
+    let clean_cursor = sink.committed();
+    let follow_up = |replica: Arc<Replica>, cursor: Option<Value>| {
+        let build = &build;
+        async move {
+            let conn = build(replica.clone()).await;
+            let sink = ReplicaSink::new(replica.clone());
+            run_pass(&*conn, cursor, &sink)
+                .await
+                .expect("follow-up pass");
+            (sink.summary(), replica.snapshot())
+        }
+    };
+    let want_next = {
+        let r = Replica::new();
+        r.restore(want.clone());
+        follow_up(r, clean_cursor).await
+    };
 
     let mut runs = 0;
     let points = (0..sends)
@@ -374,14 +411,14 @@ where
         );
         drop(conn);
         let mut cursor = sink.committed().or(start.clone());
-        let mut done = false;
+        let mut done = None;
         for _ in 0..MAX_RESUMES {
             runs += 1;
             let conn = build(replica.clone()).await;
             let resume = ReplicaSink::new(replica.clone());
             match run_pass(&*conn, cursor.clone(), &resume).await {
-                Ok(_) => {
-                    done = true;
+                Ok(next) => {
+                    done = Some(next);
                     break;
                 }
                 Err(e) => {
@@ -390,14 +427,18 @@ where
                 }
             }
         }
-        assert!(
-            done,
-            "resume after crash at send {send_at:?} / checkpoint {cp_at:?} never finished"
-        );
+        let Some(resumed_cursor) = done else {
+            panic!("resume after crash at send {send_at:?} / checkpoint {cp_at:?} never finished");
+        };
         assert_eq!(
             replica.snapshot(),
             want,
             "index after crash at send {send_at:?} / checkpoint {cp_at:?} + resume differs from a clean run"
+        );
+        assert_eq!(
+            follow_up(replica, Some(resumed_cursor)).await,
+            want_next,
+            "the pass after a crash at send {send_at:?} / checkpoint {cp_at:?} differs from the pass after a clean run (wrong resumed cursor?)"
         );
     }
     CrashReport {
@@ -458,19 +499,33 @@ pub fn server_error(status: u16, retry_after_secs: Option<u64>) -> wiremock::Res
 // Fixture hygiene
 // ---------------------------------------------------------------------------------------------
 
-const SECRET_KEYS: &[&str] = &[
-    "access_token",
-    "refresh_token",
-    "id_token",
+/// Key suffixes (lower-case, non-alphanumerics removed) whose values are credentials:
+/// `access_token`, `accessToken`, `x-api-key`, `Set-Cookie`, `private_key` ...
+const SECRET_KEY_SUFFIXES: &[&str] = &[
     "token",
-    "client_secret",
-    "password",
-    "authorization",
-    "cookie",
-    "api_key",
-    "apikey",
     "secret",
+    "password",
+    "apikey",
+    "cookie",
+    "authorization",
+    "privatekey",
 ];
+
+fn is_secret_key(k: &str) -> bool {
+    let norm: String = k
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    SECRET_KEY_SUFFIXES.iter().any(|s| norm.ends_with(s))
+}
+
+fn is_example_domain(host: &str) -> bool {
+    let h = host.to_ascii_lowercase();
+    ["example.com", "example.org", "example.net"]
+        .iter()
+        .any(|d| h == *d || h.ends_with(&format!(".{d}")))
+}
 
 /// Placeholder written over scrubbed values.
 pub const SCRUBBED: &str = "<scrubbed>";
@@ -481,8 +536,7 @@ pub fn scrub_json(v: &mut Value) {
     match v {
         Value::Object(map) => {
             for (k, val) in map.iter_mut() {
-                let lk = k.to_ascii_lowercase();
-                if SECRET_KEYS.iter().any(|s| lk == *s || lk.ends_with(&format!("_{s}"))) {
+                if is_secret_key(k) && !matches!(val, Value::Null | Value::Bool(_)) {
                     *val = Value::String(SCRUBBED.into());
                 } else {
                     scrub_json(val);
@@ -498,14 +552,12 @@ pub fn scrub_json(v: &mut Value) {
 fn scrub_emails(s: &str) -> String {
     s.split_inclusive(|c: char| c.is_whitespace() || "<>,;\"'()[]".contains(c))
         .map(|tok| {
-            let core = tok.trim_end_matches(|c: char| c.is_whitespace() || "<>,;\"'()[]".contains(c));
+            let core =
+                tok.trim_end_matches(|c: char| c.is_whitespace() || "<>,;\"'()[]".contains(c));
             let tail = &tok[core.len()..];
             match core.split_once('@') {
                 Some((user, host))
-                    if !user.is_empty()
-                        && host.contains('.')
-                        && !host.ends_with("example.com")
-                        && !host.ends_with("example.org") =>
+                    if !user.is_empty() && host.contains('.') && !is_example_domain(host) =>
                 {
                     format!("user@example.com{tail}")
                 }
@@ -524,8 +576,28 @@ pub fn assert_scrubbed(fixture: &str) {
     };
     let before = v.clone();
     scrub_json(&mut v);
-    assert_eq!(before, v, "fixture contains unscrubbed secrets or e-mail addresses");
-    for needle in ["ya29.", "xoxb-", "xoxp-", "ghp_", "gho_", "lin_api_", "secret_", "Bearer "] {
+    assert_eq!(
+        before, v,
+        "fixture contains unscrubbed secrets or e-mail addresses"
+    );
+    for needle in [
+        "ya29.",
+        "1//0",
+        "eyJ",
+        "xoxb-",
+        "xoxp-",
+        "xoxe-",
+        "ghp_",
+        "gho_",
+        "ghs_",
+        "ghu_",
+        "github_pat_",
+        "lin_api_",
+        "ntn_",
+        "\"secret_",
+        "Bearer ",
+        "%40",
+    ] {
         assert!(
             !fixture.contains(needle),
             "fixture contains a token-like value ({needle}...)"
@@ -586,6 +658,76 @@ mod tests {
         assert_eq!(v["list"][0], "bob@example.com");
         assert_eq!(v["list"][1], "user@example.com,");
         assert_scrubbed(&v.to_string());
+
+        let mut v = serde_json::json!({
+            "accessToken": "a", "clientSecret": "b", "x-api-key": "c", "Set-Cookie": "d",
+            "private_key": "e", "client_secret_expires_at": 0, "has_password": true,
+            "owner": "bob@myexample.com",
+        });
+        scrub_json(&mut v);
+        for k in [
+            "accessToken",
+            "clientSecret",
+            "x-api-key",
+            "Set-Cookie",
+            "private_key",
+        ] {
+            assert_eq!(v[k], SCRUBBED, "{k}");
+        }
+        assert_eq!(v["has_password"], true);
+        assert_eq!(v["owner"], "user@example.com");
+    }
+
+    #[test]
+    fn replica_skips_unchanged_versions() {
+        let r = Replica::new();
+        let doc = |body: &str| {
+            let mut d = Document::new("k", "text/plain", Content::Text(body.into()));
+            d.version = Some("v1".into());
+            Change::Upsert(d)
+        };
+        r.apply(&doc("old"));
+        r.apply(&doc("new"));
+        assert_eq!(r.get("k").unwrap().content, "old");
+    }
+
+    /// A connector that commits its final cursor before sending the last item loses it on a
+    /// crash; the matrix must catch that.
+    struct EarlyCommit;
+    #[async_trait]
+    impl Connector for EarlyCommit {
+        fn kind(&self) -> &'static str {
+            "early"
+        }
+        async fn sync(
+            &self,
+            cursor: Option<Value>,
+            sink: &dyn ChangeSink,
+            _: &CancellationToken,
+        ) -> Result<Value> {
+            if cursor.is_some() {
+                return Ok(Value::from(1));
+            }
+            sink.checkpoint(Value::from(1)).await?;
+            sink.send(Change::Upsert(Document::new(
+                "a",
+                "text/plain",
+                Content::Text("a".into()),
+            )))
+            .await?;
+            Ok(Value::from(1))
+        }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "differs from a clean run")]
+    async fn crash_matrix_catches_an_early_checkpoint() {
+        assert_crash_resumable(
+            |_| async { Arc::new(EarlyCommit) as Arc<dyn Connector> },
+            None,
+            BTreeMap::new(),
+        )
+        .await;
     }
 
     #[test]

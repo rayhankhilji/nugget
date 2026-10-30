@@ -332,9 +332,9 @@ pub struct SourceInfo {
 /// A source's sync health, for people rather than logs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceHealth {
-    /// Stable machine code (`ok`, `disabled`, `reconnect`, `rate_limited`, `offline`, `server_error`,
-    /// `too_large`, `config`, `item_errors`, `error`); clients translate it and fall back to
-    /// `reason`/`fix`.
+    /// Stable machine code (`ok`, `syncing`, `disabled`, `reconnect`, `not_set_up`,
+    /// `rate_limited`, `offline`, `server_error`, `too_large`, `disk_full`, `config`,
+    /// `item_errors`, `error`); clients translate it and fall back to `reason`/`fix`.
     pub code: String,
     /// One sentence on what is going on, in English.
     pub reason: String,
