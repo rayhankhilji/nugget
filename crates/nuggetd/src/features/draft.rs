@@ -79,8 +79,8 @@
 pub(super) mod voice;
 
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -124,6 +124,14 @@ const METHODS: &[&str] = &[
 /// How long `draft.read_ahead` waits for the read-ahead before answering `{"started": true}`
 /// (quick skips, the common case, are answered with their reason).
 const READ_AHEAD_ANSWER_WAIT: Duration = Duration::from_millis(100);
+
+/// Shortest time between two `draft.read_ahead` calls that pass the field gate (capped by
+/// `[draft.read_ahead] min_interval_ms`, so `0` turns it off). The engine's own rate limit
+/// counts only prefills it sent, and every call cancels the one before it, so a burst of
+/// calls would each start a retrieval (on the blocking pool, not cancelled) and voice lookup
+/// without ever being limited; the call answers in ~100 ms, so the IPC server's per-connection
+/// cap does not bound that work either. The desktop sends at most one every ~1.5 s (dwell).
+const READ_AHEAD_MIN_SPACING: Duration = Duration::from_secs(1);
 
 /// `[draft]` in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -384,6 +392,8 @@ pub(crate) struct DraftFeature {
     drafter: Drafter,
     voice: Arc<SharedVoice>,
     enabled: bool,
+    /// When the last `draft.read_ahead` past the gate was admitted ([`READ_AHEAD_MIN_SPACING`]).
+    read_ahead_at: Mutex<Option<Instant>>,
 }
 
 /// Start the feature: parse `[draft]`, build the drafter, and load the voice profile in the
@@ -441,6 +451,7 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
         drafter,
         voice,
         enabled: cfg.enabled,
+        read_ahead_at: Mutex::new(None),
     })
 }
 
@@ -608,6 +619,19 @@ impl DraftFeature {
         if self.state.shutdown.is_cancelled() {
             return Err(shutting_down());
         }
+        let config = self.drafter.config();
+        if !config.read_ahead.enabled {
+            return Ok(json!({ "started": false, "skipped": "disabled" }));
+        }
+        // Refused fields cost nothing and never count against the spacing.
+        if gate_with(&req.context, &config.excluded_apps, config.allow_terminals).is_err() {
+            return Ok(json!({ "started": false, "skipped": "refused" }));
+        }
+        let spacing =
+            READ_AHEAD_MIN_SPACING.min(Duration::from_millis(config.read_ahead.min_interval_ms));
+        if !admit(&self.read_ahead_at, Instant::now(), spacing) {
+            return Ok(json!({ "started": false, "skipped": "rate_limited" }));
+        }
         let (tx, rx) = tokio::sync::oneshot::channel();
         let drafter = self.drafter.clone();
         let shutdown = self.state.shutdown.clone();
@@ -660,6 +684,16 @@ impl DraftFeature {
 }
 
 /// Append an audit entry (no content: callers pass ids, kinds and counts only).
+/// Whether a call at `now` may start, at most one per `spacing`; records it if so.
+fn admit(last: &Mutex<Option<Instant>>, now: Instant, spacing: Duration) -> bool {
+    let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
+    if last.is_some_and(|t| now.saturating_duration_since(t) < spacing) {
+        return false;
+    }
+    *last = Some(now);
+    true
+}
+
 async fn audit(state: &State, actor: &str, action: &str, target: &str, detail: Value) {
     let store = state.store.clone();
     let entry = AuditEntry {
@@ -943,6 +977,23 @@ mod tests {
             local_draft_model(&toml::from_str("[local]\nmodel = 3").unwrap()),
             None
         );
+    }
+
+    #[test]
+    fn read_ahead_calls_are_spaced_out() {
+        let last = Mutex::new(None);
+        let t0 = Instant::now();
+        let s = READ_AHEAD_MIN_SPACING;
+        assert!(admit(&last, t0, s));
+        // A burst is refused, however many calls it has...
+        for ms in [0, 1, 500, 999] {
+            assert!(!admit(&last, t0 + Duration::from_millis(ms), s), "{ms}");
+        }
+        // ...and refused calls do not push the next admission back.
+        assert!(admit(&last, t0 + s, s));
+        assert!(!admit(&last, t0 + s + Duration::from_millis(10), s));
+        // No spacing: everything is admitted.
+        assert!(admit(&last, t0 + s, Duration::ZERO));
     }
 
     #[test]

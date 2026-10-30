@@ -683,6 +683,39 @@ async fn read_ahead_skips_cloud_providers_and_refused_fields_and_cancel_answers(
     h.stop().await;
 }
 
+/// Every call cancels the read-ahead before it and the engine's rate limit counts only prefills
+/// sent, so without the feature's spacing a burst would start one retrieval per call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_burst_of_read_aheads_is_rate_limited() {
+    let mut h = start("", |_| {}).await;
+    let v: Value = h
+        .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+        .await;
+    assert_eq!(v, json!({"started": false, "skipped": "cloud"}));
+    for _ in 0..20 {
+        let v: Value = h
+            .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+            .await;
+        assert_eq!(v, json!({"started": false, "skipped": "rate_limited"}));
+    }
+    // Refused fields are answered as before, and do not count.
+    let v: Value = h
+        .call(method::DRAFT_READ_AHEAD, json!({"context": secure_hint()}))
+        .await;
+    assert_eq!(v, json!({"started": false, "skipped": "refused"}));
+    h.stop().await;
+
+    // `min_interval_ms = 0` (as the bench sets) turns the spacing off too.
+    let mut h = start("[draft.read_ahead]\nmin_interval_ms = 0", |_| {}).await;
+    for _ in 0..3 {
+        let v: Value = h
+            .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+            .await;
+        assert_eq!(v, json!({"started": false, "skipped": "cloud"}));
+    }
+    h.stop().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn read_ahead_is_skipped_when_drafting_or_read_ahead_is_off() {
     for draft in ["enabled = false", "[draft.read_ahead]\nenabled = false"] {
