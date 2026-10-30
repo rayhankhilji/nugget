@@ -127,6 +127,11 @@ pub fn run(ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
         p.queries = n;
     }
     p.freshness = !opts.memory_no_freshness;
+    if ctx.config.local.local_models {
+        // A local embedding model on a 2-core CPU indexes 1.5–3 files/s: the full scale's 20,000
+        // files take up to about 4 hours.
+        p.ingest_timeout_s = p.ingest_timeout_s.max(5.0 * 3_600.0);
+    }
     run_with(ctx, &p)
 }
 

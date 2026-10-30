@@ -272,16 +272,12 @@ jobs:
   memory:
     name: memory ${{ matrix.scale }} (real embedder)
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    timeout-minutes: 355
     strategy:
       fail-fast: false
       matrix:
         include:
-          - scale: quick
-            runs: |
-              hash memory --backend real
-              nomic memory --backend real --local-models --memory-rerank local
-          - scale: standard
+          - scale: full
             runs: |
               hash memory --backend real
               nomic memory --backend real --local-models
