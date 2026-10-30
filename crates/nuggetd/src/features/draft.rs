@@ -13,6 +13,12 @@
 //!   thread a few seconds after startup (`voice_load_delay_ms`, or at the first draft or
 //!   `voice.status` if sooner), then refreshed incrementally after ingest commits and draft
 //!   feedback, debounced ([`voice`]).
+//! - **Prompt cache.** Every `draft.prewarm` (the trigger's first tap) warms the exact system
+//!   prefix of the coming draft on a non-cloud provider (connection only for cloud ones). With
+//!   `prewarm_on_start = true` the feature also caches the drafting rules on the default
+//!   non-cloud provider at start ([`Drafter::prewarm_idle`]); off by default, since it sends a
+//!   request at startup and may start the on-device chat server. `draft.end` audits prompt and
+//!   cached prompt tokens.
 //! - **Audit.** Every refusal, start (by the engine), cancel, end and feedback is audited with
 //!   lengths, kinds, provider, locality and app id only: never field text, thread or draft.
 //!
@@ -33,6 +39,13 @@
 //! prewarm_ttl_ms = 30000
 //! voice_refresh_debounce_ms = 5000      # quiet time after ingest commits before a refresh
 //! voice_load_delay_ms = 5000            # wait after startup before loading the voice profile
+//! prewarm_on_start = false        # cache the drafting rules on the local server at start
+//!
+//! [draft.local]                   # smaller prompts for on-device and LAN providers
+//! enabled = true                  # false: they get the cloud budget above
+//! budget_tokens = 300             # retrieval budget for them
+//! max_snippets = 3                # best retrieved passages kept
+//! include_sensitive = false       # let passages marked sensitive into local prompts
 //!
 //! [draft.voice]
 //! emails = ["me@example.com"]     # who "me" is (completed from sent mail when infer_me)
@@ -61,10 +74,10 @@ use nugget_core::ipc::{
 };
 use nugget_core::{Error, Result};
 use nugget_draft::{
-    DEFAULT_EXCLUDED_APPS, DraftConfig, DraftStream, Drafter, MAX_BUDGET_TOKENS, ProfileVoice,
-    Refusal, RetrievalRunner, VoiceFeedback, Warmer, gate_with,
+    DEFAULT_EXCLUDED_APPS, DraftConfig, DraftStream, Drafter, LocalBudget, MAX_BUDGET_TOKENS,
+    ProfileVoice, Refusal, RetrievalRunner, VoiceFeedback, Warmer, gate_with,
 };
-use nugget_infer::{ChatEvent, Provider, StopReason};
+use nugget_infer::{ChatEvent, ChatRequest, Provider, StopReason};
 use nugget_ipc::{Notifier, RpcError, code, parse_params, to_result};
 use nugget_retrieve::PackedContext;
 use nugget_store::AuditEntry;
@@ -107,6 +120,31 @@ struct DraftSection {
     voice_refresh_debounce_ms: u64,
     voice_load_delay_ms: u64,
     voice: VoiceSection,
+    local: LocalSection,
+    /// Warm the default local provider's prompt cache with the drafting rules at start.
+    prewarm_on_start: bool,
+}
+
+/// `[draft.local]`: the prompt budget for non-cloud providers ([`LocalBudget`]).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct LocalSection {
+    enabled: bool,
+    budget_tokens: u32,
+    max_snippets: usize,
+    include_sensitive: bool,
+}
+
+impl Default for LocalSection {
+    fn default() -> Self {
+        let d = LocalBudget::default();
+        Self {
+            enabled: d.enabled,
+            budget_tokens: d.budget_tokens,
+            max_snippets: d.max_snippets,
+            include_sensitive: d.include_sensitive,
+        }
+    }
 }
 
 impl Default for DraftSection {
@@ -128,6 +166,8 @@ impl Default for DraftSection {
             voice_refresh_debounce_ms: 5_000,
             voice_load_delay_ms: 5_000,
             voice: VoiceSection::default(),
+            local: LocalSection::default(),
+            prewarm_on_start: false,
         }
     }
 }
@@ -187,6 +227,13 @@ impl DraftSection {
             retrieval_timeout_ms: self.retrieval_timeout_ms,
             voice_timeout_ms: self.voice_timeout_ms,
             prewarm_ttl_ms: self.prewarm_ttl_ms,
+            local: LocalBudget {
+                enabled: self.local.enabled,
+                budget_tokens: self.local.budget_tokens.min(MAX_BUDGET_TOKENS),
+                max_snippets: self.local.max_snippets,
+                include_sensitive: self.local.include_sensitive,
+                ..LocalBudget::default()
+            },
             ..DraftConfig::default()
         }
     }
@@ -216,7 +263,8 @@ pub(crate) fn draft_config_from_table(table: &toml::Table) -> Result<DraftConfig
     Ok(section::<DraftSection>("draft", table)?.draft_config())
 }
 
-/// Opens the provider's connection (and starts a stopped local server) on trigger.
+/// Opens the provider's connection (and starts a stopped local server) on trigger, and warms a
+/// local server's prompt cache with the draft's system prefix.
 struct ProviderWarmer;
 
 #[async_trait]
@@ -224,6 +272,12 @@ impl Warmer for ProviderWarmer {
     async fn warm(&self, provider: Arc<dyn Provider>) {
         if let Err(e) = provider.prewarm().await {
             tracing::debug!(provider = %provider.id(), error = %e, "draft: prewarm failed");
+        }
+    }
+
+    async fn warm_prefix(&self, provider: Arc<dyn Provider>, prefix: ChatRequest) {
+        if let Err(e) = provider.prewarm_prefix(&prefix).await {
+            tracing::debug!(provider = %provider.id(), error = %e, "draft: prefix prewarm failed");
         }
     }
 }
@@ -285,10 +339,18 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
         },
         state.shutdown.clone(),
     ));
+    // Opt-in: cache the drafting rules on the default (non-cloud) provider now.
+    let idle_warmed = if cfg.enabled && cfg.prewarm_on_start {
+        drafter.prewarm_idle()
+    } else {
+        None
+    };
     tracing::info!(
         enabled = cfg.enabled,
         excluded_apps = drafter.config().excluded_apps.len(),
         app_providers = drafter.config().app_providers.len(),
+        local_budget = drafter.config().local.enabled,
+        idle_warmed = idle_warmed.as_ref().map(ProviderId::as_str),
         "draft feature started"
     );
     Arc::new(DraftFeature {
@@ -564,6 +626,8 @@ async fn run_draft(
             "total_ms": timings.total_ms,
             "prewarmed": timings.prewarmed,
             "attempts": timings.attempts,
+            "prompt_tokens": timings.prompt_tokens,
+            "cached_prompt_tokens": timings.cached_prompt_tokens,
         }),
     )
     .await;
@@ -687,6 +751,36 @@ mod tests {
         assert!(parse("[voice]\nnope = 1").is_err());
     }
 
+    #[test]
+    fn local_subsection_sets_the_local_budget() {
+        let c = parse("").unwrap().draft_config();
+        assert_eq!(c.local, LocalBudget::default());
+        let c = parse(
+            r#"
+            budget_tokens = 2000
+            [local]
+            budget_tokens = 999999
+            max_snippets = 2
+            "#,
+        )
+        .unwrap()
+        .draft_config();
+        assert!(c.local.enabled);
+        assert_eq!(c.local.budget_tokens, MAX_BUDGET_TOKENS);
+        assert_eq!(c.local.max_snippets, 2);
+        assert_eq!(c.budget_tokens, 2000);
+        assert!(
+            !parse("[local]\nenabled = false")
+                .unwrap()
+                .draft_config()
+                .local
+                .enabled
+        );
+        assert!(parse("[local]\nnope = 1").is_err());
+        assert!(!parse("").unwrap().prewarm_on_start);
+        assert!(parse("prewarm_on_start = true").unwrap().prewarm_on_start);
+    }
+
     /// On a single-threaded runtime, a retrieval job that blocks its thread until another task
     /// runs only finishes if it runs off the runtime's thread.
     #[test]
@@ -714,6 +808,59 @@ mod tests {
             assert_eq!(out.to_string(), Error::Other("ran".into()).to_string());
             sender.await.unwrap();
         });
+    }
+
+    /// Records what the warmer asks of it.
+    struct Recorder {
+        id: ProviderId,
+        calls: std::sync::Mutex<Vec<Option<ChatRequest>>>,
+    }
+
+    #[async_trait]
+    impl Provider for Recorder {
+        fn id(&self) -> &ProviderId {
+            &self.id
+        }
+
+        fn meta(&self) -> nugget_infer::ProviderMeta {
+            nugget_infer::ProviderMeta {
+                kind: nugget_infer::ProviderKind::OpenaiCompatible,
+                model: "m".into(),
+                locality: nugget_core::capability::Locality::OnDevice,
+                context_tokens: None,
+            }
+        }
+
+        async fn chat(&self, _req: ChatRequest) -> Result<nugget_infer::ChatStream> {
+            Err(Error::Unsupported("no chat".into()))
+        }
+
+        async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>> {
+            Err(Error::Unsupported("no embeddings".into()))
+        }
+
+        async fn prewarm(&self) -> Result<()> {
+            self.calls.lock().unwrap().push(None);
+            Ok(())
+        }
+
+        async fn prewarm_prefix(&self, req: &ChatRequest) -> Result<()> {
+            self.calls.lock().unwrap().push(Some(req.clone()));
+            Err(Error::Network("down".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn warmer_sends_the_prefix_to_the_provider() {
+        let p = Arc::new(Recorder {
+            id: ProviderId::new("local-chat"),
+            calls: std::sync::Mutex::new(Vec::new()),
+        });
+        let prefix = ChatRequest::default().with_system("rules");
+        // Failures are logged, never raised.
+        ProviderWarmer.warm_prefix(p.clone(), prefix.clone()).await;
+        ProviderWarmer.warm(p.clone()).await;
+        assert_eq!(*p.calls.lock().unwrap(), vec![Some(prefix), None]);
     }
 
     #[test]
