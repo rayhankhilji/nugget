@@ -1034,7 +1034,9 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
   nor the rehearsal passes `--app-version` to `tauri signer sign`, so a payload signature doesn't
   name the version it belongs to, and the updater's `requireSignedVersion` check can't be turned
   on. The feed signature and the "newer only" rule limit what a replayed payload can do, but
-  binding the version would close it at the payload level.
+  binding the version would close it at the payload level. (Both options are in Tauri's current
+  sources; check that the pinned CLI 2.11.5 and `tauri-plugin-updater` 2.12.0 have them before
+  relying on this, or upgrade.)
 - Linux packages aren't GPG-signed, and there's no apt/rpm repository yet; users get updates
   through the in-app updater or by downloading again.
 - Update checks aren't recorded in the daemon's egress ledger (the desktop app makes them, not
