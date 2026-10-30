@@ -94,7 +94,7 @@ async function settle(page) {
  */
 function cannedAnswer(system) {
   const passages = new Map();
-  const body = system.split(/\nPassages:\n/)[1] ?? "";
+  const body = system.split(/<passages>\n/)[1] ?? "";
   let current = null;
   for (const line of body.split("\n")) {
     const m = line.match(/^\s*\[(\d+)\]/);
@@ -140,7 +140,7 @@ function startFakeModel({ logFile } = {}) {
         .filter((m) => m.role === "system")
         .map((m) => (typeof m.content === "string" ? m.content : (m.content ?? []).map((p) => p.text ?? "").join("")))
         .join("\n");
-      const text = /numbered passages/.test(system) ? cannedAnswer(system) : "Hello! Ask me about your notes, mail and calendar.";
+      const text = /<passages>/.test(system) ? cannedAnswer(system) : "Hello! Ask me about your notes, mail and calendar.";
       const usage = { prompt_tokens: 512, completion_tokens: 64, total_tokens: 576 };
       if (!request.stream) {
         res.writeHead(200, { "Content-Type": "application/json" }).end(

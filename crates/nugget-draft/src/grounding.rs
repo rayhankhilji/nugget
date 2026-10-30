@@ -1128,6 +1128,27 @@ pub(crate) fn values(text: &str) -> Vec<Value> {
     out
 }
 
+/// The numbers, amounts, percentages, dates and times stated in `text` (not bare weekday
+/// names), for checks outside this crate: each as written, with its alternative normalised
+/// keys. A value is stated by a source when one of its keys is among the source's
+/// [`supported_value_keys`].
+pub fn value_keys(text: &str) -> Vec<(String, Vec<String>)> {
+    values(text)
+        .into_iter()
+        .filter(|v| v.kind != ValueKind::Weekday)
+        .map(|v| (v.raw, v.keys))
+        .collect()
+}
+
+/// Every value key a source `text` supports (see [`value_keys`]): its values' keys, plus a
+/// date's day number, year and weekday.
+pub fn supported_value_keys(text: &str) -> HashSet<String> {
+    values(text)
+        .into_iter()
+        .flat_map(|v| v.keys.into_iter().chain(v.extra))
+        .collect()
+}
+
 /// Keys a date in the corpus also supports: its day number and year.
 fn date_extra(year: Option<i32>, day: u32) -> Vec<String> {
     let mut v = vec![num_key(f64::from(day))];
@@ -1187,6 +1208,26 @@ mod tests {
         assert_eq!(one("Friday"), vec!["wd:5"]);
         assert_eq!(one("14/11"), vec!["date:11-14"]);
         assert_eq!(one("3/4"), vec!["date:04-03", "date:03-04"]);
+    }
+
+    #[test]
+    fn public_value_keys_match_supported_keys() {
+        let stated = value_keys("It costs £1,250.50 on Nov 14 at 2pm, 12% off, see you Friday.");
+        let raws: Vec<&str> = stated.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(raws, ["£1,250.50", "Nov 14", "2pm", "12%"], "{stated:?}");
+        let source = supported_value_keys("Price 1250.50 GBP, due 2026-11-14 14:00, 12 percent.");
+        assert!(
+            stated
+                .iter()
+                .all(|(_, keys)| keys.iter().any(|k| source.contains(k))),
+            "{stated:?} vs {source:?}"
+        );
+        assert!(
+            !value_keys("It is 612 pounds.")[0]
+                .1
+                .iter()
+                .any(|k| source.contains(k))
+        );
     }
 
     #[test]

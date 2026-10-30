@@ -10,7 +10,9 @@ use futures::StreamExt;
 use nugget_core::capability::Locality;
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
-use nugget_core::ipc::{AskStarted, ChatDelta, ChatDone, ChatStarted, method, notification};
+use nugget_core::ipc::{
+    AskStarted, ChatDelta, ChatDone, ChatStarted, ClaimFlag, FlaggedClaim, method, notification,
+};
 use nugget_core::paths::Paths;
 use nugget_ingest::MemorySecrets;
 use nugget_ipc::{Client, Notification};
@@ -28,20 +30,33 @@ const SECRET: &str = "SECRETPASSAGE 4111 1111 1111 1111";
 /// What the mock model replies to a follow-up rewriting request.
 const REWRITTEN: &str = "heron river walk";
 
+/// A question whose answer streams markers split across deltas, in non-canonical forms.
+const SPLIT_MARKERS_QUESTION: &str = "Which river did the heron fish by?";
+const SPLIT_MARKERS_REPLY: &[&str] = &[
+    "The heron fished by the river [",
+    "Passage ",
+    "1, 9]. It caught 3 fish [1",
+    "].",
+];
+
 /// Streams a short answer for any chat request ([`REWRITTEN`] for a query rewrite).
 struct Answer;
 
 impl Respond for Answer {
     fn respond(&self, req: &Request) -> ResponseTemplate {
-        let reply = if String::from_utf8_lossy(&req.body).contains("Standalone search query:") {
-            REWRITTEN
+        let body = String::from_utf8_lossy(&req.body);
+        let reply: &[&str] = if body.contains("Standalone search query:") {
+            &[REWRITTEN]
+        } else if body.contains(SPLIT_MARKERS_QUESTION) {
+            SPLIT_MARKERS_REPLY
         } else {
-            "Herons [1]"
+            &["Herons [1]"]
         };
-        let chunks = [
-            json!({"choices": [{"index": 0, "delta": {"content": reply}}]}),
-            json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}),
-        ];
+        let mut chunks: Vec<Value> = reply
+            .iter()
+            .map(|r| json!({"choices": [{"index": 0, "delta": {"content": r}}]}))
+            .collect();
+        chunks.push(json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}));
         let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
         body.push_str("data: [DONE]\n\n");
         ResponseTemplate::new(200)
@@ -303,6 +318,7 @@ async fn ask_never_sends_sensitive_passages_to_a_cloud_model() {
         .await;
     let (_, done) = collect(&mut notes, &chat.stream_id).await;
     assert_eq!(done.error, None);
+    assert_eq!(done.check, None, "plain chats are not checked");
     let chats = h.egress("chat").await;
     assert_eq!(chats.len(), 1, "{chats:?}");
     assert_eq!(chats[0].items, vec![iref("walk.md")]);
@@ -397,7 +413,7 @@ fn history() -> Value {
 fn answer_messages(requests: &[Value]) -> Vec<(String, String)> {
     let answer = requests
         .iter()
-        .find(|r| r.to_string().contains("Passages:"))
+        .find(|r| r.to_string().contains("<passages>"))
         .expect("an answering request");
     answer["messages"]
         .as_array()
@@ -450,7 +466,7 @@ async fn ask_rewrites_followups_with_a_local_model_and_forwards_history() {
         ["system", "user", "assistant", "user"],
         "{messages:?}"
     );
-    assert!(messages[0].1.contains("Passages:"));
+    assert!(messages[0].1.contains("<passages>"));
     assert!(messages[1].1.contains("Where did we watch herons?"));
     assert!(messages[2].1.contains("By the river"));
     assert!(messages[3].1.contains("what about the second one?"));
@@ -545,6 +561,7 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
     let (text, done) = collect(&mut notes, &started.stream_id).await;
     assert_eq!(done.error, None);
     assert!(!text.is_empty());
+    assert_eq!(done.check, None, "general answers are not checked");
     let requests = h.requests().await;
     assert_eq!(requests.len(), 1);
     let roles: Vec<&str> = requests[0]["messages"]
@@ -554,7 +571,7 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
         .map(|m| m["role"].as_str().unwrap())
         .collect();
     assert_eq!(roles, ["user"], "no sourced system prompt");
-    assert!(!h.bodies().await.contains("numbered passages"));
+    assert!(!h.bodies().await.contains("<passages>"));
     assert_eq!(audited_ask(&h.store)["general"], json!(true));
 
     // With passages it is a sourced answer, as before.
@@ -567,5 +584,44 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
     assert!(!started.general);
     assert!(!started.citations.is_empty());
     collect(&mut notes, &started.stream_id).await;
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_normalises_markers_and_checks_the_answer() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": SPLIT_MARKERS_QUESTION, "budget_tokens": 2000}),
+        )
+        .await;
+    assert!(!started.general, "{started:?}");
+    assert!(started.citations.iter().all(|c| c.n != 9));
+    let (text, done) = collect(&mut notes, &started.stream_id).await;
+    assert_eq!(done.error, None);
+    // `[Passage 1, 9]` split over three deltas: canonical `[1]`, the unknown `[9]` dropped.
+    assert_eq!(
+        text,
+        "The heron fished by the river [1]. It caught 3 fish [1]."
+    );
+    let check = done.check.expect("a sourced answer is checked");
+    assert!(!check.not_found);
+    assert_eq!(check.claims, 2);
+    assert_eq!(check.invalid_citations, 1);
+    assert_eq!(
+        check.flagged,
+        vec![FlaggedClaim {
+            text: "It caught 3 fish [1].".into(),
+            reason: ClaimFlag::Unsupported,
+        }]
+    );
+
+    // The grounded prompt: dated passages and the exact not-found reply.
+    let bodies = h.bodies().await;
+    assert!(bodies.contains("<passages>"), "{bodies}");
+    assert!(bodies.contains(nuggetd::ask::NOT_FOUND_REPLY));
+    assert!(bodies.contains("Today is "));
     h.stop().await;
 }
