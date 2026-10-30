@@ -96,7 +96,7 @@ async fn unauthorized_parks_the_source_until_credentials_change() {
     // Never a silent stop: the health says to reconnect, in plain words.
     let health = info.health.expect("health");
     assert_eq!(health.code, "reconnect");
-    assert!(health.fix.contains("Reconnect"), "{}", health.fix);
+    assert!(health.fix.contains("Sign in again"), "{}", health.fix);
 
     // No retries while waiting for the user.
     tokio::time::sleep(Duration::from_millis(300)).await;

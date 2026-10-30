@@ -53,7 +53,7 @@ pub fn diagnose(
     if state == SourceState::NeedsAuth {
         return mk(
             code::RECONNECT,
-            format!("{service} stopped accepting Nugget's sign-in, so syncing is paused."),
+            format!("{} stopped accepting Nugget's sign-in, so syncing is paused.", cap(&service)),
             reconnect_fix(kind, &service),
         );
     }
@@ -85,7 +85,7 @@ fn classify(kind: &str, service: &str, err: &str) -> (&'static str, String, Stri
     {
         return (
             code::RECONNECT,
-            format!("{service} stopped accepting Nugget's sign-in, so syncing is paused."),
+            format!("{} stopped accepting Nugget's sign-in, so syncing is paused.", cap(service)),
             reconnect_fix(kind, service),
         );
     }
@@ -142,8 +142,16 @@ fn reconnect_fix(kind: &str, service: &str) -> String {
         "slack" | "notion" | "github" | "linear" => {
             format!("Paste a new {service} token, or sign in again, from the source's settings.")
         }
-        _ => format!("Click \"Reconnect\" and sign in to {service} again."),
+        _ => format!("Choose \"Sign in again\" on the source and sign in to {service}."),
     }
+}
+
+/// Capitalise the first letter (service names like "the mail server" start sentences).
+fn cap(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 /// Human name of a connector kind (falls back to the kind itself).
@@ -193,8 +201,9 @@ mod tests {
     fn reconnect_is_never_silent() {
         let h = d("gmail", SourceState::NeedsAuth, Some("authorization required: x"));
         assert_eq!(h.code, code::RECONNECT);
-        assert!(h.fix.contains("Reconnect"));
+        assert!(h.fix.contains("Sign in again"));
         let h = d("imap", SourceState::NeedsAuth, None);
+        assert!(h.reason.starts_with("The mail server"), "{}", h.reason);
         assert!(h.fix.contains("app password"));
         // A refresh failure reported as a plain error still asks to reconnect.
         let h = d("onedrive", SourceState::Error, Some("provider error: invalid_grant"));
