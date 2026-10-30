@@ -112,6 +112,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # Hybrid retrieval (the manifest's embedding model, as nuggetd's default local embedder) with
+  # the 4B: checks whether the text-only harness findings on retrieval hold in the product setup.
+  draft-embed:
+    name: draft 4b-embed-ra-off
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[gg1-run]') || contains(github.event.head_commit.message, '[gg1-embed]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg1
+          workspaces: qa/GG1/harness -> target
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-embed-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+      - name: Build the harness
+        run: cargo build --release --manifest-path qa/GG1/harness/Cargo.toml
+      - name: Draft
+        run: |
+          mkdir -p "$RESULTS"
+          only=()
+          if [ -n "$ONLY" ]; then only=(--only "$ONLY"); fi
+          ./qa/GG1/harness/target/release/gg1 draft --local-models --embed \
+            --local-chat-model qwen3-4b-q4km --label 4b-embed-ra-off "${only[@]}" \
+            --out "$RESULTS/drafts-4b-embed-ra-off.jsonl" < /dev/null
+      - name: Deterministic checks
+        if: always()
+        run: python3 qa/GG1/check.py "$RESULTS/drafts-4b-embed-ra-off.jsonl" | tee "$RESULTS/check-4b-embed-ra-off.txt"
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg1-4b-embed-ra-off
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 30
+
   judge:
     name: judge (8B) shard ${{ matrix.shard }}
     needs: draft

@@ -195,7 +195,17 @@ fn parse_date(d: &str) -> Result<OffsetDateTime, String> {
 
 /// One store per persona: vault items (sensitive ones flagged as PII triage would) and sent
 /// messages shaped as the connectors store them, so the real voice profile recognises them.
-fn build_store(p: &Persona) -> Result<Store, String> {
+/// Embeds chunk texts for the store (hybrid retrieval, as the daemon with its local embedder).
+type Embed<'a> = &'a dyn Fn(&str) -> Result<Option<Vec<f32>>, String>;
+
+fn chunk(text: &str, embed: Embed<'_>) -> Result<NewChunk, String> {
+    Ok(match embed(text)? {
+        Some(v) => NewChunk::embedded(text.to_owned(), v),
+        None => NewChunk::text(text.to_owned()),
+    })
+}
+
+fn build_store(p: &Persona, embed: Embed<'_>) -> Result<Store, String> {
     let store = Store::open_in_memory().map_err(|e| e.to_string())?;
     let e = |e: Error| e.to_string();
     for it in &p.vault {
@@ -206,7 +216,7 @@ fn build_store(p: &Persona) -> Result<Store, String> {
             .with_modified_at(parse_date(&it.date)?);
         store.upsert_item(&item).map_err(e)?;
         store
-            .replace_chunks(&item.item, &[NewChunk::text(it.body.clone())])
+            .replace_chunks(&item.item, &[chunk(&it.body, embed)?])
             .map_err(e)?;
     }
     let from = format!("{} <{}>", p.name, p.emails.first().cloned().unwrap_or_default());
@@ -243,7 +253,7 @@ fn build_store(p: &Persona) -> Result<Store, String> {
             .with_modified_at(at);
         store.upsert_item(&item).map_err(e)?;
         store
-            .replace_chunks(&item.item, &[NewChunk::text(m.text.clone())])
+            .replace_chunks(&item.item, &[chunk(&m.text, embed)?])
             .map_err(e)?;
     }
     Ok(store)
@@ -449,6 +459,10 @@ enum Cmd {
         /// Label stored in every record (e.g. `4b-ra-off`).
         #[arg(long, default_value = "")]
         label: String,
+        /// `--local-models`: also serve the manifest's embedding model and retrieve hybrid
+        /// (vectors + full text), as nuggetd does with its default local embedder.
+        #[arg(long)]
+        embed: bool,
     },
     /// Judge drafts with a local model against the GG1 rubric.
     Judge {
@@ -497,6 +511,7 @@ fn main() {
             only,
             timeout_s,
             label,
+            embed,
         } => run_drafts(DraftRun {
             models,
             world,
@@ -508,6 +523,7 @@ fn main() {
             only,
             timeout: Duration::from_secs(timeout_s),
             label,
+            embed,
         }),
         Cmd::Judge {
             models,
@@ -574,6 +590,7 @@ struct DraftRun {
     only: Option<String>,
     timeout: Duration,
     label: String,
+    embed: bool,
 }
 
 fn draft_config(sc: &ScenarioConfig, temperature: Option<f32>, read_ahead: bool) -> DraftConfig {
@@ -637,9 +654,18 @@ fn run_drafts(r: DraftRun) -> Result<(), String> {
         id: ProviderId::new("gg1-scripted"),
         reply: Mutex::new(String::new()),
     });
+    let mut embedder: Option<Arc<dyn Provider>> = None;
     let (exec, base, model_desc): (Exec, Arc<dyn Provider>, String) = if r.models.local_models {
-        let models = LocalModels::start(&r.models.options(None), &[RuntimeRole::Chat])
+        let roles: &[RuntimeRole] = if r.embed {
+            &[RuntimeRole::Chat, RuntimeRole::Embedding]
+        } else {
+            &[RuntimeRole::Chat]
+        };
+        let models = LocalModels::start(&r.models.options(None), roles)
             .map_err(|e| e.to_string())?;
+        if r.embed {
+            embedder = Some(models.embedder().map_err(|e| e.to_string())?);
+        }
         let cfg = models
             .chat_config(Thinking::Off)
             .ok_or("no local chat model was started")?;
@@ -661,8 +687,13 @@ fn run_drafts(r: DraftRun) -> Result<(), String> {
         prefix_warms: AtomicUsize::new(0),
     });
     let provider: Arc<dyn Provider> = capture.clone();
-    let tiers = HashMap::from([(TIER, vec![provider.id().clone()])]);
-    let router = Arc::new(Router::new(vec![provider.clone()], tiers));
+    let mut tiers = HashMap::from([(TIER, vec![provider.id().clone()])]);
+    let mut providers = vec![provider.clone()];
+    if let Some(e) = &embedder {
+        tiers.insert(Tier::Embedding, vec![e.id().clone()]);
+        providers.push(e.clone());
+    }
+    let router = Arc::new(Router::new(providers, tiers));
     let now = parse_date("2026-10-30T09:00:00Z")?;
     let warmer = Arc::new(CountingWarmer::default());
 
@@ -688,7 +719,14 @@ fn run_drafts(r: DraftRun) -> Result<(), String> {
             .get(&s.persona)
             .ok_or_else(|| format!("{}: unknown persona {}", s.id, s.persona))?;
         if !stores.contains_key(&persona.id) {
-            let store = build_store(persona)?;
+            let embed_fn = |text: &str| -> Result<Option<Vec<f32>>, String> {
+                let Some(e) = &embedder else { return Ok(None) };
+                let v = exec
+                    .block_on(e.embed(&[text.to_owned()]))
+                    .map_err(|e| format!("embedding: {e}"))?;
+                Ok(v.into_iter().next())
+            };
+            let store = build_store(persona, &embed_fn)?;
             let me = MeIdentity::new(persona.emails.clone(), [persona.name.clone()]);
             let profile = VoiceProfile::build(&store, me, VoiceConfig::default())
                 .map_err(|e| e.to_string())?;
@@ -708,7 +746,11 @@ fn run_drafts(r: DraftRun) -> Result<(), String> {
         let drafter = drafters
             .entry(key)
             .or_insert_with(|| {
-                let retriever = Retriever::new(store.clone(), None, RetrieveConfig::default())
+                let retriever = Retriever::new(
+                    store.clone(),
+                    embedder.is_some().then(|| router.clone()),
+                    RetrieveConfig::default(),
+                )
                     .with_reference_time(now);
                 Drafter::new(
                     store.clone(),
@@ -745,6 +787,7 @@ fn run_drafts(r: DraftRun) -> Result<(), String> {
             ));
             let line = json!({
                 "label": r.label,
+                "embed": r.embed,
                 "model": model_desc,
                 "read_ahead": r.read_ahead,
                 "temperature": r.temperature,
