@@ -23,7 +23,7 @@ use crate::injection::{HeuristicDetector, InjectionDetector, InjectionFinding, w
 use crate::ledger::{ActionLedger, Fnv128, LedgerEntry, MemoryLedger, action_id};
 use crate::log::{ActionLog, LogEntry, MemoryLog, Record, risk_label};
 use crate::tool::{
-    Claim, Control, FINISH, Tool, ToolCtx, ToolRegistry, ToolResult, Verification,
+    ASK_USER, Claim, Control, FINISH, Tool, ToolCtx, ToolRegistry, ToolResult, Verification,
     normalize_finish_args, truncate,
 };
 use crate::types::{Budget, ConfirmAnswer, GateOutcome, Outcome, Usage};
@@ -611,6 +611,16 @@ impl Agent {
             return self.conclude(st, o, None, None, started);
         };
         let mut results = pending.results;
+        // An option the user picked is a label from the screen (or the model): it says which
+        // item, but its words are data, so it goes back fenced like the screen it came from.
+        let answer = if pending.options.iter().any(|o| o.trim() == answer.trim()) {
+            format!(
+                "they picked this item:\n{}",
+                wrap_untrusted(ASK_USER, &st.fence, answer.trim(), false)
+            )
+        } else {
+            answer.to_string()
+        };
         let reply = if pending.held {
             format!(
                 "This action was NOT performed: the request could mean more than one item, so the \
@@ -627,7 +637,7 @@ impl Agent {
         }
         st.messages.push(Message::user(results));
         let record = Record::Resumed {
-            answer: truncate(answer, LOG_TEXT_MAX),
+            answer: truncate(&answer, LOG_TEXT_MAX),
         };
         if let Err(o) = self.append(&mut st, record) {
             return self.conclude(st, o, None, None, started);
@@ -1172,11 +1182,21 @@ impl Agent {
                 tool: call.name.clone(),
                 verification: v.clone(),
             });
+            // A reason can quote the result or the screen (an error's text, a field's value):
+            // for an untrusted result it is fenced like the result itself, never left outside.
+            let fenced = |reason: &str| {
+                if result.untrusted {
+                    wrap_untrusted(&call.name, &st.fence, reason, false)
+                } else {
+                    reason.to_string()
+                }
+            };
             match &v {
                 Verification::Passed(_) => st.consecutive_verify_failures = 0,
                 // A tool that reported an error normally refused before acting, so nothing
                 // happened: say so, but do not count it towards the failures-in-a-row stop.
                 Verification::Failed(reason) if result.is_error => {
+                    let reason = fenced(reason);
                     content.push_str(&format!(
                         "\n\nVERIFICATION FAILED: {reason}. The action returned an error and was \
                          not performed. Fix the cause or try a different approach."
@@ -1184,6 +1204,7 @@ impl Agent {
                 }
                 Verification::Failed(reason) => {
                     st.consecutive_verify_failures += 1;
+                    let reason = fenced(reason);
                     content.push_str(&format!(
                         "\n\nVERIFICATION FAILED: {reason}. The action did not have the intended \
                          effect. Observe the current state and try a different approach."
