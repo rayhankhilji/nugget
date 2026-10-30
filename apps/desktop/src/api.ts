@@ -265,6 +265,8 @@ export interface AskRequest {
   tier?: Tier;
   /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
   history?: ChatMessage[];
+  /** The client's current UTC offset in minutes (east positive): the daemon's "today". */
+  utc_offset_minutes?: number;
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -1966,6 +1968,7 @@ export function askInConversation(
     provider: route.provider,
     tier: route.tier,
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+    utc_offset_minutes: -new Date().getTimezoneOffset(),
   });
 }
 
