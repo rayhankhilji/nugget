@@ -278,10 +278,22 @@ impl HostRule {
         let url = Url::parse(&format!("{scheme}://{rest}/")).map_err(|e| bad(&e.to_string()))?;
         let host = match url.host() {
             // `matches` ignores a URL's trailing dot, so the rule must too or it never matches.
-            Some(url::Host::Domain(d)) => match d.trim_end_matches('.') {
-                "" => return Err(bad("missing host")),
-                d => d.to_string(),
-            },
+            // `matches` ignores one trailing dot on a URL's host, so the rule drops it too. A
+            // name that is not a plain domain without it (`2..` would read as an IPv4 address,
+            // `a..b` has an empty label) is refused rather than silently changing kind.
+            Some(url::Host::Domain(d)) => {
+                let d = d.strip_suffix('.').unwrap_or(d);
+                if d.is_empty() || d.split('.').any(str::is_empty) {
+                    return Err(bad("empty label in host name"));
+                }
+                match Url::parse(&format!("{scheme}://{d}/"))
+                    .ok()
+                    .and_then(|u| u.host().map(|h| matches!(h, url::Host::Domain(_))))
+                {
+                    Some(true) => d.to_string(),
+                    _ => return Err(bad("host name is not a domain without its trailing dot")),
+                }
+            }
             Some(url::Host::Ipv4(ip)) if !wildcard => ip.to_string(),
             Some(url::Host::Ipv6(ip)) if !wildcard => ip.to_string(),
             Some(_) => return Err(bad("a wildcard needs a domain name")),
