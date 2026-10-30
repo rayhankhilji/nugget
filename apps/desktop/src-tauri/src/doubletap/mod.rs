@@ -7,6 +7,7 @@
 //! - [`permissions`]: per-OS onboarding and the status the settings page shows.
 //! - [`flow`]: the runtime glue (listener lifecycle, the draft flow, effects, focus restore).
 //! - [`commands`]: the Tauri commands.
+//! - `probe`: debug builds only, a step log for the native overlay runs (`apps/desktop/e2e-native`).
 
 pub mod commands;
 pub mod errors;
@@ -14,6 +15,7 @@ pub mod flow;
 pub mod overlay;
 pub mod permissions;
 pub mod placement;
+mod probe;
 pub mod settings;
 
 use std::path::PathBuf;

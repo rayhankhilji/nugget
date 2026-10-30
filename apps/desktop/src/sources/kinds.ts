@@ -15,7 +15,7 @@ export interface KindGroup {
 
 export const KIND_GROUPS: readonly KindGroup[] = [
   { id: "local", label: "addSource.group.local", kinds: ["files", "obsidian"] },
-  { id: "google", label: "addSource.group.google", kinds: ["gmail", "gcal"] },
+  { id: "google", label: "addSource.group.google", kinds: ["gmail", "gcal", "gdrive"] },
   { id: "microsoft", label: "addSource.group.microsoft", kinds: MICROSOFT_KINDS },
   { id: "standard", label: "addSource.group.standard", kinds: ["imap", "caldav"] },
   { id: "work", label: "addSource.group.work", kinds: SAAS_KINDS },
@@ -23,6 +23,7 @@ export const KIND_GROUPS: readonly KindGroup[] = [
 
 export const isMicrosoftKind = (k: string): k is MicrosoftKind => (MICROSOFT_KINDS as readonly string[]).includes(k);
 export const isSaasKind = (k: string): k is SaasKind => (SAAS_KINDS as readonly string[]).includes(k);
+export const isGoogleKind = (k: string): k is GoogleKind => (GOOGLE_KINDS as readonly string[]).includes(k);
 
 /**
  * How an existing source (re)connects:
@@ -41,7 +42,7 @@ const hasString = (settings: SourceSettings | undefined, key: string) => {
 };
 
 export function connectMode(kind: string, settings?: SourceSettings): ConnectMode {
-  if (kind === "gmail" || kind === "gcal" || isMicrosoftKind(kind)) return "browser";
+  if (isGoogleKind(kind) || isMicrosoftKind(kind)) return "browser";
   if (kind === "imap" || kind === "caldav") return "password";
   if (isSaasKind(kind)) {
     if (hasString(settings, "token_env")) return "env";
@@ -51,6 +52,40 @@ export function connectMode(kind: string, settings?: SourceSettings): ConnectMod
     return "token";
   }
   return "none";
+}
+
+// ---- Google ----
+
+export type GoogleKind = "gmail" | "gcal" | "gdrive";
+export const GOOGLE_KINDS: readonly GoogleKind[] = ["gmail", "gcal", "gdrive"];
+
+/** Google's product name for the API each kind needs enabled, as shown in the Cloud console. */
+export const GOOGLE_API: Record<GoogleKind, string> = {
+  gmail: "Gmail API",
+  gcal: "Google Calendar API",
+  gdrive: "Google Drive API",
+};
+
+/** The only scope Google Drive asks for: read-only (the Sheets and Slides APIs accept it for reads). */
+export const GDRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+
+export interface GoogleForm {
+  clientId: string;
+  /** Google Drive only. */
+  includeSharedWithMe: boolean;
+  includeSharedDrives: boolean;
+}
+
+export const EMPTY_GOOGLE: GoogleForm = { clientId: "", includeSharedWithMe: false, includeSharedDrives: false };
+
+/** `client_id`, plus Drive's two opt-ins (sent explicitly for `gdrive` only). The secret goes through `sources.secret.set`. */
+export function googleSettings(kind: GoogleKind, f: GoogleForm): SourceSettings {
+  const out: SourceSettings = { client_id: f.clientId.trim() };
+  if (kind === "gdrive") {
+    out.include_shared_with_me = f.includeSharedWithMe;
+    out.include_shared_drives = f.includeSharedDrives;
+  }
+  return out;
 }
 
 // ---- Microsoft 365 ----

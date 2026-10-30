@@ -15,6 +15,7 @@ and has **Sync now**, **Disable** and **Remove** actions.
 | [`obsidian`](sources-obsidian.md) | An Obsidian vault's notes and attachments | None | Live file-system watcher |
 | [`gmail`](sources-google.md) | Gmail, read-only | Your own Google OAuth client | Polled every 60 s (history deltas) |
 | [`gcal`](sources-google.md) | Google Calendar, read-only | Your own Google OAuth client | Polled every 5 min (sync tokens) |
+| [`gdrive`](sources-google.md#google-drive) | Documents in Google Drive, read-only | Your own Google OAuth client | Polled every 5 min (Drive change feed) |
 | [`imap`](sources-imap-caldav.md) | Any IMAP mailbox over TLS | Password or app password | IMAP IDLE on the inbox, plus polling |
 | [`caldav`](sources-imap-caldav.md) | Any CalDAV calendar over https | Password or app password | Polled every 5 min (`sync-collection`) |
 

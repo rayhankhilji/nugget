@@ -29,6 +29,7 @@ use tauri::{AppHandle, Emitter, Listener as _, Manager, PhysicalPosition};
 use super::errors::{self, Failure};
 use super::overlay::{Effect, Event, Started};
 use super::placement::{self, Area, Screen};
+use super::probe;
 use super::settings;
 use super::{DRAFT_PREWARM, DoubleTap, OVERLAY_EVENT, OVERLAY_LABEL, OVERLAY_SIZE, lock};
 use crate::daemon::{self, Daemon};
@@ -127,6 +128,10 @@ pub fn restart_listener(app: &AppHandle) {
             }
         }
     }
+    probe::record(
+        "listener",
+        || serde_json::json!({ "listening": slot.is_some(), "error": error }),
+    );
     *lock(&state.trigger_error) = error;
 }
 
@@ -155,6 +160,7 @@ pub async fn restart_listener_async(app: &AppHandle) {
 
 /// Runs on the hotkey dispatcher thread.
 fn on_trigger(app: &AppHandle) {
+    probe::record("trigger", || serde_json::Value::Null);
     let app = app.clone();
     tauri::async_runtime::spawn(fire(app));
 }
@@ -189,6 +195,7 @@ pub async fn fire(app: AppHandle) {
         }
         let step = m.apply(Event::Begin);
         let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
+        probe::record("view", || serde_json::json!(m.view()));
         drop(m);
         run(&app, step.effects);
     }
@@ -338,6 +345,7 @@ pub fn apply(app: &AppHandle, event: Event) {
         if step.changed {
             // Emitted under the lock so views arrive in order.
             let _ = app.emit_to(OVERLAY_LABEL, OVERLAY_EVENT, m.view());
+            probe::record("view", || serde_json::json!(m.view()));
         }
         step.effects
     };
@@ -443,12 +451,14 @@ fn show_overlay(app: &AppHandle, focus: bool) {
     if focus {
         let _ = win.set_focus();
     }
+    probe::window("show", &win);
 }
 
 fn hide_overlay(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(OVERLAY_LABEL) {
         let _ = win.hide();
         let _ = win.set_focusable(false);
+        probe::window("hide", &win);
     }
 }
 
@@ -471,6 +481,10 @@ async fn insert(app: AppHandle, text: String) {
             .map_err(|e| errors::classify_a11y(&e, true))
     })
     .await;
+    probe::record(
+        "insert",
+        || serde_json::json!({ "ok": matches!(result, Ok(Ok(_))) }),
+    );
     match result {
         Ok(Ok(outcome)) => apply(
             &app,

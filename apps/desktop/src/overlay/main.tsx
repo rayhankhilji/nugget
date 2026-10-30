@@ -4,6 +4,7 @@ import { initI18n } from "../i18n";
 import { Overlay } from "./Overlay";
 import "../styles.css";
 import "./overlay.css";
+import "../styles-a11y.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

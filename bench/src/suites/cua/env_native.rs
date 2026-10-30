@@ -1,5 +1,5 @@
 //! The `native` environment: the apps on the machine's own desktop, read and driven through its
-//! real accessibility API. Windows only for now (UI Automation); the Linux equivalent is `xvfb`.
+//! real accessibility API: UI Automation on Windows, AX on macOS. The Linux equivalent is `xvfb`.
 //!
 //! - **Windows.** The apps are served on the loopback socket as in `xvfb`, and each app gets one
 //!   Microsoft Edge window in app mode (`--app=<url>`, renderer accessibility forced on, a
@@ -7,16 +7,20 @@
 //!   installed. Occlusion and background throttling are off, so a covered window still reloads
 //!   when the world changes. The run waits until every window has loaded its page and is visible
 //!   to UI Automation; every process is killed on drop.
+//! - **macOS.** The same, with one Google Chrome app window per app, read and driven over AX
+//!   (see [`super::env_ax`]). The process running the bench needs the Accessibility permission.
 //! - **Session** ([`NativeSession`]): observations and confirmations go to the harness as in
 //!   `socket`, but every action is performed on the real window through UI Automation by
-//!   [`super::env_uia::UiaDriver`]; the page posts it to the server, exactly as a user's input.
+//!   [`super::env_uia::UiaDriver`] (over AX on macOS); the page posts it to the server, exactly
+//!   as a user's input.
 //!   So the `reference` agent drives the real windows too, which checks the harness.
 //! - **The nugget arm** gets [`computer`]: a `ComputerUse` that reads the real windows over UI
 //!   Automation and presents them with bench ids (see `env_uia`). It is available while a native
 //!   desktop is up, on the thread that started it ([`NativeDesktop`] registers its driver there
 //!   and unregisters it on drop).
 //!
-//! `NUGGET_CUA_EDGE` overrides the browser (any Chromium build with `--app` works).
+//! `NUGGET_CUA_EDGE` (Windows) and `NUGGET_CUA_CHROME` (macOS) override the browser (any
+//! Chromium build with `--app` works).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -30,6 +34,7 @@ use nugget_policy::ActionDescriptor;
 
 use super::agent::{ActResult, EnvError, Session};
 use super::apps::APP_IDS;
+use super::env_ax;
 use super::env_uia::{UiaComputer, UiaDriver};
 use super::nugget_env::WorldPort;
 use super::server::Stage;
@@ -99,22 +104,77 @@ pub fn find_edge() -> Option<PathBuf> {
     })
 }
 
-/// Whether the prerequisites for the `native` environment are present.
-pub fn available() -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err(format!(
-            "the native environment needs Windows (UI Automation and Microsoft Edge); this is {}. \
-             On Linux use --cua-env xvfb",
+/// The browser for this OS's app windows: Edge on Windows, Chrome on macOS.
+pub fn find_browser() -> Result<PathBuf, String> {
+    if cfg!(windows) {
+        find_edge()
+            .ok_or_else(|| "Microsoft Edge not found (set NUGGET_CUA_EDGE to msedge.exe)".into())
+    } else if cfg!(target_os = "macos") {
+        env_ax::find_chrome().ok_or_else(|| {
+            "Google Chrome not found in /Applications (set NUGGET_CUA_CHROME to its binary)".into()
+        })
+    } else {
+        Err(format!(
+            "the native environment needs Windows (UI Automation and Microsoft Edge) or macOS \
+             (AX and Google Chrome); this is {}. On Linux use --cua-env xvfb",
             std::env::consts::OS
-        ));
+        ))
     }
-    if find_edge().is_none() {
-        return Err("Microsoft Edge not found (set NUGGET_CUA_EDGE to msedge.exe)".into());
-    }
-    Ok(())
 }
 
-/// One Edge window per app, and the accessibility driver over them.
+/// Whether the prerequisites for the `native` environment are present.
+pub fn available() -> Result<(), String> {
+    find_browser().map(|_| ())
+}
+
+/// Edge's command line for one app window (Windows).
+fn edge_args(url: &str, profile: &Path, pos: (u32, u32), size: (u32, u32)) -> Vec<String> {
+    vec![
+        format!("--app={url}"),
+        format!("--user-data-dir={}", profile.display()),
+        format!("--window-position={},{}", pos.0, pos.1),
+        format!("--window-size={},{}", size.0, size.1),
+        "--force-renderer-accessibility".into(),
+        "--no-first-run".into(),
+        "--no-default-browser-check".into(),
+        "--disable-sync".into(),
+        "--disable-extensions".into(),
+        "--disable-component-update".into(),
+        "--disable-background-networking".into(),
+        "--disable-features=Translate,msEdgeTranslate,CalculateNativeWinOcclusion,\
+         msUndersideButton,msEdgeSidebarV2"
+            .into(),
+        "--disable-backgrounding-occluded-windows".into(),
+        "--disable-renderer-backgrounding".into(),
+        "--disable-background-timer-throttling".into(),
+        "--edge-skip-compat-layer-relaunch".into(),
+        "--no-proxy-server".into(),
+    ]
+}
+
+fn is_edge(name: &str) -> bool {
+    name.to_lowercase().contains("msedge")
+}
+
+/// `NUGGET_CUA_DUMP`: write each browser window's real tree (normalised as the matcher reads
+/// it) to `<dir>/<n>.json`, for diagnosing a match. Best effort.
+fn dump_windows(sys: &dyn ComputerUse, dir: &Path) {
+    let _ = std::fs::create_dir_all(dir);
+    for (i, w) in sys.windows().unwrap_or_default().iter().enumerate() {
+        let Ok(mut tree) = sys.snapshot(
+            &nugget_a11y::computer::WindowSel::Id(w.id.clone()),
+            &super::env_uia::real_limits(),
+        ) else {
+            continue;
+        };
+        env_ax::normalize(&mut tree.root);
+        if let Ok(json) = serde_json::to_string_pretty(&tree) {
+            let _ = std::fs::write(dir.join(format!("{i}.json")), json);
+        }
+    }
+}
+
+/// One browser window per app, and the accessibility driver over them.
 pub struct NativeDesktop {
     pub info: NativeInfo,
     pub driver: Arc<UiaDriver>,
@@ -140,15 +200,27 @@ impl NativeDesktop {
     /// Open the app windows and wait until each has loaded its page and is visible to the
     /// accessibility API. `stage` must hold a world (the pages render it).
     pub fn start(base_url: &str, stage: &Stage, timeout: Duration) -> Result<Self, String> {
-        available()?;
-        let edge = find_edge().ok_or("Microsoft Edge not found")?;
+        let browser = find_browser()?;
+        let mac = cfg!(target_os = "macos");
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let sys = nugget_a11y::system_computer();
+        if sys.permission() == nugget_a11y::Permission::Denied {
+            return Err(
+                "the accessibility permission is not granted to this process (macOS: System \
+                 Settings, Privacy & Security, Accessibility)"
+                    .into(),
+            );
+        }
+        let (accessibility, kind) = if mac {
+            ("ax", "chrome")
+        } else {
+            ("uia", "edge")
+        };
         let mut d = NativeDesktop {
             info: NativeInfo {
-                browser: edge.display().to_string(),
+                browser: browser.display().to_string(),
                 pids: HashMap::new(),
-                accessibility: "uia",
+                accessibility,
             },
             driver: Arc::new(UiaDriver::new(
                 sys.clone(),
@@ -162,35 +234,21 @@ impl NativeDesktop {
         for (i, app) in APP_IDS.iter().enumerate() {
             let (x, y) = ((i as u32 % 3) * WINDOW.0, (i as u32 / 3) * WINDOW.1);
             let profile = d.dir.path().join(format!("profile-{app}"));
-            let mut cmd = Command::new(&edge);
-            cmd.args([
-                format!("--app={base_url}/{app}/"),
-                format!("--user-data-dir={}", profile.display()),
-                format!("--window-position={x},{y}"),
-                format!("--window-size={},{}", WINDOW.0, WINDOW.1),
-                "--force-renderer-accessibility".into(),
-                "--no-first-run".into(),
-                "--no-default-browser-check".into(),
-                "--disable-sync".into(),
-                "--disable-extensions".into(),
-                "--disable-component-update".into(),
-                "--disable-background-networking".into(),
-                "--disable-features=Translate,msEdgeTranslate,CalculateNativeWinOcclusion,\
-                 msUndersideButton,msEdgeSidebarV2"
-                    .into(),
-                "--disable-backgrounding-occluded-windows".into(),
-                "--disable-renderer-backgrounding".into(),
-                "--disable-background-timer-throttling".into(),
-                "--edge-skip-compat-layer-relaunch".into(),
-                "--no-proxy-server".into(),
-            ]);
-            let name = format!("edge-{app}");
+            let url = format!("{base_url}/{app}/");
+            let args = if mac {
+                env_ax::chrome_args(&url, &profile, (x, y), WINDOW)
+            } else {
+                edge_args(&url, &profile, (x, y), WINDOW)
+            };
+            let mut cmd = Command::new(&browser);
+            cmd.args(args);
+            let name = format!("{kind}-{app}");
             let child = cmd
                 .stdin(Stdio::null())
                 .stdout(d.log(&name))
                 .stderr(d.log(&format!("{name}.err")))
                 .spawn()
-                .map_err(|e| format!("cannot start {}: {e}", edge.display()))?;
+                .map_err(|e| format!("cannot start {}: {e}", browser.display()))?;
             spawned.insert((*app).to_owned(), child.id());
             d.children.push((name, child));
         }
@@ -208,11 +266,8 @@ impl NativeDesktop {
             let titled = ws
                 .iter()
                 .filter(|w| {
-                    w.app.name.to_lowercase().contains("msedge")
-                        || w.app
-                            .id
-                            .as_deref()
-                            .is_some_and(|i| i.to_lowercase().contains("msedge"))
+                    let is = if mac { env_ax::is_chrome } else { is_edge };
+                    is(&w.app.name) || w.app.id.as_deref().is_some_and(is)
                 })
                 .count();
             let all_served = APP_IDS.iter().all(|a| served.contains(*a));
@@ -230,11 +285,14 @@ impl NativeDesktop {
                     .collect();
                 return Err(format!(
                     "app windows did not come up within {timeout:?} (pages not served: \
-                     {missing:?}; windows: {titles:?}); edge says: {}",
-                    d.log_tail("edge-mail.err")
+                     {missing:?}; windows: {titles:?}); {kind} says: {}",
+                    d.log_tail(&format!("{kind}-mail.err"))
                 ));
             }
             std::thread::sleep(Duration::from_millis(200));
+        }
+        if let Some(dir) = std::env::var_os("NUGGET_CUA_DUMP") {
+            dump_windows(&*sys, Path::new(&dir));
         }
         d.driver = Arc::new(UiaDriver::new(sys, Arc::new(d.info.pids.clone())));
         d.registration = Some(register(d.driver.clone()));
@@ -261,7 +319,7 @@ impl Drop for NativeDesktop {
             let _ = c.kill();
             let _ = c.wait();
         }
-        // Edge's helper processes let go of the profile shortly after the browser exits.
+        // The browser's helper processes let go of the profile shortly after it exits.
         std::thread::sleep(Duration::from_millis(300));
     }
 }
@@ -342,7 +400,24 @@ impl Session for NativeSession<'_> {
         };
         let stage = self.stage.clone();
         let version = move || stage.version();
-        Ok(self.driver.perform(action, &obs, &version, &bench))
+        let r = self.driver.perform(action, &obs, &version, &bench);
+        if !r.ok {
+            eprintln!(
+                "cua native: {action:?} failed: {}",
+                r.message.as_deref().unwrap_or("-")
+            );
+            if let Some(dir) = std::env::var_os("NUGGET_CUA_DUMP") {
+                let at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or_default();
+                dump_windows(
+                    &**self.driver.sys(),
+                    &Path::new(&dir).join(format!("fail-{at}")),
+                );
+            }
+        }
+        Ok(r)
     }
 
     fn confirm(&mut self, action: &ActionDescriptor) -> Result<bool, EnvError> {
@@ -363,13 +438,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn unavailable_off_windows_with_a_clear_reason() {
-        if cfg!(windows) {
+    fn unavailable_on_linux_with_a_clear_reason() {
+        if cfg!(windows) || cfg!(target_os = "macos") {
             return;
         }
         let e = available().unwrap_err();
         assert!(e.contains("needs Windows"), "{e}");
+        assert!(e.contains("macOS"), "{e}");
         assert!(e.contains("xvfb"), "{e}");
+    }
+
+    #[test]
+    fn edge_app_window_command_line() {
+        let a = edge_args(
+            "http://127.0.0.1:9/mail/",
+            Path::new("p"),
+            (0, 490),
+            (530, 490),
+        );
+        assert_eq!(a[0], "--app=http://127.0.0.1:9/mail/");
+        assert!(a.contains(&"--window-position=0,490".to_owned()));
+        assert!(a.contains(&"--force-renderer-accessibility".to_owned()));
+        assert!(is_edge("msedge.exe"));
+        assert!(!is_edge("Google Chrome"));
     }
 
     #[test]

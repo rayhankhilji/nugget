@@ -51,6 +51,7 @@ describe("isSourceState / isSourceKind", () => {
     for (const s of ["idle", "syncing", "watching", "needs_auth", "disabled", "error"]) expect(isSourceState(s)).toBe(true);
     for (const s of ["NeedsAuth", "needsAuth", "", "ready", 1, null, undefined]) expect(isSourceState(s)).toBe(false);
     expect(isSourceKind("gcal")).toBe(true);
+    expect(isSourceKind("gdrive")).toBe(true);
     expect(isSourceKind("dropbox")).toBe(false);
   });
 });

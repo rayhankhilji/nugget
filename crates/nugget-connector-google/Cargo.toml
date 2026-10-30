@@ -1,6 +1,6 @@
 [package]
 name = "nugget-connector-google"
-description = "Gmail and Google Calendar connectors for Nugget"
+description = "Gmail, Google Calendar and Google Drive connectors for Nugget"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

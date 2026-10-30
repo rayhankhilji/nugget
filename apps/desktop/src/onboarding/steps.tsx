@@ -1,8 +1,9 @@
-import { useEffect, useState, type Dispatch, type ReactNode, type RefObject } from "react";
+import { useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
 import { api, events, type ConnectorKind, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
+import { Announce, useAnnouncer } from "../components/Announce";
 import { pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
 
@@ -83,7 +84,7 @@ export function SourceStep({ headingRef, connected }: StepProps) {
   const t = useT();
   const [open, setOpen] = useState<ConnectorKind | "pick" | null>(null);
   const [added, setAdded] = useState<SourceInfo[]>([]);
-  const [announce, setAnnounce] = useState("");
+  const [announcement, announce] = useAnnouncer();
 
   return (
     <>
@@ -102,18 +103,16 @@ export function SourceStep({ headingRef, connected }: StepProps) {
       ) : (
         <OfflineNote />
       )}
-      {added.length > 0 && <IndexProgress added={added} />}
+      {added.length > 0 && <IndexProgress added={added} announce={announce} />}
       <p className="muted">{t("onboarding.source.later")}</p>
-      <div className="visually-hidden" aria-live="polite">
-        {announce}
-      </div>
+      <Announce message={announcement} />
       {open && (
         <AddSourceWizard
           initialKind={open === "pick" ? undefined : open}
           onClose={() => setOpen(null)}
           onAdded={(s) => {
             setAdded((list) => [...list.filter((x) => x.id !== s.id), s]);
-            setAnnounce(t("onboarding.source.addedAnnounce", { name: s.name }));
+            announce(t("onboarding.source.addedAnnounce", { name: s.name }));
           }}
         />
       )}
@@ -131,9 +130,10 @@ const PHASE_KEY: Record<IndexPhase, MessageKey> = {
 /**
  * Live indexing progress for the sources added in this step, so the first run shows that
  * something is happening and says when search starts to work. Polls `sources.list` (and
- * refreshes on `sources.changed`) until every added source is searchable or failed.
+ * refreshes on `sources.changed`) until every added source is searchable or failed. The list is
+ * not a live region (its counts change every second); each source's start and end are announced.
  */
-function IndexProgress({ added }: { added: SourceInfo[] }) {
+function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (text: string) => void }) {
   const t = useT();
   const [live, setLive] = useState<Record<string, SourceInfo>>({});
   const ids = added.map((s) => s.id).join("\u0000");
@@ -170,8 +170,22 @@ function IndexProgress({ added }: { added: SourceInfo[] }) {
     };
   }, [ids, settled, tick]);
 
+  // The last phase announced per source: "added" is said by the step, then indexing and the end.
+  const announced = useRef(new Map<string, IndexPhase>());
+  useEffect(() => {
+    for (const s of current) {
+      const phase = indexPhase(s);
+      const before = announced.current.get(s.id) ?? "waiting";
+      // A later pass over a finished source is not news here.
+      if (phase === before || phase === "waiting" || (phase === "indexing" && before !== "waiting")) continue;
+      announced.current.set(s.id, phase);
+      const args = { name: s.name, count: s.items, error: s.last_error ?? "" };
+      announce(phase === "indexing" ? t("announce.indexing", args) : t(PHASE_KEY[phase], args));
+    }
+  });
+
   return (
-    <ul className="ob-index" aria-live="polite">
+    <ul className="ob-index" aria-busy={!settled}>
       {current.map((s) => {
         const phase = indexPhase(s);
         return (
