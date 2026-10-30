@@ -56,10 +56,16 @@
     "linux": {
       "deb": {
         "section": "utils",
-        "depends": []
+        "depends": [],
+        "files": {
+          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
+        }
       },
       "rpm": {
-        "release": "1"
+        "release": "1",
+        "files": {
+          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
+        }
       },
       "appimage": {
         "bundleMediaFramework": false

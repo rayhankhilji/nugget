@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap lee los campos de texto mediante AT-SPI, que está desactivado en este escritorio. Actívalo con: gsettings set org.gnome.desktop.interface toolkit-accessibility true — y después cierra sesión y vuelve a entrar.",
   "doubletap.hint.accessibility": "Nugget necesita acceso de Accesibilidad para leer el campo activo e insertar borradores. Abre Ajustes del Sistema → Privacidad y seguridad → Accesibilidad y activa Nugget.",
   "doubletap.hint.wayland_chord": "En Wayland, las apps no pueden detectar pulsaciones sueltas, así que la doble pulsación no funciona. Usa una combinación de teclas como atajo.",
-  "doubletap.hint.macos_permissions": "Double Tap necesita Accesibilidad y Monitorización de entrada. Haz clic en Abrir solicitudes de permisos, activa Nugget en Ajustes del Sistema → Privacidad y seguridad y vuelve aquí."
+  "doubletap.hint.macos_permissions": "Double Tap necesita Accesibilidad y Monitorización de entrada. Haz clic en Abrir solicitudes de permisos, activa Nugget en Ajustes del Sistema → Privacidad y seguridad y vuelve aquí.",
+  "doubletap.hint.wayland_no_portal": "Este escritorio no tiene un portal de atajos globales (por ejemplo, sway o un xdg-desktop-portal antiguo), así que Nugget no puede registrar tu combinación de teclas. Con Nugget en marcha, asigna una tecla en la configuración de tu compositor para ejecutar nugget-desktop --double-tap (en sway: bindsym $mod+Shift+space exec nugget-desktop --double-tap), o abre Nugget desde la bandeja con «Open Nugget» y haz clic en «Probar».",
+  "doubletap.shortcut.awaiting_consent": "Tu escritorio está preguntando si Nugget puede usar este atajo. Apruébalo en el cuadro de diálogo para iniciar Double Tap con él.",
+  "doubletap.shortcut.not_assigned": "Tu escritorio no ha asignado ninguna tecla a Double Tap. Asigna una a «Nugget: draft a reply» en los ajustes de atajos de teclado de tu escritorio; funcionará en cuanto lo hagas. Mientras tanto, abre Nugget desde la bandeja y haz clic en «Probar».",
+  "doubletap.shortcut.rebinding": "Tu escritorio quitó el atajo; Nugget lo está configurando de nuevo…",
+  "doubletap.shortcut.active_desktop": "Tu escritorio inicia Double Tap con {trigger}.",
+  "doubletap.shortcut.failed": "El atajo del escritorio dejó de funcionar: {error}"
 }

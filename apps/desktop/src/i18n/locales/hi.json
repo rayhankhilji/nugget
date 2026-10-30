@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap टेक्स्ट फ़ील्ड AT-SPI से पढ़ता है, जो इस डेस्कटॉप पर बंद है। इसे चालू करें: gsettings set org.gnome.desktop.interface toolkit-accessibility true — फिर लॉग आउट करके दोबारा लॉग इन करें।",
   "doubletap.hint.accessibility": "फ़ोकस किए गए फ़ील्ड को पढ़ने और ड्राफ़्ट डालने के लिए Nugget को Accessibility अनुमति चाहिए। System Settings → Privacy & Security → Accessibility खोलें और Nugget चालू करें।",
   "doubletap.hint.wayland_chord": "Wayland पर ऐप अकेली कुंजी नहीं देख सकते, इसलिए डबल टैप काम नहीं करेगा। इसके बजाय कुंजी संयोजन को ट्रिगर बनाएँ।",
-  "doubletap.hint.macos_permissions": "Double Tap को सुगम्यता और इनपुट मॉनिटरिंग चाहिए। अनुमति अनुरोध खोलें पर क्लिक करें, System Settings → Privacy & Security में Nugget चालू करें, फिर वापस आएँ।"
+  "doubletap.hint.macos_permissions": "Double Tap को सुगम्यता और इनपुट मॉनिटरिंग चाहिए। अनुमति अनुरोध खोलें पर क्लिक करें, System Settings → Privacy & Security में Nugget चालू करें, फिर वापस आएँ।",
+  "doubletap.hint.wayland_no_portal": "इस डेस्कटॉप में ग्लोबल शॉर्टकट पोर्टल नहीं है (जैसे sway, या पुराना xdg-desktop-portal), इसलिए Nugget आपका की-कॉम्बिनेशन रजिस्टर नहीं कर सकता। Nugget चालू रहते हुए, अपने कंपोज़िटर की कॉन्फ़िग में nugget-desktop --double-tap चलाने के लिए एक की असाइन करें (sway पर: bindsym $mod+Shift+space exec nugget-desktop --double-tap), या ट्रे में “Open Nugget” से Nugget खोलें और “आज़माएँ” पर क्लिक करें।",
+  "doubletap.shortcut.awaiting_consent": "आपका डेस्कटॉप पूछ रहा है कि क्या Nugget यह शॉर्टकट इस्तेमाल कर सकता है। इससे Double Tap शुरू करने के लिए डायलॉग में अनुमति दें।",
+  "doubletap.shortcut.not_assigned": "आपके डेस्कटॉप ने Double Tap को कोई की असाइन नहीं की है। अपने डेस्कटॉप की कीबोर्ड शॉर्टकट सेटिंग्स में “Nugget: draft a reply” को एक की असाइन करें; ऐसा करते ही यह काम करने लगेगा। तब तक, ट्रे से Nugget खोलें और “आज़माएँ” पर क्लिक करें।",
+  "doubletap.shortcut.rebinding": "आपके डेस्कटॉप ने शॉर्टकट हटा दिया; Nugget उसे फिर से सेट कर रहा है…",
+  "doubletap.shortcut.active_desktop": "आपका डेस्कटॉप Double Tap को {trigger} से शुरू करता है।",
+  "doubletap.shortcut.failed": "डेस्कटॉप शॉर्टकट ने काम करना बंद कर दिया: {error}"
 }

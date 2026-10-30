@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap lit les champs de texte via AT-SPI, désactivé sur ce bureau. Activez-le avec : gsettings set org.gnome.desktop.interface toolkit-accessibility true — puis fermez la session et rouvrez-la.",
   "doubletap.hint.accessibility": "Nugget a besoin de l'accès Accessibilité pour lire le champ actif et insérer les brouillons. Ouvrez Réglages Système → Confidentialité et sécurité → Accessibilité et activez Nugget.",
   "doubletap.hint.wayland_chord": "Sous Wayland, les apps ne peuvent pas détecter un appui isolé : le double appui ne fonctionne pas. Utilisez plutôt une combinaison de touches.",
-  "doubletap.hint.macos_permissions": "Double Tap a besoin de l'accessibilité et de la surveillance de l'entrée. Cliquez sur Ouvrir les demandes d'autorisation, activez Nugget dans Réglages Système → Confidentialité et sécurité, puis revenez."
+  "doubletap.hint.macos_permissions": "Double Tap a besoin de l'accessibilité et de la surveillance de l'entrée. Cliquez sur Ouvrir les demandes d'autorisation, activez Nugget dans Réglages Système → Confidentialité et sécurité, puis revenez.",
+  "doubletap.hint.wayland_no_portal": "Ce bureau n’a pas de portail de raccourcis globaux (par exemple sway, ou un xdg-desktop-portal ancien) : Nugget ne peut donc pas enregistrer votre combinaison de touches. Pendant que Nugget tourne, associez une touche dans la configuration de votre compositeur pour lancer nugget-desktop --double-tap (sous sway : bindsym $mod+Shift+space exec nugget-desktop --double-tap), ou ouvrez Nugget depuis la zone de notification avec « Open Nugget » et cliquez sur « Essayer ».",
+  "doubletap.shortcut.awaiting_consent": "Votre bureau demande si Nugget peut utiliser ce raccourci. Approuvez-le dans la boîte de dialogue pour lancer Double Tap avec.",
+  "doubletap.shortcut.not_assigned": "Votre bureau n’a attribué aucune touche à Double Tap. Attribuez-en une à « Nugget: draft a reply » dans les paramètres de raccourcis clavier de votre bureau ; elle fonctionnera aussitôt. En attendant, ouvrez Nugget depuis la zone de notification et cliquez sur « Essayer ».",
+  "doubletap.shortcut.rebinding": "Votre bureau a retiré le raccourci ; Nugget le configure à nouveau…",
+  "doubletap.shortcut.active_desktop": "Votre bureau lance Double Tap avec {trigger}.",
+  "doubletap.shortcut.failed": "Le raccourci du bureau ne fonctionne plus : {error}"
 }

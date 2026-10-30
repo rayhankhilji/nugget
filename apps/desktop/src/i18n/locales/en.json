@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap reads text fields through AT-SPI, which is off on this desktop. Turn it on with: gsettings set org.gnome.desktop.interface toolkit-accessibility true — then log out and back in.",
   "doubletap.hint.accessibility": "Nugget needs Accessibility access to read the focused field and insert drafts. Open System Settings → Privacy & Security → Accessibility and turn on Nugget.",
   "doubletap.hint.wayland_chord": "On Wayland, apps can't watch single key taps, so a double tap won't work. Use a key combination as your trigger instead.",
-  "doubletap.hint.macos_permissions": "Double Tap needs Accessibility and Input Monitoring. Click Open permission prompts, turn Nugget on in System Settings → Privacy & Security, then come back."
+  "doubletap.hint.macos_permissions": "Double Tap needs Accessibility and Input Monitoring. Click Open permission prompts, turn Nugget on in System Settings → Privacy & Security, then come back.",
+  "doubletap.hint.wayland_no_portal": "This desktop has no global shortcut portal (sway, for example, or an older xdg-desktop-portal), so Nugget can't register your key combination. While Nugget is running, bind a key in your compositor's config to run nugget-desktop --double-tap (on sway: bindsym $mod+Shift+space exec nugget-desktop --double-tap), or open Nugget from the tray with Open Nugget and click Try it.",
+  "doubletap.shortcut.awaiting_consent": "Your desktop is asking whether Nugget may use this shortcut. Approve it in the dialog to start Double Tap with it.",
+  "doubletap.shortcut.not_assigned": "Your desktop hasn't assigned a key to Double Tap. Assign one to “Nugget: draft a reply” in your desktop's keyboard shortcut settings; it works as soon as you do. Until then, open Nugget from the tray and click Try it.",
+  "doubletap.shortcut.rebinding": "Your desktop dropped the shortcut; Nugget is setting it up again…",
+  "doubletap.shortcut.active_desktop": "Your desktop starts Double Tap with {trigger}.",
+  "doubletap.shortcut.failed": "The desktop shortcut stopped working: {error}"
 }

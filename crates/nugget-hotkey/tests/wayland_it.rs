@@ -11,13 +11,19 @@
 //! ```
 //!
 //! What runs depends on the portal the session offers:
-//! - **GlobalShortcuts available** (KDE: kwin + xdg-desktop-portal-kde): a real portal session
-//!   and bind request. When the desktop binds the shortcut, it is activated through
-//!   kglobalaccel's `invokeShortcut` (synthetic key presses cannot reach a Wayland compositor's
-//!   shortcut handling from a test). Where it cannot get further, the test stops at the
-//!   documented point: xdg-desktop-portal 1.19+ refuses an unscoped host process ("An app id is
-//!   required"); Plasma 5.27 answers the bind by leaving the keys to the user in System
-//!   Settings (the manual step); GNOME 48+ and Plasma 6 ask in a dialog.
+//! - **GlobalShortcuts available** (kwin: xdg-desktop-portal-kde, Plasma 6; gnome:
+//!   xdg-desktop-portal-gnome, GNOME 48+): nugget-hotkey registers the app id `dev.nugget.Nugget`
+//!   (the session provides its desktop file, or the installed package does), the portal session
+//!   is created and the shortcut bound. A new shortcut makes the desktop ask in a dialog, which
+//!   the test accepts over AT-SPI (`accept-shortcut-dialog.py`), as a user would. The bound
+//!   shortcut is then fired by a real key press, Ctrl+Alt+Space on the compositor's virtual
+//!   keyboard (`virtual-keyboard.py`: KWin fake input, Mutter RemoteDesktop), which goes through
+//!   the desktop's own shortcut handling to the portal's Activated signal. Without a virtual
+//!   keyboard, kglobalaccel's `invokeShortcut` is used and labelled (it is not a key press).
+//!   `NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES=1` makes every stop short of a key press firing the
+//!   shortcut a failure. Without it the test stops at the documented points: the portal refuses
+//!   an app it cannot name ("An app id is required"); Plasma 5.27 leaves the keys to the user in
+//!   System Settings (the manual step).
 //! - **No GlobalShortcuts** (sway: xdg-desktop-portal-wlr; GNOME before 48): `start` must fail fast
 //!   with the documented `Unsupported` error, and Double Tap is driven by a direct call (the
 //!   shell's fallback when no trigger can be registered is the tray / app button).
@@ -32,8 +38,9 @@ use std::time::{Duration, Instant};
 
 use nugget_core::Error;
 use nugget_hotkey::{
-    KillSwitch, Modifier, Session, Trigger, capabilities, check, check_kill_switch,
-    detect_linux_session, recommended_trigger, session, start, start_kill_switch,
+    APP_ID, DOUBLE_TAP_SHORTCUT_ID, KillSwitch, Listener, Modifier, Session, ShortcutState,
+    Trigger, capabilities, check, check_kill_switch, detect_linux_session, recommended_trigger,
+    session, start, start_kill_switch,
 };
 use support::{Mode, Pipeline};
 
@@ -80,10 +87,10 @@ fn tokens(reply: &str) -> Vec<String> {
     out
 }
 
-/// The kglobalaccel component and action the portal bound for this process (ids
-/// `nugget-<pid>-<n>`, from `wayland.rs`).
+/// The kglobalaccel component and action the KDE portal bound for Double Tap: component
+/// `dev.nugget.Nugget` (the app id, object path `/component/dev_nugget_Nugget`), action
+/// [`DOUBLE_TAP_SHORTCUT_ID`].
 fn find_kglobalaccel_shortcut() -> Option<(String, String)> {
-    let prefix = format!("nugget-{}-", std::process::id());
     let comps = gdbus(&[
         "call",
         "--session",
@@ -95,7 +102,8 @@ fn find_kglobalaccel_shortcut() -> Option<(String, String)> {
         "org.kde.KGlobalAccel.allComponents",
     ])
     .ok()?;
-    for comp in tokens(&comps).into_iter().filter(|c| c.starts_with('/')) {
+    let want = format!("/component/{}", APP_ID.replace(['.', '-'], "_"));
+    for comp in tokens(&comps).into_iter().filter(|c| *c == want) {
         let Ok(names) = gdbus(&[
             "call",
             "--session",
@@ -108,8 +116,8 @@ fn find_kglobalaccel_shortcut() -> Option<(String, String)> {
         ]) else {
             continue;
         };
-        if let Some(n) = tokens(&names).into_iter().find(|n| n.starts_with(&prefix)) {
-            return Some((comp, n));
+        if tokens(&names).iter().any(|n| n == DOUBLE_TAP_SHORTCUT_ID) {
+            return Some((comp, DOUBLE_TAP_SHORTCUT_ID.to_string()));
         }
     }
     None
@@ -145,7 +153,119 @@ fn dump_kglobalaccel() -> String {
     s
 }
 
-/// Activate the bound shortcut the way the compositor does when its keys are pressed.
+/// Press keys on the compositor's virtual keyboard (`virtual-keyboard.py` from the session:
+/// KWin fake input, Mutter RemoteDesktop), when this session has one.
+fn virtual_keyboard() -> Option<String> {
+    let script = std::env::var("NUGGET_WAYLAND_KEYS").ok()?;
+    matches!(compositor().as_str(), "kwin" | "gnome").then_some(script)
+}
+
+fn press(script: &str, chord: &str) {
+    let out = Command::new("python3")
+        .arg(script)
+        .arg(chord)
+        .output()
+        .expect("run virtual-keyboard.py");
+    print!("{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        out.status.success(),
+        "virtual keyboard: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+/// The keys the portal binds, as virtual-keyboard.py spells them.
+const KEYS: &str = "ctrl+alt+space";
+
+/// Whether this run must get as far as a real key press firing the shortcut
+/// (`NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES=1`: the kwin and gnome jobs).
+fn expect_fires() -> bool {
+    std::env::var_os("NUGGET_WAYLAND_EXPECT_SHORTCUT_FIRES").is_some_and(|v| v == "1")
+}
+
+/// How the listener's shortcut got bound (or did not).
+struct Bind {
+    state: ShortcutState,
+    consent: String,
+    bound_ms: f64,
+}
+
+/// Wait for the portal bind to settle, accepting the desktop's consent dialog the way a user
+/// does (`accept-shortcut-dialog.py`, AT-SPI) when the listener reports it waiting for one.
+fn settle(listener: &dyn Listener, t: Instant) -> Bind {
+    let mut consent = "none asked (returning shortcut)".to_string();
+    let mut asked = false;
+    let mut waiting_since: Option<Instant> = None;
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        let state = listener.state();
+        match &state {
+            // Every bind waits on the portal briefly; a returning shortcut is bound in
+            // milliseconds, so only a bind still open after 1.5 s is waiting on a dialog.
+            ShortcutState::AwaitingConsent if !asked => {
+                let since = *waiting_since.get_or_insert_with(Instant::now);
+                if since.elapsed() > Duration::from_millis(1500) {
+                    asked = true;
+                    consent = accept_dialog();
+                }
+            }
+            ShortcutState::Active { .. }
+            | ShortcutState::NotAssigned
+            | ShortcutState::Failed(_) => {
+                return Bind {
+                    state,
+                    consent,
+                    bound_ms: support::ms(t.elapsed()),
+                };
+            }
+            _ => {}
+        }
+        if Instant::now() > deadline {
+            return Bind {
+                state,
+                consent: format!("{consent}; still unsettled after 40 s"),
+                bound_ms: support::ms(t.elapsed()),
+            };
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn accept_dialog() -> String {
+    let Ok(script) = std::env::var("NUGGET_WAYLAND_ACCEPT_DIALOG") else {
+        return "dialog left open (no accept-shortcut-dialog.py)".into();
+    };
+    let out = Command::new("python3")
+        .arg(script)
+        .args(["--timeout", "25"])
+        .output()
+        .expect("run accept-shortcut-dialog.py");
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    println!("{text}");
+    match out.status.code() {
+        Some(0) => "dialog accepted over AT-SPI".into(),
+        Some(3) => "no dialog appeared".into(),
+        c => format!("dialog not accepted (exit {c:?}): {}", text.trim()),
+    }
+}
+
+/// Press the chord on the virtual keyboard until `rx` sees a fire (3 attempts); the ms from the
+/// last press to the fire.
+fn press_until_fired(script: &str, rx: &mpsc::Receiver<Instant>) -> Option<f64> {
+    for attempt in 1..=3 {
+        let pressed = Instant::now();
+        press(script, KEYS);
+        if let Ok(at) = rx.recv_timeout(Duration::from_secs(3)) {
+            println!("fired on virtual key press attempt {attempt}");
+            return Some(support::ms(at.saturating_duration_since(pressed)));
+        }
+        println!("virtual key press attempt {attempt}: no fire");
+    }
+    None
+}
+
+/// Activate the bound shortcut through kglobalaccel (not a key press: the fallback when the
+/// session has no virtual keyboard).
 fn invoke(comp: &str, name: &str) {
     gdbus(&[
         "call",
@@ -159,6 +279,14 @@ fn invoke(comp: &str, name: &str) {
         name,
     ])
     .unwrap_or_else(|e| panic!("invokeShortcut {name}: {e}"));
+}
+
+fn keyboard_kind() -> &'static str {
+    match compositor().as_str() {
+        "kwin" => "KWin org_kde_kwin_fake_input",
+        "gnome" => "Mutter RemoteDesktop",
+        _ => "none",
+    }
 }
 
 fn channel_callback() -> (Box<dyn Fn() + Send + Sync>, mpsc::Receiver<Instant>) {
@@ -341,105 +469,122 @@ fn wayland_portal_chord() {
         );
         assert!(start_ms < 6_000.0, "the portal check took {start_ms:.0} ms");
         summary(&format!(
-            "| {} | chord {CHORD} | portal without GlobalShortcuts: Unsupported in {start_ms:.1} ms | - |",
+            "| {} | - | portal without GlobalShortcuts: Unsupported in {start_ms:.1} ms | - | - | - | no (tray / app button fallback) |",
             compositor()
         ));
         return;
     }
 
-    // xdg-desktop-portal 1.19+ (Ubuntu 26.04) gives GlobalShortcuts only to an app it can name:
-    // a sandboxed app, an app in a systemd `app-<id>-*.scope`, or one whose host registration
-    // matches an installed desktop file it resolves. A headless test process launched from a
-    // shell has none of these, so the portal refuses the session; that refusal, with its reason,
-    // is where the automated path stops (an installed, desktop-launched Nugget gets its scope).
+    // xdg-desktop-portal 1.19+ gives GlobalShortcuts to an unsandboxed app only when it can
+    // name it: nugget-hotkey registers APP_ID, which the portal accepts when a desktop file of
+    // that name with an existing Exec program is installed (the .deb's, or the session's test
+    // one). Without it the session is refused, with the reason.
     let listener = match r {
         Ok(l) => l,
         Err(Error::Unsupported(msg)) if msg.contains("app id") => {
             println!("STOP: portal refused the session after {start_ms:.1} ms: {msg}");
-            assert!(start_ms < 6_000.0, "the portal took {start_ms:.0} ms");
             assert!(
-                msg.contains("registering the app id"),
-                "reason missing: {msg}"
+                !expect_fires(),
+                "the portal refused the session although {APP_ID}.desktop is installed: {msg}"
             );
+            assert!(msg.contains(APP_ID), "reason missing: {msg}");
             summary(&format!(
-                "| {} | chord {CHORD} via GlobalShortcuts | refused in {start_ms:.1} ms: the \
-                 portal needs an app id (unscoped host process) | - |",
+                "| {} | registration refused | refused in {start_ms:.1} ms (no {APP_ID}.desktop) | - | - | - | no |",
                 compositor()
             ));
             return;
         }
         Err(e) => panic!("portal session: {e}"),
     };
-    println!("portal session created in {start_ms:.1} ms");
+    println!("portal session created for {APP_ID} in {start_ms:.1} ms");
     assert!(
         start_ms < 6_000.0,
         "creating the session took {start_ms:.0} ms"
     );
-    // The bind runs after start() returns. Plasma 5.27 answers it at once without binding
-    // anything: it opens System Settings' shortcuts page (systemsettings://kcm_keys/<session>)
-    // for the user to assign the keys. That is the manual step; nothing can be activated
-    // before it, so the test stops there (the listener stays subscribed meanwhile).
-    let Some((comp, name)) = support::wait_for(Duration::from_secs(5), find_kglobalaccel_shortcut)
-    else {
-        println!(
-            "MANUAL STEP: the desktop did not bind the shortcut; the user assigns it in the \
-             desktop's shortcut settings (Plasma 5.27: System Settings > Shortcuts). \
-             kglobalaccel:\n{}",
+
+    // The bind runs after start() returns; Plasma 6 and GNOME ask the user about a new
+    // shortcut in a dialog (accepted here as a user would), and bind a returning one silently.
+    let bind = settle(listener.as_ref(), t);
+    println!(
+        "bind settled after {:.1} ms: {:?}; consent: {}",
+        bind.bound_ms, bind.state, bind.consent
+    );
+    let ShortcutState::Active { trigger } = &bind.state else {
+        // Plasma 5.27 answers without binding (System Settings opens for the user): the manual
+        // step. Anything else is a failure where a key press is expected.
+        assert!(
+            !expect_fires(),
+            "the shortcut was not bound: {:?} (consent: {}); kglobalaccel:\n{}",
+            bind.state,
+            bind.consent,
             dump_kglobalaccel()
         );
-        assert_eq!(
-            fired(&rx),
-            0,
-            "nothing fires before the user binds the keys"
+        println!(
+            "MANUAL STEP: the desktop did not bind the shortcut ({:?})",
+            bind.state
         );
-        let t = Instant::now();
+        assert_eq!(fired(&rx), 0, "nothing fires before the keys are bound");
         drop(listener);
-        let close_ms = support::ms(t.elapsed());
-        assert!(
-            close_ms < 3_000.0,
-            "closing the session took {close_ms:.0} ms"
-        );
         summary(&format!(
-            "| {} | chord {CHORD} via GlobalShortcuts | session created in {start_ms:.1} ms; bind \
-             answered, keys left to the user (manual step) | - |",
-            compositor()
+            "| {} | {APP_ID} | created in {start_ms:.1} ms | {:?} | {} | - | no (manual step) |",
+            compositor(),
+            bind.state,
+            bind.consent
         ));
         return;
     };
-    let bound_ms = support::ms(t.elapsed());
-    println!("bound as {name} in {comp} after {bound_ms:.1} ms");
-
-    let pressed = Instant::now();
-    invoke(&comp, &name);
-    let at = rx
-        .recv_timeout(Duration::from_secs(3))
-        .expect("the portal's Activated signal did not fire within 3 s");
-    let fire_ms = support::ms(at.saturating_duration_since(pressed));
-    println!(
-        "DOUBLETAP-HOTKEY os=linux-wayland trigger=portal({CHORD}) activate_to_fire_ms={fire_ms:.2}"
+    let bound = format!(
+        "bound {} in {:.0} ms",
+        trigger.as_deref().unwrap_or("(trigger not reported)"),
+        bind.bound_ms
     );
-    assert_eq!(fired(&rx), 0, "one activation fires once");
-    invoke(&comp, &name);
-    assert_eq!(fired(&rx), 1, "a second activation fires again");
-    summary(&format!(
-        "| {} | chord {CHORD} via GlobalShortcuts | session {start_ms:.1} ms, bound {bound_ms:.1} ms | activate to fire {fire_ms:.2} ms |",
+
+    // Activation: a real key press on the compositor's virtual keyboard where the session has
+    // one; kglobalaccel's invokeShortcut otherwise (not a key press, labelled as such).
+    let (activation, fire_ms) = if let Some(keys) = virtual_keyboard() {
+        let ms = press_until_fired(&keys, &rx).unwrap_or_else(|| {
+            panic!(
+                "Ctrl+Alt+Space on the virtual keyboard did not fire the portal shortcut ({bound})"
+            )
+        });
+        assert_eq!(fired(&rx), 0, "one press fires once");
+        press(&keys, KEYS);
+        assert_eq!(fired(&rx), 1, "a second press fires again");
+        (format!("virtual keyboard ({})", keyboard_kind()), ms)
+    } else if let Some((comp, name)) = find_kglobalaccel_shortcut() {
+        assert!(
+            !expect_fires(),
+            "a key press is expected, but this session has no virtual keyboard"
+        );
+        let pressed = Instant::now();
+        invoke(&comp, &name);
+        let at = rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("the portal's Activated signal did not fire within 3 s");
+        (
+            "kglobalaccel invokeShortcut (not a key press)".to_string(),
+            support::ms(at.saturating_duration_since(pressed)),
+        )
+    } else {
+        panic!("bound, but no way to activate the shortcut in this session");
+    };
+    println!(
+        "DOUBLETAP-HOTKEY os=linux-wayland-{} trigger=portal({CHORD}) activation={activation} \
+         press_to_fire_ms={fire_ms:.2}",
         compositor()
+    );
+    summary(&format!(
+        "| {} | {APP_ID} | created in {start_ms:.1} ms | {bound} | {} | {activation} | yes, {fire_ms:.1} ms |",
+        compositor(),
+        bind.consent
     ));
 
-    // Dropping closes the portal session: activations no longer reach us.
+    // Dropping closes the portal session: the keys no longer reach us.
     drop(listener);
-    std::thread::sleep(Duration::from_millis(300));
-    let _ = gdbus(&[
-        "call",
-        "--session",
-        "--dest",
-        "org.kde.kglobalaccel",
-        "--object-path",
-        &comp,
-        "--method",
-        "org.kde.kglobalaccel.Component.invokeShortcut",
-        &name,
-    ]);
+    std::thread::sleep(Duration::from_millis(500));
+    if let Some(keys) = virtual_keyboard() {
+        press(&keys, KEYS);
+    }
     assert_eq!(fired(&rx), 0, "fired after drop");
 }
 
@@ -544,24 +689,34 @@ fn wayland_doubletap_into_gtk4() {
         }
         let pipeline = Pipeline::new(chunks);
         let (cb, rx) = channel_callback();
-        // The real trigger when the desktop binds the portal chord (activated through
-        // kglobalaccel); otherwise the listener is still started, as the shell does, and the
-        // same path is driven by a direct call, as the tray/app button does.
+        // The real trigger when the desktop binds the portal chord (consent accepted in its
+        // dialog, keys pressed on the virtual keyboard); otherwise the listener is still started,
+        // as the shell does, and the same path is driven by a direct call, as the tray/app
+        // button does.
         let (cb, direct) = split_callback(cb);
-        // A portal that refuses the session (no app id, see wayland_portal_chord) leaves the
-        // direct trigger too.
+        let t = Instant::now();
         let listener = has_portal
             .then(|| start(Trigger::Chord(CHORD.into()), cb))
             .and_then(|r| {
                 r.map_err(|e| println!("portal chord unavailable: {e}"))
                     .ok()
             });
-        let bound = listener
-            .as_ref()
-            .and_then(|_| support::wait_for(Duration::from_secs(5), find_kglobalaccel_shortcut));
-        let trigger = if bound.is_some() { "portal" } else { "direct" };
-        let report = support::trigger_and_draft(&backend, &pipeline, mode, rx, |_| match &bound {
-            Some((comp, name)) => invoke(comp, name),
+        let bound = listener.as_ref().is_some_and(|l| {
+            let bind = settle(l.as_ref(), t);
+            println!("portal bind: {:?}; consent: {}", bind.state, bind.consent);
+            matches!(bind.state, ShortcutState::Active { .. })
+        });
+        let keys = virtual_keyboard().filter(|_| bound);
+        if expect_fires() {
+            assert!(keys.is_some(), "the portal shortcut was not bound");
+        }
+        let trigger = if keys.is_some() {
+            "portal, virtual key press"
+        } else {
+            "direct"
+        };
+        let report = support::trigger_and_draft(&backend, &pipeline, mode, rx, |_| match &keys {
+            Some(k) => press(k, KEYS),
             None => direct(),
         })
         .unwrap_or_else(|e| panic!("{} mode: {e}", mode.as_str()));

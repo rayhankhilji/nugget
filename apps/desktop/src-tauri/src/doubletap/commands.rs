@@ -69,16 +69,26 @@ async fn status(app: &AppHandle) -> DoubleTapStatus {
     let trigger = lock(&state.settings).trigger.clone();
     let platform = Platform::current();
     let session = nugget_hotkey::session();
+    let trigger_error = lock(&state.trigger_error).clone();
     DoubleTapStatus {
         platform: permissions::platform_name(platform),
         session: permissions::session_name(session),
         listening: lock(&state.listener).is_some(),
-        trigger_error: lock(&state.trigger_error).clone(),
+        trigger_error: trigger_error.clone(),
         accessibility,
         input_monitoring: permissions::input_monitoring(platform),
-        hint: permissions::hint_for(platform, session, accessibility, &trigger),
+        hint: permissions::hint_for(
+            platform,
+            session,
+            accessibility,
+            &trigger,
+            trigger_error.as_deref(),
+        ),
         modifiers: permissions::modifiers(platform),
         recommended_trigger: TriggerSpec::recommended(),
+        shortcut: lock(&state.listener)
+            .as_ref()
+            .map(|l| permissions::shortcut_status(l.state(), &trigger)),
     }
 }
 
