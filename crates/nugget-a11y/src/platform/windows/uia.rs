@@ -48,12 +48,19 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VIRTUAL_KEY, VK_CONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GUITHREADINFO, GetForegroundWindow, GetGUIThreadInfo, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, SMTO_ABORTIFHUNG, SendMessageTimeoutW,
+    ES_MULTILINE, GUITHREADINFO, GWL_STYLE, GetForegroundWindow, GetGUIThreadInfo, GetWindowLongW,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, SMTO_ABORTIFHUNG,
+    SendMessageTimeoutW,
 };
 use windows::core::BSTR;
 
 use crate::Rect;
+use crate::platform::text_map;
+
+/// Cap on the text read to measure a selection endpoint (characters).
+const MEASURE_MAX_CHARS: i32 = 1 << 20;
+/// Selection ranges looked at (multiple selections are reported as one span).
+const MAX_SELECTION_RANGES: i32 = 16;
 
 /// Edit-control messages (`CommCtrl.h`), for edit controls without a TextPattern.
 const EM_GETSEL: u32 = 0x00B0;
@@ -158,6 +165,8 @@ fn automation() -> Result<IUIAutomation> {
 
 /// The foreground window and its process.
 pub struct Foreground {
+    /// The window handle, as an integer (for noticing foreground changes).
+    pub hwnd: isize,
     pub pid: i32,
     pub exe: Option<String>,
     pub title: String,
@@ -179,6 +188,7 @@ pub fn foreground() -> Result<Option<Foreground>> {
     let n = unsafe { GetWindowTextW(hwnd, &mut buf) }.max(0) as usize;
     let title = String::from_utf16_lossy(&buf[..n.min(buf.len())]);
     Ok(Some(Foreground {
+        hwnd: hwnd.0 as isize,
         pid: pid as i32,
         exe: exe_name(pid),
         title,
@@ -538,7 +548,12 @@ impl UiaEl {
         }
     }
 
-    /// The text of the whole document range, capped.
+    pub fn has_text_pattern(&self) -> bool {
+        self.text().is_some()
+    }
+
+    /// The text of the whole document range, capped (`TextPattern.DocumentRange.GetText`).
+    /// Line endings are as the control reports them (`\r\n`, or `\r` for RichEdit paragraphs).
     pub fn document_text(&self, max_bytes: usize) -> Option<String> {
         let t = self.text()?;
         let max = i32::try_from(max_bytes).unwrap_or(i32::MAX);
@@ -566,22 +581,33 @@ impl UiaEl {
         Some(hwnd)
     }
 
-    /// `EM_GETSEL` as character offsets into the value (UTF-16 units from the control).
+    /// `EM_GETSEL` as character offsets into the value with line endings normalised to `\n`
+    /// (the control counts UTF-16 units, and `\r\n` as two).
     fn edit_selection(&self) -> Option<(u32, u32)> {
         let hwnd = self.edit_hwnd()?;
         let (text, _) = self.value_pattern()?;
-        let units: Vec<u16> = text.encode_utf16().collect();
+        let units = text.encode_utf16().count();
         // The packed return value holds 16-bit offsets.
-        if units.len() > 0xFFFF {
+        if units > 0xFFFF {
             return None;
         }
         let r = send_timeout(hwnd, EM_GETSEL, 0, 0)?;
         let (s, e) = (r & 0xFFFF, (r >> 16) & 0xFFFF);
-        if s > units.len() || e > units.len() {
+        if s > units || e > units {
             return None;
         }
-        let chars = |n: usize| String::from_utf16_lossy(&units[..n]).chars().count() as u32;
+        let map = text_map::normalize_newlines(&text);
+        let chars = |n: usize| map.to_text(text_map::utf16_to_chars(&text, n));
         Some((chars(s), chars(e)))
+    }
+
+    /// Whether this is a multi-line Win32 edit (`ES_MULTILINE`); `None` when it has no window
+    /// of its own (a windowless or web control).
+    pub fn edit_is_multiline(&self) -> Option<bool> {
+        let hwnd = self.edit_hwnd()?;
+        // SAFETY: a window handle; returns 0 for an invalid one.
+        let style = unsafe { GetWindowLongW(hwnd, GWL_STYLE) };
+        Some(style & ES_MULTILINE != 0)
     }
 
     /// The caret of an edit control from its GUI thread (physical pixels).
@@ -625,8 +651,10 @@ impl UiaEl {
         })
     }
 
-    /// Selection as character offsets: the text length from the document start to each end.
-    /// Edit controls without a TextPattern answer `EM_GETSEL`.
+    /// Selection as character offsets into the document text with line endings normalised to
+    /// `\n`: the normalised length of the text from the document start to each endpoint. Several
+    /// selection ranges are reported as one span from the first start to the last end; a
+    /// degenerate range is the caret. Edit controls without a TextPattern answer `EM_GETSEL`.
     pub fn selection_offsets(&self) -> Option<(u32, u32)> {
         let Some(t) = self.text() else {
             return self.edit_selection();
@@ -634,22 +662,36 @@ impl UiaEl {
         // SAFETY: valid pattern/range interfaces, all owned.
         unsafe {
             let sel = t.GetSelection().ok()?;
-            if sel.Length().ok()? < 1 {
-                return None;
+            let n = sel.Length().ok()?.min(MAX_SELECTION_RANGES);
+            if n < 1 {
+                return self.edit_selection();
             }
-            let range = sel.GetElement(0).ok()?;
             let doc = t.DocumentRange().ok()?;
-            let measure = |endpoint| -> Option<u32> {
+            let measure = |range: &IUIAutomationTextRange, endpoint| -> Option<u32> {
                 let r: IUIAutomationTextRange = doc.Clone().ok()?;
-                r.MoveEndpointByRange(TextPatternRangeEndpoint_End, &range, endpoint)
+                r.MoveEndpointByRange(TextPatternRangeEndpoint_End, range, endpoint)
                     .ok()?;
-                let s = r.GetText(-1).ok()?.to_string();
-                Some(s.chars().count() as u32)
+                let s = r.GetText(MEASURE_MAX_CHARS).ok()?.to_string();
+                Some(text_map::normalize_newlines(&s).len())
             };
-            Some((
-                measure(TextPatternRangeEndpoint_Start)?,
-                measure(TextPatternRangeEndpoint_End)?,
-            ))
+            let mut out: Option<(u32, u32)> = None;
+            for i in 0..n {
+                let Ok(range) = sel.GetElement(i) else {
+                    continue;
+                };
+                let (Some(a), Some(b)) = (
+                    measure(&range, TextPatternRangeEndpoint_Start),
+                    measure(&range, TextPatternRangeEndpoint_End),
+                ) else {
+                    continue;
+                };
+                let (a, b) = (a.min(b), a.max(b));
+                out = Some(match out {
+                    Some((s, e)) => (s.min(a), e.max(b)),
+                    None => (a, b),
+                });
+            }
+            out
         }
     }
 
@@ -698,19 +740,22 @@ impl UiaEl {
         }
     }
 
-    /// Put the caret at a character offset (best effort).
+    /// Put the caret at a character offset into the normalised text (best effort).
     pub fn set_caret(&self, offset: u32) {
         let Some(t) = self.text() else {
             if let (Some(hwnd), Some((text, _))) = (self.edit_hwnd(), self.value_pattern()) {
-                let u: usize = text
-                    .chars()
-                    .take(offset as usize)
-                    .map(char::len_utf16)
-                    .sum();
+                let raw = text_map::normalize_newlines(&text).to_source(offset);
+                let u = text_map::chars_to_utf16(&text, raw);
                 let _ = send_timeout(hwnd, EM_SETSEL, u, u as isize);
             }
             return;
         };
+        // The character unit counts what the control stores (`\r\n` as two in an Edit).
+        let offset = self
+            .document_text(MEASURE_MAX_CHARS as usize)
+            .map_or(offset, |text| {
+                text_map::normalize_newlines(&text).to_source(offset)
+            });
         // SAFETY: valid interfaces.
         unsafe {
             let Ok(r) = t.DocumentRange() else { return };

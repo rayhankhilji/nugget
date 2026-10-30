@@ -4,10 +4,15 @@
 //! - Frontmost: `GetForegroundWindow`; the focused element (`GetFocusedElement`) must belong to
 //!   that window's process.
 //! - Secure fields: `IsPassword`; their value is never requested.
-//! - Value and selection: `ValuePattern` and `TextPattern` (selection offsets are measured as
-//!   the text length from the document start to each endpoint).
-//! - Insertion: `ValuePattern.SetValue` with the selection replaced, for plain edit controls
-//!   whose whole value was read; rich documents and web content use the clipboard fallback.
+//! - Value and selection: `TextPattern.DocumentRange` text when the element has a text pattern
+//!   (rich edits, Notepad's document, browsers), else `ValuePattern`; selection offsets are the
+//!   text length from the document start to each endpoint. Line endings (`\r\n`, RichEdit's
+//!   `\r`) are normalised to `\n` in the value and the offsets alike.
+//! - Insertion: `ValuePattern.SetValue` with the selection replaced, for single-line plain edit
+//!   controls whose whole value was read. Multi-line edits (Notepad), rich documents and web
+//!   content use the clipboard fallback: one paste is one undo step and keeps the caret.
+//! - Focus: right after a window comes to the foreground, a browser can report its document or
+//!   pane before the web tree is built; the focus is read once more after a short wait.
 //! - Bounds are converted from physical pixels to logical points with the window's DPI.
 //! - Computer use (M4) is in `computer`: windows, pattern-based actions, key input, launch.
 
@@ -18,8 +23,12 @@ mod uia;
 use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
 use crate::computer::{AppEntry, KeyInput, UiAction, UiActionKind};
 use crate::engine::{FieldRead, Platform, PlatformWindow, Target};
+use crate::platform::{hints, text_map};
 use crate::role::{Role, role_from_uia, uia as ct};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -44,6 +53,26 @@ fn scale_rect(r: Rect, scale: f64) -> Rect {
         y: r.y / scale,
         width: r.width / scale,
         height: r.height / scale,
+    }
+}
+
+/// How long after a window comes to the foreground a placeholder focus is read again.
+const FRESH_FOREGROUND: Duration = Duration::from_secs(3);
+/// The wait before reading the focus again.
+const FOCUS_RETRY_WAIT: Duration = Duration::from_millis(200);
+
+/// The last foreground window seen, and when it was first seen.
+static LAST_FOREGROUND: Mutex<Option<(isize, Instant)>> = Mutex::new(None);
+
+/// Whether `hwnd` came to the foreground recently (or is seen for the first time).
+fn recently_foregrounded(hwnd: isize) -> bool {
+    let mut last = LAST_FOREGROUND.lock().unwrap_or_else(|p| p.into_inner());
+    match *last {
+        Some((h, since)) if h == hwnd => since.elapsed() < FRESH_FOREGROUND,
+        _ => {
+            *last = Some((hwnd, Instant::now()));
+            true
+        }
     }
 }
 
@@ -183,9 +212,19 @@ impl Platform for UiaPlatform {
         let Some(fg) = uia::foreground()? else {
             return Ok(None);
         };
-        let Some(el) = UiaEl::focused()? else {
+        let Some(mut el) = UiaEl::focused()? else {
             return Ok(None);
         };
+        // Chromium and Firefox build their UIA web tree when a client first asks; until then the
+        // focus is the document or a pane without a text pattern. One bounded retry.
+        if recently_foregrounded(fg.hwnd)
+            && hints::uia_focus_is_placeholder(el.info().control_type, el.has_text_pattern())
+        {
+            std::thread::sleep(FOCUS_RETRY_WAIT);
+            if let Ok(Some(again)) = UiaEl::focused() {
+                el = again;
+            }
+        }
         if el.info().process_id != fg.pid {
             // Focus is in another process than the foreground window (a tool window, or a
             // race while windows switch): not the user's target.
@@ -216,14 +255,25 @@ impl Platform for UiaPlatform {
         let state = if node.states.secure {
             FieldState::default()
         } else {
-            let raw = el
-                .value_pattern()
-                .map(|(v, _)| v)
-                .filter(|v| !(node.role == Role::WebArea && looks_like_url(v)))
-                .or_else(|| el.document_text(max_value_bytes))
-                .unwrap_or_default();
-            let value = sanitize::clean_value(&raw, max_value_bytes);
-            let truncated = value.len() < raw.len();
+            // The text pattern first: its text is what the selection offsets are measured in,
+            // and it is the whole document for rich edits and browsers.
+            let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
+            let (raw, capped) = match el.document_text(max_value_bytes) {
+                Some(t) => {
+                    let capped = t.chars().count() >= max_chars as usize;
+                    (t, capped)
+                }
+                None => (
+                    el.value_pattern()
+                        .map(|(v, _)| v)
+                        .filter(|v| !(node.role == Role::WebArea && looks_like_url(v)))
+                        .unwrap_or_default(),
+                    false,
+                ),
+            };
+            let norm = text_map::normalize_newlines(&raw);
+            let value = sanitize::clean_value(&norm.text, max_value_bytes);
+            let truncated = capped || value.len() < norm.text.len();
             FieldState {
                 value,
                 selection: el.selection_offsets(),
@@ -243,6 +293,16 @@ impl Platform for UiaPlatform {
         if !matches!(info.control_type, ct::EDIT | ct::COMBO_BOX) || before.truncated {
             return Err(Error::Unsupported(
                 "ValuePattern insertion only for plain edit controls".into(),
+            ));
+        }
+        // SetValue replaces the whole value: in a multi-line edit (Notepad) that is not one undo
+        // step and loses the caret. A paste is both.
+        let multiline = el
+            .edit_is_multiline()
+            .unwrap_or_else(|| el.read_node().states.multiline == Some(true));
+        if multiline {
+            return Err(Error::Unsupported(
+                "multi-line edit: pasting keeps undo and the caret".into(),
             ));
         }
         let Some((_, read_only)) = el.value_pattern() else {

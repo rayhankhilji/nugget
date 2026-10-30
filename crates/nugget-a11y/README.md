@@ -82,14 +82,14 @@ synthesises Return, and it strips `\r` and control characters from the inserted 
 
 | | Linux (AT-SPI) | macOS (AX) | Windows (UIA) |
 |---|---|---|---|
-| Frontmost app, window title | active toplevel; desktop-file id from the process | `AXFocusedApplication`, bundle id | foreground window, exe name |
+| Frontmost app, window title | active toplevel; desktop-file id from the process | `AXFocusedApplication`, bundle id; `AXManualAccessibility` set once per Chromium/Electron pid | foreground window, exe name; one bounded focus retry for a fresh browser window |
 | Browser URL | `Document` `DocURL` | `AXURL` on `AXWebArea` | document `ValuePattern` (Chromium) |
 | Field role, label, placeholder | ✓ | ✓ | ✓ (placeholder from HelpText) |
-| Value, selection | `Text` | `AXValue`, `AXSelectedTextRange` (UTF-16 converted) | `ValuePattern`/`TextPattern` |
+| Value, selection | `Text`; U+FFFC embedded objects (web contenteditable) replaced by their text, caret mapped; a LibreOffice paragraph reads its whole document | `AXValue`, `AXSelectedTextRange` (UTF-16 converted), else text markers for rich web editors | `TextPattern` document text, else `ValuePattern`; `\r\n`/`\r` normalised to `\n` in value and offsets |
 | Caret bounds | `GetCharacterExtents` | `AXBoundsForRange` | `TextPattern` rectangles, DPI-scaled |
 | Secure fields | `password text` role | `AXSecureTextField` subrole | `IsPassword` |
 | Thread walk | ✓ | ✓ (batched attribute reads) | ✓ (cache requests) |
-| A11y insertion | `EditableText` | `AXSelectedText` | `ValuePattern.SetValue` (plain edits) |
+| A11y insertion | `EditableText` (multi-line text into web contenteditable or LibreOffice: clipboard) | `AXSelectedText` (multi-line text into web editors: clipboard) | `ValuePattern.SetValue` (single-line plain edits) |
 | Clipboard fallback | X11 selections (INCR) or Wayland data-control; XTest Ctrl+V, `PasteText` | NSPasteboard items × types; CGEvent Cmd+V | all memory formats + EMF; `SendInput` Ctrl+V |
 | Permission | `org.a11y.Status.IsEnabled` (request enables it) | `AXIsProcessTrustedWithOptions` | not required |
 | **Status** | **run and verified** (integration tests) | compile-checked (`aarch64-apple-darwin`) | compile-checked (`x86_64-pc-windows-msvc`) |
@@ -200,12 +200,14 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
 
 - macOS and Windows have not been run on a real machine yet. Their logic is shared with Linux
   through `engine`, but the OS calls are compile-checked only.
-- On macOS, rich web editors (Mail compose, some contenteditable regions) expose their text
-  through text markers (`AXSelectedTextMarkerRange`) rather than `AXValue` or
-  `AXSelectedTextRange`. Value and selection may then be empty, so insertion relies on the
-  clipboard path.
-- On Windows, accessibility insertion is limited to plain edit controls. Rich edits, documents
-  and web content use the clipboard.
+- On macOS, rich web editors without `AXValue`/`AXSelectedTextRange` are read through text
+  markers; when the selection cannot be placed in the element's marker text it is left unknown
+  and verification falls back to counting occurrences.
+- On Windows, accessibility insertion is limited to single-line plain edit controls.
+  Multi-line edits (Notepad), rich edits, documents and web content use the clipboard.
+- On Linux, LibreOffice exposes only the paragraphs it has laid out as children of the
+  document, so a long document may read in part (reported as truncated). Rich web text is
+  flattened within a budget (400 objects, 500 ms).
 - Computer use on macOS and Windows is compile-checked only. In particular, unverified on real
   machines:
   - macOS: scroll wheel events are posted at a location without moving the pointer, and their

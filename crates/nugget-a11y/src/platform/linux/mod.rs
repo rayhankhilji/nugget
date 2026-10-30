@@ -7,14 +7,20 @@
 //! - Frontmost window: the toplevel with the `active` state. Focused element: a `Collection`
 //!   match for the `focused` state (Firefox, Chromium), else a bounded breadth-first search
 //!   (GTK's collection support returns nothing).
+//! - Rich text (`rich`): a web contenteditable's U+FFFC embedded objects are replaced by their
+//!   text (blocks on lines of their own) with the caret mapped into it; a LibreOffice paragraph
+//!   reads as its whole document.
 //! - Insertion: `EditableText.DeleteText` + `InsertText`, then the caret is moved after the
-//!   text. Fallback: clipboard + `EditableText.PasteText` (works on Wayland too), else an XTest
-//!   Ctrl+V on X11.
+//!   text (into the paragraph holding the caret, for flattened rich text). Text with line
+//!   breaks for a web contenteditable or an office document is left to the paste fallback:
+//!   `InsertText` turns them into `<br>`s or paragraph splits inconsistently. Fallback:
+//!   clipboard + `EditableText.PasteText` (works on Wayland too), else an XTest Ctrl+V on X11.
 //! - Computer use (`computer`): apps and windows from the registry, element actions through the
 //!   AT-SPI interfaces, key input (`input`: XTest, else the device event controller).
 
 mod computer;
 mod input;
+mod rich;
 mod wayland;
 mod x11;
 
@@ -40,6 +46,7 @@ use zbus::proxy::CacheProperties;
 
 use crate::clipboard::Clipboard;
 use crate::engine::{FieldRead, Platform, Target};
+use crate::platform::{hints, text_map};
 use crate::role::{Role, role_from_atspi};
 use crate::sanitize;
 use crate::tree::{Element, Node, States};
@@ -542,14 +549,31 @@ impl AtspiPlatform {
         if secure {
             return FieldState::default();
         }
+        // Read up to max_value_bytes characters; the byte cap is applied after cleaning.
+        let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
+        if let Some(doc) = rich::office_document(el, max_value_bytes) {
+            let value = sanitize::clean_value(&doc.text, max_value_bytes);
+            return FieldState {
+                truncated: doc.truncated || value.len() < doc.text.len(),
+                selection: doc.selection(el),
+                value,
+            };
+        }
         let Some(t) = el.text() else {
             return FieldState::default();
         };
         let count = t.character_count().unwrap_or(0).max(0);
-        // Read up to max_value_bytes characters; the byte cap is applied after cleaning.
-        let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
         let end = text_end(count, max_chars);
         let raw = t.get_text(0, end).unwrap_or_default();
+        if let Some(r) = rich::flatten(el, &raw, max_value_bytes) {
+            let text = r.flat.text();
+            let value = sanitize::clean_value(text, max_value_bytes);
+            return FieldState {
+                truncated: r.truncated || count > max_chars || value.len() < text.len(),
+                selection: r.selection(),
+                value,
+            };
+        }
         let value = sanitize::clean_value(&raw, max_value_bytes);
         let truncated = count > max_chars || value.len() < raw.len();
         let selection = match t.get_n_selections() {
@@ -571,7 +595,61 @@ impl AtspiPlatform {
             truncated,
         }
     }
+
+    /// The element and the offsets in its own text that `state` (in field offsets) refers to:
+    /// the focused paragraph for an office document, the paragraph holding the caret for
+    /// flattened rich text.
+    fn own_range(el: &AtspiEl, state: &FieldState) -> Option<(AtspiEl, u32, u32)> {
+        let (start, end) = state.selection?;
+        let (start, end) = (start.min(end), start.max(end));
+        if let Some(doc) = rich::office_document(el, MAX_RICH_CHARS) {
+            // Offsets into a document read in part may not line up with this read.
+            if state.truncated || doc.truncated {
+                return None;
+            }
+            return Some((el.clone(), doc.to_own(start)?, doc.to_own(end)?));
+        }
+        let (raw, _) = el.text_contents(i32::try_from(MAX_RICH_CHARS).unwrap_or(i32::MAX))?;
+        let Some(r) = rich::flatten(el, &raw, MAX_RICH_CHARS) else {
+            return Some((el.clone(), start, end));
+        };
+        if start == end {
+            let (leaf, off) = r.caret_leaf()?;
+            return Some((leaf, off, off));
+        }
+        let (s, e) = r.root_selection()?;
+        Some((el.clone(), s, e))
+    }
+
+    /// `DeleteText` over `start..end` and `InsertText` at `start` in `el`'s own offsets, then
+    /// the caret after the text.
+    fn insert_at(el: &AtspiEl, start: u32, end: u32, text: &str) -> Result<()> {
+        let (_, ifaces, attrs) = el.read_node(false);
+        if !ifaces.contains(Interface::EditableText) {
+            return Err(Error::Unsupported("element has no EditableText".into()));
+        }
+        let ed = el
+            .editable()
+            .ok_or_else(|| Error::Unsupported("EditableText proxy".into()))?;
+        let to_i32 = |v: u32| i32::try_from(v).unwrap_or(i32::MAX);
+        let (start, end) = (to_i32(start.min(end)), to_i32(start.max(end)));
+        if end > start && !ed.delete_text(start, end).map_err(zerr)? {
+            return Err(Error::Other("DeleteText refused".into()));
+        }
+        let len = insert_length(text, attrs.get("toolkit").map(String::as_str));
+        if !ed.insert_text(start, text, len).map_err(zerr)? {
+            return Err(Error::Other("InsertText refused".into()));
+        }
+        if let Some(t) = el.text() {
+            let n = i32::try_from(text.chars().count()).unwrap_or(i32::MAX);
+            let _ = t.set_caret_offset(start.saturating_add(n));
+        }
+        Ok(())
+    }
 }
+
+/// Cap on rich text flattened to place the caret (characters).
+const MAX_RICH_CHARS: usize = 1 << 20;
 
 impl Platform for AtspiPlatform {
     type Element = AtspiEl;
@@ -618,8 +696,10 @@ impl Platform for AtspiPlatform {
     }
 
     fn caret_bounds(&self, el: &AtspiEl, state: &FieldState) -> Option<Rect> {
+        // Offsets in the text of the object that holds them (the field's text may be a
+        // flattened or joined one).
+        let (el, start, end) = Self::own_range(el, state)?;
         let t = el.text()?;
-        let (start, end) = state.selection?;
         if start != end {
             let (x, y, w, h) = t
                 .get_range_extents(start as i32, end as i32, CoordType::Screen)
@@ -648,29 +728,55 @@ impl Platform for AtspiPlatform {
     }
 
     fn insert_text(&self, el: &AtspiEl, text: &str, before: &FieldState) -> Result<()> {
-        let (_, ifaces, attrs) = el.read_node(false);
-        if !ifaces.contains(Interface::EditableText) {
-            return Err(Error::Unsupported("element has no EditableText".into()));
+        let multiline_text = text.contains('\n');
+        if rich::office_document(el, 1).is_some() {
+            // `InsertText` with line breaks in a Writer paragraph does not split it into
+            // paragraphs the way typing or pasting does.
+            if multiline_text {
+                return Err(Error::Unsupported(
+                    "line breaks into an office document are pasted".into(),
+                ));
+            }
+            let (el, start, end) = Self::own_range(el, before)
+                .ok_or_else(|| Error::Unsupported("selection outside the paragraph".into()))?;
+            return Self::insert_at(&el, start, end, text);
         }
-        let ed = el
-            .editable()
-            .ok_or_else(|| Error::Unsupported("EditableText proxy".into()))?;
+        let (node, _, attrs) = el.read_node(false);
+        if multiline_text
+            && hints::atspi_web_rich_editable(
+                rich::in_web_document(el),
+                &node.raw_role,
+                attrs.get("tag").map(String::as_str),
+                attrs.get("xml-roles").map(String::as_str),
+            )
+        {
+            // Firefox and Chromium turn `\n` from `InsertText` into `<br>`s or split
+            // paragraphs inconsistently; a paste goes through the editor's own handling.
+            return Err(Error::Unsupported(
+                "line breaks into a web contenteditable are pasted".into(),
+            ));
+        }
+        let raw = el
+            .text_contents(i32::try_from(MAX_RICH_CHARS).unwrap_or(i32::MAX))
+            .map(|(s, _)| s)
+            .unwrap_or_default();
+        if raw.contains(text_map::EMBED) {
+            // Flattened rich text: insert into the paragraph holding the caret. A selection
+            // across objects is replaced by the paste fallback instead.
+            if before.selection.is_some_and(|(s, e)| s != e) {
+                return Err(Error::Unsupported(
+                    "a selection across rich text objects is replaced by pasting".into(),
+                ));
+            }
+            let (leaf, off, _) = Self::own_range(el, before)
+                .ok_or_else(|| Error::Unsupported("caret not found in rich text".into()))?;
+            return Self::insert_at(&leaf, off, off, text);
+        }
         let (start, end) = before.selection.unwrap_or_else(|| {
             let n = before.value.chars().count() as u32;
             (n, n)
         });
-        let (start, end) = (start.min(end) as i32, start.max(end) as i32);
-        if end > start && !ed.delete_text(start, end).map_err(zerr)? {
-            return Err(Error::Other("DeleteText refused".into()));
-        }
-        let len = insert_length(text, attrs.get("toolkit").map(String::as_str));
-        if !ed.insert_text(start, text, len).map_err(zerr)? {
-            return Err(Error::Other("InsertText refused".into()));
-        }
-        if let Some(t) = el.text() {
-            let _ = t.set_caret_offset(start + text.chars().count() as i32);
-        }
-        Ok(())
+        Self::insert_at(el, start, end, text)
     }
 
     fn clipboard(&self) -> Result<Box<dyn Clipboard>> {
