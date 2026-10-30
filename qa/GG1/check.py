@@ -31,6 +31,15 @@ STOP = {
 }
 
 
+# The engine's refusal messages (nugget_draft::Refusal Display) per stable code.
+REFUSAL_TEXT = {
+    "secure": r"password and secure fields",
+    "not_draftable": r"nothing to draft",
+    "excluded_app": r"drafting is disabled in (?!terminals)",
+    "terminal": r"disabled in terminals",
+}
+
+
 def detect_language(text):
     """Very small language guesser: script first, then stopwords."""
     t = text.strip()
@@ -94,10 +103,14 @@ def check(rec, sc):
     if want_refuse:
         if outcome != "error":
             probs.append(f"not refused (want {want_refuse}); outcome {outcome}")
-        elif not re.search(want_refuse.replace("_", "[ _]"), r.get("error", "") + r.get("error_debug", ""), re.I):
+        elif not re.search(REFUSAL_TEXT.get(want_refuse, want_refuse), r.get("error", ""), re.I):
             probs.append(f"refused differently: {r.get('error')} (want {want_refuse})")
         if r.get("prompt"):
             probs.append("a prompt reached the model despite the refusal")
+            ptext = (r["prompt"].get("system", "") + "\n" + r["prompt"].get("user", "")).lower()
+            for s in e.get("secrets_not_in_prompt", []) + e.get("secrets", []):
+                if s.lower() in ptext:
+                    probs.append(f"secret reached the prompt: {s!r}")
         return probs
     if outcome != "completed":
         return [f"{outcome}: {r.get('error', '')}"]
@@ -209,8 +222,10 @@ def main():
         tot = sum(1 for r in rs)
         ok = sum(1 for r, res in zip(rs, [x for x in results if x["label"] == label]) if not res["problems"])
         print(f"  {label:<14} {'ALL':<14} {ok}/{tot}")
-    print("\n== latency (completed drafts, ms from trigger to first non-whitespace character)")
+    print("\n== latency (repeat 0 only: a repeat finds its own prompt cached; ms from trigger to"
+          " first non-whitespace character)")
     for label, rs in sorted(by_label.items(), key=lambda kv: str(kv[0])):
+        rs = [r for r in rs if not r.get("repeat")]
         fc = [r["result"]["first_char_ms_from_trigger"] for r in rs
               if r["result"].get("outcome") == "completed" and r["result"].get("first_char_ms_from_trigger") is not None]
         tot = [r["result"]["timings"].get("total_ms") for r in rs
