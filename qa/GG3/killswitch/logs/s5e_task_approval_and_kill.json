@@ -1,0 +1,21 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "task_approvals_while_running": [
+        {
+          "risk": "send",
+          "target": "mail.example.test",
+          "task_id": "d0e80dafbd964099ab86f75dd86f01a5"
+        }
+      ],
+      "task_approvals_after_kill_resume": [],
+      "finished": {
+        "outcome": "halted"
+      },
+      "submits": 1,
+      "submits_after_kill": 0,
+      "ok": true
+    }
+  ]
+}

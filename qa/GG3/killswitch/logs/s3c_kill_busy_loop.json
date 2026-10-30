@@ -1,0 +1,41 @@
+{
+  "commit": "0d81796",
+  "runs": [
+    {
+      "task": "2e2d1e2ec7384633a36f5c2a30aaa701",
+      "acts_before_kill": 5,
+      "acts_started_between_kill_sent_and_reply": 0,
+      "acts_started_after_kill_reply": 0,
+      "kill_rpc_ms": 0.45,
+      "kill_to_finished_ms": 0.9,
+      "finished": {
+        "outcome": "halted"
+      },
+      "ok": true
+    },
+    {
+      "task": "8490d289a3dd43e68386ee87c6a454bb",
+      "acts_before_kill": 4,
+      "acts_started_between_kill_sent_and_reply": 0,
+      "acts_started_after_kill_reply": 0,
+      "kill_rpc_ms": 0.45,
+      "kill_to_finished_ms": 1.2,
+      "finished": {
+        "outcome": "halted"
+      },
+      "ok": true
+    },
+    {
+      "task": "b5a77779c7c94c8dbcdab631aa140ee2",
+      "acts_before_kill": 4,
+      "acts_started_between_kill_sent_and_reply": 0,
+      "acts_started_after_kill_reply": 0,
+      "kill_rpc_ms": 2.05,
+      "kill_to_finished_ms": 0,
+      "finished": {
+        "outcome": "halted"
+      },
+      "ok": true
+    }
+  ]
+}

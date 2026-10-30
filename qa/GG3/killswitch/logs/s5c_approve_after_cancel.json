@@ -1,0 +1,34 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "after": {
+        "cancel_reply": "ok",
+        "approve_reply": "no open confirmation act_59a8206d41232b848f225ab22354f9b4:8",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "pipelined": {
+        "cancel_reply": "ok",
+        "approve_reply": "confirmation act_1f2a70888c948a70962588c745a05bbb:8 is no longer open",
+        "finished": {
+          "outcome": "cancelled"
+        },
+        "submits_at_extension": 0,
+        "events_tail": [
+          "action_proposed",
+          "confirmation_needed",
+          "finished"
+        ]
+      },
+      "ok": true
+    }
+  ]
+}

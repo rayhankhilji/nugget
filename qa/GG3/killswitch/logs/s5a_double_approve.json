@@ -1,0 +1,17 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "replies": [
+        "error: confirmation act_820ba494a43236b4c81217604dbda2c7:8 is no longer open",
+        "ok",
+        "error: no open confirmation act_820ba494a43236b4c81217604dbda2c7:8"
+      ],
+      "finished": {
+        "outcome": "succeeded"
+      },
+      "submits_at_extension": 1,
+      "ok": true
+    }
+  ]
+}

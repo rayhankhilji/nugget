@@ -1,0 +1,15 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "timeout_ms_in_request": 2000,
+      "resolved_as": "timed_out",
+      "approve_reply": "no open confirmation act_2caf9e8ad485c7d8fbe23d8a7e4df0ee:8",
+      "finished": {
+        "outcome": "succeeded"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "commit": null,
+  "runs": [
+    {
+      "other_task_reply": "no open confirmation act_5524c2644c87390cb6612ebb020989a6:8",
+      "unknown_task_reply": "unknown agent task 0000",
+      "submits_before_right_answer": 0,
+      "deny_reply": "ok",
+      "finished": {
+        "detail": "script ended",
+        "outcome": "failed"
+      },
+      "submits_at_extension": 0,
+      "ok": true
+    }
+  ]
+}
