@@ -81,6 +81,23 @@ const MANY_WORDS: &[&str] = &[
 /// items (by label, ignoring case and spacing) is ambiguous. Nothing is ambiguous when the goal
 /// asks for several items ([`MANY_WORDS`], or a plural goal word whose singular is on screen).
 pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
+    // A whole name the goal spells out (`draft.txt`, `sam@ourco.example`) that one target shows
+    // is that target.
+    let names = dotted_names(goal);
+    if names.iter().any(|n| {
+        targets
+            .iter()
+            .filter(|t| t.to_lowercase().contains(n.as_str()))
+            .count()
+            == 1
+    }) {
+        return None;
+    }
+    // A file extension says what kind of item, not which one.
+    let extensions: HashSet<String> = names
+        .iter()
+        .filter_map(|n| n.rsplit_once('.').map(|(_, ext)| ext.to_string()))
+        .collect();
     let all = words(goal);
     if all
         .iter()
@@ -93,6 +110,7 @@ pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
     let goal_words: Vec<(String, String)> = all
         .into_iter()
         .filter(|(_, lower)| lower.chars().count() >= 2 && !STOP_WORDS.contains(&lower.as_str()))
+        .filter(|(_, lower)| !extensions.contains(lower))
         .filter(|(_, lower)| seen.insert(lower.clone()))
         .collect();
     if goal_words.is_empty() || targets.len() < 2 {
@@ -188,6 +206,22 @@ fn words(text: &str) -> Vec<(String, String)> {
         out.push((word, lower));
     }
     out
+}
+
+/// Lowercase tokens of `text` with a dot (or `@`) between letters or digits: file names and
+/// addresses, which name one item whole.
+fn dotted_names(text: &str) -> Vec<String> {
+    text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '“' | '”' | ',' | '(' | ')'))
+        .map(|w| w.trim_end_matches(['.', '!', '?', ':', ';']).to_lowercase())
+        .filter(|w| {
+            let b = w.as_bytes();
+            (1..b.len().saturating_sub(1)).any(|i| {
+                matches!(b[i], b'.' | b'@')
+                    && b[i - 1].is_ascii_alphanumeric()
+                    && b[i + 1].is_ascii_alphanumeric()
+            })
+        })
+        .collect()
 }
 
 /// A label's identity: lowercase with whitespace collapsed.
@@ -341,5 +375,21 @@ mod tests {
             .map(|(w, _)| w)
             .collect();
         assert_eq!(w, vec!["Sam", "Q3", "report", "OBrien", "dont"]);
+    }
+
+    #[test]
+    fn a_whole_file_name_is_not_ambiguous() {
+        let files = t(&["File draft.txt", "File notes.txt", "Folder Projects"]);
+        assert_eq!(
+            ambiguity("In Documents, rename draft.txt to final.txt.", &files),
+            None
+        );
+        // The extension alone never makes a term.
+        assert_eq!(ambiguity("Rename the txt file to final.txt", &files), None);
+        let two = t(&["File q3 report.txt", "File q3 report final.txt"]);
+        assert_eq!(
+            ambiguity("Delete the q3 report", &two).map(|a| a.term),
+            Some("q3 report".into())
+        );
     }
 }
