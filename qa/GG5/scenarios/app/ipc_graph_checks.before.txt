@@ -1,0 +1,48 @@
+entities=45 claims=60 entity->entity claims=60
+statuses: {'active': 59, 'superseded': 1}
+[overview] nodes=45 edges=59 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  overview missing entities: []
+  current entity->entity claims not in overview edges: []
+  non-current entity claims (should not be edges): {19: ('superseded', 'Dana Whitfield works at Brightwell (has a brightwell.example address).')}
+[mara d1] nodes=19 edges=22 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  expected 19 nodes; missing=[] extra=[] depth-mismatch=[]
+  d1 neighbours: ['1:1 Mara / Bob', 'Climbing with Sam', 'Counselling session', 'Dana Whitfield', 'Drinks with Dana (new job!)', 'Gus Ferreira', 'Gus Ferreira', 'Harbor', 'Harbor go/no-go review (launch 3 Dec)', 'Harbor stand-up', 'Harbor-launch-plan', 'Ife Okafor', 'Ife staying (Gull Point Sunday)', 'Priyanka Rao', 'R. Chen', 'Sam', 'Sam Patel', 'Theo Lindqvist']
+[mara d2] nodes=36 edges=59 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  expected 36 nodes; missing=[] extra=[] depth-mismatch=[]
+[mara d3] nodes=36 edges=59 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  expected 36 nodes; missing=[] extra=[] depth-mismatch=[]
+[overview kinds=['person']] nodes=12 edges=9 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  wrong-kind nodes=[]; expected 12 got 12
+[overview kinds=['person', 'organization']] nodes=16 edges=15 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  wrong-kind nodes=[]; expected 16 got 16
+[overview kinds=['event']] nodes=7 edges=0 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  wrong-kind nodes=[]; expected 7 got 7
+[mara d2 kinds=['person']] nodes=11 edges=9 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  nodes=[('Mara Okafor', 'person', 0), ('R. Chen', 'person', 1), ('Sam Patel', 'person', 1), ('Dana Whitfield', 'person', 1), ('Gus Ferreira', 'person', 1), ('Sam', 'person', 1), ('Ife Okafor', 'person', 1), ('Theo Lindqvist', 'person', 1), ('Gus Ferreira', 'person', 1), ('Priyanka Rao', 'person', 1), ('Jonas Albers', 'person', 2)]
+  nodes with no drawn edge (reached only via filtered-out kinds): [('Jonas Albers', 2)]
+[mara d2 kinds=['organization']] nodes=5 edges=0 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+  nodes=[('Mara Okafor', 'person', 0), ('Brightwell Analytics', 'organization', 2), ('Corvid Labs', 'organization', 2), ('Tessellate', 'organization', 2), ('Lumenfold', 'organization', 2)]
+  nodes with no drawn edge (reached only via filtered-out kinds): [('Mara Okafor', 0), ('Brightwell Analytics', 2), ('Corvid Labs', 2), ('Tessellate', 2), ('Lumenfold', 2)]
+[overview source=Mara's files] nodes=45 edges=59 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+[mara d2 source=Mara's files] nodes=36 edges=59 truncated=False non-current-edges=[] dangling=[] dup_nodes=0
+[bogus source center=None] nodes=[] edges=0 truncated=False
+[bogus source center=Mara Okafor] nodes=['Mara Okafor'] edges=0 truncated=False
+[overview limit=1] nodes=1 truncated=True
+[overview limit=5] nodes=5 truncated=True
+[overview limit=44] nodes=44 truncated=True
+[overview limit=45] nodes=45 truncated=False
+[overview limit=46] nodes=45 truncated=False
+[mara d1 limit=1] nodes=1 truncated=True edges=0
+[mara d1 limit=5] nodes=5 truncated=True edges=6
+[mara d1 limit=19] nodes=19 truncated=False edges=22
+[mara d1 limit=20] nodes=19 truncated=False edges=22
+[mara d2 limit=5 kinds=organization] nodes=[('Mara Okafor', 'person')] truncated=True
+[mara d2 limit=0] nodes=36 truncated=False
+[{'center': 'ent_doesnotexist', 'depth': 1, 'limit': 10, 'kinds': []}] error knowledge.graph: {'code': -32001, 'message': 'entity ent_doesnotexist'}
+[{'center': None, 'depth': 1, 'limit': 10, 'kinds': ['planet']}] error knowledge.graph: {'code': -32602, 'message': 'unknown entity kind `planet`'}
+[{'center': 'ent_apdw7xfevmeiptur', 'depth': 99, 'limit': 10, 'kinds': []}] ok nodes=10 truncated=True
+[sensitive Jonas Albers] in overview=True d1 neighbours=['Counselling session'] attrs={}
+[sensitive Counselling session] in overview=True d1 neighbours=['Albers Counselling, 3 Quay Lane, Halden Bay', 'Jonas Albers', 'Mara Okafor'] attrs={'all_day': False, 'end': '2026-06-17T17:50:00Z', 'location': 'Albers Counselling, 3 Quay Lane, Halden Bay', 'rrule': 'FREQ=WEEKLY;COUNT=8', 'start': '2026-06-17T17:00:00Z', 'timezone': 'UTC'}
+[sensitive Albers Counselling, 3 Quay Lane, Halden Bay] in overview=True d1 neighbours=['Counselling session'] attrs={}
+[sensitive Dr. Lena Brandt] in overview=True d1 neighbours=[] attrs={}
+[sensitive health] in overview=True d1 neighbours=[] attrs={}

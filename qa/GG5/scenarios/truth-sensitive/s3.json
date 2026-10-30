@@ -1,0 +1,94 @@
+{
+ "dated": [
+  {
+   "id": 33,
+   "status": "superseded",
+   "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+   "evidence": [
+    [
+     "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+     "2026-03-04T09:00:00Z",
+     "Cc: Dana Whitfield <dana.whitfield@brightwell.example>"
+    ],
+    [
+     "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+     "2026-03-20T09:00:00Z",
+     "From: Dana Whitfield <dana.whitfield@brightwell.example>"
+    ],
+    [
+     "0:Notes/People/Dana (Brightwell).md",
+     "2026-03-01T09:00:00Z",
+     "org: Brightwell Analytics"
+    ]
+   ]
+  },
+  {
+   "id": 41,
+   "status": "active",
+   "text": "Dana Whitfield works at Corvidlabs (has a corvidlabs.example address).",
+   "evidence": [
+    [
+     "0:Mail/Inbox/2026-08-14-dana-new-role.eml",
+     "2026-08-14T09:00:00Z",
+     "From: Dana Whitfield <dana@corvidlabs.example>"
+    ],
+    [
+     "0:Mail/Sent/2026-08-15-re-new-role.eml",
+     "2026-08-15T09:00:00Z",
+     "To: Dana Whitfield <dana@corvidlabs.example>"
+    ],
+    [
+     "0:Notes/People/Dana-Whitfield.md",
+     "2026-08-17T09:00:00Z",
+     "org: Corvid Labs"
+    ]
+   ]
+  }
+ ],
+ "copied": [
+  {
+   "id": 33,
+   "status": "active",
+   "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+   "evidence": [
+    [
+     "0:Mail/Inbox/2026-03-04-harbor-kickoff.eml",
+     "2026-03-04T09:00:00Z",
+     "Cc: Dana Whitfield <dana.whitfield@brightwell.example>"
+    ],
+    [
+     "0:Mail/Inbox/2026-03-20-dashboard-design-review.eml",
+     "2026-03-20T09:00:00Z",
+     "From: Dana Whitfield <dana.whitfield@brightwell.example>"
+    ],
+    [
+     "0:Notes/People/Dana (Brightwell).md",
+     "2026-10-30T19:48:35.693348407Z",
+     "org: Brightwell Analytics"
+    ]
+   ]
+  },
+  {
+   "id": 41,
+   "status": "superseded",
+   "text": "Dana Whitfield works at Corvidlabs (has a corvidlabs.example address).",
+   "evidence": [
+    [
+     "0:Mail/Inbox/2026-08-14-dana-new-role.eml",
+     "2026-08-14T09:00:00Z",
+     "From: Dana Whitfield <dana@corvidlabs.example>"
+    ],
+    [
+     "0:Mail/Sent/2026-08-15-re-new-role.eml",
+     "2026-08-15T09:00:00Z",
+     "To: Dana Whitfield <dana@corvidlabs.example>"
+    ],
+    [
+     "0:Notes/People/Dana-Whitfield.md",
+     "2026-08-17T09:00:00Z",
+     "org: Corvid Labs"
+    ]
+   ]
+  }
+ ]
+}
