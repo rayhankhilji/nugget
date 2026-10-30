@@ -175,7 +175,10 @@ fn fail(app: &AppHandle, f: Failure) {
 }
 
 /// Why drafting is refused locally in `app`, if it is.
-fn local_refusal(app: &AppInfo, s: &settings::DoubleTapSettings) -> Option<&'static str> {
+pub(super) fn local_refusal(
+    app: &AppInfo,
+    s: &settings::DoubleTapSettings,
+) -> Option<&'static str> {
     if settings::is_excluded(app, &s.excluded_apps) {
         Some(errors::REFUSED_EXCLUDED)
     } else if !s.allow_terminals && settings::is_terminal(app) {
@@ -232,20 +235,7 @@ pub async fn fire(app: AppHandle) {
         app: focused.app.clone(),
         caret: focused.caret,
     });
-    let provider = settings::provider_for(&focused.app, &s.app_providers);
-    let request = DraftRequest {
-        context: DraftContext {
-            app: focused.app,
-            field: focused.field,
-            thread: focused.thread,
-            recipients: focused.recipients,
-            subject: focused.subject,
-            screenshot_png_base64: None,
-        },
-        instruction: None,
-        provider: provider.map(ProviderId::new),
-        max_tokens: None,
-    };
+    let request = draft_request(focused, &s);
     match begin(&app, &request).await {
         Ok(started) => {
             apply(
@@ -260,6 +250,28 @@ pub async fn fire(app: AppHandle) {
             );
         }
         Err(f) => fail(&app, f),
+    }
+}
+
+/// The request `draft.begin` gets for a field read (read-ahead sends the same one, so the
+/// daemon prefills exactly the prompt the trigger will ask for).
+pub(super) fn draft_request(
+    focused: nugget_a11y::Focused,
+    s: &settings::DoubleTapSettings,
+) -> DraftRequest {
+    let provider = settings::provider_for(&focused.app, &s.app_providers);
+    DraftRequest {
+        context: DraftContext {
+            app: focused.app,
+            field: focused.field,
+            thread: focused.thread,
+            recipients: focused.recipients,
+            subject: focused.subject,
+            screenshot_png_base64: None,
+        },
+        instruction: None,
+        provider: provider.map(ProviderId::new),
+        max_tokens: None,
     }
 }
 

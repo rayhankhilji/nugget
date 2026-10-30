@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use super::overlay::{Event, OverlayView};
 use super::permissions::{self, DoubleTapStatus, PermissionState};
 use super::settings::{self, DoubleTapSettings, TriggerSpec};
-use super::{DoubleTap, OVERLAY_LABEL, SETTINGS_EVENT, flow, lock};
+use super::{DoubleTap, OVERLAY_LABEL, SETTINGS_EVENT, flow, lock, readahead};
 use crate::daemon::{CmdError, Daemon};
 
 fn only_overlay(window: &WebviewWindow) -> Result<(), CmdError> {
@@ -33,8 +33,9 @@ pub fn doubletap_settings_get(state: State<'_, DoubleTap>) -> DoubleTapSettings 
     lock(&state.settings).clone()
 }
 
-/// Validate, save, restart the listener with the new trigger, and tell every window (the
-/// settings page and onboarding both write here; this file is the one source of truth).
+/// Validate, save, restart the listener with the new trigger and the read-ahead loop, and tell
+/// every window (the settings page and onboarding both write here; this file is the one source
+/// of truth).
 #[tauri::command]
 pub async fn doubletap_settings_set(
     app: AppHandle,
@@ -50,6 +51,7 @@ pub async fn doubletap_settings_set(
     }
     *lock(&state.settings) = settings.clone();
     flow::restart_listener_async(&app).await;
+    readahead::restart(&app);
     if let Err(e) = app.emit(SETTINGS_EVENT, &settings) {
         tracing::debug!(error = %e, "cannot announce the Double Tap settings");
     }
