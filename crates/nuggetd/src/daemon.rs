@@ -262,11 +262,6 @@ impl Daemon {
             }
         };
 
-        let (config, config_created) = Config::load_or_create(&paths)?;
-        if config_created {
-            tracing::info!(path = %paths.config_file().display(), "created default config");
-        }
-
         let store = {
             let paths = paths.clone();
             let key = opts.store_key;
@@ -276,10 +271,16 @@ impl Daemon {
                     None => StoreKey::load_or_create(&paths)?,
                 };
                 tracing::info!(source = ?key.source(), "store key loaded");
-                Store::open(paths.db_file(), &key)
+                // Applies a staged restore; a damaged database is never opened (recovery mode).
+                crate::features::backup::open_store(&paths, key)
             })
             .await?
         };
+        // After the store: applying a staged restore may have put the backup's config in place.
+        let (mut config, config_created) = Config::load_or_create(&paths)?;
+        if config_created {
+            tracing::info!(path = %paths.config_file().display(), "created default config");
+        }
         let egress: Arc<dyn EgressSink> = Arc::new(store.clone());
 
         let (providers, unavailable) = {
@@ -473,6 +474,7 @@ impl Daemon {
             .clone()
             .unwrap_or_else(|| crate::knowledge::default_vault_dir(&paths));
         let vault_dir = crate::knowledge::vault_root(&config.vault, &default_vault)?;
+        crate::features::backup::prepare_config(&paths, &mut config, &vault_dir);
         let knowledge = {
             let (store, router, hub, power) =
                 (store.clone(), router.clone(), hub.clone(), power.clone());
@@ -634,8 +636,13 @@ impl Daemon {
         let state = self.state;
         let handler = Arc::new(RpcHandler::new(state.clone()));
         let winding = state.clone();
+        let stop = state.shutdown.clone();
         let shutdown = async move {
-            shutdown.await;
+            // A feature may stop the daemon itself (a staged restore) by cancelling `shutdown`.
+            tokio::select! {
+                () = shutdown => {}
+                () = stop.cancelled() => {}
+            }
             wind_down(&winding).await;
         };
         // Returns once the listener stopped accepting and every connection is closed.

@@ -62,7 +62,9 @@ nuggetd restore --from "/Volumes/Backup/nugget-backup-20261030T091500Z"
 
 (stop the daemon first; the command refuses to restore under a running one). On a computer where the
 key is not in the keychain you are asked for the backup passphrase; `--passphrase-file` or the
-`NUGGET_BACKUP_PASSPHRASE` environment variable work for scripts.
+`NUGGET_BACKUP_PASSPHRASE` environment variable work for scripts (on Windows the command does not
+prompt, so use one of them). On the command line, `nuggetd backup set-passphrase` sets the
+passphrase and `nuggetd backup --to DIR` backs up into another folder once.
 
 Before anything is replaced, Nugget checks the backup: the SHA-256 of every file, that the key
 opens it, SQLite's integrity check, the audit log's hash chain, and that the search and vector

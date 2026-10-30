@@ -78,6 +78,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tracing-appender = "0.2"
 uuid = { version = "1", features = ["v4"] }
 getrandom = "0.4"
+# Backup manifests (SHA-256 of each file; same versions as nugget-store).
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 nuggetd = { path = ".", version = "0.0.1", features = ["fake-runtime"] }

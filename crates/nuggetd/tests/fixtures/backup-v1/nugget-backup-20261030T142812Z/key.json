@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "kdf": "argon2id",
+  "m_kib": 8,
+  "t": 1,
+  "p": 1,
+  "salt": "96288e9e4ace61edf2466d25e2e85f45",
+  "aead": "xchacha20poly1305",
+  "nonce": "2624a6c2b363809a1023fa08c20282f5da0653c66d0d6330",
+  "ct": "ee4a929f7515593a17a1e28c1cec5dc3fd2b599c635cc58b985f4e4e98f4b90d9ffea6d2598766f4a4ddad7c66778812",
+  "key_id": "9dc651ba2f678f9c"
+}
