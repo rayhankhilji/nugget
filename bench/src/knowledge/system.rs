@@ -80,6 +80,8 @@ pub struct RenderedFact {
     pub footnotes: usize,
     /// The evidence behind those footnotes, checked against the store.
     pub citations: Vec<Evidence>,
+    /// A history line (a superseded claim shown under "Earlier"), not a current fact.
+    pub history: bool,
 }
 
 /// One rendered vault page.
@@ -98,8 +100,20 @@ pub struct RenderedVault {
 }
 
 impl RenderedVault {
+    /// Current facts (history lines excluded).
     pub fn facts(&self) -> impl Iterator<Item = &RenderedFact> {
-        self.pages.iter().flat_map(|p| &p.facts)
+        self.pages
+            .iter()
+            .flat_map(|p| &p.facts)
+            .filter(|f| !f.history)
+    }
+
+    /// History lines: superseded claims the page still shows, with their citations.
+    pub fn history(&self) -> impl Iterator<Item = &RenderedFact> {
+        self.pages
+            .iter()
+            .flat_map(|p| &p.facts)
+            .filter(|f| f.history)
     }
 }
 

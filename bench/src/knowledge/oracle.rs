@@ -230,6 +230,7 @@ impl KnowledgeSystem for Oracle {
                     text: line,
                     footnotes: citations.len(),
                     citations,
+                    history: false,
                 });
             }
             region.push_str(&format!("\n{notes}{END}\n"));

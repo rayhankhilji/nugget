@@ -2,6 +2,10 @@
 //!
 //! - every fact line in a facts block cites at least one footnote that is defined on the page,
 //!   unless it is a user-asserted fact marked `(you)`;
+//! - so does every history line (`<!-- h:ID -->`, a superseded claim): history is never `(you)`;
+//! - claim and history markers in the facts block parse (`<!-- c:ID -->`, `<!-- h:ID -->` on a
+//!   bullet);
+//! - footnotes referenced in the merge section (`merged` block) are defined;
 //! - every link in a generated block resolves to a page in the vault;
 //! - entity pages have valid frontmatter (`nugget_id`, `kind`, `aliases`, `identifiers`,
 //!   `updated`; stubs carry `merged_into` or `status`).
@@ -23,6 +27,8 @@ pub enum IssueKind {
     BadFrontmatter,
     MissingPage,
     UnreadablePage,
+    /// A claim or history marker that does not parse.
+    BadMarker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,8 +44,10 @@ pub struct ValidationIssue {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct ValidationReport {
     pub pages: u64,
-    /// Fact lines seen.
+    /// Fact lines seen (history lines included).
     pub facts: u64,
+    /// History lines (superseded claims) among `facts`.
+    pub history_facts: u64,
     /// Fact lines with at least one resolvable citation (user facts excluded).
     pub cited_facts: u64,
     /// Fact lines marked `(you)`.
@@ -75,6 +83,7 @@ impl ValidationReport {
     pub fn merge(&mut self, other: ValidationReport) {
         self.pages += other.pages;
         self.facts += other.facts;
+        self.history_facts += other.history_facts;
         self.cited_facts += other.cited_facts;
         self.user_facts += other.user_facts;
         self.links += other.links;
@@ -138,10 +147,40 @@ pub(crate) fn validate_page_with(
     if let Some(facts) = doc.region(R_FACTS) {
         let start = region_start(R_FACTS);
         for (i, line) in facts.iter().enumerate() {
+            let at = start.map(|s| s + i);
+            if has_bad_marker(line) {
+                issue(
+                    &mut r,
+                    at,
+                    IssueKind::BadMarker,
+                    "claim marker does not parse".into(),
+                );
+                continue;
+            }
+            if parse_history(line).is_some() {
+                r.facts += 1;
+                r.history_facts += 1;
+                let refs = footnote_refs(line);
+                match refs.iter().find(|x| !defined.contains(x.as_str())) {
+                    _ if refs.is_empty() => issue(
+                        &mut r,
+                        at,
+                        IssueKind::MissingCitation,
+                        "history line has no citation".into(),
+                    ),
+                    Some(x) => issue(
+                        &mut r,
+                        at,
+                        IssueKind::MissingCitation,
+                        format!("footnote [^{x}] is not defined"),
+                    ),
+                    None => r.cited_facts += 1,
+                }
+                continue;
+            }
             let Some((claim, _)) = parse_fact(line) else {
                 continue;
             };
-            let at = start.map(|s| s + i);
             r.facts += 1;
             let refs = footnote_refs(line);
             let mine = line
@@ -182,6 +221,23 @@ pub(crate) fn validate_page_with(
                 );
             } else {
                 r.cited_facts += 1;
+            }
+        }
+    }
+
+    if let Some(merged) = doc.region(R_MERGED) {
+        let start = region_start(R_MERGED);
+        for (i, line) in merged.iter().enumerate() {
+            if let Some(x) = footnote_refs(line)
+                .iter()
+                .find(|x| !defined.contains(x.as_str()))
+            {
+                issue(
+                    &mut r,
+                    start.map(|s| s + i),
+                    IssueKind::MissingCitation,
+                    format!("footnote [^{x}] is not defined"),
+                );
             }
         }
     }

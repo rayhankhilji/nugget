@@ -1,7 +1,8 @@
 //! Persistent pipeline state, kept in the store's cursor table through [`ItemFeed`]:
 //!
-//! - `knowledge`: [`State`] (extractor version, the user's entity and learned addresses, the
-//!   sources seen, the item change-log cursor and retry hints, unresolved wikilinks);
+//! - `knowledge`: [`State`] (extractor and time-model versions, the user's entity and learned
+//!   addresses, the sources seen, the item change-log cursor and retry hints, unresolved
+//!   wikilinks);
 //! - `knowledge/lb/<bucket>/<source>`: the **ledger**, one entry per processed item (connector
 //!   version, content fingerprint, LLM status), sharded into [`BUCKETS`] buckets per source so a
 //!   flush rewrites only what changed (a flush of `flush_every` items dirties about that many
@@ -38,6 +39,14 @@ use crate::feed::ItemFeed;
 /// adoption): new and changed items use the new path, but re-extracting a whole vault costs one
 /// local-model request per item (26–33 s each on a 2-core CPU), too much to start silently.
 pub const EXTRACTOR_VERSION: u32 = 2;
+/// Version of the claims' time model. A run that finds an older one in [`State::temporal`]
+/// first migrates the graph, without the LLM and without re-extracting anything
+/// (`Session::backfill_validity`): claims get `valid_from` from their evidence dates, and
+/// single-valued predicates are settled again (one current value, dated history). Kept apart
+/// from [`EXTRACTOR_VERSION`], whose bump would re-extract every item with the LLM.
+///
+/// - 1: EE1 validity intervals, past-tense and start cues, order-independent supersession.
+pub(crate) const TEMPORAL_VERSION: u32 = 1;
 pub(crate) const STATE_KEY: &str = "knowledge";
 /// The pre-sharding notes index (read for migration, cleared once moved).
 pub(crate) const NOTES_KEY: &str = "knowledge/notes";
@@ -71,6 +80,11 @@ pub(crate) struct State {
     pub retry_failed: bool,
     /// Some ledger entry may be waiting for the LLM extractor.
     pub retry_llm: bool,
+    /// [`TEMPORAL_VERSION`] the graph was last migrated to (0: written before validity
+    /// intervals, or a new vault).
+    pub temporal: u32,
+    /// The migration's progress: the last entity (in id order) it finished, while unfinished.
+    pub temporal_cursor: Option<EntityId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -590,3 +590,27 @@ fn the_graph_fold_leaves_people_to_corroborated_resolution() {
     assert_eq!(extra.entities[1].name, "Ostrander Freight Cooperative");
     assert_eq!(extra.entities[1].aliases, ["Ostrander"]);
 }
+
+#[test]
+fn role_synonyms_are_one_single_valued_predicate_and_titles_lose_the_employer() {
+    for p in [
+        "role",
+        "position",
+        "job_title",
+        "has_role",
+        "works_as",
+        "occupation",
+        "Job Title",
+    ] {
+        assert_eq!(canonical_predicate(p).as_deref(), Some("has_title"), "{p}");
+    }
+    assert!(crate::session::SINGLE_VALUED.contains(&"has_title"));
+    assert_eq!(clean_title("Head of Data at Quillfeather"), "Head of Data");
+    assert_eq!(
+        clean_title("our Senior Data Scientist"),
+        "Senior Data Scientist"
+    );
+    assert_eq!(clean_title("Head of Data"), "Head of Data");
+    assert_eq!(clean_title("Head of Data AT Quillfeather"), "Head of Data");
+    assert_eq!(clean_title("CTO @ Acme"), "CTO");
+}

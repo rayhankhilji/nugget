@@ -14,13 +14,21 @@
 //! is not an edit. A link in the new text (`[[Kind/Name (id)|Name]]`) makes the claim's object
 //! that entity; otherwise the object is the text itself. Aliases added to the frontmatter become
 //! graph aliases.
+//!
+//! History lines (superseded claims, listed under `*Earlier:*` and marked `<!-- h:ID -->`) are
+//! read-only: editing or deleting one changes nothing in the graph, and the next render restores
+//! it (an outdated fact is a record of what the sources said, not a current statement to
+//! correct). A line counts as history when it carries the marker of a claim the last render
+//! showed as history, wherever the marker sits (un-indented, or with text appended after it);
+//! a line with any other `<!-- h:N -->` marker, or none, is the user's own text and is kept.
+//! To state something new, add a fact line instead.
 
 use std::collections::{BTreeMap, HashSet};
 
 use nugget_graph::ClaimId;
 
 use crate::doc::*;
-use crate::merge::{FLine, classify_facts};
+use crate::merge::{FLine, classify_facts, classify_facts_with, history_ids};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NewFact {
@@ -85,7 +93,7 @@ pub(crate) fn plan_edits(base: &Doc, user: &Doc) -> EditPlan {
 
     let mut seen = HashSet::new();
     let mut group: Option<String> = None;
-    for l in classify_facts(u) {
+    for l in classify_facts_with(u, Some(&history_ids(b))) {
         match l {
             FLine::Heading(p) => group = Some(p),
             FLine::Fact { claim, content } => {
@@ -182,5 +190,30 @@ mod tests {
         let p = plan_edits(&base, &user);
         assert!(p.retract.is_empty());
         assert_eq!(p.aliases, vec!["Al".to_string()]);
+    }
+
+    #[test]
+    fn history_lines_are_never_edits() {
+        let base = page(
+            "## Facts\n\n### Works at <!-- p:works_at -->\n- B [^1] <!-- c:2 -->\n\n*Earlier:*\n  - A (until 2026-10-05) [^2] <!-- h:1 -->\n  - Z [^3] <!-- h:3 -->",
+        );
+        // Edited, deleted and un-indented history lines: no plan.
+        let user = page(
+            "## Facts\n\n### Works at <!-- p:works_at -->\n- B [^1] <!-- c:2 -->\n\n*Earlier:*\n- A changed [^2] <!-- h:1 -->",
+        );
+        assert!(plan_edits(&base, &user).is_empty());
+        // A history line copied into a fact bullet without its marker is a new fact.
+        let user = page(
+            "## Facts\n\n### Works at <!-- p:works_at -->\n- B [^1] <!-- c:2 -->\n- A again\n\n*Earlier:*\n  - A (until 2026-10-05) [^2] <!-- h:1 -->\n  - Z [^3] <!-- h:3 -->",
+        );
+        let p = plan_edits(&base, &user);
+        assert_eq!(
+            p.add,
+            vec![NewFact {
+                predicate: "works_at".into(),
+                content: "A again".into()
+            }]
+        );
+        assert!(p.retract.is_empty() && p.supersede.is_empty());
     }
 }
