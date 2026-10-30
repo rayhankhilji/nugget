@@ -212,6 +212,18 @@ The fix: the `.deb` and `.rpm` install `dev.nugget.Nugget.desktop` next to `Nugg
 needs the portal (only a file it wrote itself is ever updated). Flatpak and Snap builds get their
 app id from the sandbox and skip the registration.
 
+### How it is verified
+
+`.github/workflows/real-os.yml` runs headless Wayland sessions on GitHub's Ubuntu runners with
+the real portals: KWin (Plasma 6.6, xdg-desktop-portal-kde) and GNOME Shell 50 (headless, a
+virtual monitor, xdg-desktop-portal-gnome), plus sway for the no-portal path. It installs the
+built `.deb`, starts Nugget, accepts the desktop's real consent dialogs over AT-SPI, presses
+`Ctrl+Alt+Space` on a virtual keyboard (KWin's fake-input protocol; Mutter's RemoteDesktop
+keyboard), and checks that Double Tap fired. On KWin the job turns off KWin's per-app
+permission check for the fake-input keyboard (`KWIN_WAYLAND_NO_PERMISSION_CHECKS=1`); the key
+still goes through KWin's input and shortcut handling. Plasma 5.27, GNOME before 48 and physical
+desktops are not covered by CI.
+
 ## Latency
 
 The targets are a first inserted token in under 1.2 s (median) with a cloud provider and under 3 s
