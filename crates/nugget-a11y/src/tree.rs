@@ -440,8 +440,14 @@ fn is_document(n: &Node) -> bool {
 /// and the thread walk would start inside the editor. The climb continues while the parent is
 /// editable and stops below a window, dialog or application. A web area or document is taken
 /// only when it is itself inside another document (an editable iframe body, `designMode`); the
-/// page's own root never is, so an editable page does not swallow the whole tab. A secure
-/// element never climbs.
+/// page's own root never is, so an editable page does not swallow the whole tab. Nor is an
+/// editable ancestor that also holds a message-like log or list (`<body contenteditable>` or an
+/// app-wide editable wrapper), checked with a bounded read of the parts not yet looked at. The
+/// climb ends at an element with the `editable_root` attr set to `true` (a platform that knows
+/// the root, such as AX `AXHighestEditableAncestor`). A secure element never climbs.
+///
+/// Relies on the platform reporting `states.editable` on the elements inside a contenteditable
+/// (AT-SPI `State::Editable`; AX `AXEditableAncestor` being set).
 pub fn editor_root<E: Element>(el: &E) -> Option<E> {
     if el.node().states.secure {
         return None;
@@ -459,16 +465,83 @@ pub(crate) fn editable_ancestor<E: Element>(el: &E) -> Option<E> {
         if !n.states.editable || n.states.secure || is_page_boundary(&n) {
             break;
         }
+        // A wrapper that also holds the conversation (`<body contenteditable>`, an app-wide
+        // editable root) is not the editor. Only the part not looked at yet is read.
+        if holds_thread(&p, best.as_ref().unwrap_or(el)) {
+            break;
+        }
         if is_document(&n) {
             if has_document_ancestor(&p) {
                 best = Some(p);
             }
             break;
         }
-        cur = p.parent();
+        // The platform knows the root (AX `AXHighestEditableAncestor`).
+        let top = n.attr("editable_root") == Some("true");
+        cur = if top { None } else { p.parent() };
         best = Some(p);
     }
     best
+}
+
+/// Elements read per level when looking for a thread inside an editable ancestor.
+const THREAD_PROBE_NODES: usize = 120;
+const THREAD_PROBE_DEPTH: usize = 4;
+
+/// Whether `p`'s children other than `skip` hold a message-like log or list (bounded read).
+fn holds_thread<E: Element>(p: &E, skip: &E) -> bool {
+    let mut budget = THREAD_PROBE_NODES;
+    p.children(64)
+        .iter()
+        .filter(|c| !c.same(skip))
+        .any(|c| read_probe(c, 0, &mut budget).iter().any(looks_like_thread))
+}
+
+fn read_probe<E: Element>(el: &E, depth: usize, budget: &mut usize) -> Node {
+    let mut n = el.node();
+    if *budget == 0 {
+        return n;
+    }
+    *budget -= 1;
+    n.children.clear();
+    if depth < THREAD_PROBE_DEPTH && !n.states.secure {
+        for c in el.children(32) {
+            if *budget == 0 {
+                break;
+            }
+            n.children.push(read_probe(&c, depth + 1, budget));
+        }
+    }
+    n
+}
+
+/// A conversation rather than editor content: a non-editable log with entries, or a
+/// non-editable list or table with at least two items that each hold two or more texts
+/// (author and body), unlike a bulleted list in a draft.
+fn looks_like_thread(n: &Node) -> bool {
+    if n.states.editable {
+        return false;
+    }
+    match n.role {
+        Role::Log => !n.children.is_empty(),
+        Role::List | Role::Table => {
+            let structured = n
+                .children
+                .iter()
+                .filter(|item| {
+                    !item.states.editable
+                        && item
+                            .iter()
+                            .take(64)
+                            .filter(|d| d.own_text().is_some())
+                            .count()
+                            >= 2
+                })
+                .count();
+            structured >= 2
+        }
+        _ => false,
+    }
 }
 
 fn has_document_ancestor<E: Element>(el: &E) -> bool {
@@ -502,6 +575,15 @@ pub fn editor_root_path(snap: &Snapshot) -> Vec<usize> {
         if !n.states.editable || n.states.secure || is_page_boundary(n) {
             break;
         }
+        let holds_thread = n
+            .children
+            .iter()
+            .enumerate()
+            .filter(|&(i, _)| i != path[len])
+            .any(|(_, c)| c.iter().take(2000).any(looks_like_thread));
+        if holds_thread {
+            break;
+        }
         if is_document(n) {
             let nested = (0..len).any(|l| snap.node_at(&path[..l]).is_some_and(is_document));
             if nested {
@@ -510,6 +592,9 @@ pub fn editor_root_path(snap: &Snapshot) -> Vec<usize> {
             break;
         }
         best = len;
+        if n.attr("editable_root") == Some("true") {
+            break;
+        }
     }
     path[..best].to_vec()
 }
@@ -601,6 +686,7 @@ pub fn flatten_text_with<E: Element>(
         limits,
         mark,
         mark_start: None,
+        mark_pending: false,
         truncated: false,
         started: false,
         own_newline: false,
@@ -643,6 +729,9 @@ struct Flattener<'a, E> {
     limits: &'a FlattenLimits,
     mark: Option<&'a E>,
     mark_start: Option<u32>,
+    /// The mark was entered; its start is the next character it emits (after any pending
+    /// break), or where it ends when it emits none.
+    mark_pending: bool,
     truncated: bool,
     /// Something (text or a block, even an empty one) was emitted.
     started: bool,
@@ -670,6 +759,13 @@ impl<E: Element> Flattener<'_, E> {
         self.chars += 1;
     }
 
+    fn take_mark(&mut self) {
+        if self.mark_pending {
+            self.mark_pending = false;
+            self.mark_start = Some(self.chars);
+        }
+    }
+
     /// Emit one character of inline text.
     fn text_char(&mut self, c: char) {
         if self.after_block {
@@ -677,10 +773,12 @@ impl<E: Element> Flattener<'_, E> {
             if c == '\n' {
                 self.push('\n');
                 self.own_newline = true;
+                self.take_mark();
                 return;
             }
             self.push('\n');
         }
+        self.take_mark();
         self.push(c);
         self.own_newline = c == '\n';
         self.started = true;
@@ -723,18 +821,26 @@ impl<E: Element> Flattener<'_, E> {
             self.after_block = false;
             self.own_newline = false;
         }
-        if self.mark_start.is_none() && depth > 0 && self.mark.is_some_and(|m| el.same(m)) {
-            self.mark_start = Some(self.chars);
+        let is_mark = self.mark_start.is_none()
+            && !self.mark_pending
+            && depth > 0
+            && self.mark.is_some_and(|m| el.same(m));
+        if is_mark {
+            self.mark_pending = true;
         }
         let start_len = self.out.len();
         let own_text: Option<String> = match own {
             Some(t) => Some(t.to_string()),
             None => node.value.clone().filter(|v| !v.is_empty()),
         };
-        let kids = |s: &Self| {
+        let kids = |s: &mut Self| {
             if depth < s.limits.max_depth {
-                el.children(s.limits.max_children)
+                let kids = el.children(s.limits.max_children);
+                // At the cap there may be more.
+                s.truncated |= kids.len() >= s.limits.max_children;
+                kids
             } else {
+                s.truncated |= !el.children(1).is_empty();
                 Vec::new()
             }
         };
@@ -746,7 +852,8 @@ impl<E: Element> Flattener<'_, E> {
                     self.interleave(&t, &children, depth);
                 } else {
                     // The placeholders do not line up with the children: rebuild from the
-                    // children alone.
+                    // children alone, and do not trust the result to be complete.
+                    self.truncated = true;
                     if depth == 0 {
                         self.own_offsets.clear();
                     }
@@ -782,6 +889,9 @@ impl<E: Element> Flattener<'_, E> {
                     }
                 }
             }
+        }
+        if is_mark {
+            self.take_mark();
         }
         if block {
             // A trailing break inside a block (`<p>text<br></p>`) is presentational.
@@ -1099,6 +1209,118 @@ pub(crate) mod tests {
         assert!(editor_root(&MemEl::new(t, vec![0, 1, 0])).is_none());
     }
 
+    #[test]
+    fn mark_starts_after_the_pending_break() {
+        // A block, then an inline text run (the caret's element) on the next line.
+        let mut root = para(Role::Section, "");
+        root.children = vec![para(Role::Paragraph, "A"), text("tail")];
+        let tree = root.clone();
+        let el = MemEl::new(root, vec![]);
+        let mark = MemEl::new(tree.clone(), vec![1]);
+        let f = flatten_text_with(&el, None, Some(&mark), &FlattenLimits::default());
+        assert_eq!(f.text, "A\ntail");
+        assert_eq!(f.mark_start, Some(2));
+        // An empty mark after a block sits after the break too.
+        let mut root = tree;
+        root.children.push(para(Role::Paragraph, ""));
+        let el = MemEl::new(root.clone(), vec![]);
+        let mark = MemEl::new(root, vec![2]);
+        let f = flatten_text_with(&el, None, Some(&mark), &FlattenLimits::default());
+        assert_eq!(f.text, "A\ntail\n");
+        assert_eq!(f.mark_start, Some(7));
+    }
+
+    #[test]
+    fn flatten_caps_and_mismatches_mark_truncated() {
+        let mut root = para(Role::Section, "");
+        root.children = (0..1200)
+            .map(|i| para(Role::Paragraph, &format!("p{i}")))
+            .collect();
+        let el = MemEl::new(root.clone(), vec![]);
+        let f = flatten_text_with(&el, None, None, &FlattenLimits::default());
+        assert!(f.text.ends_with("p999"));
+        assert!(f.truncated, "children cap");
+        // Below the cap: complete.
+        root.children.truncate(10);
+        let el = MemEl::new(root.clone(), vec![]);
+        assert!(!flatten_text_with(&el, None, None, &FlattenLimits::default()).truncated);
+        // Placeholders that do not match the children.
+        let f = flatten_text_with(&el, Some("\u{FFFC}"), None, &FlattenLimits::default());
+        assert!(f.truncated, "placeholder mismatch");
+        // Depth cap with more below.
+        let limits = FlattenLimits {
+            max_depth: 0,
+            ..Default::default()
+        };
+        assert!(flatten_text_with(&el, None, None, &limits).truncated);
+    }
+
+    /// A page whose wrapper is editable (`<body contenteditable>` exposed as a section) and
+    /// holds the chat log next to the editor.
+    fn editable_wrapper(log_role: Role) -> Node {
+        let mut log = Node::new(log_role);
+        log.children = (0..3)
+            .map(|i| {
+                let mut item = Node::new(Role::ListItem);
+                item.children = vec![text("Maya Chen"), text(&format!("message {i}"))];
+                item
+            })
+            .collect();
+        let mut editor = para(Role::Section, "");
+        editor.children = vec![para(Role::Paragraph, "draft")];
+        let mut wrapper = para(Role::Section, "");
+        wrapper.children = vec![log, editor];
+        let mut web = Node::new(Role::WebArea);
+        web.children = vec![wrapper];
+        let mut win = Node::new(Role::Window);
+        win.children = vec![web];
+        win
+    }
+
+    #[test]
+    fn climb_stops_below_an_editable_wrapper_holding_the_thread() {
+        for role in [Role::Log, Role::List] {
+            let tree = editable_wrapper(role);
+            let p = MemEl::new(tree.clone(), vec![0, 0, 1, 0]);
+            let root = editor_root(&p).unwrap();
+            assert!(
+                root.same(&MemEl::new(tree.clone(), vec![0, 0, 1])),
+                "{role:?}"
+            );
+            let snap = Snapshot {
+                root: tree,
+                focus_path: vec![0, 0, 1, 0],
+                truncated: false,
+            };
+            assert_eq!(editor_root_path(&snap), vec![0, 0, 1], "{role:?}");
+        }
+        // A bulleted list inside the draft (editable, one text per item) does not stop it.
+        let mut tree = editable_wrapper(Role::List);
+        let list = &mut tree.children[0].children[0].children[0];
+        list.states.editable = true;
+        let p = MemEl::new(tree.clone(), vec![0, 0, 1, 0]);
+        assert!(editor_root(&p).unwrap().same(&MemEl::new(tree, vec![0, 0])));
+    }
+
+    #[test]
+    fn climb_ends_at_the_platform_editable_root() {
+        let mut tree = editable_wrapper(Role::Group);
+        tree.children[0].children[0].children[1]
+            .attrs
+            .insert("editable_root".into(), "true".into());
+        let p = MemEl::new(tree.clone(), vec![0, 0, 1, 0]);
+        assert!(
+            editor_root(&p)
+                .unwrap()
+                .same(&MemEl::new(tree.clone(), vec![0, 0, 1]))
+        );
+        let snap = Snapshot {
+            root: tree,
+            focus_path: vec![0, 0, 1, 0],
+            truncated: false,
+        };
+        assert_eq!(editor_root_path(&snap), vec![0, 0, 1]);
+    }
     #[test]
     fn editor_root_path_on_snapshots() {
         let snap = Snapshot {

@@ -34,7 +34,11 @@ processes and is bounded by timeouts, not instant.
 **Rich editors.** In a browser the focus can land on a paragraph or text run inside a
 contenteditable (Firefox always, Chromium sometimes after a click). The backend then climbs to the
 topmost editable ancestor below the page (`tree::editor_root`) and reads that as the field: value,
-role, label and the thread walk all start there. Writes (accessibility insertion, paste, caret
+role, label and the thread walk all start there. The climb relies on the platform marking
+elements inside a contenteditable editable (AT-SPI `State::Editable`; on macOS
+`AXEditableAncestor`), ends at an element whose `editable_root` attr is `true`
+(`AXHighestEditableAncestor`), and never takes an editable wrapper that also holds a
+message-like log or list. Writes (accessibility insertion, paste, caret
 bounds) still go to the focused element, in its own offsets. When a value holds U+FFFC
 embedded-object characters (AT-SPI stands one in for each child paragraph), it is rebuilt from the
 children in order, one `\n` between blocks (`tree::flatten_text`), and the selection is mapped into
@@ -50,38 +54,47 @@ after 1.2 s is looked for during a further 1.5 s grace period before the clipboa
 Rich web editors (ProseMirror/TipTap, Quill, Draft.js, Lexical, CKEditor, mail compose bodies) get
 the clipboard first when the text has a line break or at least 1000 characters
 (`A11yConfig::rich_paste`): they handle a paste as one undo step with paragraphs intact, while
-accessibility insertion loses the breaks or is reverted. If the paste fails or leaves the field
-unchanged, accessibility insertion follows. Whichever method runs first, if the field changed but
-not as expected, the backend reports `verified: false` and does not insert a second copy. It never
+accessibility insertion loses the breaks or is reverted. Accessibility insertion follows only when
+the paste never reached the app (no clipboard, `set_text` failed). Once the paste keystroke was
+sent, an unverified paste (it may still land) or an error is reported as `Clipboard`,
+`verified: false`, and a failure waits out the grace period before the clipboard is restored, so
+a late paste cannot insert the old contents. Whichever method runs first, if the field changed
+but not as expected, or a read after it fails or is truncated, the backend reports
+`verified: false` and does not insert a second copy. It never
 synthesises Return, and it strips `\r` and control characters from the inserted text.
 
 **Verification.** The expected value (the text over the selection) must match the field after
-normalising line endings, U+2028/2029, NBSP, zero-width characters, U+FFFC and trailing newlines.
-Failing that, rich editors are compared loosely: blank lines dropped and spaces collapsed on both
-sides, so `\n` against `\n\n` between paragraphs or a lost empty paragraph still verify, but the
-whole value must match. When the selection is unknown or a value was truncated, the text must
-appear once more than before. Partial insertions (one paragraph of several, text cut at a length
-limit) and second copies fail.
+normalising line endings, U+2028/2029, NBSP, zero-width characters, U+FFFC, bidi marks (read back
+as spaces) and trailing newlines. Failing that, rich editors are compared loosely: blank lines
+dropped and spaces collapsed on both sides, so `\n` against `\n\n` between paragraphs, a lost
+empty paragraph or a dropped bidi mark still verify, but the whole value must match. With a known
+selection and complete reads those are the only checks. When the selection is unknown or a value
+was truncated, the text must appear once more than before (and, with a known selection, the text
+before the caret must survive). Partial insertions, insertions elsewhere, a replaced field and
+second copies fail.
 
 **Thread heuristics.** These are platform-neutral and run on snapshots:
 
 - The backend walks the composer's ancestors (from the editor root), nearest first, and scores
   containers in the sibling subtrees. A container scores higher for more message-like children,
   for a `log` or `list` role, and for a name like "Messages" or "Conversation". It also scores
-  higher when it sits in the composer's column and above it. Sidebars, navigation landmarks, chat lists, channel lists and
-  lists of other conversations (each item one link) score lower; table rows are never a thread.
+  higher when it sits in the composer's column and above it. Sidebars, navigation landmarks,
+  chat lists, channel lists and lists of other conversations (each item one link) score lower;
+  table rows are never a thread.
 - Each item is split into author, timestamp and body.
 - App families (Mail, Gmail, Outlook web, Slack, Teams, iMessage, WhatsApp, generic) add their own
   rules:
   - summaries such as "Your iMessage, …" or "Alice, text, 10:41 AM";
-  - consecutive messages grouped under one author (Slack, Teams; elsewhere when the body is in the
-    same column);
+  - consecutive messages grouped under one author (Slack, Teams; elsewhere when the body is known
+    to be in the same column);
   - "You" or "me" taken as the user;
   - quoted mail ("On … wrote:", Outlook `From:/Sent:` blocks), cut from each message of a thread;
-  - To/Cc/Bcc recipients, and the subject from the Subject field or a reply-style window title. A
-    web page with a To or Subject field next to the composer gets the mail rules too.
+  - To/Cc/Bcc recipients, and the subject from the Subject field or a reply-style window title.
+    Other apps get the mail rules (and recipients) only from an editable field labelled exactly
+    "To", "Cc", "Subject"... within three levels around the composer.
 - `from_me` comes from the author, the item summary, `ThreadLimits::self_names`, or (in chat apps)
-  right-aligned bubbles. When one author is "You", the other named authors are not the user.
+  right-aligned bubbles. When one author is "You" and the user's messages have a column of their
+  own (or the app is known to label the user "You"), the other named authors are not the user.
 - The result keeps the newest 30 messages, up to 20 KB.
 
 **Safety.**
