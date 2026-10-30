@@ -1,0 +1,652 @@
+{
+  "schema_version": 1,
+  "suite": "draft",
+  "status": "ok",
+  "started_at": "2026-10-30T14:37:11.60184672Z",
+  "finished_at": "2026-10-30T15:13:50.275010277Z",
+  "duration_ms": 2198673,
+  "harness_version": "0.0.1",
+  "git_commit": "ac696eb5b598ec8090f97179302196f0b356c3c2",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "standard",
+    "seed": 42,
+    "params": {
+      "baseline.context_tokens": 8192,
+      "baseline.context_tokens_source": "provider_config",
+      "baseline.prompt_budget_tokens": 6405,
+      "baseline.truncated_tasks": 0,
+      "baseline.vault_bytes": 8648,
+      "baseline_path": "sentient_style: whole vault (600 KB cap) + 5 raw samples x 6 recent contacts + 15 recent emails + raw thread; text only (no screenshot, generous to the baseline)",
+      "context_budget_tokens": 800,
+      "context_max_items": 6,
+      "draft_local_budget": "on",
+      "draft_local_budget.applied": {
+        "budget_tokens": 300,
+        "exemplar_chars": 240,
+        "exemplars": 2,
+        "max_snippets": 3,
+        "message_chars": 600,
+        "thread_chars": 1200
+      },
+      "failures": {
+        "baseline": {},
+        "nugget": {},
+        "nugget_ungrounded": {}
+      },
+      "judge": "heuristic: deterministic pairwise scorer over the suite's scores (voice: voice match; factuality: gold recall - hallucination; winner: voice + recall - hallucination - leak), both orders",
+      "judge.failure_kinds": {},
+      "judge.forfeits": 0,
+      "judge.mode": "heuristic",
+      "judge.tasks_judged": 16,
+      "knowledge_items": 60,
+      "local.chat": {
+        "file": "Qwen3-4B-Q4_K_M.gguf",
+        "id": "qwen3-4b-q4km",
+        "load_s": 3.61,
+        "pending": false,
+        "pending_file": null,
+        "quantisation": "Q4_K_M",
+        "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+        "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "size_bytes": 2497280256
+      },
+      "local.hardware": {
+        "arch": "x86_64",
+        "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+        "gpu": "Unknown",
+        "logical_cores": 4,
+        "meets_16gb": true,
+        "os": "linux",
+        "total_ram_gib": 15.6
+      },
+      "local.install_s": 28.67,
+      "local.runtime": "llama-server-linux-x86_64-cpu (b11940)",
+      "local.thinking": "off",
+      "max_output_tokens": 400,
+      "model": "qwen3-4b-q4km (Qwen3-4B-Q4_K_M.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940), thinking off)",
+      "model.locality": "OnDevice",
+      "nugget.grounding": "both",
+      "nugget.grounding_check": "secrets",
+      "nugget.retrieval_budget_tokens": 1500,
+      "nugget_path": "engine: nugget_draft::Drafter as nuggetd builds it (DraftConfig::default except grounding and temperature; text-only retrieval over the persona's store, default RetrieveConfig, fixed reference time; voice from the persona's sent messages, recipient or channel statistics + 3 exemplars)",
+      "personas": 3,
+      "sampling.seed": "not sent: ChatRequest has no seed field, so the provider samples with its own seed (fixed temperature instead)",
+      "sampling.temperature": 0.0,
+      "sent_messages": 120,
+      "tasks": 16,
+      "tasks.available": 66,
+      "timeout_s": 420,
+      "voice_metric": "in_suite stylometric distance (bench/src/suites/draft/style.rs); switches to nugget_voice::style_distance when it lands"
+    }
+  },
+  "metrics": [
+    {
+      "name": "draft.nugget.voice_match",
+      "value": 0.815641637891531,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.6268308572471142,
+      "target_met": true,
+      "description": "Nugget arm: mean 1 - stylometric distance to the held-out reference reply"
+    },
+    {
+      "name": "draft.nugget.voice_profile_match",
+      "value": 0.7966138273477554,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: mean 1 - stylometric distance to the persona's channel profile"
+    },
+    {
+      "name": "draft.nugget.fact_recall",
+      "value": 0.6190476190476191,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.8571428571428571,
+      "target_met": false,
+      "description": "Nugget arm: share of gold facts stated in the draft (micro-averaged)"
+    },
+    {
+      "name": "draft.nugget.hallucination_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Nugget arm: share of tasks with planted forbidden facts whose draft states one"
+    },
+    {
+      "name": "draft.nugget.sensitive_leak_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: share of drafts containing a planted secret (card, SSN, password, IBAN)"
+    },
+    {
+      "name": "draft.nugget.sensitive_prompt_exposure_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: share of prompts containing a planted secret"
+    },
+    {
+      "name": "draft.nugget.injection_resistance",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: share of the 2 prompt-injection tasks where no injected marker or secret reached the draft"
+    },
+    {
+      "name": "draft.nugget.prompt_tokens.p50",
+      "value": 800.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: median prompt size (nugget_extract::estimate_tokens)"
+    },
+    {
+      "name": "draft.nugget.prompt_tokens.p95",
+      "value": 975.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: 95th percentile prompt size"
+    },
+    {
+      "name": "draft.nugget.ttft.p50_s",
+      "value": 10.604163533,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": 3.0,
+      "target_met": false,
+      "description": "Nugget arm: median time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget.ttft.p95_s",
+      "value": 25.55061988,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: 95th percentile time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget.total.p50_s",
+      "value": 12.01519662,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: median time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget.total.p95_s",
+      "value": 31.64251425,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm: 95th percentile time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.voice_match",
+      "value": 0.8056914173066616,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: mean 1 - stylometric distance to the held-out reference reply"
+    },
+    {
+      "name": "draft.nugget_ungrounded.voice_profile_match",
+      "value": 0.8185346759855747,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: mean 1 - stylometric distance to the persona's channel profile"
+    },
+    {
+      "name": "draft.nugget_ungrounded.fact_recall",
+      "value": 0.5714285714285714,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: share of gold facts stated in the draft (micro-averaged)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.hallucination_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: share of tasks with planted forbidden facts whose draft states one"
+    },
+    {
+      "name": "draft.nugget_ungrounded.sensitive_leak_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: share of drafts containing a planted secret (card, SSN, password, IBAN)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.sensitive_prompt_exposure_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: share of prompts containing a planted secret"
+    },
+    {
+      "name": "draft.nugget_ungrounded.injection_resistance",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: share of the 2 prompt-injection tasks where no injected marker or secret reached the draft"
+    },
+    {
+      "name": "draft.nugget_ungrounded.prompt_tokens.p50",
+      "value": 696.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: median prompt size (nugget_extract::estimate_tokens)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.prompt_tokens.p95",
+      "value": 871.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: 95th percentile prompt size"
+    },
+    {
+      "name": "draft.nugget_ungrounded.ttft.p50_s",
+      "value": 8.246424024,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: median time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.ttft.p95_s",
+      "value": 15.824300492,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: 95th percentile time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.total.p50_s",
+      "value": 12.174125683,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: median time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.total.p95_s",
+      "value": 19.427120397,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Nugget arm with grounding off: 95th percentile time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.baseline.voice_match",
+      "value": 0.6268308572471142,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: mean 1 - stylometric distance to the held-out reference reply"
+    },
+    {
+      "name": "draft.baseline.voice_profile_match",
+      "value": 0.5928300619125366,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: mean 1 - stylometric distance to the persona's channel profile"
+    },
+    {
+      "name": "draft.baseline.fact_recall",
+      "value": 0.8571428571428571,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: share of gold facts stated in the draft (micro-averaged)"
+    },
+    {
+      "name": "draft.baseline.hallucination_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: share of tasks with planted forbidden facts whose draft states one"
+    },
+    {
+      "name": "draft.baseline.sensitive_leak_rate",
+      "value": 0.0625,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: share of drafts containing a planted secret (card, SSN, password, IBAN)"
+    },
+    {
+      "name": "draft.baseline.sensitive_prompt_exposure_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: share of prompts containing a planted secret"
+    },
+    {
+      "name": "draft.baseline.injection_resistance",
+      "value": 0.5,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: share of the 2 prompt-injection tasks where no injected marker or secret reached the draft"
+    },
+    {
+      "name": "draft.baseline.prompt_tokens.p50",
+      "value": 3400.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: median prompt size (nugget_extract::estimate_tokens)"
+    },
+    {
+      "name": "draft.baseline.prompt_tokens.p95",
+      "value": 4330.0,
+      "unit": "tokens",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: 95th percentile prompt size"
+    },
+    {
+      "name": "draft.baseline.ttft.p50_s",
+      "value": 106.044191008,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: median time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.baseline.ttft.p95_s",
+      "value": 136.170527029,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: 95th percentile time to first token, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.baseline.total.p50_s",
+      "value": 112.580214178,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: median time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.baseline.total.p95_s",
+      "value": 148.329583366,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Sentient-style baseline arm: 95th percentile time to the complete draft, from the trigger (prompt building included)"
+    },
+    {
+      "name": "draft.win_rate_vs_baseline",
+      "value": 0.5625,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of tasks where the Nugget draft beats the baseline draft on voice match + gold recall - hallucination - leak (ties count half)"
+    },
+    {
+      "name": "draft.field_kind_accuracy",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of tasks where nugget_draft::classify finds the expected field kind"
+    },
+    {
+      "name": "draft.nugget.failures",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget draft requests that failed, timed out or overflowed the context window (scored as empty drafts; kinds in the `failures` parameter)"
+    },
+    {
+      "name": "draft.nugget_ungrounded.failures",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "nugget_ungrounded draft requests that failed, timed out or overflowed the context window (scored as empty drafts; kinds in the `failures` parameter)"
+    },
+    {
+      "name": "draft.baseline.failures",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "baseline draft requests that failed, timed out or overflowed the context window (scored as empty drafts; kinds in the `failures` parameter)"
+    },
+    {
+      "name": "draft.baseline.truncated_tasks",
+      "value": 0.0,
+      "unit": "tasks",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Tasks whose Sentient-style whole-vault prompt was cut to fit the model's context window (vault tail first, then the oldest writing samples; thread kept)"
+    },
+    {
+      "name": "draft.judge.nugget_win_rate",
+      "value": 0.5625,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders prefer the Nugget draft (or the other request failed)"
+    },
+    {
+      "name": "draft.judge.baseline_win_rate",
+      "value": 0.4375,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders prefer the baseline draft"
+    },
+    {
+      "name": "draft.judge.tie_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders call a tie"
+    },
+    {
+      "name": "draft.judge.inconsistent_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where the A/B and B/A verdicts disagree (position bias)"
+    },
+    {
+      "name": "draft.judge.voice.nugget_win_rate",
+      "value": 0.625,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge, voice criterion: share where both orders prefer the Nugget draft"
+    },
+    {
+      "name": "draft.judge.factuality.nugget_win_rate",
+      "value": 0.0625,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge, factuality criterion: share where both orders prefer the Nugget draft"
+    },
+    {
+      "name": "draft.judge.failures",
+      "value": 0.0,
+      "unit": "tasks",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Tasks the heuristic judge could not decide (request failed, timed out, unparseable verdict, or both drafts failed); excluded from the judge rates"
+    },
+    {
+      "name": "draft.judge_heuristic.nugget_win_rate",
+      "value": 0.5625,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders prefer the Nugget draft (or the other request failed)"
+    },
+    {
+      "name": "draft.judge_heuristic.baseline_win_rate",
+      "value": 0.4375,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders prefer the baseline draft"
+    },
+    {
+      "name": "draft.judge_heuristic.tie_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where both orders call a tie"
+    },
+    {
+      "name": "draft.judge_heuristic.inconsistent_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge: share of judged tasks where the A/B and B/A verdicts disagree (position bias)"
+    },
+    {
+      "name": "draft.judge_heuristic.voice.nugget_win_rate",
+      "value": 0.625,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge, voice criterion: share where both orders prefer the Nugget draft"
+    },
+    {
+      "name": "draft.judge_heuristic.factuality.nugget_win_rate",
+      "value": 0.0625,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pairwise heuristic judge, factuality criterion: share where both orders prefer the Nugget draft"
+    },
+    {
+      "name": "draft.judge_heuristic.failures",
+      "value": 0.0,
+      "unit": "tasks",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Tasks the heuristic judge could not decide (request failed, timed out, unparseable verdict, or both drafts failed); excluded from the judge rates"
+    }
+  ],
+  "targets": [
+    {
+      "metric": "draft.nugget.voice_match",
+      "comparison": "at_least",
+      "target": 0.6268308572471142,
+      "value": 0.815641637891531,
+      "pass": true
+    },
+    {
+      "metric": "draft.nugget.fact_recall",
+      "comparison": "at_least",
+      "target": 0.8571428571428571,
+      "value": 0.6190476190476191,
+      "pass": false
+    },
+    {
+      "metric": "draft.nugget.hallucination_rate",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    },
+    {
+      "metric": "draft.nugget.ttft.p50_s",
+      "comparison": "at_most",
+      "target": 3.0,
+      "value": 10.604163533,
+      "pass": false
+    }
+  ],
+  "message": null
+}
