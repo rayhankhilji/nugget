@@ -555,10 +555,24 @@ async fn mmr_uses_vectors_when_the_query_was_embedded() {
     assert_eq!(emb2.calls(), 1);
 }
 
-/// Wraps the hash embedder and records how many texts each `embed` call carried.
+/// Wraps the hash embedder and records each call as (`"query"` or `"document"`, number of texts),
+/// and every text it was sent. Reports `prefixes` as its model's task prefixes.
 struct Recording {
     inner: HashEmbedder,
-    batches: std::sync::Mutex<Vec<usize>>,
+    batches: std::sync::Mutex<Vec<(&'static str, usize)>>,
+    texts: std::sync::Mutex<Vec<String>>,
+    prefixes: (String, String),
+}
+
+impl Recording {
+    fn new(prefixes: (&str, &str)) -> Self {
+        Self {
+            inner: embedder(),
+            batches: Default::default(),
+            texts: Default::default(),
+            prefixes: (prefixes.0.to_owned(), prefixes.1.to_owned()),
+        }
+    }
 }
 
 #[async_trait]
@@ -573,8 +587,17 @@ impl Provider for Recording {
         self.inner.chat(req).await
     }
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        self.batches.lock().unwrap().push(texts.len());
+        self.batches.lock().unwrap().push(("document", texts.len()));
+        self.texts.lock().unwrap().extend_from_slice(texts);
         self.inner.embed(texts).await
+    }
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        self.batches.lock().unwrap().push(("query", texts.len()));
+        self.texts.lock().unwrap().extend_from_slice(texts);
+        self.inner.embed_query(texts).await
+    }
+    fn embed_prefixes(&self) -> (String, String) {
+        self.prefixes.clone()
     }
 }
 
@@ -599,10 +622,7 @@ async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
         ),
         Some(&local),
     );
-    let rec = Arc::new(Recording {
-        inner: embedder(),
-        batches: Default::default(),
-    });
+    let rec = Arc::new(Recording::new(("", "")));
     let r = Retriever::new(
         store,
         Some(router(vec![rec.clone()], true)),
@@ -614,8 +634,56 @@ async fn vector_mmr_embeds_only_passages_stored_without_a_vector() {
     assert_eq!(keys(&res.items)[2], "dup-b", "{:?}", keys(&res.items));
     assert_eq!(
         *rec.batches.lock().unwrap(),
-        vec![1, 1],
-        "the query, then only the one passage without a stored vector"
+        vec![("query", 1), ("document", 1)],
+        "the query (as a query), then only the one passage without a stored vector (as a document)"
+    );
+}
+
+/// A store with `dup-a` embedded and `dup-b` (same text) stored text-only, so vector MMR embeds
+/// one passage. With `prefixes`, the index's scheme is recorded before any vector is stored.
+fn prefix_store(prefixes: Option<(&str, &str)>) -> Store {
+    let local = embedder();
+    let store = Store::open_in_memory().unwrap();
+    if let Some((q, d)) = prefixes {
+        store.adopt_embedding_prefixes(q, d).unwrap();
+    }
+    let dup = "Quarterly sales forecast for the northern region: widgets up, gizmos flat.";
+    add(&store, Doc::new("dup-a", "Report A", &[dup]), Some(&local));
+    add(&store, Doc::new("dup-b", "Report B", &[dup]), None);
+    store
+}
+
+#[tokio::test]
+async fn an_index_built_without_prefixes_gets_prefix_free_queries() {
+    const NOMIC: (&str, &str) = ("search_query: ", "search_document: ");
+    let search = |store: Store| async move {
+        let rec = Arc::new(Recording::new(NOMIC));
+        let r = Retriever::new(
+            store,
+            Some(router(vec![rec.clone()], true)),
+            RetrieveConfig::default(),
+        );
+        let res = r.search("quarterly sales forecast", 3).await.unwrap();
+        assert_eq!(res.similarity, Similarity::Vector);
+        rec.texts.lock().unwrap().clone()
+    };
+
+    // Vectors stored before any scheme was recorded: the provider's model takes prefixes, but
+    // neither the query nor the passage MMR embeds get them, matching the stored vectors.
+    let legacy = search(prefix_store(None)).await;
+    assert_eq!(legacy.len(), 2, "{legacy:?}");
+    assert_eq!(legacy[0], "quarterly sales forecast");
+    assert!(
+        legacy.iter().all(|t| !t.starts_with("search_")),
+        "{legacy:?}"
+    );
+
+    // An index built with the prefixes: the query and the passage get them.
+    let prefixed = search(prefix_store(Some(NOMIC))).await;
+    assert_eq!(prefixed[0], "search_query: quarterly sales forecast");
+    assert!(
+        prefixed[1].starts_with("search_document: Quarterly"),
+        "{prefixed:?}"
     );
 }
 

@@ -22,6 +22,9 @@
 //!   A request with tools and no `json_schema` also gets `tool_choice: "required"` and
 //!   `parallel_tool_calls: false`: with `--jinja` the server compiles a grammar from the tool
 //!   schemas, so the model can only emit one well-formed call (`extra_body` can override both).
+//! - Embeddings: texts are sent as given. [`Provider::embed_prefixes`] reports the model's task
+//!   prefixes ([`crate::embed_prefixes`], e.g. `search_query: ` / `search_document: ` for
+//!   nomic-embed-text); callers add them, so an index keeps the scheme it was built with.
 //! - [`Provider::prewarm`] is `GET {base}/models`. With `llama_cpp`, [`Provider::prewarm_prefix`]
 //!   sends the stable prefix to `chat/completions` with `n_predict: 0` (the server evaluates the
 //!   prompt into the slot's KV cache and generates at most one token), `cache_prompt: true`,
@@ -41,7 +44,7 @@ use nugget_core::{Error, Result};
 use serde_json::{Map, Value, json};
 
 use crate::adapters::data_url;
-use crate::config::{MaxTokensParam, ProviderConfig, Secret, merge_extra_body};
+use crate::config::{MaxTokensParam, ProviderConfig, Secret, embed_prefixes, merge_extra_body};
 use crate::http::{SseDecoder, error_detail_value, parse_tool_arguments, sse_chat_stream};
 use crate::provider::{Common, Prepared, Provider, auth_header};
 use crate::schema::is_strict_compatible;
@@ -567,6 +570,10 @@ impl Provider for OpenAiCompatibleProvider {
             .post_for_json("chat/completions", &body, &req.feature, &req.items)
             .await?;
         Ok(())
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        embed_prefixes(&self.common.cfg)
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {

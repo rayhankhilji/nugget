@@ -383,6 +383,27 @@ impl Provider for RuntimeSlot {
         self.ready().await?.embed(texts).await
     }
 
+    async fn embed_query(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if self.role != RuntimeRole::Embedding {
+            return Err(Error::Unsupported(format!("{} does not embed", self.id)));
+        }
+        self.ready().await?.embed_query(texts).await
+    }
+
+    /// The served model's task prefixes: from its config once running, else from its id (the
+    /// runtime serves a model under its manifest id).
+    fn embed_prefixes(&self) -> (String, String) {
+        match self
+            .active
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+        {
+            Some(a) => nugget_infer::embed_prefixes(&a.cfg),
+            None => nugget_infer::model_embed_prefixes(&self.model.id),
+        }
+    }
+
     /// Start the server if it stopped (Double Tap trigger), then warm the ready provider.
     async fn prewarm(&self) -> Result<()> {
         self.ready().await?.prewarm().await

@@ -3,6 +3,7 @@
 pub mod cua;
 pub mod doubletap;
 pub mod draft;
+pub mod energy;
 pub mod knowledge;
 pub mod memory;
 pub mod perf;

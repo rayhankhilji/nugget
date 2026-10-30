@@ -13,12 +13,13 @@ cargo run --release -p nugget-bench -- perf memory        # run suites, write re
 cargo run --release -p nugget-bench -- all --scale quick  # every suite, smaller workload
 cargo run --release -p nugget-bench -- memory --backend real --strict  # the M1 gate
 cargo run --release -p nugget-bench -- knowledge --strict                # the M2 gates
+cargo run --release -p nugget-bench -- energy --scale full --energy-scenarios idle,index  # DD2
 cargo run -p nugget-bench -- --schema                     # print the report JSON schema
 ```
 
 | Option | Meaning |
 |---|---|
-| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`, or `all` |
+| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`, `energy`, or `all` |
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
 | `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate in process (`real`). Other suites ignore it |
@@ -32,6 +33,7 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 | `--cua-agent reference\|null\|naive\|nugget\|nugget-compliant` | `cua`: the agent under test (default `reference`) |
 | `--cua-env inproc\|socket\|xvfb` | `cua`: where the apps run (default `inproc`; `xvfb` is Linux only) |
 | `--cua-tasks TERMS` | `cua`: only tasks matching any comma-separated id, tag, app or difficulty |
+| `--energy-scenarios LIST` | `energy`: comma-separated scenarios (`daemon_idle`, `index_1k`, `a11y_poll`, `prefill`, `shell_idle`, `shell_focus`; short forms `idle`, `index`, `poll`; `all`). Default `daemon_idle,index_1k,a11y_poll,prefill`; env `NUGGET_BENCH_ENERGY_SCENARIOS` |
 | `--out-dir DIR` | Where reports go (default `bench/results/`; env `NUGGET_BENCH_RESULTS_DIR`) |
 | `--no-write` | Do not write report files |
 | `--json` | Print report JSON to stdout; the human summary moves to stderr |
@@ -47,8 +49,8 @@ Exit codes:
 | 3 | `--strict` was given and a selected suite is not implemented |
 | 4 | `--strict` was given and a metric missed its target (takes precedence over 3) |
 
-Debug builds work, but their timings are not representative; the CLI warns when you run `perf`
-or `memory --backend real` on one.
+Debug builds work, but their timings are not representative; the CLI warns when you run `perf`,
+`energy` or `memory --backend real` on one.
 
 ## Reports
 
@@ -104,6 +106,7 @@ citation targets for real pipeline reasons (see the results below). TODO (wave 2
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
 | `cua` | **M4: 51 tasks on six local test apps; in process, over a socket, or on an Xvfb desktop** | Verified task success, steps, wall time, unconfirmed risky actions, false confirmations, injection compliance, token cost |
 | `knowledge` | **M2: the real pipeline** (`nugget-knowledge`, `nugget-vault`, `nugget-mcp`) on a labelled corpus | Entity, claim and resolution quality; citation coverage; unsupported claims; injection resistance; retraction; vault merge fidelity; throughput; MCP `get_context` latency |
+| `energy` | **DD2: the real `nuggetd`, the shell's accessibility poll, local read-ahead** | Idle CPU, wakeups and power; joules and CPU-seconds per 1k items indexed; cost of the 1 Hz frontmost-app read; joules per read-ahead. RAPL (Linux) or `powermetrics` (macOS) when readable, else CPU time and wakeups |
 
 ### The M0 fake index
 
@@ -310,6 +313,162 @@ Process metrics come from `/proc` on Linux; macOS reports RSS and CPU time from 
 wakeups or peak); Windows skips them. `.github/workflows/perf.yml` runs the full profile on
 Linux on demand (`workflow_dispatch`, with a `scale` input) and weekly, and uploads the reports;
 it is not part of push/PR CI. A run at `full` takes about 30 minutes on 4 vCPUs.
+
+### `energy` (DD2)
+
+What Nugget costs in energy and battery: `docs/PLAN.md`'s "battery cost per 1k items" and idle
+overhead, measured where the machine lets us and reported as CPU time and wakeups where it does
+not. The code is `src/suites/energy/`; build `nuggetd` in the same profile as the bench
+(`cargo build --release -p nuggetd -p nugget-bench`) or set `NUGGET_BENCH_NUGGETD`, as for the
+[daemon profile](#daemon-profile-perf---backend-real-daemon-x5).
+
+**The meter** (`energy/meter.rs`, `Meter::start(&[pid]) … stop() -> Reading`, reusable by later
+scenarios). Per process, each metered pid counts *with its descendants* (all processes are
+walked by parent pid on every sample, so child processes such as a webview count too). A
+sampler thread reads every second and keeps the last value of every thread or process, so ones
+that exit mid-window still count up to their last sample.
+
+| Figure | Linux | macOS | Windows |
+|---|---|---|---|
+| CPU time | `/proc/<pid>/task/*/schedstat` (ns, every thread) | `powermetrics` tasks (`cputime_ms_per_s`), else `ps -o time` | not measured |
+| Wakeups | voluntary + involuntary context switches (`/proc/<pid>/task/*/status`) | `powermetrics` tasks (`idle_wakeups_per_s` + `intr_wakeups_per_s`); none from `ps` | not measured |
+| System energy | RAPL: top-level `package-*` zones of `/sys/class/powercap/intel-rapl:*/energy_uj`, read every second, wraparound handled with `max_energy_range_uj` | `sudo -n powermetrics --samplers cpu_power,tasks --show-process-energy -f plist` as a child for the window: package energy or power from each sample's `processor` dict (`package_energy`, `combined_power`, `cpu_energy`+`gpu_energy`+`ane_energy`, `package_joules`, `package_watts` or `cpu_power`, whichever is there) | none |
+| Per-process energy | – | `energy_impact` of the tasks (unitless, as Activity Monitor) | – |
+
+Every source is optional. RAPL counters are root-only on most kernels since 2020 and absent on
+most VMs; `powermetrics` needs passwordless `sudo` (GitHub's macOS runners have it) and virtual
+Macs may report no processor energy. A missing source never fails a run: the report says which
+source each scenario used (`config.params.<scenario>.energy_source`: `rapl`, `powermetrics` or
+`none`, with `<scenario>.energy_note` saying why there is none) and where the process figures
+came from (`<scenario>.process_source`: `proc`, `powermetrics`, `ps` or `none`). `perf stat -e
+power/energy-pkg/` is not used.
+
+**Attribution.** Package energy is the whole machine's. When a source exists, each scenario also
+meters a baseline window of the same length with nothing launched (before the daemon starts for
+`daemon_idle`; after it stopped for `index_1k`; with the server loaded but idle for `prefill`;
+`a11y_poll` uses its own sleeping arm) and reports `attributable = window − baseline` as mean
+watts, times the window for joules. On a shared VM or a busy laptop this difference is noisy (it
+can even be negative): read it over several runs. The CPU and wakeup figures are per process and
+not affected.
+
+**Scenarios** (metric prefix `energy.<scenario>.`). Windows scale with `--scale`: smoke a few
+seconds, quick about a minute, standard five minutes, full ten (the PLAN's idle window).
+
+- `daemon_idle`: `nuggetd` on a seeded home as in the daemon profile (200 / 2k / 10k / 10k items,
+  vault on, no providers, `[runtime]` and `[mcp]` off); after the startup knowledge run and vault
+  render finished and a settle period (1 / 12 / 15 / 15 s), a window of 2 s / 60 s / 5 min / 10 min
+  with a connected but silent IPC client. `cpu_percent` (share of one core), `wakeups_per_s`,
+  `window_s`; with an energy source `package_w`, `baseline_w`, `attributable_w`, `attributable_j`;
+  on macOS `energy_impact`.
+- `index_1k`: a fresh daemon (empty store, vault off, same config) watches an empty folder; then
+  1,000 Markdown files (100 at smoke) are written into it, metered from the first write until
+  `ingest.status` shows all indexed with an empty queue and `search` finds the last one (polled
+  every 250 ms, so `wall_s` is that coarse). `items`, `wall_s`, `cpu_s_per_1k_items`,
+  `wakeups_per_1k_items`, `cpu_percent`; with an energy source `package_j_per_1k_items`,
+  **`attributable_j_per_1k_items`** (the battery cost per 1k items), `package_w`, `baseline_w`,
+  `attributable_w`. The config has no model providers, so indexing is text-only with no embedding
+  model; indexing with the real local embedding model is not measured yet (a known gap), nor is
+  the knowledge extraction that follows indexing.
+- `a11y_poll`: the desktop shell's per-second "what is in front" read alone, in the bench
+  process: `nugget_a11y::Backend::new(<AT-SPI | AX | UI Automation>, A11yConfig::default())
+  .frontmost_app()`, as the shell's `A11y::frontmost`. One untimed first call (`first_call_ms`,
+  it connects to the accessibility API), then two arms of equal length on a 1 Hz schedule: one
+  only sleeps (`sleep.cpu_percent`, `sleep.wakeups_per_s`, `sleep.window_s`), one calls on every
+  tick. `calls`, `frontmost_found`, `errors`, `call_ms.p50/.p95`, `cpu_ms_per_call` and
+  `cpu_percent_added`, `wakeups_per_s_added` (polling minus sleeping), with an energy source
+  `attributable_w` and `attributable_mj_per_call`. `params.a11y_poll.result` says whether a
+  frontmost app was found; on a headless runner it is not (no accessibility bus, or nothing
+  focused), and the figures are those of the failing call. Work in other processes (the AT-SPI
+  registry, the focused app answering) shows only in system energy. Skipped on other platforms.
+- `prefill` (`--local-models` only, else recorded as skipped): the real local chat model in
+  `llama-server` (fixed seed, temperature 0, the local prompt budget per `--draft-local-budget`),
+  drafters built as `doubletap` builds them with read-ahead on and no minimum interval;
+  `Drafter::prewarm_idle` and one read-ahead unmetered, then 2 / 4 / 8 / 12 read-aheads of
+  distinct fixture tasks back to back, each waited for, metered on the `llama-server` process.
+  `completed`, `skipped`, `timeouts`, `seconds_per_read_ahead`, `cpu_s_per_read_ahead`,
+  `wakeups_per_read_ahead`; with an energy source `package_j_per_read_ahead`,
+  `attributable_j_per_read_ahead` (baseline: the server loaded and idle), `package_w`,
+  `baseline_w`, `attributable_w`.
+- `shell_idle` (`energy/shell.rs`): the desktop shell, `$NUGGET_BENCH_SHELL --minimized` (hidden
+  in the tray), connected to the real `nuggetd` on an empty temporary `NUGGET_HOME` (no providers,
+  `[runtime]`, `[mcp]` and vault off), with nothing in front but the desktop. The shell gets the
+  daemon's `NUGGET_HOME` (so it finds that daemon's socket and starts none of its own) and an
+  isolated app config directory: Tauri's `app_config_dir` is `$XDG_CONFIG_HOME/dev.nugget.desktop`
+  on Linux (the bench also moves `XDG_DATA_HOME` and `XDG_CACHE_HOME`) and `$HOME/Library/Application
+  Support/dev.nugget.desktop` on macOS (the bench moves `HOME`). There it writes `doubletap.json`
+  (Double Tap on, read-ahead on, on battery too) and `settings.json` (update channel `off`: no
+  network). Settling: a debug build honours `NUGGET_E2E_PROBE` and writes a `read_ahead_loop` line
+  once Double Tap is set up; the bench waits for it (at most 30 s), then 3 / 15 / 20 / 20 s. A
+  release build writes no probe: the 30 s are the settle period and no read-ahead counts are
+  reported (`params.<scenario>.probe` says which). Then one window of `idle_s` (2 s / 60 s / 5 min /
+  10 min), the shell metered with its descendants (the WebKitGTK web and network processes on
+  Linux) and the daemon separately: `shell.cpu_percent`, `shell.wakeups_per_s`, `daemon.*` likewise,
+  `*.window_s`, macOS `*.energy_impact`; with an energy source `package_w`, `baseline_w` (an equal
+  window before anything starts), `attributable_w`; with the probe `read_ahead_sends`, `_started`,
+  `_skipped`, `_failed`, `_cancels` (zero when nothing is focused).
+- `shell_focus` (`energy/shell.rs`): the same shell setup, but the daemon's only provider is the
+  fake `llama-server` (`nuggetd-fake-llama-server`, from `NUGGET_BENCH_FAKE_LLAMA_SERVER`, else
+  next to `nugget-bench` or `nuggetd`) started by the bench on a loopback port and configured as
+  an `openai_compatible` provider on `127.0.0.1`: on-device, so the daemon accepts read-ahead and
+  sends llama.cpp's `cache_prompt` prefill, which the fake answers at once. That isolates the
+  shell's focus handling, its polling and the daemon's request handling from a real model's
+  prefill (`prefill` measures that). Three text-field windows with distinct titles and texts
+  ("Quarterly report", "Team offsite", "Vendor contract"): on Linux three GTK 3 windows
+  (`bench/scripts/energy-text-window.py`, embedded in the binary; a Python with PyGObject from
+  `NUGGET_BENCH_PYTHON`, else `python3`, `python3.12`, ...) brought to the front with `xdotool
+  windowactivate --sync`; on macOS three TextEdit documents brought to the front by reopening each with `open -a
+  TextEdit` (no AppleScript: Apple Events to TextEdit need an Automation grant a CI runner does
+  not have). A scripted window of 15 s at smoke, else 60 s, switching
+  every 5 s in a fixed order (0, 1, 2, 0, ...). It runs twice, read-ahead **off** then **on**
+  (`doubletap.json` rewritten, the shell restarted; daemon and server keep running).
+  Per run, under `energy.shell_focus.read_ahead_{off,on}.`: `shell.*`, `daemon.*`, `server.*`
+  (`cpu_percent`, `wakeups_per_s`, `window_s`, macOS `energy_impact`), `switches`,
+  `switch_errors` (`params…switch_error` has the first), with the probe `read_ahead_sends`,
+  `_started`, `_skipped`, `_failed`, `_cancels`; with an energy source `package_w`, and
+  `baseline_w`/`attributable_w` against the same focus script run with the windows open and
+  nothing of Nugget running. `energy.shell_focus.read_ahead_added.cpu_percent` and
+  `.wakeups_per_s`: shell + daemon + server, on minus off. On macOS, window switches inside one
+  app are not reported by focus notifications, so the shell sees them on its 5 s fallback check.
+
+The shell scenarios run only when listed, on Linux (X11) and macOS, and are skipped (recorded,
+not failed) when `NUGGET_BENCH_SHELL` is unset or not a file, without a display (`DISPLAY` unset
+on Linux), when `xdotool` or a Python with GTK 3 (Linux) is missing
+(`shell_focus`), or without the fake server (`shell_focus`). Linux also needs a window manager
+and a session bus with AT-SPI, which the caller provides: `bench/scripts/energy-linux.sh
+<command…>` runs a command inside Xvfb + openbox + `dbus-run-session` with
+`WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` and `GTK_MODULES=gail:atk-bridge` (as
+`apps/desktop/e2e-native/run-linux.sh`); `a11y_poll` finds a frontmost app only in such a session.
+macOS needs Accessibility for the shell (GitHub's macOS runners grant it). Known gaps: on
+macOS the webview's WebKit processes are XPC services, not children of the shell, so they are
+not counted in `shell.*`; the debug shell is measured (for its probe), a release build is a
+little cheaper.
+
+```sh
+cargo build --release -p nuggetd -p nugget-bench
+cargo build -p nuggetd --features fake-runtime --bin nuggetd-fake-llama-server
+(cd apps/desktop && pnpm install --frozen-lockfile && pnpm tauri build --debug --no-bundle)
+NUGGET_BENCH_SHELL=target/debug/nugget-desktop \
+NUGGET_BENCH_FAKE_LLAMA_SERVER=target/debug/nuggetd-fake-llama-server \
+  bench/scripts/energy-linux.sh target/release/nugget-bench energy \
+  --energy-scenarios shell_idle,shell_focus --scale quick
+```
+
+**CI** (`.github/workflows/perf.yml`, weekly and on demand): the `energy` job (ubuntu-latest and
+macos-latest) builds the release `nuggetd` and bench, the debug fake server and the debug shell
+(`pnpm tauri build --ci --debug --no-bundle`), records the hardware, and runs every scenario but
+`prefill` (Linux through `energy-linux.sh`; macOS directly, `powermetrics` through `sudo -n`).
+With the `before_ref` input it also builds the shell at that ref (`git worktree add`, its own
+`CARGO_TARGET_DIR`) and runs `shell_idle,shell_focus` against it on the same runner: reports in
+`energy-results/after/` and `energy-results/before/`. The `energy-prefill` job runs `prefill`
+with `--local-models` at `quick` for `qwen3-4b-q4km` and `qwen3-1.7b-q8` (models cached as in
+`evals.yml`). Both validate the reports against the schema, upload them, and put a table of the
+main figures in the job summary.
+
+Daemon scenarios are skipped (`config.params.<scenario> = "skipped: …"`, not failed) without a
+`nuggetd` binary. Pick scenarios with `--energy-scenarios` or `NUGGET_BENCH_ENERGY_SCENARIOS`
+(e.g. `idle,index` on a Linux runner, `poll,prefill --local-models` on a Mac). Report-level
+params record the scenarios run, the energy source found and why not, the sample interval and
+the attribution rule.
 
 ### `knowledge` (M2)
 
@@ -1449,6 +1608,113 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+## Energy
+
+DD2 measured what Nugget costs in energy and battery and cut what was wasteful: the daemon idle,
+indexing 1,000 items, the desktop shell hidden in the tray, the shell's "what is in front"
+accessibility read alone, a scripted minute of Double Tap focus changes with read-ahead on and off,
+and the real model's read-ahead prefill. Method and metric names: [`energy` (DD2)](#energy-dd2).
+Reports: [`results/energy/`](results/energy/), one folder per workflow run.
+
+**No energy counter on the CI machines.** The PLAN asks for battery cost, which needs a
+package-energy counter. Neither GitHub runner has one: the Linux VMs expose no RAPL zones
+(`/sys/class/powercap` is empty), and `powermetrics` on the virtual Macs reports no processor
+energy or power (only the per-task `energy_impact` score). So every joule figure below is
+**MISSED (not measured)**, and the numbers are CPU time and wakeups (context switches on Linux,
+`powermetrics` wakeups on macOS), the two things that drain a laptop battery and that energy
+roughly follows. The suite reports joules on its own wherever a counter exists (a Linux laptop
+with readable RAPL, a physical Mac): the weekly `energy` job will, once it lands on such a machine.
+
+**Setup.** `nugget-bench energy --scale quick` (60 s windows, seed 42), release `nuggetd` and bench,
+the **debug** desktop shell (its probe counts the read-aheads; a release shell is a little cheaper).
+Linux: Xvfb + openbox + AT-SPI (`bench/scripts/energy-linux.sh`), three GTK text windows switched
+every 5 s with `xdotool`. "Before" is the shell at `40e1994` (1 s frontmost-app poll), "after" is
+this branch, both built and run in the same job on the same runner.
+
+### Daemon and indexing
+
+Run [41021694231](https://github.com/rayhankhilji/nugget/actions/runs/41021694231) at `2f21533`,
+Linux, AMD EPYC 7763 (4 vCPUs, 2 cores), 15.6 GiB:
+
+| Figure | Value | Target | |
+|---|---|---|---|
+| Daemon idle (2,000 items, vault on), 60 s | 0.086% of one core, 1.6 wakeups/s | idle overhead (X5: 0.03% at 100k items over its window) | measured |
+| Indexing 1,000 files through the daemon (text-only, no embedding model) | 1.56 s, **1.06 CPU-s per 1k items**, 11,800 wakeups per 1k items | battery cost per 1k items | CPU measured; **joules MISSED (not measured)** |
+| Daemon idle energy | – | – | **MISSED (not measured)** |
+
+Indexing with the real local embedding model, and the knowledge extraction that follows indexing,
+are not in these figures (known gap: `index_1k` runs the daemon without model providers).
+
+### Desktop shell: idle in the tray and Double Tap focus changes
+
+**Linux**, same run and runner, shell before → after (shell = `nugget-desktop` with its WebKitGTK
+child processes):
+
+| Scenario (60 s) | Shell CPU before → after | Shell wakeups/s before → after | Read-aheads (sent / started) |
+|---|---|---|---|
+| Idle in the tray, nothing in front (read-ahead on) | 0.096% → **0.065%** | 7.4 → **5.0** (−32%) | 0 |
+| 12 focus switches, read-ahead **off** | 0.045% → 0.044% | 4.0 → 3.5 | 0 |
+| 12 focus switches, read-ahead **on** | 1.53% → **1.46%** | 131 → **120** (−8%) | 4 / 3 (both) |
+
+The daemon stayed at or under 0.005% and 0.6 wakeups/s in every scenario; the fake model server
+(which answers a prefill at once) at 0.002%. The frontmost-app read itself (`a11y_poll`, AT-SPI,
+nothing focused): 0.39 ms per call (p50), **0.34 ms of CPU and ~16 wakeups per call**, so a 1 Hz
+poll alone costs about 0.03% of a core and 16 wakeups/s.
+
+**What changed and what it bought.** The 1 s poll is gone: on macOS and Windows the shell now
+waits for the OS to report a focus change (NSWorkspace app activation; `SetWinEventHook`
+foreground and title changes) and otherwise checks every 5 s; on Linux, where no such notice
+exists for us, it checks every second only while a field is about to be read or a read-ahead is
+running, else every 2 s. The read-ahead planner and its decisions are unchanged (a test replays
+the schedule against 100 ms polling and gets the same reads at the same moments). On Linux this
+cut the idle shell's wakeups by a third. It did not cut the cost of read-ahead itself: **with
+read-ahead on, moving between text fields every 5 s costs the shell about 1.5% of a core and
+~120 wakeups/s**, against 0.04% and 3.5 with it off. That cost is the full accessibility read of
+each newly focused field and its thread (one per field after the 1.5 s dwell, rereads backing off
+from 10 s), not the polling and not the daemon. Making that read cheaper is not done here.
+
+**macOS** (run [41027744669](https://github.com/rayhankhilji/nugget/actions/runs/41027744669) at
+`c361fb7`, Apple M1 virtual, 3 cores, 7 GiB; three TextEdit documents brought to the front with
+`open`; CPU and wakeups from `powermetrics`' tasks sampler; the shell's WebKit processes are XPC
+services, not its children, so they are not in these figures):
+
+| Scenario (60 s) | Shell CPU before → after | Shell wakeups/s before → after | Read-aheads sent |
+|---|---|---|---|
+| Idle in the tray, nothing in front (read-ahead on) | 0.47% → **0.053%** (−89%) | 4.1 → **1.6** (−60%) | 0 |
+| 12 focus switches, read-ahead **off** | 0.009% → 0.005% | 0.10 → 0.10 | 0 |
+| 12 focus switches, read-ahead **on** | 0.38% → **0.18%** (−52%) | 3.7 → **1.7** (−54%) | 4 (both) |
+
+Here the 1 s poll was most of the shell's idle cost (each check is an Accessibility round trip to
+the frontmost app), and the focus notifications remove it: the hidden shell's CPU drops ninefold.
+The same run repeated Linux on another CPU (Intel Xeon 8370C) and reproduced run 41021694231:
+idle shell 6.8 → 5.1 wakeups/s, read-ahead on 130 → 120 wakeups/s (1.39% → 1.25% of a core).
+The macOS daemon: idle 0.059% / 1.5 wakeups/s; indexing 1,000 files 1.06 CPU-s (1.7 s).
+
+### Read-ahead prefill with a real model
+
+`energy-prefill` in the same run, `--scale quick`, 4 read-aheads of distinct fixture tasks after
+one warm-up, metered on `llama-server`:
+
+| Runner | Model | Seconds per read-ahead | CPU-seconds per read-ahead | Energy |
+|---|---|---|---|---|
+| Linux, AMD EPYC 9V74 (4 vCPUs), CPU | qwen3-4b-q4km | 12.9 | 25.7 | **MISSED (not measured)** |
+| Linux, AMD EPYC 9V74 | qwen3-1.7b-q8 | 6.8 | 13.5 | **MISSED (not measured)** |
+| macOS, M2 Pro (virtual, 5 cores), Metal | qwen3-4b-q4km | 7.4 | 34.4 | energy impact 466/s; joules **MISSED** |
+| macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | 2.6 | 12.5 | energy impact 471/s; joules **MISSED** |
+
+This is the cost that matters for battery: one read-ahead of a new reply field with the 4B model takes as
+much CPU (26 s) as about ten hours of the idle daemon and hidden shell together (~2.4 s per hour). It is mostly work the draft would do
+anyway at the trigger (see [CC1](#a-small-double-tap-model-and-read-ahead-wave-cc-cc1)); it is
+wasted for fields that get focus and no draft. Because it cannot be measured in joules here and
+moves rather than adds work for the user who drafts, read-ahead stays on by default, also on
+battery; it **pauses in low power mode / battery saver** (macOS Low Power Mode, Windows battery
+saver, Linux `low-power` platform profile), and **Read ahead on battery** (Double Tap settings,
+`read_ahead_on_battery`, default on) pauses it whenever the computer runs on battery.
+
+**Keeping it measured.** `.github/workflows/perf.yml` runs `energy` (Linux and macOS, every
+scenario but `prefill`) and `energy-prefill` (both OSes, real models) weekly with the daemon
+`perf` job, and on demand with a `before_ref` for before/after comparisons on one runner.
+
 ## Real-model results
 
 Every number elsewhere in this file comes from scripted or fake models. These come from real local
@@ -2077,6 +2343,150 @@ hours on this CPU (was ~15).
 `nugget_knowledge::EXTRACTOR_VERSION` is **not** bumped for these changes: items extracted or
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
+
+### Memory recall with a real embedding model (DD4)
+
+`memory --backend real --local-models` runs the M1 memory benchmark (the real store, ingest
+pipeline, files watcher and retriever, see [`memory --backend real`](#memory---backend-real)) with
+the manifest's embedding model served by `nugget-runtime`'s `llama-server`, as the app runs it:
+**`nomic-embed-text-v1.5-q8`** (nomic-embed-text v1.5, **Q8_0** GGUF, 146 MB, 768 dimensions,
+CPU). `--memory-rerank local` also starts the manifest's reranker, **`bge-reranker-v2-m3-q4km`**
+(Q4_K_M, 438 MB), and measures the reranked search (`hybrid_rerank`, `hybrid_mmr_rerank`) on the
+same index as the plain one. Every arm of a scale runs one after the other on one runner (the
+`memory` job of [`evals.yml`](../.github/workflows/evals.yml)), against the in-process hash
+embedder (`hash`) as the M1 runs used it. Seed 42, release build, `RetrieveConfig::default()`.
+
+| Option | Meaning |
+|---|---|
+| `--memory-rerank off\|local` | Rerank with the manifest's reranker (`--local-rerank-model ID` picks another), measured as extra modes on the same index: `hybrid_rerank` and `hybrid_mmr_rerank` (adaptive, the app's default) and `hybrid_mmr_rerank_fixed` (every search waits for it) |
+| `--memory-rerank-timeout-ms MS`, `--memory-rerank-pool N` | Override the app's reranker timeout (2.5 s) and pool (30) |
+| `--memory-embed-prefixes auto\|off` | The model's task prefixes (`search_query: ` / `search_document: ` for nomic), or none |
+| `--memory-queries N`, `--memory-no-freshness` | Ask only the first N known-item queries; skip the freshness phase |
+| `NUGGET_BENCH_DUMP_MISSES=FILE` | Write the target's rank per query and arm, and the hybrid top 10 of every query whose outcome differs from the fake index |
+
+**Task prefixes.** nomic-embed-text was trained with `search_query: ` on queries and
+`search_document: ` on documents. Providers now report a model's prefixes
+(`Provider::embed_prefixes`), and an index records the scheme it was built with
+(`Store::embedding_prefixes`): a new index adopts the embedder's prefixes on its first vector,
+ingest prefixes documents and the retriever prefixes queries with the recorded scheme, and an index
+that already held vectors before this change counts as built without prefixes, so existing users
+keep matching query and document embeddings (re-indexing picks the prefixes up).
+
+#### Quick scale
+
+Run [41015993297](https://github.com/rayhankhilji/nugget/actions/runs/41015993297) at `885a865`
+(2026-10-30), reports in [`results/real-models/run-41015993297/`](results/real-models/run-41015993297/).
+One runner: **AMD EPYC 9V45**, 4 vCPUs, 15.6 GiB, `llama-server` b11940 with its default threads.
+2,000 files (one chunk each, ~906 characters), 200 known-item queries; the eval set is 57 Markdown
+notes and 42 labelled queries.
+
+| | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
+|---|---|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index** | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | 0.980 vs 0.940 pass |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.455 / 0.830 / 0.607 / 0.694 | 0.145 / 0.870 / 0.405 / 0.543 | 0.175 / 0.890 / 0.425 / 0.558 | 0.260 / – / 0.496 / 0.615 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.885 / 0.579 | 0.975 / 0.417 | 0.970 / 0.425 | 0.980 / 0.496 |
+| reranked: R@1 / R@10 / MRR@10 / nDCG@10 | | | (never reranked, see below) | **0.740** / 0.980 / **0.832** / **0.869** |
+| bm25 R@10 / MRR@10 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.970 |
+| vector R@10 / MRR@10 | 0.425 / 0.248 | 0.060 / 0.023 | 0.045 / 0.018 | 0.060 / 0.027 |
+| Eval set: hybrid R@1 / R@10 / MRR@10 / nDCG@10 (text-only 0.595 / 0.905 / 0.768 / 0.798) | 0.714 / 1.000 / 0.895 / 0.917 | 0.798 / 1.000 / **0.943** / **0.954** | 0.774 / 1.000 / 0.931 / 0.946 | reranked: 0.984 MRR, 0.988 nDCG |
+| Eval set: hybrid + MMR R@10 / MRR@10 | 0.976 / 0.877 | 0.976 / 0.921 | **1.000** / 0.913 | |
+| Query latency, default search p50 / p95 | 3 / 5 ms | 27 / 29 ms | 29 / 32 ms | reranked: 14.5 / 15.1 **s** |
+| Query embedding p50 / p95 | <0.01 ms | 21 / 22 ms | 25 / 45 ms | |
+| Initial ingest | 2.0 s (998 files/s) | 655 s (3.05 files/s) | 654 s (3.06 files/s) | 645 s |
+| Embedding time per 1k items (= chunks here) | 0.02 s | **326 s** | **325 s** | 321 s |
+| Freshness p50 / p95 / max (target p95 ≤ 60 s); propagation | 0.48 / 0.61 / 0.62 s; all 1.0 | 0.90 / 1.89 / 2.46 s; all 1.0 | 0.92 / 1.65 / 2.47 s; all 1.0 | skipped |
+| Peak RSS: bench process / embedding server / reranker server | 50 MiB / – / – | 82 / 194 MiB / – | 81 / 194 / 735 MiB | 74 / 194 / 732 MiB |
+| DB per 1k items after ingest | 6.3 MB | 8.3 MB | 8.3 MB | 8.3 MB |
+
+#### Standard scale: the recall gate
+
+Run [41027473994](https://github.com/rayhankhilji/nugget/actions/runs/41027473994) at `a4aada5`
+(2026-10-30), reports in [`results/real-models/run-41027473994/`](results/real-models/run-41027473994/).
+One runner: **AMD EPYC 9V45**, 4 vCPUs. 5,000 files, 500 known-item queries.
+
+| | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
+|---|---|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index (0.938)** | 0.936 **MISSED** (−0.002) | 0.936 **MISSED** (−0.002) | **0.938 met** (tie) | 0.880 vs 0.940 (subset; reranked 0.960) |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.426 / 0.808 / 0.580 / 0.666 | 0.186 / 0.870 / 0.455 / 0.574 | 0.196 / 0.872 / 0.458 / 0.576 | 0.140 / 0.800 / 0.401 / 0.519 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.854 / 0.544 | 0.938 / 0.457 | **0.948** / 0.463 | 0.900 / 0.402 |
+| reranked R@1 / R@10 / MRR@10 / nDCG@10 | | | | **0.600** / 0.960 / **0.717** / **0.777** |
+| bm25 R@10 / MRR@10 | 0.968 / 0.888 | same | same | 0.960 / 0.870 |
+| vector R@10 / MRR@10 | 0.338 / 0.169 | 0.016 / 0.008 | 0.018 / 0.008 | 0.000 / 0.000 |
+| Eval set hybrid R@1 / MRR@10 / nDCG@10 (R@10 1.000 everywhere) | 0.714 / 0.895 / 0.917 | 0.798 / 0.943 / 0.954 | 0.774 / 0.931 / 0.946 | reranked 0.869 / 0.984 / 0.988 |
+| Query latency, default search p50 / p95 | 5 / 7 ms | 29 / 33 ms | 31 / 33 ms | reranked 15.1 / 15.7 **s** |
+| Initial ingest; embedding per 1k items | 5 s (991 files/s); 0.02 s | 1,598 s (3.13 files/s); 318 s | 1,601 s (3.12 files/s); 318 s | 1,623 s; 323 s |
+| Freshness p95 (target ≤ 60 s); propagation | 0.60 s; all 1.0 | 1.66 s; all 1.0 | 1.67 s; all 1.0 | skipped |
+| Peak RSS: bench / embedding server / reranker | 85 MiB / – / – | 150 / 194 MiB / – | 132 / 194 MiB / – | 120 / 195 / 732 MiB |
+
+**Why the gate is a tie.** The per-query dumps (`ranks.tsv` in each report folder) show the same
+mechanism as the hash runs: of 500 queries, the real stack's hybrid top 10 and the fake index's
+differ on 24 (nomic: 12 each way; hash: 7 and 8). In every one, reciprocal-rank fusion decides:
+the target is full-text rank 1 and missing from the vector list (e.g. q119, target bm25 1 / vector
+–, fused at 9; q28 at 3), and chunks that both lists hold in their middle outrank it. nomic's
+vector leg has no signal on this corpus (vector R@10 0.018), which is expected: the synthetic
+documents are strings of made-up syllable words (`solyfolo bagipami rufosomi`), which a semantic
+model cannot relate. On the English eval set, where it has signal, nomic beats the hash embedder
+on every ranking metric (hybrid MRR 0.895 → 0.931, nDCG 0.917 → 0.946, R@1 0.714 → 0.774) and
+the default search (hybrid + MMR) keeps R@10 at 1.000. Task prefixes are worth the gate's one
+query on the synthetic corpus (0.936 → 0.938) and cost 1 of 42 eval queries at R@1 (0.798 →
+0.774, MRR 0.943 → 0.931) while lifting eval hybrid + MMR R@10 0.976 → 1.000: within noise
+either way, so the app follows the model card and sends them.
+
+#### Score-aware fusion (`RetrieveConfig::fusion = "convex"`), measured, not the default
+
+Plain RRF ranks any chunk that both lists hold above one list's clear best match. `Fusion::Convex`
+(`nugget_retrieve::rank::convex_fuse`) fuses scores instead: bm25 / best and (cosine + 1) / (best +
+1), so a list whose scores barely differ moves little, with a chunk missing from a list counted at
+that list's lowest score and the two lists weighted 0.5 / 0.5. Run
+[41029284336](https://github.com/rayhankhilji/nugget/actions/runs/41029284336) at `01b08c9`
+measured it on the same index as RRF (one runner per scale, **AMD EPYC 9V74**; reports in
+[`results/real-models/run-41029284336/`](results/real-models/run-41029284336/)):
+
+| nomic, same index | RRF (default) | convex |
+|---|---|---|
+| **Eval set (English)**: hybrid R@1 / R@10 / MRR@10 / nDCG@10 | **0.774 / 1.000 / 0.931 / 0.946** | 0.702 / 1.000 / 0.885 / 0.911 |
+| Eval set: hybrid + MMR R@10 / MRR@10 | **1.000 / 0.913** | 0.964 / 0.861 |
+| Synthetic, standard: hybrid R@1 / R@10 / MRR@10 | 0.196 / 0.938 / 0.458 | **0.844 / 0.966 / 0.887** |
+| Synthetic, standard: hybrid + MMR R@10 / MRR@10 | 0.948 / 0.463 | **0.968 / 0.885** |
+| Synthetic, quick: hybrid R@10 / MRR@10 | 0.970 / 0.425 | **0.980 / 0.930** |
+| Query latency p50 / p95 (standard) | 49 / 54 ms | 49 / 53 ms |
+
+Convex fusion fixes the synthetic corpus (it simply follows bm25 when the vector list is flat) but
+loses on the English eval set, the only set here with real semantics: 3 more of 42 queries miss
+rank 1, and hybrid + MMR recall@10 falls from 1.000 to 0.964. **RRF stays the default**; convex is
+available as an option, and the synthetic corpus is not a reason to switch (it rewards ignoring
+the embedder). With the hash embedder, convex costs the eval set one query at R@10 (1.000 → 0.988).
+
+#### Adaptive reranker (`RetrieveConfig::rerank_adaptive`, on by default)
+
+On these runners the manifest's reranker needs about 0.5 s per passage (15 s for the default pool
+of 30; 38 s on the slower EPYC 7763), so with the app's 2.5 s timeout it never answered: every
+search waited 2.5 s and kept its first-stage order. The retriever now keeps the reranker within its
+budget: after a rerank it sizes the pool to what fits in 80% of the timeout at the measured time per
+passage, it halves the pool after a timeout, and when fewer than `rerank_min_pool` (8) passages fit
+it pauses reranking for `rerank_cooldown_ms` (10 min, doubling on consecutive pauses up to 8×) and
+then probes once with the minimum pool. `Retriever::rerank_status` reports the pool, the time per
+passage and why it paused. Same index, same runner (quick, EPYC 9V74, 200 queries):
+
+| Search (hybrid + MMR) | p50 / p95 latency | R@10 / MRR@10 | reranked |
+|---|---|---|---|
+| no reranker | 37 / 40 ms | 0.970 / 0.425 | – |
+| reranker, before (every search waits) | **2,564 / 2,571 ms** | 0.970 / 0.425 | 0 of 200 |
+| reranker, adaptive | **37 / 40 ms** | 0.970 / 0.425 | 0 of 200 (paused after the 2nd query: "reranking 15 passages timed out after 2500 ms") |
+
+What the reranker can do when it is given the time (no timeout): MRR@10 0.50 → 0.83–0.86 (quick)
+and 0.40 → 0.72 (standard), eval set MRR 0.931 → 0.984. On a machine where it answers within
+budget (a GPU, Apple Silicon or a faster CPU), the adaptive pool keeps that gain: the pool shrinks
+only as far as the time per passage requires.
+
+#### Full scale
+
+**Running** ([41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865), hash and
+nomic on one runner, 20,000 files and 1,000 queries). The first attempt (run 41027473994) stopped at
+the bench's one-hour limit on the initial ingest with 7,713 of 20,000 files embedded (2.1 files/s on
+an EPYC 9V74); the limit is now five hours for local embedders. Its hash arm finished: hybrid R@10
+0.877 vs the fake index's 0.874 (met), freshness p95 0.69 s.
+
 
 ### Bugs the real models exposed
 

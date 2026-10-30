@@ -23,6 +23,8 @@
     "doubletap.perm.accessibilityWhy",
     "doubletap.readAhead",
     "doubletap.readAheadHint",
+    "doubletap.readAheadOnBattery",
+    "doubletap.readAheadOnBatteryHint",
     "doubletap.shortcut.active_desktop",
     "doubletap.shortcut.awaiting_consent",
     "doubletap.shortcut.failed",

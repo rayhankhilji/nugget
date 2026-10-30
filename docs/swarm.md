@@ -113,9 +113,9 @@ Briefs in `docs/waves/wave-dd/`.
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) (merged) |
-| DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste |
+| DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste (merged) |
 | DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence |
-| DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker |
+| DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker (merged) |
 
 ## Wave EE (after AA3, alongside DD): cloud sessions from the EE briefs commit
 Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent review layer of subagents.
@@ -138,3 +138,17 @@ Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent
 | FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status |
 | FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes |
 | FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins |
+
+## Wave GG (independent QA, new files only): cloud sessions from 5f1998e
+Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every finding reproduced by a second subagent; findings go to the owning build team through the orchestrator.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| GG1 | `qa/doubletap` | session_01CTjRStX6Dx5a8tNZozvNrv | Double Tap end to end, 60+ scenarios, real models |
+| GG2 | `qa/ask` | session_01CTjRSsqzVXFPgqGksu9bV6 | Ask and Chat over a realistic persona corpus, 100+ questions |
+| GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations |
+| GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks |
+| GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases |
+| GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
+| GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
+| GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic |

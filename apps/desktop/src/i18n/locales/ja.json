@@ -1566,6 +1566,8 @@
   "doubletap.enabled": "Double Tap をオンにする",
   "doubletap.readAhead": "返信中に先読みする",
   "doubletap.readAheadHint": "返信欄にしばらくフォーカスがあると、Nugget が内容を先に読み取り、ローカルモデルに読み込みを始めさせるため、トリガーを押したときに下書きが早く始まります。ローカルモデルのみで、除外したアプリ、ターミナル、パスワード欄では行いません。クラウドプロバイダーには何も送られず、何も保存されません。欄を移動する間、CPU を少し使います。",
+  "doubletap.readAheadOnBattery": "バッテリー駆動中も先読みする",
+  "doubletap.readAheadOnBatteryHint": "オフにすると、コンピューターがバッテリーで動作している間は先読みを一時停止します。低電力モード（バッテリー節約機能）では常に一時停止します。",
   "doubletap.save": "保存",
   "doubletap.saving": "保存中…",
   "doubletap.revert": "変更を破棄",
