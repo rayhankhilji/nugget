@@ -39,9 +39,10 @@
 //!   field has kept focus for a moment. Never in excluded apps, terminals (unless allowed) or
 //!   secure fields.
 //! - **Sent:** to the local Nugget daemon only, over its local socket. The daemon itself refuses
-//!   read-ahead for cloud providers (no field content leaves the machine for read-ahead), for
-//!   excluded apps and secure fields, and rate-limits; it feeds the prompt to the local model
-//!   server to fill its cache and generates nothing.
+//!   read-ahead for cloud providers (nothing goes to a cloud API for read-ahead), for excluded
+//!   apps and secure fields, and rate-limits; it feeds the prompt to the draft's provider (the
+//!   on-device model server, or a local-network server the user configured, recorded in the
+//!   egress ledger) to fill its cache and generates nothing.
 //! - **Stored:** nothing. The shell keeps only a keyed hash of the last context it sent (to
 //!   avoid sending the same one twice), in memory, with a key that is new every run. The local
 //!   model server keeps the prefilled prompt in its in-memory cache, as it does for any draft.
