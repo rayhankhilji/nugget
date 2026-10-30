@@ -200,6 +200,11 @@ pub struct AgentConfig {
     /// [`Outcome::Refused`] if so. Any error or unparsable reply carries on with the normal loop.
     /// Off by default.
     pub triage: bool,
+    /// Ask, don't guess: when the goal names a target that matches more than one item a tool
+    /// showed ([`ToolResult::targets`](crate::ToolResult)), suspend before the first action of
+    /// `Edit` risk or higher and ask the user which one, with the candidates as options. On by
+    /// default.
+    pub clarify: bool,
 }
 
 impl Default for AgentConfig {
@@ -215,6 +220,7 @@ impl Default for AgentConfig {
             cancel: CancellationToken::new(),
             halt_poll: Duration::from_millis(50),
             triage: false,
+            clarify: true,
         }
     }
 }
@@ -244,6 +250,9 @@ pub struct ActionRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PendingAsk {
     pub question: String,
+    /// Candidates offered to the user (empty: free text).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
     pub call_id: String,
     /// Results of the other calls in that turn, sent along with the answer.
     pub results: Vec<Part>,
@@ -480,37 +489,7 @@ impl Agent {
             deadline: started + cfg.budgets.deadline,
             poll: cfg.halt_poll,
         };
-        let mut goal = format!("Request from the user:\n{}", st.task.goal);
-        if let Some(c) = &st.task.context {
-            goal.push_str("\n\nContext:\n");
-            goal.push_str(c);
-        }
-        let req = ChatRequest {
-            system: Some(TRIAGE_PROMPT.into()),
-            messages: vec![Message::user_text(goal)],
-            tools: Vec::new(),
-            json_schema: Some(serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "harm": {"type": "string", "enum": [
-                        "none", "fraud_or_scam", "impersonation", "harassment",
-                        "other_serious_harm"
-                    ]},
-                    "reason": {"type": "string"}
-                },
-                "required": ["harm", "reason"],
-                "additionalProperties": false
-            })),
-            max_tokens: Some(TRIAGE_MAX_TOKENS),
-            temperature: cfg.temperature,
-            feature: FEATURE_AGENT.into(),
-            items: st.task.items.clone(),
-            cache: Some(CacheHint {
-                system: true,
-                key: Some("agent:triage".into()),
-                ttl: CacheTtl::default(),
-            }),
-        };
+        let req = triage_request(&st.task, cfg);
         let input_estimate = estimate_tokens(&req.messages) + estimate(TRIAGE_PROMPT);
         let t0 = Instant::now();
         let reply = stop
@@ -552,6 +531,47 @@ impl Agent {
             None => {
                 tracing::warn!(task = %st.task.id, "triage reply did not parse; continuing");
                 None
+            }
+        }
+    }
+
+    /// Run the triage check ([`AgentConfig::triage`]) on a goal alone, outside any run: one
+    /// tool-less call, nothing logged and no tool touched. For measuring the triage (refusal
+    /// rates, latency) without running tasks. `cfg.temperature` applies.
+    pub async fn triage_goal(&self, task: &Task, cfg: &AgentConfig) -> TriageReport {
+        let req = triage_request(task, cfg);
+        let input_estimate = estimate_tokens(&req.messages) + estimate(TRIAGE_PROMPT);
+        let t0 = Instant::now();
+        let reply = async { ChatResponse::collect(self.model.chat(req).await?).await }.await;
+        let elapsed = t0.elapsed();
+        match reply {
+            Err(e) => TriageReport {
+                verdict: TriageVerdict::Error,
+                reason: e.to_string(),
+                reply: String::new(),
+                elapsed,
+                usage: Usage::default(),
+            },
+            Ok(resp) => {
+                let text = resp.text();
+                let usage = Usage {
+                    input_tokens: resp.input_tokens.map_or(input_estimate, u64::from),
+                    output_tokens: resp
+                        .output_tokens
+                        .map_or_else(|| estimate(&text) + 16, u64::from),
+                };
+                let (verdict, reason) = match parse_triage(&text) {
+                    Some(Triage::Refuse(r)) => (TriageVerdict::Refuse, r),
+                    Some(Triage::Proceed) => (TriageVerdict::Proceed, String::new()),
+                    None => (TriageVerdict::Unparsed, String::new()),
+                };
+                TriageReport {
+                    verdict,
+                    reason,
+                    reply: truncate(&text, LOG_TEXT_MAX),
+                    elapsed,
+                    usage,
+                }
             }
         }
     }
@@ -709,6 +729,7 @@ impl Agent {
                         }
                         st.pending = Some(PendingAsk {
                             question: question.clone(),
+                            options: Vec::new(),
                             call_id,
                             results: std::mem::take(&mut results),
                         });
@@ -1118,10 +1139,11 @@ impl Agent {
         }
         match result.control {
             Some(Control::Finish { summary, claim }) => Act::Finish { summary, claim },
-            Some(Control::AskUser { question }) => {
+            Some(Control::AskUser { question, options }) => {
                 self.events.emit(AgentEvent::Suspended {
                     task_id: st.task.id.clone(),
                     question: question.clone(),
+                    options,
                 });
                 Act::Ask {
                     question,
@@ -1587,6 +1609,67 @@ fn judge(st: &RunState, claim: Claim, summary: &str) -> Outcome {
             }
         }
     }
+}
+
+/// The triage call for a task: the fixed [`TRIAGE_PROMPT`], the goal and trusted context, a JSON
+/// schema and no tools.
+fn triage_request(task: &Task, cfg: &AgentConfig) -> ChatRequest {
+    let mut goal = format!("Request from the user:\n{}", task.goal);
+    if let Some(c) = &task.context {
+        goal.push_str("\n\nContext:\n");
+        goal.push_str(c);
+    }
+    ChatRequest {
+        system: Some(TRIAGE_PROMPT.into()),
+        messages: vec![Message::user_text(goal)],
+        tools: Vec::new(),
+        json_schema: Some(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "harm": {"type": "string", "enum": [
+                    "none", "fraud_or_scam", "impersonation", "harassment",
+                    "other_serious_harm"
+                ]},
+                "reason": {"type": "string"}
+            },
+            "required": ["harm", "reason"],
+            "additionalProperties": false
+        })),
+        max_tokens: Some(TRIAGE_MAX_TOKENS),
+        temperature: cfg.temperature,
+        feature: FEATURE_AGENT.into(),
+        items: task.items.clone(),
+        cache: Some(CacheHint {
+            system: true,
+            key: Some("agent:triage".into()),
+            ttl: CacheTtl::default(),
+        }),
+    }
+}
+
+/// What the triage made of a goal ([`Agent::triage_goal`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageVerdict {
+    Proceed,
+    Refuse,
+    /// The reply did not parse; a run would carry on.
+    Unparsed,
+    /// The call failed; a run would carry on.
+    Error,
+}
+
+/// One triage call, measured.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriageReport {
+    pub verdict: TriageVerdict,
+    /// The refusal reason, or the error.
+    pub reason: String,
+    /// The model's reply, cut to a log line.
+    pub reply: String,
+    /// Wall time of the call: what the triage adds to a task.
+    pub elapsed: Duration,
+    pub usage: Usage,
 }
 
 /// A parsed triage verdict.

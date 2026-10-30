@@ -1056,6 +1056,7 @@ mod tests {
         runs.emit(AgentEvent::Suspended {
             task_id: "t".into(),
             question: "which one?".into(),
+            options: Vec::new(),
         });
         assert!(runs.lock()["t"].deferred.is_some());
         assert_eq!(runs.lock()["t"].question.as_deref(), Some("which one?"));

@@ -42,7 +42,7 @@ mod types;
 
 pub use agent::{
     ActionRecord, Agent, AgentConfig, AgentRun, Budgets, FEATURE_AGENT, Model, MutationRecord,
-    PendingAsk, RunState, Task, ToolRate, VerificationSummary,
+    PendingAsk, RunState, Task, ToolRate, TriageReport, TriageVerdict, VerificationSummary,
 };
 pub use chained::{AGENT_SOURCE, ChainedLog, agent_entries};
 pub use events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
