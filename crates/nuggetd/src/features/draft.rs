@@ -45,6 +45,7 @@
 //! enabled = true                  # false: they get the cloud budget above
 //! budget_tokens = 300             # retrieval budget for them
 //! max_snippets = 3                # best retrieved passages kept
+//! include_sensitive = false       # let passages marked sensitive into local prompts
 //!
 //! [draft.voice]
 //! emails = ["me@example.com"]     # who "me" is (completed from sent mail when infer_me)
@@ -131,6 +132,7 @@ struct LocalSection {
     enabled: bool,
     budget_tokens: u32,
     max_snippets: usize,
+    include_sensitive: bool,
 }
 
 impl Default for LocalSection {
@@ -140,6 +142,7 @@ impl Default for LocalSection {
             enabled: d.enabled,
             budget_tokens: d.budget_tokens,
             max_snippets: d.max_snippets,
+            include_sensitive: d.include_sensitive,
         }
     }
 }
@@ -228,6 +231,7 @@ impl DraftSection {
                 enabled: self.local.enabled,
                 budget_tokens: self.local.budget_tokens.min(MAX_BUDGET_TOKENS),
                 max_snippets: self.local.max_snippets,
+                include_sensitive: self.local.include_sensitive,
                 ..LocalBudget::default()
             },
             ..DraftConfig::default()

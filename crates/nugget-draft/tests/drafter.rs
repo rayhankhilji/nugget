@@ -281,11 +281,7 @@ async fn cloud_provider_never_sees_sensitive_items() {
 #[tokio::test]
 async fn local_provider_may_use_sensitive_items_and_egress_items_are_listed() {
     let local = Fake::new("local", Locality::OnDevice, &["ok"]);
-    let s = setup(
-        vec![local.clone()],
-        DraftConfig::default(),
-        Arc::new(NoVoice),
-    );
+    let s = setup(vec![local.clone()], local_sensitive(), Arc::new(NoVoice));
     let (started, _stream) = s
         .drafter
         .begin(request(slack_ctx("Can you send the Q3 numbers?")))
@@ -595,7 +591,7 @@ async fn tier_fallback_skips_a_failing_provider_and_repacks_for_locality() {
     let local = Fake::new("local", Locality::OnDevice, &["ok"]);
     let s = setup(
         vec![bad.clone(), local.clone()],
-        DraftConfig::default(),
+        local_sensitive(),
         Arc::new(NoVoice),
     );
     let (started, stream) = s
@@ -720,7 +716,7 @@ impl FeedbackSink for Sink {
 async fn feedback_is_audited_and_sent_to_the_sink() {
     let local = Fake::new("local", Locality::OnDevice, &["Thursday works."]);
     let sink = Arc::new(Sink::default());
-    let s = setup(vec![local], DraftConfig::default(), Arc::new(NoVoice));
+    let s = setup(vec![local], local_sensitive(), Arc::new(NoVoice));
     let drafter = s.drafter.clone().with_feedback_sink(sink.clone());
 
     let (started, stream) = drafter
@@ -779,7 +775,7 @@ async fn feedback_is_audited_and_sent_to_the_sink() {
 async fn feedback_marks_drafts_from_sensitive_passages() {
     let local = Fake::new("local", Locality::OnDevice, &["ok"]);
     let sink = Arc::new(Sink::default());
-    let s = setup(vec![local], DraftConfig::default(), Arc::new(NoVoice));
+    let s = setup(vec![local], local_sensitive(), Arc::new(NoVoice));
     let drafter = s.drafter.clone().with_feedback_sink(sink.clone());
     let (started, stream) = drafter
         .begin(request(slack_ctx("Can you send the Q3 numbers?")))
@@ -873,6 +869,41 @@ fn context_of(req: &ChatRequest) -> String {
         .to_owned()
 }
 
+/// Local prompts that may carry sensitive passages (`[draft.local] include_sensitive`).
+fn local_sensitive() -> DraftConfig {
+    DraftConfig {
+        local: LocalBudget {
+            include_sensitive: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn local_budget_leaves_sensitive_items_out_by_default() {
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let s = setup(
+        vec![local.clone()],
+        DraftConfig::default(),
+        Arc::new(NoVoice),
+    );
+    let (started, _stream) = s
+        .drafter
+        .begin(request(slack_ctx("Can you send the Q3 numbers?")))
+        .await
+        .unwrap();
+    assert!(started.excluded_sensitive >= 1);
+    assert!(!keys(&started).contains(&"salaries"));
+    assert!(
+        !local
+            .last()
+            .items
+            .iter()
+            .any(|i| i.key.as_str() == "salaries")
+    );
+}
+
 fn local_off() -> DraftConfig {
     DraftConfig {
         local: LocalBudget {
@@ -897,6 +928,8 @@ async fn local_budget_keeps_the_best_snippets_and_matching_citations() {
     let config = DraftConfig {
         local: LocalBudget {
             max_snippets: 1,
+            // Compared with the unbudgeted packing, which includes sensitive passages.
+            include_sensitive: true,
             ..Default::default()
         },
         ..Default::default()

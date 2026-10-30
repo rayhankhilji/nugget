@@ -189,6 +189,10 @@ pub struct LocalBudget {
     pub budget_tokens: u32,
     /// Retrieved snippets kept (the best first).
     pub max_snippets: usize,
+    /// Let passages marked sensitive into local prompts. Off by default: with only a few
+    /// snippets a sensitive one (a card number, a password) is more likely to make the cut and
+    /// a small model to paste it into a draft that is then sent from a third-party app.
+    pub include_sensitive: bool,
     #[serde(skip, default = "PromptLimits::local")]
     pub limits: PromptLimits,
 }
@@ -199,6 +203,7 @@ impl Default for LocalBudget {
             enabled: true,
             budget_tokens: 300,
             max_snippets: 3,
+            include_sensitive: false,
             limits: PromptLimits::local(),
         }
     }
@@ -809,12 +814,12 @@ impl Drafter {
             .clone();
         // The cache key's `cloud` decides the budget too, so each locality gets its own packing.
         let (budget, max_snippets) = self.budget_for(cloud);
+        let local = &self.inner.config.local;
+        let exclude_sensitive = cloud || (local.enabled && !local.include_sensitive);
         let q = query.to_owned();
         let fut = async move {
             let started = Instant::now();
-            let opts = ContextOptions {
-                exclude_sensitive: cloud,
-            };
+            let opts = ContextOptions { exclude_sensitive };
             let job = async move { retriever.pack_context_with(&q, budget, opts).await }.boxed();
             let packed = match runner {
                 Some(r) => r.run(job).await,

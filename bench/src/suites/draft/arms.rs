@@ -303,7 +303,11 @@ impl<'a> NuggetArm<'a> {
                 self.local
                     .as_ref()
                     .map_or(CONTEXT_BUDGET_TOKENS, |l| l.budget_tokens as usize),
-                ContextOptions { exclude_sensitive },
+                ContextOptions {
+                    // As nugget-draft: the local budget leaves sensitive passages out too.
+                    exclude_sensitive: exclude_sensitive
+                        || self.local.as_ref().is_some_and(|l| !l.include_sensitive),
+                },
             )
             .await?;
         let (context, n) = neutralise(&packed.response.text);
