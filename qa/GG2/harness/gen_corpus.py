@@ -648,10 +648,11 @@ CAL_TOPICS = [("1:1 with Priya", "Video"), ("Team standup", "Room Fjord"), ("Yog
 
 def filler(c: Corpus):
     rng = c.rng
+    lim = (c.today - c.M).days  # offsets beyond this are after today
     n = 0
     for name, addr, topics in NEWSLETTERS:
         for i, topic in enumerate(topics):
-            off = -120 + rng.randint(0, 130)
+            off = min(-120 + rng.randint(0, 130), lim)
             n += 1
             c.email(f"mail/9-newsletters/{name.lower().replace(' ', '-')}-{i + 1}.eml", (name, addr), "me",
                     f"{name}: {topic}",
@@ -662,7 +663,7 @@ def filler(c: Corpus):
                     c.at(off, rng.randint(5, 9), rng.randint(0, 59)))
     for i in range(50):
         shop, lo, hi = rng.choice(SHOPS)
-        off = -110 + rng.randint(0, 120)
+        off = min(-110 + rng.randint(0, 120), lim)
         amt = round(rng.uniform(lo, hi), 2)
         c.email(f"mail/8-receipts/receipt-{i + 1:02d}.eml", (shop, f"receipts@{shop.split()[0].lower()}.example"), "me",
                 f"Your receipt from {shop}", f"Thanks for shopping at {shop}. Total: ${amt:.2f}. Paid by card ending 4417.",
@@ -670,13 +671,13 @@ def filler(c: Corpus):
     for i in range(75):
         subj, body = rng.choice(TOPICS_WORK)
         who = rng.choice(FILLER_COLLEAGUES)
-        off = -100 + rng.randint(0, 112)
+        off = min(-100 + rng.randint(0, 112), lim)
         c.email(f"mail/1-fernhill/misc-{i + 1:02d}.eml", who, "me", subj,
                 body.format(n=rng.randint(2, 30)) + f"\n\n{PEOPLE[who][0].split()[0]}",
                 c.at(off, rng.randint(8, 18), rng.randint(0, 59)))
     for i in range(55):
         title, body = rng.choice(NOTE_TOPICS)
-        off = -150 + rng.randint(0, 160)
+        off = min(-150 + rng.randint(0, 160), lim)
         c.note(f"notes/misc/{i + 1:02d} {title.split(':')[0].lower()}.md",
                f"# {title}\n\n{body.format(n=rng.randint(3, 15))}", c.at(off, rng.randint(7, 22), 0))
     for i in range(45):
@@ -684,7 +685,7 @@ def filler(c: Corpus):
         off = -60 + rng.randint(0, 90)
         h = rng.randint(8, 17)
         c.event(f"calendar/misc/{i + 1:02d}-{re.sub(r'[^a-z0-9]+', '', title.split()[0].lower()) or 'event'}.ics", title, c.at(off, h, 0), c.at(off, h, 45), loc,
-                created=c.at(off - 7, 9, 0))
+                created=c.at(min(off - 7, lim), 9, 0))
     for i in range(8):
         off = -80 + i * 10
         lines = [f"Team chat export (#product), {c.day(off)}"]
@@ -694,7 +695,7 @@ def filler(c: Corpus):
                 "anyone seen the new Beacon numbers?", "standup moved to 10:15 today", "lunch?",
                 "PR is up for review", "the Quarry search is slow again", "+1", "thanks!",
                 "can we push the design review to Thursday?"]))
-        c.note(f"chats/team-product-{i + 1}.txt", "\n".join(lines), c.at(off, 18, 0))
+        c.note(f"chats/team-product-{i + 1}.txt", "\n".join(lines), c.at(min(off, lim), 18, 0))
 
 
 # ---------------------------------------------------------------------------------------------
