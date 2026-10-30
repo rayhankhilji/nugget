@@ -683,7 +683,6 @@ impl DraftFeature {
     }
 }
 
-/// Append an audit entry (no content: callers pass ids, kinds and counts only).
 /// Whether a call at `now` may start, at most one per `spacing`; records it if so.
 fn admit(last: &Mutex<Option<Instant>>, now: Instant, spacing: Duration) -> bool {
     let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
@@ -694,6 +693,7 @@ fn admit(last: &Mutex<Option<Instant>>, now: Instant, spacing: Duration) -> bool
     true
 }
 
+/// Append an audit entry (no content: callers pass ids, kinds and counts only).
 async fn audit(state: &State, actor: &str, action: &str, target: &str, detail: Value) {
     let store = state.store.clone();
     let entry = AuditEntry {

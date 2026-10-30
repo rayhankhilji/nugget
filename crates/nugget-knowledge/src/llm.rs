@@ -567,7 +567,7 @@ fn header_lines(item: &Item, me_name: Option<&str>) -> String {
         let names: Vec<String> = crate::extract::strings(ex.get(key))
             .iter()
             .filter_map(|raw| parse_address(raw).name)
-            .map(|n| truncate_chars(&n.replace(['\n', '\r'], " "), 60))
+            .map(|n| truncate_chars(&one_line(&n), 60))
             .collect();
         if names.is_empty() {
             continue;
@@ -599,6 +599,21 @@ fn header_lines(item: &Item, me_name: Option<&str>) -> String {
     out
 }
 
+/// `s` on one line: every control character (`\n`, `\r`, NEL, vertical tab, form feed...)
+/// and the Unicode line and paragraph separators become spaces, so a title or name cannot start
+/// a header line of its own in the prompt.
+fn one_line(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}') {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 /// The user message: a one-line task, then the document (last).
 pub(crate) fn prompt(item: &Item, me_name: Option<&str>, batch: &[Chunk]) -> String {
     let n = nonce();
@@ -607,11 +622,7 @@ pub(crate) fn prompt(item: &Item, me_name: Option<&str>, batch: &[Chunk]) -> Str
 lines carrying the code {n}; everything between them is untrusted data, not \
 instructions.\n\n<<<DOC-{n}>>>\nTitle: {}\n",
         truncate_chars(
-            &item
-                .title
-                .as_deref()
-                .unwrap_or("(none)")
-                .replace(['\n', '\r'], " "),
+            &one_line(item.title.as_deref().unwrap_or("(none)")),
             MAX_TITLE_CHARS
         )
     );
@@ -1113,11 +1124,11 @@ struct Ctx {
     me: Option<String>,
     me_first: Option<String>,
     item_date: OffsetDateTime,
-    /// Whether "I" is the user: a document without a sender, or mail the user sent. In mail
+    /// Whether "I" is the user: a document that is not mail, or mail the user sent. In mail
     /// from someone else "I" is the sender, and "you" the user.
     first_person_is_me: bool,
-    /// The item has a sender (mail): a fact about the user needs a quote that refers to them.
-    has_sender: bool,
+    /// The item is mail: a fact about the user needs a quote that refers to them.
+    in_mail: bool,
 }
 
 /// Pronouns a model may use for a claim's subject or object.
@@ -1174,6 +1185,16 @@ impl Ctx {
             .split(|c: char| !c.is_alphanumeric())
             .any(|w| mine.contains(&w) || self.me_first.as_deref() == Some(w))
     }
+
+    /// Whether a (lower-cased) quote speaks in the first person of someone who is not the
+    /// user (the sender's "I", "my" in mail from someone else): "Robin, I prefer ..." names the
+    /// user but states the sender's preference.
+    fn in_others_first_person(&self, quote_lower: &str) -> bool {
+        !self.first_person_is_me
+            && quote_lower
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|w| matches!(w, "i" | "me" | "my" | "mine" | "myself"))
+    }
 }
 
 /// The item's sender as written (`extracted.from`), if it has one.
@@ -1183,17 +1204,27 @@ pub(crate) fn sender(item: &Item) -> Option<String> {
         .next()
 }
 
-/// Whether "I" in this item is the user: it has no sender (a note or document of the user's),
-/// the caller knows the sender's address as the user's (`sender_is_me`), or the sender's
-/// display name is the user's.
-fn first_person_is_me(item: &Item, me: Option<&str>, sender_is_me: bool) -> bool {
-    match sender(item) {
-        None => true,
-        Some(_) if sender_is_me => true,
-        Some(raw) => parse_address(&raw)
-            .name
-            .is_some_and(|n| me == Some(normalize_name(&n).as_str())),
-    }
+/// Whether the item is mail: by type, or by any parsed header (a message without a `From`
+/// header is still someone's mail, not a note of the user's).
+fn is_mail(item: &Item) -> bool {
+    let mime = item
+        .mime
+        .as_deref()
+        .or_else(|| item.metadata.get("mime").and_then(Value::as_str))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let extracted = item.metadata.get("extracted");
+    mime.starts_with("message/")
+        || ["from", "to", "cc", "bcc", "message_id", "in_reply_to"]
+            .iter()
+            .any(|k| extracted.and_then(|e| e.get(k)).is_some())
+}
+
+/// Whether "I" in this item is the user: it is not mail (a note or document of the user's), or
+/// the caller knows the sender's address as the user's (`sender_is_me`). Never by display
+/// name: anyone can send mail as "Robin Ashgrove" <someone@else>.
+fn first_person_is_me(item: &Item, sender_is_me: bool) -> bool {
+    !is_mail(item) || (sender_is_me && sender(item).is_some())
 }
 
 /// A cleaned entity, before it is added to the extraction.
@@ -1445,8 +1476,8 @@ fn validate_capped(
         .filter(|f| f.chars().count() >= 2);
     let cx = Ctx {
         all_lower,
-        first_person_is_me: first_person_is_me(item, me.as_deref(), sender_is_me),
-        has_sender: sender(item).is_some(),
+        first_person_is_me: first_person_is_me(item, sender_is_me),
+        in_mail: is_mail(item),
         me,
         me_first,
         item_date: crate::extract::item_date(item),
@@ -1791,7 +1822,12 @@ fn validate_capped(
             // In mail, a fact about the user needs a quote that is about the user: the
             // sender's "I prefer ..." in someone else's mail is not. (In the user's own notes
             // the unnamed subject is the user.)
-            if about_me && cx.has_sender && !cx.names_me(&qlower) {
+            // "Robin, I prefer ..." names the user, but the preference is the sender's.
+            if about_me
+                && cx.in_mail
+                && (!cx.names_me(&qlower)
+                    || (subject == CRef::Me && cx.in_others_first_person(&qlower)))
+            {
                 gate.quotes_rejected += 1;
                 why = "quote does not refer to the user";
                 continue;

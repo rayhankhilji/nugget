@@ -350,3 +350,62 @@ async fn a_sensitive_cards_subject_is_not_kept_as_a_learned_label() {
                 && !e.label.as_deref().unwrap_or("").contains("884213"))
     );
 }
+
+/// PL-2: a thread that turns out sensitive loses the label an earlier card of it left (the
+/// thread's subject), the next time feedback on one of its sensitive cards is recorded.
+#[tokio::test]
+async fn a_thread_turning_sensitive_drops_its_earlier_label() {
+    let f = fixture();
+    put_mail(
+        &f.store,
+        Mail {
+            key: "m-lab-1",
+            from: "Dana Lee <dana@clinic.test>",
+            subject: "Appointment 884213",
+            body: "Could you confirm the appointment time before Friday?",
+            days_ago: 3.0,
+            message_id: "<lab-1@clinic.test>",
+            ..Default::default()
+        },
+    );
+    let p = Proactive::new(f.store.clone(), cfg());
+    p.refresh(now()).await.unwrap();
+    let first = find(&p, |c| c.title.contains("884213"));
+    assert!(!first.sensitive);
+    p.dismiss(&first.id, DismissReason::NotImportant, now())
+        .unwrap();
+    let label = |p: &Proactive| {
+        p.learned(now())
+            .unwrap()
+            .into_iter()
+            .find(|e| e.scope == Scope::Thread)
+            .expect("the thread is learned")
+            .label
+    };
+    assert!(label(&p).is_some_and(|l| l.contains("884213")));
+
+    put_mail(
+        &f.store,
+        Mail {
+            key: "m-lab-2",
+            from: "Dana Lee <dana@clinic.test>",
+            subject: "Re: Appointment 884213",
+            body: "Your biopsy results are in. Could you call me before Friday?",
+            days_ago: 1.0,
+            message_id: "<lab-2@clinic.test>",
+            in_reply_to: Some("<lab-1@clinic.test>"),
+            sensitive: true,
+            ..Default::default()
+        },
+    );
+    let later = now() + Duration::hours(1);
+    p.refresh(later).await.unwrap();
+    let cards = p.all_cards().unwrap();
+    let second = cards
+        .iter()
+        .find(|c| c.sensitive && c.title.contains("884213"))
+        .unwrap_or_else(|| panic!("{cards:#?}"));
+    p.dismiss(&second.id, DismissReason::NotImportant, later)
+        .unwrap();
+    assert_eq!(label(&p), None);
+}

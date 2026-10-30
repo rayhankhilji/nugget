@@ -379,6 +379,25 @@ const HOSTED_SUFFIXES: &[&str] = &[
     "appspot.com",
     "blogspot.com",
     "me.uk",
+    // Mailing lists and newsletter hosts: every list or newsletter sends from the same domain.
+    "googlegroups.com",
+    "groups.io",
+    "substack.com",
+    // Second levels sold or given to anyone, which `base_domain` (no public suffix list) takes
+    // for the registrable domain: `evil.eu.org` and `acme.eu.org` would be one key.
+    "eu.org",
+    "pp.ua",
+    "uk.com",
+    "us.com",
+    "eu.com",
+    "de.com",
+    "gb.net",
+    "uk.net",
+    "za.com",
+    "cn.com",
+    "jpn.com",
+    "co.com",
+    "gr.jp",
 ];
 
 /// Whether unrelated people can get addresses at this base domain.
@@ -498,6 +517,16 @@ impl Learned {
             }
         }
         self.bound(now);
+    }
+
+    /// Forget the label of the thread a card with these features is in: the card is
+    /// sensitive, and the label an earlier card of the thread left is the same subject.
+    pub fn forget_thread_label(&mut self, features: &Features) {
+        if let Some(t) = features.thread.as_deref().filter(|t| !t.is_empty())
+            && let Some(e) = self.entries.get_mut(&entry_id(Scope::Thread, t))
+        {
+            e.label = None;
+        }
     }
 
     /// The effects on a card with these features at `now`, strongest first. Their
@@ -1000,6 +1029,11 @@ mod tests {
             ("friend@web.de", "phish@web.de"),
             ("alice@corp.onmicrosoft.com", "phish@evil.onmicrosoft.com"),
             ("ops@team.github.io", "phish@evil.github.io"),
+            // Lists and second levels anyone can register (`base_domain` stops at them).
+            ("team@googlegroups.com", "phish@googlegroups.com"),
+            ("ana@acme.eu.org", "phish@evil.eu.org"),
+            ("ana@acme.uk.com", "phish@evil.uk.com"),
+            ("ana@acme.pp.ua", "phish@evil.pp.ua"),
         ] {
             let mut l = Learned::default();
             for i in 0..10 {

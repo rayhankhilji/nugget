@@ -407,6 +407,9 @@ impl Proactive {
             state
                 .learned
                 .record(kind, &features, fb, reason, &title, now);
+            if card.sensitive {
+                state.learned.forget_thread_label(&features);
+            }
             state.feedback_log.push(cards::FeedbackEvent {
                 card_id: id.to_owned(),
                 kind,
