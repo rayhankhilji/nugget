@@ -65,15 +65,6 @@ jobs:
               draft --draft-grounding both --draft-temperature 0 --draft-judge model
               --draft-judge-model qwen3-8b-q4km --draft-judge-timeout-s 240
               --draft-dump eval-results/draft-drafts.jsonl
-          # Before/after on one runner (AA3): the extractor at `base_ref` on the 30-item subset,
-          # then this commit on the same subset, then this commit on every item.
-          - suite: knowledge
-            base_ref: 50e9b751793bcd217e49408189f21559f763d5fd
-            base_args: knowledge
-            args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
-            args2: >-
-              knowledge --knowledge-items 93
-              --knowledge-dump eval-results/knowledge-dump-all.jsonl
     steps:
       - uses: actions/checkout@v5
         with:
