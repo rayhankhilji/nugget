@@ -8,7 +8,13 @@
 //!    evidence (item refs and quotes) and a stable dedup key.
 //! 3. **Scoring** ([`score`]): an online logistic model over urgency, importance (relationship
 //!    strength from the graph and mail history), freshness and kind; updated from accept,
-//!    dismiss and snooze; explainable (top factors on every card).
+//!    dismiss and snooze; explainable (top factors on every card). On top of it, the
+//!    [`feedback`] layer learns from the user's own feedback per sender, domain, kind and thread
+//!    (reason-aware, decaying with a 30-day half-life, bounded) and adds to the log-odds; a
+//!    thread dismissed as already handled is suppressed until something new happens in it. Each
+//!    card lists these effects (`Card::learned`) with the counts behind them, and
+//!    [`Proactive::reset_learning`] forgets them. Learning changes ranking and suppression only,
+//!    never what an action does or whether it needs approval.
 //! 4. **Optional LLM judge** ([`judge`]): enriches the top candidates (summary, suggested action,
 //!    confidence). Local by default; cloud only when allowed and never for sensitive evidence. It
 //!    cannot add candidates and only nudges the rank (20 % weight next to the model's 80 %).
@@ -34,6 +40,7 @@ pub mod candidate;
 pub mod cards;
 pub mod config;
 pub mod corpus;
+pub mod feedback;
 pub mod generators;
 pub mod judge;
 pub mod score;
@@ -64,6 +71,7 @@ pub use cards::{
 };
 pub use config::ProactiveConfig;
 pub use corpus::Corpus;
+pub use feedback::{Direction, Effect, Learned, LearnedEntry, ResetScope, Scope};
 pub use generators::GenContext;
 pub use judge::{Enrichment, Judge, JudgeInput, LlmJudge, judge_allowed};
 pub use score::{Factor, Feedback, ScoringModel};
@@ -213,7 +221,17 @@ impl Proactive {
                         .by_dedup_key(&c.dedup_key)
                         .is_none_or(|card| !card.state.is_terminal() && card.enrichment.is_none())
                 })
-                .map(|c| (c, snapshot.model.score(&c.features)))
+                .filter_map(|c| {
+                    let (p, _, effects) = score::learned_score(
+                        &snapshot.model,
+                        &snapshot.learned,
+                        c.kind,
+                        &c.features,
+                        now,
+                    );
+                    // Suppressed candidates are not worth the judge's time.
+                    (!score::hidden(&effects)).then_some((c, p))
+                })
                 .collect();
             pending.sort_by(|a, b| b.1.total_cmp(&a.1));
             let mut inputs = Vec::new();
@@ -248,6 +266,7 @@ impl Proactive {
         report.judged = enrichments.len();
         let _g = self.guard();
         let mut state = self.cards.load()?;
+        state.migrate(now);
         let mut produced = HashSet::new();
         for cand in cands {
             let id = cards::card_id(&cand.dedup_key);
@@ -295,8 +314,9 @@ impl Proactive {
             if let Some(e) = &card.enrichment {
                 order_actions(card, e.suggested_action.clone());
             }
-            card.rescore(&state.model);
         }
+        state.learned.prune(now);
+        state.rescore_open(now);
         state.prune(now, self.cfg.tombstone_days);
         state.last_refresh = Some(now);
         state.version = cards::STATE_VERSION;
@@ -338,19 +358,18 @@ impl Proactive {
     fn update<T>(
         &self,
         id: &str,
+        now: OffsetDateTime,
         f: impl FnOnce(&mut Card, &mut ScoringModel) -> Result<T>,
     ) -> Result<T> {
         let _g = self.guard();
         let mut state = self.cards.load()?;
+        state.migrate(now);
         let ProactiveState { cards, model, .. } = &mut state;
         let card = cards
             .get_mut(id)
             .ok_or_else(|| Error::NotFound(format!("card {id}")))?;
         let out = f(card, model)?;
-        let model = state.model.clone();
-        for c in state.cards.values_mut().filter(|c| !c.state.is_terminal()) {
-            c.rescore(&model);
-        }
+        state.rescore_open(now);
         self.cards.save(&state)?;
         Ok(out)
     }
@@ -359,32 +378,37 @@ impl Proactive {
         &self,
         id: &str,
         fb: Feedback,
+        reason: Option<&DismissReason>,
         now: OffsetDateTime,
         f: impl FnOnce(&mut Card) -> Result<()>,
     ) -> Result<()> {
         let _g = self.guard();
         let mut state = self.cards.load()?;
+        state.migrate(now);
         let card = state
             .cards
             .get_mut(id)
             .ok_or_else(|| Error::NotFound(format!("card {id}")))?;
         let already_accepted = card.was_accepted;
         f(card)?;
-        let (features, kind) = (card.features.clone(), card.kind);
+        let (features, kind, title) = (card.features.clone(), card.kind, card.title.clone());
         // One accept per card counts; repeated accepts are no-ops.
         if !(fb == Feedback::Accepted && already_accepted) {
-            state.model.update(&features, fb);
+            state
+                .model
+                .update_weighted(&features, fb, model_weight(fb, reason));
+            state
+                .learned
+                .record(kind, &features, fb, reason, &title, now);
             state.feedback_log.push(cards::FeedbackEvent {
                 card_id: id.to_owned(),
                 kind,
                 feedback: fb,
+                reason: reason.map(|r| r.as_str().to_owned()),
                 at: now,
             });
         }
-        let model = state.model.clone();
-        for c in state.cards.values_mut().filter(|c| !c.state.is_terminal()) {
-            c.rescore(&model);
-        }
+        state.rescore_open(now);
         self.cards.save(&state)
     }
 
@@ -403,20 +427,23 @@ impl Proactive {
     }
 
     pub fn accept(&self, id: &str, now: OffsetDateTime) -> Result<()> {
-        self.learn(id, Feedback::Accepted, now, |c| c.accept(now))
+        self.learn(id, Feedback::Accepted, None, now, |c| c.accept(now))
     }
 
     pub fn dismiss(&self, id: &str, reason: DismissReason, now: OffsetDateTime) -> Result<()> {
-        self.learn(id, Feedback::Dismissed, now, |c| c.dismiss(reason, now))
+        let r = reason.clone();
+        self.learn(id, Feedback::Dismissed, Some(&r), now, |c| {
+            c.dismiss(reason, now)
+        })
     }
 
     pub fn snooze(&self, id: &str, until: OffsetDateTime, now: OffsetDateTime) -> Result<()> {
-        self.learn(id, Feedback::Snoozed, now, |c| c.snooze(until, now))
+        self.learn(id, Feedback::Snoozed, None, now, |c| c.snooze(until, now))
     }
 
     /// Mark an accepted card done (the user handled it themselves).
     pub fn complete(&self, id: &str, now: OffsetDateTime) -> Result<()> {
-        self.update(id, |c, _| c.complete(now))
+        self.update(id, now, |c, _| c.complete(now))
     }
 
     /// Prepare action `index` of a card for approval (drafts content, renders the diff).
@@ -491,6 +518,38 @@ impl Proactive {
         Ok(self.cards.load()?.model)
     }
 
+    /// What feedback taught the ranking, strongest adjustment first.
+    pub fn learned(&self, now: OffsetDateTime) -> Result<Vec<LearnedEntry>> {
+        Ok(self.cards.load()?.learned.list(now))
+    }
+
+    /// Forget what feedback taught the ranking (all, or one sender, domain, kind or thread) and
+    /// rescore open cards, so suppressed cards come back. Returns how many learned entries were
+    /// forgotten.
+    ///
+    /// `All` also puts the scoring model's weights back to the prior and its update count to
+    /// zero; one kind also puts that kind's model weight back to its prior. The feedback log
+    /// (the audit of what the user did) is kept.
+    pub fn reset_learning(&self, scope: &ResetScope, now: OffsetDateTime) -> Result<usize> {
+        let _g = self.guard();
+        let mut state = self.cards.load()?;
+        // Legacy per-sender weights become entries first, so they are forgotten like the rest.
+        state.migrate(now);
+        let n = state.learned.reset(scope);
+        match scope {
+            ResetScope::All => state.model.reset_learned(),
+            ResetScope::One(Scope::Kind, key) => {
+                if let Some(kind) = feedback::parse_kind(key.trim()) {
+                    state.model.reset_kind(kind);
+                }
+            }
+            ResetScope::One(..) => {}
+        }
+        state.rescore_open(now);
+        self.cards.save(&state)?;
+        Ok(n)
+    }
+
     /// The morning brief from the current cards and calendar (run `refresh` first).
     pub fn brief(&self, now: OffsetDateTime) -> Result<MorningBrief> {
         let corpus = self.corpus()?;
@@ -526,6 +585,17 @@ impl Drop for ExecutingGuard<'_> {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.card_id);
+    }
+}
+
+/// How much one piece of feedback moves the shared model's weights: dismissals that say
+/// something about this one card (already handled, wrong info) move them less.
+fn model_weight(fb: Feedback, reason: Option<&DismissReason>) -> f64 {
+    match (fb, reason) {
+        (Feedback::Dismissed, Some(DismissReason::AlreadyHandled)) => 0.5,
+        (Feedback::Dismissed, Some(DismissReason::WrongInfo)) => 0.25,
+        (Feedback::Dismissed, Some(DismissReason::Other(_))) => 0.75,
+        _ => 1.0,
     }
 }
 

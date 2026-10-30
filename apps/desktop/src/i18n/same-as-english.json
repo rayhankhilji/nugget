@@ -37,7 +37,8 @@
     "shortcuts.hint",
     "shortcuts.key.ctrl",
     "shortcuts.key.esc",
-    "status.version"
+    "status.version",
+    "today.learned.line"
   ],
   "de": [
     "addSource.imap.port",
@@ -87,6 +88,7 @@
     "status.title",
     "status.triage",
     "status.vault",
+    "today.learning.scope.domain",
     "updates.badge.beta",
     "updates.title"
   ],

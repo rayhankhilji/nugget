@@ -11,6 +11,7 @@ import {
   api,
   DISMISS_REASONS,
   errorMessage,
+  learningApi,
   proactiveApi,
   proactiveEvents,
   type BriefCardView,
@@ -21,6 +22,7 @@ import {
   type CardFeedbackRequest,
   type CardView,
   type DismissReason,
+  type ResetLearningRequest,
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { formatRelative, formatTime } from "../format";
@@ -28,6 +30,7 @@ import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
+import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
   SNOOZE_CHOICES,
   cardKindLabel,
@@ -46,6 +49,7 @@ export function TodayPage() {
   const cards = useAsync(() => proactiveApi.cardsList({}), []);
   const brief = useAsync(() => proactiveApi.briefGet(), []);
   const metrics = useAsync(() => proactiveApi.metrics(), []);
+  const learning = useAsync(() => learningApi.learning(), []);
   // Only to tell "all caught up" from "nothing connected yet"; unknown (`null`) is not "none".
   const sources = useAsync(() => api.sourcesList().catch(() => null), []);
   const [refreshing, setRefreshing] = useState(false);
@@ -61,6 +65,7 @@ export function TodayPage() {
     cards.reload();
     brief.reload();
     metrics.reload();
+    learning.reload();
   };
 
   useEvent(proactiveEvents.onCardsChanged, reloadAll);
@@ -98,9 +103,19 @@ export function TodayPage() {
       inboxRef.current?.focus();
       cards.reload();
       metrics.reload();
+      learning.reload();
     } catch (e) {
       setStatus(t("today.feedbackFailed", { error: errorMessage(e) }));
     }
+  };
+
+  /** Forget what feedback taught (one sender/domain/kind/thread, or all); throws on failure. */
+  const forget: Forget = async (request: ResetLearningRequest) => {
+    const r = await learningApi.resetLearning(request);
+    // The daemon also emits `cards.changed`; refetch now in case it is not delivered.
+    cards.reload();
+    learning.reload();
+    return r;
   };
 
   const list = cards.data;
@@ -171,10 +186,18 @@ export function TodayPage() {
                     void feedback(c, { feedback: "snooze", until }, t("today.snoozed", { title: c.title, until: formatTime(until) }));
                   }}
                   onAction={(a) => setAction({ card: c, action: a })}
+                  onForget={forget}
                 />
               ))}
             </ul>
           )}
+          <LearningPanel
+            learning={learning.data}
+            error={learning.error}
+            loading={learning.loading}
+            onRetry={learning.reload}
+            onForget={forget}
+          />
         </>
       )}
 
@@ -304,12 +327,14 @@ function CardItem({
   onDismiss,
   onSnooze,
   onAction,
+  onForget,
 }: {
   card: CardView;
   onAccept: () => void;
   onDismiss: (reason: DismissReason, text: string) => void;
   onSnooze: (choice: SnoozeChoice) => void;
   onAction: (a: CardActionView) => void;
+  onForget: Forget;
 }) {
   const t = useT();
   const now = useNow();
@@ -355,6 +380,7 @@ function CardItem({
           </ul>
         </div>
       )}
+      <LearnedLines card={card} onForget={onForget} />
 
       {card.evidence.length > 0 && (
         <div>

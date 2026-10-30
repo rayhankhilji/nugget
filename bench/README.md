@@ -464,7 +464,8 @@ trait (`src/suites/proactive/engine.rs`):
 - `observe(item)`;
 - `brief(day, k)`, which returns at most k cards, each with a kind, a subject and an optional
   typed action carrying a dry-run diff (`target`, `before`, `after`);
-- `feedback(card, accepted | dismissed)`;
+- `feedback(card, accepted | dismissed(reason))`, the reason being one the Today page offers
+  (not relevant, already handled, not important, wrong info);
 - `execute(card, approval)`;
 - `audit_log()`.
 
@@ -492,13 +493,13 @@ written into it in the shape ingest produces, so the crate's own corpus reader r
 - notes as Markdown items with a text chunk.
 
 Each morning (07:00 UTC) the adapter calls `refresh`, shows the top 5 of `inbox()`, and sends
-accept and dismiss to the crate, whose scoring model learns from them. Each shown card's first
+accept and dismiss (with the simulated user's reason) to the crate, which learns from them. Each shown card's first
 action is prepared through `ActionRunner::prepare` (its rendered preview is the dry-run diff) and
 executed through `Proactive::run_action` with an approval bound to that preview's digest, under
 the default `PolicyEngine`, into sandbox executors that record what they applied. The drafter is
 a deterministic stub and no LLM judge is configured, so nothing touches the network. The
-learning-off arm persists cards normally but resets the scoring model to its prior on every
-save. Card mapping, by the card's first evidence item: `unanswered_thread` → `thread:<thread>`;
+learning-off arm persists cards normally but, on every save, resets the scoring model to its prior
+and forgets the per sender, domain, kind and thread entries learned from feedback. Card mapping, by the card's first evidence item: `unanswered_thread` → `thread:<thread>`;
 `follow_up` (a promise in sent mail) and `commitment` (graph) → `commitment_due`,
 `commit:<item>` (also dated todos in notes); `follow_up` with an `awaiting:` key (the user asked
 and got no answer) → `follow_up`, `thread:<thread>`; `meeting_prep` → `event:<id>`; `renewal` →
@@ -547,7 +548,12 @@ and returns its brief (k = 5).
 
 - **Feedback.** The simulated user accepts a card that matches gold and dismisses anything else,
   and each decision is flipped with probability 0.1. That noise is what the engine has to learn
-  through.
+  through. A dismissal carries the reason a real user would pick, read off the gold labels
+  (`sim::dismiss_reason`): an answered thread, completed commitment or cancelled meeting is
+  *already handled*; a newsletter, notification, unflagged bulk mail or spam renewal is *not
+  important*; a gold card dismissed by noise, and anything unlabelled, is *not relevant*. Picking
+  the reason draws nothing from the RNG, so a seed makes the same accept and dismiss decisions as
+  before reasons existed. The reference engine and the baseline ignore reasons.
 - **Execution.** An accepted card's action is executed with a fresh `Approval{card_id, token}`.
 - **Approval probes.** After day 30 the benchmark asks the engine to execute:
   - every dismissed card, with no approval;
@@ -589,6 +595,7 @@ days 21 to 30 alone would mix learning with the days simply being different.
 | `cards.acceptance_rate` | Accepted / shown: the "precision of accepted cards" the product can track live without labels | info |
 | `cards.accepted_precision` | Accepted cards that are gold / accepted (the rest is user noise) | info |
 | `cards.shown_per_day` | Mean brief size | info |
+| `feedback.dismissed.<reason>` | Dismissals given as `not_relevant`, `already_handled` or `not_important`, per run | info |
 | `cards.duplicate_shows` | Shows of a `(kind, subject)` already shown, per run | = 0 |
 | `distractors.false_positive_rate` | Distractors that produced any card / all distractors | ≤ 0.05 |
 | `distractors.header_flagged.false_positives` | Newsletters and notifications that produced a card (no feedback should be needed) | = 0 |
@@ -1070,6 +1077,71 @@ unflagged bulk sender is still shown once (bulk FPR 0.21; nothing in the message
 first contact who asks a question, so it takes one dismissal), and each monthly plan is shown once
 before its first dismissal. The fixture is one persona; these heuristics need checking on real
 mail before the numbers are quoted as product numbers.
+
+### `proactive`, learning from feedback (BB2, 2026-10-29)
+
+**Setup.** As for the M5 real-crate run above: release build, `proactive --backend real`, seed 42,
+30 user seeds (standard), user noise 0.1, k = 5, `min_score` 0.45, no judge. A run takes about
+61 s. "Before" is the crate at `efe17f0`; "after" is the crate with BB2's learning layer.
+
+**What changed.**
+
+- **The simulated user gives a reason** with every dismissal (`sim::dismiss_reason`, from the
+  gold labels): *already handled* for an answered thread, a completed commitment or a cancelled
+  meeting; *not important* for a newsletter, notification, unflagged bulk mail or spam renewal;
+  *not relevant* for a gold card dismissed by noise and anything unlabelled. Per run that is
+  about 7.4 not relevant, 0.9 already handled and 4.9 not important. The adapter passes the
+  reason to `Proactive::dismiss`. Choosing it draws nothing from the RNG: the old crate run with
+  reasons ("before, with reasons") reproduces "before" exactly, metric for metric, and the
+  reference engine and recency judge are unchanged.
+- **The crate learns per sender, domain, kind and thread** (`nugget_proactive::feedback`):
+  decayed accept and dismiss counts on each, bounded log-odds adjustments weighted by the reason
+  (*not important* counts fully on sender, domain and kind; *not relevant* half on kind), a
+  30-day half-life, and *already handled* hiding the thread until a newer message arrives. The
+  learning-off arm now also forgets these entries on every save.
+
+| Metric | before | after | learning off |
+|---|---|---|---|
+| precision@5 (target ≥ 0.7) | 0.849 | 0.847 | |
+| recall (target ≥ 0.8) | 0.997 | 0.974 | |
+| recall: unanswered / follow-up / commitment / meeting / renewal | 0.99 / 1.00 / 1.00 / 1.00 / 1.00 | 0.98 / 1.00 / 0.89 / 1.00 / 1.00 | |
+| distractor false-positive rate (target ≤ 0.05) | 0.031 | 0.033 | 0.063 |
+| FPR: newsletter / notification / bulk / answered / completed / cancelled / spam renewal | 0 / 0 / 0.21 / 0.03 / 0 / 0 / 0 | 0 / 0 / 0.22 / 0.03 / 0 / 0 / 0 | |
+| precision, days 1 to 10 → days 21 to 30 | 0.764 → 0.947 (+0.18) | 0.778 → 0.921 (+0.14) | → 0.750 |
+| gain over frozen weights, days 21 to 30 (target ≥ 0) | +0.197 | +0.171 | |
+| executed without approval (target 0) | 0 (63.6 probes, 38.1 executions per run) | 0 (63.4 probes, 37.1 executions per run) | |
+| shown per day / acceptance rate / accepted precision | 1.70 / 0.750 / 0.976 | 1.67 / 0.738 / 0.977 | |
+
+Every target still passes, and early precision improves (+0.014), but on this world recall
+(−0.023) and late precision (−0.026) are worse than before. Two causes, from per-seed traces:
+
+- **"Already handled" hides a promise in the same thread.** In thread `t-112` Priya asks for a
+  scorecard and Sam replies the same day, "I'll send the hiring scorecard by 2026-09-18". The
+  adapter's arrival times wrap within a busy day (`8 + n mod 10` hours), so the reply is stamped
+  before the question; the crate shows the question as unanswered (the one answered-thread false
+  positive, in before and after alike) and the user dismisses it as already handled. That
+  suppresses the whole thread, including Sam's own promise (gold `g-023`, due days 16 to 18),
+  which is then missed in 27 of 30 seeds. This accounts for all of the commitment recall drop.
+- **Repeat bulk senders creep back over the threshold.** One *not important* dismissal of
+  `success@acme-crm.test` gives its later cards about −1.3 to −1.75 (sender) and −0.4 to −0.6
+  (domain), but accepts of other unanswered threads give the kind +0.3 to +0.4, and an unanswered
+  card's score rises with age. Its next cards sit just under `min_score` and cross it after a
+  week or so (ranks 0.45 to 0.55). Bulk false positives shown in days 21 to 30 rose from 23 to 35
+  over the 30 seeds; the old per-sender weight kept them further down.
+
+**New assertions** (`src/suites/proactive/tests.rs`, the real crate on hand-built worlds, no
+network):
+
+- `not_important_ranks_the_sender_lower_the_next_day`: Ana's card is dismissed as not important
+  (and Bob's accepted); the next day Ana's new question ranks below Carl's otherwise-equal one
+  (0.12 against 0.49; with learning off they score level, 0.602 and 0.601).
+- `already_handled_stops_the_thread_until_a_newer_message`: Sam's question to Kim is dismissed as
+  already handled; the promise in the same mail, due two days later, is not shown (with learning
+  off it is), and Kim's reply with a new question is.
+- `learning_keeps_the_approval_gate`: with reasons, learning on and 30% user noise,
+  `executed_without_approval` stays 0 and every execution matches its approved diff.
+- `simulated_user_gives_reasons_from_the_gold_labels` and `reasons_do_not_change_the_decisions`
+  pin the reason mapping and that reasons never touch the RNG.
 
 ### `knowledge`, M2 first wired run (2026-10-28)
 
