@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Release rehearsal, test only: make a throwaway local CA and a server certificate for localhost
-# (DNS:localhost, IP:127.0.0.1, IP:::1), valid for two days, so the rehearsal can serve its update
-# feed over HTTPS. Release builds of the app refuse plain-HTTP update endpoints and verify TLS
+# Release rehearsal, test only: make a throwaway local CA, name-constrained to the loopback names,
+# and a server certificate for localhost (DNS:localhost, IP:127.0.0.1, IP:::1), both valid for two
+# days, so the rehearsal can serve its update feed over HTTPS. Release builds of the app refuse plain-HTTP update endpoints and verify TLS
 # against the OS trust store (rustls-platform-verifier), so the CA is added to the runner's
 # store for the duration of the job (trust-ca.sh, or the Windows step) and removed afterwards.
 # The CA's private key is deleted as soon as the server certificate is signed.
@@ -26,6 +26,8 @@ CN = Nugget release rehearsal CA (throwaway, test only)
 [ext]
 basicConstraints = critical, CA:TRUE, pathlen:0
 keyUsage = critical, keyCertSign, cRLSign
+# Even if its key survived, this CA could vouch for nothing but the loopback names.
+nameConstraints = critical, permitted;DNS:localhost, permitted;IP:127.0.0.1/255.255.255.255, permitted;IP:0:0:0:0:0:0:0:1/FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF:FFFF
 subjectKeyIdentifier = hash
 EOF
 cat >server.cnf <<'EOF'

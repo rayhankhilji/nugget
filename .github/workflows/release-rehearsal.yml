@@ -11,7 +11,8 @@ name: Release rehearsal
 # - builds the app twice, an OLD and a NEW version (both `-rehearsal`), with the throwaway updater
 #   key and a feed on https://localhost baked in;
 # - signs the new build's update payload and the feed exactly as release.yml's `sign` and
-#   `channels` jobs do (packaging/scripts/updater_manifest.py, `tauri signer sign`);
+#   `channels` jobs do for a prerelease (promote, then the beta channel; packaging/scripts/
+#   updater_manifest.py, `tauri signer sign`); the installed apps follow the beta channel;
 # - serves the feed over HTTPS from 127.0.0.1 (a throwaway local CA, trusted by the runner for
 #   the job only) and lets the installed OLD app find, verify and install the NEW one;
 # - checks that a feed signed with the wrong key, and a payload signed with the wrong key, are
@@ -32,6 +33,12 @@ name: Release rehearsal
 
 on:
   workflow_dispatch:
+  # TEMPORARY while iterating; removed before merge.
+  push:
+    branches: [ee/release-readiness]
+    paths:
+      - ".github/workflows/release-rehearsal.yml"
+      - "packaging/scripts/rehearsal/**"
 
 permissions: {}
 

@@ -11,7 +11,8 @@
 #                                updater key and the localhost feed baked in
 #   prepare.sh sign              sign the new build's update payloads and the feed exactly as
 #                                release.yml's `sign` and `channels` jobs do, and lay out the
-#                                feed variants to serve (good, wrong feed key, wrong payload key)
+#                                feed variants to serve (good, wrong feed key, wrong payload key),
+#                                on the beta channel, where a prerelease goes
 #
 # Environment: TARGET (default host), BUNDLES (tauri --bundles; default appimage on Linux,
 # nsis on Windows), REHEARSAL_DIR (default $RUNNER_TEMP/rehearsal). Run from anywhere.
@@ -38,12 +39,30 @@ updater_sign() { # key file
   pw="$(cat "$KEYS/$1.password")"
   key="$(cat "$KEYS/$1.key")"
   mask "$pw"
+  mask "$(tr -d '\r\n' <<<"$key")"
   TAURI_SIGNING_PRIVATE_KEY="$key" TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$pw" \
     tauri signer sign "$2" >/dev/null
   test -s "$2.sig" || rdie "tauri signer sign wrote no $2.sig"
 }
 
+# Both versions must be marked "-rehearsal", and NEW must be strictly newer than OLD by the same
+# SemVer rule the release pipeline uses (updater_manifest.newer).
+check_versions() {
+  case "$OLD_VERSION/$NEW_VERSION" in
+    *-rehearsal*/*-rehearsal*) ;;
+    *) rdie "both versions must contain -rehearsal: $OLD_VERSION, $NEW_VERSION" ;;
+  esac
+  "$PY" -I - "$REHEARSAL_ROOT/packaging/scripts" "$OLD_VERSION" "$NEW_VERSION" <<'PYEOF' ||
+import sys
+sys.path.insert(0, sys.argv[1])
+from updater_manifest import newer
+sys.exit(0 if newer(sys.argv[3], sys.argv[2]) else 1)
+PYEOF
+    rdie "$NEW_VERSION is not newer than $OLD_VERSION"
+}
+
 cmd_keys() {
+  check_versions
   [ ! -e "$KEYS" ] || rdie "$KEYS already exists; keys are made once per run"
   mkdir -p "$KEYS" "$PUB"
   chmod 700 "$KEYS"
@@ -121,6 +140,7 @@ EOF
 
 cmd_build() {
   local which="$1" version conf backup out bundle
+  check_versions
   case "$which" in
     old) version="$OLD_VERSION" ;;
     new) version="$NEW_VERSION" ;;
@@ -150,19 +170,21 @@ cmd_build() {
   record "Build $which installer ($version)" PASS "$(cd "$out" && for f in *; do printf '%s %s; ' "$f" "$(sha256 "$f")"; done)"
 }
 
-# Serve root for one feed variant: ROOT/feed/stable.json(.sig) and ROOT/dist/<payloads>.
+# Serve root for one feed variant: ROOT/feed/beta.json(.sig) and ROOT/dist/<payloads>. A
+# prerelease only ever reaches the beta channel (release.yml `channels`), so that is the feed.
 layout() { # variant dist feed.json feed.sig
   local root="$REHEARSAL_DIR/serve/$1"
+  rm -rf "$root"
   mkdir -p "$root/feed" "$root/dist"
   local f
   for f in $("$PY" -I packaging/scripts/updater_manifest.py payloads "$2" | tr -d '\r'); do
     ln "$f" "$root/dist/" 2>/dev/null || cp "$f" "$root/dist/"
   done
-  cp "$3" "$root/feed/stable.json"
-  cp "$4" "$root/feed/stable.json.sig"
+  cp "$3" "$root/feed/beta.json"
+  cp "$4" "$root/feed/beta.json.sig"
   mkdir -p "$EVIDENCE/feeds/$1"
-  cp "$3" "$EVIDENCE/feeds/$1/stable.json"
-  cp "$4" "$EVIDENCE/feeds/$1/stable.json.sig"
+  cp "$3" "$EVIDENCE/feeds/$1/beta.json"
+  cp "$4" "$EVIDENCE/feeds/$1/beta.json.sig"
 }
 
 cmd_sign() {
@@ -183,11 +205,14 @@ cmd_sign() {
     --base-url "$DIST_BASE" --out "$dist/latest.json"
   "$PY" -I packaging/scripts/updater_manifest.py checksums "$dist" >/dev/null
   updater_sign updater "$dist/latest.json"
-  # release.yml `channels`: the stable feed is a byte-for-byte copy of latest.json and its .sig.
-  "$PY" -I packaging/scripts/updater_manifest.py channel "$dist/latest.json" stable >/dev/null
+  # release.yml `channels` for a prerelease: beta only. `promote` against the (empty) current
+  # feed must accept it; the beta feed is then a byte-for-byte copy of latest.json and its .sig.
+  [ "$("$PY" -I packaging/scripts/updater_manifest.py promote "$dist/latest.json" "$REHEARSAL_DIR/no-current-feed.json" | tr -d '\r')" = "$NEW_VERSION" ] ||
+    rdie "updater_manifest.py promote refused $NEW_VERSION"
+  "$PY" -I packaging/scripts/updater_manifest.py channel "$dist/latest.json" beta >/dev/null
   "$PY" -I packaging/scripts/updater_manifest.py checksums "$dist" >/dev/null
   mkdir -p "$EVIDENCE/release"
-  for f in latest.json latest.json.sig stable.json stable.json.sig SHA256SUMS; do cp "$dist/$f" "$EVIDENCE/release/"; done
+  for f in latest.json latest.json.sig beta.json beta.json.sig SHA256SUMS; do cp "$dist/$f" "$EVIDENCE/release/"; done
   for f in "$dist"/*.sig; do cp "$f" "$EVIDENCE/release/"; done
   cat "$dist/SHA256SUMS"
 
@@ -204,15 +229,15 @@ EOF
   fi
 
   # Variant "good": what `channels` would publish.
-  layout good "$dist" "$dist/stable.json" "$dist/stable.json.sig"
+  layout good "$dist" "$dist/beta.json" "$dist/beta.json.sig"
 
   # Variant "wrong-feed-key": the same feed bytes, signed by a key the app does not trust.
   local w="$REHEARSAL_DIR/wrong-feed-key"
   rm -rf "$w"
   mkdir -p "$w"
-  cp "$dist/stable.json" "$w/stable.json"
-  updater_sign updater-wrong "$w/stable.json"
-  layout wrong-feed-key "$dist" "$w/stable.json" "$w/stable.json.sig"
+  cp "$dist/beta.json" "$w/beta.json"
+  updater_sign updater-wrong "$w/beta.json"
+  layout wrong-feed-key "$dist" "$w/beta.json" "$w/beta.json.sig"
 
   # Variant "wrong-payload-key": a correctly signed feed whose payload signatures were made
   # with the wrong key (the feed itself verifies; the download must not).
@@ -228,10 +253,10 @@ EOF
     --pub-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --base-url "$DIST_BASE" --out "$p/latest.json"
   updater_sign updater "$p/latest.json"
-  "$PY" -I packaging/scripts/updater_manifest.py channel "$p/latest.json" stable >/dev/null
-  layout wrong-payload-key "$p" "$p/stable.json" "$p/stable.json.sig"
+  "$PY" -I packaging/scripts/updater_manifest.py channel "$p/latest.json" beta >/dev/null
+  layout wrong-payload-key "$p" "$p/beta.json" "$p/beta.json.sig"
 
-  record "Update signed like release.yml (payloads, latest.json, latest.json.sig, stable.json, SHA256SUMS)" PASS \
+  record "Update signed like release.yml (payloads, latest.json + .sig, promote, beta.json + .sig, SHA256SUMS)" PASS \
     "$(wc -l <"$REHEARSAL_DIR/payloads.txt") payload(s); variants: good, wrong-feed-key, wrong-payload-key"
 }
 

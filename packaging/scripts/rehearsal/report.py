@@ -6,10 +6,11 @@ the rehearsal scripts), the public keys and the release files in EVIDENCE, and w
 EVIDENCE/report.md: a PASS/FAIL table, the public keys, SHA256SUMS and the feed files, and the
 list of logs. Appends the same report to $GITHUB_STEP_SUMMARY when set.
 
-Before writing anything it checks that EVIDENCE holds no private key material: no file named
+Before reading anything it checks that EVIDENCE holds no private key material: no file named
 *.key or *.password, and no file containing the text of any file in KEYS_DIR (the throwaway
 private keys and their passwords). A hit is reported as a failed check and the offending file
-is deleted, so the upload step can never ship it.
+is deleted, so the upload step can never ship it. The finished report goes through the same
+check (and is redacted and failed on a hit) before it is written or added to the job summary.
 
 Exits 1 if any check failed or nothing was recorded.
 
@@ -24,8 +25,8 @@ import sys
 from pathlib import Path
 
 
-def scrub(evidence: Path, keys: Path) -> list[str]:
-    """Delete anything private from the evidence; return what was found."""
+def load_secrets(keys: Path) -> list[bytes]:
+    """The text of every private key and password in KEYS_DIR."""
     secrets: list[bytes] = []
     if keys.is_dir():
         for k in keys.iterdir():
@@ -33,6 +34,11 @@ def scrub(evidence: Path, keys: Path) -> list[str]:
                 text = k.read_bytes().strip()
                 if text:
                     secrets.append(text)
+    return secrets
+
+
+def scrub(evidence: Path, secrets: list[bytes]) -> list[str]:
+    """Delete anything private from the evidence; return what was found."""
     found = []
     for f in sorted(evidence.rglob("*")):
         if not f.is_file():
@@ -65,6 +71,10 @@ def main(argv: list[str]) -> int:
     ev: Path = args.evidence
     ev.mkdir(parents=True, exist_ok=True)
 
+    # Scrub first, so nothing below can read a file that held a secret.
+    secrets = load_secrets(args.keys)
+    leaked = scrub(ev, secrets)
+
     rows: list[tuple[str, str, str]] = []
     results = ev / "results.tsv"
     if results.is_file():
@@ -73,7 +83,6 @@ def main(argv: list[str]) -> int:
             if len(parts) == 3:
                 rows.append((parts[0], parts[1], parts[2]))
 
-    leaked = scrub(ev, args.keys)
     if leaked:
         rows.append(("Evidence holds no private key material", "FAIL", "removed: " + ", ".join(leaked)))
     else:
@@ -120,6 +129,13 @@ def main(argv: list[str]) -> int:
         if f.is_file() and f.name != "report.md":
             out.append(f"- `{f.relative_to(ev).as_posix()}` ({f.stat().st_size} bytes)")
     text = "\n".join(out) + "\n"
+    # The report itself goes through the same check before it is written anywhere.
+    if any(sec.decode("utf-8", "replace") in text for sec in secrets):
+        for sec in secrets:
+            text = text.replace(sec.decode("utf-8", "replace"), "[REDACTED]")
+        text = text.replace(f"# Release rehearsal ({args.os}): {verdict}", f"# Release rehearsal ({args.os}): FAIL", 1)
+        text += "\n**FAIL: the report contained private key material; it was redacted.**\n"
+        verdict = "FAIL"
 
     (ev / "report.md").write_text(text, encoding="utf-8")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")

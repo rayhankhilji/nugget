@@ -1,7 +1,7 @@
 # Release rehearsal, Windows x64: the end-to-end checks, after prepare.sh has built and signed
 # everything and the throwaway CA is in the Windows root store (workflow step, test only).
 #
-#   1. Wrong feed key: stable.json signed by a key the app doesn't trust is refused; nothing
+#   1. Wrong feed key: beta.json signed by a key the app doesn't trust is refused; nothing
 #      installs.
 #   2. Wrong payload key: a correctly signed feed whose payload signature is by the wrong key is
 #      offered, but the download fails verification; nothing installs.
@@ -139,6 +139,11 @@ function Installed-Version {
 function Install-Processes {
     @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($installDir, [StringComparison]::OrdinalIgnoreCase) })
 }
+# A running NSIS installer (the updater starts the downloaded *-setup.exe in passive mode).
+function Setup-Processes {
+    @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath -like '*-setup.exe' })
+}
+
 function Stop-InstallProcesses {
     foreach ($p in (Install-Processes)) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     $null = Wait-Until 30 { @(Install-Processes).Count -eq 0 }
@@ -160,7 +165,10 @@ function Start-Feed([string]$variant, [string]$caseDir) {
     if (-not (Wait-Until 20 { Test-Path -LiteralPath $ready })) { throw "the feed server did not start (see $caseDir\feed-server.log)" }
 }
 function Stop-Feed {
-    if ($script:server -and -not $script:server.HasExited) { Stop-Process -Id $script:server.Id -Force -ErrorAction SilentlyContinue }
+    if ($script:server -and -not $script:server.HasExited) {
+        Stop-Process -Id $script:server.Id -Force -ErrorAction SilentlyContinue
+        $null = $script:server.WaitForExit(10000) # the port must be free for the next case
+    }
     $script:server = $null
 }
 
@@ -177,9 +185,10 @@ function New-Case([string]$name) {
     $env:NUGGET_HOME = Join-Path $w 'nh'
     $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $w 'webview2'
     New-Item -ItemType Directory -Force -Path $env:NUGGET_HOME | Out-Null
-    # Stable channel, auto-install: download and verify in the background, install at quit.
+    # Beta channel (where a prerelease is published), auto-install: download and verify in the
+    # background, install at quit.
     New-Item -ItemType Directory -Force -Path $configDir | Out-Null
-    [IO.File]::WriteAllText($settingsFile, '{"channel":"stable","auto_install":true}', (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($settingsFile, '{"channel":"beta","auto_install":true}', (New-Object Text.UTF8Encoding($false)))
 }
 
 function Launch([string]$logName) {
@@ -227,25 +236,57 @@ function Show-Log {
 
 # ---- cases -------------------------------------------------------------------------------------
 
-function Case-Negative([string]$name, [string]$label, [string]$waitFor, [string]$mustContain, [string]$mustNot) {
+# minisign's error when a signature was made by another key: the only refusal these cases accept
+# ("download or signature check failed" alone would also cover a 404 or a TLS error).
+$keyMismatch = 'different key than the one provided'
+
+function Line-Of([string]$text) {
+    $lines = (Read-Shared $script:appLog) -split "`n"
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Contains($text)) { return $i + 1 } }
+    return 0
+}
+
+function Served([string]$pattern) {
+    (Read-Shared (Join-Path $script:caseDir 'feed-access.log')) -match ('"GET /' + $pattern + ' HTTP/1\.[01]" 200')
+}
+
+function Case-Negative([string]$name, [string]$label) {
     $c = "$label (Windows NSIS)"
     New-Case $name
     Start-Feed $name $script:caseDir
     Log "case $name"
     if (-not (Launch 'app.log')) { Record "${c}: old app starts" 'FAIL' "no window within ${windowTimeout}s"; Show-Log; End-Case; return }
-    if ((Wait-Logged $checkTimeout $waitFor) -and (Logged $mustContain) -and -not (Logged $mustNot)) {
-        Record "${c}: refused" 'PASS' ((First-Line $waitFor) -replace '^.*?(WARN|INFO) ', '')
+    if ($name -eq 'wrong-feed-key') {
+        $null = Wait-Logged $checkTimeout 'update check failed'
+        $ok = (Logged 'update check failed') -and (Logged 'the update feed failed signature verification') -and
+            (Logged $keyMismatch) -and (Served 'feed/beta\.json\.sig') -and -not (Logged 'update available')
+        $want = "'update check failed ... the update feed failed signature verification ... $keyMismatch', beta.json.sig served, no update offered"
+        $line = 'update check failed'
     } else {
-        Record "${c}: refused" 'FAIL' "no '$waitFor ... $mustContain' within ${checkTimeout}s, or '$mustNot' was logged"
+        $null = Wait-Logged $checkTimeout 'update download failed'
+        $avail = Line-Of 'update available'
+        $dl = Line-Of 'update download failed'
+        # Offered first, the payload really downloaded (HTTP 200), then refused for the key alone.
+        $ok = $avail -gt 0 -and $dl -gt $avail -and (Served 'dist/[^ ]+-setup\.exe') -and
+            (Logged 'download or signature check failed') -and (Logged $keyMismatch) -and -not (Logged 'update downloaded')
+        $want = "'update available' (line $avail), then 'update download failed ... $keyMismatch' (line $dl), a 200 for the payload, and no 'update downloaded'"
+        $line = 'update download failed'
+    }
+    if ($ok) {
+        Record "${c}: refused" 'PASS' ((First-Line $line) -replace '^.*?(WARN|INFO) ', '')
+    } else {
+        Record "${c}: refused" 'FAIL' "within ${checkTimeout}s, need $want"
         Show-Log
     }
     $st = Close-App
-    Start-Sleep -Seconds 3 # an installer would have started by now
+    # An installer would have started by now.
+    $setup = Wait-Until 10 { @(Setup-Processes).Count -gt 0 }
     $v = Installed-Version
-    if ($v -eq $OldVersion -and -not (Logged 'installing downloaded update')) {
-        Record "${c}: nothing installed" 'PASS' "nugget-desktop.exe still $v; exit status $st"
+    if ($v -eq $OldVersion -and -not $setup -and -not (Logged 'installing downloaded update')) {
+        Record "${c}: nothing installed" 'PASS' "no installer started; nugget-desktop.exe still $v; exit status $st"
     } else {
-        Record "${c}: nothing installed" 'FAIL' "nugget-desktop.exe is now $v"
+        Record "${c}: nothing installed" 'FAIL' "installer started: $setup; nugget-desktop.exe is $v"
+        foreach ($p in (Setup-Processes)) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     }
     End-Case
 }
@@ -272,20 +313,28 @@ function Case-Update {
     } else {
         Record "${c}: hands over to the installer when the window is closed" 'FAIL' "exit status $st"; Show-Log
     }
-    # The NSIS hooks stop nuggetd and the passive installer replaces the files.
+    # The NSIS hooks stop nuggetd and the passive installer replaces the files. Wait for the
+    # installer to appear and then to finish before looking at the result.
     $t = [Diagnostics.Stopwatch]::StartNew()
-    if (Wait-Until $installTimeout { (Installed-Version) -eq $NewVersion }) {
-        Record "${c}: installed nugget-desktop.exe has the new version" 'PASS' ("ProductVersion $NewVersion after {0:N0}s (was $OldVersion)" -f $t.Elapsed.TotalSeconds)
+    $started = Wait-Until 60 { @(Setup-Processes).Count -gt 0 -or (Installed-Version) -eq $NewVersion }
+    $finished = Wait-Until $installTimeout { @(Setup-Processes).Count -eq 0 }
+    if (-not $finished) {
+        Record "${c}: the passive installer finishes" 'FAIL' "still running after ${installTimeout}s"
     } else {
-        Record "${c}: installed nugget-desktop.exe has the new version" 'FAIL' "ProductVersion is $(Installed-Version) after ${installTimeout}s"
+        Record "${c}: the passive installer finishes" 'PASS' ("installer seen: $started; done {0:N0}s after the window closed" -f $t.Elapsed.TotalSeconds)
+    }
+    if ((Installed-Version) -eq $NewVersion) {
+        Record "${c}: installed nugget-desktop.exe has the new version" 'PASS' "ProductVersion $NewVersion (was $OldVersion)"
+    } else {
+        Record "${c}: installed nugget-desktop.exe has the new version" 'FAIL' "ProductVersion is $(Installed-Version)"
         Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'nugget|Nugget|setup' } |
             Format-Table ProcessId, ParentProcessId, Name, ExecutablePath -AutoSize | Out-String -Width 250 | Write-Host
     }
     # The passive installer restarts the app when it finishes (Tauri's /R); informational.
-    $relaunched = Wait-Until 60 { @(Install-Processes | Where-Object { $_.Name -eq 'nugget-desktop.exe' }).Count -gt 0 }
-    Record "${c}: installer restarted the app" 'INFO' $(if ($relaunched) { 'nugget-desktop.exe running again from the install directory' } else { 'no restart seen within 60s' })
+    $relaunched = Wait-Until 30 { @(Install-Processes | Where-Object { $_.Name -eq 'nugget-desktop.exe' }).Count -gt 0 }
+    Record "${c}: installer restarted the app" 'INFO' $(if ($relaunched) { 'nugget-desktop.exe running again from the install directory' } else { 'no restart seen within 30s' })
     $access = Read-Shared (Join-Path $script:caseDir 'feed-access.log')
-    if ($access -match '"GET /feed/stable\.json HTTP/1\.[01]" 200' -and $access -match '"GET /feed/stable\.json\.sig HTTP/1\.[01]" 200' -and $access -match '"GET /dist/[^ ]+-setup\.exe HTTP/1\.[01]" 200') {
+    if ($access -match '"GET /feed/beta\.json HTTP/1\.[01]" 200' -and $access -match '"GET /feed/beta\.json\.sig HTTP/1\.[01]" 200' -and $access -match '"GET /dist/[^ ]+-setup\.exe HTTP/1\.[01]" 200') {
         Record "${c}: fetched the feed, its signature and the payload over HTTPS" 'PASS' 'see logs/update/feed-access.log'
     } else {
         Record "${c}: fetched the feed, its signature and the payload over HTTPS" 'FAIL' ($access -replace "`n", ' ')
@@ -315,8 +364,8 @@ try {
     if ($v -eq $OldVersion) { Record 'Old build installed silently (per user)' 'PASS' "nugget-desktop.exe $v in a temp directory" }
     else { Record 'Old build installed silently (per user)' 'FAIL' "nugget-desktop.exe reports $v"; throw 'install failed' }
 
-    Case-Negative 'wrong-feed-key' 'Wrong feed key' 'update check failed' 'the update feed failed signature verification' 'update available'
-    Case-Negative 'wrong-payload-key' 'Wrong payload key' 'update download failed' 'download or signature check failed' 'update downloaded'
+    Case-Negative 'wrong-feed-key' 'Wrong feed key'
+    Case-Negative 'wrong-payload-key' 'Wrong payload key'
     Case-Update
     $failed = $false
 } catch {
@@ -324,6 +373,7 @@ try {
     if ($script:appLog) { Show-Log }
 } finally {
     Stop-Feed
+    foreach ($p in (Setup-Processes)) { Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }
     Stop-InstallProcesses
     $un = Join-Path $installDir 'uninstall.exe'
     if ($installed -and (Test-Path -LiteralPath $un)) {

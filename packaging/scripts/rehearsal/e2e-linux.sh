@@ -8,7 +8,7 @@
 #      signed update on the HTTPS localhost feed, downloads and verifies it, and replaces itself
 #      with the NEW AppImage when its window is closed. The result is byte-identical to the new
 #      build, carries the new version and starts.
-#   3. Wrong feed key: stable.json signed by a key the app doesn't trust is refused; nothing
+#   3. Wrong feed key: beta.json signed by a key the app doesn't trust is refused; nothing
 #      installs.
 #   4. Wrong payload key: a correctly signed feed whose payload signature is by the wrong key is
 #      offered, but the download fails verification; nothing installs.
@@ -123,6 +123,7 @@ main_window() {
     awk '{ id = $1; $1 = $2 = $3 = ""; if (substr($0, 4) == "Nugget") { print id; exit } }'
 }
 have_window() { [ -n "$(main_window)" ]; }
+no_window() { [ -z "$(main_window)" ]; }
 logged() { grep -qF "$1" "$app_log" 2>/dev/null; }
 app_gone() { ! kill -0 "$app_pid" 2>/dev/null; }
 
@@ -141,12 +142,15 @@ new_case() { # name
   export XDG_RUNTIME_DIR="$w/run"
   mkdir -p "$NUGGET_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
-  # Stable channel with auto-install: download and verify in the background, install at quit.
+  # Beta channel (where a prerelease is published) with auto-install: download and verify in
+  # the background, install at quit.
   mkdir -p "$XDG_CONFIG_HOME/dev.nugget.desktop"
-  printf '{"channel":"stable","auto_install":true}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/settings.json"
+  printf '{"channel":"beta","auto_install":true}\n' >"$XDG_CONFIG_HOME/dev.nugget.desktop/settings.json"
   # Any temp files (the updater's backup of the running AppImage) stay in the case directory.
   export TMPDIR="$w/tmp"
   mkdir -p "$TMPDIR"
+  # A window left over from an earlier case would be mistaken for this one.
+  wait_for 15 no_window || rdie "a 'Nugget' window from an earlier case is still open"
 }
 
 launch() { # log-name
@@ -196,6 +200,13 @@ end_case() {
   app_log=""
 }
 
+# minisign's error when a signature was made by another key (the only refusal these cases accept;
+# "download or signature check failed" alone would also cover a 404 or a TLS error).
+KEY_MISMATCH="different key than the one provided"
+
+# Line number of the first app-log line containing TEXT (empty if none).
+first_line() { grep -n -m1 -F "$1" "$app_log" 2>/dev/null | cut -d: -f1 || true; }
+
 served() { grep -qE "\"GET /$1 HTTP/1\\.[01]\" 200" "$case_dir/feed-access.log" 2>/dev/null; }
 
 # ---- 1. model manifest -------------------------------------------------------------------------
@@ -229,17 +240,19 @@ case_update() {
   new_case update
   start_server good
   rlog "case update: old $OLD_VERSION -> new $NEW_VERSION"
-  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; return; }
+  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; end_case; return; }
   if wait_logged "$check_timeout" "update available"; then
     pass "$c: old app finds the update on the signed feed" "$(grep -m1 -F 'update available' "$app_log" | sed 's/^.*INFO //')"
   else
     fail "$c: old app finds the update on the signed feed" "no 'update available' within ${check_timeout}s"
+    end_case
     return
   fi
   if wait_logged "$check_timeout" "update downloaded; installs at quit"; then
     pass "$c: payload downloaded and its signature verified" "logged 'update downloaded; installs at quit'"
   else
     fail "$c: payload downloaded and its signature verified" "no 'update downloaded; installs at quit' within ${check_timeout}s"
+    end_case
     return
   fi
   close_app; st="$close_status"
@@ -271,7 +284,7 @@ case_update() {
     fail "$c: installed app reports the new version" "version string $NEW_VERSION not found in the extracted binary"
   fi
 
-  if served "feed/stable.json" && served "feed/stable.json.sig" && served "dist/$payload"; then
+  if served "feed/beta.json" && served "feed/beta.json.sig" && served "dist/$payload"; then
     pass "$c: fetched the feed, its signature and the payload over HTTPS" "see logs/update/feed-access.log"
   else
     fail "$c: fetched the feed, its signature and the payload over HTTPS" "$(tr '\n' ' ' <"$case_dir/feed-access.log" 2>/dev/null)"
@@ -302,12 +315,12 @@ case_wrong_feed_key() {
   new_case wrong-feed-key
   start_server wrong-feed-key
   rlog "case wrong-feed-key"
-  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; return; }
+  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; end_case; return; }
   if wait_logged "$check_timeout" "update check failed" && logged "the update feed failed signature verification" &&
-    ! logged "update available"; then
+    logged "$KEY_MISMATCH" && served "feed/beta.json.sig" && ! logged "update available"; then
     pass "$c: feed refused" "$(grep -m1 -F 'update check failed' "$app_log" | sed 's/^.*WARN //')"
   else
-    fail "$c: feed refused" "no 'update check failed ... the update feed failed signature verification' within ${check_timeout}s, or an update was offered"
+    fail "$c: feed refused" "no 'update check failed ... the update feed failed signature verification ... $KEY_MISMATCH' within ${check_timeout}s, beta.json.sig not served, or an update was offered"
   fi
   close_app; st="$close_status"
   if [ "$(sha256 "$install")" = "$old_sha" ] && ! logged "installing downloaded update"; then
@@ -325,12 +338,17 @@ case_wrong_payload_key() {
   new_case wrong-payload-key
   start_server wrong-payload-key
   rlog "case wrong-payload-key"
-  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; return; }
-  if wait_logged "$check_timeout" "update download failed" && logged "download or signature check failed" &&
-    ! logged "update downloaded"; then
+  launch app.log || { fail "$c: old app starts" "no window within ${window_timeout}s"; end_case; return; }
+  local avail dlfail
+  wait_logged "$check_timeout" "update download failed"
+  avail="$(first_line "update available")"
+  dlfail="$(first_line "update download failed")"
+  # Offered first, the payload really downloaded (HTTP 200), then refused for the key alone.
+  if [ -n "$avail" ] && [ -n "$dlfail" ] && [ "$avail" -lt "$dlfail" ] && served "dist/$payload" &&
+    logged "download or signature check failed" && logged "$KEY_MISMATCH" && ! logged "update downloaded"; then
     pass "$c: payload signature refused" "$(grep -m1 -F 'update download failed' "$app_log" | sed 's/^.*WARN //' | cut -c1-300)"
   else
-    fail "$c: payload signature refused" "no 'update download failed ... download or signature check failed' within ${check_timeout}s, or the payload was accepted"
+    fail "$c: payload signature refused" "need 'update available' (line ${avail:-none}), then 'update download failed ... $KEY_MISMATCH' (line ${dlfail:-none}) within ${check_timeout}s, and a 200 for dist/$payload; or the payload was accepted"
   fi
   close_app; st="$close_status"
   if [ "$(sha256 "$install")" = "$old_sha" ] && ! logged "installing downloaded update"; then
