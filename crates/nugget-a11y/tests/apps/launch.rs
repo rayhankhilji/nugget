@@ -109,8 +109,19 @@ pub fn all_apps() -> Vec<AppSpec> {
 
 /// Run a command with a deadline; its stdout (lossy UTF-8) when it exited successfully.
 pub fn run_out(program: &str, args: &[&str], timeout: Duration) -> Result<String, String> {
+    run_out_env(program, args, &[], timeout)
+}
+
+/// [`run_out`] with extra environment variables.
+pub fn run_out_env(
+    program: &str,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<String, String> {
     let mut child = Command::new(program)
         .args(args)
+        .envs(envs.iter().copied())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -118,7 +129,10 @@ pub fn run_out(program: &str, args: &[&str], timeout: Duration) -> Result<String
         .map_err(|e| format!("cannot run {program}: {e}"))?;
     let mut out = child.stdout.take();
     let mut err = child.stderr.take();
-    let reader = std::thread::spawn(move || {
+    // The pipes are read on a thread; a grandchild that keeps them open must not hang us, so
+    // the result is awaited with a deadline too.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut o = Vec::new();
         let mut e = Vec::new();
         if let Some(s) = out.as_mut() {
@@ -127,7 +141,7 @@ pub fn run_out(program: &str, args: &[&str], timeout: Duration) -> Result<String
         if let Some(s) = err.as_mut() {
             let _ = s.read_to_end(&mut e);
         }
-        (o, e)
+        let _ = tx.send((o, e));
     });
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -141,7 +155,7 @@ pub fn run_out(program: &str, args: &[&str], timeout: Duration) -> Result<String
             }
         }
     };
-    let (o, e) = reader.join().unwrap_or_default();
+    let (o, e) = rx.recv_timeout(Duration::from_secs(5)).unwrap_or_default();
     if status.success() {
         Ok(String::from_utf8_lossy(&o).into_owned())
     } else {
@@ -299,14 +313,14 @@ pub fn version(spec: &AppSpec, path: &Path) -> Option<String> {
         } else {
             "(Get-Item $env:NUGGET_EXE).VersionInfo.ProductVersion".to_string()
         };
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .env("NUGGET_EXE", &p)
-            .stdin(Stdio::null())
-            .output()
-            .ok()?;
-        return first_line(String::from_utf8_lossy(&out.stdout).into_owned())
-            .filter(|s| !s.is_empty());
+        let out = run_out_env(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", &script],
+            &[("NUGGET_EXE", &p)],
+            t,
+        )
+        .ok()?;
+        return first_line(out).filter(|s| !s.is_empty());
     }
     let out = if spec.kind == Kind::Native(Native::Writer) {
         // A private user installation, so the version query never talks to a running office.
@@ -526,6 +540,31 @@ impl Running {
         {
             let _ = run_out("pkill", &["-KILL", "-f", m], t);
         }
+        if self.images.contains(&"Safari") {
+            // Quit, so it does not restore this page next time, then forget its saved windows.
+            let _ = run_out(
+                "/usr/bin/osascript",
+                &["-e", "tell application \"Safari\" to quit"],
+                Duration::from_secs(5),
+            );
+            if let Some(home) = std::env::var_os("HOME") {
+                let home = PathBuf::from(home);
+                for d in [
+                    home.join("Library")
+                        .join("Saved Application State")
+                        .join("com.apple.Safari.savedState"),
+                    home.join("Library")
+                        .join("Containers")
+                        .join("com.apple.Safari")
+                        .join("Data")
+                        .join("Library")
+                        .join("Saved Application State")
+                        .join("com.apple.Safari.savedState"),
+                ] {
+                    let _ = std::fs::remove_dir_all(d);
+                }
+            }
+        }
         for img in &self.images {
             if cfg!(windows) {
                 let _ = run_out("taskkill", &["/F", "/T", "/IM", img], t);
@@ -553,8 +592,17 @@ impl Drop for Running {
     }
 }
 
+static LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Where app logs go (the uploaded output dir); `dir` of the launch otherwise.
+pub fn set_log_dir(dir: PathBuf) {
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = LOG_DIR.set(dir);
+}
+
 fn log_file(dir: &Path, name: &str) -> (Stdio, Stdio, PathBuf) {
-    let p = dir.join(format!("{name}.log"));
+    let dir = LOG_DIR.get().map(PathBuf::as_path).unwrap_or(dir);
+    let p = dir.join(format!("{name}-{}.log", unique()));
     match std::fs::File::create(&p) {
         Ok(f) => {
             let e = f
@@ -578,20 +626,42 @@ fn spawn(mut cmd: Command, dir: &Path, name: &str) -> Result<(Child, PathBuf), S
     Ok((child, log))
 }
 
-/// macOS: launch through LaunchServices (activates the app like a user launch).
-fn open_app_bundle(app: &Path, new_instance: bool, args: &[String]) -> Result<(), String> {
-    let mut a: Vec<String> = Vec::new();
-    if new_instance {
-        a.push("-n".into());
-    }
-    a.push("-a".into());
-    a.push(app.to_string_lossy().into_owned());
-    if !args.is_empty() {
-        a.push("--args".into());
-        a.extend(args.iter().cloned());
-    }
-    let refs: Vec<&str> = a.iter().map(String::as_str).collect();
-    run_out("/usr/bin/open", &refs, Duration::from_secs(30)).map(|_| ())
+/// macOS: the executable inside an `.app` bundle (`CFBundleExecutable`, else the bundle name).
+pub fn bundle_exe(app: &Path) -> PathBuf {
+    let plist = app.join("Contents").join("Info.plist");
+    let name = run_out(
+        "/usr/bin/plutil",
+        &[
+            "-extract",
+            "CFBundleExecutable",
+            "raw",
+            &plist.to_string_lossy(),
+        ],
+        Duration::from_secs(10),
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+    .unwrap_or_else(|| {
+        app.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    });
+    app.join("Contents").join("MacOS").join(name)
+}
+
+/// macOS: `open -a <app> [args]` through LaunchServices, started without waiting for it (it
+/// can block on a slow app start); the child is reaped when the app is killed.
+fn spawn_open(app: &Path, args: &[&str]) -> Result<Child, String> {
+    Command::new("/usr/bin/open")
+        .arg("-a")
+        .arg(app)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("cannot run open -a {}: {e}", app.display()))
 }
 
 /// Start a browser on `url` with a fresh profile under `dir`.
@@ -619,47 +689,55 @@ pub fn launch_browser(
     match b {
         Browser::Chrome | Browser::Edge => {
             let args = chromium_args(b == Browser::Edge, url, &profile, force_a11y);
-            if cfg!(target_os = "macos") {
-                open_app_bundle(exe, true, &args)?;
+            let bin = if cfg!(target_os = "macos") {
+                bundle_exe(exe)
             } else {
-                let mut cmd = Command::new(exe);
-                cmd.args(&args);
-                let (c, log) = spawn(cmd, dir, spec.id)?;
-                run.child = Some(c);
-                run.log = Some(log);
-            }
+                exe.to_path_buf()
+            };
+            let mut cmd = Command::new(bin);
+            cmd.args(&args);
+            let (c, log) = spawn(cmd, dir, spec.id)?;
+            run.child = Some(c);
+            run.log = Some(log);
         }
         Browser::Firefox => {
             std::fs::write(profile.join("user.js"), FIREFOX_USER_JS)
                 .map_err(|e| format!("user.js: {e}"))?;
-            let args: Vec<String> = vec![
+            let mut args: Vec<String> = vec![
                 "-no-remote".into(),
                 "-new-instance".into(),
                 "-profile".into(),
                 profile.to_string_lossy().into_owned(),
-                url.into(),
             ];
-            if cfg!(target_os = "macos") {
-                open_app_bundle(exe, true, &args)?;
-            } else {
-                let mut cmd = Command::new(exe);
-                cmd.args(&args)
-                    .env("MOZ_CRASHREPORTER_DISABLE", "1")
-                    .env("MOZ_DISABLE_AUTO_SAFE_MODE", "1");
-                if cfg!(target_os = "linux") {
-                    cmd.env("GNOME_ACCESSIBILITY", "1")
-                        .env("MOZ_ENABLE_WAYLAND", "0");
-                }
-                let (c, log) = spawn(cmd, dir, spec.id)?;
-                run.child = Some(c);
-                run.log = Some(log);
+            if cfg!(windows) {
+                // The process we start stays the browser (not a launcher that exits), so it
+                // can be killed with its tree.
+                args.push("-wait-for-browser".into());
+                run.images = vec!["firefox.exe"];
             }
+            args.push(url.into());
+            let bin = if cfg!(target_os = "macos") {
+                bundle_exe(exe)
+            } else {
+                exe.to_path_buf()
+            };
+            let mut cmd = Command::new(bin);
+            cmd.args(&args)
+                .env("MOZ_CRASHREPORTER_DISABLE", "1")
+                .env("MOZ_DISABLE_AUTO_SAFE_MODE", "1");
+            if cfg!(target_os = "linux") {
+                cmd.env("GNOME_ACCESSIBILITY", "1")
+                    .env("MOZ_ENABLE_WAYLAND", "0");
+            }
+            let (c, log) = spawn(cmd, dir, spec.id)?;
+            run.child = Some(c);
+            run.log = Some(log);
         }
         Browser::Safari => {
             // Safari has no profile switch; it is quit (killed) after each page.
             run.images = vec!["Safari"];
             run.marker = None;
-            open_app_bundle(exe, false, &[url.to_string()])?;
+            run.child = Some(spawn_open(exe, &[url])?);
         }
     }
     Ok(run)
@@ -682,15 +760,11 @@ pub fn launch_native(spec: AppSpec, exe: &Path, doc: &Path, dir: &Path) -> Resul
     match n {
         Native::TextEdit => {
             run.images = vec!["TextEdit"];
-            run_out(
-                "/usr/bin/open",
-                &["-a", &exe.to_string_lossy(), &doc_s],
-                Duration::from_secs(30),
-            )?;
+            run.child = Some(spawn_open(exe, &[&doc_s])?);
         }
         Native::Notes => {
             run.images = vec!["Notes"];
-            open_app_bundle(exe, false, &[])?;
+            run.child = Some(spawn_open(exe, &[])?);
         }
         Native::Notepad | Native::WordPad => {
             run.images = if n == Native::Notepad {
@@ -808,17 +882,13 @@ pub fn screenshot(cu: &dyn ComputerUse, path: &Path) -> Result<(), String> {
              $g = [System.Drawing.Graphics]::FromImage($bmp); \
              $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size); \
              $bmp.Save($env:NUGGET_SHOT)";
-        let out = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", script])
-            .env("NUGGET_SHOT", &p)
-            .stdin(Stdio::null())
-            .output()
-            .map_err(|e| e.to_string())?;
-        return if out.status.success() {
-            Ok(())
-        } else {
-            Err(String::from_utf8_lossy(&out.stderr).into_owned())
-        };
+        return run_out_env(
+            "powershell",
+            &["-NoProfile", "-NonInteractive", "-Command", script],
+            &[("NUGGET_SHOT", &p)],
+            t,
+        )
+        .map(|_| ());
     }
     match cu.screenshot(&nugget_a11y::WindowSel::Focused) {
         Ok(Some(png)) => std::fs::write(path, png).map_err(|e| e.to_string()),

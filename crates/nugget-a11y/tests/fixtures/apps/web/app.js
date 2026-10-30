@@ -274,6 +274,9 @@
   /* ---------- state reports ---------- */
 
   let ack = 0;
+  let n = 0;
+  // Identifies this page load to the harness, which follows only the first page after a launch.
+  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   let lastPost = 0;
   let timer = null;
   function active() {
@@ -283,10 +286,15 @@
     return 'other';
   }
   function state() {
+    const raw = N.normNewlines(editor.text());
     return {
       editor: id,
+      token,
+      n: ++n,
       ack,
-      text: N.normText(editor.text()),
+      text: N.normText(raw),
+      text_raw: raw,
+      label: editor.root.getAttribute('aria-label') || '',
       active: active(),
       password_len: page.pw.value.length,
       undo_depth: editor.undoDepth(),
@@ -313,7 +321,7 @@
   }
   async function poll() {
     try {
-      const r = await fetch('/cmd', { cache: 'no-store' });
+      const r = await fetch('/cmd?token=' + token, { cache: 'no-store' });
       const c = await r.json();
       if (c && c.cmd && c.seq > ack) {
         try {

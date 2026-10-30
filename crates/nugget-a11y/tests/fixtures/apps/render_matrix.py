@@ -21,6 +21,7 @@ FAIL = "❌"
 NONE = "—"
 OS_NAMES = {"macos": "macOS", "windows": "Windows", "linux": "Linux"}
 OS_ORDER = ["macos", "windows", "linux"]
+PAYLOADS = ["ascii", "newlines", "emoji", "rtl", "combining", "long"]
 
 
 def load(paths):
@@ -98,8 +99,10 @@ def insert_cell(ins):
     if not ins:
         return NONE
     ok = [i for i in ins if i.get("exact") is True]
+    ran = {i.get("payload") for i in ins}
     bad = [i.get("payload", "?") for i in ins if i.get("exact") is not True]
-    s = f"{PASS if not bad else FAIL} {len(ok)}/{len(ins)}"
+    bad += [p for p in PAYLOADS if p not in ran]
+    s = f"{PASS if not bad else FAIL} {len(ok)}/{len(PAYLOADS)}"
     methods = sorted({i.get("method") for i in ins if i.get("method")})
     if methods:
         s += " " + "/".join(methods)
@@ -113,7 +116,7 @@ def undo_cell(ins):
     if not tried:
         return NONE
     ok = [i for i in tried if i.get("undo_one_step") is True]
-    s = f"{PASS if len(ok) == len(tried) else FAIL} {len(ok)}/{len(tried)}"
+    s = f"{PASS if len(ok) == len(PAYLOADS) else FAIL} {len(ok)}/{len(PAYLOADS)}"
     bad = [i.get("payload", "?") for i in tried if i.get("undo_one_step") is not True]
     if bad:
         s += " ✗ " + ", ".join(bad)
@@ -164,6 +167,9 @@ def failures(r):
                 if k == "subject_ok":
                     extra = f": got {esc(json.dumps(t.get('got_subject'), ensure_ascii=False))}"
                 out.append((k.replace("_ok", ""), "wrong" + extra))
+    sec = r.get("secure")
+    if isinstance(sec, dict) and sec.get("error"):
+        out.append(("secure", esc(short(sec["error"], 200))))
     if r.get("secure_ok") is False:
         s = r.get("secure") or {}
         bad = [k for k in ("secure", "value_empty", "insert_refused", "password_len_unchanged")
@@ -189,16 +195,22 @@ def render(recs, heading_level=3):
     if not recs:
         return "_No app matrix results._\n"
     h = "#" * heading_level
-    by_os = {}
+    # One table per runner (windows-latest and windows-2022 apart), else per OS.
+    groups = {}
     for r in recs:
-        by_os.setdefault(r.get("os", "?"), []).append(r)
-    order = [o for o in OS_ORDER if o in by_os] + sorted(o for o in by_os if o not in OS_ORDER)
+        key = (r.get("os", "?"), r.get("runner") or "")
+        groups.setdefault(key, []).append(r)
+
+    def order(k):
+        os_id, runner = k
+        return (OS_ORDER.index(os_id) if os_id in OS_ORDER else len(OS_ORDER), os_id, runner)
+
     lines = []
-    for os_id in order:
-        rows = by_os[os_id]
+    for os_id, runner in sorted(groups, key=order):
+        rows = groups[(os_id, runner)]
         versions = sorted({r.get("os_version") for r in rows if r.get("os_version")})
-        lines.append(f"{h} {OS_NAMES.get(os_id, os_id)}"
-                     + (f" ({esc(', '.join(versions))})" if versions else ""))
+        title = OS_NAMES.get(os_id, os_id) + (f" `{esc(runner)}`" if runner else "")
+        lines.append(f"{h} {title}" + (f" ({esc(', '.join(versions))})" if versions else ""))
         lines.append("")
         lines.append("| app | fixture | detect | read | thread P/R | secure | insert | undo "
                      "| read (median) |")
@@ -255,8 +267,9 @@ def update(path, marker, body):
     end = f"<!-- a11y-matrix:{marker}:end -->"
     with open(path, encoding="utf-8") as f:
         text = f.read()
-    i, j = text.find(start), text.find(end)
-    if i < 0 or j < 0 or j < i:
+    i = text.find(start)
+    j = text.find(end, i + len(start)) if i >= 0 else -1
+    if i < 0 or j < 0:
         raise SystemExit(f"{path}: markers {start} / {end} not found")
     new = text[: i + len(start)] + "\n\n" + body.rstrip() + "\n\n" + text[j:]
     with open(path, "w", encoding="utf-8") as f:
@@ -297,8 +310,8 @@ def self_test():
     assert "### Linux (Ubuntu 24.04)" in md, md
     assert "### macOS" in md and md.index("### macOS") < md.index("### Linux"), md
     assert "| firefox 131.0 | quill [1] | ✅ text_area | ✅ | ❌ 100%/75% |" in md, md
-    assert "❌ 1/2 accessibility/clipboard ✗ emoji" in md, md
-    assert "❌ 1/2 ✗ emoji" in md, md
+    assert "❌ 1/6 accessibility/clipboard ✗ emoji, newlines, rtl, combining, long" in md, md
+    assert "❌ 1/6 ✗ emoji" in md, md
     assert "| edge | * | not available |" in md, md
     assert "first difference at char 14" in md, md
     assert "ᵃ" in md and "| gedit | native | ✅ text_area | ✅ᵃ |" in md, md
@@ -317,6 +330,14 @@ def self_test():
             t = f.read()
         assert t == "a\n<!-- a11y-matrix:x:start -->\n\nNEW\n\n<!-- a11y-matrix:x:end -->\nb\n", t
         update(p, "x", "NEWER")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("<!-- a11y-matrix:y:end -->\n<!-- a11y-matrix:y:start -->\nz\n"
+                    "<!-- a11y-matrix:y:end -->\n")
+        update(p, "y", "Y")
+        with open(p, encoding="utf-8") as f:
+            assert f.read() == ("<!-- a11y-matrix:y:end -->\n<!-- a11y-matrix:y:start -->\n\nY\n\n"
+                                "<!-- a11y-matrix:y:end -->\n")
+        update(p, "y", "NEWER")
         with open(p, encoding="utf-8") as f:
             assert "NEW\n" not in f.read().replace("NEWER", "")
         try:
@@ -333,6 +354,10 @@ def self_test():
 
 
 def main():
+    # Windows consoles default to a legacy code page that cannot encode the marks.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("files", nargs="*", help="JSON Lines result files")
     mode = ap.add_mutually_exclusive_group()

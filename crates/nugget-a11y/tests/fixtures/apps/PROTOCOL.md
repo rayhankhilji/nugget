@@ -54,7 +54,10 @@ with `\r\n` turned into `\n`.
 
 ## Command channel
 
-The page polls `GET /cmd` every 100 ms. The response is `{"seq": <n>}` (nothing new) or
+The page polls `GET /cmd?token=<token>` every 100 ms, where `<token>` is a random string
+chosen once per page load. After each launch the harness follows only the first token it sees;
+other pages (left over from an earlier cell, or restored by the browser) get no commands and
+their state reports are ignored. The response is `{"seq": <n>}` (nothing new) or
 `{"seq": <n>, "cmd": "<cmd>", "text": "<optional>"}`. Each `seq` is executed once, in order:
 
 | cmd | effect |
@@ -73,8 +76,11 @@ After executing a command the page posts its state with `ack` set to that `seq`.
 ```json
 {
   "editor": "lexical",
+  "token": "k2j9x0l1lqz3",
+  "n": 17,
   "ack": 3,
   "text": "Draft: hello",
+  "text_raw": "Draft: hello",
   "active": "editor",
   "password_len": 15,
   "undo_depth": 1,
@@ -82,6 +88,11 @@ After executing a command the page posts its state with `ack` set to that `seq`.
 }
 ```
 
+- `token` is the page's token (see the command channel); `n` counts the page's posts (1, 2, …)
+  so the harness can drop a post that arrives after a newer one.
+- `text` is the text model with NBSP reported as a space; `text_raw` is the same model with
+  NBSP kept (newlines are always `\n`).
+- `label` is the editor's accessible name (its `aria-label`).
 - `active` is `editor`, `password` or `other` (where `document.activeElement` is).
 - `undo_depth` is the number of steps in the editor's own history (`-1` for editors that use the
   browser's native undo: `textarea`, `contenteditable`, `mail-compose`).

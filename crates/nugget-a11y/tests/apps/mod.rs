@@ -226,6 +226,8 @@ pub fn summary(rec: &Value) -> String {
 struct Env {
     os: &'static str,
     os_version: String,
+    /// The CI runner label (`NUGGET_A11Y_RUNNER`, e.g. `windows-2022`), when set.
+    runner: Option<String>,
     force_a11y: bool,
 }
 
@@ -234,6 +236,7 @@ impl Env {
         json!({
             "os": self.os,
             "os_version": self.os_version,
+            "runner": self.runner,
             "app": app.id,
             "app_version": version,
             "fixture": fixture,
@@ -315,6 +318,9 @@ pub fn run_matrix() {
     let env = Env {
         os: os_id(),
         os_version: launch::os_version(),
+        runner: std::env::var("NUGGET_A11Y_RUNNER")
+            .ok()
+            .filter(|r| !r.is_empty()),
         force_a11y: cfg.force_a11y,
     };
     eprintln!(
@@ -363,8 +369,11 @@ pub fn run_matrix() {
         None
     };
 
-    let work = cfg.out_dir().join(format!("work-{}", std::process::id()));
+    // Profiles and documents outside the uploaded output dir (browsers can keep files locked);
+    // app logs inside it.
+    let work = std::env::temp_dir().join(format!("nugget-apps-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&work);
+    launch::set_log_dir(cfg.out_dir().join("logs"));
     let screens = cfg.out_dir().join("screens");
 
     for spec in &specs {
@@ -639,11 +648,34 @@ fn nudge_app(c: &Cell<'_>) {
     }
 }
 
-fn title_ok(f: &Focused) -> bool {
-    f.app
-        .window_title
+/// The window title of a fixture page: exactly `Nugget fixture: <name>`, alone (Safari) or
+/// followed by the browser's suffix (` - Google Chrome`, ` — Mozilla Firefox`).
+fn title_ok(f: &Focused, name: &str) -> bool {
+    let want = format!("{TITLE}: {name}");
+    f.app.window_title.as_deref().is_some_and(|t| {
+        t == want
+            || [" - ", " — ", " – "]
+                .iter()
+                .any(|sep| t.starts_with(&format!("{want}{sep}")))
+    })
+}
+
+/// Whether the focused field is the fixture's editor (not the address bar, a search box or the
+/// To and Subject fields): its accessible name is the editor's label, or it is a multi-line
+/// text role on the fixture page.
+fn is_editor(f: &Focused, ed: &Editor, label: &str) -> bool {
+    if f.field.secure {
+        return false;
+    }
+    if !label.is_empty() && f.field.label.as_deref() == Some(label) {
+        return true;
+    }
+    let on_page = f
+        .app
+        .url
         .as_deref()
-        .is_some_and(|t| t.contains(TITLE))
+        .is_none_or(|u| u.contains(&format!("editor={}", ed.id)));
+    on_page && matches!(f.field.role.as_str(), "text_area" | "document")
 }
 
 /// Five `focused()` calls: median and max milliseconds.
@@ -658,8 +690,8 @@ fn read_times(a11y: &dyn Accessibility) -> Value {
     measure::median_max(&mut ms)
 }
 
-fn set_field(rec: &mut Value, f: &Focused) {
-    rec["detect"] = json!(!f.field.secure);
+fn set_field(rec: &mut Value, f: &Focused, detect: bool) {
+    rec["detect"] = json!(detect);
     rec["role"] = json!(f.field.role);
     rec["label"] = json!(f.field.label);
     rec["seen"] = json!({
@@ -668,6 +700,49 @@ fn set_field(rec: &mut Value, f: &Focused) {
         "window_title": f.app.window_title.as_deref().map(|t| trunc(t, 120)),
         "url": f.app.url.as_deref().map(|u| trunc(u, 120)),
     });
+}
+
+/// Exact comparison form: only `\r\n` becomes `\n` (no trimming, no NBSP folding).
+fn exact(s: &str) -> String {
+    s.replace("\r\n", "\n")
+}
+
+/// The page's text model for exact comparisons: `text_raw` (NBSP kept) for plain editors,
+/// where an NBSP would be a real difference, else `text`.
+fn model_text(s: &Value, plain: bool) -> String {
+    let raw = plain
+        .then(|| s.get("text_raw").and_then(Value::as_str))
+        .flatten();
+    exact(raw.or(s["text"].as_str()).unwrap_or_default())
+}
+
+/// How long a matching text must stay unchanged before it counts: a second copy (a fallback
+/// paste after an accessibility insert, a late key) shows up within this.
+fn settle(payload: &str) -> Duration {
+    Duration::from_millis(700 + (payload.chars().count() as u64 / 10).min(1300))
+}
+
+/// Wait until the page's text is exactly `want`, then for `settle`, and check it still is.
+/// Returns whether it held, and the text last seen.
+fn wait_exact(
+    srv: &Server,
+    edit: Option<&str>,
+    plain: bool,
+    want: &str,
+    timeout: Duration,
+    settle: Duration,
+) -> (bool, String) {
+    match srv.wait_state(edit, timeout, |s| model_text(s, plain) == want) {
+        Ok(_) => {
+            std::thread::sleep(settle);
+            let now = srv
+                .state(edit)
+                .map(|s| model_text(&s, plain))
+                .unwrap_or_default();
+            (now == want, now)
+        }
+        Err(l) => (false, l.map(|s| model_text(&s, plain)).unwrap_or_default()),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -682,6 +757,7 @@ fn web_cell(
     force_a11y: bool,
 ) -> Result<(), String> {
     let edit = Some(ed.id.as_str());
+    let plain = ed.kind == "plain";
     let initial = truth.initial_text.as_str();
     srv.forget_page();
     let url = srv.editor_url(&ed.id);
@@ -693,7 +769,7 @@ fn web_cell(
         .map_err(|last| {
             format!(
                 "the page never acknowledged reset (index served: {}, /cmd polls: {}, last state: \
-             {last:?}, app alive: {:?})",
+                 {last:?}, app alive: {:?})",
                 srv.served("/index.html"),
                 srv.polls(),
                 c.running.as_mut().and_then(Running::alive)
@@ -701,14 +777,26 @@ fn web_cell(
         })?;
     srv.wait_state(edit, Duration::from_secs(5), |s| s["active"] == "editor")
         .map_err(|last| format!("the editor did not take focus after reset: {last:?}"))?;
+    let label = srv
+        .state(edit)
+        .and_then(|s| s["label"].as_str().map(str::to_string))
+        .unwrap_or_default();
 
     // The browser in front and the editor focused, as accessibility sees it.
-    let oracle = || last_text(&srv.state(edit));
+    let oracle = || {
+        srv.state(edit)
+            .map(|s| model_text(&s, plain))
+            .unwrap_or_default()
+    };
     let (f, matched, last) = wait_field(
         c,
         Duration::from_secs(25),
-        |f| !f.field.secure && norm(&f.field.value) == norm(&oracle()),
-        title_ok,
+        |f| {
+            title_ok(f, &ed.name)
+                && is_editor(f, ed, &label)
+                && norm(&f.field.value) == norm(&oracle())
+        },
+        |f| title_ok(f, &ed.name) && is_editor(f, ed, &label),
         |c| {
             nudge_app(c);
             let s = srv.send("focus-editor", None);
@@ -718,11 +806,12 @@ fn web_cell(
     let Some(f) = f else {
         c.rec["detect"] = json!(false);
         return Err(format!(
-            "no focused field in the fixture window within 25 s (last: {last}; {})",
+            "the editor never had accessibility focus in the fixture window within 25 s (last: \
+             {last}; {})",
             desktop(c.cu)
         ));
     };
-    set_field(c.rec, &f);
+    set_field(c.rec, &f, true);
     let text = oracle();
     c.rec["read_ok"] = json!(matched);
     if !matched {
@@ -764,6 +853,13 @@ fn web_cell(
         thread["got_subject"] = json!(f.subject);
     }
     c.rec["thread"] = thread;
+    if let Some(dir) = std::env::var_os("NUGGET_A11Y_APPS_RECORD") {
+        let name = format!("web_{}_{}_{}.json", spec.id, os_id(), ed.id);
+        match record_snapshot(&Path::new(&dir).join(&name)) {
+            Ok(()) => eprintln!("  recorded {name}"),
+            Err(e) => eprintln!("  recording {name} failed: {e}"),
+        }
+    }
     c.rec["read_ms"] = read_times(c.a11y);
 
     // Secure field.
@@ -772,20 +868,53 @@ fn web_cell(
     // Insertions, each followed by one undo.
     let mut inserts = Vec::new();
     for (pid, payload) in measure::payloads() {
-        let r = web_insert(c, srv, edit, initial, pid, &payload);
+        let r = web_insert(c, srv, edit, plain, initial, pid, &payload);
         inserts.push(r);
         c.rec["inserts"] = json!(inserts);
     }
     Ok(())
 }
 
+/// `NUGGET_A11Y_APPS_RECORD`: the focused window's snapshot (`Backend::snapshot`) as JSON, for
+/// the thread fixtures in `tests/fixtures/trees/`.
+fn record_snapshot(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    let backend =
+        nugget_a11y::Backend::new(nugget_a11y::AtspiPlatform::new(), A11yConfig::default());
+    #[cfg(target_os = "macos")]
+    let backend = nugget_a11y::Backend::new(nugget_a11y::AxPlatform::new(), A11yConfig::default());
+    #[cfg(windows)]
+    let backend = nugget_a11y::Backend::new(nugget_a11y::UiaPlatform::new(), A11yConfig::default());
+    let (_, snap) = backend
+        .snapshot()
+        .map_err(|e| e.to_string())?
+        .ok_or("no focused window")?;
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, snap.to_json()).map_err(|e| e.to_string())
+}
+
 /// `focus-password`: `focused()` must report a secure, empty field, `insert` must refuse, and
-/// the page's password length must not change.
-fn secure_check(c: &mut Cell<'_>, srv: &Server, edit: Option<&str>) -> Result<bool, String> {
+/// the page's password length must not change. `None` (a harness error, recorded) when the
+/// page could not focus its password field.
+fn secure_check(
+    c: &mut Cell<'_>,
+    srv: &Server,
+    edit: Option<&str>,
+) -> Result<Option<bool>, String> {
     let seq = srv.send("focus-password", None);
-    let before = srv
-        .wait_ack(edit, seq, Duration::from_secs(5))
+    srv.wait_ack(edit, seq, Duration::from_secs(5))
         .map_err(|l| format!("focus-password not acknowledged: {l:?}"))?;
+    let before = match srv.wait_state(edit, Duration::from_secs(3), |s| s["active"] == "password") {
+        Ok(s) => s,
+        Err(l) => {
+            c.rec["secure"] = json!({
+                "error": format!("harness: the page did not focus its password field ({l:?})"),
+            });
+            return Ok(None);
+        }
+    };
     let len_before = before["password_len"].clone();
     let (f, ok, last) = wait_field(
         c,
@@ -812,13 +941,14 @@ fn secure_check(c: &mut Cell<'_>, srv: &Server, edit: Option<&str>) -> Result<bo
         "password_len_unchanged": unchanged,
         "last": if ok { Value::Null } else { json!(last) },
     });
-    Ok(secure && empty && refused && unchanged)
+    Ok(Some(secure && empty && refused && unchanged))
 }
 
 fn web_insert(
     c: &mut Cell<'_>,
     srv: &Server,
     edit: Option<&str>,
+    plain: bool,
     initial: &str,
     pid: &str,
     payload: &str,
@@ -827,7 +957,7 @@ fn web_insert(
                        "undo_one_step": null});
     let seq = srv.send("reset", Some(initial));
     let pre = match srv.wait_ack(edit, seq, Duration::from_secs(5)) {
-        Ok(s) => last_text(&Some(s)),
+        Ok(s) => model_text(&s, plain),
         Err(l) => {
             r["error"] = json!(format!("reset not acknowledged: {l:?}"));
             return r;
@@ -858,48 +988,56 @@ fn web_insert(
         }
     }
     r["insert_ms"] = json!((t.elapsed().as_secs_f64() * 1000.0).round());
-    let got = match srv.wait_state(edit, Duration::from_secs(3), |s| {
-        norm(s["text"].as_str().unwrap_or_default()) == norm(&expected)
-    }) {
-        Ok(s) => {
-            r["exact"] = json!(true);
-            last_text(&Some(s))
-        }
-        Err(l) => {
-            let got = last_text(&l);
-            r["diff"] = json!(measure::diff(&norm(&expected), &norm(&got)));
-            got
-        }
-    };
-    if norm(&got) == norm(&pre) {
+    let (ok, got) = wait_exact(
+        srv,
+        edit,
+        plain,
+        &expected,
+        Duration::from_secs(3),
+        settle(payload),
+    );
+    r["exact"] = json!(ok);
+    if !ok {
+        r["diff"] = json!(measure::diff(&expected, &got));
+    }
+    if got == pre {
         // Nothing was inserted: nothing to undo.
         return r;
     }
-    let undo = c.cu.key_input(None, &undo_chord());
-    if let Err(e) = undo {
+    if let Err(e) = c.cu.key_input(None, &undo_chord()) {
         r["undo_error"] = json!(trunc(&e.to_string(), 200));
     }
-    let back = srv.wait_state(edit, Duration::from_secs(2), |s| {
-        norm(s["text"].as_str().unwrap_or_default()) == norm(&pre)
-    });
-    r["undo_one_step"] = json!(back.is_ok());
-    if let Err(l) = back {
-        r["undo_text"] = json!(trunc(&norm(&last_text(&l)), 120));
+    let (back, now) = wait_exact(srv, edit, plain, &pre, Duration::from_secs(2), settle(""));
+    r["undo_one_step"] = json!(back);
+    if !back {
+        r["undo_text"] = json!(trunc(&now, 120));
     }
     r
 }
 
-/// TextEdit's own text (AppleScript), independent of accessibility.
-fn textedit_text() -> Result<String, String> {
-    launch::run_out(
+/// TextEdit's own text (AppleScript), independent of accessibility. One try per run with a
+/// short timeout: on a runner the first call can sit on an Automation consent prompt.
+fn textedit_text() -> Option<String> {
+    static USABLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+    if !USABLE.load(std::sync::atomic::Ordering::SeqCst) {
+        return None;
+    }
+    let r = launch::run_out(
         "/usr/bin/osascript",
         &[
             "-e",
             "tell application \"TextEdit\" to get text of document 1",
         ],
-        Duration::from_secs(10),
-    )
-    .map(|s| s.strip_suffix('\n').unwrap_or(&s).to_string())
+        Duration::from_secs(3),
+    );
+    match r {
+        Ok(s) => Some(s.strip_suffix('\n').unwrap_or(&s).to_string()),
+        Err(e) => {
+            eprintln!("  osascript oracle disabled for this run: {e}");
+            USABLE.store(false, std::sync::atomic::Ordering::SeqCst);
+            None
+        }
+    }
 }
 
 fn native_cell(
@@ -917,7 +1055,7 @@ fn native_cell(
     c.running = Some(launch::launch_native(*spec, exe, &doc, dir)?);
 
     if n == Native::Notes {
-        // A new note, then the seed typed into it.
+        // Best effort: a new note, then the seed typed into it.
         std::thread::sleep(Duration::from_secs(4));
         nudge_app(c);
         let _ = c.cu.key_input(None, &keys("cmd+n"));
@@ -939,53 +1077,50 @@ fn native_cell(
             desktop(c.cu)
         ));
     };
-    set_field(c.rec, &f);
+    set_field(c.rec, &f, true);
     let _ = c.cu.key_input(None, &end_of_document());
     std::thread::sleep(Duration::from_millis(300));
 
     // The oracle: TextEdit's AppleScript text when it answers, else the a11y read-back.
-    let mut use_script = n == Native::TextEdit;
-    if use_script && let Err(e) = textedit_text() {
-        use_script = false;
+    let use_script = n == Native::TextEdit && textedit_text().is_some();
+    if n == Native::TextEdit && !use_script {
         c.rec["oracle"] = json!("a11y");
-        c.rec["oracle_note"] = json!(format!("osascript unavailable: {}", trunc(&e, 200)));
+        c.rec["oracle_note"] = json!("osascript unavailable (timed out or refused)");
     }
     let a11y = c.a11y;
-    let read_oracle = move || -> String {
+    let read_oracle = move || -> Option<String> {
         if use_script {
-            textedit_text().unwrap_or_default()
+            textedit_text()
         } else {
-            a11y.focused()
-                .ok()
-                .flatten()
-                .map(|f| f.field.value)
-                .unwrap_or_default()
+            a11y.focused().ok().flatten().map(|f| exact(&f.field.value))
         }
     };
-    let wait_oracle = |want: &str, timeout: Duration| -> (bool, String) {
+    // Exactly `want`, still so after `settle`. `None`: the oracle could not be read.
+    let wait_oracle = |want: &str, timeout: Duration, settle: Duration| -> Option<(bool, String)> {
         let deadline = Instant::now() + timeout;
         loop {
-            let got = read_oracle();
-            if norm(&got) == norm(want) {
-                return (true, got);
+            let got = read_oracle()?;
+            if got == want {
+                std::thread::sleep(settle);
+                let now = read_oracle()?;
+                return Some((now == want, now));
             }
             if Instant::now() > deadline {
-                return (false, got);
+                return Some((false, got));
             }
             std::thread::sleep(Duration::from_millis(150));
         }
     };
 
-    let value = f.field.value.clone();
+    let value = exact(&f.field.value);
     let read_ok = if use_script {
-        norm(&value) == norm(&read_oracle())
+        read_oracle().is_some_and(|o| o == value)
     } else {
-        norm(&value) == norm(&seed)
+        value == seed
     };
     c.rec["read_ok"] = json!(read_ok);
     if !read_ok {
-        c.rec["read_diff"] = json!({"expected": trunc(&norm(&seed), 200),
-                                    "got": trunc(&norm(&value), 200)});
+        c.rec["read_diff"] = json!({"expected": trunc(&seed, 200), "got": trunc(&value, 200)});
     }
     c.rec["read_ms"] = read_times(c.a11y);
 
@@ -993,52 +1128,66 @@ fn native_cell(
     for (pid, payload) in measure::payloads() {
         let mut r = json!({"payload": pid, "method": null, "verified": null, "exact": false,
                            "undo_one_step": null});
-        // Back to the seed when the previous undo did not get there.
-        let (at_seed, _) = wait_oracle(&seed, Duration::from_millis(300));
-        if !at_seed {
-            let _ = c.cu.key_input(None, &select_all());
-            let _ = c.cu.key_input(None, &KeyInput::Text(seed.clone()));
-            let _ = c.cu.key_input(None, &end_of_document());
-            let (ok, got) = wait_oracle(&seed, Duration::from_secs(3));
+        let r = 'cell: {
+            // Back to the seed when the previous undo did not get there.
+            let at_seed = wait_oracle(&seed, Duration::from_millis(300), Duration::ZERO);
+            if !at_seed.as_ref().is_some_and(|x| x.0) {
+                let _ = c.cu.key_input(None, &select_all());
+                let _ = c.cu.key_input(None, &KeyInput::Text(seed.clone()));
+                let _ = c.cu.key_input(None, &end_of_document());
+                match wait_oracle(&seed, Duration::from_secs(3), settle("")) {
+                    Some((true, _)) => {}
+                    other => {
+                        r["error"] = json!(format!(
+                            "could not reset the document to the seed (it reads {:?})",
+                            other.map(|o| trunc(&o.1, 80))
+                        ));
+                        break 'cell r;
+                    }
+                }
+            }
+            let Some(pre) = read_oracle() else {
+                r["error"] = json!("oracle unavailable before the insert");
+                break 'cell r;
+            };
+            let expected = format!("{pre}{payload}");
+            let t = Instant::now();
+            match c.a11y.insert(&payload) {
+                Ok(o) => {
+                    r["method"] = json!(format!("{:?}", o.method).to_lowercase());
+                    r["verified"] = json!(o.verified);
+                }
+                Err(e) => {
+                    r["verified"] = json!(false);
+                    r["error"] = json!(trunc(&e.to_string(), 200));
+                }
+            }
+            r["insert_ms"] = json!((t.elapsed().as_secs_f64() * 1000.0).round());
+            let Some((ok, got)) = wait_oracle(&expected, Duration::from_secs(3), settle(&payload))
+            else {
+                r["error"] = json!("oracle unavailable after the insert");
+                break 'cell r;
+            };
+            r["exact"] = json!(ok);
             if !ok {
-                r["error"] = json!(format!(
-                    "could not reset the document to the seed (it reads {:?})",
-                    trunc(&got, 80)
-                ));
-                inserts.push(r);
-                c.rec["inserts"] = json!(inserts);
-                continue;
+                r["diff"] = json!(measure::diff(&expected, &got));
             }
-        }
-        let pre = read_oracle();
-        let expected = format!("{pre}{payload}");
-        let t = Instant::now();
-        match c.a11y.insert(&payload) {
-            Ok(o) => {
-                r["method"] = json!(format!("{:?}", o.method).to_lowercase());
-                r["verified"] = json!(o.verified);
+            if got != pre {
+                if let Err(e) = c.cu.key_input(None, &undo_chord()) {
+                    r["undo_error"] = json!(trunc(&e.to_string(), 200));
+                }
+                match wait_oracle(&pre, Duration::from_secs(2), settle("")) {
+                    Some((back, now)) => {
+                        r["undo_one_step"] = json!(back);
+                        if !back {
+                            r["undo_text"] = json!(trunc(&now, 120));
+                        }
+                    }
+                    None => r["undo_error"] = json!("oracle unavailable after the undo"),
+                }
             }
-            Err(e) => {
-                r["verified"] = json!(false);
-                r["error"] = json!(trunc(&e.to_string(), 200));
-            }
-        }
-        r["insert_ms"] = json!((t.elapsed().as_secs_f64() * 1000.0).round());
-        let (exact, got) = wait_oracle(&expected, Duration::from_secs(3));
-        r["exact"] = json!(exact);
-        if !exact {
-            r["diff"] = json!(measure::diff(&norm(&expected), &norm(&got)));
-        }
-        if norm(&got) != norm(&pre) {
-            if let Err(e) = c.cu.key_input(None, &undo_chord()) {
-                r["undo_error"] = json!(trunc(&e.to_string(), 200));
-            }
-            let (back, now) = wait_oracle(&pre, Duration::from_secs(2));
-            r["undo_one_step"] = json!(back);
-            if !back {
-                r["undo_text"] = json!(trunc(&norm(&now), 120));
-            }
-        }
+            r
+        };
         inserts.push(r);
         c.rec["inserts"] = json!(inserts);
     }
@@ -1079,6 +1228,7 @@ mod tests {
         let env = Env {
             os: os_id(),
             os_version: "x".into(),
+            runner: Some("r".into()),
             force_a11y: true,
         };
         let spec = launch::all_apps()[0];

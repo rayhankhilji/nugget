@@ -39,6 +39,25 @@ struct Inner {
     /// Paths of the files served (for "did the page load").
     served: Vec<String>,
     polls: u64,
+    /// The page this server follows: the first `token` seen since the last `forget_page`.
+    token: Option<String>,
+    /// The highest `n` of that page's state posts.
+    last_n: u64,
+}
+
+impl Inner {
+    /// Whether a request carrying `token` comes from the followed page (binding the first one).
+    /// Requests without a token (an older page) are always accepted.
+    fn follows(&mut self, token: Option<&str>) -> bool {
+        match (token, &self.token) {
+            (None, _) => true,
+            (Some(t), None) => {
+                self.token = Some(t.to_string());
+                true
+            }
+            (Some(t), Some(bound)) => t == bound,
+        }
+    }
 }
 
 struct Shared {
@@ -136,6 +155,8 @@ impl Server {
         g.state = None;
         g.by_editor.clear();
         g.served.clear();
+        g.token = None;
+        g.last_n = 0;
     }
 
     /// The latest state report (of `editor`, when given).
@@ -224,7 +245,18 @@ impl Drop for Server {
 struct Request {
     method: String,
     path: String,
+    query: String,
     body: Vec<u8>,
+}
+
+impl Request {
+    /// A query parameter (no percent-decoding: tokens are alphanumeric).
+    fn param(&self, name: &str) -> Option<&str> {
+        self.query.split('&').find_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            (k == name && !v.is_empty()).then_some(v)
+        })
+    }
 }
 
 fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
@@ -268,12 +300,14 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Option<Request>> {
         body.extend_from_slice(&chunk[..n]);
     }
     body.truncate(len);
-    let path = target
-        .split(['?', '#'])
-        .next()
-        .unwrap_or_default()
-        .to_string();
-    Ok(Some(Request { method, path, body }))
+    let target = target.split('#').next().unwrap_or_default();
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    Ok(Some(Request {
+        method,
+        path: path.to_string(),
+        query: query.to_string(),
+        body,
+    }))
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
@@ -325,13 +359,25 @@ fn percent_decode(s: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
+/// Windows device names (`CON`, `nul.txt`, `COM1`, ...), which open devices in any directory.
+fn is_device_name(seg: &str) -> bool {
+    let stem = seg.split('.').next().unwrap_or_default();
+    let stem = stem.trim_end_matches([' ', '.']).to_ascii_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ((stem.starts_with("COM") || stem.starts_with("LPT"))
+        && stem.len() == 4
+        && stem.as_bytes()[3].is_ascii_digit())
+}
+
 /// The file under `base` for a URL path, refusing anything that could leave `base`.
 pub fn resolve(base: &Path, url_path: &str) -> Option<PathBuf> {
     let decoded = percent_decode(url_path)?;
     let mut p = base.to_path_buf();
     let mut any = false;
     for seg in decoded.split('/').filter(|s| !s.is_empty()) {
-        if seg.starts_with('.') || seg.contains(['\\', ':', '\0']) {
+        if seg.starts_with('.') || seg.contains(['\\', ':', '\0']) || is_device_name(seg) {
             return None;
         }
         p.push(seg);
@@ -354,15 +400,16 @@ fn handle(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
             let body = {
                 let mut g = shared.lock();
                 g.polls += 1;
+                let follows = g.follows(req.param("token"));
                 match &g.cmd {
-                    Some(c) => {
+                    Some(c) if follows => {
                         let mut v = json!({"seq": c.seq, "cmd": c.cmd});
                         if let Some(t) = &c.text {
                             v["text"] = json!(t);
                         }
                         v
                     }
-                    None => json!({"seq": g.seq}),
+                    _ => json!({"seq": g.seq}),
                 }
             };
             respond(
@@ -374,8 +421,14 @@ fn handle(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
         }
         ("POST", "/state") => match serde_json::from_slice::<Value>(&req.body) {
             Ok(v) if v.is_object() => {
-                {
-                    let mut g = shared.lock();
+                let mut g = shared.lock();
+                let follows = g.follows(v.get("token").and_then(Value::as_str));
+                let n = v.get("n").and_then(Value::as_u64);
+                // Another page, or a post overtaken by a newer one: ignored.
+                if follows && n.is_none_or(|n| n > g.last_n) {
+                    if let Some(n) = n {
+                        g.last_n = n;
+                    }
                     let at = shared.started.elapsed();
                     g.log.push_back((at, v.clone()));
                     if let Some(e) = v.get("editor").and_then(Value::as_str) {
@@ -386,6 +439,7 @@ fn handle(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
                     }
                     g.state = Some(v);
                 }
+                drop(g);
                 shared.cv.notify_all();
                 respond(&mut stream, "204 No Content", "text/plain", b"")
             }
@@ -393,10 +447,15 @@ fn handle(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
         },
         ("OPTIONS", _) => respond(&mut stream, "204 No Content", "text/plain", b""),
         ("GET" | "HEAD", path) => {
+            let web = shared.root.join("web");
             let file = if path == "/truth.json" {
                 Some(shared.root.join("truth.json"))
             } else {
-                resolve(&shared.root.join("web"), path)
+                // Resolved, then canonicalised: it must still be inside `web/` (no symlink out).
+                resolve(&web, path).filter(|f| match (f.canonicalize(), web.canonicalize()) {
+                    (Ok(f), Ok(w)) => f.starts_with(w),
+                    _ => false,
+                })
             };
             match file.and_then(|f| Some((std::fs::read(&f).ok()?, f))) {
                 Some((bytes, f)) => {
@@ -598,6 +657,46 @@ mod tests {
     }
 
     #[test]
+    fn follows_one_page_and_drops_stale_posts() {
+        let root = Root::new("token");
+        let srv = Server::start(&root.0).unwrap();
+        let p = srv.port();
+        let seq = srv.send("reset", Some("Draft: "));
+        // The first page to poll is followed; another page gets no command.
+        let v: Value = serde_json::from_slice(&request(p, "GET", "/cmd?token=aaa", "").2).unwrap();
+        assert_eq!(v["cmd"], "reset");
+        let v: Value = serde_json::from_slice(&request(p, "GET", "/cmd?token=bbb", "").2).unwrap();
+        assert_eq!(v, json!({"seq": seq}));
+        let post = |body: &str| request(p, "POST", "/state", body).0;
+        assert_eq!(
+            post(r#"{"editor":"quill","token":"bbb","n":9,"ack":1,"text":"x"}"#),
+            204
+        );
+        assert_eq!(srv.state(None), None, "another page's state is ignored");
+        assert_eq!(
+            post(r#"{"editor":"quill","token":"aaa","n":2,"ack":1,"text":"new"}"#),
+            204
+        );
+        assert_eq!(
+            post(r#"{"editor":"quill","token":"aaa","n":1,"ack":1,"text":"old"}"#),
+            204
+        );
+        assert_eq!(
+            srv.state(Some("quill")).unwrap()["text"],
+            "new",
+            "older post dropped"
+        );
+        assert_eq!(srv.log().len(), 1);
+        // A new launch follows a new page.
+        srv.forget_page();
+        assert_eq!(
+            post(r#"{"editor":"quill","token":"ccc","n":1,"ack":1,"text":"c"}"#),
+            204
+        );
+        assert_eq!(srv.state(None).unwrap()["text"], "c");
+    }
+
+    #[test]
     fn concurrent_clients() {
         let root = Root::new("conc");
         let srv = Server::start(&root.0).unwrap();
@@ -628,6 +727,12 @@ mod tests {
         assert_eq!(resolve(base, "/a/../b"), None);
         assert_eq!(resolve(base, "/c:/x"), None);
         assert_eq!(resolve(base, "/%zz"), None);
+        assert_eq!(resolve(base, "/CON"), None);
+        assert_eq!(resolve(base, "/a/nul.txt"), None);
+        assert_eq!(resolve(base, "/com1.js"), None);
+        assert_eq!(resolve(base, "/LPT9"), None);
+        assert!(resolve(base, "/console.js").is_some());
+        assert!(resolve(base, "/com10.js").is_some());
         assert_eq!(content_type("/x.mjs"), "text/javascript; charset=utf-8");
     }
 }

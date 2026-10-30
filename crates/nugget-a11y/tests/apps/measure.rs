@@ -131,13 +131,31 @@ fn texts_match(got: &str, truth: &str) -> bool {
     if g == t {
         return true;
     }
-    // Containment either way, but not of a fragment too short to mean anything.
+    // Containment either way (an author or time glued on, a truncated preview), but not of a
+    // fragment too short to mean anything, nor with much more text around it.
     let (short, long) = if g.chars().count() < t.chars().count() {
         (&g, &t)
     } else {
         (&t, &g)
     };
-    short.chars().count() >= 8 && long.contains(short.as_str())
+    let (ns, nl) = (short.chars().count(), long.chars().count());
+    ns >= 8 && nl - ns <= MAX_EXTRA_CHARS && long.contains(short.as_str())
+}
+
+/// The most text a reported message may have beyond the truth message it matches (or lack).
+pub const MAX_EXTRA_CHARS: usize = 40;
+
+/// How many truth messages a reported message contains whole: two or more means it merged
+/// several messages (or a whole list), which is not a match for any of them.
+fn contained_truths(got: &str, truth: &[TruthMessage]) -> usize {
+    let g = ws(got);
+    truth
+        .iter()
+        .filter(|t| {
+            let t = ws(&t.text);
+            !t.is_empty() && g.contains(t.as_str())
+        })
+        .count()
 }
 
 /// Thread scores: precision and recall of the reported messages (each truth message matched at
@@ -146,6 +164,9 @@ pub fn score_thread(got: &[GotMessage], truth: &[TruthMessage]) -> Value {
     let mut used = vec![false; truth.len()];
     let mut pairs: Vec<(usize, usize)> = Vec::new();
     for (gi, g) in got.iter().enumerate() {
+        if contained_truths(&g.text, truth) >= 2 {
+            continue;
+        }
         if let Some(ti) =
             (0..truth.len()).find(|&ti| !used[ti] && texts_match(&g.text, &truth[ti].text))
         {
@@ -225,7 +246,8 @@ pub fn median_max(ms: &mut [f64]) -> Value {
 /// name. Names: `available`, `no_error`, `detect`, `read`, `secure`, `thread_precision`,
 /// `thread_recall`, `from_me`, `recipients`, `subject`, `insert:<payload>` (the oracle shows
 /// exactly the expected text), `verified:<payload>` (the API said verified), `undo:<payload>`,
-/// `insert:*` / `verified:*` / `undo:*` (every payload), and `read_ms` (median). Numeric
+/// `insert:*` / `verified:*` / `undo:*` (all six payloads present and passing), and `read_ms`
+/// (median). Numeric
 /// metrics take a threshold: `thread_recall>=0.8`, `read_ms<=250`; without one, the thread
 /// scores must be 1.
 pub fn metric_passes(rec: &Value, name: &str) -> Option<bool> {
@@ -252,7 +274,12 @@ pub fn metric_passes(rec: &Value, name: &str) -> Option<bool> {
     let inserts = rec["inserts"].as_array().cloned().unwrap_or_default();
     let per_payload = |field: &str, p: &str| -> bool {
         if p == "*" {
-            !inserts.is_empty() && inserts.iter().all(|i| truthy(&i[field]))
+            payloads().iter().all(|(id, _)| {
+                inserts
+                    .iter()
+                    .find(|i| i["payload"] == *id)
+                    .is_some_and(|i| truthy(&i[field]))
+            })
         } else {
             inserts
                 .iter()
@@ -305,18 +332,50 @@ pub fn cell_key(rec: &Value) -> String {
     )
 }
 
-/// Gate failures: each expected metric that fails on an available cell (or is unknown). Cells
-/// that did not run on this machine (another OS, app missing or filtered out) are skipped.
+/// The cell key with the runner label instead of the OS (`windows-2022/wordpad/native`), so
+/// `expected.json` can name a cell that only one runner image has.
+pub fn runner_key(rec: &Value) -> Option<String> {
+    Some(format!(
+        "{}/{}/{}",
+        rec["runner"].as_str().filter(|r| !r.is_empty())?,
+        rec["app"].as_str().unwrap_or("?"),
+        rec["fixture"].as_str().unwrap_or("?")
+    ))
+}
+
+/// Gate failures: each expected metric that fails (or is unknown), and each expected cell whose
+/// app is not available. Cells that did not run on this machine (another OS or runner, or
+/// filtered out) are skipped.
 pub fn gate(expected: &Value, records: &[Value]) -> Vec<String> {
     let mut out = Vec::new();
     let Some(map) = expected.as_object() else {
         return vec!["expected.json is not a JSON object".into()];
     };
     for (key, metrics) in map {
-        let Some(rec) = records.iter().find(|r| cell_key(r) == *key) else {
+        let rec = records
+            .iter()
+            .find(|r| cell_key(r) == *key || runner_key(r).as_deref() == Some(key.as_str()));
+        // A missing app writes one record with fixture `*`.
+        let rec = rec.or_else(|| {
+            let (prefix, _) = key.rsplit_once('/')?;
+            records.iter().find(|r| {
+                r["available"] == false
+                    && (cell_key(r).rsplit_once('/').map(|x| x.0) == Some(prefix)
+                        || runner_key(r)
+                            .as_deref()
+                            .and_then(|k| k.rsplit_once('/'))
+                            .map(|x| x.0)
+                            == Some(prefix))
+            })
+        });
+        let Some(rec) = rec else {
             continue;
         };
         if rec["available"].as_bool() != Some(true) {
+            out.push(format!(
+                "{key}: app not available ({})",
+                rec["error"].as_str().unwrap_or("no reason recorded")
+            ));
             continue;
         }
         let Some(list) = metrics.as_array() else {
@@ -425,6 +484,18 @@ mod tests {
         // Short fragments do not match by containment.
         let s = score_thread(&[g("Yes", None)], &truth);
         assert_eq!(s["matched"], 0);
+        // Much more text around a truth message is not a match.
+        let long = format!("Yes, 3pm works for me. {}", "padding ".repeat(8));
+        let s = score_thread(&[g(&long, Some(true))], &truth);
+        assert_eq!(s["matched"], 0);
+        // One reported message holding two truth messages is a false positive.
+        let merged = g(
+            "Are we still on for Thursday? Yes, 3pm works for me.",
+            Some(false),
+        );
+        let s = score_thread(&[merged], &truth);
+        assert_eq!(s["matched"], 0);
+        assert_eq!(s["precision"], 0.0);
         // Nothing reported: precision undefined, recall 0.
         let s = score_thread(&[], &truth);
         assert_eq!(s["precision"], Value::Null);
@@ -516,13 +587,19 @@ mod tests {
         assert!(gate(&json!({}), &recs).is_empty());
         let exp = json!({
             "linux/firefox/quill": ["detect", "insert:ascii", "read", "wat"],
-            "linux/chrome/*": ["detect"],
+            "linux/chrome/textarea": ["detect"],
             "macos/safari/quill": ["detect"]
         });
         let f = gate(&exp, &recs);
-        assert_eq!(f.len(), 2, "{f:?}");
-        assert!(f[0].contains("read failed"));
-        assert!(f[1].contains("unknown metric"));
+        assert_eq!(f.len(), 3, "{f:?}");
+        assert!(f[0].contains("not available"), "{f:?}");
+        assert!(f[1].contains("read failed"));
+        assert!(f[2].contains("unknown metric"));
+        // By runner label.
+        let mut r = record();
+        r["runner"] = json!("ubuntu-24.04");
+        let f = gate(&json!({"ubuntu-24.04/firefox/quill": ["read"]}), &[r]);
+        assert_eq!(f.len(), 1, "{f:?}");
         assert_eq!(gate(&json!([]), &recs).len(), 1);
         assert_eq!(cell_key(&recs[0]), "linux/firefox/quill");
     }
