@@ -286,7 +286,7 @@ export function App() {
       <a className="skip-link" href="#main">
         {t("app.skipToContent")}
       </a>
-      <aside className="sidebar">
+      <aside className="sidebar" aria-label={t("app.sidebarLabel")}>
         <div className="brand">
           <Logo />
           <span>{t("app.name")}</span>

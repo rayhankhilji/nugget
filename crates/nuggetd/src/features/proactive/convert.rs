@@ -2,13 +2,15 @@
 
 use nugget_core::ipc::{
     BriefCardView, BriefMeetingView, BriefView, CardActionView, CardEvidence, CardExecuteResult,
-    CardFactor, CardPreview, CardView, KindMetricsView, PreviewLine, ProactiveMetrics,
+    CardFactor, CardLearned, CardPreview, CardView, KindMetricsView, LearnedView, PreviewLine,
+    ProactiveMetrics, ResetLearningRequest,
 };
 use nugget_core::{Error, Result};
 use nugget_proactive::actions::risk_name;
 use nugget_proactive::{
-    Action, BriefCard, BriefMeeting, Card, DiffOp, DismissReason, EvidenceRef, ExecOutcome, Factor,
-    Metrics, MorningBrief, PreparedAction,
+    Action, BriefCard, BriefMeeting, CandidateKind, Card, DiffOp, DismissReason, Effect,
+    EvidenceRef, ExecOutcome, Factor, LearnedEntry, Metrics, MorningBrief, PreparedAction,
+    ResetScope, Scope,
 };
 use time::Date;
 
@@ -63,6 +65,76 @@ pub(crate) fn card_view(c: &Card, supports: &dyn Fn(&Action) -> bool) -> CardVie
         sensitive: c.sensitive,
         created_at: c.created_at,
         snoozed_until: c.snoozed_until,
+        learned: c.learned.iter().map(learned_effect).collect(),
+    }
+}
+
+/// How feedback changed one card (the "why" line).
+pub(crate) fn learned_effect(e: &Effect) -> CardLearned {
+    CardLearned {
+        scope: e.scope.as_str().to_owned(),
+        key: e.key.clone(),
+        direction: e.direction.as_str().to_owned(),
+        accepted: e.accepted,
+        dismissed: e.dismissed,
+        reason: e.reason.clone(),
+        contribution: e.contribution,
+    }
+}
+
+/// One entry of `proactive.learning`.
+pub(crate) fn learned_view(e: &LearnedEntry) -> LearnedView {
+    LearnedView {
+        scope: e.scope.as_str().to_owned(),
+        key: e.key.clone(),
+        label: e.label.clone(),
+        accepted: e.accepted,
+        dismissed: e.dismissed,
+        adjustment: e.adjustment,
+        suppresses: e.suppresses,
+        last_at: e.last_at,
+    }
+}
+
+/// `proactive.reset_learning`'s request. `key` is required (non-empty) unless `scope` is `all`;
+/// sender and domain keys are matched case-insensitively, a `kind` key must be a card kind's wire
+/// name.
+pub(crate) fn reset_scope(req: &ResetLearningRequest) -> Result<ResetScope> {
+    let scope = req.scope.trim();
+    if scope == "all" {
+        return Ok(ResetScope::All);
+    }
+    let Some(scope) = Scope::parse(scope) else {
+        return Err(Error::Invalid(format!(
+            "unknown learning scope {:?} (all, sender, domain, kind, thread)",
+            req.scope
+        )));
+    };
+    let key = req.key.as_deref().map(str::trim).unwrap_or_default();
+    if key.is_empty() {
+        return Err(Error::Invalid(format!(
+            "a key is required to reset the {} scope",
+            scope.as_str()
+        )));
+    }
+    let key = match scope {
+        Scope::Sender | Scope::Domain => key.to_lowercase(),
+        Scope::Kind => {
+            if !CandidateKind::ALL.iter().any(|k| k.as_str() == key) {
+                return Err(Error::Invalid(format!("unknown card kind {key:?}")));
+            }
+            key.to_owned()
+        }
+        Scope::Thread => key.to_owned(),
+    };
+    Ok(ResetScope::One(scope, key))
+}
+
+/// The audit target of a reset: `all`, or `<scope>:<key>`.
+pub(crate) fn reset_target(scope: &ResetScope) -> String {
+    match scope {
+        ResetScope::All => "all".to_owned(),
+        ResetScope::One(s, k) => format!("{}:{k}", s.as_str()),
     }
 }
 

@@ -9,7 +9,8 @@
   overflow: auto;
   padding: 4px 8px;
   font-size: 12px;
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  /* Opaque: muted text over a see-through panel drops below 4.5:1 where a label or node is under it. */
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
 }

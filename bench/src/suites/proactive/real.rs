@@ -17,11 +17,12 @@
 //!
 //! Each morning the adapter calls [`Proactive::refresh`] at 07:00 UTC, then shows the top `k` of
 //! [`Proactive::inbox`]. Accept and dismiss go to [`Proactive::accept`] and
-//! [`Proactive::dismiss`], so the crate's scoring model learns from the same noisy user as the
-//! reference engine. Every shown action is prepared through [`ActionRunner::prepare`] (the dry-run
-//! diff is the crate's rendered preview) and executed through [`Proactive::run_action`] with an
-//! approval bound to that preview's digest, the default [`PolicyEngine`] and sandbox executors
-//! that record what they were asked to apply. No network: the drafter is a deterministic stub and
+//! [`Proactive::dismiss`] (with the simulated user's reason: not relevant, already handled, not
+//! important), so the crate learns from the same noisy user as the reference engine. Every shown
+//! action is prepared through [`ActionRunner::prepare`] (the dry-run diff is the crate's rendered
+//! preview) and executed through [`Proactive::run_action`] with an approval bound to that
+//! preview's digest, the default [`PolicyEngine`] and sandbox executors that record what they
+//! were asked to apply. No network: the drafter is a deterministic stub and
 //! no LLM judge is configured.
 //!
 //! The crate's card kinds map to the benchmark's `(kind, subject)` through each card's first
@@ -52,7 +53,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
 use super::engine::{
-    Action, ActionKind, Approval, Card, DryRun, Execution, Feedback, ProactiveEngine,
+    self, Action, ActionKind, Approval, Card, DryRun, Execution, Feedback, ProactiveEngine,
 };
 use super::world::{
     self, CardKind, Event, EventCancelled, Item, Mail, Note, Receipt, commit_subject,
@@ -92,9 +93,9 @@ fn store_err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Card persistence that never keeps what the model learned: the learning-off ablation. Feedback
-/// still moves cards through the state machine (so dedup and tombstones work), but every save
-/// resets the scoring model to its prior.
+/// Card persistence that never keeps what was learned: the learning-off ablation. Feedback still
+/// moves cards through the state machine (so dedup and tombstones work), but every save resets
+/// the scoring model to its prior and forgets the per sender, domain, kind and thread entries.
 struct FrozenModel(StoreCardStore);
 
 impl CardStore for FrozenModel {
@@ -105,6 +106,7 @@ impl CardStore for FrozenModel {
     fn save(&self, state: &ProactiveState) -> nugget_core::Result<()> {
         let mut s = state.clone();
         s.model = ScoringModel::default();
+        s.learned = np::Learned::default();
         self.0.save(&s)
     }
 }
@@ -181,6 +183,16 @@ impl np::Drafter for StubDrafter {
             "Hi,\n\n{}\n\nBest,\nSam",
             req.intent.trim().trim_end_matches('.')
         ))
+    }
+}
+
+/// The simulated user's dismiss reason as the crate's (the Today page's) reason.
+pub fn dismiss_reason(reason: engine::DismissReason) -> DismissReason {
+    match reason {
+        engine::DismissReason::NotRelevant => DismissReason::NotRelevant,
+        engine::DismissReason::AlreadyHandled => DismissReason::AlreadyHandled,
+        engine::DismissReason::NotImportant => DismissReason::NotImportant,
+        engine::DismissReason::WrongInfo => DismissReason::WrongInfo,
     }
 }
 
@@ -287,6 +299,11 @@ impl RealEngine {
     /// Store and crate errors seen while driving the engine (the trait's methods cannot fail).
     pub fn errors(&self) -> &[String] {
         &self.errors
+    }
+
+    /// The crate under test, for assertions on what it learned.
+    pub fn proactive(&self) -> &Proactive {
+        &self.proactive
     }
 
     /// The crate's own metrics (precision = accepted / shown, by kind).
@@ -598,9 +615,9 @@ impl ProactiveEngine for RealEngine {
     fn feedback(&mut self, card_id: &str, feedback: Feedback) {
         let r = match feedback {
             Feedback::Accepted => self.proactive.accept(card_id, self.now),
-            Feedback::Dismissed => {
+            Feedback::Dismissed(reason) => {
                 self.proactive
-                    .dismiss(card_id, DismissReason::NotRelevant, self.now)
+                    .dismiss(card_id, dismiss_reason(reason), self.now)
             }
         };
         if let Err(e) = r {

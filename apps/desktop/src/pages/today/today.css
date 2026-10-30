@@ -155,3 +155,57 @@
   margin: 6px 0;
   overflow-wrap: anywhere;
 }
+
+/* BB2: what feedback taught the ranking. */
+
+.today-learned ul,
+.today-learning-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.today-learned li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.today-learned-less,
+.today-learned-hidden {
+  color: var(--muted);
+}
+
+.today-learning {
+  margin-top: 16px;
+}
+
+.today-learning-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.today-learning-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.today-learning-what {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.today-learning-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}

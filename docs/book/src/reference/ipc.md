@@ -104,8 +104,8 @@ then go to the model before the question (`system` entries are ignored, and the 
 `SourceInfo` is `{id, kind, name, enabled, state, items, chunks, last_sync, last_error, settings}`, with
 `state` one of `idle`, `syncing`, `watching`, `needs_auth`, `disabled`, `error`. Settings never
 contain secrets: `sources.add` and `sources.update` refuse a `client_secret` key. Use
-`sources.secret.set`: for `imap` and `caldav` it stores the password, for `gmail` and `gcal` the
-OAuth client secret (then rebuilds the source). It is write-only, at most 4096 bytes. See
+`sources.secret.set`: for `imap` and `caldav` it stores the password, for `gmail`, `gcal` and `gdrive`
+the OAuth client secret (then rebuilds the source). It is write-only, at most 4096 bytes. See
 [Connector settings](connectors.md) for each kind's `settings`.
 
 ### Knowledge graph
@@ -184,7 +184,7 @@ policy.
 <!-- check-refs: ipc.methods -->
 | Method | Params | Result | Daemon |
 |---|---|---|---|
-| `cards.list` | `CardsListRequest`: `{include_closed}` | `CardsList`: the open cards best first, each with its top factors, evidence and offered actions | yes |
+| `cards.list` | `CardsListRequest`: `{include_closed}` | `CardsList`: the open cards best first, each with its top factors, evidence, offered actions and `learned` (how your feedback changed its ranking: scope, key, `less`/`more`/`hidden`, the accepts and dismissals behind it) | yes |
 | `cards.feedback` | `CardFeedbackRequest`: a card id and `accept`, `dismiss` (with a reason), `snooze` (until), `seen` or `done` | The updated `CardView` | yes |
 | `cards.preview` | `CardPreviewRequest`: a card id and an action index | `CardPreview`: a dry-run diff and the digest an approval is bound to | yes |
 | `cards.execute` | `CardExecuteRequest`: card id, action index, the preview's digest, `confirmed` | `CardExecuteResult`: `executed` (with an artifact for the app to finish), `needs_confirmation`, `denied` or `halted` | yes |
@@ -192,6 +192,8 @@ policy.
 | `proactive.metrics` | `{}` | `ProactiveMetrics`: precision, time to action, dismiss reasons | yes |
 | `proactive.refresh` | `{}` | `CardsChanged`: runs a refresh now | yes |
 | `reminders.list` | `{}` | Pending `ReminderView`s, soonest first | yes |
+| `proactive.learning` | `{}` | `ProactiveLearning`: what feedback taught the ranking, per sender, domain, kind and thread, strongest adjustment first (answers even when `[proactive] enabled = false`) | yes |
+| `proactive.reset_learning` | `ResetLearningRequest`: `{scope, key}` with `scope` `all`, `sender`, `domain`, `kind` (key: a card kind) or `thread`; `key` required unless `all` | `ResetLearningResult`: `{cleared}`. Recorded in the audit log (`proactive.reset_learning`, target `all` or `<scope>:<key>`) and broadcasts `cards.changed` with reason `reset_learning` | yes |
 
 ### Plugins (milestone M6)
 
@@ -226,7 +228,7 @@ Being wired in (wave W); the names are planned and the parameters not final:
 |---|---|---|---|
 | `agent.event` | An `AgentEvent` | An agent task took a step, needs a confirmation or finished | yes |
 | `policy.kill.changed` | Whether the kill switch is engaged | The kill switch was engaged or released, from any cause (hotkey, tray, IPC) | yes |
-| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback or an executed action); refetch `cards.list` | yes |
+| `cards.changed` | `CardsChanged`: `{reason, open, created, resolved}` | The set of suggestion cards changed (refresh, feedback, an executed action or a learning reset: `reset_learning`); refetch `cards.list` | yes |
 | `brief.ready` | A `BriefView` | The morning brief is ready, once a day at `[proactive] brief_time` (not sent when it is empty) | yes |
 | `reminder.due` | A `ReminderView` | A reminder the user approved is due; the app shows an OS notification | yes |
 | `browser.host.request` | A message for the extension | Daemon to native host: forward this request to the browser extension | yes |

@@ -153,7 +153,7 @@ export function UpdateSettings() {
         </>
       )}
 
-      <h2>{t("updates.login.title")}</h2>
+      <h3 className="ask-sub">{t("updates.login.title")}</h3>
       {settings.start_at_login === null ? (
         <div className="note" style={{ display: "block" }}>
           <p>{t("updates.login.ask")}</p>

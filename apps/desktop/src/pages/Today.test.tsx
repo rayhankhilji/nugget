@@ -2,10 +2,10 @@
 import axe from "axe-core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { act } from "react";
-import type { BriefView, CardsList, CardView } from "../api";
+import type { BriefView, CardsList, CardView, ProactiveLearning } from "../api";
 import { TodayPage } from "./Today";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
-import { factorLabel, snoozeUntil, topFactors } from "./today/model";
+import { factorLabel, learnedLine, snoozeUntil, topFactors } from "./today/model";
 import { briefNotification, reminderNotification } from "../proactiveNotifications";
 
 const card: CardView = {
@@ -178,6 +178,8 @@ describe("Today page", () => {
     expect(executes[1]).toEqual({ card_id: "c1", action: 0, digest: "d1", confirmed: true });
     expect(dialog.querySelector(".today-draft")?.textContent).toBe("Hi Ana, <i>numbers</i>");
     expect(dialog.querySelector("i")).toBeNull();
+    // Once the action ran, the dialog no longer says nothing has changed.
+    expect(dialog.textContent).not.toContain("This is a preview");
     await click(byText(dialog, "button", "Open in mail app"));
     expect(calls).toContain("open_mailto");
   });
@@ -231,6 +233,139 @@ describe("Today page", () => {
   });
 });
 
+const learning: ProactiveLearning = {
+  entries: [
+    { scope: "sender", key: "bo@vendor.io", label: null, accepted: 0, dismissed: 3.2, adjustment: -1.1, suppresses: false, last_at: "2026-10-28T09:00:00Z" },
+    { scope: "thread", key: "t-9f2", label: "<i>Invoice</i> follow-up", accepted: 0, dismissed: 1, adjustment: -6, suppresses: true, last_at: "2026-10-27T09:00:00Z" },
+    { scope: "kind", key: "renewal", label: null, accepted: 2, dismissed: 0, adjustment: 0.6, suppresses: false, last_at: "2026-10-26T09:00:00Z" },
+  ],
+};
+
+const learnedCard: CardView = {
+  ...card,
+  state: "seen",
+  learned: [
+    { scope: "sender", key: "ana@example.com", direction: "less", accepted: 0, dismissed: 3, reason: null, contribution: -0.9 },
+    { scope: "kind", key: "unanswered_thread", direction: "more", accepted: 2, dismissed: 0, reason: null, contribution: 0.4 },
+    { scope: "domain", key: "example.com", direction: "less", accepted: 0, dismissed: 1, reason: "not_important", contribution: -0.1 },
+  ],
+};
+
+function setupLearning(extra: Record<string, unknown | ((a: unknown) => unknown)> = {}) {
+  const resets: Record<string, unknown>[] = [];
+  const r = setup({
+    cards_list: { cards: [learnedCard], enabled: true },
+    proactive_learning: learning,
+    proactive_reset_learning: (a: unknown) => {
+      resets.push((a as Req).request);
+      return { cleared: 1 };
+    },
+    ...extra,
+  });
+  return { ...r, resets };
+}
+
+describe("Today learning", () => {
+  it("says in the why how feedback moved a card, at most two effects, with counts", async () => {
+    setupLearning();
+    const { container } = await render(<TodayPage />);
+    const lines = Array.from(container.querySelectorAll(".today-learned li span")).map((e) => e.textContent);
+    expect(lines).toEqual([
+      "Shown less often: you dismissed 3 similar cards from this sender",
+      "Shown more often: you accepted 2 similar “Awaiting your reply” cards",
+    ]);
+  });
+
+  it("treats a card without `learned` (older daemon) as nothing learned and hides the panel without the method", async () => {
+    setup();
+    const { container } = await render(<TodayPage />);
+    expect(container.querySelector(".today-learned")).toBeNull();
+    expect(container.querySelector(".today-learning")).toBeNull();
+  });
+
+  it("forgets one effect from the card", async () => {
+    const { resets, calls } = setupLearning();
+    const { container } = await render(<TodayPage />);
+    const before = calls.filter((c) => c === "cards_list").length;
+    await click(container.querySelector('.today-learned button[aria-label="Forget what Nugget learned about ana@example.com (Sender)"]'));
+    expect(resets).toEqual([{ scope: "sender", key: "ana@example.com" }]);
+    expect(calls.filter((c) => c === "cards_list").length).toBeGreaterThan(before);
+  });
+
+  it("lists what was learned, as plain text, and forgets one entry", async () => {
+    const { resets, calls } = setupLearning();
+    const { container } = await render(<TodayPage />);
+    const panel = container.querySelector(".today-learning")!;
+    expect(panel.querySelector("h2")?.textContent).toBe("What Nugget has learned");
+    const toggle = byText(panel, "button", "Show 3 things Nugget learned")!;
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    await click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    const entries = Array.from(panel.querySelectorAll(".today-learning-entry"));
+    expect(entries.length).toBe(3);
+    expect(entries[0]!.textContent).toContain("bo@vendor.io");
+    expect(entries[0]!.textContent).toContain("Shown less often");
+    expect(entries[0]!.textContent).toContain("0 accepted · 3 dismissed");
+    expect(entries[1]!.textContent).toContain("<i>Invoice</i> follow-up");
+    expect(entries[1]!.textContent).toContain("Hidden");
+    expect(panel.querySelector("i")).toBeNull();
+    expect(entries[2]!.textContent).toContain("Renewal");
+    expect(entries[2]!.textContent).toContain("Shown more often");
+
+    const learningCalls = calls.filter((c) => c === "proactive_learning").length;
+    await click(byText(entries[1]!, "button", "Forget"));
+    expect(resets).toEqual([{ scope: "thread", key: "t-9f2" }]);
+    expect(calls.filter((c) => c === "proactive_learning").length).toBeGreaterThan(learningCalls);
+    expect(panel.querySelector('[role="status"]')?.textContent).toBe("Forgot 1 learned adjustment");
+  });
+
+  it("asks before resetting everything", async () => {
+    const { resets } = setupLearning();
+    const { container } = await render(<TodayPage />);
+    await click(byText(container, "button", "Reset all learning"));
+    let dialog = document.querySelector("dialog");
+    expect(dialog?.textContent).toContain("Reset everything Nugget has learned?");
+    expect(resets).toEqual([]);
+    // Cancel (focused first) leaves everything as it was.
+    expect(document.activeElement?.textContent).toBe("Cancel");
+    await click(byText(dialog!, "button", "Cancel"));
+    expect(document.querySelector("dialog")).toBeNull();
+    expect(resets).toEqual([]);
+
+    await click(byText(container, "button", "Reset all learning"));
+    dialog = document.querySelector("dialog");
+    await click(byText(dialog!, "button", "Reset all"));
+    expect(resets).toEqual([{ scope: "all" }]);
+    expect(document.querySelector("dialog")).toBeNull();
+  });
+
+  it("shows an error when forgetting fails and keeps the dialog open", async () => {
+    setupLearning({
+      proactive_reset_learning: () => {
+        throw { kind: "rpc", message: "store is locked", code: -32000 };
+      },
+    });
+    const { container } = await render(<TodayPage />);
+    await click(byText(container, "button", "Reset all learning"));
+    await click(byText(document.querySelector("dialog")!, "button", "Reset all"));
+    expect(document.querySelector("dialog")?.textContent).toContain("store is locked");
+
+    await click(byText(document.querySelector("dialog")!, "button", "Cancel"));
+    await click(container.querySelector('.today-learned button[aria-label="Forget what Nugget learned about ana@example.com (Sender)"]'));
+    expect(container.querySelector('.today-learned [role="alert"]')?.textContent).toContain("store is locked");
+  });
+
+  it("has no accessibility violations with learning shown", async () => {
+    setupLearning();
+    const { container } = await render(<TodayPage />);
+    await click(byText(container, "button", "Show 3 things Nugget learned"));
+    const result = await axe.run(document.body, {
+      rules: { "color-contrast": { enabled: false }, region: { enabled: false } },
+    });
+    expect(result.violations.map((v) => v.id)).toEqual([]);
+  });
+});
+
 describe("today helpers", () => {
   it("labels factors", () => {
     expect(factorLabel("importance")).toBe("Important");
@@ -244,6 +379,28 @@ describe("today helpers", () => {
       { name: "b", value: 1, weight: -2, contribution: -2 },
     ]);
     expect(f.map((x) => x.name)).toEqual(["b", "a"]);
+  });
+
+  it("phrases learned effects with plurals and reasons", () => {
+    const base = { accepted: 0, dismissed: 1, reason: null, contribution: -1 };
+    expect(learnedLine({ ...base, scope: "sender", key: "a@b.c", direction: "less" })).toBe(
+      "Shown less often: you dismissed 1 similar card from this sender",
+    );
+    expect(learnedLine({ ...base, scope: "domain", key: "b.c", direction: "less", dismissed: 4, reason: "not_important" })).toBe(
+      "Shown less often: you marked 4 similar cards from this domain as not important",
+    );
+    expect(learnedLine({ ...base, scope: "thread", key: "t", direction: "hidden", reason: "already_handled" })).toBe(
+      "Hidden: you marked this thread as already handled",
+    );
+    expect(learnedLine({ ...base, scope: "kind", key: "renewal", direction: "more", accepted: 2.4 })).toBe(
+      "Shown more often: you accepted 2 similar “Renewal” cards",
+    );
+    // Decayed to nothing, or a scope this app doesn't know: a generic cause.
+    expect(learnedLine({ ...base, scope: "sender", key: "a", direction: "less", dismissed: 0.2 })).toBe(
+      "Shown less often: based on your earlier feedback",
+    );
+    expect(learnedLine({ ...base, scope: "project", key: "x", direction: "less" })).toBe("Shown less often: based on your earlier feedback");
+    expect(learnedLine({ ...base, scope: "sender", key: "a", direction: "sideways" })).toBeNull();
   });
 
   it("computes snooze times", () => {

@@ -22,7 +22,7 @@ this book shows its source. Solid lines run today; dashed lines are being wired 
 flowchart LR
   subgraph ext_src["Sources"]
     files["Folders, Obsidian"]
-    google["Gmail, Google Calendar"]
+    google["Gmail, Google Calendar,<br/>Google Drive"]
     imapcal["IMAP, CalDAV servers"]
     msft["Microsoft Graph<br/>(Outlook, calendar, OneDrive)"]
     saas["Slack, Notion, GitHub, Linear"]

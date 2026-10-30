@@ -65,6 +65,17 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
 
   const preview = phase.kind === "previewing" ? null : phase.preview;
 
+  // Each phase swaps the buttons: when the focused one goes (Approve while it runs, Confirm once
+  // confirmed), focus would drop to the page body. Move it to the phase's main button instead.
+  const actionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const dialog = actionsRef.current?.closest("dialog");
+    if (!dialog) return;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && dialog.contains(active) && !isDisabled(active)) return;
+    dialog.querySelector<HTMLElement>("[data-autofocus]:not(:disabled)")?.focus();
+  }, [phase]);
+
   return (
     <Dialog title={action.label || t("today.action.title")} description={card.title} onClose={() => onClose(executed)} wide>
       {phase.kind === "previewing" && !error && <Spinner label={t("today.action.previewing")} />}
@@ -77,7 +88,7 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
             <Badge tone={riskTone(preview.risk)}>{t("today.action.risk", { risk: riskLabel(preview.risk) })}</Badge>
             <Badge>{t("today.action.target", { target: targetLabel(preview.target) })}</Badge>
           </div>
-          <p className="muted small">{t("today.action.dryRun")}</p>
+          {!executed && <p className="muted small">{t("today.action.dryRun")}</p>}
           {preview.diff.length > 0 ? (
             <ul className="today-diff" aria-label={t("today.action.diffLabel")}>
               {preview.diff.map((line, i) => (
@@ -99,7 +110,7 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
 
       {phase.kind === "result" && <Outcome result={phase.result} onConfirm={() => void execute(phase.preview, true)} />}
 
-      <div className="dialog-actions">
+      <div className="dialog-actions" ref={actionsRef}>
         {phase.kind === "result" && phase.result.outcome !== "needs_confirmation" ? (
           <button type="button" className="btn btn-primary" onClick={() => onClose(executed)} data-autofocus>
             {t("common.done")}
@@ -126,6 +137,8 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
     </Dialog>
   );
 }
+
+const isDisabled = (el: HTMLElement) => el.matches(":disabled");
 
 function Outcome({ result, onConfirm }: { result: CardExecuteResult; onConfirm: () => void }) {
   const t = useT();

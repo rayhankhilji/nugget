@@ -1,0 +1,11 @@
+suite: cua
+runner: GitHub Actions 1000009777 (Linux X64)
+commit: 04c554f6aaba7d4c6880013532714f0a68131adc baseline: abe2f7423a7a62b7747105e81ed47eb54f098b41
+date: 2026-10-29T10:23:08Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 9V45 96-Core Processor
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

@@ -94,6 +94,14 @@ pub const DEFAULT_EXCLUDED_APPS: &[&str] = &[
     "com.nordsec.nordpass",
     "nordpass",
     "nordpass.com",
+    // Keeper and RoboForm.
+    "com.keepersecurity.passwordmanager",
+    "keeperpasswordmanager",
+    "keeper password manager",
+    "keepersecurity.com",
+    "com.siber.roboform",
+    "roboform",
+    "roboform.com",
     "my.1password.com",
     "vault.bitwarden.com",
     "lastpass.com",
@@ -134,15 +142,36 @@ pub const DEFAULT_TERMINAL_APPS: &[&str] = &[
     "org.wezfurlong.wezterm",
     "ghostty",
     "xterm",
+    "uxterm",
+    "dev.warp.warp-stable",
+    "dev.warp.warp",
+    "warp",
+    "com.gexperts.tilix",
+    "tilix",
+    "org.gnome.ptyxis",
+    "ptyxis",
+    "terminator",
+    "foot",
+    "footclient",
+    "rxvt",
+    "urxvt",
+    "co.zeit.hyper",
+    "hyper",
+    "org.tabby",
+    "tabby",
 ];
 
 /// Whether the focused app is a terminal emulator ([`DEFAULT_TERMINAL_APPS`]).
+/// Also any app whose id contains `terminal` (`xfce4-terminal`, `mate-terminal`), or whose name
+/// has the word "Terminal".
 pub fn is_terminal(ctx: &DraftContext) -> bool {
     let s = Signals::of(ctx);
-    !s.app_id.is_empty()
-        && DEFAULT_TERMINAL_APPS
+    (!s.app_id.is_empty()
+        && (DEFAULT_TERMINAL_APPS
             .iter()
             .any(|t| s.app_id == *t || s.app_id_raw == *t)
+            || s.app_id.contains("terminal")))
+        || words(&s.app_name).any(|w| w == "terminal")
 }
 
 /// Refuse secure fields, excluded apps and terminals, then classify. `excluded` holds app ids
@@ -1742,6 +1771,13 @@ mod tests {
             "kitty",
             "wezterm-gui.exe",
             "com.mitchellh.ghostty",
+            // Security review PA-5: the rest of the review's list.
+            "dev.warp.Warp-Stable",
+            "com.gexperts.Tilix",
+            "org.gnome.Ptyxis.desktop",
+            "xfce4-terminal",
+            "mate-terminal",
+            "xterm",
         ] {
             let ctx = Case {
                 app_id: Some(id),
@@ -1776,6 +1812,51 @@ mod tests {
         assert!(!is_terminal(&ctx));
         let err: nugget_core::Error = Refusal::Terminal("Terminal".into()).into();
         assert!(matches!(err, nugget_core::Error::Invalid(_)));
+    }
+
+    /// Security review PA-5 (`security-m3-m6-poc/draft_poc.rs`, inverted): terminals and the
+    /// password managers a11y names are refused by the default lists.
+    #[test]
+    fn pa5_terminals_and_other_password_managers_are_refused() {
+        let excluded: Vec<String> = DEFAULT_EXCLUDED_APPS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        for (id, name) in [
+            ("com.apple.Terminal", "Terminal"),
+            ("com.googlecode.iterm2", "iTerm2"),
+            ("org.gnome.Terminal.desktop", "Terminal"),
+            ("WindowsTerminal.exe", "Windows Terminal"),
+            ("me.proton.pass.electron", "Proton Pass"),
+            ("in.sinew.Enpass-Desktop", "Enpass"),
+            ("com.nordsec.nordpass", "NordPass"),
+            (
+                "com.keepersecurity.passwordmanager",
+                "Keeper Password Manager",
+            ),
+            ("KeeperPasswordManager.exe", "Keeper"),
+            ("com.siber.RoboForm", "RoboForm"),
+            ("RoboForm.exe", "RoboForm"),
+            // Unknown id, but named a terminal.
+            ("com.example.shell", "GNOME Terminal"),
+        ] {
+            let ctx = Case {
+                app_id: Some(id),
+                app_name: name,
+                thread: true,
+                ..Default::default()
+            }
+            .ctx();
+            assert!(gate(&ctx, &excluded).is_err(), "{id}");
+        }
+        // The word, not a substring of another one.
+        let ctx = Case {
+            app_id: Some("com.example.notes"),
+            app_name: "Terminally Online Notes",
+            ..Default::default()
+        }
+        .ctx();
+        assert!(!is_terminal(&ctx));
     }
 
     #[test]

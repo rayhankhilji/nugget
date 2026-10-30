@@ -15,8 +15,8 @@ use nugget_core::ipc::{
 };
 use nugget_core::ipc::{
     BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest, CardPreview,
-    CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest, ProactiveMetrics,
-    ReminderView, proactive_method,
+    CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest, ProactiveLearning,
+    ProactiveMetrics, ReminderView, ResetLearningRequest, ResetLearningResult, proactive_method,
 };
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager, State};
@@ -830,6 +830,48 @@ pub async fn proactive_refresh(app: AppHandle, daemon: State<'_, Daemon>) -> Res
         .await
 }
 
+/// Scopes `proactive.reset_learning` takes (`all` needs no key).
+const LEARNING_SCOPES: &[&str] = &["all", "sender", "domain", "kind", "thread"];
+
+fn check_reset_learning(request: &ResetLearningRequest) -> Result<()> {
+    if !LEARNING_SCOPES.contains(&request.scope.as_str()) {
+        return Err(CmdError::Other("unknown learning scope".into()));
+    }
+    match request.key.as_deref() {
+        Some(key) if key.len() > MAX_TEXT_LEN => {
+            Err(CmdError::Other("learning key is too long".into()))
+        }
+        None | Some("") if request.scope != "all" => {
+            Err(CmdError::Other("say what to forget".into()))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// What feedback taught the card ranking.
+#[tauri::command]
+pub async fn proactive_learning(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<ProactiveLearning> {
+    daemon
+        .call(&app, proactive_method::PROACTIVE_LEARNING, &json!({}))
+        .await
+}
+
+/// Forget learned ranking adjustments (all, or one sender/domain/kind/thread); audited.
+#[tauri::command]
+pub async fn proactive_reset_learning(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+    request: ResetLearningRequest,
+) -> Result<ResetLearningResult> {
+    check_reset_learning(&request)?;
+    daemon
+        .call(&app, proactive_method::PROACTIVE_RESET_LEARNING, &request)
+        .await
+}
+
 #[tauri::command]
 pub async fn reminders_list(
     app: AppHandle,
@@ -1225,6 +1267,18 @@ mod tests {
         let bad: CardFeedbackRequest =
             serde_json::from_value(json!({ "card_id": " ", "feedback": "seen" })).unwrap();
         assert!(check_card_feedback(&bad).is_err());
+
+        let all: ResetLearningRequest = serde_json::from_value(json!({ "scope": "all" })).unwrap();
+        assert!(check_reset_learning(&all).is_ok());
+        let one: ResetLearningRequest =
+            serde_json::from_value(json!({ "scope": "sender", "key": "bo@vendor.io" })).unwrap();
+        assert!(check_reset_learning(&one).is_ok());
+        let keyless: ResetLearningRequest =
+            serde_json::from_value(json!({ "scope": "kind" })).unwrap();
+        assert!(check_reset_learning(&keyless).is_err());
+        let unknown: ResetLearningRequest =
+            serde_json::from_value(json!({ "scope": "everything" })).unwrap();
+        assert!(check_reset_learning(&unknown).is_err());
         let prev: CardPreviewRequest =
             serde_json::from_value(json!({ "card_id": "c1", "action": 0 })).unwrap();
         assert_eq!(prev.action, 0);

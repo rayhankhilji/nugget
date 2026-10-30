@@ -1,6 +1,8 @@
-//! Real accessibility for the `native` environment: the app windows (Edge, see
-//! [`super::env_native`]) read and driven through the OS accessibility API
-//! (`nugget_a11y::system_computer()`, UI Automation on Windows).
+//! Real accessibility for the `native` environment: the app windows (Edge on Windows, Chrome on
+//! macOS, see [`super::env_native`]) read and driven through the OS accessibility API
+//! (`nugget_a11y::system_computer()`: UI Automation on Windows, AX on macOS). Nothing here is
+//! specific to one OS: it works on any [`ComputerUse`]. Each snapshot is first put in the
+//! matcher's conventions by [`super::env_ax::normalize`] (a no-op for UIA trees).
 //!
 //! - **Matching.** A web page's accessibility tree has no bench ids (`UiNode` carries no
 //!   automation id), so the real tree of an app window is matched to the app's bench tree
@@ -42,6 +44,7 @@ use nugget_core::ipc::AppInfo;
 use nugget_core::{Error, Result};
 
 use super::agent::{ActResult, EnvError};
+use super::env_ax::normalize;
 use super::nugget_env::{WorldPort, decode_id, encode_id};
 use super::ui::{Action, Node, Observation, Role, app_of, check_action};
 
@@ -269,11 +272,13 @@ pub fn match_tree(bench: &Node, real: &UiNode) -> Match {
             last_end = last_end.max(flat[i].end);
         }
     }
+    // The window's own title (AX shows it as text after the page) is not a status line.
+    let title = norm(real.name.as_deref().unwrap_or(""));
     m.trailing = flat[last_end.min(flat.len())..]
         .iter()
         .filter(|f| f.node.children.is_empty() && real_class(f.node) == Class::Other)
         .filter_map(|f| f.node.name.as_deref().map(norm))
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty() && *s != title)
         .collect();
     m
 }
@@ -430,11 +435,32 @@ fn ok() -> ActResult {
     }
 }
 
-fn chord(key: Key, ctrl: bool) -> KeyChord {
+fn chord(key: Key) -> KeyChord {
     KeyChord {
         key,
+        modifiers: Modifiers::default(),
+    }
+}
+
+/// Typing an option's text into a closed list. On macOS each character goes as its own key
+/// press: a list's type-ahead reads key presses, and the text input path sends a string per
+/// event.
+fn type_ahead(option: &str) -> KeyInput {
+    if cfg!(target_os = "macos") {
+        KeyInput::Keys(option.chars().map(|c| chord(Key::Char(c))).collect())
+    } else {
+        KeyInput::Text(option.to_owned())
+    }
+}
+
+/// Select all: Command+A on macOS, Ctrl+A elsewhere.
+fn select_all() -> KeyChord {
+    let mac = cfg!(target_os = "macos");
+    KeyChord {
+        key: Key::Char('a'),
         modifiers: Modifiers {
-            ctrl,
+            ctrl: !mac,
+            meta: mac,
             ..Modifiers::default()
         },
     }
@@ -490,9 +516,10 @@ impl UiaDriver {
                 let window = self.real_window(app, &b.name)?;
                 self.reads
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let tree = self
+                let mut tree = self
                     .sys
                     .snapshot(&WindowSel::Id(window.id.clone()), &real_limits())?;
+                normalize(&mut tree.root);
                 let matched = match_tree(&b, &tree.root);
                 Ok(Located {
                     window,
@@ -552,41 +579,63 @@ impl UiaDriver {
             }
             _ => {}
         }
-        let located = match self.locate(&app, bench) {
-            Ok(l) => l,
-            Err(e) => return fail(format!("cannot read the {app} window: {e}")),
-        };
-        let Some(real) = located.real(action.target()).cloned() else {
-            return fail(format!(
-                "`{}` is not in the real {app} window (accessibility match failed)",
-                node.name
-            ));
-        };
+        // The page can be replaced between the read and the action (a second reload): the
+        // element is then gone, so read the window again and retry once.
+        let mut attempt = 0;
         let v0 = version();
-        let first = match action {
-            Action::Click { .. } => self.sys.act(&real.id, &UiAction::Press),
-            Action::Type { text, .. } => self.sys.act(
-                &real.id,
-                &UiAction::SetValue {
-                    value: text.clone(),
-                },
-            ),
-            Action::Select { target, option } => {
-                let opt = node
-                    .options
-                    .iter()
-                    .position(|o| o == option)
-                    .and_then(|i| located.matched.options.get(&option_id(target, i)));
-                match opt {
-                    Some(o) => self.sys.act(&o.id, &UiAction::Select),
-                    None => self.sys.act(
-                        &real.id,
-                        &UiAction::SetValue {
-                            value: option.clone(),
-                        },
-                    ),
+        let (real, first) = loop {
+            let located = match self.locate(&app, bench) {
+                Ok(l) => l,
+                Err(e) => return fail(format!("cannot read the {app} window: {e}")),
+            };
+            let Some(real) = located.real(action.target()).cloned() else {
+                return fail(format!(
+                    "`{}` is not in the real {app} window (accessibility match failed)",
+                    node.name
+                ));
+            };
+            let first: Result<ActionOutcome> = match action {
+                Action::Click { .. } => self.sys.act(&real.id, &UiAction::Press),
+                Action::Type { text, .. } => self.sys.act(
+                    &real.id,
+                    &UiAction::SetValue {
+                        value: text.clone(),
+                    },
+                ),
+                Action::Select { target, option } => {
+                    let opt = node
+                        .options
+                        .iter()
+                        .position(|o| o == option)
+                        .and_then(|i| located.matched.options.get(&option_id(target, i)));
+                    let has = |n: &UiNode, k: UiActionKind| n.actions.contains(&k);
+                    match opt {
+                        Some(o) if has(o, UiActionKind::Select) => {
+                            self.sys.act(&o.id, &UiAction::Select)
+                        }
+                        // AX may expose a closed `<select>`'s options as menu items to press.
+                        Some(o) if has(o, UiActionKind::Press) => {
+                            self.sys.act(&o.id, &UiAction::Press)
+                        }
+                        Some(o) if !has(&real, UiActionKind::SetValue) => {
+                            self.sys.act(&o.id, &UiAction::Select)
+                        }
+                        _ => self.sys.act(
+                            &real.id,
+                            &UiAction::SetValue {
+                                value: option.clone(),
+                            },
+                        ),
+                    }
                 }
+            };
+            let stale = matches!(&first, Err(Error::NotFound(_)));
+            if stale && attempt == 0 && version() == v0 {
+                attempt += 1;
+                std::thread::sleep(POLL * 5);
+                continue;
             }
+            break (real, first);
         };
         let first_err = first.err();
         if self.await_effect(&v0, version, FALLBACK_AFTER) {
@@ -596,13 +645,13 @@ impl UiaDriver {
         let fallback = match action {
             Action::Click { .. } => None,
             Action::Type { text, .. } => Some(vec![
-                KeyInput::Keys(vec![chord(Key::Char('a'), true)]),
+                KeyInput::Keys(vec![select_all()]),
                 KeyInput::Text(text.clone()),
-                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab), false)]),
+                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
             Action::Select { option, .. } => Some(vec![
-                KeyInput::Text(option.clone()),
-                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab), false)]),
+                type_ahead(option),
+                KeyInput::Keys(vec![chord(Key::Named(NamedKey::Tab))]),
             ]),
         };
         if let Some(inputs) = fallback {
@@ -610,9 +659,43 @@ impl UiaDriver {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // Each input focuses the field first (a no-op when it has focus); Tab then leaves
             // it, which commits the change.
-            for input in inputs {
-                if let Err(e) = self.sys.key_input(Some(&real.id), &input) {
-                    return fail(format!("keyboard input failed: {e}"));
+            let mut target = real.id.clone();
+            let mut retried = false;
+            let mut i = 0;
+            while i < inputs.len() {
+                // A list's type-ahead commits on the first letter that picks the option; the
+                // page then reloads, and the rest of the input has nothing left to do.
+                if version() != v0 {
+                    return ok();
+                }
+                match self.sys.key_input(Some(&target), &inputs[i]) {
+                    Ok(_) => i += 1,
+                    // The page was replaced under the field: read it again and start over.
+                    Err(Error::NotFound(_)) if !retried => {
+                        retried = true;
+                        if self.await_effect(&v0, version, POLL * 5) {
+                            return ok();
+                        }
+                        let fresh = self
+                            .locate(&app, bench)
+                            .ok()
+                            .and_then(|l| l.real(action.target()).map(|n| n.id.clone()));
+                        match fresh {
+                            Some(id) => {
+                                target = id;
+                                i = 0;
+                            }
+                            None => {
+                                return fail(format!("`{}` is gone from the window", node.name));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        if self.await_effect(&v0, version, EFFECT) {
+                            return ok();
+                        }
+                        return fail(format!("keyboard input failed: {e}"));
+                    }
                 }
             }
             if self.await_effect(&v0, version, EFFECT) {
@@ -649,10 +732,11 @@ impl UiaDriver {
     fn status(&self, app: &str, bench: &dyn Fn() -> Result<Node>) -> Option<String> {
         let b = bench().ok()?;
         let w = self.real_window(app, &b.name).ok()?;
-        let tree = self
+        let mut tree = self
             .sys
             .snapshot(&WindowSel::Id(w.id), &real_limits())
             .ok()?;
+        normalize(&mut tree.root);
         let m = match_tree(&b, &tree.root);
         m.trailing.into_iter().next()
     }

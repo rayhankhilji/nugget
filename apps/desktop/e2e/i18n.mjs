@@ -12,7 +12,7 @@ import { check, DIST, expect, log, newContext, OUT, settle, sleep, until } from 
 export const I18N_LOCALES = (process.env.E2E_I18N_LOCALES || "en-XA,de,ja,ar").split(",").map((s) => s.trim()).filter(Boolean);
 
 /** Elements whose text is a label: what a translation must fit into. */
-const LABELLED = [
+export const LABELLED = [
   "button",
   "a",
   "[role=button]",
@@ -41,7 +41,7 @@ const LABELLED = [
 /**
  * Where overflow is intended, with the reason. An element inside one of these is not measured.
  */
-const ALLOW = [
+export const ALLOW = [
   // The knowledge graph draws its own labels on a canvas.
   "canvas",
   // Code, paths and patterns are shown verbatim; their blocks scroll. (`kbd` is measured: key

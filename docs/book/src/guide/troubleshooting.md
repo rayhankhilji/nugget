@@ -53,7 +53,7 @@ A cloud-only embedding tier is ignored unless you opt in (see [Privacy](privacy.
 
 | State or error | What to do |
 |---|---|
-| `needs_auth` on Gmail or Google Calendar | Reconnect. If it happens weekly, your OAuth app is in Testing mode: see [the 7-day limit](sources-google.md#the-7-day-sign-in-limit-in-testing-mode). |
+| `needs_auth` on Gmail, Google Calendar or Google Drive | Reconnect. If it happens weekly, your OAuth app is in Testing mode: see [the 7-day limit](sources-google.md#the-7-day-sign-in-limit-in-testing-mode). |
 | `needs_auth` on IMAP or CalDAV | The password is missing or rejected. Create a new app password and set it again. |
 | TLS or certificate error on IMAP | The server's certificate is not trusted by your OS. For Proton Mail Bridge, see [the certificate steps](sources-imap-caldav.md#proton-mail-bridge-the-certificate). |
 | `refusing plain http` on CalDAV | Use the `https://` URL. Plain http is accepted only for `localhost`. |

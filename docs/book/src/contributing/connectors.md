@@ -99,7 +99,7 @@ custom form.
 
 Three credential patterns exist; pick the one that fits:
 
-- **`AuthKind::OAuth`** (`gmail`, `gcal`, the Microsoft kinds): `begin_auth` runs the
+- **`AuthKind::OAuth`** (`gmail`, `gcal`, `gdrive`, the Microsoft kinds): `begin_auth` runs the
   authorization-code flow with PKCE from `nugget-oauth` (a loopback listener on `127.0.0.1`) and stores
   the tokens under `oauth:<source>`. A client secret, if the provider needs one, is set with
   `sources.secret.set`; the daemon stores it under `oauth_client_secret:<source>` and injects it into

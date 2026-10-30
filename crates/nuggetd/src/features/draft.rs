@@ -10,7 +10,8 @@
 //!   read or sent, with a stable error: `data.refused` is `"secure"`, `"excluded_app"` or
 //!   `"not_draftable"` or `"terminal"` (`"disabled"` when `[draft] enabled = false`). See [`refusal_error`].
 //! - **Voice.** The profile is loaded from its encrypted snapshot (or built) on a blocking
-//!   thread after startup, then refreshed incrementally after ingest commits and draft
+//!   thread a few seconds after startup (`voice_load_delay_ms`, or at the first draft or
+//!   `voice.status` if sooner), then refreshed incrementally after ingest commits and draft
 //!   feedback, debounced ([`voice`]).
 //! - **Audit.** Every refusal, start (by the engine), cancel, end and feedback is audited with
 //!   lengths, kinds, provider, locality and app id only: never field text, thread or draft.
@@ -31,6 +32,7 @@
 //! voice_timeout_ms = 500
 //! prewarm_ttl_ms = 30000
 //! voice_refresh_debounce_ms = 5000      # quiet time after ingest commits before a refresh
+//! voice_load_delay_ms = 5000            # wait after startup before loading the voice profile
 //!
 //! [draft.voice]
 //! emails = ["me@example.com"]     # who "me" is (completed from sent mail when infer_me)
@@ -104,6 +106,7 @@ struct DraftSection {
     prewarm_ttl_ms: u64,
     grounding: bool,
     voice_refresh_debounce_ms: u64,
+    voice_load_delay_ms: u64,
     voice: VoiceSection,
 }
 
@@ -125,6 +128,7 @@ impl Default for DraftSection {
             prewarm_ttl_ms: d.prewarm_ttl_ms,
             grounding: d.grounding,
             voice_refresh_debounce_ms: 5_000,
+            voice_load_delay_ms: 5_000,
             voice: VoiceSection::default(),
         }
     }
@@ -278,7 +282,10 @@ fn start_with(state: &Arc<State>, cfg: &DraftSection) -> Arc<dyn Feature> {
         cfg.me(),
         cfg.voice_config(),
         events,
-        Duration::from_millis(cfg.voice_refresh_debounce_ms),
+        voice::Timing {
+            debounce: Duration::from_millis(cfg.voice_refresh_debounce_ms),
+            load_delay: Duration::from_millis(cfg.voice_load_delay_ms),
+        },
         state.shutdown.clone(),
     ));
     tracing::info!(

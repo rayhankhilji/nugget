@@ -1,0 +1,12 @@
+suite: cua-8b
+runner: GitHub Actions 1000009775 (Linux X64)
+commit: 04c554f6aaba7d4c6880013532714f0a68131adc baseline: abe2f7423a7a62b7747105e81ed47eb54f098b41
+date: 2026-10-29T10:23:26Z
+CPU(s):                                  4
+Model name:                              Intel(R) Xeon(R) 6973P-C
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      139%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1          10           0           4          14
+Swap:              2           0           2

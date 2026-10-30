@@ -38,6 +38,8 @@ pub use server::{
 };
 pub use transport::{LOCK_FILE, bind, connect_stream, lock_path, socket_display, socket_name};
 pub use wire::Notification;
+#[doc(hidden)]
+pub use wire::fuzz_frames;
 
 /// Re-exported so dependents name the same listener/stream types without depending on
 /// `interprocess` directly.

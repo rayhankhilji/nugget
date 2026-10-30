@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use hmac::{Hmac, Mac};
 use nugget_core::ids::ItemRef;
 use nugget_core::{Error, Result};
-use nugget_policy::{ActionDescriptor, Decision, PolicyGate, RiskClass};
+use nugget_policy::{ActionContext, ActionDescriptor, Decision, PolicyGate, RiskClass};
 use nugget_store::{AuditEntry, Store};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -401,6 +401,22 @@ impl PreparedAction {
         }
     }
 
+    /// What the policy gate is told around [`Action::descriptor`]: the approval card the user
+    /// sees, titled with the preview's summary (`Draft a reply to sam@example.com`, `Archive
+    /// "Q3 invoices"`), so rules on labels also see the recipients and what the action does.
+    ///
+    /// There is no page URL: the referenced items are mail messages and notes, not pages the
+    /// action is performed on, and a host taken from a cited source would make host rules act
+    /// on a local reminder or note as if it acted on that site.
+    pub fn context(&self) -> ActionContext {
+        let mut ctx = ActionContext::default();
+        let title = truncate(&self.preview.summary, 200);
+        if !title.is_empty() {
+            ctx = ctx.with_window_title(title);
+        }
+        ctx
+    }
+
     /// The user approved this exact preview. `confirmed` answers a policy `Confirm` (the UI
     /// shows the policy's reason and the user confirmed it).
     pub fn approve(&self, confirmed: bool) -> Approval {
@@ -632,7 +648,8 @@ impl ActionRunner {
             return Err(missing(what));
         }
         let descriptor = prepared.action.descriptor(&task);
-        let policy_reason = match self.policy.evaluate(&descriptor) {
+        let context = prepared.context();
+        let policy_reason = match self.policy.evaluate_with_context(&descriptor, &context) {
             Decision::Allow => None,
             Decision::Confirm(reason) => Some(reason),
             Decision::Deny(reason) => {
@@ -656,9 +673,11 @@ impl ActionRunner {
         }
         // The user approved a policy `Confirm`: it counts against the task's rate limit.
         if policy_confirm
-            && !self
-                .policy
-                .record_approved(&descriptor, prepared.preview.risk)
+            && !self.policy.record_approved_with_context(
+                &descriptor,
+                prepared.preview.risk,
+                &context,
+            )
         {
             let reason = "the rate limit for approved actions is reached".to_owned();
             self.audit("denied", &task, prepared, json!({"reason": reason}));
@@ -719,5 +738,145 @@ impl ActionRunner {
         if let Err(e) = store.append_audit(&entry) {
             tracing::warn!(error = %e, "cannot write proactive audit entry");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nugget_core::ids::{ItemKey, SourceId};
+    use nugget_policy::{Effect, PolicyConfig, PolicyEngine, Rule};
+
+    use super::*;
+
+    /// Records the context of every check; refuses any check made without one.
+    #[derive(Default)]
+    struct ContextGate {
+        evaluated: Mutex<Vec<ActionContext>>,
+        approved: Mutex<Vec<ActionContext>>,
+    }
+
+    impl PolicyGate for ContextGate {
+        fn evaluate(&self, _: &ActionDescriptor) -> Decision {
+            Decision::Deny("checked without context".into())
+        }
+        fn halted(&self) -> bool {
+            false
+        }
+        fn evaluate_with_context(&self, _: &ActionDescriptor, ctx: &ActionContext) -> Decision {
+            self.evaluated.lock().unwrap().push(ctx.clone());
+            Decision::Confirm("check this".into())
+        }
+        fn record_approved(&self, _: &ActionDescriptor, _: RiskClass) -> bool {
+            false // only the context-aware recording may approve
+        }
+        fn record_approved_with_context(
+            &self,
+            _: &ActionDescriptor,
+            _: RiskClass,
+            ctx: &ActionContext,
+        ) -> bool {
+            self.approved.lock().unwrap().push(ctx.clone());
+            true
+        }
+    }
+
+    #[derive(Default)]
+    struct Mail {
+        saved: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl MailExecutor for Mail {
+        async fn save_draft(&self, d: &DraftReply) -> Result<String> {
+            self.saved.lock().unwrap().push(d.subject.clone());
+            Ok("draft-1".into())
+        }
+        async fn archive_thread(&self, _: &ArchiveThread) -> Result<String> {
+            Ok("archived".into())
+        }
+    }
+
+    fn draft_to(to: &str) -> Action {
+        Action::DraftReply(DraftReply {
+            reply_to: ItemRef {
+                source: SourceId::new("gmail:me@example.com"),
+                key: ItemKey::new("msg-1"),
+            },
+            in_reply_to_message_id: None,
+            to: vec![to.to_owned()],
+            cc: Vec::new(),
+            subject: "Re: Pricing".into(),
+            intent: "answer the question".into(),
+            body: Some("Hi,\n\nThe numbers are attached.".into()),
+        })
+    }
+
+    fn runner(policy: Arc<dyn PolicyGate>, mail: Arc<Mail>) -> ActionRunner {
+        ActionRunner::new(
+            policy,
+            Executors {
+                mail: Some(mail),
+                ..Default::default()
+            },
+        )
+        .with_key([7; APPROVAL_KEY_LEN])
+    }
+
+    #[tokio::test]
+    async fn the_gate_sees_the_approval_cards_context() {
+        let gate = Arc::new(ContextGate::default());
+        let mail = Arc::new(Mail::default());
+        let r = runner(gate.clone(), mail.clone());
+        let prepared = r
+            .prepare("card-1", 0, &draft_to("sam@example.com"), &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            prepared.context().window_title.as_deref(),
+            Some("Draft a reply to sam@example.com")
+        );
+        let out = r.execute(&prepared, &prepared.approve(true)).await.unwrap();
+        assert_eq!(out, ExecOutcome::Executed("draft-1".into()));
+        // Evaluated and counted in the same context.
+        assert_eq!(*gate.evaluated.lock().unwrap(), [prepared.context()]);
+        assert_eq!(*gate.approved.lock().unwrap(), [prepared.context()]);
+        assert_eq!(mail.saved.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_rule_matching_only_the_context_applies() {
+        // The recipient is in the card's title, not in the descriptor's label ("Re: Pricing").
+        let config = PolicyConfig {
+            rules: vec![
+                Rule::new("no-rival-drafts", Effect::Deny)
+                    .labels(["draft a reply to *@rival.example"]),
+            ],
+            ..PolicyConfig::default()
+        };
+        let engine = Arc::new(PolicyEngine::new(config));
+        let mail = Arc::new(Mail::default());
+        let r = runner(engine, mail.clone());
+
+        let rival = r
+            .prepare("card-1", 0, &draft_to("sam@rival.example"), &[])
+            .await
+            .unwrap();
+        assert!(
+            rival.action.descriptor("t").target_label.as_deref() == Some("Re: Pricing"),
+            "the label alone cannot match the rule"
+        );
+        let out = r.execute(&rival, &rival.approve(true)).await.unwrap();
+        assert!(
+            matches!(&out, ExecOutcome::Denied(reason) if reason.contains("no-rival-drafts")),
+            "{out:?}"
+        );
+
+        let friend = r
+            .prepare("card-2", 0, &draft_to("sam@example.com"), &[])
+            .await
+            .unwrap();
+        let out = r.execute(&friend, &friend.approve(true)).await.unwrap();
+        assert_eq!(out, ExecOutcome::Executed("draft-1".into()));
+        assert_eq!(*mail.saved.lock().unwrap(), ["Re: Pricing"]);
     }
 }

@@ -7,6 +7,7 @@ use nugget_browser::bridge::BridgeError;
 use nugget_browser::protocol::{ErrorCode, SnapshotOptions};
 use nugget_browser::tool::{ToolContext, browser_tools};
 use nugget_browser::{BrowserAction, BrowserController, BrowserError, DeclineAll};
+use nugget_policy::RiskClass;
 use serde_json::json;
 
 fn setup(
@@ -254,5 +255,155 @@ async fn tools_drive_the_controller() {
             .unwrap()
             .iter()
             .all(|d| d.task_id == "task-9")
+    );
+}
+
+/// Records the context of every check; refuses any check made without one.
+#[derive(Default)]
+struct ContextGate {
+    evaluated: Mutex<Vec<(String, nugget_policy::ActionContext)>>,
+    approved: Mutex<Vec<(String, nugget_policy::ActionContext)>>,
+}
+
+impl nugget_policy::PolicyGate for ContextGate {
+    fn evaluate(&self, _: &nugget_policy::ActionDescriptor) -> nugget_policy::Decision {
+        nugget_policy::Decision::Deny("checked without context".into())
+    }
+
+    fn halted(&self) -> bool {
+        false
+    }
+
+    fn evaluate_with_context(
+        &self,
+        a: &nugget_policy::ActionDescriptor,
+        context: &nugget_policy::ActionContext,
+    ) -> nugget_policy::Decision {
+        self.evaluated
+            .lock()
+            .unwrap()
+            .push((a.verb.clone(), context.clone()));
+        if a.verb == "click" {
+            nugget_policy::Decision::Confirm("click needs approval".into())
+        } else {
+            nugget_policy::Decision::Allow
+        }
+    }
+
+    fn record_approved(&self, _: &nugget_policy::ActionDescriptor, _: RiskClass) -> bool {
+        false // only the context-aware recording may approve
+    }
+
+    fn record_approved_with_context(
+        &self,
+        a: &nugget_policy::ActionDescriptor,
+        _: RiskClass,
+        context: &nugget_policy::ActionContext,
+    ) -> bool {
+        self.approved
+            .lock()
+            .unwrap()
+            .push((a.verb.clone(), context.clone()));
+        true
+    }
+}
+
+fn context_rig() -> (Arc<ContextGate>, Arc<BrowserController>) {
+    let gate = Arc::new(ContextGate::default());
+    let c = Arc::new(BrowserController::new(
+        Arc::new(FakeBridge::new(form())),
+        gate.clone(),
+        Arc::new(ScriptedConfirmer(true, Mutex::new(Vec::new()))),
+    ));
+    (gate, c)
+}
+
+#[tokio::test]
+async fn controller_rechecks_with_the_page_context() {
+    let (gate, c) = context_rig();
+    let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    c.act(
+        "t",
+        BrowserAction::Type {
+            element: id(&s, "Email address"),
+            text: "grace@example.com".into(),
+            clear: None,
+        },
+    )
+    .await
+    .unwrap();
+    // The fake bridge's act reply replaces the snapshot; take the form again.
+    let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    c.act(
+        "t",
+        BrowserAction::Click {
+            element: id(&s, "Create account"),
+        },
+    )
+    .await
+    .unwrap();
+    c.act(
+        "t",
+        BrowserAction::Navigate {
+            url: "/checkout".into(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let evaluated = gate.evaluated.lock().unwrap().clone();
+    let verbs: Vec<_> = evaluated.iter().map(|(v, _)| v.as_str()).collect();
+    assert_eq!(
+        verbs,
+        ["snapshot", "set_value", "snapshot", "click", "navigate"]
+    );
+
+    // A read is judged on the site alone.
+    assert_eq!(evaluated[0].1, nugget_policy::ActionContext::default());
+
+    let typed = &evaluated[1].1;
+    assert_eq!(typed.url.as_deref(), Some("https://shop.example/page"));
+    assert!(!typed.secure_field);
+    assert_eq!(typed.role.as_deref(), Some("textbox"));
+    // The form's password field is named in the classifier's vocabulary.
+    assert!(typed.form_fields.iter().any(|f| f == "password"));
+    assert!(typed.form_fields.iter().any(|f| f == "Email address"));
+
+    let click = &evaluated[3].1;
+    assert_eq!(click.role.as_deref(), Some("button"));
+    assert_eq!(click.submits, Some(true));
+    assert!(!click.secure_field);
+    // The approval is counted in the context it was judged in.
+    assert_eq!(
+        *gate.approved.lock().unwrap(),
+        [("click".to_owned(), click.clone())]
+    );
+
+    // A navigation is judged on its destination, not the page being left.
+    let nav = &evaluated[4].1;
+    assert_eq!(nav.url.as_deref(), Some("https://shop.example/checkout"));
+    assert_eq!(nav.window_title, None);
+}
+
+#[tokio::test]
+async fn controller_context_matches_what_the_agent_tools_give_the_loop() {
+    let (gate, c) = context_rig();
+    let tools = nugget_browser::tool::agent_tools(c.clone());
+    let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    let tool = tools.iter().find(|t| t.name() == "browser_click").unwrap();
+    let args = json!({"element": id(&s, "Create account")});
+    let loop_context = tool.context(&args);
+    c.act(
+        "t",
+        BrowserAction::Click {
+            element: id(&s, "Create account"),
+        },
+    )
+    .await
+    .unwrap();
+    let evaluated = gate.evaluated.lock().unwrap();
+    assert_eq!(
+        evaluated.last().unwrap(),
+        &("click".to_owned(), loop_context)
     );
 }

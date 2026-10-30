@@ -1,0 +1,6 @@
+target/
+artifacts/
+coverage/
+# Corpus entries libFuzzer adds during a run. Only the handmade `seed-*` files are committed.
+corpus/*/*
+!corpus/*/seed-*

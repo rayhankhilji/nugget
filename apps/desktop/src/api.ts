@@ -135,8 +135,8 @@ export interface EgressEvent {
 // ---- sources (M1) ----
 
 /** Connector kinds shipped in M1. The daemon may report others; treat `kind` as a string. */
-export type SourceKind = "files" | "obsidian" | "gmail" | "gcal" | "imap" | "caldav";
-export const SOURCE_KINDS: readonly SourceKind[] = ["files", "obsidian", "gmail", "gcal", "imap", "caldav"];
+export type SourceKind = "files" | "obsidian" | "gmail" | "gcal" | "gdrive" | "imap" | "caldav";
+export const SOURCE_KINDS: readonly SourceKind[] = ["files", "obsidian", "gmail", "gcal", "gdrive", "imap", "caldav"];
 
 export type SourceState = "idle" | "syncing" | "watching" | "needs_auth" | "disabled" | "error";
 export const SOURCE_STATES: readonly SourceState[] = ["idle", "syncing", "watching", "needs_auth", "disabled", "error"];
@@ -2059,4 +2059,81 @@ export interface FitReport {
 export const modelFitApi = {
   /** Why each model is recommended and what it needs. Older daemons answer "method not found". */
   modelsFit: () => call<FitReport>("models_fit"),
+};
+
+// ---- BB2 proactive learning ----
+//
+// What the user's own Accept/Dismiss feedback taught the card ranking, and forgetting it
+// (`proactive.learning`, `proactive.reset_learning` in `nugget_core::ipc`). Learning only changes
+// ranking and suppression, never what an action does. Labels are untrusted source text.
+
+/** `sender`, `domain`, `kind`, `thread` (or a newer scope). */
+export type LearningScope = "sender" | "domain" | "kind" | "thread";
+/** `less` (ranked lower), `more` (ranked higher), `hidden` (suppressed). */
+export type LearnedDirection = "less" | "more" | "hidden";
+
+/** One way feedback changed a card's ranking (`CardView.learned`, strongest first). */
+export interface CardLearned {
+  scope: LearningScope | string;
+  /** The sender address, domain or card kind (`thread`: an opaque key). */
+  key: string;
+  direction: LearnedDirection | string;
+  /** Accepts and dismissals behind it (decayed, rounded). */
+  accepted: number;
+  dismissed: number;
+  /** The most common dismiss reason behind it (`DismissReason` wire name), when dismissals dominate. */
+  reason?: DismissReason | string | null;
+  /** Change in log-odds of the score. */
+  contribution: number;
+}
+
+/** One learned adjustment in `proactive.learning`. */
+export interface LearnedView {
+  scope: LearningScope | string;
+  key: string;
+  /** A human label (a thread's card title) when the key is opaque. Untrusted: plain text only. */
+  label?: string | null;
+  /** Decayed counts. */
+  accepted: number;
+  dismissed: number;
+  /** Log-odds; negative ranks lower. */
+  adjustment: number;
+  /** Suppresses matching cards (a thread marked already handled). */
+  suppresses?: boolean;
+  /** RFC 3339. */
+  last_at: string;
+}
+
+export interface ProactiveLearning {
+  /** Strongest adjustment first. */
+  entries: LearnedView[];
+}
+
+export interface ResetLearningRequest {
+  scope: "all" | LearningScope;
+  /** Required unless `scope` is `all`. */
+  key?: string | null;
+}
+
+export interface ResetLearningResult {
+  /** Learned entries forgotten. */
+  cleared: number;
+}
+
+// Declaration merge: `CardView` (W4 block) gains the learned effects.
+export interface CardView {
+  /** How the user's feedback changed this card's ranking, strongest first (absent from older daemons). */
+  learned?: CardLearned[] | null;
+}
+
+/** A card's learned effects; older daemons send none. */
+export function cardLearned(card: CardView): CardLearned[] {
+  return Array.isArray(card.learned) ? card.learned : [];
+}
+
+export const learningApi = {
+  /** Older daemons answer "method not found". */
+  learning: () => call<ProactiveLearning>("proactive_learning"),
+  /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
+  resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };

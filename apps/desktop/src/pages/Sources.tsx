@@ -13,10 +13,11 @@ import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime, sourceKindLabel, sourceStateLabel, SOURCE_STATE_TONE } from "../format";
 import { useT, type TFunction } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
+import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { Dialog } from "../components/Dialog";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, ProgressBar, Spinner } from "../components/ui";
 import { DeviceSignInDialog } from "../sources/auth";
-import { connectMode, isSaasKind } from "../sources/kinds";
+import { connectMode, isGoogleKind, isSaasKind } from "../sources/kinds";
 import { KindIcon } from "../sources/KindIcon";
 import { TOKEN_LABEL } from "../sources/SaasForm";
 
@@ -29,7 +30,7 @@ export function SourcesPage() {
   const [removing, setRemoving] = useState<SourceInfo | null>(null);
   const [passwordFor, setPasswordFor] = useState<SourceInfo | null>(null);
   const [deviceFor, setDeviceFor] = useState<SourceInfo | null>(null);
-  const [announce, setAnnounce] = useState("");
+  const [announcement, setAnnounce] = useAnnouncer();
   const [syncAllError, setSyncAllError] = useState<string | null>(null);
   const now = useNow();
 
@@ -45,6 +46,9 @@ export function SourcesPage() {
     reloadTimer.current = window.setTimeout(reload, 400);
   }, [reload]);
   useEffect(() => () => window.clearTimeout(reloadTimer.current), []);
+
+  // Progress bars tick silently; a pass is announced when it starts and when it ends.
+  useIngestAnnouncements(setAnnounce, (id) => sources?.find((s) => s.id === id));
 
   useEvent(events.onIngestProgress, (p) => {
     if (p.phase === "idle" || p.phase === "error") {
@@ -95,9 +99,7 @@ export function SourcesPage() {
           )
         }
       />
-      <div className="visually-hidden" aria-live="polite">
-        {announce}
-      </div>
+      <Announce message={announcement} />
       {syncAllError && (
         <p className="note note-error" role="alert">
           {syncAllError}
@@ -308,6 +310,7 @@ function SourceRow({
           <div className="note note-error small" role="status">
             <span>{s.last_error ? t("sources.lastError", { error: s.last_error }) : t("sources.errorNoDetail")}</span>
             <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
+            {isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
         )}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (

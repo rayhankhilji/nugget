@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-use super::engine::{Action, ActionKind, Approval, Card, DryRun, Execution, Feedback};
+use super::engine::{
+    Action, ActionKind, Approval, Card, DismissReason, DryRun, Execution, Feedback,
+};
 use super::generate::generate;
 use super::world::{
     self, CardKind, DistractorCategory, Gold, Item, World, day_of, iso_date, load_gold, load_world,
@@ -661,5 +663,290 @@ fn real_engine_diagnostic() {
             s.card.subject,
             s.card.title
         );
+    }
+}
+
+// ---- learning from dismiss reasons (BB2) ----
+
+#[test]
+fn simulated_user_gives_reasons_from_the_gold_labels() {
+    let (_, g) = fixture();
+    let distractors: HashMap<&str, DistractorCategory> = g
+        .distractors
+        .iter()
+        .flat_map(|d| d.subjects.iter().map(move |s| (s.as_str(), d.category)))
+        .collect();
+    let card = |subject: &str| Card {
+        id: "c".into(),
+        kind: CardKind::UnansweredThread,
+        subject: subject.into(),
+        title: String::new(),
+        score: 0.0,
+        action: None,
+    };
+    for d in &g.distractors {
+        let want = match d.category {
+            DistractorCategory::AnsweredThread
+            | DistractorCategory::CompletedCommitment
+            | DistractorCategory::CancelledMeeting => DismissReason::AlreadyHandled,
+            _ => DismissReason::NotImportant,
+        };
+        for s in &d.subjects {
+            assert_eq!(
+                sim::dismiss_reason(&card(s), false, &distractors),
+                want,
+                "{s}"
+            );
+        }
+    }
+    // A gold card the user dismissed is noise, not a judgement about it.
+    let gold = &g.cards[0].subject;
+    assert_eq!(
+        sim::dismiss_reason(&card(gold), true, &distractors),
+        DismissReason::NotRelevant
+    );
+    assert_eq!(
+        sim::dismiss_reason(&card("thread:nowhere"), false, &distractors),
+        DismissReason::NotRelevant
+    );
+}
+
+/// Reasons never touch the RNG: an engine that records the decisions sees the same accepts and
+/// dismisses as one that ignores reasons, and every dismissal has a reason.
+#[test]
+fn reasons_do_not_change_the_decisions() {
+    let (w, g) = fixture();
+    let mut e = reference::ReferenceEngine::new(SAM, true);
+    let run = sim::run(&w, &g, &mut e, sim_config(11));
+    assert!(run.shows.iter().all(|s| s.accepted == s.reason.is_none()));
+    let reasons: HashSet<DismissReason> = run.shows.iter().filter_map(|s| s.reason).collect();
+    assert!(reasons.contains(&DismissReason::NotRelevant), "{reasons:?}");
+    // Same seed, same decisions (the RNG draws once per shown card, nothing else).
+    let mut e2 = reference::ReferenceEngine::new(SAM, true);
+    let again = sim::run(&w, &g, &mut e2, sim_config(11));
+    let decisions = |r: &sim::Run| -> Vec<(i32, String, bool)> {
+        r.shows
+            .iter()
+            .map(|s| (s.day, s.card.subject.clone(), s.accepted))
+            .collect()
+    };
+    assert_eq!(decisions(&run), decisions(&again));
+}
+
+/// Feed `items` day by day; `on_brief` sees each morning's brief and gives feedback.
+fn drive(
+    e: &mut real::RealEngine,
+    items: &[Item],
+    days: i32,
+    mut on_brief: impl FnMut(i32, &[Card], &mut real::RealEngine),
+) {
+    let mut items: Vec<&Item> = items.iter().collect();
+    items.sort_by_key(|i| i.day());
+    let mut next = 0;
+    for day in 1..=days {
+        while next < items.len() && items[next].day() < day {
+            e.observe(items[next]);
+            next += 1;
+        }
+        let cards = e.brief(day, K);
+        on_brief(day, &cards, e);
+    }
+    assert!(e.errors().is_empty(), "{:?}", e.errors());
+}
+
+const PRICING: &str = "Hi Sam, could you send me your pricing sheet? Thanks";
+
+/// Day 1: Ana and Bob each ask Sam something. Day 2: Ana and Carl each ask the same new question
+/// in new threads. On day 3 Sam accepts Bob's card and dismisses Ana's as not important.
+fn sender_world() -> Vec<Item> {
+    let ask = "Hi Sam, could you share your availability for a demo next week? Thanks";
+    vec![
+        mail("m-a1", 1, "t-a1", "ana@globex.test", SAM, "Demo", ask),
+        mail("m-b1", 1, "t-b1", "bob@umbrella.test", SAM, "Demo", ask),
+        mail(
+            "m-a2",
+            2,
+            "t-a2",
+            "ana@globex.test",
+            SAM,
+            "Pricing",
+            PRICING,
+        ),
+        mail(
+            "m-c2",
+            2,
+            "t-c2",
+            "carl@initech.test",
+            SAM,
+            "Pricing",
+            PRICING,
+        ),
+    ]
+}
+
+/// Day 4 in the sender world: the crate's score for Ana's second card and Carl's, and whether
+/// Ana's ranks below Carl's in the brief (below it, or not shown at all).
+fn sender_brief(learning: bool) -> (f64, f64, bool) {
+    let mut e = real::RealEngine::new(SAM, learning, 21).unwrap();
+    let mut day4 = Vec::new();
+    drive(&mut e, &sender_world(), 4, |day, cards, e| {
+        if day == 3 {
+            let card = |t: &str| {
+                let c = cards.iter().find(|c| c.subject == t);
+                c.unwrap_or_else(|| panic!("day 3 has no {t}: {cards:?}"))
+                    .id
+                    .clone()
+            };
+            e.feedback(&card("thread:t-b1"), Feedback::Accepted);
+            e.feedback(
+                &card("thread:t-a1"),
+                Feedback::Dismissed(DismissReason::NotImportant),
+            );
+        }
+        if day == 4 {
+            day4 = cards.to_vec();
+        }
+    });
+    let pos = |t: &str| day4.iter().position(|c| c.subject == t);
+    let carl = pos("thread:t-c2").unwrap_or_else(|| panic!("day 4: {day4:?}"));
+    let below = pos("thread:t-a2").is_none_or(|ana| ana > carl);
+    // Scores from the crate, including a card it no longer shows.
+    let all = e.proactive().all_cards().unwrap();
+    let score = |mail: &str| {
+        let c = all.iter().find(|c| {
+            c.evidence
+                .first()
+                .is_some_and(|ev| ev.item.key.as_str() == mail)
+        });
+        c.unwrap_or_else(|| panic!("no card for {mail}")).rank
+    };
+    (score("m-a2"), score("m-c2"), below)
+}
+
+/// A sender dismissed as not important is ranked lower the next day: Ana's second card ranks
+/// below Carl's otherwise-equal card (with learning off the two score level), and the gap comes
+/// from the feedback.
+#[test]
+fn not_important_ranks_the_sender_lower_the_next_day() {
+    let (ana, carl, below) = sender_brief(true);
+    let (ana0, carl0, _) = sender_brief(false);
+    assert!(below, "learning on: Ana {ana} vs Carl {carl}");
+    assert!(ana < carl, "learning on: Ana {ana} vs Carl {carl}");
+    assert!(
+        carl - ana > carl0 - ana0 + 0.1,
+        "the gap comes from feedback: on {ana} vs {carl}, frozen {ana0} vs {carl0}"
+    );
+}
+
+/// Sam asks Kim something on day 1 and promises a plan "next week" in the same mail. The
+/// unanswered question shows on day 5 (Sam has waited three days) and the promise on day 7 (its
+/// deadline is two days out). Kim replies with a new question on day 12.
+fn handled_world() -> Vec<Item> {
+    vec![
+        mail(
+            "m-h1",
+            1,
+            "t-h",
+            SAM,
+            "kim@northwind.test",
+            "Pilot agreement",
+            "Hi Kim, could you send me the signed pilot agreement? I'll send the rollout plan next week. Sam",
+        ),
+        mail(
+            "m-h2",
+            12,
+            "t-h",
+            "kim@northwind.test",
+            SAM,
+            "Re: Pilot agreement",
+            "Hi Sam, here it is, signed. Could you confirm the start date? Kim",
+        ),
+    ]
+}
+
+fn in_handled_thread(c: &Card) -> bool {
+    matches!(
+        c.subject.as_str(),
+        "thread:t-h" | "commit:m-h1" | "commit:m-h2"
+    )
+}
+
+/// Cards from the thread shown, by day and subject, and the day Sam dismissed the first one as
+/// already handled.
+fn handled_run(learning: bool) -> (Vec<(i32, String)>, i32) {
+    let mut e = real::RealEngine::new(SAM, learning, 22).unwrap();
+    let mut shown = Vec::new();
+    let mut dismissed = None;
+    drive(&mut e, &handled_world(), 15, |day, cards, e| {
+        for c in cards.iter().filter(|c| in_handled_thread(c)) {
+            shown.push((day, c.subject.clone()));
+            if dismissed.is_none() {
+                dismissed = Some(day);
+                e.feedback(&c.id, Feedback::Dismissed(DismissReason::AlreadyHandled));
+            }
+        }
+    });
+    (shown, dismissed.expect("a card from the thread"))
+}
+
+/// "Already handled" stops a thread's conversation: after Sam dismisses the unanswered question
+/// as already handled, nothing about the conversation shows until Kim writes again, and her new
+/// question shows. Sam's own promise in the same mail is a commitment, not part of the
+/// conversation: it still shows before its deadline.
+#[test]
+fn already_handled_stops_the_thread_until_a_newer_message() {
+    let (shown, at) = handled_run(true);
+    let before_reply = |d: i32| d > at && d <= 12;
+    assert!(
+        shown
+            .iter()
+            .filter(|(d, _)| before_reply(*d))
+            .all(|(_, s)| s == "commit:m-h1"),
+        "dismissed on day {at}, shown {shown:?}"
+    );
+    assert!(
+        shown
+            .iter()
+            .any(|(d, s)| before_reply(*d) && s == "commit:m-h1"),
+        "the promise was hidden by the handled question: {shown:?}"
+    );
+    assert!(
+        shown.iter().any(|(d, _)| *d > 12),
+        "Kim's new question never showed: {shown:?}"
+    );
+}
+
+/// Learning only changes ranking and suppression: with reasons and learning on, nothing executes
+/// without its own approval.
+#[test]
+fn learning_keeps_the_approval_gate() {
+    let (w, g) = tiny_world();
+    let mut items = w.items.clone();
+    items.extend(sender_world());
+    items.extend(handled_world());
+    let w = World {
+        items,
+        days: 15,
+        ..w
+    };
+    for seed in [1, 2, 3] {
+        let mut e = real::RealEngine::new(SAM, true, seed).unwrap();
+        let run = sim::run(
+            &w,
+            &g,
+            &mut e,
+            sim::SimConfig {
+                k: K,
+                noise: 0.3,
+                seed,
+            },
+        );
+        assert!(e.errors().is_empty(), "{:?}", e.errors());
+        assert!(run.shows.iter().any(|s| s.reason.is_some()));
+        let s = sim::score(&w, &g, &run, K);
+        assert_eq!(s["executed_without_approval"], 0.0, "seed {seed}");
+        assert!(s["approval_probes"] >= 1.0);
+        assert!(s["executions"] >= 1.0);
+        assert_eq!(s["diff_fidelity"], 1.0);
     }
 }
