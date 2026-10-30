@@ -931,10 +931,10 @@ progress::-moz-progress-bar {
 
 /* ---- tables & stats ---- */
 
-/* 120px minimum: five tiles fit on one row in a 900px window, so no tile is left alone below. */
+/* 110px minimum: five tiles fit on one row in a 900px window, so no tile is left alone below. */
 .stats {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   margin: 0 0 16px;
 }

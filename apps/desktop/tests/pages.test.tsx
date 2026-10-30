@@ -156,18 +156,20 @@ describe("models page", () => {
     const models = (RESPONSES.models_list as { installed: boolean }[]).map((m) => ({ ...m, installed: false }));
     mockDaemon({ models_list: models });
     await render(inMain(<ModelsPage />));
-    expect(text()).toContain("No models installed yet");
+    expect(text()).toContain("Nothing is installed yet.");
     expect(text()).toContain("qwen3-4b-q4");
     expect(await violations()).toEqual([]);
   });
 });
 
 describe("apps page", () => {
-  it("offers Connect from the empty state", async () => {
+  it("offers Connect once, in the header, and opens the how-to when nothing is connected", async () => {
     mockDaemon({ mcp_clients_list: [] });
     await render(inMain(<AppsPage />));
-    const action = document.querySelector(".pg-empty-action button");
-    expect(action?.textContent).toBe("Connect an app");
+    expect(document.querySelector(".pg-empty-action button")).toBeNull();
+    const connect = Array.from(document.querySelectorAll(".page-header button")).find((b) => b.textContent === "Connect an app");
+    expect(connect).toBeDefined();
+    expect(document.querySelector<HTMLDetailsElement>("details.apps-help")?.open).toBe(true);
   });
 });
 

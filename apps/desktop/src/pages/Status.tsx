@@ -142,7 +142,14 @@ export function StatusPage() {
       )}
 
       <IndexingCard data={ingest.data} error={quiet ? null : ingest.error} loading={!quiet && ingest.loading} onRetry={ingest.reload} />
-      <RuntimeCard data={runtime.data} error={quiet ? null : runtime.error} loading={!quiet && runtime.loading} onRetry={runtime.reload} />
+      <RuntimeCard
+        data={runtime.data}
+        error={quiet ? null : runtime.error}
+        loading={!quiet && runtime.loading}
+        onRetry={runtime.reload}
+        // "No AI providers" above already offers Go to Models: one button per next step.
+        offerModels={!s || s.providers.length > 0}
+      />
       <KnowledgeCard data={knowledge.data} error={quiet ? null : knowledge.error} loading={!quiet && knowledge.loading} onRetry={knowledge.reload} />
       <UpdateSettings />
 
@@ -389,11 +396,13 @@ function RuntimeCard({
   error,
   loading,
   onRetry,
+  offerModels = true,
 }: {
   data: RuntimeInfo[] | undefined;
   error: unknown;
   loading: boolean;
   onRetry: () => void;
+  offerModels?: boolean;
 }) {
   const t = useT();
   return (
@@ -406,7 +415,7 @@ function RuntimeCard({
           <ErrorNote error={error} onRetry={onRetry} />
           {loading && !data && <Loading label={t("status.runtimeLoading")} lines={2} />}
           {data && data.length === 0 && (
-            <EmptyState title={t("status.noRuntimesTitle")} action={<GoToPage page="models" className="btn" />}>
+            <EmptyState title={t("status.noRuntimesTitle")} action={offerModels ? <GoToPage page="models" className="btn" /> : undefined}>
               {t("status.noRuntimes")}
             </EmptyState>
           )}

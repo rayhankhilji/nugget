@@ -138,7 +138,7 @@ describe("Today returns focus to the inbox after an executed action", () => {
       cards_execute: { outcome: "executed", artifact: { kind: "draft", text: "Hi Ana" } },
     });
     await render(<TodayPage />);
-    await click(getByRole("button", { name: "Draft a reply to Ana" }));
+    await click(getByRole("button", { name: "Draft reply" }));
     await click(getByRole("button", { name: t("today.action.approve") }));
     d.on("cards_list", { ...list, cards: [] });
     await click(getByRole("button", { name: t("common.done") }));
