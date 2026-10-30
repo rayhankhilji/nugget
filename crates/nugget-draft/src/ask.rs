@@ -4,22 +4,24 @@
 //! Pure rules, no model calls, deterministic for the same [`DraftContext`] and instruction:
 //! - **Open points** ([`Ask::from_draft`]): the questions and requests in the newest messages
 //!   from others (those after the user's last message, else the newest one from others):
-//!   sentences ending in `?`, starting with a question or request word (`can`, `what`,
-//!   `please`, ...), or asking to "let me know", a leading greeting or vocative ("Hi Sam,")
-//!   dropped. At most [`MAX_POINTS`], each at most [`MAX_POINT_CHARS`] characters. Quoted earlier
-//!   messages (`>` lines, "On ... wrote:") are not read. The text is data: it is only ever
-//!   copied into the prompt escaped (see `prompt::user_text`).
+//!   questions (sentences ending in `?`) first, then requests to the user ("please ...",
+//!   "could you ...", "let me know ..."), a leading greeting or vocative ("Hi Alex,") dropped.
+//!   At most [`MAX_POINTS`], each at most [`MAX_POINT_CHARS`] characters, with anything that
+//!   looks like a fact reference (`F2`) removed. Quoted earlier messages (`>` lines, "On ...
+//!   wrote:") are not read. The text is data: it is only ever copied into the prompt fenced
+//!   and escaped (see `prompt::answer_plan`).
 //! - **Answer kinds** ([`AnswerKind`]) per point, from cue words: a date or time for "when",
 //!   "deadline", ...; an amount for "how much", "how many", "limit", "price", ...; a person for
 //!   "who"; a place for "where".
 //! - **Relevance** ([`Ask::relevance`]) of passages (title and body) to the points: content-word
-//!   overlap after light normalisation (lowercase, punctuation stripped, crude suffix stemming:
-//!   `expenses`, `expense` → `expens`), each word weighted by how rare it is in the candidate
+//!   overlap after light normalisation (lowercase, punctuation stripped, hyphenated compounds
+//!   kept whole, English function words dropped, crude suffix stemming: `tickets`, `ticket` →
+//!   `ticket`), each word weighted by how rare it is in the candidate
 //!   pool (BM25's idf: a word every passage has weighs next to nothing), words in the title
 //!   counting extra, a bonus when the passage holds a value of a kind a point expects, and the
 //!   retrieval rank as a prior (reciprocal, so it mostly separates the first few). The user's
 //!   instruction counts like one more point, and the newest message's words count a little
-//!   (they say what a short point such as "what's the limit?" is about). Passages are picked
+//!   (they say what a short point such as "what's the fee?" is about). Passages are picked
 //!   greedily ([`Ask::select`]): what the ones already picked cover counts less, so the second
 //!   pick answers another part of the question rather than repeating the first.
 
@@ -106,35 +108,34 @@ impl Ask {
     /// The open points of a draft's thread, and the user's instruction.
     pub fn from_draft(ctx: &DraftContext, instruction: Option<&str>) -> Self {
         let messages = open_messages(&ctx.thread);
-        // Newest message first, so its points are kept when there are too many; listed oldest
-        // first.
-        let mut groups: Vec<Vec<Point>> = Vec::new();
+        // Candidates: (kind, message, sentence, text). Questions before requests, then the
+        // newest message first; the kept ones are listed oldest first.
+        let mut found: Vec<(PointKind, usize, usize, String)> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
-        let mut n = 0;
-        for m in messages.iter().rev() {
-            let mut group = Vec::new();
-            for s in sentences(unquoted(&m.text)) {
-                if n >= MAX_POINTS {
-                    break;
-                }
+        for (mi, m) in messages.iter().enumerate() {
+            for (si, s) in sentences(unquoted(&m.text)).into_iter().enumerate() {
                 let s = strip_opener(s);
-                if !is_point(s) {
+                let Some(kind) = point_kind(s) else {
+                    continue;
+                };
+                let text = cap(&collapse(&strip_fact_refs(s)), MAX_POINT_CHARS);
+                if text.is_empty() || !seen.insert(text.to_lowercase()) {
                     continue;
                 }
-                let text = cap(&collapse(s), MAX_POINT_CHARS);
-                if !seen.insert(text.to_lowercase()) {
-                    continue;
-                }
-                group.push(Point {
-                    kinds: answer_kinds(&text),
-                    terms: terms(&text),
-                    text,
-                });
-                n += 1;
+                found.push((kind, mi, si, text));
             }
-            groups.push(group);
         }
-        let points = groups.into_iter().rev().flatten().collect();
+        found.sort_by_key(|&(kind, mi, si, _)| (kind, std::cmp::Reverse(mi), si));
+        found.truncate(MAX_POINTS);
+        found.sort_by_key(|&(_, mi, si, _)| (mi, si));
+        let points = found
+            .into_iter()
+            .map(|(_, _, _, text)| Point {
+                kinds: answer_kinds(&text),
+                terms: terms(&text),
+                text,
+            })
+            .collect();
         Self {
             points,
             instruction: instruction.map(terms).unwrap_or_default(),
@@ -174,6 +175,17 @@ impl Ask {
         let none = Covered::default();
         (0..passages.len())
             .map(|i| pool.score(i, &queries, &none) + pool.prior(i))
+            .collect()
+    }
+
+    /// How well each passage matches the ask on its own, without the rank prior (0 when no
+    /// word matches): for scoring the sentences of one passage.
+    pub fn match_scores(&self, passages: &[Passage<'_>]) -> Vec<f32> {
+        let pool = Pool::new(passages, self.pool.as_ref());
+        let queries = self.queries();
+        let none = Covered::default();
+        (0..passages.len())
+            .map(|i| pool.score(i, &queries, &none))
             .collect()
     }
 
@@ -240,7 +252,7 @@ impl Ask {
 
     /// What passages are scored against: each point and the instruction in full, and the
     /// newest message from others at [`FOCUS_WEIGHT`] (it names what a short point such as
-    /// "what's the limit?" refers to).
+    /// "what's the fee?" refers to).
     fn queries(&self) -> Vec<Query<'_>> {
         let mut q: Vec<Query<'_>> = self
             .points
@@ -292,6 +304,8 @@ struct Pool {
     df: HashMap<String, usize>,
     /// Passages `df` counts over.
     n: usize,
+    /// The mean of `df` (1 when empty).
+    avg_df: f32,
 }
 
 impl Pool {
@@ -319,25 +333,31 @@ impl Pool {
                 (all.len(), df)
             }
         };
+        let avg_df = if df.is_empty() {
+            1.0
+        } else {
+            df.values().sum::<usize>() as f32 / df.len() as f32
+        };
         Self {
             title,
             all,
             kinds: passages.iter().map(|p| value_kinds(p.body)).collect(),
             df,
             n,
+            avg_df,
         }
     }
 
-    /// BM25's idf over the pool: near zero for a term every passage has.
+    /// BM25's idf over the pool: near zero for a term every passage has. A term the pool's
+    /// counts don't know (a passage scored against another pool's weights) gets the pool's
+    /// average count rather than a rare term's weight.
     fn idf(&self, term: &str) -> f32 {
         let n = self.n.max(1) as f32;
-        // A term of a passage outside the pool still counts once.
-        let df = self
-            .df
-            .get(term)
-            .copied()
-            .unwrap_or(1)
-            .clamp(1, self.n.max(1)) as f32;
+        let df = match self.df.get(term) {
+            Some(&d) => d as f32,
+            None => self.avg_df,
+        }
+        .clamp(1.0, n);
         ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
     }
 
@@ -353,8 +373,8 @@ impl Pool {
     /// Each matched term weighs its idf, double in the title, half ([`KIND_MISS`]) when the
     /// query expects a kind of value the passage does not hold; a passage that matches any query
     /// and holds a value of a kind a query expects gets [`KIND_BONUS`] for that query (also
-    /// when the query's own words are not in it: "what's the limit?" after "can I expense
-    /// dinners?").
+    /// when the query's own words are not in it: "what's the fee?" after "can we bring bikes on
+    /// the ferry?").
     fn score(&self, i: usize, queries: &[Query<'_>], covered: &Covered) -> f32 {
         let mut s = 0.0;
         let mut matched = false;
@@ -461,7 +481,7 @@ fn unquoted(text: &str) -> &str {
 
 /// Sentences: split after `.`, `?` or `!` followed by whitespace (or the end), and at line
 /// breaks.
-fn sentences(text: &str) -> Vec<&str> {
+pub(crate) fn sentences(text: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut start = 0;
     let mut chars = text.char_indices().peekable();
@@ -487,7 +507,7 @@ fn sentences(text: &str) -> Vec<&str> {
     out
 }
 
-/// Words of a greeting or opener before a comma or colon ("Hi Maya,", "Real question, Jules:").
+/// Words of a greeting or opener before a comma or colon ("Hi Alex,", "Also, Sam:").
 const OPENERS: &[&str] = &[
     "hi",
     "hello",
@@ -505,17 +525,12 @@ const OPENERS: &[&str] = &[
     "okay",
     "btw",
     "ps",
-    "quick",
-    "one",
-    "question",
-    "real",
     "sorry",
     "thanks",
     "team",
     "all",
     "everyone",
     "folks",
-    "yo",
 ];
 
 /// The sentence without a leading greeting or vocative: up to two comma- or colon-ended runs
@@ -548,42 +563,82 @@ fn strip_opener(sentence: &str) -> &str {
     s
 }
 
-/// Words that open a question or request.
-const STARTERS: &[&str] = &[
-    "can", "could", "would", "will", "do", "does", "did", "is", "are", "what", "when", "where",
-    "who", "how", "which", "why", "please", "pls", "kindly", "should", "shall", "send", "share",
-    "confirm",
-];
+/// What makes a sentence an open point; questions rank before requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum PointKind {
+    Question,
+    Request,
+}
 
-fn is_point(sentence: &str) -> bool {
+/// Verbs of a request when they open a sentence addressed to the user ("send me ...").
+const REQUEST_VERBS: &[&str] = &["send", "share", "forward", "confirm", "tell", "give"];
+
+/// Whether a sentence is a question (it ends in `?`) or a request to the user: "please ..."
+/// (not "please find attached", "please note"), "can/could/would/will you ...", a request
+/// verb followed by "me" or "us", or "let me know". A statement opening with "will", "is",
+/// "do", ... is not a point. Fewer than three words never is.
+fn point_kind(sentence: &str) -> Option<PointKind> {
     let words: Vec<String> = sentence
         .split_whitespace()
         .map(|w| {
             w.trim_matches(|c: char| !c.is_alphanumeric())
                 .to_lowercase()
         })
+        .filter(|w| !w.is_empty())
         .collect();
-    if words.iter().filter(|w| !w.is_empty()).count() < 3 {
-        return false;
+    if words.len() < 3 {
+        return None;
     }
     if sentence.trim_end().ends_with('?') {
-        return true;
+        return Some(PointKind::Question);
     }
+    let w = |i: usize| words.get(i).map_or("", String::as_str);
+    let request = match w(0) {
+        "please" | "pls" | "kindly" => {
+            !matches!(w(1), "find" | "see" | "note" | "ignore" | "disregard")
+        }
+        "can" | "could" | "would" | "will" => matches!(w(1), "you" | "u"),
+        v if REQUEST_VERBS.contains(&v) => matches!(w(1), "me" | "us"),
+        _ => false,
+    };
     let lower = format!(" {} ", words.join(" "));
-    if lower.contains(" let me know ") || lower.contains(" let us know ") {
-        return true;
+    (request || lower.contains(" let me know ") || lower.contains(" let us know "))
+        .then_some(PointKind::Request)
+}
+
+/// The text without fact references (`F2`, `(see F1)`): only the prompt may point at facts.
+/// Sentence punctuation after a reference stays.
+fn strip_fact_refs(text: &str) -> String {
+    let is_ref = |w: &str| {
+        let w = w.trim_matches(|c: char| !c.is_alphanumeric());
+        let mut c = w.chars();
+        matches!(c.next(), Some('F' | 'f')) && w.len() > 1 && c.all(|c| c.is_ascii_digit())
+    };
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split_whitespace() {
+        if !is_ref(w) {
+            out.push(w.to_owned());
+            continue;
+        }
+        // "(see F1)": drop the "see" that went with it.
+        if out
+            .last()
+            .is_some_and(|p| p.trim_start_matches('(').eq_ignore_ascii_case("see"))
+        {
+            out.pop();
+        }
+        let tail: String = w
+            .trim_start_matches(|c: char| !c.is_alphanumeric())
+            .trim_start_matches(char::is_alphanumeric)
+            .chars()
+            .filter(|c| matches!(c, '?' | '!' | '.' | ',' | ';' | ':'))
+            .collect();
+        match out.last_mut() {
+            Some(prev) if !tail.is_empty() => prev.push_str(&tail),
+            _ => {}
+        }
     }
-    let starts = |w: &str| STARTERS.contains(&w);
-    if words.first().is_some_and(|w| starts(w)) {
-        return true;
-    }
-    // After a vocative or opener ("Sam, can you ...", "Also, please ...").
-    sentence
-        .split_whitespace()
-        .take(3)
-        .position(|w| w.ends_with(','))
-        .and_then(|i| words.get(i + 1))
-        .is_some_and(|w| starts(w))
+    out.join(" ")
 }
 
 /// Cue phrases of each answer kind (lowercase words).
@@ -720,199 +775,36 @@ fn has_proper_noun(text: &str) -> bool {
     false
 }
 
-/// Words that say nothing about a subject (compared before stemming).
+/// Words that say nothing about a subject (compared before stemming): English function words,
+/// and the verbs and courtesies of asking ("can you confirm ...", "please let me know").
+#[rustfmt::skip]
 const STOPWORDS: &[&str] = &[
-    // Discourse words of requests ("can you confirm what we agreed?").
-    "confirm",
-    "remind",
-    "whether",
-    "finally",
-    "actually",
-    "exactly",
-    "ahead",
-    "current",
-    "currently",
-    "expect",
-    "real",
-    "question",
-    "quick",
-    "check",
-    "reply",
-    "together",
-    "agree",
-    "agreed",
-    "settle",
-    "settled",
-    "drop",
-    "add",
-    "the",
-    "and",
-    "for",
-    "with",
-    "from",
-    "about",
-    "this",
-    "that",
-    "these",
-    "those",
-    "was",
-    "were",
-    "are",
-    "has",
-    "have",
-    "had",
-    "having",
-    "will",
-    "would",
-    "can",
-    "could",
-    "should",
-    "shall",
-    "may",
-    "might",
-    "must",
-    "our",
-    "ours",
-    "your",
-    "yours",
-    "their",
-    "his",
-    "her",
-    "its",
-    "who",
-    "whom",
-    "whose",
-    "what",
-    "when",
-    "where",
-    "which",
-    "why",
-    "how",
-    "all",
-    "any",
-    "but",
-    "not",
-    "per",
-    "into",
-    "onto",
-    "over",
-    "under",
-    "than",
-    "then",
-    "there",
-    "here",
-    "also",
-    "just",
-    "only",
-    "each",
-    "every",
-    "some",
-    "more",
-    "most",
-    "less",
-    "via",
-    "out",
-    "off",
-    "too",
-    "very",
-    "much",
-    "many",
-    "did",
-    "does",
-    "doing",
-    "done",
-    "been",
-    "being",
-    "they",
-    "them",
-    "she",
-    "you",
-    "yes",
-    "yet",
-    "now",
-    "today",
-    "tomorrow",
-    "yesterday",
-    "soon",
-    "still",
-    "again",
-    "please",
-    "pls",
-    "kindly",
-    "thanks",
-    "thank",
-    "hey",
-    "hello",
-    "dear",
-    "know",
-    "let",
-    "get",
-    "got",
-    "send",
-    "share",
-    "tell",
-    "need",
-    "want",
-    "like",
-    "think",
-    "sure",
-    "okay",
-    "going",
-    "able",
-    "time",
-    "date",
-    "day",
-    "week",
-    "anything",
-    "something",
-    "thing",
-    "things",
-    "one",
-    "else",
-    "around",
-    "after",
-    "before",
-    "same",
-    "other",
-    "if",
-    "is",
-    "be",
-    "am",
-    "do",
-    "it",
-    "we",
-    "us",
-    "me",
-    "my",
-    "he",
-    "him",
-    "of",
-    "to",
-    "in",
-    "on",
-    "at",
-    "by",
-    "or",
-    "an",
-    "a",
-    "as",
-    "so",
-    "no",
-    "ok",
-    "hi",
-    "i",
-    "re",
-    "fwd",
-    "cc",
+    // Function words.
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are",
+    "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but",
+    "by", "did", "do", "does", "doing", "down", "during", "each", "few", "for", "from",
+    "further", "had", "has", "have", "having", "he", "her", "here", "hers", "herself", "him",
+    "himself", "his", "how", "i", "if", "in", "into", "is", "it", "its", "itself", "just", "me",
+    "more", "most", "my", "myself", "no", "nor", "not", "now", "of", "off", "on", "once", "only",
+    "or", "other", "our", "ours", "ourselves", "out", "over", "own", "same", "she", "so", "some",
+    "such", "than", "that", "the", "their", "theirs", "them", "themselves", "then", "there",
+    "these", "they", "this", "those", "through", "to", "too", "under", "until", "up", "very",
+    "was", "we", "were", "what", "when", "where", "which", "while", "who", "whom", "whose",
+    "why", "with", "you", "your", "yours", "yourself", "yourselves", "also", "via", "per", "yet",
+    "much", "many", "us",
+    // Modals and the verbs and courtesies of a request.
+    "can", "could", "would", "will", "shall", "should", "may", "might", "must", "please", "pls",
+    "kindly", "let", "know", "tell", "send", "share", "confirm", "thanks", "thank", "hi",
+    "hello", "hey", "dear",
 ];
 
 /// Content terms of a text: lowercase, stopwords out, stemmed; words of three letters or more,
 /// or mixing letters and digits (`q4`). Deduplicated, in order of appearance.
 fn terms(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
-    text.split(|c: char| !c.is_alphanumeric())
-        .filter(|w| !w.is_empty())
-        .map(str::to_lowercase)
+    words(text)
+        .into_iter()
+        .map(|w| w.to_lowercase())
         .filter(|w| {
             let digit = w.chars().any(|c| c.is_ascii_digit());
             let alpha = w.chars().any(char::is_alphabetic);
@@ -924,11 +816,32 @@ fn terms(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// The words of a text: runs of letters and digits, hyphenated compounds kept whole
+/// ("add-on", "go-live").
+fn words(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let joins =
+            c == '-' && start.is_some() && chars.peek().is_some_and(|(_, n)| n.is_alphanumeric());
+        if c.is_alphanumeric() || joins {
+            start.get_or_insert(i);
+        } else if let Some(s) = start.take() {
+            out.push(&text[s..i]);
+        }
+    }
+    if let Some(s) = start {
+        out.push(&text[s..]);
+    }
+    out
+}
+
 /// Crude suffix stemming for English (ASCII words without digits): `-ies` → `-y`, else a plural
 /// `-s`, then `-ing` or `-ed`, then a final `-e` and a doubled final consonant. Not a real stemmer:
 /// it only needs to map a word's common forms to the same key.
 fn stem(word: &str) -> String {
-    if !word.is_ascii() || word.chars().any(|c| c.is_ascii_digit()) {
+    if !word.is_ascii() || word.chars().any(|c| c.is_ascii_digit() || c == '-') {
         return word.to_owned();
     }
     let mut s = word.to_owned();
@@ -1255,5 +1168,73 @@ reimbursed. Submit claims within 30 days.",
             pooled[1] - pooled[0] > local[1] - local[0],
             "{local:?} {pooled:?}"
         );
+    }
+
+    #[test]
+    fn statements_are_not_requests_and_questions_come_first() {
+        let a = ask_of(vec![msg(
+            "Will be there at 5. Please find attached the invoice. Is fine by me. Do note the \
+gate code changed. Please send the floor plan. Could you book the van. Can the van fit the \
+piano? Who has the spare key? Where do we park?",
+            Some(false),
+        )]);
+        // Three questions beat the two requests; listed in message order.
+        assert_eq!(
+            texts(&a),
+            [
+                "Can the van fit the piano?",
+                "Who has the spare key?",
+                "Where do we park?"
+            ]
+        );
+        let a = ask_of(vec![msg(
+            "Will be there at 5. Please find attached the invoice. Please send the floor plan. \
+Send me the seating chart.",
+            Some(false),
+        )]);
+        assert_eq!(
+            texts(&a),
+            ["Please send the floor plan.", "Send me the seating chart."]
+        );
+    }
+
+    #[test]
+    fn hyphenated_compounds_stay_whole() {
+        assert_eq!(
+            terms("Is the add-on part of the go-live plan?"),
+            ["add-on", "part", "go-live", "plan"]
+        );
+        assert_eq!(words("well-known -dash x-"), ["well-known", "dash", "x"]);
+    }
+
+    #[test]
+    fn fact_references_are_stripped_from_points() {
+        assert_eq!(
+            strip_fact_refs("What does F2 say (see F1)? Use f3."),
+            "What does say? Use."
+        );
+        assert_eq!(strip_fact_refs("Room F12a is free"), "Room F12a is free");
+    }
+
+    #[test]
+    fn unknown_terms_weigh_as_an_average_pool_term() {
+        let pool = [
+            Passage {
+                title: "Kite",
+                body: "kite",
+            },
+            Passage {
+                title: "Kite string",
+                body: "string",
+            },
+            Passage {
+                title: "Kite tail",
+                body: "tail",
+            },
+        ];
+        let p = Pool::new(&pool, None);
+        // Not in the pool: between the rarest term and the commonest, not the rarest.
+        let unknown = p.idf("anemometer");
+        assert!(p.idf(&stem("kite")) < unknown && unknown < p.idf("tail"));
     }
 }

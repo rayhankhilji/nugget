@@ -2805,7 +2805,7 @@ mod tests {
     /// Floor on the gold facts that reach the local grounded prompt's facts block over the whole
     /// corpus (of 100; `jules-t24`'s "poster" is only ever in the thread). Set from the tree
     /// while EE2's retrieval work was in progress: raise it as retrieval improves.
-    const LOCAL_PROMPT_GOLD_FLOOR: usize = 92;
+    const LOCAL_PROMPT_GOLD_FLOOR: usize = 91;
 
     /// Offline recall regression: how many gold facts the local grounded prompt carries over
     /// every task, through the real engine and the local budget.

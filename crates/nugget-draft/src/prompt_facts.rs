@@ -240,7 +240,8 @@ fn ordered(context: &ContextResponse, ask: Option<&Ask>) -> (Vec<Fact>, bool) {
         return (out, false);
     };
     if out.len() < 2 {
-        return (out, true);
+        // One fact has no order to speak of: the usual header.
+        return (out, false);
     }
     // Scored in packed (rank) order, so the rank prior breaks ties.
     let mut by_rank: Vec<usize> = (0..out.len()).collect();

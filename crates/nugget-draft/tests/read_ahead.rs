@@ -676,3 +676,49 @@ async fn a_dropped_read_ahead_counts_as_cancelled() {
     assert!(rec.prefixes()[1].1.messages.is_empty());
     assert_eq!(rec.warms(), 0);
 }
+
+#[tokio::test]
+async fn read_ahead_matches_begin_with_an_instruction_and_several_points() {
+    let local = Fake::new("local", Locality::OnDevice);
+    let rec = Arc::new(Rec::default());
+    let d = drafter(
+        vec![local.clone()],
+        &["local"],
+        DraftConfig::default(),
+        Some(rec.clone()),
+    );
+    let mut ctx = slack_ctx(
+        "Hi! Can you send the Q3 numbers? How much did revenue grow? Also please let me know \
+if the garden needs watering.",
+    );
+    ctx.thread.insert(
+        0,
+        ThreadMessage {
+            author: None,
+            text: "Morning, I'll look into it".into(),
+            from_me: Some(true),
+            timestamp: None,
+        },
+    );
+    let req = || DraftRequest {
+        instruction: Some("mention the growth figure".into()),
+        ..request(ctx.clone())
+    };
+    d.read_ahead(req()).await.unwrap();
+    let (_, warm) = rec.prefixes().pop().unwrap();
+    d.begin(req()).await.unwrap();
+    let sent = local.requests().pop().unwrap();
+    assert_eq!(warm.system, sent.system);
+    assert_eq!(without_breakpoints(&warm.messages), sent.messages);
+    assert_eq!(warm.items, sent.items);
+    let text: String = sent.messages[0]
+        .content
+        .iter()
+        .filter_map(|p| match p {
+            Part::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(text.contains("<points>\n1. Can you send the Q3 numbers?\n2. How much did revenue grow?\n3. Also please let me know if the garden needs watering.\n</points>"), "{text}");
+    assert!(text.contains("<instruction>mention the growth figure</instruction>"));
+}

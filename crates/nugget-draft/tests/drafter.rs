@@ -1422,8 +1422,8 @@ async fn ask_aware_selection_keeps_the_passage_that_answers() {
     assert!(ctx.chars().count() / 4 <= 120 + 20, "{ctx}");
     assert!(
         user.contains(
-            "- \"Can I claim the mileage for the harbour festival trip?\" (see F1)\n\
-- \"What rate do we get?\"\n"
+            "<points>\n1. Can I claim the mileage for the harbour festival trip?\n\
+2. What rate do we get?\n</points>\nFor point 1, see F1. Use the facts' exact values"
         ),
         "{user}"
     );
@@ -1469,7 +1469,7 @@ async fn cloud_prompts_carry_no_ask() {
     assert_eq!(a.last(), b.last());
     let user = user_text(&a.last());
     assert!(
-        user.contains("newest first") && !user.contains("Points from the thread to answer:"),
+        user.contains("newest first") && !user.contains("<points>"),
         "{user}"
     );
 
@@ -1480,7 +1480,176 @@ async fn cloud_prompts_carry_no_ask() {
     s.drafter.begin(request(festival_ctx())).await.unwrap();
     let user = user_text(&l.last());
     assert!(
-        user.contains("newest first") && !user.contains("Points from the thread to answer:"),
+        user.contains("newest first") && !user.contains("<points>"),
         "{user}"
     );
+}
+
+/// A fixed store and draft for the golden prompts: dated items only, so nothing depends on
+/// the day the test runs.
+fn golden_drafter(provider: Arc<Fake>, config: DraftConfig) -> Drafter {
+    use time::{Date, Month};
+    let store = Store::open_in_memory().unwrap();
+    let day = |m, d| Date::from_calendar_date(2026, m, d).unwrap();
+    for (key, title, text, date) in [
+        (
+            "g1",
+            "Choir tour budget draft",
+            "Draft budget for the choir tour: $9,500 for the coach and two nights in Ghent.",
+            day(Month::June, 2),
+        ),
+        (
+            "g2",
+            "Choir tour budget approved",
+            "Decision: the committee approved $8,200 for the choir tour, coach included. One \
+night in Ghent was cut.",
+            day(Month::July, 14),
+        ),
+        (
+            "g3",
+            "Choir tour rehearsal",
+            "Tour rehearsal moves to the parish hall on Thursdays at 19:30.",
+            day(Month::August, 3),
+        ),
+        (
+            "g4",
+            "Garden rota",
+            "Watering rota for the allotment: Tuesdays and Fridays.",
+            day(Month::May, 20),
+        ),
+    ] {
+        add_dated(&store, key, title, text, date);
+    }
+    let router = Arc::new(Router::new(
+        vec![provider.clone() as Arc<dyn Provider>],
+        HashMap::from([(Tier::Synthesis, vec![provider.id.clone()])]),
+    ));
+    let retriever = Retriever::new(store.clone(), None, RetrieveConfig::default());
+    Drafter::new(store, retriever, router, Arc::new(NoVoice), config)
+}
+
+fn golden_request() -> DraftRequest {
+    DraftRequest {
+        context: DraftContext {
+            app: AppInfo {
+                id: Some("com.apple.mail".into()),
+                name: "Mail".into(),
+                ..Default::default()
+            },
+            field: FieldInfo {
+                role: "text_area".into(),
+                ..Default::default()
+            },
+            thread: vec![ThreadMessage {
+                author: Some("Ines <ines@choir.example>".into()),
+                text: "Hi! How much did the committee approve for the choir tour? And is \
+rehearsal still on Thursdays?"
+                    .into(),
+                from_me: Some(false),
+                timestamp: Some("2026-09-01T08:00:00Z".into()),
+            }],
+            recipients: vec!["ines@choir.example".into()],
+            subject: Some("Choir tour".into()),
+            ..Default::default()
+        },
+        instruction: Some("keep it short".into()),
+        provider: None,
+        max_tokens: None,
+    }
+}
+
+/// System prompt and user text of the request a provider got.
+fn golden_prompt(req: &ChatRequest) -> String {
+    format!(
+        "{}\n=====\n{}",
+        req.system.as_deref().unwrap_or(""),
+        user_text(req)
+    )
+}
+
+/// The prompt the pre-ask engine rendered for [`golden_request`] (system, then user text),
+/// for cloud and local providers alike.
+const PRE_ASK_PROMPT: &str = include_str!("golden/pre_ask_prompt.txt");
+
+#[tokio::test]
+async fn cloud_prompts_are_byte_identical_to_the_pre_ask_rendering() {
+    let p = Fake::new("p", Locality::Cloud, &["ok"]);
+    let d = golden_drafter(p.clone(), DraftConfig::default());
+    d.begin(golden_request()).await.unwrap();
+    assert_eq!(golden_prompt(&p.last()), PRE_ASK_PROMPT);
+}
+
+#[tokio::test]
+async fn local_prompts_without_the_ask_are_byte_identical_to_the_pre_ask_rendering() {
+    let off = DraftConfig {
+        local: LocalBudget {
+            candidate_tokens: 0,
+            answer_plan: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let p = Fake::new("p", Locality::OnDevice, &["ok"]);
+    let d = golden_drafter(p.clone(), off);
+    d.begin(golden_request()).await.unwrap();
+    assert_eq!(golden_prompt(&p.last()), PRE_ASK_PROMPT);
+
+    // With the ask (the default) the same draft lists its points.
+    let p = Fake::new("p", Locality::OnDevice, &["ok"]);
+    let d = golden_drafter(p.clone(), DraftConfig::default());
+    d.begin(golden_request()).await.unwrap();
+    let prompt = golden_prompt(&p.last());
+    assert_ne!(prompt, PRE_ASK_PROMPT);
+    assert!(
+        prompt.contains(
+            "<points>\n1. How much did the committee approve for the choir tour?\n\
+2. And is rehearsal still on Thursdays?\n</points>\n"
+        ),
+        "{prompt}"
+    );
+}
+
+#[tokio::test]
+async fn a_grown_passage_keeps_the_chunk_that_answers() {
+    // Through the real packer: the answering chunk follows a long neighbouring chunk, so
+    // the grown passage starts with the neighbour.
+    let local = Fake::new("local", Locality::OnDevice, &["ok"]);
+    let config = DraftConfig {
+        local: LocalBudget {
+            budget_tokens: 90,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
+    let minutes = "The committee met in the library and went through the minutes of the last \
+meeting. The treasurer read the accounts aloud and nobody had questions. A volunteer offered to \
+repaint the noticeboard before winter. The chair thanked the bakery for the biscuits and the \
+choir for the music at the summer fete. Several members asked about the hedge along the \
+footpath. The secretary will write to the council about the bins.";
+    let item = NewItem::new("notes", "minutes", content_hash(minutes))
+        .with_title("Committee minutes")
+        .with_metadata(serde_json::json!({ "sensitive": false }));
+    s.store.upsert_item(&item).unwrap();
+    s.store
+        .replace_chunks(
+            &item.item,
+            &[
+                NewChunk::text(minutes),
+                NewChunk::text("The street permit for the garage sale costs $25 per stall."),
+            ],
+        )
+        .unwrap();
+    let (started, _st) = s
+        .drafter
+        .begin(request(slack_ctx(
+            "How much is the street permit for the garage sale stall?",
+        )))
+        .await
+        .unwrap();
+    assert!(keys(&started).contains(&"minutes"), "{:?}", keys(&started));
+    let ctx = context_of(&local.last());
+    assert!(ctx.contains("costs $25 per stall."), "{ctx}");
+    // Cut to the budget: some of the minutes were left out.
+    assert!(ctx.contains('…'), "{ctx}");
 }
