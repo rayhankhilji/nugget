@@ -683,7 +683,7 @@ def filler(c: Corpus):
         title, loc = rng.choice(CAL_TOPICS)
         off = -60 + rng.randint(0, 90)
         h = rng.randint(8, 17)
-        c.event(f"calendar/misc/{i + 1:02d}-{title.split()[0].lower()}.ics", title, c.at(off, h, 0), c.at(off, h, 45), loc,
+        c.event(f"calendar/misc/{i + 1:02d}-{re.sub(r'[^a-z0-9]+', '', title.split()[0].lower()) or 'event'}.ics", title, c.at(off, h, 0), c.at(off, h, 45), loc,
                 created=c.at(off - 7, 9, 0))
     for i in range(8):
         off = -80 + i * 10
