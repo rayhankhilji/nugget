@@ -130,6 +130,13 @@ is not offered: its drafts recalled too few of the facts they needed.
   and sites, and system settings. In an excluded app no thread, recipients, subject or field text is
   read, and nothing is inserted. You can add more.
 - **It does not send by itself.** It inserts text into the field; you press Send.
+- **It does not copy secrets into a draft.** Drafts get a short list of dated facts from your items to
+  stick to, and while the text streams in, a check stops the draft before it would write out a
+  password or other credential taken from a sensitive item. It adds about a tenth of a second
+  before the first character. `[draft] grounding = false` turns both off; `grounding_check =
+  "sentences"` instead holds each sentence until its numbers and dates are confirmed, which is
+  stricter but delays the first character by a few seconds (see
+  [Configuration](../reference/config.md#draft)).
 - **It does not read ahead for cloud models.** [Read-ahead](#read-ahead) only ever goes to a local
   model server, never in excluded apps, terminals or secure fields, and stores nothing.
 - **It does not record keystrokes.** For a double tap only modifier presses are observed; for every
