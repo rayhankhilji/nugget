@@ -268,15 +268,35 @@ fn backoff_is_exponential_capped_and_jittered() {
     let net = Error::Network("x".into());
     for attempt in 0..8u32 {
         let exp = Duration::from_millis(100 * (1u64 << attempt)).min(policy.max_delay);
-        let d = crate::graph::backoff(&policy, attempt, &net);
+        let d = crate::graph::backoff(&policy, attempt, &net).unwrap();
         assert!(d >= exp && d <= exp + exp / 4, "attempt {attempt}: {d:?}");
     }
-    // A server hint is a floor (up to the cap).
+    // A server hint is a floor, never shortened by the cap or the jitter.
     let hinted = Error::RateLimited {
         retry_after_ms: Some(1_500),
     };
-    let d = crate::graph::backoff(&policy, 0, &hinted);
+    let d = crate::graph::backoff(&policy, 0, &hinted).unwrap();
     assert!(d >= Duration::from_millis(1_500), "{d:?}");
+}
+
+/// A `Retry-After` longer than `max_delay` was cut down to `max_delay` and retried early,
+/// inviting more throttling. It is now a floor: when it exceeds what a pass may wait, the error
+/// is returned at once (carrying the full wait) for the supervisor to honour.
+#[test]
+fn regression_retry_after_is_a_floor_not_capped() {
+    let policy = RetryPolicy {
+        max_retries: 8,
+        base_delay: Duration::from_millis(100),
+        max_delay: Duration::from_secs(2),
+    };
+    let long = Error::RateLimited {
+        retry_after_ms: Some(30_000),
+    };
+    assert_eq!(crate::graph::backoff(&policy, 0, &long), None);
+    let at_cap = Error::RateLimited {
+        retry_after_ms: Some(2_000),
+    };
+    assert!(crate::graph::backoff(&policy, 0, &at_cap).unwrap() >= Duration::from_secs(2));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -604,7 +624,7 @@ async fn regression_retry_after_http_date() {
     INBOX
         .mock(At::Skip("s1"))
         .respond_with(throttled_http_date())
-        .up_to_n_times(2)
+        .up_to_n_times(1)
         .mount(&h.server)
         .await;
     INBOX
@@ -905,7 +925,8 @@ async fn outlook_resync_required_reconciles() {
 }
 
 /// One message whose MIME download keeps failing with a 5xx stopped the whole pass (and so
-/// every later pass, since the delta never moved past it). It is now skipped.
+/// every later pass, since the delta never moved past it). It is now skipped, carried in the
+/// cursor and fetched again on the next pass, so a partial outage loses nothing.
 #[tokio::test]
 async fn regression_outlook_one_failing_message_does_not_stop_the_pass() {
     let h = Harness::new().await;
@@ -927,10 +948,12 @@ async fn regression_outlook_one_failing_message_does_not_stop_the_pass() {
             ),
         )
         .await;
+    // A partial outage: `$value` fails for this message during the first pass only.
     Mock::given(method("GET"))
         .and(path(mime_path("bad")))
         .respond_with(server_error(500, None))
         .with_priority(1)
+        .up_to_n_times(2)
         .mount(&h.server)
         .await;
     mount_mime_any(&h).await;
@@ -946,8 +969,27 @@ async fn regression_outlook_one_failing_message_does_not_stop_the_pass() {
         .unwrap();
     assert_eq!(r.keys(), vec!["inbox/good1", "inbox/good2"]);
     assert!(cur.to_string().contains("deltatoken=d1"));
-    // Retried within budget before giving up on it.
+    // Retried within budget, then carried in the cursor.
     assert_eq!(h.requests_to(&mime_path("bad")).await.len(), 2);
+    assert_eq!(cur["retry"], json!([{"key": "inbox/bad", "attempts": 1}]));
+
+    // The next pass (nothing new in the delta) fetches it again.
+    INBOX
+        .mount(
+            &h,
+            At::Delta("d1"),
+            INBOX.page(&h, vec![], None, Some("d1")),
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/messages/bad")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ol_msg("bad", "B", &rec)))
+        .mount(&h.server)
+        .await;
+    let sink = ReplicaSink::new(r.clone());
+    let cur = testkit::run_pass(&*conn, Some(cur), &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["+inbox/bad"]);
+    assert!(cur.get("retry").is_none(), "{cur}");
     h.assert_egress("sync:outlook").await;
 }
 
@@ -1234,8 +1276,8 @@ async fn calendar_throttling_backoff_and_retry_budget() {
         "{err:?}"
     );
     assert_eq!(r.keys(), vec!["e1"]);
-    // 4 for the first page, 1 + 3 retries for the second.
-    assert_eq!(h.requests_to(CAL.path).await.len(), 8);
+    // 4 for the first page; the second asks for 30 s, longer than a pass waits: no retry.
+    assert_eq!(h.requests_to(CAL.path).await.len(), 5);
     let committed = sink.committed().unwrap();
 
     h.server.reset().await;
@@ -2039,15 +2081,18 @@ async fn regression_onedrive_one_failing_download_does_not_stop_the_pass() {
     DRIVE
         .mount(&h, At::Initial, DRIVE.page(&h, p, None, Some("d1")))
         .await;
+    // A partial outage during the first pass only.
     Mock::given(method("GET"))
         .and(path(dl_path("bad")))
         .respond_with(server_error(500, None))
         .with_priority(1)
+        .up_to_n_times(2)
         .mount(&h.server)
         .await;
     Mock::given(method("GET"))
         .and(path(format!("{API}/me/drive/items/bad/content")))
         .respond_with(server_error(502, None))
+        .up_to_n_times(2)
         .mount(&h.server)
         .await;
     mount_downloads(&h).await;
@@ -2064,6 +2109,28 @@ async fn regression_onedrive_one_failing_download_does_not_stop_the_pass() {
     assert_eq!(r.keys(), vec!["ok1", "ok2"]);
     assert!(cur["delta_link"].as_str().unwrap().contains("token=d1"));
     assert_eq!(h.requests_to(&dl_path("bad")).await.len(), 2);
+    assert_eq!(cur["retry"], json!([{"key": "bad", "attempts": 1}]));
+
+    // The next pass fetches its metadata and content again.
+    DRIVE
+        .mount(
+            &h,
+            At::Delta("d1"),
+            DRIVE.page(&h, vec![], None, Some("d1")),
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/drive/items/bad")))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(od_file(&h, "bad", "ROOT", "bad.txt", 1)),
+        )
+        .mount(&h.server)
+        .await;
+    let sink = ReplicaSink::new(r.clone());
+    let cur = testkit::run_pass(&*conn, Some(cur), &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["+bad"]);
+    assert_eq!(r.get("bad").unwrap().content, "content of bad");
+    assert!(cur.get("retry").is_none(), "{cur}");
     h.assert_egress("sync:onedrive").await;
 }
 
@@ -2206,15 +2273,11 @@ async fn regression_non_object_delta_entries_are_skipped() {
         .mount(
             &h,
             At::Initial,
-            INBOX.page(
-                &h,
-                vec![json!(["m", "x", "2026-10-01T00:00:00Z"])],
-                None,
-                Some("d1"),
-            ),
+            INBOX.page(&h, vec![json!(["m", recent()])], None, Some("d1")),
         )
         .await;
     mount_downloads(&h).await;
+    mount_mime_any(&h).await;
     let r = Replica::new();
     let conn = build(
         &h,
@@ -2253,6 +2316,7 @@ async fn regression_non_object_delta_entries_are_skipped() {
         .await
         .unwrap();
     assert!(r.is_empty());
+    assert!(h.requests_to(&mime_path("m")).await.is_empty());
     let requests = h.server.received_requests().await.unwrap().len();
     let rows = h.egress.0.lock().unwrap().clone();
     assert_eq!(rows.len(), requests, "one egress row per request");
@@ -2262,4 +2326,404 @@ async fn regression_non_object_delta_entries_are_skipped() {
         features,
         ["sync:onedrive", "sync:outlook", "sync:outlook-calendar"].into()
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Item failures: retried on later passes, outages and token failures end the pass
+// ---------------------------------------------------------------------------------------------
+
+/// `$value` for `id` always answers `resp` (priority 1, so it wins over `mount_mime_any`).
+async fn mount_mime_answer(h: &Harness, id: &str, resp: ResponseTemplate) {
+    Mock::given(method("GET"))
+        .and(path(mime_path(id)))
+        .respond_with(resp)
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+}
+
+/// A skipped message was lost for good: the delta moved on and nothing recorded it. Skipped
+/// messages are now fetched again on later passes, deleted when gone upstream, and given up
+/// after `MAX_ITEM_ATTEMPTS` tries.
+#[tokio::test]
+async fn regression_skipped_items_retried_deleted_or_given_up() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let rec = recent();
+    INBOX
+        .mount(
+            &h,
+            At::Initial,
+            INBOX.page(
+                &h,
+                vec![
+                    ol_msg("ok", "OK", &rec),
+                    ol_msg("gone", "G", &rec),
+                    ol_msg("stuck", "S", &rec),
+                ],
+                None,
+                Some("d1"),
+            ),
+        )
+        .await;
+    INBOX
+        .mount(
+            &h,
+            At::Delta("d1"),
+            INBOX.page(&h, vec![], None, Some("d1")),
+        )
+        .await;
+    mount_mime_answer(&h, "gone", server_error(500, None)).await;
+    mount_mime_answer(&h, "stuck", server_error(500, None)).await;
+    mount_mime_any(&h).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/messages/gone")))
+        .respond_with(
+            ResponseTemplate::new(404)
+                .set_body_json(json!({"error": {"code": "ErrorItemNotFound"}})),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/messages/stuck")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ol_msg("stuck", "S", &rec)))
+        .mount(&h.server)
+        .await;
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &ol_factory(&h, fast_retry(0)),
+        &ol_settings(),
+        r.clone(),
+    );
+    let mut cur = testkit::run_pass(&*conn, None, &ReplicaSink::new(r.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        cur["retry"],
+        json!([{"key": "inbox/gone", "attempts": 1}, {"key": "inbox/stuck", "attempts": 1}])
+    );
+    let sink = ReplicaSink::new(r.clone());
+    cur = testkit::run_pass(&*conn, Some(cur), &sink).await.unwrap();
+    assert_eq!(sink.summary(), vec!["-inbox/gone"]);
+    assert_eq!(cur["retry"], json!([{"key": "inbox/stuck", "attempts": 2}]));
+    for attempts in 3..crate::graph::MAX_ITEM_ATTEMPTS {
+        cur = testkit::run_pass(&*conn, Some(cur), &ReplicaSink::new(r.clone()))
+            .await
+            .unwrap();
+        assert_eq!(
+            cur["retry"],
+            json!([{"key": "inbox/stuck", "attempts": attempts}])
+        );
+    }
+    cur = testkit::run_pass(&*conn, Some(cur), &ReplicaSink::new(r.clone()))
+        .await
+        .unwrap();
+    assert!(cur.get("retry").is_none(), "given up: {cur}");
+    assert_eq!(r.keys(), vec!["inbox/ok"]);
+    h.assert_egress("sync:outlook").await;
+}
+
+/// Every item fetch failing is an outage, not a run of bad items: the pass ends (`Network`)
+/// instead of succeeding with nothing.
+#[tokio::test]
+async fn regression_item_outage_ends_the_pass() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let rec = recent();
+    let msgs: Vec<Value> = (0..8)
+        .map(|i| ol_msg(&format!("m{i}"), "x", &rec))
+        .collect();
+    INBOX
+        .mount(&h, At::Initial, INBOX.page(&h, msgs, None, Some("d1")))
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/\$value$"))
+        .respond_with(server_error(503, None))
+        .mount(&h.server)
+        .await;
+    let mut files = vec![od_root()];
+    files.extend((0..8).map(|i| od_file(&h, &format!("f{i}"), "ROOT", "f.txt", 1)));
+    DRIVE
+        .mount(&h, At::Initial, DRIVE.page(&h, files, None, Some("d1")))
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"^/dl/"))
+        .respond_with(server_error(500, None))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/content$"))
+        .respond_with(server_error(500, None))
+        .mount(&h.server)
+        .await;
+
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &ol_factory(&h, fast_retry(0)),
+        &ol_settings(),
+        r.clone(),
+    );
+    let sink = ReplicaSink::new(r.clone());
+    let res = conn.sync(None, &sink, &CancellationToken::new()).await;
+    assert!(matches!(res, Err(Error::Network(_))), "{res:?}");
+    assert!(sink.committed().is_none() && r.is_empty());
+
+    let conn = build(
+        &h,
+        &od_factory(&h, fast_retry(0)),
+        &od_settings(),
+        r.clone(),
+    );
+    let sink = ReplicaSink::new(r.clone());
+    let res = conn.sync(None, &sink, &CancellationToken::new()).await;
+    assert!(matches!(res, Err(Error::Network(_))), "{res:?}");
+    assert!(sink.committed().is_none() && r.is_empty());
+}
+
+/// A token refresh failing with anything but `invalid_grant` (AAD `interaction_required`,
+/// keychain trouble, a malformed token answer) came back as `Other`/`Invalid` and was taken for
+/// an item failure: every fetch was "skipped" and the pass succeeded. Token failures now always
+/// end the pass, and nothing is recorded as skipped.
+#[tokio::test]
+async fn regression_token_failure_on_message_fetch_ends_the_pass() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let rec = recent();
+    INBOX
+        .mount(
+            &h,
+            At::Initial,
+            INBOX.page(
+                &h,
+                vec![ol_msg("a", "A", &rec), ol_msg("b", "B", &rec)],
+                None,
+                Some("d1"),
+            ),
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(r"/\$value$"))
+        .and(header("authorization", "Bearer at"))
+        .respond_with(
+            ResponseTemplate::new(401)
+                .set_body_json(json!({"error": {"code": "InvalidAuthenticationToken"}})),
+        )
+        .mount(&h.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(TOKEN_PATH))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+            "error": "interaction_required",
+            "error_description": "AADSTS50076: multi-factor authentication required."
+        })))
+        .mount(&h.server)
+        .await;
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &ol_factory(&h, fast_retry(2)),
+        &ol_settings(),
+        r.clone(),
+    );
+    let sink = ReplicaSink::new(r.clone());
+    let res = conn.sync(None, &sink, &CancellationToken::new()).await;
+    assert!(res.is_err(), "{res:?}");
+    assert!(r.is_empty());
+    assert!(sink.committed().is_none(), "nothing recorded as skipped");
+    h.assert_egress("sync:outlook").await;
+}
+
+/// A rejected token on `/content` refreshes; a revoked refresh token is `Unauthorized`
+/// (reconnect), never a skipped file.
+#[tokio::test]
+async fn regression_rejected_token_on_file_content_is_unauthorized() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let mut f = od_file(&h, "a", "ROOT", "a.txt", 1);
+    f.as_object_mut()
+        .unwrap()
+        .remove("@microsoft.graph.downloadUrl");
+    DRIVE
+        .mount(
+            &h,
+            At::Initial,
+            DRIVE.page(&h, vec![od_root(), f], None, Some("d1")),
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/drive/items/a/content")))
+        .and(header("authorization", "Bearer at"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&h.server)
+        .await;
+    mount_refresh_invalid_grant(&h).await;
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &od_factory(&h, fast_retry(1)),
+        &od_settings(),
+        r.clone(),
+    );
+    let sink = ReplicaSink::new(r.clone());
+    let res = conn.sync(None, &sink, &CancellationToken::new()).await;
+    assert!(is_unauthorized(&res), "{res:?}");
+    assert!(r.is_empty() && sink.committed().is_none());
+    h.assert_egress("sync:onedrive").await;
+}
+
+/// A 403 for one item (a policy- or malware-blocked file, a protected message) failed every
+/// pass with "reconnect the account". It is now an item failure: skipped and retried later.
+#[tokio::test]
+async fn regression_item_access_denied_is_skipped_not_reconnect() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let rec = recent();
+    INBOX
+        .mount(
+            &h,
+            At::Initial,
+            INBOX.page(
+                &h,
+                vec![ol_msg("ok", "OK", &rec), ol_msg("irm", "Protected", &rec)],
+                None,
+                Some("d1"),
+            ),
+        )
+        .await;
+    mount_mime_answer(
+        &h,
+        "irm",
+        ResponseTemplate::new(403).set_body_json(
+            json!({"error": {"code": "ErrorAccessDenied", "message": "Access is denied."}}),
+        ),
+    )
+    .await;
+    mount_mime_any(&h).await;
+    let mut blocked = od_file(&h, "mal", "ROOT", "mal.txt", 1);
+    blocked
+        .as_object_mut()
+        .unwrap()
+        .remove("@microsoft.graph.downloadUrl");
+    DRIVE
+        .mount(
+            &h,
+            At::Initial,
+            DRIVE.page(
+                &h,
+                vec![od_root(), od_file(&h, "ok", "ROOT", "ok.txt", 1), blocked],
+                None,
+                Some("d1"),
+            ),
+        )
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/drive/items/mal/content")))
+        .respond_with(ResponseTemplate::new(403).set_body_json(
+            json!({"error": {"code": "accessDenied", "message": "The file is infected with a virus."}}),
+        ))
+        .mount(&h.server)
+        .await;
+    mount_downloads(&h).await;
+
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &ol_factory(&h, fast_retry(0)),
+        &ol_settings(),
+        r.clone(),
+    );
+    let cur = testkit::run_pass(&*conn, None, &ReplicaSink::new(r.clone()))
+        .await
+        .unwrap();
+    assert_eq!(r.keys(), vec!["inbox/ok"]);
+    assert_eq!(cur["retry"], json!([{"key": "inbox/irm", "attempts": 1}]));
+
+    let r = Replica::new();
+    let conn = build(
+        &h,
+        &od_factory(&h, fast_retry(0)),
+        &od_settings(),
+        r.clone(),
+    );
+    let cur = testkit::run_pass(&*conn, None, &ReplicaSink::new(r.clone()))
+        .await
+        .unwrap();
+    assert_eq!(r.keys(), vec!["ok"]);
+    assert_eq!(cur["retry"], json!([{"key": "mal", "attempts": 1}]));
+
+    // A 403 about the account (not one item) still ends the pass as "reconnect".
+    reset(&h).await;
+    INBOX
+        .mount(
+            &h,
+            At::Initial,
+            INBOX.page(&h, vec![ol_msg("x", "X", &rec)], None, Some("d1")),
+        )
+        .await;
+    mount_mime_answer(
+        &h,
+        "x",
+        ResponseTemplate::new(403)
+            .set_body_json(json!({"error": {"code": "Authorization_RequestDenied"}})),
+    )
+    .await;
+    let conn = build(
+        &h,
+        &ol_factory(&h, fast_retry(0)),
+        &ol_settings(),
+        Replica::new(),
+    );
+    let res = conn
+        .sync(
+            None,
+            &ReplicaSink::new(Replica::new()),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert!(is_unauthorized(&res), "{res:?}");
+}
+
+/// Series masters indexed before they were skipped stayed as duplicates forever (a resync
+/// skipped them, and the missing-event check found them still there). A listed master that is
+/// indexed is now deleted, and the check treats a master as gone.
+#[tokio::test]
+async fn regression_calendar_indexed_series_master_removed_on_resync() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let t = now();
+    let seed = Replica::new();
+    for id in ["M1", "M2"] {
+        let mut d = Document::new(id, "text/plain", Content::Text(format!("master {id}")));
+        d.version = Some(format!("ck-{id}#{t}:{}", t + 900));
+        seed.apply(&nugget_connector::Change::Upsert(d));
+    }
+    let mut m1 = ev("M1", "Standup");
+    m1["type"] = "seriesMaster".into();
+    // No cursor while events are indexed: a reconciling resync.
+    CAL.mount(
+        &h,
+        At::Initial,
+        CAL.page(&h, vec![m1, ev("e1", "One")], None, Some("d1")),
+    )
+    .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{API}/me/events/M2")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": "M2", "type": "seriesMaster", "isCancelled": false})),
+        )
+        .mount(&h.server)
+        .await;
+    let conn = build(
+        &h,
+        &cal_factory(&h, fast_retry(0)),
+        &cal_settings(),
+        seed.clone(),
+    );
+    let sink = ReplicaSink::new(seed.clone());
+    testkit::run_pass(&*conn, None, &sink).await.unwrap();
+    assert_eq!(seed.keys(), vec!["e1"]);
+    assert_eq!(sink.summary(), vec!["-M1", "+e1", "-M2"]);
 }

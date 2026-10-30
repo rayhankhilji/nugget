@@ -452,7 +452,11 @@ impl OutlookCalendarConnector {
                 }
                 if !removed && ev.kind.as_deref() == Some("seriesMaster") {
                     // The calendar view lists every occurrence; a series master alongside them
-                    // would duplicate the first one.
+                    // would duplicate the first one. One indexed by an earlier version goes.
+                    seen.remove(&ev.id);
+                    if live.remove(&ev.id).is_some() {
+                        sink.send(Change::Delete(ItemKey::new(ev.id))).await?;
+                    }
                     continue;
                 }
                 if removed || ev.is_cancelled == Some(true) {
@@ -543,7 +547,7 @@ impl OutlookCalendarConnector {
         }
         let url = self
             .api
-            .url(&["me", "events", id], &[("$select", "id,isCancelled")])?;
+            .url(&["me", "events", id], &[("$select", "id,isCancelled,type")])?;
         let get = Get {
             prefer: &[IMMUTABLE_IDS],
             ..Default::default()
@@ -553,7 +557,9 @@ impl OutlookCalendarConnector {
             404 | 410 => Ok(false),
             200 => {
                 let ev: Event = GraphApi::json(&resp, "outlook events.get")?;
-                Ok(ev.is_cancelled != Some(true))
+                // A series master is not indexed (its occurrences are): one left from an
+                // earlier version is removed.
+                Ok(ev.is_cancelled != Some(true) && ev.kind.as_deref() != Some("seriesMaster"))
             }
             _ => Err(status_error("outlook events.get", &resp)),
         }

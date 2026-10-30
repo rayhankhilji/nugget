@@ -16,7 +16,12 @@
 //! - `{"delta_link":"<url>","next_link":"<url>"}` while an incremental round is part-way,
 //!
 //! plus `"verify":["<key>",...]` (omitted when empty): indexed messages a resync did not list and
-//! that are still to be checked, [`MAX_VERIFY`] per pass.
+//! that are still to be checked, [`MAX_VERIFY`] per pass. At the top level,
+//! `"retry":[{"key":"<key>","attempts":n},...]` (omitted when empty) lists messages whose MIME
+//! Graph could not serve (5xx after retries, 403 `ErrorAccessDenied`, 400, 409/423); they are
+//! fetched again at the end of later passes, deleted if gone, and given up after
+//! [`MAX_ITEM_ATTEMPTS`](crate::graph::MAX_ITEM_ATTEMPTS) tries. Several such failures in a row
+//! mean an outage and end the pass instead.
 //!
 //! Folders that are no longer synced are found from the indexed keys, not only from the cursor,
 //! so a reset cursor still drops them. A folder with indexed messages but no cursor state (a
@@ -48,7 +53,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
 use crate::graph::{
-    DeltaPage, Get, GraphApi, is_item_failure, is_removed, needs_resync, status_error,
+    DeltaPage, Get, GraphApi, ItemGet, RetryItem, Skips, is_removed, needs_resync, status_error,
 };
 use crate::oauth::{SCOPE_MAIL_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::{OutlookSettings, valid_folder_id};
@@ -103,6 +108,9 @@ struct Cursor {
     v: u32,
     #[serde(default)]
     folders: BTreeMap<String, FolderState>,
+    /// Messages whose MIME could not be fetched, tried again on later passes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retry: Vec<RetryItem>,
 }
 
 impl Default for Cursor {
@@ -110,6 +118,7 @@ impl Default for Cursor {
         Self {
             v: 1,
             folders: BTreeMap::new(),
+            retry: Vec::new(),
         }
     }
 }
@@ -117,6 +126,12 @@ impl Default for Cursor {
 impl Cursor {
     fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+
+    /// The cursor with the items still to retry.
+    fn with(&mut self, skips: &Skips) -> Value {
+        self.retry = skips.list.clone();
+        self.to_value()
     }
 }
 
@@ -228,6 +243,13 @@ struct FolderInfo {
     id: String,
 }
 
+/// Result of fetching one message.
+enum Fetched {
+    Change(Option<Change>),
+    /// Graph could not serve it now: retry on a later pass.
+    Failed(String),
+}
+
 /// What to do for one delta entry, in page order.
 enum Step {
     Delete(String),
@@ -265,6 +287,7 @@ impl Connector for OutlookConnector {
             })
             .unwrap_or_default();
         let folders = self.settings.folder_ids();
+        let mut skips = Skips::new(std::mem::take(&mut cur.retry));
 
         // Folders no longer synced: drop their messages. They are found from the indexed keys
         // as well as the cursor, which a settings update resets.
@@ -290,7 +313,7 @@ impl Connector for OutlookConnector {
                 }
                 cur.folders.remove(folder);
             }
-            sink.checkpoint(cur.to_value()).await?;
+            sink.checkpoint(cur.with(&skips)).await?;
         }
         // Indexed mail but no cursor state: a reconciling full listing.
         for folder in &folders {
@@ -312,10 +335,13 @@ impl Connector for OutlookConnector {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            self.sync_folder(folder, &mut cur, sink, cancel).await?;
-            sink.checkpoint(cur.to_value()).await?;
+            self.sync_folder(folder, &mut cur, &mut skips, sink, cancel)
+                .await?;
+            sink.checkpoint(cur.with(&skips)).await?;
         }
-        Ok(cur.to_value())
+        self.retry_skipped(&wanted, &mut skips, sink, cancel)
+            .await?;
+        Ok(cur.with(&skips))
     }
 }
 
@@ -340,6 +366,7 @@ impl OutlookConnector {
         &self,
         folder: &str,
         cur: &mut Cursor,
+        skips: &mut Skips,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -418,13 +445,13 @@ impl OutlookConnector {
                     "outlook delta page has neither nextLink nor deltaLink".into(),
                 ));
             }
-            self.apply_page(folder, page.value, &known, &mut seen, sink, cancel)
+            self.apply_page(folder, page.value, &known, &mut seen, skips, sink, cancel)
                 .await?;
 
             if let Some(n) = next {
                 state.next_link = Some(n);
                 cur.folders.insert(folder.to_string(), state.clone());
-                sink.checkpoint(cur.to_value()).await?;
+                sink.checkpoint(cur.with(skips)).await?;
                 continue;
             }
             // Last page: check unlisted messages (a fresh resync's, or those carried over).
@@ -457,12 +484,15 @@ impl OutlookConnector {
         }
     }
 
+    // The pass state is threaded through explicitly (cursor-held skips, the listing's seen set).
+    #[allow(clippy::too_many_arguments)]
     async fn apply_page(
         &self,
         folder: &str,
         items: Vec<Value>,
         known: &HashMap<ItemKey, Option<String>>,
         seen: &mut HashMap<String, String>,
+        skips: &mut Skips,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -482,6 +512,7 @@ impl OutlookConnector {
             }
             let key = format!("{folder}/{}", msg.id);
             if removed || msg.is_draft == Some(true) {
+                skips.resolved(&key);
                 // Indexed before this pass, or upserted earlier in it.
                 let listed = seen.remove(&key).is_some();
                 if listed || known.contains_key(&ItemKey::new(key.as_str())) {
@@ -498,34 +529,112 @@ impl OutlookConnector {
                     .get(&ItemKey::new(key.as_str()))
                     .is_some_and(|v| v.as_deref() == Some(version.as_str()));
             seen.insert(key.clone(), version);
-            if !unchanged {
+            if unchanged {
+                skips.resolved(&key);
+            } else {
                 steps.push(Step::Fetch(key, Box::new(msg)));
             }
         }
+        self.run_steps(steps, skips, sink, cancel).await
+    }
+
+    /// Apply deletes and fetch messages (a few at a time), in order. A message that cannot be
+    /// read is kept in `skips` for a later pass.
+    async fn run_steps(
+        &self,
+        steps: Vec<Step>,
+        skips: &mut Skips,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         let mut results = futures::stream::iter(steps)
             .map(|step| async move {
                 match step {
-                    Step::Delete(key) => Ok(Some(Change::Delete(ItemKey::new(key)))),
-                    Step::Fetch(key, msg) => self.fetch(key, *msg, cancel).await,
+                    Step::Delete(key) => {
+                        let change = Change::Delete(ItemKey::new(key.as_str()));
+                        Ok((key, false, Fetched::Change(Some(change))))
+                    }
+                    Step::Fetch(key, msg) => {
+                        let out = self.fetch(&key, *msg, cancel).await?;
+                        Ok::<_, Error>((key, true, out))
+                    }
                 }
             })
             .buffered(FETCH_CONCURRENCY);
-        while let Some(change) = results.next().await {
-            if let Some(change) = change? {
-                sink.send(change).await?;
+        while let Some(r) = results.next().await {
+            let (key, fetch, out) = r?;
+            match out {
+                Fetched::Change(change) => {
+                    if fetch {
+                        skips.fetched(&key);
+                    } else {
+                        skips.resolved(&key);
+                    }
+                    if let Some(change) = change {
+                        sink.send(change).await?;
+                    }
+                }
+                Fetched::Failed(reason) => {
+                    skips.failed(self.ctx.source.as_str(), &key, &reason)?;
+                }
             }
         }
         Ok(())
     }
 
-    /// `$value` → a `message/rfc822` document. A message gone meanwhile becomes a delete; an
-    /// oversized one is skipped.
-    async fn fetch(
+    /// Fetch again the messages earlier passes could not read. One gone meanwhile is deleted.
+    async fn retry_skipped(
         &self,
-        key: String,
-        msg: Message,
+        wanted: &HashSet<&str>,
+        skips: &mut Skips,
+        sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<Option<Change>> {
+    ) -> Result<()> {
+        let mut steps = Vec::new();
+        for key in skips.pending() {
+            let Some((folder, id)) = key.split_once('/') else {
+                skips.resolved(&key);
+                continue;
+            };
+            if !wanted.contains(folder) || !valid_message_id(id) {
+                skips.resolved(&key);
+                continue;
+            }
+            let url = self.api.url(
+                &["me", "messages", id],
+                &[("$select", &format!("{SELECT},parentFolderId"))],
+            )?;
+            let get = Get {
+                prefer: &[IMMUTABLE_IDS],
+                ..Default::default()
+            };
+            match self.api.get_item(&url, get, cancel).await? {
+                ItemGet::Done(resp) if matches!(resp.status.as_u16(), 404 | 410) => {
+                    steps.push(Step::Delete(key));
+                }
+                ItemGet::Done(resp) if resp.status.as_u16() == 200 => {
+                    match GraphApi::json::<Message>(&resp, "outlook messages.get") {
+                        Ok(msg) if msg.is_draft == Some(true) => steps.push(Step::Delete(key)),
+                        Ok(msg) if msg.received.as_deref().and_then(parse_rfc3339).is_some() => {
+                            steps.push(Step::Fetch(key, Box::new(msg)));
+                        }
+                        _ => skips.failed(self.ctx.source.as_str(), &key, "unreadable message")?,
+                    }
+                }
+                ItemGet::Done(resp) => {
+                    let e = status_error("outlook messages.get", &resp);
+                    skips.failed(self.ctx.source.as_str(), &key, &e.to_string())?;
+                }
+                ItemGet::TooLarge => skips.resolved(&key),
+                ItemGet::Failed(reason) => skips.failed(self.ctx.source.as_str(), &key, &reason)?,
+            }
+        }
+        self.run_steps(steps, skips, sink, cancel).await
+    }
+
+    /// `$value` → a `message/rfc822` document. A message gone meanwhile becomes a delete; an
+    /// oversized or empty one is skipped; one Graph cannot serve now is [`Fetched::Failed`].
+    async fn fetch(&self, key: &str, msg: Message, cancel: &CancellationToken) -> Result<Fetched> {
         let url = self.api.url(&["me", "messages", &msg.id, "$value"], &[])?;
         let get = Get {
             prefer: &[IMMUTABLE_IDS],
@@ -533,33 +642,31 @@ impl OutlookConnector {
             raw: true,
             ..Default::default()
         };
-        let resp = match self.api.get(&url, get, cancel).await {
-            Ok(r) => r,
-            Err(Error::Invalid(m)) if m.contains("exceeds") => {
+        let resp = match self.api.get_item(&url, get, cancel).await? {
+            ItemGet::Done(r) => r,
+            ItemGet::TooLarge => {
                 tracing::warn!(source = %self.ctx.source, "skipping oversized message");
-                return Ok(None);
+                return Ok(Fetched::Change(None));
             }
-            // One unreadable message must not stop the pass.
-            Err(e) if is_item_failure(&e) => {
-                tracing::warn!(source = %self.ctx.source, "skipping unreadable message: {e}");
-                return Ok(None);
-            }
-            Err(e) => return Err(e),
+            ItemGet::Failed(reason) => return Ok(Fetched::Failed(reason)),
         };
         match resp.status.as_u16() {
             200 => {}
-            404 | 410 => return Ok(Some(Change::Delete(ItemKey::new(key)))),
+            404 | 410 => return Ok(Fetched::Change(Some(Change::Delete(ItemKey::new(key))))),
             _ => {
                 let e = status_error("outlook message $value", &resp);
-                tracing::warn!(source = %self.ctx.source, "skipping unreadable message: {e}");
-                return Ok(None);
+                return Ok(Fetched::Failed(e.to_string()));
             }
         }
         if resp.body.is_empty() {
             tracing::warn!(source = %self.ctx.source, "skipping message with an empty MIME body");
-            return Ok(None);
+            return Ok(Fetched::Change(None));
         }
-        Ok(Some(Change::Upsert(document(key, msg, resp.body))))
+        Ok(Fetched::Change(Some(Change::Upsert(document(
+            key.to_string(),
+            msg,
+            resp.body,
+        )))))
     }
 
     /// Check the first [`MAX_VERIFY`] keys of `missing` (in order) and delete the messages no

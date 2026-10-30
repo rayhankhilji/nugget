@@ -44,9 +44,20 @@ enum Outcome {
     Done(Response),
     /// 401: refresh the token once and retry.
     Refresh,
-    /// Worth retrying after a backoff.
-    Retry(Error),
+    /// Worth retrying after a backoff; `true` when the server answered (not a transport error).
+    Retry(Error, bool),
+    /// Item requests only: this item cannot be read now (skip it, retry on a later pass).
+    ItemFailed(String),
     Fatal(Error),
+}
+
+/// Result of [`GraphApi::get_item`].
+pub(crate) enum ItemGet {
+    Done(Response),
+    /// The body is over the cap.
+    TooLarge,
+    /// Graph failed or refused this one item; the reason is for logs.
+    Failed(String),
 }
 
 #[derive(Deserialize, Default)]
@@ -197,7 +208,7 @@ impl GraphApi {
 
     /// GET `url` as JSON with the bearer token. Returns 2xx, 404, 410 and resync-coded 400
     /// responses (and 3xx with `allow_redirect`); maps the rest to typed errors. 401 refreshes
-    /// the token once; 429, 503/504, 408 and 5xx are retried with exponential backoff
+    /// the token once; 429, 503/504, 408, 409, 423 and 5xx are retried with exponential backoff
     /// (honouring `Retry-After`) up to the policy's limit.
     pub(crate) async fn get(
         &self,
@@ -205,6 +216,42 @@ impl GraphApi {
         opts: Get<'_>,
         cancel: &CancellationToken,
     ) -> Result<Response> {
+        match self.request(url, opts, cancel, false).await? {
+            ItemGet::Done(r) => Ok(r),
+            ItemGet::TooLarge => Err(Error::Invalid(format!(
+                "Graph response body exceeds {} bytes",
+                if opts.max_body == 0 {
+                    MAX_JSON
+                } else {
+                    opts.max_body
+                }
+            ))),
+            ItemGet::Failed(m) => Err(Error::Other(m)),
+        }
+    }
+
+    /// GET one item's content (a message's MIME, a file's bytes). Like [`get`](Self::get), but
+    /// a failure that is about this item alone — Graph answered with a 5xx/408/409/423 after
+    /// the retries, a 400, or a 403 `accessDenied` for the item — is [`ItemGet::Failed`], and a
+    /// body over the cap is [`ItemGet::TooLarge`]. Everything else still ends the pass as an
+    /// `Err`: token and keychain failures, a rejected token, other 403s, throttling once the
+    /// budget is spent, and transport failures (the network is down).
+    pub(crate) async fn get_item(
+        &self,
+        url: &Url,
+        opts: Get<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<ItemGet> {
+        self.request(url, opts, cancel, true).await
+    }
+
+    async fn request(
+        &self,
+        url: &Url,
+        opts: Get<'_>,
+        cancel: &CancellationToken,
+        item: bool,
+    ) -> Result<ItemGet> {
         let mut attempt = 0u32;
         let mut refreshed = false;
         let http = self.http.clone().with_max_body(if opts.max_body == 0 {
@@ -216,6 +263,7 @@ impl GraphApi {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
+            // Token errors always end the pass, whatever their kind.
             let token = self.tokens.access_token().await?;
             let mut req = http
                 .request(Method::GET, url.as_str())
@@ -225,12 +273,14 @@ impl GraphApi {
                 req = req.header("Prefer", *p);
             }
             let outcome = match http.send(req, &[]).await {
-                Ok(resp) => classify(resp, opts.allow_redirect),
-                Err(e @ Error::Network(_)) => Outcome::Retry(e),
+                Ok(resp) => classify(resp, opts.allow_redirect, item),
+                Err(Error::Invalid(m)) if m.contains("exceeds") => return Ok(ItemGet::TooLarge),
+                Err(e @ Error::Network(_)) => Outcome::Retry(e, false),
                 Err(e) => Outcome::Fatal(e),
             };
             match outcome {
-                Outcome::Done(resp) => return Ok(resp),
+                Outcome::Done(resp) => return Ok(ItemGet::Done(resp)),
+                Outcome::ItemFailed(m) => return Ok(ItemGet::Failed(m)),
                 Outcome::Refresh if !refreshed => {
                     refreshed = true;
                     self.tokens.force_refresh(&token).await?;
@@ -240,8 +290,17 @@ impl GraphApi {
                         "Microsoft rejected the access token; reconnect the account".into(),
                     ));
                 }
-                Outcome::Retry(e) if attempt < self.retry.max_retries => {
-                    let delay = backoff(&self.retry, attempt, &e);
+                Outcome::Retry(e, server) => {
+                    let delay = (attempt < self.retry.max_retries)
+                        .then(|| backoff(&self.retry, attempt, &e))
+                        .flatten();
+                    let Some(delay) = delay else {
+                        // Out of retries (or asked to wait longer than a pass should).
+                        return match e {
+                            Error::Network(m) if item && server => Ok(ItemGet::Failed(m)),
+                            e => Err(e),
+                        };
+                    };
                     tracing::debug!(
                         path = url.path(),
                         attempt,
@@ -254,7 +313,7 @@ impl GraphApi {
                         _ = cancel.cancelled() => return Err(Error::Cancelled),
                     }
                 }
-                Outcome::Retry(e) | Outcome::Fatal(e) => return Err(e),
+                Outcome::Fatal(e) => return Err(e),
             }
         }
     }
@@ -296,37 +355,36 @@ pub(crate) fn retry_after_ms(resp: &Response) -> Option<u64> {
     nugget_connector::retry::retry_after_ms(&resp.headers)
 }
 
-pub(crate) fn backoff(retry: &RetryPolicy, attempt: u32, err: &Error) -> Duration {
-    let exp = retry.base_delay.saturating_mul(1u32 << attempt.min(16));
+/// The wait before retry number `attempt` (0-based): `base * 2^attempt` capped at `max_delay`,
+/// plus up to 25% jitter, never shorter than a server-requested `Retry-After`. `None` when the
+/// server asks for a longer wait than `max_delay`: the error is returned so the supervisor
+/// waits instead of retrying early.
+pub(crate) fn backoff(retry: &RetryPolicy, attempt: u32, err: &Error) -> Option<Duration> {
     let hinted = match err {
         Error::RateLimited {
             retry_after_ms: Some(ms),
         } => Duration::from_millis(*ms),
         _ => Duration::ZERO,
     };
-    let base = exp.max(hinted).min(retry.max_delay);
+    if hinted > retry.max_delay {
+        return None;
+    }
+    let exp = retry
+        .base_delay
+        .saturating_mul(1u32 << attempt.min(16))
+        .min(retry.max_delay);
     // Up to 25% jitter so parallel sources do not retry in lockstep.
     let nanos = time::OffsetDateTime::now_utc().nanosecond() as u64;
-    let jitter = base.as_millis() as u64 / 4;
-    base + Duration::from_millis(if jitter == 0 { 0 } else { nanos % jitter })
+    let jitter = exp.as_millis() as u64 / 4;
+    let d = exp + Duration::from_millis(if jitter == 0 { 0 } else { nanos % jitter });
+    Some(d.max(hinted))
 }
 
-/// Prefix of the error for a 408/5xx Graph answered with (as opposed to a transport failure).
-const SERVER_STATUS: &str = "Microsoft Graph HTTP";
+/// Graph error codes of a 403 that concern one item (blocked or protected content), not the
+/// account's access.
+const ITEM_DENIED_CODES: &[&str] = &["accessdenied", "erroraccessdenied"];
 
-/// Whether a failed request for one item (a message's MIME, a file's content) is about that
-/// item: the server answered with an error that is neither throttling nor an authorization
-/// problem. Such an item is skipped so the rest of the pass goes on; throttling, auth and
-/// transport failures (the network is down) still end the pass.
-pub(crate) fn is_item_failure(e: &Error) -> bool {
-    match e {
-        Error::Network(m) => m.starts_with(SERVER_STATUS),
-        Error::Invalid(_) | Error::Other(_) | Error::NotFound(_) => true,
-        _ => false,
-    }
-}
-
-fn classify(resp: Response, allow_redirect: bool) -> Outcome {
+fn classify(resp: Response, allow_redirect: bool, item: bool) -> Outcome {
     let status = resp.status.as_u16();
     if resp.status.is_success() || status == 404 || needs_resync(&resp) {
         return Outcome::Done(resp);
@@ -346,24 +404,134 @@ fn classify(resp: Response, allow_redirect: bool) -> Outcome {
     let message: String = body.error.message.chars().take(300).collect();
     match status {
         401 => Outcome::Refresh,
-        429 | 509 => Outcome::Retry(Error::RateLimited {
-            retry_after_ms: retry_after,
-        }),
-        503 | 504 if retry_after.is_some() => Outcome::Retry(Error::RateLimited {
-            retry_after_ms: retry_after,
-        }),
+        429 | 509 => Outcome::Retry(
+            Error::RateLimited {
+                retry_after_ms: retry_after,
+            },
+            true,
+        ),
+        503 | 504 if retry_after.is_some() => Outcome::Retry(
+            Error::RateLimited {
+                retry_after_ms: retry_after,
+            },
+            true,
+        ),
+        403 if item && ITEM_DENIED_CODES.contains(&code.to_ascii_lowercase().as_str()) => {
+            Outcome::ItemFailed(format!("Microsoft Graph HTTP 403 {code}: {message}"))
+        }
         403 => Outcome::Fatal(Error::Unauthorized(format!(
             "Microsoft Graph denied access (HTTP 403 {code}): {message}"
         ))),
-        408 | 500..=599 => Outcome::Retry(Error::Network(format!(
-            "{SERVER_STATUS} {status} {code}: {message}"
-        ))),
+        408 | 409 | 423 | 500..=599 => Outcome::Retry(
+            Error::Network(format!("Microsoft Graph HTTP {status} {code}: {message}")),
+            true,
+        ),
+        400 if item => Outcome::ItemFailed(format!("Microsoft Graph HTTP 400 {code}: {message}")),
         400 => Outcome::Fatal(Error::Invalid(format!(
             "Microsoft Graph rejected the request ({code}): {message}"
         ))),
+        _ if item => {
+            Outcome::ItemFailed(format!("Microsoft Graph HTTP {status} {code}: {message}"))
+        }
         _ => Outcome::Fatal(Error::Other(format!(
             "Microsoft Graph HTTP {status} {code}: {message}"
         ))),
+    }
+}
+
+/// Items carried in a cursor for another try.
+pub(crate) const MAX_RETRY_ITEMS: usize = 1_000;
+/// Tries before an item that keeps failing is given up (with a warning).
+pub(crate) const MAX_ITEM_ATTEMPTS: u32 = 5;
+/// Item fetches failing in a row that mean an outage, not bad items: the pass ends.
+pub(crate) const MAX_FAILURE_STREAK: u32 = 5;
+
+/// An item whose content could not be fetched, kept in the cursor and fetched again on later
+/// passes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub(crate) struct RetryItem {
+    pub key: String,
+    pub attempts: u32,
+}
+
+/// Bookkeeping of item failures in one pass.
+pub(crate) struct Skips {
+    /// To carry in the cursor.
+    pub list: Vec<RetryItem>,
+    /// Attempts made before this pass.
+    prior: std::collections::HashMap<String, u32>,
+    /// Handled (fetched, failed again, resolved) in this pass.
+    tried: std::collections::HashSet<String>,
+    streak: u32,
+}
+
+impl Skips {
+    pub(crate) fn new(mut carried: Vec<RetryItem>) -> Self {
+        carried.truncate(MAX_RETRY_ITEMS);
+        Self {
+            prior: carried
+                .iter()
+                .map(|r| (r.key.clone(), r.attempts))
+                .collect(),
+            list: carried,
+            tried: Default::default(),
+            streak: 0,
+        }
+    }
+
+    /// The item was fetched (or is gone, unchanged or out of scope): no retry needed.
+    pub(crate) fn resolved(&mut self, key: &str) {
+        self.tried.insert(key.to_string());
+        self.list.retain(|r| r.key != key);
+    }
+
+    /// An item fetch succeeded: the failure streak is over.
+    pub(crate) fn fetched(&mut self, key: &str) {
+        self.streak = 0;
+        self.resolved(key);
+    }
+
+    /// An item fetch failed: keep it for a later pass (until [`MAX_ITEM_ATTEMPTS`]). Fails the
+    /// pass after [`MAX_FAILURE_STREAK`] failures in a row, so an outage is not taken for bad
+    /// items.
+    pub(crate) fn failed(&mut self, source: &str, key: &str, reason: &str) -> Result<()> {
+        self.streak += 1;
+        if self.streak >= MAX_FAILURE_STREAK {
+            return Err(Error::Network(format!(
+                "{} item downloads failed in a row; last: {reason}",
+                self.streak
+            )));
+        }
+        let attempts = self.prior.get(key).copied().unwrap_or(0) + 1;
+        self.tried.insert(key.to_string());
+        self.list.retain(|r| r.key != key);
+        if attempts >= MAX_ITEM_ATTEMPTS {
+            tracing::warn!(
+                source,
+                item = key,
+                "giving up on an item after {attempts} failed fetches: {reason}"
+            );
+        } else if self.list.len() < MAX_RETRY_ITEMS {
+            tracing::warn!(
+                source,
+                item = key,
+                "skipping an unreadable item for now: {reason}"
+            );
+            self.list.push(RetryItem {
+                key: key.to_string(),
+                attempts,
+            });
+        }
+        Ok(())
+    }
+
+    /// Carried items not handled yet in this pass.
+    pub(crate) fn pending(&self) -> Vec<String> {
+        self.list
+            .iter()
+            .filter(|r| !self.tried.contains(&r.key))
+            .map(|r| r.key.clone())
+            .collect()
     }
 }
 

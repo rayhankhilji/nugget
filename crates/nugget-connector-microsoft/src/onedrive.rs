@@ -21,6 +21,13 @@
 //! every indexed file the enumeration does not report in scope is deleted at its end; an
 //! interrupted reconciling enumeration restarts from scratch.
 //!
+//! `"retry":[{"key":"<id>","attempts":n},...]` (omitted when empty) lists files Microsoft could
+//! not serve (5xx after retries, 403 `accessDenied`, 400, 409/423); they are fetched again at the
+//! end of later passes (`/items/{id}`, then the usual download), deleted if gone, and given up
+//! after [`MAX_ITEM_ATTEMPTS`](crate::graph::MAX_ITEM_ATTEMPTS) tries. Such a file stays in the
+//! pass's `seen` set, so a reconciling enumeration never deletes its indexed copy. Several
+//! failures in a row mean an outage and end the pass instead.
+//!
 //! Keys are drive item ids. Versions are `<eTag>|<parent id>`: the parent lets a deleted
 //! folder's indexed files be removed even when Graph reports only the folder.
 
@@ -44,7 +51,8 @@ use time::format_description::well_known::Rfc3339;
 use url::Url;
 
 use crate::graph::{
-    DeltaPage, Get, GraphApi, backoff, is_item_failure, needs_resync, retry_after_ms, status_error,
+    DeltaPage, Get, GraphApi, ItemGet, RetryItem, Skips, backoff, needs_resync, retry_after_ms,
+    status_error,
 };
 use crate::oauth::{SCOPE_FILES_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::OneDriveSettings;
@@ -113,11 +121,20 @@ struct Cursor {
     root: Option<String>,
     #[serde(default)]
     folders: BTreeMap<String, Folder>,
+    /// Files whose content could not be fetched, tried again on later passes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retry: Vec<RetryItem>,
 }
 
 impl Cursor {
     fn to_value(&self) -> Value {
         serde_json::to_value(self).unwrap_or(Value::Null)
+    }
+
+    /// The cursor with the files still to retry.
+    fn with(&mut self, skips: &Skips) -> Value {
+        self.retry = skips.list.clone();
+        self.to_value()
     }
 
     fn fresh(reconcile: bool) -> Self {
@@ -278,6 +295,8 @@ struct Pass {
     seen: HashSet<String>,
     /// A folder moved or was renamed while folder filters are set: re-enumerate.
     rescan: bool,
+    /// Files whose content could not be fetched.
+    skips: Skips,
 }
 
 #[async_trait]
@@ -310,7 +329,7 @@ impl Connector for OneDriveConnector {
                 None
             }
         });
-        let cur = match parsed {
+        let mut cur = match parsed {
             Some(c) => c,
             None => {
                 // No cursor but indexed files: a reconciling enumeration.
@@ -328,10 +347,12 @@ impl Connector for OneDriveConnector {
                 .collect(),
             seen: HashSet::new(),
             rescan: false,
+            skips: Skips::new(std::mem::take(&mut cur.retry)),
         };
-        self.listing(cur, &mut pass, sink, cancel)
-            .await
-            .map(|c| c.to_value())
+        let mut cur = self.listing(cur, &mut pass, sink, cancel).await?;
+        self.retry_skipped(&mut cur, &mut pass, sink, cancel)
+            .await?;
+        Ok(cur.with(&pass.skips))
     }
 }
 
@@ -418,7 +439,7 @@ impl OneDriveConnector {
 
             if let Some(n) = next {
                 cur.next_link = Some(n);
-                sink.checkpoint(cur.to_value()).await?;
+                sink.checkpoint(cur.with(&pass.skips)).await?;
                 continue;
             }
             if cur.full && cur.reconcile {
@@ -443,7 +464,7 @@ impl OneDriveConnector {
                 tracing::info!(source = %self.ctx.source, "onedrive folder moved; re-applying folder filters");
                 restarts += 1;
                 pass.rescan = false;
-                sink.checkpoint(cur.to_value()).await?;
+                sink.checkpoint(cur.with(&pass.skips)).await?;
                 cur = Cursor::fresh(true);
                 continue;
             }
@@ -515,6 +536,7 @@ impl OneDriveConnector {
             }
             let key = item.id.clone();
             if item.deleted.is_some() || item.file.is_none() {
+                pass.skips.resolved(&key);
                 pass.seen.remove(&key);
                 if pass.live.remove(&key).is_some() {
                     sink.send(Change::Delete(ItemKey::new(key))).await?;
@@ -541,6 +563,7 @@ impl OneDriveConnector {
             if path.is_none() && self.settings.has_filters() {
                 // Cannot tell whether it is in scope: leave it as it is.
                 tracing::debug!(source = %self.ctx.source, "onedrive: file in an unknown folder");
+                pass.skips.resolved(&key);
                 continue;
             }
             let mime = mime_for(&name);
@@ -548,6 +571,7 @@ impl OneDriveConnector {
                 .size
                 .is_none_or(|s| s >= 0 && (s as u64) <= self.settings.max_bytes());
             let Some(mime) = mime.filter(|_| in_scope && size_ok) else {
+                pass.skips.resolved(&key);
                 pass.seen.remove(&key);
                 if pass.live.remove(&key).is_some() {
                     sink.send(Change::Delete(ItemKey::new(key))).await?;
@@ -568,10 +592,24 @@ impl OneDriveConnector {
                 .get(&key)
                 .is_some_and(|v| v.as_deref() == Some(version.as_str()))
             {
+                pass.skips.resolved(&key);
                 continue;
             }
-            let Some(bytes) = self.download(&item, cancel).await? else {
-                continue;
+            // `seen` keeps a file that cannot be fetched now, so a reconciling pass does not
+            // delete its indexed copy; `skips` brings it back on a later pass.
+            let bytes = match self.download(&item, cancel).await? {
+                Dl::Bytes(b) => {
+                    pass.skips.fetched(&key);
+                    b
+                }
+                Dl::Skip => {
+                    pass.skips.resolved(&key);
+                    continue;
+                }
+                Dl::Failed(reason) => {
+                    pass.skips.failed(self.ctx.source.as_str(), &key, &reason)?;
+                    continue;
+                }
             };
             let doc = self.document(item, name, path, mime, version.clone(), bytes);
             pass.live.insert(key, Some(version));
@@ -616,20 +654,74 @@ impl OneDriveConnector {
         doc
     }
 
-    /// The file's bytes, or `None` when it cannot be downloaded safely (no acceptable URL,
-    /// gone, too large).
-    async fn download(
+    /// Fetch again the files earlier passes could not read: their current metadata goes
+    /// through [`apply_page`](Self::apply_page) like a delta entry. A file gone meanwhile is
+    /// deleted.
+    async fn retry_skipped(
         &self,
-        item: &DriveItem,
+        cur: &mut Cursor,
+        pass: &mut Pass,
+        sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<Option<Vec<u8>>> {
-        if let Some(u) = item.download_url.as_deref()
-            && let Some(bytes) = self.fetch_download(u, cancel).await?
-        {
-            return Ok(Some(bytes));
+    ) -> Result<()> {
+        for key in pass.skips.pending() {
+            if !valid_item_id(&key) {
+                pass.skips.resolved(&key);
+                continue;
+            }
+            let url = self.api.url(&["me", "drive", "items", &key], &[])?;
+            let resp = match self.api.get_item(&url, Get::default(), cancel).await? {
+                ItemGet::Done(r) => r,
+                ItemGet::TooLarge => {
+                    pass.skips.resolved(&key);
+                    continue;
+                }
+                ItemGet::Failed(reason) => {
+                    pass.skips.failed(self.ctx.source.as_str(), &key, &reason)?;
+                    continue;
+                }
+            };
+            match resp.status.as_u16() {
+                404 | 410 => {
+                    pass.skips.resolved(&key);
+                    pass.seen.remove(&key);
+                    if pass.live.remove(&key).is_some() {
+                        sink.send(Change::Delete(ItemKey::new(key))).await?;
+                    }
+                }
+                200 => match serde_json::from_slice::<Value>(&resp.body)
+                    .ok()
+                    .filter(Value::is_object)
+                    .and_then(|v| serde_json::from_value::<DriveItem>(v).ok())
+                    .filter(|i| i.id == key && i.remote_item.is_none() && !i.is_folder())
+                {
+                    Some(item) => self.apply_page(cur, vec![item], pass, sink, cancel).await?,
+                    None => pass.skips.resolved(&key),
+                },
+                _ => {
+                    let e = status_error("onedrive items.get", &resp);
+                    pass.skips
+                        .failed(self.ctx.source.as_str(), &key, &e.to_string())?;
+                }
+            }
         }
-        // No usable download URL (or it expired): ask Graph for a fresh one. `/content` answers
-        // with a redirect to it, which is inspected rather than followed.
+        Ok(())
+    }
+
+    /// The file's bytes; [`Dl::Skip`] when it must not or cannot be downloaded (no acceptable
+    /// URL, gone, too large); [`Dl::Failed`] when Microsoft failed to serve it now.
+    async fn download(&self, item: &DriveItem, cancel: &CancellationToken) -> Result<Dl> {
+        let mut failure = None;
+        if let Some(u) = item.download_url.as_deref() {
+            match self.fetch_download(u, cancel).await? {
+                UrlFetch::Bytes(b) => return Ok(Dl::Bytes(b)),
+                UrlFetch::TooLarge => return Ok(Dl::Skip),
+                UrlFetch::Unusable => {}
+                UrlFetch::Failed(r) => failure = Some(r),
+            }
+        }
+        // No usable download URL (or it expired or failed): ask Graph for a fresh one.
+        // `/content` answers with a redirect to it, which is inspected rather than followed.
         let url = self
             .api
             .url(&["me", "drive", "items", &item.id, "content"], &[])?;
@@ -639,51 +731,42 @@ impl OneDriveConnector {
             max_body: usize::try_from(self.settings.max_bytes()).unwrap_or(usize::MAX),
             ..Default::default()
         };
-        let resp = match self.api.get(&url, get, cancel).await {
-            Ok(r) => r,
-            Err(Error::Invalid(m)) if m.contains("exceeds") => return Ok(None),
-            // One unreadable file must not stop the pass.
-            Err(e) if is_item_failure(&e) => {
-                tracing::warn!(source = %self.ctx.source, "onedrive: skipping unreadable file: {e}");
-                return Ok(None);
-            }
-            Err(e) => return Err(e),
+        let resp = match self.api.get_item(&url, get, cancel).await? {
+            ItemGet::Done(r) => r,
+            ItemGet::TooLarge => return Ok(Dl::Skip),
+            ItemGet::Failed(r) => return Ok(Dl::Failed(r)),
         };
-        match resp.status.as_u16() {
+        Ok(match resp.status.as_u16() {
             300..=399 => {
                 let Some(loc) = resp
                     .headers
                     .get(reqwest::header::LOCATION)
                     .and_then(|v| v.to_str().ok())
                 else {
-                    return Ok(None);
+                    return Ok(failure.map_or(Dl::Skip, Dl::Failed));
                 };
-                self.fetch_download(loc, cancel).await
+                match self.fetch_download(loc, cancel).await? {
+                    UrlFetch::Bytes(b) => Dl::Bytes(b),
+                    UrlFetch::TooLarge => Dl::Skip,
+                    UrlFetch::Unusable => failure.map_or(Dl::Skip, Dl::Failed),
+                    UrlFetch::Failed(r) => Dl::Failed(r),
+                }
             }
-            404 | 410 => Ok(None),
-            s if (200..300).contains(&s) => Ok(Some(resp.body)),
-            _ => {
-                let e = status_error("onedrive content", &resp);
-                tracing::warn!(source = %self.ctx.source, "onedrive: skipping unreadable file: {e}");
-                Ok(None)
-            }
-        }
+            404 | 410 => Dl::Skip,
+            s if (200..300).contains(&s) => Dl::Bytes(resp.body),
+            _ => Dl::Failed(status_error("onedrive content", &resp).to_string()),
+        })
     }
 
-    /// GET a pre-authenticated download URL **without** the bearer token. `None` when the URL is
-    /// refused, expired (401/403/404/410), redirects, or the file is too large.
-    async fn fetch_download(
-        &self,
-        raw: &str,
-        cancel: &CancellationToken,
-    ) -> Result<Option<Vec<u8>>> {
+    /// GET a pre-authenticated download URL **without** the bearer token.
+    async fn fetch_download(&self, raw: &str, cancel: &CancellationToken) -> Result<UrlFetch> {
         let Some(url) = download_allowed(&self.hosts, self.allow_http, raw) else {
             tracing::warn!(
                 source = %self.ctx.source,
                 host = Url::parse(raw).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default(),
                 "onedrive: refusing download URL outside the Microsoft download hosts"
             );
-            return Ok(None);
+            return Ok(UrlFetch::Unusable);
         };
         let retry = self.api.retry();
         let mut attempt = 0u32;
@@ -692,42 +775,43 @@ impl OneDriveConnector {
                 return Err(Error::Cancelled);
             }
             let req = self.download.request(Method::GET, url.as_str());
-            let err = match self.download.send(req, &[]).await {
+            // `server`: the host answered (an item failure once retries run out).
+            let (err, server) = match self.download.send(req, &[]).await {
                 Ok(resp) => match resp.status.as_u16() {
-                    200..=299 => return Ok(Some(resp.body)),
+                    200..=299 => return Ok(UrlFetch::Bytes(resp.body)),
                     300..=399 => {
                         tracing::warn!(source = %self.ctx.source, "onedrive: download redirected; not followed");
-                        return Ok(None);
+                        return Ok(UrlFetch::Unusable);
                     }
-                    401 | 403 | 404 | 410 => return Ok(None),
-                    429 | 503 | 509 => Error::RateLimited {
-                        retry_after_ms: retry_after_ms(&resp),
-                    },
-                    s @ (408 | 500..=599) => {
-                        // The server answered for this file: after the retries, skip it
-                        // rather than stop the pass.
-                        if attempt >= retry.max_retries {
-                            tracing::warn!(source = %self.ctx.source, "onedrive: skipping file, download failed with HTTP {s}");
-                            return Ok(None);
-                        }
-                        Error::Network(format!("onedrive download: HTTP {s}"))
+                    // Expired or refused URL: a fresh one comes from `/content`.
+                    401 | 403 | 404 | 410 => return Ok(UrlFetch::Unusable),
+                    429 | 503 | 509 => (
+                        Error::RateLimited {
+                            retry_after_ms: retry_after_ms(&resp),
+                        },
+                        true,
+                    ),
+                    s @ (408 | 409 | 423 | 500..=599) => {
+                        (Error::Network(format!("onedrive download: HTTP {s}")), true)
                     }
-                    s => {
-                        tracing::warn!(source = %self.ctx.source, "onedrive: skipping file, download failed with HTTP {s}");
-                        return Ok(None);
-                    }
+                    s => return Ok(UrlFetch::Failed(format!("onedrive download: HTTP {s}"))),
                 },
                 Err(Error::Invalid(m)) if m.contains("exceeds") => {
                     tracing::warn!(source = %self.ctx.source, "onedrive: skipping file over the size cap");
-                    return Ok(None);
+                    return Ok(UrlFetch::TooLarge);
                 }
-                Err(e @ Error::Network(_)) => e,
+                Err(e @ Error::Network(_)) => (e, false),
                 Err(e) => return Err(e),
             };
-            if attempt >= retry.max_retries {
-                return Err(err);
-            }
-            let delay = backoff(&retry, attempt, &err);
+            let delay = (attempt < retry.max_retries)
+                .then(|| backoff(&retry, attempt, &err))
+                .flatten();
+            let Some(delay) = delay else {
+                return match err {
+                    Error::Network(m) if server => Ok(UrlFetch::Failed(m)),
+                    e => Err(e),
+                };
+            };
             attempt += 1;
             tokio::select! {
                 _ = tokio::time::sleep(delay) => {}
@@ -735,6 +819,24 @@ impl OneDriveConnector {
             }
         }
     }
+}
+
+/// Result of [`OneDriveConnector::download`].
+enum Dl {
+    Bytes(Vec<u8>),
+    /// Not downloaded on purpose (too large, gone, no acceptable URL).
+    Skip,
+    /// Microsoft failed to serve it now: retry on a later pass.
+    Failed(String),
+}
+
+/// Result of fetching one download URL.
+enum UrlFetch {
+    Bytes(Vec<u8>),
+    TooLarge,
+    /// Refused, expired or redirecting: try a fresh URL.
+    Unusable,
+    Failed(String),
 }
 
 /// Whether a download URL may be fetched: HTTPS (unless `allow_http`, for tests), no

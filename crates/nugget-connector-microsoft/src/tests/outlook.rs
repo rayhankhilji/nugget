@@ -518,7 +518,8 @@ async fn persistent_throttling_surfaces_rate_limited() {
         ),
         "{err:?}"
     );
-    assert_eq!(h.requests_to(&delta_path("inbox")).await.len(), 2);
+    // 7 s is longer than the policy's 50 ms max delay: returned at once for the supervisor.
+    assert_eq!(h.requests_to(&delta_path("inbox")).await.len(), 1);
 }
 
 #[tokio::test]
