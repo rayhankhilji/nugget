@@ -98,6 +98,8 @@ pub struct Corpus {
     /// Credential-like values from sensitive facts (passwords, card and account numbers),
     /// normalised by [`squash`].
     secrets: Vec<String>,
+    /// Characters of the longest secret.
+    secret_len: usize,
     superseded_facts: u32,
 }
 
@@ -149,6 +151,14 @@ impl Corpus {
         for e in &voice.exemplars {
             c.words.extend(words(e));
         }
+        c.secrets.sort();
+        c.secrets.dedup();
+        c.secret_len = c
+            .secrets
+            .iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0);
         c
     }
 
@@ -162,12 +172,38 @@ impl Corpus {
 }
 
 /// Letters and digits only, lower case: "Tangerine-Otter-42" and "4111 1111" compare equal
-/// however a draft spaces or punctuates them.
+/// however a draft spaces or punctuates them. Fullwidth forms ("４１１１") fold to ASCII.
 fn squash(text: &str) -> String {
     text.chars()
+        .map(|c| match c {
+            '\u{ff01}'..='\u{ff5e}' => char::from_u32(c as u32 - 0xfee0).unwrap_or(c),
+            c => c,
+        })
         .filter(|c| c.is_alphanumeric())
         .flat_map(char::to_lowercase)
         .collect()
+}
+
+/// Characters that separate a key from its value inside one word (`pw=…`, `pin:…`).
+fn is_key_separator(c: char) -> bool {
+    matches!(
+        c,
+        ':' | '='
+            | ','
+            | ';'
+            | '"'
+            | '\''
+            | '`'
+            | '('
+            | ')'
+            | '['
+            | ']'
+            | '{'
+            | '}'
+            | '<'
+            | '>'
+            | '|'
+    )
 }
 
 /// Credential-like values in a sensitive fact: tokens of six or more letters and digits that
@@ -175,7 +211,13 @@ fn squash(text: &str) -> String {
 /// number, spaces and dashes allowed between groups).
 fn secret_tokens(text: &str) -> Vec<String> {
     let mut out = Vec::new();
-    for tok in text.split_whitespace() {
+    // Each word, and each part of it between key separators: "pw=Kq7vZ93xw" holds the
+    // credential "Kq7vZ93xw", which a draft may copy without its key.
+    let words = text.split_whitespace().flat_map(|tok| {
+        let parts = tok.split(is_key_separator).filter(move |p| *p != tok);
+        std::iter::once(tok).chain(parts)
+    });
+    for tok in words {
         let t = tok.trim_matches(|c: char| !c.is_alphanumeric());
         let sq = squash(t);
         if sq.chars().count() >= 6
@@ -232,7 +274,8 @@ pub enum GroundingCheck {
 pub struct Grounder {
     corpus: Corpus,
     check: GroundingCheck,
-    /// `Secrets`: the end of the text emitted so far, for credentials split across releases.
+    /// The end of the text emitted so far, [`squash`]ed (so padding between characters does
+    /// not push a credential's start out of it), for credentials split across releases.
     tail: String,
     /// Text received but not yet decided (the current sentence and its leading whitespace).
     pending: String,
@@ -387,6 +430,7 @@ impl Grounder {
         }
         let ws = stronger(&self.carry, ws).to_owned();
         self.carry.clear();
+        self.remember(sentence);
         if !self.body_ok {
             // `emitted_any` is still false here: the body starts with the held lines.
             if !self.held.is_empty() {
@@ -438,6 +482,16 @@ impl Grounder {
                     }
                 }
             }
+            if !self.corpus.secrets.is_empty() {
+                // A credential already complete in what would be held: stop now.
+                if self.copies_secret(&self.pending[..cut]) {
+                    self.report.secrets_dropped += 1;
+                    self.pending.clear();
+                    self.finished = true;
+                    return String::new();
+                }
+                cut = self.hold_secret_start(cut);
+            }
             // Never release trailing whitespace (it goes out in front of the next word).
             self.pending[..cut].trim_end().len()
         };
@@ -445,23 +499,13 @@ impl Grounder {
             return String::new();
         }
         let release: String = self.pending.drain(..cut).collect();
-        if !self.corpus.secrets.is_empty() {
-            let window = format!("{}{}", self.tail, release);
-            let sq = squash(&window);
-            let digits: String = sq.chars().filter(char::is_ascii_digit).collect();
-            if self.corpus.secrets.iter().any(|s| {
-                sq.contains(s.as_str())
-                    || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
-            }) {
-                self.report.secrets_dropped += 1;
-                self.pending.clear();
-                self.finished = true;
-                return String::new();
-            }
+        if self.copies_secret(&release) {
+            self.report.secrets_dropped += 1;
+            self.pending.clear();
+            self.finished = true;
+            return String::new();
         }
-        let keep = format!("{}{}", self.tail, release);
-        let n = keep.chars().count();
-        self.tail = keep.chars().skip(n.saturating_sub(48)).collect();
+        self.remember(&release);
         if !release.trim().is_empty() {
             self.emitted_any = true;
             self.body_ok = true;
@@ -469,19 +513,67 @@ impl Grounder {
         release
     }
 
+    /// Whether `text`, after what was emitted before it, copies a credential from a sensitive
+    /// fact: its letters and digits contain one, or (for a card or account number) its digits do.
+    fn copies_secret(&self, text: &str) -> bool {
+        if self.corpus.secrets.is_empty() {
+            return false;
+        }
+        let sq = format!("{}{}", self.tail, squash(text));
+        let digits: String = sq.chars().filter(char::is_ascii_digit).collect();
+        self.corpus.secrets.iter().any(|s| {
+            sq.contains(s.as_str())
+                || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
+        })
+    }
+
+    /// Note emitted (or accepted) text in `tail`.
+    fn remember(&mut self, text: &str) {
+        if self.corpus.secrets.is_empty() {
+            return;
+        }
+        let keep = format!("{}{}", self.tail, squash(text));
+        let n = keep.chars().count();
+        let max = (2 * self.corpus.secret_len).max(64);
+        self.tail = keep.chars().skip(n.saturating_sub(max)).collect();
+    }
+
+    /// `Secrets`: move `cut` back to the start of the longest run of trailing words of
+    /// `pending[..cut]` that a credential starts with, so that no start of a credential goes out
+    /// before the words after it show whether it is one ("tangerine- Otter-42", or a password
+    /// spelled out a character at a time).
+    fn hold_secret_start(&self, cut: usize) -> usize {
+        let head = &self.pending[..cut];
+        let max = self.corpus.secret_len;
+        let mut best = cut;
+        let mut prev_ws = true;
+        let starts: Vec<usize> = head
+            .char_indices()
+            .filter_map(|(i, c)| {
+                let start = prev_ws && !c.is_whitespace();
+                prev_ws = c.is_whitespace();
+                start.then_some(i)
+            })
+            .collect();
+        // Bounded: words of punctuation alone add nothing to the squashed text.
+        for &k in starts.iter().rev().take(4 * max + 16) {
+            let s = squash(&head[k..]);
+            if s.chars().count() > max {
+                break;
+            }
+            if !s.is_empty() && self.corpus.secrets.iter().any(|sec| sec.starts_with(&s)) {
+                best = k;
+            }
+        }
+        best
+    }
+
     /// Whether every value in the sentence is supported; counts values and names.
     fn check(&mut self, sentence: &str) -> bool {
         // A credential from a sensitive source never goes into a message, whoever asked.
-        if !self.corpus.secrets.is_empty() {
-            let sq = squash(sentence);
-            let digits: String = sq.chars().filter(char::is_ascii_digit).collect();
-            if self.corpus.secrets.iter().any(|s| {
-                sq.contains(s.as_str())
-                    || (s.chars().all(|c| c.is_ascii_digit()) && digits.contains(s.as_str()))
-            }) {
-                self.report.secrets_dropped += 1;
-                return false;
-            }
+        if self.copies_secret(sentence) {
+            self.report.secrets_dropped += 1;
+            return false;
         }
         let mut ok = true;
         for v in values(sentence) {
@@ -1512,5 +1604,80 @@ tangerine-Otter-42 and rotates monthly. The team has 12 people.\n\n\
         assert!(!out.is_empty() && !out.ends_with(' '));
         let rest = g.finish();
         assert_eq!(format!("{out}{rest}"), words.trim_end());
+    }
+
+    /// Feed `parts` one push at a time, then finish; the whole emitted text.
+    fn stream(g: &mut Grounder, parts: &[&str]) -> String {
+        let mut out = String::new();
+        for p in parts {
+            out.push_str(&g.push(p));
+        }
+        out + &g.finish()
+    }
+
+    #[test]
+    fn secrets_mode_catches_a_credential_padded_past_any_window() {
+        // Each character of the password, with separators between them: the raw text runs far
+        // longer than the password, and arrives one word at a time.
+        let parts: Vec<String> = "tangerineOtter42"
+            .chars()
+            .map(|c| format!("{c} ,  ; "))
+            .collect();
+        let mut all = vec!["The password is "];
+        all.extend(parts.iter().map(String::as_str));
+        all.push("ok.");
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &all);
+        // Neither the password nor its start went out.
+        assert!(!squash(&out).contains("tang"), "{out:?}");
+        assert_eq!(g.report().secrets_dropped, 1);
+    }
+
+    #[test]
+    fn secrets_mode_holds_the_start_of_a_credential_split_by_a_space() {
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        let out = stream(&mut g, &["It is tangerine- ", "Otter-42 ", "now."]);
+        assert_eq!(out, "It is");
+        assert_eq!(g.report().secrets_dropped, 1);
+        // A word that only starts like one goes out when the next word shows it is not.
+        let mut g = with_secrets().with_check(GroundingCheck::Secrets);
+        assert_eq!(g.push("a tangerine "), "a");
+        assert_eq!(g.push("tree now"), " tangerine tree");
+        assert_eq!(g.finish(), " now");
+    }
+
+    #[test]
+    fn credentials_in_fullwidth_or_after_a_key_are_caught() {
+        let (ctx, _) = henrik();
+        let mut c = cite(1, "k60", "Router", "2026-10-01");
+        c.sensitive = true;
+        let cr = ContextResponse {
+            text: "[1] Router (notes)\nadmin pw=Kq7vZ93xw (rotate yearly)".into(),
+            citations: vec![c],
+            excluded_sensitive: 0,
+        };
+        for check in [GroundingCheck::Secrets, GroundingCheck::Sentences] {
+            for draft in ["The password is Kq7vZ93xw.", "It is Ｋｑ７ｖＺ９３ｘｗ."] {
+                let mut g =
+                    Grounder::for_draft(&ctx, &cr, None, &VoiceHints::default()).with_check(check);
+                let out = stream(&mut g, &[draft]);
+                assert!(
+                    !out.contains("Kq7") && !out.contains("Ｋｑ"),
+                    "{check:?}: {out:?}"
+                );
+                assert_eq!(g.report().secrets_dropped, 1, "{check:?}: {draft}");
+            }
+        }
+    }
+
+    #[test]
+    fn sentences_mode_catches_a_credential_split_across_sentences() {
+        let mut g = with_secrets();
+        let out = stream(
+            &mut g,
+            &["The team has 12 people. tangerine. Otter-42. Thanks!"],
+        );
+        assert!(!squash(&out).contains("tangerineotter42"), "{out:?}");
+        assert_eq!(g.report().secrets_dropped, 1);
     }
 }
