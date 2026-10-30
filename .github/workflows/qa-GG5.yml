@@ -17,12 +17,16 @@ on:
         description: "Chat models to run, comma-separated manifest ids"
         default: "qwen3-4b-q4km,qwen3-8b-q4km"
         type: string
+      product_ref:
+        description: "Build the product from this ref instead (harness and corpus stay from this commit)"
+        default: ""
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.sha }}-${{ inputs.product_ref }}
   cancel-in-progress: false
 
 env:
@@ -42,7 +46,8 @@ jobs:
     steps:
       - id: m
         run: |
-          models="${{ inputs.models || 'qwen3-4b-q4km,qwen3-8b-q4km' }}"
+          # TEMPORARY push default: EE1's branch with the 4B model.
+          models="${{ inputs.models || 'qwen3-4b-q4km' }}"
           echo "models=$(jq -cn --arg m "$models" '$m | split(",") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
   knowledge:
@@ -55,12 +60,24 @@ jobs:
       matrix:
         model: ${{ fromJson(needs.setup.outputs.models) }}
     env:
+      PRODUCT_REF: ${{ github.event_name == 'push' && 'ee/entity-resolution' || inputs.product_ref }}
       QA_HOME: ${{ github.workspace }}/qa-home
       QA_OUT: ${{ github.workspace }}/qa-out
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+
+      # The product under test; `product/` is this commit unless a product ref is given.
+      - name: Check out the product
+        run: |
+          if [ -n "$PRODUCT_REF" ]; then
+            git clone --quiet --no-tags --depth 1 --branch "$PRODUCT_REF" \
+              "https://github.com/${{ github.repository }}" product
+          else
+            ln -s . product
+          fi
+          echo "product: ${PRODUCT_REF:-this commit} $(git -C product rev-parse HEAD)" | tee product-ref.txt
 
       - name: Install Rust toolchain
         run: rustup toolchain install stable --profile minimal
@@ -83,7 +100,7 @@ jobs:
           key: qa-gg5-models-${{ runner.os }}-${{ matrix.model }}-${{ hashFiles('manifests/default.json') }}
 
       - name: Build nuggetd
-        run: cargo build --release --locked -p nuggetd
+        run: cargo build --release --locked -p nuggetd --manifest-path product/Cargo.toml --target-dir target
 
       - name: Record hardware
         run: |
@@ -91,7 +108,8 @@ jobs:
           {
             echo "model: ${{ matrix.model }}"
             echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
-            echo "commit: ${{ github.sha }}"
+            echo "harness commit: ${{ github.sha }}"
+            cat product-ref.txt
             echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
             lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160
             free -g
@@ -114,7 +132,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: qa-gg5-${{ matrix.model }}
+          name: qa-gg5-${{ matrix.model }}${{ env.PRODUCT_REF && '-ee1' || '' }}
           path: |
             ${{ env.QA_OUT }}
             qa-home/data/logs
