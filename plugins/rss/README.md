@@ -35,14 +35,19 @@ plus a `feed_headlines` tool for the agent.
 - **Failures.** One failing feed (a 5xx, a parse error, an undeclared host) is logged and skipped,
   and its documents stay; the pass fails only if every feed failed. Redirects are not followed by
   the host; a `3xx` is reported with its `Location` so the user can update the URL.
-- **Parsing** uses `roxmltree` with a node limit and its entity-expansion checks; external
-  entities are never resolved. Common breakage is repaired: HTML named entities (`&nbsp;`), bare
+- **Parsing** uses `roxmltree` with DTDs disabled: a `<!DOCTYPE>` (internal subset included) is
+  removed before parsing, so no entity is ever declared or expanded, and references to it stay
+  literal text. Bodies over 4 MiB are refused before parsing and there is a node limit, so one
+  hostile feed cannot exhaust the plugin's memory; it fails alone. Only `http(s)` links are kept
+  (`javascript:` and other schemes are dropped), and dates outside years 1 to 9999 are left out. Common breakage is repaired: HTML named entities (`&nbsp;`), bare
   `&`, Latin-1 / Windows-1252 bodies, a BOM, relative links (`xml:base` too), and dates in either
   RFC 822 or ISO 8601 with the usual mistakes.
 
 `feed_headlines` takes `{ "url": "...", "limit": 10 }` (1 to 50) and returns the feed's title,
 link, format and items (`title`, `link`, `date`, `date_ms`). It only sends `GET` and stores
-nothing.
+nothing. Because the agent picks the URL (and may have been steered by text it read), the URL may
+not carry a query string or fragment: a declared host cannot be used to smuggle data out in one.
+Feeds that need a query string can still be followed by the connector.
 
 ## Hosts
 

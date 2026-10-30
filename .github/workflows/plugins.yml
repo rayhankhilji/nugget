@@ -103,6 +103,13 @@ jobs:
           CARGO_FLAGS=--locked bash plugins/build.sh --out "$OUT_DIR"
           cargo build --locked -p nugget-plugin --example sign-plugin
 
+      # Sync each first-party plugin under the real wasm host (crates/nugget-plugin/src/tests/
+      # first_party.rs): build.sh left their wasm in target/plugins.
+      - name: First-party plugins on the real host
+        env:
+          NUGGET_FIRST_PARTY_WASM_DIR: ${{ github.workspace }}/target/plugins/wasm32-wasip2/release
+        run: cargo test --locked -p nugget-plugin first_party
+
       # The throwaway key exists only in this step's shell: masked, never written to disk, to
       # $GITHUB_ENV or to an output, and gone with the step. Only its public half leaves the step.
       # The packages are for CI only; a user trusts them only by adding that public key to

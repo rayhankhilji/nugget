@@ -35,9 +35,12 @@ store: the only thing it can reach is the folder you pick.
 - **Front matter** is read by a small, tolerant parser for the YAML Obsidian writes: `key: value`,
   quoted strings, `[inline, lists]`, block lists, `|` and `>` block scalars. Nested maps are skipped
   rather than misread. A file without a closing `---` has no front matter.
-- **Deletes.** When the walk saw the whole vault, notes the store holds that are gone are deleted,
-  on every pass. If any folder fails to list, the pass sends changes but deletes nothing, so a
-  transient error never wipes notes. A note that cannot be read (too large, vanished) is logged
+- **Deletes.** Notes the store holds that are gone are deleted on every pass, except under a
+  folder this pass could not see (it failed to list or is nested too deeply): those keep their
+  notes, so a transient error never wipes them. Reaching the note cap suspends deletes for the
+  whole vault. A folder that lists exactly like one of its ancestors (a symlink back up the tree)
+  is skipped, so loops do not import notes repeatedly. Modification times Nugget cannot store
+  (beyond years ±9999) are left out of the document. A note that cannot be read (too large, vanished) is logged
   and keeps its stored version.
 - **Cancellation** is checked per folder and per note.
 

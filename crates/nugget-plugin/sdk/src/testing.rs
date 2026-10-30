@@ -68,6 +68,10 @@ use crate::{Connector, Content, Document, Error, Result, Tool, Tools, Value, fs,
 /// The default fake time: 2023-11-14T22:13:20Z.
 pub const DEFAULT_NOW_MS: i64 = 1_700_000_000_000;
 
+/// The `modified_at` range the host accepts: years -9999 to 9999 (milliseconds).
+pub const MIN_MODIFIED_MS: i64 = -377_705_116_800_000;
+pub const MAX_MODIFIED_MS: i64 = 253_402_300_799_999;
+
 /// Longest key-value key, in bytes (as the host's store).
 const MAX_KV_KEY_BYTES: usize = 256;
 /// Header names a plugin may not set (as the host).
@@ -413,7 +417,11 @@ struct State {
     routes: Vec<(String, String, Handler)>,
     requests: Vec<http::Request>,
     requests_this_call: usize,
+    /// The source's key-value namespace (connectors).
     kv: BTreeMap<String, Vec<u8>>,
+    /// The tools' own namespace (read-only for tools), separate as on the host.
+    tools_kv: BTreeMap<String, Vec<u8>>,
+    allow_private_network: bool,
     secrets: BTreeMap<String, String>,
     now: i64,
     logs: Vec<(Level, String)>,
@@ -509,6 +517,8 @@ impl TestHost {
             requests: Vec::new(),
             requests_this_call: 0,
             kv: BTreeMap::new(),
+            tools_kv: BTreeMap::new(),
+            allow_private_network: false,
             secrets: BTreeMap::new(),
             now: DEFAULT_NOW_MS,
             logs: Vec::new(),
@@ -620,9 +630,23 @@ impl TestHost {
         self
     }
 
-    /// Every key-value key, in order.
+    /// Every key-value key of the source namespace, in order.
     pub fn kv_keys(&self) -> Vec<String> {
         self.state.borrow().kv.keys().cloned().collect()
+    }
+
+    /// Put an entry into the tools' namespace (what `kv::get` reads inside `call`). On the host,
+    /// connectors write one namespace per source and tools read a separate one.
+    pub fn tools_kv_set(&self, key: &str, value: impl Into<Vec<u8>>) -> &Self {
+        self.st().tools_kv.insert(key.to_string(), value.into());
+        self
+    }
+
+    /// Let requests reach loopback and private IP literals and `localhost` (refused by default,
+    /// like the host).
+    pub fn allow_private_network(&self, allow: bool) -> &Self {
+        self.st().allow_private_network = allow;
+        self
     }
 
     /// Set a secret's value (the name must still be declared for the plugin to read it).
@@ -811,6 +835,11 @@ impl TestHost {
             );
             assert!(seen.insert(&t.name), "tool `{}` listed twice", t.name);
             assert!(
+                t.description.len() <= 4096,
+                "tool `{}`: description longer than 4096 bytes",
+                t.name
+            );
+            assert!(
                 t.input_schema.is_object(),
                 "tool `{}`: input_schema must be a JSON object",
                 t.name
@@ -823,6 +852,9 @@ impl TestHost {
     /// reads, no sink or files; input and output through JSON with the size cap).
     pub fn call<T: Tools>(&self, name: &str, input: Value) -> Result<Value> {
         self.require_kind(false)?;
+        if !self.tools::<T>().iter().any(|t| t.name == name) {
+            return Err(Error::NotFound(format!("the plugin has no tool `{name}`")));
+        }
         let max = self.state.borrow().limits.max_tool_io_bytes;
         let text = input.to_string();
         if text.len() > max {
@@ -1007,6 +1039,52 @@ pub(crate) mod sys {
         Error::Denied(msg.into())
     }
 
+    fn is_cancelled(st: &State) -> bool {
+        st.cancelled
+            || st
+                .cancel_after_upserts
+                .is_some_and(|n| st.upserts_this_pass >= n)
+    }
+
+    /// The host fails http, fs and sink calls once the call is cancelled.
+    fn check_cancel(st: &State) -> Result<()> {
+        if matches!(st.mode, Mode::Sync | Mode::Validate) && is_cancelled(st) {
+            return Err(Error::Cancelled);
+        }
+        Ok(())
+    }
+
+    /// Whether a URL host is a loopback, private or otherwise local IP literal (or `localhost`).
+    fn is_local(host: &str) -> bool {
+        use std::net::IpAddr;
+        if host == "localhost" || host.ends_with(".localhost") {
+            return true;
+        }
+        match host.parse::<IpAddr>() {
+            Ok(IpAddr::V4(ip)) => {
+                ip.is_loopback()
+                    || ip.is_private()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_broadcast()
+                    || ip.is_multicast()
+                    || ip.is_documentation()
+                    || (ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64)
+            }
+            Ok(IpAddr::V6(ip)) => {
+                ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_multicast()
+                    || (ip.segments()[0] & 0xfe00) == 0xfc00
+                    || (ip.segments()[0] & 0xffc0) == 0xfe80
+                    || ip
+                        .to_ipv4_mapped()
+                        .is_some_and(|v4| is_local(&v4.to_string()))
+            }
+            Err(_) => false,
+        }
+    }
+
     pub(crate) fn http_send(req: http::Request) -> Result<http::Response> {
         let state = current();
         let handler = {
@@ -1034,6 +1112,7 @@ pub(crate) mod sys {
     }
 
     fn check_request(st: &mut State, req: &http::Request) -> Result<()> {
+        check_cancel(st)?;
         let method = req.method.to_ascii_uppercase();
         match st.mode {
             Mode::Validate => return Err(deny("no network access in validate")),
@@ -1059,6 +1138,12 @@ pub(crate) mod sys {
                 url.scheme,
                 url.host,
                 url.port.map(|p| format!(":{p}")).unwrap_or_default()
+            )));
+        }
+        if !st.allow_private_network && is_local(&url.host) {
+            return Err(deny(format!(
+                "{} is a private or local network address",
+                url.host
             )));
         }
         if req.headers.len() > 64 {
@@ -1112,8 +1197,12 @@ pub(crate) mod sys {
     pub(crate) fn kv_get(key: &str) -> Result<Option<Vec<u8>>> {
         with(|st| {
             kv_allowed(st, false)?;
-            check_key(key)?;
-            Ok(st.kv.get(key).cloned())
+            let ns = if st.mode == Mode::Tool {
+                &st.tools_kv
+            } else {
+                &st.kv
+            };
+            Ok(ns.get(key).cloned())
         })
     }
 
@@ -1151,8 +1240,12 @@ pub(crate) mod sys {
     pub(crate) fn kv_keys(prefix: &str) -> Result<Vec<String>> {
         with(|st| {
             kv_allowed(st, false)?;
-            Ok(st
-                .kv
+            let ns = if st.mode == Mode::Tool {
+                &st.tools_kv
+            } else {
+                &st.kv
+            };
+            Ok(ns
                 .keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
@@ -1264,6 +1357,7 @@ pub(crate) mod sys {
     /// The mount for `root`, checking the mode, the declaration, the settings field and the
     /// operation budget (one operation per call, as the host counts them).
     fn mount_of(st: &mut State, root: &str) -> Result<Mount> {
+        check_cancel(st)?;
         if st.mode == Mode::Tool {
             return Err(deny(
                 "file access is only available to connectors (validate and sync)",
@@ -1410,7 +1504,13 @@ pub(crate) mod sys {
                 }
                 let rd = std::fs::read_dir(&dir).map_err(|e| Error::other(e.to_string()))?;
                 let mut out = Vec::new();
-                for e in rd.flatten() {
+                for (seen, e) in rd.enumerate() {
+                    if seen >= max_entries {
+                        return Err(Error::invalid(format!(
+                            "{root}:{path} has more than {max_entries} entries"
+                        )));
+                    }
+                    let Ok(e) = e else { continue };
                     let Ok(name) = e.file_name().into_string() else {
                         continue;
                     };
@@ -1499,6 +1599,9 @@ pub(crate) mod sys {
         let segs = segments(path)?;
         let name = segs.last().copied().unwrap_or("");
         match mount {
+            Mount::Mem(m) if m.failing.contains(&segs.join("/")) => {
+                Err(Error::other(format!("{root}:{path}: permission denied")))
+            }
             Mount::Mem(m) => m
                 .nodes
                 .get(&segs.join("/"))
@@ -1515,6 +1618,7 @@ pub(crate) mod sys {
     // ---- sink ----
 
     fn sink_allowed(st: &State) -> Result<()> {
+        check_cancel(st)?;
         match st.mode {
             Mode::Sync | Mode::Free => Ok(()),
             _ => Err(deny("the sink is only available during a sync")),
@@ -1542,6 +1646,12 @@ pub(crate) mod sys {
             }
             if !doc.metadata.is_object() {
                 return Err(Error::invalid("document metadata must be a JSON object"));
+            }
+            if doc
+                .modified_at
+                .is_some_and(|ms| !(MIN_MODIFIED_MS..=MAX_MODIFIED_MS).contains(&ms))
+            {
+                return Err(Error::invalid("modified-at is out of range"));
             }
             st.upserts_this_pass += 1;
             st.seeded.remove(&doc.key);
@@ -1581,12 +1691,7 @@ pub(crate) mod sys {
     }
 
     pub(crate) fn sink_cancelled() -> bool {
-        with(|st| {
-            st.cancelled
-                || st
-                    .cancel_after_upserts
-                    .is_some_and(|n| st.upserts_this_pass >= n)
-        })
+        with(|st| is_cancelled(st))
     }
 }
 

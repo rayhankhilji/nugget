@@ -104,15 +104,12 @@ pub fn parse(text: &str) -> Note {
 
 /// Keeps first occurrences, compared ignoring case, up to [`MAX_ITEMS`].
 #[derive(Default)]
-struct Dedup(Vec<String>);
+struct Dedup(Vec<String>, std::collections::BTreeSet<String>);
 
 impl Dedup {
     fn push(&mut self, s: &str) {
         let s = s.trim();
-        if s.is_empty()
-            || self.0.len() >= MAX_ITEMS
-            || self.0.iter().any(|x| x.to_lowercase() == s.to_lowercase())
-        {
+        if s.is_empty() || self.0.len() >= MAX_ITEMS || !self.1.insert(s.to_lowercase()) {
             return;
         }
         self.0.push(s.to_string());
@@ -189,6 +186,7 @@ fn split_inline_list(s: &str) -> Vec<String> {
 fn parse_yaml(src: &str) -> Vec<(String, Yaml)> {
     let lines: Vec<&str> = src.lines().collect();
     let mut out: Vec<(String, Yaml)> = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     let mut i = 0;
     while i < lines.len() {
         let line = lines[i];
@@ -204,7 +202,7 @@ fn parse_yaml(src: &str) -> Vec<(String, Yaml)> {
         };
         let key = unquote(key);
         let value = value.trim();
-        if key.is_empty() || out.iter().any(|(k, _)| *k == key) {
+        if key.is_empty() || !seen.insert(key.clone()) {
             continue;
         }
         // Indented lines that follow belong to this key.
@@ -271,8 +269,30 @@ fn scan_body(body: &str, links: &mut Dedup, embeds: &mut Dedup, tags: &mut Dedup
     }
 }
 
+/// `line.find(pat)` from `from` on, remembering the answer: a later search from a position at or
+/// before the remembered match gives the same match, and a failed search fails for every later
+/// position. Keeps scanning linear on lines full of unclosed `[[`, `](` or backticks.
+fn find_cached(
+    cache: &mut BTreeMap<String, Option<usize>>,
+    line: &str,
+    from: usize,
+    pat: &str,
+) -> Option<usize> {
+    if let Some(&hit) = cache.get(pat) {
+        match hit {
+            None => return None,
+            Some(p) if p >= from => return Some(p),
+            Some(_) => {}
+        }
+    }
+    let hit = line[from..].find(pat).map(|p| p + from);
+    cache.insert(pat.to_string(), hit);
+    hit
+}
+
 fn scan_line(line: &str, links: &mut Dedup, embeds: &mut Dedup, tags: &mut Dedup) {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let mut cache = BTreeMap::new();
     let mut i = 0;
     let mut prev: Option<char> = None;
     while i < chars.len() {
@@ -282,9 +302,9 @@ fn scan_line(line: &str, links: &mut Dedup, embeds: &mut Dedup, tags: &mut Dedup
         if c == '`' {
             let run = rest.chars().take_while(|&c| c == '`').count();
             let ticks = &rest[..run];
-            match rest[run..].find(ticks) {
-                Some(end) => {
-                    let skip_to = pos + run + end + run;
+            match find_cached(&mut cache, line, pos + run, ticks) {
+                Some(close) => {
+                    let skip_to = close + run;
                     while i < chars.len() && chars[i].0 < skip_to {
                         i += 1;
                     }
@@ -299,8 +319,9 @@ fn scan_line(line: &str, links: &mut Dedup, embeds: &mut Dedup, tags: &mut Dedup
             }
         }
         if rest.starts_with("[[")
-            && let Some(end) = rest[2..].find("]]")
+            && let Some(close) = find_cached(&mut cache, line, pos + 2, "]]")
         {
+            let end = close - pos - 2;
             let inner = &rest[2..2 + end];
             let target = inner.split('|').next().unwrap_or("");
             let target = target.split(['#', '^']).next().unwrap_or("").trim();
@@ -320,9 +341,16 @@ fn scan_line(line: &str, links: &mut Dedup, embeds: &mut Dedup, tags: &mut Dedup
         }
         if c == ']'
             && rest.starts_with("](")
-            && let Some(end) = rest[2..].find(')')
+            && let Some(close) = find_cached(&mut cache, line, pos + 2, ")")
         {
-            let href = rest[2..2 + end].trim();
+            let end = close - pos - 2;
+            // Note paths are short; a longer target is not a note link (and skipping it keeps
+            // lines of many `](` before one `)` linear).
+            let href = if end <= 1024 {
+                rest[2..2 + end].trim()
+            } else {
+                ""
+            };
             let href = href.split_whitespace().next().unwrap_or("");
             let href = href.trim_start_matches('<').trim_end_matches('>');
             let path = href.split('#').next().unwrap_or("");

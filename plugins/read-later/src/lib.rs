@@ -45,11 +45,15 @@ impl Settings {
     pub fn parse(v: &Value) -> Result<Self> {
         let export = v[ROOT]
             .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| {
                 Error::invalid("settings.export (the export file or folder) is required")
             })?;
+        if export.trim() != export {
+            return Err(Error::invalid(
+                "settings.export has spaces around the path; remove them",
+            ));
+        }
         let b = export.as_bytes();
         let absolute = export.starts_with('/')
             || export.starts_with("\\\\")
@@ -171,20 +175,36 @@ fn is_export_name(name: &str) -> bool {
     l.ends_with(".html") || l.ends_with(".htm") || l.ends_with(".csv")
 }
 
-/// The export files under the root, in path order.
-pub fn find_exports() -> Result<Vec<ExportFile>> {
+/// The export files under the root, in path order, and whether that is all of them (no
+/// subfolder failed to list, none was too deep, the file cap was not reached). Only a complete
+/// list may lead to deletes.
+pub fn find_exports() -> Result<(Vec<ExportFile>, bool)> {
     let root = fs::stat(ROOT, "")?;
     if !root.is_dir {
-        return Ok(vec![ExportFile {
+        let file = ExportFile {
             path: String::new(),
             size: root.size,
             modified_at: root.modified_at,
-        }]);
+        };
+        return Ok((vec![file], true));
     }
     let mut out = Vec::new();
+    let mut complete = true;
     let mut stack = vec![(String::new(), 0usize)];
     while let Some((dir, depth)) = stack.pop() {
-        for e in fs::read_dir(ROOT, &dir)? {
+        let entries = match fs::read_dir(ROOT, &dir) {
+            Ok(e) => e,
+            Err(e) if dir.is_empty() => return Err(e),
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
+            Err(e) => {
+                log::warn(&format!(
+                    "cannot list `{dir}`: {e}; nothing is deleted this pass"
+                ));
+                complete = false;
+                continue;
+            }
+        };
+        for e in entries {
             if e.name.starts_with('.') {
                 continue;
             }
@@ -192,8 +212,17 @@ pub fn find_exports() -> Result<Vec<ExportFile>> {
             if e.is_dir {
                 if depth + 1 < MAX_DEPTH {
                     stack.push((path, depth + 1));
+                } else {
+                    complete = false;
                 }
-            } else if is_export_name(&e.name) && out.len() < MAX_FILES {
+            } else if is_export_name(&e.name) {
+                if out.len() >= MAX_FILES {
+                    log::warn(&format!(
+                        "more than {MAX_FILES} export files; the rest are skipped and nothing is deleted"
+                    ));
+                    complete = false;
+                    continue;
+                }
                 out.push(ExportFile {
                     path,
                     size: e.size,
@@ -203,7 +232,19 @@ pub fn find_exports() -> Result<Vec<ExportFile>> {
         }
     }
     out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(out)
+    Ok((out, complete))
+}
+
+/// `url` without credentials (`https://user:pw@host/x` becomes `https://host/x`).
+pub fn strip_userinfo(url: &str) -> String {
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return url.to_string();
+    };
+    let auth_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    match rest[..auth_end].rfind('@') {
+        Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+        None => url.to_string(),
+    }
 }
 
 /// A fingerprint of the export files (paths, sizes, times).
@@ -266,13 +307,15 @@ pub fn collect(
             articles.len(),
             source.name()
         ));
-        for a in articles {
+        for mut a in articles {
             if settings.skip_archived && is_archived(a.folder.as_deref()) {
                 continue;
             }
             let Some(norm) = normalize_url(&a.url) else {
                 continue;
             };
+            // Credentials in a saved link never reach the index.
+            a.url = strip_userinfo(a.url.trim());
             match all.get_mut(&norm) {
                 None => {
                     all.insert(
@@ -383,7 +426,7 @@ impl Connector for ReadLater {
     fn validate(settings: &Value) -> Result<()> {
         let _ = Settings::parse(settings)?;
         match find_exports() {
-            Ok(files) if files.is_empty() => Err(Error::invalid(
+            Ok((files, _)) if files.is_empty() => Err(Error::invalid(
                 "no export file (.html or .csv) in that folder",
             )),
             Ok(_) => Ok(()),
@@ -396,7 +439,7 @@ impl Connector for ReadLater {
 
     fn sync(settings: &Value, cursor: Option<Value>) -> Result<Value> {
         let settings = Settings::parse(settings)?;
-        let files = find_exports()?;
+        let (files, listed_all) = find_exports()?;
         let print = format!("{}:{}", fingerprint(&files), settings.skip_archived);
         if let Some(c) = &cursor
             && c["fingerprint"].as_str() == Some(print.as_str())
@@ -404,7 +447,8 @@ impl Connector for ReadLater {
             log::debug("export unchanged");
             return Ok(c.clone());
         }
-        let (articles, complete) = collect(&files, &settings)?;
+        let (articles, read_all) = collect(&files, &settings)?;
+        let complete = listed_all && read_all;
         let known: BTreeMap<String, Option<String>> = sink::known_items()?.into_iter().collect();
         let mut keys = BTreeSet::new();
         let mut sent = 0usize;

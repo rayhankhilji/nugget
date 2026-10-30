@@ -69,9 +69,22 @@ pub fn parse_time(s: &str) -> Option<i64> {
             return None;
         }
         // Seconds until the year 33658; anything larger is milliseconds.
-        return Some(if n < 1_000_000_000_000 { n * 1000 } else { n });
+        let ms = if n < 1_000_000_000_000 {
+            n.checked_mul(1000)?
+        } else {
+            n
+        };
+        return in_range(ms);
     }
-    parse_iso(s)
+    parse_iso(s).and_then(in_range)
+}
+
+/// The range of times Nugget stores (years -9999 to 9999), in milliseconds.
+pub const MIN_MS: i64 = -377_705_116_800_000;
+pub const MAX_MS: i64 = 253_402_300_799_999;
+
+fn in_range(ms: i64) -> Option<i64> {
+    (MIN_MS..=MAX_MS).contains(&ms).then_some(ms)
 }
 
 fn parse_iso(s: &str) -> Option<i64> {
@@ -178,7 +191,13 @@ pub fn decode_entities(s: &str) -> String {
     while let Some(i) = rest.find('&') {
         out.push_str(&rest[..i]);
         let after = &rest[i + 1..];
-        let end = after.find(';').filter(|&j| j > 0 && j <= 10);
+        // Only look a few bytes ahead: a `&` without a nearby `;` is plain text (and the scan
+        // stays linear on text full of bare ampersands).
+        let end = after
+            .bytes()
+            .take(11)
+            .position(|b| b == b';')
+            .filter(|&j| j > 0);
         let decoded = end.and_then(|j| {
             let name = &after[..j];
             let c = match name {
@@ -231,6 +250,8 @@ fn tokenize(html: &str) -> Vec<Token<'_>> {
     let mut out = Vec::new();
     let mut i = 0;
     let b = html.as_bytes();
+    // ASCII lowercasing keeps byte offsets, so one copy serves every `</script>` search.
+    let lower = html.to_ascii_lowercase();
     while i < b.len() {
         let Some(lt) = html[i..].find('<').map(|p| p + i) else {
             out.push(Token::Text(&html[i..]));
@@ -264,10 +285,7 @@ fn tokenize(html: &str) -> Vec<Token<'_>> {
         i = close;
         if !end && (name == "script" || name == "style") {
             let needle = format!("</{name}");
-            i = html[i..]
-                .to_ascii_lowercase()
-                .find(&needle)
-                .map_or(b.len(), |p| i + p);
+            i = lower[i..].find(&needle).map_or(b.len(), |p| i + p);
             continue;
         }
         out.push(Token::Tag(Tag { name, end, attrs }));
@@ -338,7 +356,8 @@ fn clean_text(s: &str) -> String {
 /// description.
 fn parse_html(html: &str) -> (Source, Vec<Article>) {
     let tokens = tokenize(html);
-    let lower_head = html[..html.len().min(512)].to_ascii_lowercase();
+    let lower_head =
+        String::from_utf8_lossy(&html.as_bytes()[..html.len().min(512)]).to_ascii_lowercase();
     let mut source = if lower_head.contains("netscape-bookmark") {
         Source::Bookmarks
     } else {

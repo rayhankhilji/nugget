@@ -12,10 +12,11 @@
 //! fields), inline `#tags`, `[[wikilinks]]`, `![[embeds]]` and relative links to notes go into
 //! the metadata; the content is the note without its front matter.
 //!
-//! When the walk saw the whole vault (no folder failed to list, not cancelled), notes the store
-//! holds that are no longer in it are deleted. This happens on every such pass, the reconciling
-//! full pass (no cursor) included. A folder that cannot be listed makes the pass skip deletes,
-//! so a transient error never wipes notes.
+//! Notes the store holds that are no longer in the vault are deleted, on every pass (the
+//! reconciling full pass included), except under folders whose contents this pass could not see:
+//! one that failed to list or is nested too deeply keeps its notes, and reaching the note cap
+//! suspends deletes for the whole vault. A transient error never wipes notes. A folder that lists
+//! exactly like one of its ancestors (a symlink loop) is skipped.
 
 pub mod note;
 
@@ -31,6 +32,9 @@ pub const ROOT: &str = "vault";
 pub const MAX_DEPTH: usize = 64;
 /// Most notes imported from one vault.
 pub const MAX_NOTES: usize = 100_000;
+/// The range of times Nugget stores (years -9999 to 9999), in milliseconds.
+const MIN_MS: i64 = -377_705_116_800_000;
+const MAX_MS: i64 = 253_402_300_799_999;
 
 pub struct Vault;
 
@@ -46,9 +50,13 @@ impl Settings {
     pub fn parse(v: &Value) -> Result<Self> {
         let vault = v[ROOT]
             .as_str()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| Error::invalid("settings.vault (the vault folder) is required"))?;
+        if vault.trim() != vault {
+            return Err(Error::invalid(
+                "settings.vault has spaces around the path; remove them",
+            ));
+        }
         if !is_absolute(vault) {
             return Err(Error::invalid(
                 "settings.vault must be an absolute folder path",
@@ -134,33 +142,78 @@ impl Found {
 #[derive(Debug, Default)]
 pub struct Walk {
     pub notes: Vec<Found>,
-    /// Whether every folder was listed (deletes are only safe then).
-    pub complete: bool,
+    /// Folders whose contents are not fully known this pass (could not be listed, nested too
+    /// deeply); `""` means the whole vault (the note cap was reached). Notes under them are
+    /// never deleted.
+    pub incomplete: Vec<String>,
+}
+
+impl Walk {
+    /// Whether a note's absence from this walk proves it is gone.
+    pub fn covers(&self, path: &str) -> bool {
+        !self.incomplete.iter().any(|d| {
+            d.is_empty()
+                || (path.len() > d.len()
+                    && path.starts_with(d.as_str())
+                    && path.as_bytes()[d.len()] == b'/')
+        })
+    }
+}
+
+/// Whether `name` ends in `.md`, ignoring ASCII case (byte-wise, so any name is safe).
+fn is_note(name: &str) -> bool {
+    let b = name.as_bytes();
+    b.len() > 3 && b[b.len() - 3..].eq_ignore_ascii_case(b".md")
+}
+
+/// A fingerprint of one folder listing. A folder reached through a symlink to one of its own
+/// ancestors lists exactly what that ancestor lists, so a match with an ancestor marks a cycle.
+fn listing_print(entries: &[fs::DirEntry]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for e in entries {
+        let line = format!(
+            "{}\u{1}{}\u{1}{}\u{1}{:?}\u{2}",
+            e.name, e.is_dir, e.size, e.modified_at
+        );
+        for b in line.bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    h
 }
 
 /// Walk the vault for `.md` notes, in path order.
 pub fn walk(settings: &Settings) -> Result<Walk> {
-    let mut out = Walk {
-        notes: Vec::new(),
-        complete: true,
-    };
-    // The root itself must list, or the pass fails (a missing vault must not delete anything).
-    let mut stack: Vec<(String, usize)> = vec![(String::new(), 0)];
-    while let Some((dir, depth)) = stack.pop() {
+    let mut out = Walk::default();
+    // (folder, depth, listing fingerprints of its ancestors)
+    let mut stack: Vec<(String, usize, Vec<u64>)> = vec![(String::new(), 0, Vec::new())];
+    while let Some((dir, depth, ancestors)) = stack.pop() {
         if sink::cancelled() {
             return Err(Error::Cancelled);
         }
         let entries = match fs::read_dir(ROOT, &dir) {
             Ok(e) => e,
+            // The root itself must list, or the pass fails (a missing vault deletes nothing).
             Err(e) if dir.is_empty() => return Err(e),
+            Err(Error::Cancelled) => return Err(Error::Cancelled),
             Err(e) => {
                 log::warn(&format!(
-                    "cannot list `{dir}`: {e}; skipping deletes this pass"
+                    "cannot list `{dir}`: {e}; its notes are kept as they are"
                 ));
-                out.complete = false;
+                out.incomplete.push(dir);
                 continue;
             }
         };
+        let print = listing_print(&entries);
+        if ancestors.contains(&print) {
+            log::warn(&format!(
+                "`{dir}` lists the same as a folder above it (a symlink loop?); skipped"
+            ));
+            continue;
+        }
+        let mut lineage = ancestors.clone();
+        lineage.push(print);
         let mut subdirs = Vec::new();
         for e in entries {
             if e.name.starts_with('.') {
@@ -173,16 +226,17 @@ pub fn walk(settings: &Settings) -> Result<Walk> {
                 }
                 if depth + 1 >= MAX_DEPTH {
                     log::warn(&format!("`{path}` is nested too deeply; skipped"));
-                    out.complete = false;
+                    out.incomplete.push(path);
                     continue;
                 }
-                subdirs.push((path, depth + 1));
-            } else if e.name.len() > 3 && e.name[e.name.len() - 3..].eq_ignore_ascii_case(".md") {
+                subdirs.push((path, depth + 1, lineage.clone()));
+            } else if is_note(&e.name) {
                 if out.notes.len() >= MAX_NOTES {
                     log::warn(&format!(
                         "more than {MAX_NOTES} notes; the rest are skipped"
                     ));
-                    out.complete = false;
+                    out.incomplete.push(String::new());
+                    stack.clear();
                     break;
                 }
                 out.notes.push(Found {
@@ -247,9 +301,9 @@ impl Connector for Vault {
             }
         }
         let mut deleted = 0usize;
-        if walk.complete {
+        {
             for key in known.keys() {
-                if !seen.contains(key.as_str()) {
+                if !seen.contains(key.as_str()) && walk.covers(key) {
                     sink::delete(key)?;
                     deleted += 1;
                 }
@@ -293,7 +347,11 @@ pub fn document(settings: &Settings, found: &Found, text: &str) -> Document {
             "embeds": parsed.embeds,
             "properties": parsed.properties,
         }));
-    if let Some(ms) = found.modified_at {
+    // Times Nugget cannot store (years beyond ±9999) are left out rather than failing the note.
+    if let Some(ms) = found
+        .modified_at
+        .filter(|ms| (MIN_MS..=MAX_MS).contains(ms))
+    {
         doc = doc.with_modified_at(ms);
     }
     doc

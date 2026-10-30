@@ -351,3 +351,72 @@ fn reads_a_real_export_file() {
     h.validate::<ReadLater>(s.clone()).unwrap();
     assert_eq!(h.sync::<ReadLater>(s, None).unwrap().upserts.len(), 3);
 }
+
+#[test]
+fn multibyte_text_at_the_sniffing_boundary() {
+    // A multibyte character straddling byte 512 of an HTML export.
+    for pad in 505..515 {
+        let html = format!(
+            "<html>{}é<a href='https://x.example/'>x</a>",
+            "a".repeat(pad)
+        );
+        assert_eq!(formats::parse(&html).1.len(), 1);
+    }
+}
+
+#[test]
+fn out_of_range_and_overflowing_times_are_dropped() {
+    assert_eq!(formats::parse_time("9223372036854775"), None);
+    assert_eq!(formats::parse_time("999999999999"), None); // year 33658
+    assert_eq!(
+        formats::parse_time("253402300799999"),
+        Some(253_402_300_799_999)
+    );
+    let csv = "url,title,time_added\nhttps://a.example/,A,999999999999\n";
+    let h = host_with(MemFs::single_file(csv, 1));
+    let pass = h.sync::<ReadLater>(settings(), None).unwrap();
+    assert_eq!(pass.upserts.len(), 1);
+    assert_eq!(pass.upserts[0].modified_at, None);
+}
+
+#[test]
+fn credentials_are_stripped_and_paths_not_trimmed() {
+    let csv = "url,title\nhttps://user:secret@a.example/x,A\n";
+    let h = host_with(MemFs::single_file(csv, 1));
+    let pass = h.sync::<ReadLater>(settings(), None).unwrap();
+    let d = &pass.upserts[0];
+    assert_eq!(d.key, "https://a.example/x");
+    assert_eq!(d.url.as_deref(), Some("https://a.example/x"));
+    assert!(!d.text_content().unwrap().contains("secret"));
+    assert!(matches!(
+        h.validate::<ReadLater>(json!({ "export": format!(" {EXPORT}") })),
+        Err(Error::Invalid(_))
+    ));
+}
+
+#[test]
+fn a_truncated_or_partly_unlistable_folder_never_deletes() {
+    let fs = MemFs::new()
+        .file("a.csv", INSTAPAPER)
+        .file("sub/b.html", POCKET_HTML);
+    let h = host_with(fs);
+    let s = json!({ "export": "/home/ada/exports" });
+    h.sync::<ReadLater>(s.clone(), None).unwrap();
+    h.edit_mount(ROOT, |fs| *fs = std::mem::take(fs).fail("sub"));
+    let pass = h.sync::<ReadLater>(s, None).unwrap();
+    assert!(pass.deletes.is_empty());
+    assert!(h.logged(Level::Warn, "cannot list `sub`"));
+    assert_eq!(pass.cursor["fingerprint"], Value::Null);
+}
+
+#[test]
+fn entity_and_script_heavy_inputs_stay_fast() {
+    let start = std::time::Instant::now();
+    formats::decode_entities(&"&".repeat(200_000));
+    formats::parse(&"<script>x".repeat(50_000));
+    formats::parse(&format!(
+        "<a href='https://x/'>{}</a>",
+        "&amp".repeat(100_000)
+    ));
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+}

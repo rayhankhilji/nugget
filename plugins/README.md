@@ -21,7 +21,7 @@ cargo build --release             # -> target/wasm32-wasip2/release/nugget_*.was
 ./build.sh --check                # fmt + clippy + tests, then build and stage every package
 ```
 
-`build.sh [--out DIR] [--check]` stages each plugin (and the SDK examples) as
+`build.sh [--out DIR] [--check] [--sign]` stages each plugin (and the SDK examples) as
 `DIR/<id>/{nugget-plugin.toml,plugin.wasm}`, default `target/plugin-packages`; with
 `NUGGET_PLUGIN_SIGNING_KEY` set it signs each into `DIR/<id>.nuggetplugin`. Run `./build.sh --help`
 for the environment variables.

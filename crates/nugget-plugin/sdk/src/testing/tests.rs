@@ -175,7 +175,7 @@ fn tool_calls_are_capped_at_32_requests() {
     struct Many;
     impl Tools for Many {
         fn tools() -> Vec<Tool> {
-            vec![]
+            vec![Tool::new("x", "", json!({}))]
         }
         fn call(_: &str, _: Value) -> Result<Value> {
             for _ in 0..40 {
@@ -231,7 +231,8 @@ fn validate_has_no_network_kv_secrets_or_sink() {
 #[test]
 fn tools_are_read_only() {
     let h = host();
-    h.kv_set("k", "v");
+    h.kv_set("k", "source-only");
+    h.tools_kv_set("k", "v");
     h.set_secret("token", "s3cret");
     h.mount("folder", MemFs::new().file("a.txt", "a"));
     for op in ["post", "kv_set", "secret_set", "upsert", "ls"] {
@@ -263,7 +264,9 @@ fn kv_respects_the_declared_size_and_secrets_the_declared_names() {
     assert_eq!(kv::keys("").unwrap(), vec!["a".to_string()]);
     kv::delete("a").unwrap();
     assert_eq!(kv::get("a").unwrap(), None);
-    assert!(matches!(kv::get(""), Err(Error::Invalid(_))));
+    // Like the host: an empty key reads as absent, but cannot be written.
+    assert_eq!(kv::get("").unwrap(), None);
+    assert!(matches!(kv::set("", b"x"), Err(Error::Invalid(_))));
 
     secrets::set("token", "t").unwrap();
     assert_eq!(h.secret("token").as_deref(), Some("t"));
@@ -557,4 +560,40 @@ fn fs_budgets_and_settings() {
         Err(Error::Invalid(_))
     ));
     assert!(h.sync::<V>(json!({ "folder": "/x" }), None).is_ok());
+}
+
+#[test]
+fn parity_cancel_private_addresses_listing_and_dates() {
+    let h = host();
+    h.allow_host("http://127.0.0.1:8080");
+    h.respond("GET", "http://127.0.0.1:8080/", http::Response::ok(""));
+    {
+        let _active = h.enter(Mode::Sync, None);
+        assert!(matches!(
+            http::get("http://127.0.0.1:8080/"),
+            Err(Error::Denied(_))
+        ));
+        h.allow_private_network(true);
+        assert!(http::get("http://127.0.0.1:8080/").is_ok());
+
+        // Dates outside what the host stores are refused.
+        let far = Document::text("k", "text/plain", "").with_modified_at(MAX_MODIFIED_MS + 1);
+        assert!(matches!(sink::upsert(far), Err(Error::Invalid(_))));
+
+        // After cancellation, http, fs and the sink fail with `cancelled`.
+        h.mount("folder", MemFs::new().file("a", "x").fail("a"));
+        assert!(matches!(fs::stat("folder", "a"), Err(Error::Other(_))));
+        h.set_cancelled(true);
+        assert_eq!(
+            http::get("http://127.0.0.1:8080/").unwrap_err(),
+            Error::Cancelled
+        );
+        assert_eq!(fs::stat("folder", "").unwrap_err(), Error::Cancelled);
+        assert_eq!(sink::delete("k").unwrap_err(), Error::Cancelled);
+    }
+    // Unlisted tools are not callable.
+    assert!(matches!(
+        h.call::<Probe>("unlisted", json!({})),
+        Err(Error::NotFound(_))
+    ));
 }

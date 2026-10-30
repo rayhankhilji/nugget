@@ -47,8 +47,10 @@ The parsers never fail on malformed input; they skip what they cannot read. HTML
 - **Passes.** The cursor holds a fingerprint of the export files (paths, sizes, modification
   times). When nothing changed, a pass does nothing. Otherwise the whole export is read, articles
   whose version changed are sent, and articles no longer in the export are deleted, but only if
-  every export file could be read (an unreadable file is logged, nothing is deleted, and the
-  fingerprint is not recorded so the next pass tries again). Re-exporting from the service and
+  every export file was found and read: an unreadable file or subfolder, a folder nested too
+  deeply or more than 1000 export files means nothing is deleted and the fingerprint is not
+  recorded, so the next pass tries again. Credentials in saved links (`user:pw@`) are removed,
+  and save times outside years ±9999 are left out. Re-exporting from the service and
   replacing the file is the way to update.
 
 ## Building and testing

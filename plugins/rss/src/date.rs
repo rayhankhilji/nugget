@@ -32,11 +32,20 @@ fn to_ms(date: (i64, u32, u32), time: (u32, u32, u32, u32), offset_min: i64) -> 
     if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 24 || mi > 59 || s > 60 {
         return None;
     }
+    // Nugget stores years -9999 to 9999; anything else is a broken date, not a document error.
+    if !(1..=9999).contains(&y) {
+        return None;
+    }
     let days = days_from_civil(y, mo, d);
     let secs =
         days * 86_400 + h as i64 * 3600 + mi as i64 * 60 + s.min(59) as i64 - offset_min * 60;
-    Some(secs * 1000 + frac_ms as i64)
+    let ms = secs.checked_mul(1000)?.checked_add(frac_ms as i64)?;
+    (MIN_MS..=MAX_MS).contains(&ms).then_some(ms)
 }
+
+/// The range of times Nugget stores (years -9999 to 9999), in milliseconds.
+pub const MIN_MS: i64 = -377_705_116_800_000;
+pub const MAX_MS: i64 = 253_402_300_799_999;
 
 fn num(s: &str) -> Option<u32> {
     if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
@@ -215,6 +224,7 @@ mod tests {
         assert_eq!(parse("2006-01-02"), Some(T - 54_245_000));
         assert_eq!(parse("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse("1969-12-31T23:59:59Z"), Some(-1000));
+        assert_eq!(parse("9999-12-31T23:59:59Z"), Some(253_402_300_799_000));
     }
 
     #[test]
@@ -226,6 +236,10 @@ mod tests {
             "Mon, 99 Foo 2006",
             "2006-01-02T15:04:05+0",
             "2006/01/02",
+            "Mon, 02 Jan 99999 15:04:05 GMT",
+            "Mon, 02 Jan 4294967295 15:04:05 GMT",
+            "0000-01-01T00:00:00Z",
+            "9999-12-31T23:59:59-01:00",
         ] {
             assert_eq!(parse(s), None, "{s}");
         }

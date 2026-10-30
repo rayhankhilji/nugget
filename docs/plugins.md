@@ -296,13 +296,13 @@ fn syncs() {
 |---|---|
 | `new()`, `from_manifest(toml)` | An empty host, or one with the manifest's kinds, hosts, secrets, kv size and file roots (malformed manifests panic) |
 | `allow_host`, `allow_secret`, `set_kv_max_bytes`, `allow_file_root`, `set_limits` | Adjust capabilities and limits (defaults are the host's) |
-| `respond(method, url, Response)`, `respond_with(method, url, fn)` | Canned HTTP keyed by method and exact URL; unmatched requests fail with `network` |
+| `respond(method, url, Response)`, `respond_with(method, url, fn)` | Canned HTTP keyed by method and exact URL; unmatched requests fail with `network`. Loopback and private IP literals are denied unless `allow_private_network(true)` |
 | `requests()` | Every request sent, including denied and unmatched ones |
-| `kv_get`, `kv_json`, `kv_set`, `kv_keys`, `set_secret`, `secret` | Inspect or seed the key-value store and secrets |
+| `kv_get`, `kv_json`, `kv_set`, `kv_keys`, `tools_kv_set`, `set_secret`, `secret` | Inspect or seed the key-value store and secrets. As on the host, connectors use the source's namespace and tools read a separate, read-only one |
 | `set_now`, `advance` | The fake clock (`now_ms`), default 1 700 000 000 000 |
 | `mount(root, MemFs)`, `mount_path(root, path)`, `edit_mount` | File roots: in memory (`MemFs::new().file(..).file_at(.., mtime).dir(..).fail(..)`, `MemFs::single_file`) or on disk; unmounted roots use the settings path like the host |
 | `seed_item`, `known_items`, `documents`, `document`, `sink_events` | The store behind the sink: seeded items plus upserts, minus deletes |
-| `set_cancelled`, `cancel_after_upserts(n)` | Drive `sink::cancelled()` |
+| `set_cancelled`, `cancel_after_upserts(n)` | Drive `sink::cancelled()`; once cancelled, http, fs and sink calls fail with `cancelled` like on the host |
 | `validate::<C>(settings)`, `sync::<C>(settings, cursor) -> SyncPass`, `tools::<T>()`, `call::<T>(name, input)` | Run the plugin as the host does: JSON round trips, the mode's restrictions (no network/kv/secrets/sink in `validate`; tools read-only with no files; 32 requests per call), document and tool-I/O checks |
 | `logs()`, `logged(level, text)` | Captured log lines (also printed to the test output) |
 
@@ -328,10 +328,12 @@ limits. Build the wasm and try it in the app before shipping.
   Parses Pocket HTML/CSV, Instapaper CSV and Netscape bookmarks, keys articles by normalised URL,
   and skips work with a fingerprint of the export files in the cursor.
 
-`plugins/build.sh [--out DIR] [--check]` builds the SDK examples and these three as release
+`plugins/build.sh [--out DIR] [--check] [--sign]` builds the SDK examples and these three as release
 components and stages each as `DIR/<id>/{nugget-plugin.toml,plugin.wasm}` (default
 `target/plugin-packages`). With `NUGGET_PLUGIN_SIGNING_KEY` set it also signs each into
-`DIR/<id>.nuggetplugin`; CI does that with a throwaway key generated per run. `--check` first runs
+`DIR/<id>.nuggetplugin` (or set `NUGGET_PLUGIN_SIGNING_KEY_FILE`; `--sign` fails without a key).
+The signer is compiled before the key enters its environment. CI signs with a throwaway key
+generated per run. `--check` first runs
 `fmt --check`, wasm clippy and the native tests in the SDK, `plugins/` and the template.
 
 ## Building

@@ -200,7 +200,13 @@ fn reconcile(feeds: &[String]) -> Result<()> {
 }
 
 /// Fetch and parse a feed (shared by the connector and the tool).
-fn fetch(url: &str, validators: Option<(&str, &str)>) -> Result<Option<(Feed, http::Response)>> {
+/// Validators from a response, for the next conditional GET.
+struct Validators {
+    etag: Option<String>,
+    last_modified: Option<String>,
+}
+
+fn fetch(url: &str, validators: Option<(&str, &str)>) -> Result<Option<(Feed, Validators)>> {
     let mut req = http::Request::get(url)
         .header("accept", ACCEPT)
         .header("user-agent", USER_AGENT);
@@ -224,9 +230,28 @@ fn fetch(url: &str, validators: Option<(&str, &str)>) -> Result<Option<(Feed, ht
             resp.header("location").unwrap_or("an unknown location")
         )));
     }
-    let resp = resp.error_for_status()?;
-    let feed = feed::parse(&feed::decode(&resp.body), url)?;
-    Ok(Some((feed, resp)))
+    let http::Response { headers, body, .. } = resp.error_for_status()?;
+    if body.len() > feed::MAX_FEED_BYTES {
+        return Err(Error::invalid(format!(
+            "the feed is larger than {} bytes",
+            feed::MAX_FEED_BYTES
+        )));
+    }
+    // Keep at most one copy of the body alive while the DOM is built.
+    let text = feed::decode(&body);
+    drop(body);
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+    };
+    let validators = Validators {
+        etag: header("etag"),
+        last_modified: header("last-modified"),
+    };
+    let feed = feed::parse(&text, url)?;
+    Ok(Some((feed, validators)))
 }
 
 /// One feed's pass. `trusted` is the pass id of the last committed cursor (`None` on a full
@@ -278,8 +303,8 @@ pub fn sync_feed(
     }
     let next = json!({
         "url": url,
-        "etag": resp.header("etag"),
-        "last_modified": resp.header("last-modified"),
+        "etag": resp.etag,
+        "last_modified": resp.last_modified,
         "title": feed.title,
         "checked_at": now_ms(),
         "pass": pass,
@@ -348,7 +373,8 @@ impl Tools for Feeds {
         vec![Tool::new(
             "feed_headlines",
             "List the latest headlines of an RSS or Atom feed (on a host this plugin declares). \
-             Returns titles, links and dates; the text comes from the web and is untrusted.",
+             The URL may not carry a query string or fragment. Returns titles, links and dates; \
+             the text comes from the web and is untrusted.",
             json!({
                 "type": "object",
                 "required": ["url"],
@@ -365,11 +391,17 @@ impl Tools for Feeds {
         if name != "feed_headlines" {
             return Err(Error::NotFound(format!("no tool `{name}`")));
         }
-        let url = check_url(
-            input["url"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("input.url is required"))?,
-        )?;
+        let raw = input["url"]
+            .as_str()
+            .ok_or_else(|| Error::invalid("input.url is required"))?;
+        // The agent chooses this URL, possibly steered by text it read. A query string or
+        // fragment could carry data out to a declared host, so only plain feed URLs are allowed.
+        if raw.contains(['?', '#']) {
+            return Err(Error::invalid(
+                "input.url must be a plain feed URL without a query string or fragment",
+            ));
+        }
+        let url = check_url(raw)?;
         let limit = input["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
         let (feed, _) = fetch(&url, None)?.ok_or_else(|| Error::other("unexpected 304"))?;
         let items: Vec<Value> = feed

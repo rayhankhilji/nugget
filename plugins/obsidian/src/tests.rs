@@ -61,6 +61,7 @@ fn vault() -> MemFs {
         .file_at(".hidden.md", "hidden", 5_000)
         .file_at("diagram.png", vec![0x89, b'P', b'N', b'G'], 5_000)
         .file_at("Notes.txt", "not markdown", 5_000)
+        .file_at("Привет.md", "Кириллица #тег", 6_000)
 }
 
 fn host() -> TestHost {
@@ -221,7 +222,8 @@ fn walk_skips_dot_folders_excludes_and_other_files() {
             "Archive/public.md",
             "Daily/2026-01-05.md",
             "Inbox.MD",
-            "Projects/Compiler.md"
+            "Projects/Compiler.md",
+            "Привет.md"
         ]
     );
     drop(h);
@@ -231,8 +233,11 @@ fn walk_skips_dot_folders_excludes_and_other_files() {
 fn first_pass_imports_every_note() {
     let h = host();
     let pass = h.sync::<Vault>(settings(), None).unwrap();
-    assert_eq!(pass.upserts.len(), 4);
-    assert_eq!(pass.cursor["notes"], 4);
+    assert_eq!(pass.upserts.len(), 5);
+    assert_eq!(pass.cursor["notes"], 5);
+    let d = pass.upserted("Привет.md").unwrap();
+    assert_eq!(d.title.as_deref(), Some("Привет"));
+    assert_eq!(d.metadata["tags"], json!(["тег"]));
 
     let d = pass.upserted("Daily/2026-01-05.md").unwrap();
     assert_eq!(d.title.as_deref(), Some("Daily: 2026-01-05"));
@@ -290,7 +295,7 @@ fn later_passes_send_only_changes_and_delete_removed_notes() {
 }
 
 #[test]
-fn unlistable_folders_and_unreadable_notes_never_delete() {
+fn unlistable_folders_keep_only_their_own_notes() {
     let h = host();
     h.sync::<Vault>(settings(), None).unwrap();
     h.edit_mount(ROOT, |fs| {
@@ -301,7 +306,8 @@ fn unlistable_folders_and_unreadable_notes_never_delete() {
         fs.remove("Archive");
     });
     let pass = h.sync::<Vault>(settings(), None).unwrap();
-    assert!(pass.deletes.is_empty(), "{:?}", pass.deletes);
+    // Only the folder that vanished loses its notes; the unlistable one keeps its own.
+    assert_eq!(pass.deletes, ["Archive/public.md"]);
     assert!(pass.upserts.is_empty());
     assert!(h.logged(Level::Warn, "cannot list `Daily`"));
     assert!(h.logged(Level::Warn, "cannot read `Projects/Compiler.md`"));
@@ -355,4 +361,61 @@ fn reads_a_real_folder_and_ignores_symlinks_out_of_it() {
         pass.upserted("sub/b.md").unwrap().metadata["tags"],
         json!(["tag"])
     );
+}
+
+#[test]
+fn a_failed_folder_only_protects_its_own_notes() {
+    let h = host();
+    h.sync::<Vault>(settings(), None).unwrap();
+    h.edit_mount(ROOT, |fs| {
+        *fs = std::mem::take(fs).fail("Daily");
+        fs.remove("Projects");
+    });
+    let pass = h.sync::<Vault>(settings(), None).unwrap();
+    // `Daily` could not be listed: its note stays. `Projects` is gone: its note is deleted.
+    assert_eq!(pass.deletes, ["Projects/Compiler.md"]);
+    assert!(h.document("Daily/2026-01-05.md").is_some());
+}
+
+#[test]
+fn out_of_range_times_are_left_out() {
+    let h = TestHost::from_manifest(MANIFEST);
+    h.mount(
+        ROOT,
+        MemFs::new()
+            .file_at("future.md", "x", i64::MAX)
+            .file_at("past.md", "y", i64::MIN),
+    );
+    let pass = h.sync::<Vault>(settings(), None).unwrap();
+    assert_eq!(pass.upserts.len(), 2);
+    assert!(pass.upserts.iter().all(|d| d.modified_at.is_none()));
+}
+
+#[test]
+fn pathological_lines_scan_in_linear_time() {
+    let start = std::time::Instant::now();
+    for unit in ["[[", "](", "`", "``x", "![[a", "](a)"] {
+        let line = unit.repeat(100_000 / unit.len());
+        note::parse(&line);
+        note::parse(&format!("{line})]]`"));
+    }
+    let many_keys: String = (0..20_000).map(|i| format!("k{i}: v\n")).collect();
+    note::parse(&format!("---\n{many_keys}---\nbody"));
+    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_loops_are_not_followed() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("vault");
+    std::fs::create_dir_all(root.join("a")).unwrap();
+    std::fs::write(root.join("a").join("n.md"), "n").unwrap();
+    std::os::unix::fs::symlink(root.join("a"), root.join("a").join("loop")).unwrap();
+    std::os::unix::fs::symlink(&root, root.join("a").join("top")).unwrap();
+    let h = TestHost::from_manifest(MANIFEST);
+    let pass = h
+        .sync::<Vault>(json!({ "vault": root.to_str().unwrap() }), None)
+        .unwrap();
+    assert_eq!(pass.upserted_keys(), ["a/n.md"]);
 }

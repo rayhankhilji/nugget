@@ -181,17 +181,35 @@ fn refuses_non_feeds_and_entity_bombs() {
 #[test]
 fn resolves_relative_links() {
     let b = "https://example.com/a/b/feed.xml?x=1";
-    assert_eq!(feed::resolve(b, "c.html"), "https://example.com/a/b/c.html");
-    assert_eq!(feed::resolve(b, "/c"), "https://example.com/c");
+    let r = |base: &str, href: &str| feed::resolve(base, href);
     assert_eq!(
-        feed::resolve(b, "//cdn.example.com/c"),
-        "https://cdn.example.com/c"
+        r(b, "c.html").as_deref(),
+        Some("https://example.com/a/b/c.html")
     );
-    assert_eq!(feed::resolve(b, "https://other/x"), "https://other/x");
+    assert_eq!(r(b, "/c").as_deref(), Some("https://example.com/c"));
     assert_eq!(
-        feed::resolve("https://example.com", "x"),
-        "https://example.com/x"
+        r(b, "//cdn.example.com/c").as_deref(),
+        Some("https://cdn.example.com/c")
     );
+    assert_eq!(r(b, "https://other/x").as_deref(), Some("https://other/x"));
+    assert_eq!(r(b, "HTTP://other/x").as_deref(), Some("HTTP://other/x"));
+    assert_eq!(
+        r("https://example.com", "x").as_deref(),
+        Some("https://example.com/x")
+    );
+    // A relative link that merely contains `://` is still relative.
+    assert_eq!(
+        r(b, "/go?to=https://x.example/").as_deref(),
+        Some("https://example.com/go?to=https://x.example/")
+    );
+    for bad in [
+        "javascript://%0Aalert(1)",
+        "javascript:alert(1)",
+        "mailto:a@b",
+        "data:text/html,x",
+    ] {
+        assert_eq!(r(b, bad), None, "{bad}");
+    }
 }
 
 // ---- settings ----
@@ -527,4 +545,86 @@ fn manifest_declares_no_wildcard_tld_and_stays_under_limits() {
     assert!(hosts.len() >= 10 && hosts.len() <= 64, "{}", hosts.len());
     // The manifest parses in the test host (which applies the host's rules).
     host();
+}
+
+#[test]
+fn a_single_large_entity_is_never_expanded() {
+    let big = "A".repeat(100_000);
+    let refs = "&big;".repeat(4000);
+    let xml = format!(
+        "<?xml version=\"1.0\"?><!DOCTYPE rss [<!ENTITY big \"{big}\">]><rss><channel><title>t</title><item><guid>1</guid><description>{refs}</description></item></channel></rss>"
+    );
+    let f = feed::parse(&xml, RSS_URL).unwrap();
+    // Kept as literal text, at most the size of the input.
+    assert!(
+        f.entries[0].content.len() < 30_000,
+        "{}",
+        f.entries[0].content.len()
+    );
+    assert!(f.entries[0].content.starts_with("&big;"));
+}
+
+#[test]
+fn oversized_feeds_fail_alone() {
+    let h = host();
+    h.respond(
+        "GET",
+        ATOM_URL,
+        http::Response::ok(vec![b' '; feed::MAX_FEED_BYTES + 1]),
+    );
+    h.respond("GET", RSS_URL, http::Response::ok(RSS2));
+    let pass = h
+        .sync::<Feeds>(settings(&[ATOM_URL, RSS_URL]), None)
+        .unwrap();
+    assert_eq!(pass.upserts.len(), 4);
+    assert!(h.logged(Level::Warn, "larger than"));
+}
+
+#[test]
+fn repair_keeps_cdata_and_comments() {
+    let xml = "<a><!-- a & b --><![CDATA[x &nbsp; & y]]>&nbsp;&</a>";
+    assert_eq!(
+        feed::repair_entities(xml),
+        "<a><!-- a & b --><![CDATA[x &nbsp; & y]]>&#160;&amp;</a>"
+    );
+}
+
+#[test]
+fn channel_link_prefers_the_rss_link_and_links_must_be_http() {
+    let xml = r#"<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel>
+        <atom:link rel="self" href="https://blog.example.substack.com/feed"/>
+        <link>https://blog.example.substack.com/</link>
+        <item><guid isPermaLink="false">x</guid><link>javascript:alert(1)</link></item>
+    </channel></rss>"#;
+    let f = feed::parse(xml, RSS_URL).unwrap();
+    assert_eq!(
+        f.link.as_deref(),
+        Some("https://blog.example.substack.com/")
+    );
+    assert_eq!(f.entries[0].link, None);
+}
+
+#[test]
+fn out_of_range_dates_are_dropped_not_sent() {
+    let xml = "<rss><channel><item><guid>y</guid><pubDate>Mon, 02 Jan 99999 15:04:05 GMT</pubDate></item></channel></rss>";
+    let h = host();
+    h.respond("GET", RSS_URL, http::Response::ok(xml));
+    let pass = h.sync::<Feeds>(settings(&[RSS_URL]), None).unwrap();
+    assert_eq!(pass.upserts.len(), 1);
+    assert_eq!(pass.upserts[0].modified_at, None);
+}
+
+#[test]
+fn headlines_tool_refuses_query_strings() {
+    let h = host();
+    for url in [
+        "https://hnrss.org/newest?q=secret",
+        "https://hnrss.org/newest#x",
+    ] {
+        assert!(matches!(
+            h.call::<Feeds>("feed_headlines", json!({ "url": url })),
+            Err(Error::Invalid(_))
+        ));
+    }
+    assert!(h.requests().is_empty());
 }

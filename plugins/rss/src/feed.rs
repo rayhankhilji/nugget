@@ -9,8 +9,12 @@ use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::date;
 
-/// Most XML nodes accepted in one feed.
-const MAX_NODES: u32 = 1_000_000;
+/// Most XML nodes accepted in one feed (a 4 MiB feed of short items stays well under it).
+const MAX_NODES: u32 = 200_000;
+/// Largest feed body parsed, in bytes. Larger bodies are refused before parsing: the DOM costs a
+/// multiple of the input, and the plugin's memory is capped.
+pub const MAX_FEED_BYTES: usize = 4 * 1024 * 1024;
+const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
 
 /// What an entry's content is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,12 +113,23 @@ fn cp1252(b: u8) -> char {
 }
 
 /// Parse a feed. `base` (the feed URL) resolves relative links.
+///
+/// DTDs are never processed: a `<!DOCTYPE …>` (with any internal subset) is removed first, so no
+/// entity can be declared or expanded, and references to undeclared entities are repaired into
+/// text on the second attempt.
 pub fn parse(xml: &str, base: &str) -> Result<Feed> {
+    if xml.len() > MAX_FEED_BYTES {
+        return Err(Error::invalid(format!(
+            "the feed is larger than {MAX_FEED_BYTES} bytes"
+        )));
+    }
     let opts = || ParsingOptions {
-        allow_dtd: true,
+        allow_dtd: false,
         nodes_limit: MAX_NODES,
         entity_resolver: None,
     };
+    let stripped = strip_doctype(xml);
+    let xml = stripped.as_deref().unwrap_or(xml);
     match Document::parse_with_options(xml, opts()) {
         Ok(doc) => from_doc(&doc, base),
         Err(first) => {
@@ -127,6 +142,31 @@ pub fn parse(xml: &str, base: &str) -> Result<Feed> {
     }
 }
 
+/// The document without its `<!DOCTYPE …>` declaration (internal subset included), or `None`
+/// when it has none.
+pub fn strip_doctype(xml: &str) -> Option<String> {
+    let start = xml.find("<!DOCTYPE").or_else(|| xml.find("<!doctype"))?;
+    let b = xml.as_bytes();
+    let (mut i, mut depth, mut quote) = (start + 9, 0usize, None::<u8>);
+    while i < b.len() {
+        let c = b[i];
+        match (quote, c) {
+            (Some(q), _) if c == q => quote = None,
+            (Some(_), _) => {}
+            (None, b'"' | b'\'') => quote = Some(c),
+            (None, b'[') => depth += 1,
+            (None, b']') => depth = depth.saturating_sub(1),
+            (None, b'>') if depth == 0 => {
+                return Some(format!("{}{}", &xml[..start], &xml[i + 1..]));
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    // Unterminated: drop everything from the declaration on (the parse then fails cleanly).
+    Some(xml[..start].to_string())
+}
+
 fn from_doc(doc: &Document<'_>, base: &str) -> Result<Feed> {
     let root = doc.root_element();
     match root.tag_name().name() {
@@ -137,7 +177,7 @@ fn from_doc(doc: &Document<'_>, base: &str) -> Result<Feed> {
             Ok(Feed {
                 format: "rss",
                 title: text(channel, "title"),
-                link: text(channel, "link").map(|l| resolve(base, &l)),
+                link: rss_link(channel).and_then(|l| resolve(base, &l)),
                 entries: items.map(|i| rss_item(i, base)).collect(),
             })
         }
@@ -147,9 +187,7 @@ fn from_doc(doc: &Document<'_>, base: &str) -> Result<Feed> {
             Ok(Feed {
                 format: "rdf",
                 title: channel.and_then(|c| text(c, "title")),
-                link: channel
-                    .and_then(|c| text(c, "link"))
-                    .map(|l| resolve(base, &l)),
+                link: channel.and_then(rss_link).and_then(|l| resolve(base, &l)),
                 entries: items.map(|i| rss_item(i, base)).collect(),
             })
         }
@@ -176,9 +214,9 @@ fn rss_item(item: Node<'_, '_>, base: &str) -> Entry {
     let guid = child(item, "guid");
     let guid_text = guid.and_then(|_| text(item, "guid"));
     let guid_is_link = guid.is_some_and(|g| g.attribute("isPermaLink") != Some("false"));
-    let link = text(item, "link")
+    let link = rss_link(item)
         .or_else(|| guid_text.clone().filter(|_| guid_is_link))
-        .map(|l| resolve(base, &l));
+        .and_then(|l| resolve(base, &l));
     let about = item
         .attributes()
         .find(|a| a.name() == "about")
@@ -309,14 +347,22 @@ fn atom_link(node: Node<'_, '_>, base: &str) -> Option<String> {
         .find(|n| n.attribute("rel").is_none_or(|r| r == "alternate"))
         .or_else(|| links.first())
         .and_then(|n| n.attribute("href"))
-        .map(|h| resolve(base, h.trim()))
+        .and_then(|h| resolve(base, h.trim()))
+}
+
+/// The plain RSS `<link>` text, ignoring `<atom:link rel="self" href=…/>` and other
+/// namespaced links that feeds put next to it.
+fn rss_link(node: Node<'_, '_>) -> Option<String> {
+    node.children()
+        .filter(|n| n.tag_name().name() == "link" && n.tag_name().namespace() != Some(ATOM_NS))
+        .find_map(node_text)
 }
 
 fn xml_base(node: Node<'_, '_>, base: &str) -> String {
     match node.attributes().find(|a| {
         a.name() == "base" && a.namespace() == Some("http://www.w3.org/XML/1998/namespace")
     }) {
-        Some(a) => resolve(base, a.value().trim()),
+        Some(a) => resolve(base, a.value().trim()).unwrap_or_else(|| base.to_string()),
         None => base.to_string(),
     }
 }
@@ -340,31 +386,46 @@ fn text(node: Node<'_, '_>, name: &str) -> Option<String> {
     node_text(child(node, name)?)
 }
 
-/// Resolve `href` against `base`: absolute URLs as-is, `//host/x`, `/path`, and relative paths.
-pub fn resolve(base: &str, href: &str) -> String {
-    if href.contains("://") || href.starts_with("mailto:") {
-        return href.to_string();
+/// The scheme of `href` when it has one (`scheme:` before any `/`, `?` or `#`), lowercased.
+fn scheme_of(href: &str) -> Option<String> {
+    let colon = href.find(':')?;
+    let scheme = &href[..colon];
+    let ok = scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    ok.then(|| scheme.to_ascii_lowercase())
+}
+
+/// Resolve `href` against `base` into an absolute `http(s)` URL: absolute URLs as-is,
+/// `//host/x`, `/path`, and relative paths. Any other scheme (`javascript:`, `mailto:`, `data:`)
+/// gives `None`.
+pub fn resolve(base: &str, href: &str) -> Option<String> {
+    let href = href.trim();
+    if let Some(scheme) = scheme_of(href) {
+        return matches!(scheme.as_str(), "http" | "https").then(|| href.to_string());
     }
-    let Some((scheme, rest)) = base.split_once("://") else {
-        return href.to_string();
-    };
+    let (scheme, rest) = base.split_once("://")?;
+    if !matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https") {
+        return None;
+    }
     if let Some(h) = href.strip_prefix("//") {
-        return format!("{scheme}://{h}");
+        return Some(format!("{scheme}://{h}"));
     }
-    let authority_end = rest.find('/').unwrap_or(rest.len());
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
     let origin = format!("{scheme}://{}", &rest[..authority_end]);
     if href.starts_with('/') {
-        return format!("{origin}{href}");
+        return Some(format!("{origin}{href}"));
     }
     if href.is_empty() || href.starts_with('#') || href.starts_with('?') {
         let cut = base.find(['#', '?']).unwrap_or(base.len());
-        return format!("{}{href}", &base[..cut]);
+        return Some(format!("{}{href}", &base[..cut]));
     }
     let path = &rest[authority_end..];
     let path = &path[..path.find(['?', '#']).unwrap_or(path.len())];
     let dir = &path[..path.rfind('/').map(|i| i + 1).unwrap_or(0)];
     let dir = if dir.is_empty() { "/" } else { dir };
-    format!("{origin}{dir}{href}")
+    Some(format!("{origin}{dir}{href}"))
 }
 
 /// Remove HTML tags (for titles given as HTML). Good enough for display text; not a sanitizer.
@@ -387,8 +448,23 @@ pub fn strip_tags(s: &str) -> String {
 pub fn repair_entities(xml: &str) -> String {
     let mut out = String::with_capacity(xml.len() + 64);
     let mut rest = xml;
-    while let Some(i) = rest.find('&') {
+    while let Some(i) = rest.find(['&', '<']) {
         out.push_str(&rest[..i]);
+        // CDATA sections and comments are copied verbatim.
+        let tail = &rest[i..];
+        if tail.starts_with('<') {
+            let end = if tail.starts_with("<![CDATA[") {
+                tail.find("]]>").map(|e| e + 3)
+            } else if tail.starts_with("<!--") {
+                tail.find("-->").map(|e| e + 3)
+            } else {
+                Some(1)
+            };
+            let end = end.unwrap_or(tail.len());
+            out.push_str(&tail[..end]);
+            rest = &tail[end..];
+            continue;
+        }
         let after = &rest[i + 1..];
         let end = after
             .char_indices()

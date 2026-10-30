@@ -3,7 +3,7 @@
 # components, stage each as a package directory, and (when a signing key is set) sign each into a
 # single `.nuggetplugin` file.
 #
-# Usage: plugins/build.sh [--out DIR] [--check]
+# Usage: plugins/build.sh [--out DIR] [--check] [--sign]
 #
 #   --out DIR   Where packages go (default: <repo>/target/plugin-packages). For each plugin:
 #                 DIR/<id>/nugget-plugin.toml
@@ -13,11 +13,15 @@
 #   --check     First run, in the SDK workspace, plugins/ and plugins/template: cargo fmt --check,
 #               cargo clippy for wasm32-wasip2 with -D warnings, and the native tests
 #               (`cargo test --target host-tuple`).
+#   --sign      Require signing: fail unless a signing key is set (see below).
 #
 # Environment:
-#   NUGGET_PLUGIN_SIGNING_KEY  hex ed25519 seed. When set, every package is signed with
-#                              `cargo run -p nugget-plugin --example sign-plugin`. CI uses a
-#                              throwaway key generated per run; never a release key.
+#   NUGGET_PLUGIN_SIGNING_KEY  hex ed25519 seed, or
+#   NUGGET_PLUGIN_SIGNING_KEY_FILE  a file holding it. When either is set, every package is
+#                              signed by the `sign-plugin` example of nugget-plugin. The signer is
+#                              compiled first with both variables removed from its environment,
+#                              so no build script ever sees the key. CI uses a throwaway key
+#                              generated per run; never a release key.
 #   SDK_TARGET_DIR             cargo target dir for the SDK workspace
 #                              (default: <repo>/target/plugin-guests)
 #   PLUGINS_TARGET_DIR         cargo target dir for plugins/ and the template
@@ -32,21 +36,41 @@ repo="$(cd "$here/.." && pwd)"
 sdk="$repo/crates/nugget-plugin/sdk"
 out="$repo/target/plugin-packages"
 check=0
+require_sign=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --out) out="$2"; shift 2 ;;
         --out=*) out="${1#--out=}"; shift ;;
         --check) check=1; shift ;;
-        -h|--help) sed -n '2,28p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --sign) require_sign=1; shift ;;
+        -h|--help) sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | grep '^#' | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "build.sh: unknown argument: $1" >&2; exit 2 ;;
     esac
 done
 
 sdk_target="${SDK_TARGET_DIR:-$repo/target/plugin-guests}"
 plugins_target="${PLUGINS_TARGET_DIR:-$repo/target/plugins}"
-# shellcheck disable=SC2206 # word splitting of CARGO_FLAGS is intended
-flags=(${CARGO_FLAGS:-})
+# Split CARGO_FLAGS on whitespace without glob expansion.
+flags=()
+set -f
+read -r -a flags <<< "${CARGO_FLAGS:-}"
+set +f
+
+sign=0
+if [[ -n "${NUGGET_PLUGIN_SIGNING_KEY:-}" ]]; then
+    sign=1
+elif [[ -n "${NUGGET_PLUGIN_SIGNING_KEY_FILE:-}" ]]; then
+    if [[ ! -r "$NUGGET_PLUGIN_SIGNING_KEY_FILE" ]]; then
+        echo "build.sh: NUGGET_PLUGIN_SIGNING_KEY_FILE ($NUGGET_PLUGIN_SIGNING_KEY_FILE) is not readable" >&2
+        exit 1
+    fi
+    sign=1
+fi
+if [[ $require_sign -eq 1 && $sign -eq 0 ]]; then
+    echo "build.sh: --sign needs NUGGET_PLUGIN_SIGNING_KEY or NUGGET_PLUGIN_SIGNING_KEY_FILE" >&2
+    exit 1
+fi
 export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
 
 # workspace dir, target dir
@@ -85,6 +109,20 @@ packages=(
     "$here/read-later|$plugins_target/wasm32-wasip2/release/nugget_read_later.wasm"
 )
 
+signer=""
+if [[ $sign -eq 1 ]]; then
+    # Compile the signer without the key in the environment, then run the binary with it.
+    echo "== building sign-plugin" >&2
+    (cd "$repo" && env -u CARGO_TARGET_DIR -u NUGGET_PLUGIN_SIGNING_KEY -u NUGGET_PLUGIN_SIGNING_KEY_FILE \
+        cargo build ${flags[@]+"${flags[@]}"} --quiet -p nugget-plugin --example sign-plugin)
+    signer="$repo/target/debug/examples/sign-plugin"
+    [[ -x "$signer" ]] || signer="$signer.exe"
+    if [[ ! -x "$signer" ]]; then
+        echo "build.sh: sign-plugin was not built at $repo/target/debug/examples" >&2
+        exit 1
+    fi
+fi
+
 mkdir -p "$out"
 for p in "${packages[@]}"; do
     dir="${p%%|*}"
@@ -103,10 +141,8 @@ for p in "${packages[@]}"; do
     mkdir -p "$stage"
     cp "$dir/nugget-plugin.toml" "$stage/nugget-plugin.toml"
     cp "$wasm" "$stage/plugin.wasm"
-    if [[ -n "${NUGGET_PLUGIN_SIGNING_KEY:-}" ]]; then
-        # The signer belongs to the root workspace; use its own target dir.
-        (cd "$repo" && env -u CARGO_TARGET_DIR cargo run --quiet -p nugget-plugin --example sign-plugin -- \
-            "$stage" --out "$out/$id.nuggetplugin" >&2)
+    if [[ $sign -eq 1 ]]; then
+        "$signer" "$stage" --out "$out/$id.nuggetplugin" >&2
         echo "$id $out/$id.nuggetplugin"
     else
         echo "$id $stage"

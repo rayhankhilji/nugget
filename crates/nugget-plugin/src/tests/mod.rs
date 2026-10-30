@@ -2,6 +2,7 @@
 //! example and test plugins for `wasm32-wasip2` (see [`guest_wasm`]).
 
 mod agent;
+mod first_party;
 mod fs;
 mod guest;
 mod limits;
