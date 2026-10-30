@@ -18,6 +18,7 @@ use wiremock::MockServer;
 use crate::{MicrosoftEndpoints, RetryPolicy};
 
 mod calendar;
+mod conformance;
 mod factory;
 mod onedrive;
 mod outlook;

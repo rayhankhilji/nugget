@@ -1,5 +1,9 @@
 //! `outlook-calendar`: the default Outlook calendar over Microsoft Graph with `Calendars.Read`.
 //!
+//! Scopes: `Calendars.Read` (read events; no write), `offline_access` (a refresh token, so
+//! syncing continues without signing in again) and `User.Read` (lets the consent screen name the
+//! account). Tokens live only in the secret store.
+//!
 //! `/me/calendarView/delta` lists the event instances inside a `-past_days/+future_days` window:
 //! recurring series come back expanded (occurrences and exceptions), so every instance is its
 //! own document. Events become readable `text/plain` documents; cancelled and `@removed`
@@ -366,6 +370,16 @@ impl OutlookCalendarConnector {
             cur.next_link = None;
         }
         let mut seen: HashSet<String> = HashSet::new();
+        // Indexed versions, kept up to date with what this pass sends: an event listed again
+        // unchanged (a resync, or a repeat on a later page) is not sent again.
+        let mut live: HashMap<String, Option<String>> = self
+            .ctx
+            .known
+            .versions()
+            .await?
+            .into_iter()
+            .map(|(k, v)| (k.as_str().to_string(), v))
+            .collect();
         let mut restarts = 0u32;
         let mut pages = 0u32;
         loop {
@@ -425,6 +439,9 @@ impl OutlookCalendarConnector {
                 ));
             }
             for item in page.value {
+                if !item.is_object() {
+                    continue;
+                }
                 let removed = is_removed(&item);
                 let Ok(ev) = serde_json::from_value::<Event>(item) else {
                     tracing::debug!(source = %self.ctx.source, "skipping malformed event entry");
@@ -433,12 +450,24 @@ impl OutlookCalendarConnector {
                 if !valid_event_id(&ev.id) {
                     continue;
                 }
+                if !removed && ev.kind.as_deref() == Some("seriesMaster") {
+                    // The calendar view lists every occurrence; a series master alongside them
+                    // would duplicate the first one.
+                    continue;
+                }
                 if removed || ev.is_cancelled == Some(true) {
                     seen.remove(&ev.id);
+                    live.remove(&ev.id);
                     sink.send(Change::Delete(ItemKey::new(ev.id))).await?;
                 } else {
                     seen.insert(ev.id.clone());
-                    sink.send(Change::Upsert(event_document(ev))).await?;
+                    let doc = event_document(ev);
+                    let key = doc.key.as_str().to_string();
+                    if doc.version.is_some() && live.get(&key) == Some(&doc.version) {
+                        continue;
+                    }
+                    live.insert(key, doc.version.clone());
+                    sink.send(Change::Upsert(doc)).await?;
                 }
             }
             if let Some(n) = next {

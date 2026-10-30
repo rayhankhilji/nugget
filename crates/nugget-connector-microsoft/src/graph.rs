@@ -290,12 +290,10 @@ pub(crate) fn status_error(what: &str, resp: &Response) -> Error {
     }
 }
 
+/// `Retry-After` in milliseconds: delta-seconds or an HTTP-date, the latter measured against
+/// the response's `Date` header so a skewed local clock does not distort it.
 pub(crate) fn retry_after_ms(resp: &Response) -> Option<u64> {
-    resp.headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|s| s.min(86_400).saturating_mul(1000))
+    nugget_connector::retry::retry_after_ms(&resp.headers)
 }
 
 pub(crate) fn backoff(retry: &RetryPolicy, attempt: u32, err: &Error) -> Duration {
@@ -311,6 +309,21 @@ pub(crate) fn backoff(retry: &RetryPolicy, attempt: u32, err: &Error) -> Duratio
     let nanos = time::OffsetDateTime::now_utc().nanosecond() as u64;
     let jitter = base.as_millis() as u64 / 4;
     base + Duration::from_millis(if jitter == 0 { 0 } else { nanos % jitter })
+}
+
+/// Prefix of the error for a 408/5xx Graph answered with (as opposed to a transport failure).
+const SERVER_STATUS: &str = "Microsoft Graph HTTP";
+
+/// Whether a failed request for one item (a message's MIME, a file's content) is about that
+/// item: the server answered with an error that is neither throttling nor an authorization
+/// problem. Such an item is skipped so the rest of the pass goes on; throttling, auth and
+/// transport failures (the network is down) still end the pass.
+pub(crate) fn is_item_failure(e: &Error) -> bool {
+    match e {
+        Error::Network(m) => m.starts_with(SERVER_STATUS),
+        Error::Invalid(_) | Error::Other(_) | Error::NotFound(_) => true,
+        _ => false,
+    }
 }
 
 fn classify(resp: Response, allow_redirect: bool) -> Outcome {
@@ -343,7 +356,7 @@ fn classify(resp: Response, allow_redirect: bool) -> Outcome {
             "Microsoft Graph denied access (HTTP 403 {code}): {message}"
         ))),
         408 | 500..=599 => Outcome::Retry(Error::Network(format!(
-            "Microsoft Graph HTTP {status} {code}: {message}"
+            "{SERVER_STATUS} {status} {code}: {message}"
         ))),
         400 => Outcome::Fatal(Error::Invalid(format!(
             "Microsoft Graph rejected the request ({code}): {message}"

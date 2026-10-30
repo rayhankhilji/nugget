@@ -1,5 +1,9 @@
 //! `outlook`: Outlook / Exchange Online mail over Microsoft Graph with `Mail.Read`.
 //!
+//! Scopes: `Mail.Read` (read messages and their MIME; no send or write), `offline_access` (a
+//! refresh token, so syncing continues without signing in again) and `User.Read` (lets the
+//! consent screen name the account). Tokens live only in the secret store.
+//!
 //! Each selected folder (default: `inbox` and `sentitems`) is synced with its own message delta
 //! query. Keys are `<folder>/<immutable message id>`, so a message moved between two synced
 //! folders becomes a delete under one and an upsert under the other, whatever order the folders
@@ -43,7 +47,9 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::graph::{DeltaPage, Get, GraphApi, is_removed, needs_resync, status_error};
+use crate::graph::{
+    DeltaPage, Get, GraphApi, is_item_failure, is_removed, needs_resync, status_error,
+};
 use crate::oauth::{SCOPE_MAIL_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::{OutlookSettings, valid_folder_id};
 use crate::text::clean_line;
@@ -462,6 +468,10 @@ impl OutlookConnector {
     ) -> Result<()> {
         let mut steps = Vec::new();
         for item in items {
+            // A non-object entry would deserialize from its array form: skip it.
+            if !item.is_object() {
+                continue;
+            }
             let removed = is_removed(&item);
             let Ok(msg) = serde_json::from_value::<Message>(item) else {
                 tracing::debug!(source = %self.ctx.source, "skipping malformed message entry");
@@ -529,12 +539,21 @@ impl OutlookConnector {
                 tracing::warn!(source = %self.ctx.source, "skipping oversized message");
                 return Ok(None);
             }
+            // One unreadable message must not stop the pass.
+            Err(e) if is_item_failure(&e) => {
+                tracing::warn!(source = %self.ctx.source, "skipping unreadable message: {e}");
+                return Ok(None);
+            }
             Err(e) => return Err(e),
         };
         match resp.status.as_u16() {
             200 => {}
             404 | 410 => return Ok(Some(Change::Delete(ItemKey::new(key)))),
-            _ => return Err(status_error("outlook message $value", &resp)),
+            _ => {
+                let e = status_error("outlook message $value", &resp);
+                tracing::warn!(source = %self.ctx.source, "skipping unreadable message: {e}");
+                return Ok(None);
+            }
         }
         if resp.body.is_empty() {
             tracing::warn!(source = %self.ctx.source, "skipping message with an empty MIME body");

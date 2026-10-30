@@ -1,5 +1,10 @@
 //! `onedrive`: the user's OneDrive over Microsoft Graph with `Files.Read`.
 //!
+//! Scopes: `Files.Read` (read the user's own files; not `Files.Read.All`, so nothing shared from
+//! other drives), `offline_access` (a refresh token, so syncing continues without signing in
+//! again) and `User.Read` (lets the consent screen name the account). Tokens live only in the
+//! secret store; download URLs are pre-authenticated and fetched without the token.
+//!
 //! `/me/drive/root/delta` enumerates the drive, then reports changes. Delta items carry no
 //! path, so the folder tree (id → parent id and name) is kept in the cursor and paths are
 //! rebuilt from it for the include/exclude filters and metadata. Files of supported types up to
@@ -38,7 +43,9 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use url::Url;
 
-use crate::graph::{DeltaPage, Get, GraphApi, backoff, needs_resync, retry_after_ms, status_error};
+use crate::graph::{
+    DeltaPage, Get, GraphApi, backoff, is_item_failure, needs_resync, retry_after_ms, status_error,
+};
 use crate::oauth::{SCOPE_FILES_READ, SCOPE_OFFLINE_ACCESS, SCOPE_USER_READ};
 use crate::settings::OneDriveSettings;
 use crate::text::clean_line;
@@ -401,6 +408,9 @@ impl OneDriveConnector {
             let items: Vec<DriveItem> = page
                 .value
                 .into_iter()
+                // A non-object entry would deserialize from its array form (`["<id>"]`, an item
+                // without a file facet, which reads as a delete): skip it.
+                .filter(Value::is_object)
                 .filter_map(|v| serde_json::from_value::<DriveItem>(v).ok())
                 .filter(|i| valid_item_id(&i.id) && i.remote_item.is_none())
                 .collect();
@@ -632,6 +642,11 @@ impl OneDriveConnector {
         let resp = match self.api.get(&url, get, cancel).await {
             Ok(r) => r,
             Err(Error::Invalid(m)) if m.contains("exceeds") => return Ok(None),
+            // One unreadable file must not stop the pass.
+            Err(e) if is_item_failure(&e) => {
+                tracing::warn!(source = %self.ctx.source, "onedrive: skipping unreadable file: {e}");
+                return Ok(None);
+            }
             Err(e) => return Err(e),
         };
         match resp.status.as_u16() {
@@ -647,7 +662,11 @@ impl OneDriveConnector {
             }
             404 | 410 => Ok(None),
             s if (200..300).contains(&s) => Ok(Some(resp.body)),
-            _ => Err(status_error("onedrive content", &resp)),
+            _ => {
+                let e = status_error("onedrive content", &resp);
+                tracing::warn!(source = %self.ctx.source, "onedrive: skipping unreadable file: {e}");
+                Ok(None)
+            }
         }
     }
 
@@ -684,8 +703,19 @@ impl OneDriveConnector {
                     429 | 503 | 509 => Error::RateLimited {
                         retry_after_ms: retry_after_ms(&resp),
                     },
-                    s @ (408 | 500..=599) => Error::Network(format!("onedrive download: HTTP {s}")),
-                    s => return Err(Error::Other(format!("onedrive download: HTTP {s}"))),
+                    s @ (408 | 500..=599) => {
+                        // The server answered for this file: after the retries, skip it
+                        // rather than stop the pass.
+                        if attempt >= retry.max_retries {
+                            tracing::warn!(source = %self.ctx.source, "onedrive: skipping file, download failed with HTTP {s}");
+                            return Ok(None);
+                        }
+                        Error::Network(format!("onedrive download: HTTP {s}"))
+                    }
+                    s => {
+                        tracing::warn!(source = %self.ctx.source, "onedrive: skipping file, download failed with HTTP {s}");
+                        return Ok(None);
+                    }
                 },
                 Err(Error::Invalid(m)) if m.contains("exceeds") => {
                     tracing::warn!(source = %self.ctx.source, "onedrive: skipping file over the size cap");
