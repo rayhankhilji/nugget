@@ -206,3 +206,14 @@ fn empty_file_roots_keep_the_serialized_form() {
     assert!(json.ends_with(r#""file_roots":["vault"]}"#), "{json}");
     assert_eq!(serde_json::from_str::<Capabilities>(&json).unwrap(), with);
 }
+
+#[test]
+fn a_trailing_dot_in_a_host_rule_still_matches() {
+    let r = HostRule::parse("example.com.").unwrap();
+    assert_eq!(r, HostRule::parse("example.com").unwrap());
+    assert!(r.matches(&url::Url::parse("https://example.com/feed").unwrap()));
+    assert!(r.matches(&url::Url::parse("https://example.com./feed").unwrap()));
+    let w = HostRule::parse("*.example.com.").unwrap();
+    assert!(w.matches(&url::Url::parse("https://a.example.com/").unwrap()));
+    assert!(HostRule::parse(".").is_err());
+}

@@ -277,7 +277,11 @@ impl HostRule {
         }
         let url = Url::parse(&format!("{scheme}://{rest}/")).map_err(|e| bad(&e.to_string()))?;
         let host = match url.host() {
-            Some(url::Host::Domain(d)) => d.to_string(),
+            // `matches` ignores a URL's trailing dot, so the rule must too or it never matches.
+            Some(url::Host::Domain(d)) => match d.trim_end_matches('.') {
+                "" => return Err(bad("missing host")),
+                d => d.to_string(),
+            },
             Some(url::Host::Ipv4(ip)) if !wildcard => ip.to_string(),
             Some(url::Host::Ipv6(ip)) if !wildcard => ip.to_string(),
             Some(_) => return Err(bad("a wildcard needs a domain name")),
