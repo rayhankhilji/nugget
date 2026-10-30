@@ -808,7 +808,7 @@ impl Imap {
         self.timeout = normal.saturating_mul(BODY_TIMEOUT_FACTOR);
         self.budget = (max_total as u64).saturating_add(BODY_BUDGET_SLACK);
         let result = self
-            .exec_ok(&format!("UID FETCH {set} (UID {section})"), |r| {
+            .exec(&format!("UID FETCH {set} (UID {section})"), |r| {
                 if let Response::Fetch(_, attrs) = r {
                     let mut uid = None;
                     let mut data: Option<&[u8]> = None;
@@ -845,8 +845,17 @@ impl Imap {
             .await;
         self.timeout = normal;
         self.budget = META_BUDGET;
-        result?;
-        Ok(out)
+        match result? {
+            Done::Ok => Ok(out),
+            // The server could not deliver (some of) these messages, e.g. Dovecot's
+            // `NO [SERVERBUG]` for one corrupt message: the session is still usable.
+            Done::No(m) => Err(Error::Provider(format!(
+                "IMAP server refused to fetch messages {}: {m}",
+                clip(set, 64)
+            ))),
+            // BAD is a protocol error (our command or the session), not a broken message.
+            Done::Bad(m) => Err(net(format!("IMAP UID FETCH failed: {m}"))),
+        }
     }
 
     /// Start IDLE; returns once the server sent its continuation.

@@ -207,6 +207,35 @@ function hasProblem(s: SourceInfo): boolean {
   return s.state === "error" || Boolean(s.last_error);
 }
 
+/** Translated reason and fix for the source's health code, or null to keep the generic hint. */
+function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string } | null {
+  const name = s.name;
+  switch (s.health?.code) {
+    case "reconnect":
+      return { reason: t("sources.health.reconnect", { name }), fix: t("sources.errorHintAuth") };
+    case "rate_limited":
+      return { reason: t("sources.health.rateLimited", { name }), fix: t("sources.health.autoRetry") };
+    case "server_error":
+      return { reason: t("sources.health.serverError", { name }), fix: t("sources.health.autoRetry") };
+    case "offline":
+      return { reason: t("sources.health.offline", { name }), fix: t("sources.health.offlineFix") };
+    case "too_large":
+      return { reason: t("sources.health.tooLarge"), fix: "" };
+    case "config":
+      return { reason: t("sources.health.config", { name }), fix: t("sources.health.configFix") };
+    case undefined:
+    case "ok":
+    case "syncing":
+    case "disabled":
+    case "error":
+    case "item_errors":
+      return null;
+    default:
+      // A code this build has no translation for: the daemon's English text.
+      return s.health ? { reason: s.health.reason, fix: s.health.fix ?? "" } : null;
+  }
+}
+
 function progressText(p: IngestProgress, t: TFunction): string {
   const args = { phase: p.phase, done: p.done, total: p.total };
   if (p.total) return t("sources.progress.total", args);
@@ -241,6 +270,7 @@ function SourceRow({
   const headingId = `source-${s.id}`;
   const mode = connectMode(s.kind, s.settings);
   const signIn = mode === "browser" || mode === "device";
+  const health = healthText(s, t);
 
   const run = async (what: "toggle" | "sync" | "auth", f: () => Promise<void>) => {
     setBusy(what);
@@ -309,9 +339,26 @@ function SourceRow({
         {hasProblem(s) && (
           <div className="note note-error small" role="status">
             <span>{s.last_error ? t("sources.lastError", { error: s.last_error }) : t("sources.errorNoDetail")}</span>
-            <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
-            {isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
+            {health ? (
+              <>
+                <span className="block">{health.reason}</span>
+                {health.fix && <span className="block">{health.fix}</span>}
+              </>
+            ) : (
+              <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
+            )}
+            {!health && isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
+        )}
+        {!hasProblem(s) && (s.health?.item_errors ?? 0) > 0 && (
+          <p className="note note-warn small" role="status">
+            <span>{t("sources.health.itemErrors", { n: s.health?.item_errors ?? 0 })}</span>
+            {s.health?.last_item_error && (
+              <span className="block muted" dir="auto">
+                {t("sources.health.lastItemError", { error: s.health.last_item_error })}
+              </span>
+            )}
+          </p>
         )}
         {s.state === "needs_auth" && !s.last_error && mode !== "none" && mode !== "env" && (
           <p className="note small">

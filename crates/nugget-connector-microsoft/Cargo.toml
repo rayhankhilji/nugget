@@ -25,6 +25,7 @@ url = "2.5"
 jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [dev-dependencies]
+nugget-connector = { workspace = true, features = ["testkit"] }
 wiremock = "0.6"
 
 [lints]

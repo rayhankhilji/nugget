@@ -67,6 +67,12 @@ const MAX_IDLE_VANISHED: u32 = 10_000;
 /// Re-issue IDLE before the 30-minute server inactivity timeout (RFC 2177).
 const IDLE_REFRESH: Duration = Duration::from_secs(25 * 60);
 const IO_TIMEOUT: Duration = Duration::from_secs(60);
+/// Reconnects within one pass after the server dropped the session (BYE, reset).
+const MAX_RECONNECTS: usize = 3;
+/// Pause before reconnect number `n` is `n` times this.
+const RECONNECT_DELAY: Duration = Duration::from_millis(250);
+/// Passes that try a message the server refuses before it is given up (logged).
+const MAX_FETCH_ATTEMPTS: u32 = 5;
 
 // ---------------------------------------------------------------------------------------------
 // Factory
@@ -115,12 +121,16 @@ struct Cursor {
     folders: BTreeMap<String, FolderCursor>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FolderCursor {
     uidvalidity: u32,
     last_uid: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     highest_modseq: Option<u64>,
+    /// Messages the server refused to deliver, as `(uid, failed attempts)`: retried on later
+    /// passes (they are below `last_uid`) until [`MAX_FETCH_ATTEMPTS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    retry: Vec<(u32, u32)>,
 }
 
 impl Cursor {
@@ -420,15 +430,37 @@ impl ImapConnector {
             imap,
             sink,
             cancel,
+            refused: Vec::new(),
         };
-        for folder in &folders {
+        let mut known = known;
+        let mut reconnects = 0;
+        let mut i = 0;
+        let empty = HashMap::new();
+        while let Some(folder) = folders.get(i) {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let empty = HashMap::new();
             let known_f = known.get(folder).unwrap_or(&empty);
-            run.sync_folder(folder, known_f, &mut cursor, &mut meter)
-                .await?;
+            match run
+                .sync_folder(folder, known_f, &mut cursor, &mut meter)
+                .await
+            {
+                Ok(()) => i += 1,
+                // The server dropped the session (BYE, reset): reconnect and redo this mailbox
+                // from the progress committed so far, against what was applied meanwhile.
+                Err(e) if is_disconnect(&e) && reconnects < MAX_RECONNECTS => {
+                    reconnects += 1;
+                    tracing::warn!(folder, error = %e, reconnects, "IMAP session dropped; reconnecting");
+                    meter.flush();
+                    tokio::select! {
+                        _ = tokio::time::sleep(RECONNECT_DELAY * reconnects as u32) => {}
+                        _ = cancel.cancelled() => return Err(Error::Cancelled),
+                    }
+                    run.imap = self.connect(&meter, cancel).await?;
+                    known = self.known_tree().await?;
+                }
+                Err(e) => return Err(e),
+            }
             meter.flush();
         }
         run.imap.logout().await;
@@ -469,6 +501,7 @@ impl ImapConnector {
             imap,
             sink: &*sink,
             cancel: &cancel,
+            refused: Vec::new(),
         };
         let no_known = BTreeMap::new();
         loop {
@@ -551,6 +584,15 @@ impl Connector for ImapConnector {
     }
 }
 
+/// Whether `e` means the server dropped the session (worth a reconnect), as opposed to a
+/// timeout, a protocol violation or a refusal.
+fn is_disconnect(e: &Error) -> bool {
+    matches!(e, Error::Network(m) if m.contains("closed the session")
+        || m.contains("closed the connection")
+        || m.contains("connection lost")
+        || m.starts_with("imap i/o"))
+}
+
 async fn send_delete(sink: &dyn ChangeSink, folder: &str, uv: u32, uid: u32) -> Result<()> {
     sink.send(Change::Delete(ItemKey::new(item_key(folder, uv, uid))))
         .await
@@ -565,6 +607,8 @@ struct Run<'a> {
     imap: Imap,
     sink: &'a dyn ChangeSink,
     cancel: &'a CancellationToken,
+    /// UIDs the server refused to deliver during the current mailbox.
+    refused: Vec<u32>,
 }
 
 impl Run<'_> {
@@ -604,16 +648,17 @@ impl Run<'_> {
         let prev = cursor
             .folders
             .get(folder)
-            .copied()
+            .cloned()
             .filter(|s| s.uidvalidity == uv);
+        self.refused.clear();
         let use_modseq = self.imap.condstore && sel.highest_modseq.is_some();
 
         let mut refetch: Vec<u32> = Vec::new();
         let mut gone: Vec<u32> = Vec::new();
-        match prev {
+        match &prev {
             Some(st) if use_modseq && st.highest_modseq.is_some() => {
                 let since = st.highest_modseq.unwrap_or(0);
-                if sel.highest_modseq == Some(since) {
+                if sel.highest_modseq == Some(since) && st.retry.is_empty() {
                     // Nothing changed in this mailbox (RFC 7162: any change bumps HIGHESTMODSEQ).
                     return Ok(());
                 }
@@ -670,8 +715,35 @@ impl Run<'_> {
             self.process(folder, uv, chunk, &empty).await?;
         }
 
+        // Messages the server refused on earlier passes: try again (those gone are dropped).
+        let mut retry: Vec<(u32, u32)> = Vec::new();
+        let earlier: Vec<(u32, u32)> = prev.as_ref().map(|s| s.retry.clone()).unwrap_or_default();
+        if !earlier.is_empty() {
+            let mut uids: Vec<u32> = earlier.iter().map(|(u, _)| *u).collect();
+            uids.sort_unstable();
+            uids.dedup();
+            for chunk in uids.chunks(META_BATCH) {
+                self.process(folder, uv, chunk, known).await?;
+            }
+            for (uid, attempts) in earlier {
+                if self.refused.contains(&uid) {
+                    if attempts + 1 >= MAX_FETCH_ATTEMPTS {
+                        tracing::warn!(
+                            folder,
+                            uid,
+                            attempts = attempts + 1,
+                            "giving up on a message the server keeps refusing"
+                        );
+                    } else {
+                        retry.push((uid, attempts + 1));
+                    }
+                }
+            }
+            self.refused.clear();
+        }
+
         // New mail.
-        let last = prev.map_or(0, |s| s.last_uid);
+        let last = prev.as_ref().map_or(0, |s| s.last_uid);
         let mut criteria = if last == 0 {
             String::new()
         } else {
@@ -697,11 +769,19 @@ impl Run<'_> {
             uidvalidity: uv,
             last_uid: 0,
             highest_modseq: None,
+            retry: Vec::new(),
         });
+        // Refused new messages join the retry list as they happen, so a crash cannot lose them.
+        let fresh_retry = |refused: &[u32], retry: &[(u32, u32)]| {
+            let mut r = retry.to_vec();
+            r.extend(refused.iter().map(|u| (*u, 1)));
+            r
+        };
         for chunk in new.chunks(META_BATCH) {
             self.process(folder, uv, chunk, known).await?;
             st.last_uid = st.last_uid.max(chunk.last().copied().unwrap_or(0));
-            cursor.folders.insert(folder.to_string(), st);
+            st.retry = fresh_retry(&self.refused, &retry);
+            cursor.folders.insert(folder.to_string(), st.clone());
             self.sink.checkpoint(cursor.to_value()).await?;
             meter.flush();
         }
@@ -709,6 +789,7 @@ impl Run<'_> {
             st.last_uid = st.last_uid.max(next.saturating_sub(1));
         }
         st.highest_modseq = if use_modseq { sel.highest_modseq } else { None };
+        st.retry = fresh_retry(&self.refused, &retry);
         cursor.folders.insert(folder.to_string(), st);
         self.sink.checkpoint(cursor.to_value()).await
     }
@@ -784,7 +865,41 @@ impl Run<'_> {
         let max_total = BODY_BATCH_BYTES as usize + cap;
         let mut bodies = HashMap::new();
         for set in conn::uid_sets(&uids, MAX_SET_LEN) {
-            bodies.extend(self.imap.fetch_bodies(&set, header_only, max_total).await?);
+            match self.imap.fetch_bodies(&set, header_only, max_total).await {
+                Ok(b) => bodies.extend(b),
+                // The server cannot deliver some message of the group: fetch the rest one by one
+                // and skip only those it refuses, so one broken message never stops the sync.
+                Err(Error::Provider(m)) => {
+                    tracing::warn!(folder, error = %m, "IMAP FETCH refused; retrying one by one");
+                    bodies.clear();
+                    let mut refused = Vec::new();
+                    for uid in &uids {
+                        match self
+                            .imap
+                            .fetch_bodies(&uid.to_string(), header_only, max_total)
+                            .await
+                        {
+                            Ok(b) => bodies.extend(b),
+                            Err(Error::Provider(m)) => {
+                                tracing::warn!(folder, uid, error = %m, "skipping a message the server cannot deliver; retried next pass");
+                                refused.push(*uid);
+                            }
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    // Not one message of several delivered: the server (not a message) is
+                    // broken right now. Fail the pass rather than skip them all.
+                    if uids.len() > 1 && refused.len() == uids.len() {
+                        return Err(Error::Provider(format!(
+                            "IMAP server refused to deliver all {} messages of a batch: {m}",
+                            uids.len()
+                        )));
+                    }
+                    self.refused.extend(refused);
+                    break;
+                }
+                Err(e) => return Err(e),
+            }
         }
         let condstore = self.imap.condstore;
         for m in group {

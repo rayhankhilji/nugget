@@ -165,6 +165,35 @@ export interface SourceInfo {
   last_sync?: string | null;
   last_error?: string | null;
   settings?: SourceSettings;
+  /** Plain-language sync health (FF2); absent from older daemons. */
+  health?: SourceHealth | null;
+}
+
+/** Codes of {@link SourceHealth.code}; unknown codes fall back to the daemon's English text. */
+export type SourceHealthCode =
+  | "ok"
+  | "syncing"
+  | "disabled"
+  | "reconnect"
+  | "not_set_up"
+  | "disk_full"
+  | "rate_limited"
+  | "offline"
+  | "server_error"
+  | "too_large"
+  | "config"
+  | "item_errors"
+  | "error";
+
+export interface SourceHealth {
+  code: SourceHealthCode | string;
+  /** English fallback: what is going on. */
+  reason: string;
+  /** English fallback: what the user can do (empty when nothing is needed). */
+  fix?: string;
+  /** Items skipped in recent passes. */
+  item_errors?: number;
+  last_item_error?: string | null;
 }
 
 export interface SourceRef {
@@ -573,7 +602,19 @@ export function isSourceInfo(v: unknown): v is SourceInfo {
     isCount(v.chunks) &&
     isOptString(v.last_sync) &&
     isOptString(v.last_error) &&
-    (v.settings === undefined || v.settings === null || isRecord(v.settings))
+    (v.settings === undefined || v.settings === null || isRecord(v.settings)) &&
+    (v.health === undefined || v.health === null || isSourceHealth(v.health))
+  );
+}
+
+export function isSourceHealth(v: unknown): v is SourceHealth {
+  return (
+    isRecord(v) &&
+    typeof v.code === "string" &&
+    typeof v.reason === "string" &&
+    isOptString(v.fix) &&
+    (v.item_errors === undefined || isCount(v.item_errors)) &&
+    isOptString(v.last_item_error)
   );
 }
 

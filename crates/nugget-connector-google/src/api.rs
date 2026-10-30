@@ -168,7 +168,19 @@ impl GoogleApi {
     /// 401 refreshes the token once; 429, rate-limit 403s, 408 and 5xx are retried with
     /// exponential backoff (honouring `Retry-After`) up to the policy's limit.
     pub(crate) async fn get(&self, url: &Url, cancel: &CancellationToken) -> Result<Response> {
-        self.call(Method::GET, url, None, cancel).await
+        self.call(&self.http, Method::GET, url, None, cancel).await
+    }
+
+    /// [`get`](Self::get) with a per-call body cap: a larger body is `Error::Invalid("response
+    /// body exceeds ...")`, so the caller can skip that one item.
+    pub(crate) async fn get_capped(
+        &self,
+        url: &Url,
+        max_body: usize,
+        cancel: &CancellationToken,
+    ) -> Result<Response> {
+        let http = self.http.clone().with_max_body(max_body);
+        self.call(&http, Method::GET, url, None, cancel).await
     }
 
     /// POST a JSON body to `url`, with the same status handling and retries as [`get`](Self::get).
@@ -178,7 +190,8 @@ impl GoogleApi {
         body: &serde_json::Value,
         cancel: &CancellationToken,
     ) -> Result<Response> {
-        self.call(Method::POST, url, Some(body), cancel).await
+        self.call(&self.http, Method::POST, url, Some(body), cancel)
+            .await
     }
 
     /// GET `url` for raw content (exports, downloads, or JSON whose errors must not fail a whole
@@ -216,13 +229,14 @@ impl GoogleApi {
 
     async fn call(
         &self,
+        http: &MeteredHttp,
         method: Method,
         url: &Url,
         body: Option<&serde_json::Value>,
         cancel: &CancellationToken,
     ) -> Result<Response> {
         self.run(
-            &self.http,
+            http,
             method,
             url,
             body,
@@ -278,7 +292,9 @@ impl GoogleApi {
                         "Google rejected the access token; reconnect the account".into(),
                     ));
                 }
-                Outcome::Retry(e) if attempt < self.retry.max_retries => {
+                // A server that asks for a longer wait than the policy allows inline is not
+                // retried early: the error (with its hint) goes to the ingest supervisor.
+                Outcome::Retry(e) if attempt < self.retry.max_retries && self.hint_fits(&e) => {
                     let delay = self.backoff(attempt, &e);
                     tracing::debug!(%url, attempt, ?delay, "google api: retrying after {e}");
                     attempt += 1;
@@ -292,22 +308,28 @@ impl GoogleApi {
         }
     }
 
-    fn backoff(&self, attempt: u32, err: &Error) -> Duration {
-        let exp = self
-            .retry
-            .base_delay
-            .saturating_mul(1u32 << attempt.min(16));
-        let hinted = match err {
+    /// The server's `Retry-After` hint, if any.
+    fn hint(err: &Error) -> Option<Duration> {
+        match err {
             Error::RateLimited {
                 retry_after_ms: Some(ms),
-            } => Duration::from_millis(*ms),
-            _ => Duration::ZERO,
-        };
-        let base = exp.max(hinted).min(self.retry.max_delay);
-        // Up to 25% jitter so parallel sources do not retry in lockstep.
-        let nanos = time::OffsetDateTime::now_utc().nanosecond() as u64;
-        let jitter = base.as_millis() as u64 / 4;
-        base + Duration::from_millis(if jitter == 0 { 0 } else { nanos % jitter })
+            } => Some(Duration::from_millis(*ms)),
+            _ => None,
+        }
+    }
+
+    /// Whether waiting out the server's hint fits the inline policy.
+    fn hint_fits(&self, err: &Error) -> bool {
+        Self::hint(err).is_none_or(|h| h <= self.retry.max_delay)
+    }
+
+    /// Exponential backoff with jitter; the server's `Retry-After` is a floor.
+    fn backoff(&self, attempt: u32, err: &Error) -> Duration {
+        nugget_connector::retry::Backoff {
+            base: self.retry.base_delay,
+            max: self.retry.max_delay,
+        }
+        .delay(attempt, Self::hint(err))
     }
 
     /// Parse a JSON body, reporting malformed input as `Invalid` (never panics).
@@ -364,12 +386,9 @@ fn classify(resp: Response) -> Outcome {
     if resp.status.is_success() || status == 404 || status == 410 {
         return Outcome::Done(resp);
     }
-    let retry_after_ms = resp
-        .headers
-        .get(reqwest::header::RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(|s| s.saturating_mul(1000));
+    // Delta-seconds or an HTTP-date (measured against the response's own `Date`, so a skewed
+    // local clock does not shorten or stretch the wait).
+    let retry_after_ms = nugget_connector::retry::retry_after_ms(&resp.headers);
     let body: GoogleError = serde_json::from_slice(&resp.body).unwrap_or_default();
     let reasons: Vec<&str> = body
         .error

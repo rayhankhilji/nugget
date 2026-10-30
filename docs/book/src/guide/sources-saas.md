@@ -13,6 +13,18 @@ sits between Nugget and the API, so a sync is deterministic, free, and works wit
 The periodic full listing finds items that were deleted, archived, unshared or moved out of scope, and
 removes them from Nugget.
 
+**Scopes.** Each token is set up to read only:
+
+- **Slack**: nine user-token scopes, `channels:`, `groups:`, `im:` and `mpim:` `history` and `read`,
+  plus `users:read`. Those are exactly the API methods the connector calls; none of them can post or
+  change anything.
+- **Notion**: an internal integration with **Read content** only. It sees only the pages you share
+  with it.
+- **GitHub**: a fine-grained token with read-only Issues, Pull requests, Discussions and Metadata, on
+  the repositories you pick. The device flow asks for `repo` and `read:discussion` instead, which is
+  broader (see [GitHub](#github)).
+- **Linear**: a personal API key with read access, or OAuth with the `read` scope.
+
 ## How tokens are stored
 
 A pasted token goes to your OS keychain through `sources.secret.set`, under `password:<source id>`. It
@@ -143,3 +155,116 @@ labels, the description, then comments with replies indented. Archived and delet
   end the pass, and the source resumes from its last checkpoint after a backoff.
 
 All settings: [Connector settings → `slack`](../reference/connectors.md#slack).
+
+## Checking SaaS sources with a real account
+
+These connectors are tested against mock servers; nobody has run these checklists against a live
+account yet. Each takes about 10 minutes. Use a test channel, page, repository or team you can change
+freely. If a step fails, see [Reporting a failed check](sources.md#reporting-a-failed-check).
+
+### Checking Slack with a real account
+
+Set **window_days** to 7 and list one or two test conversations in `conversations` for a short first
+sync.
+
+1. **Connect.** Create the Slack app with the nine user scopes above, install it, and paste the
+   `xoxp-` token. Expected: Slack's install screen lists only permissions to view messages and basic
+   information about conversations and people, nothing that posts or changes anything. The source
+   switches to `syncing`.
+2. **First sync.** Expected: one item per conversation per day with top-level messages, plus one per
+   thread. Names appear instead of user ids.
+3. **New and edited messages.** Post a message, then edit a message you posted today, and post
+   another. Choose **Sync now**. Expected: today's item shows both new messages and the edit. An edit
+   on its own, with no newer message in that conversation, shows up at the next re-check of the last
+   3 days (every 6 hours).
+4. **Thread reply.** Reply in a thread and choose **Sync now**. Expected: the thread's item includes
+   the reply.
+5. **Rename.** Rename a test channel. Expected: items rebuilt after the rename (new messages, or the
+   6-hourly re-check) carry the new name; older days keep the old one.
+6. **Delete.** Delete a message posted today and post another. Choose **Sync now**. Expected: today's
+   item no longer contains the deleted message. A deletion in an older day shows up at the next
+   re-check of the last 3 days.
+7. **Unicode.** Post `Grüße 🍰 日本語 test`. Expected: the text shows as written and is searchable.
+8. **Large file.** Upload a 50 MB file to the channel. Expected: the message shows `[file: <name>]`;
+   the file's content is not indexed.
+9. **Revoke.** Uninstall the app from the workspace and choose **Sync now**. Expected: **Needs
+   sign-in** (health `reconnect`) with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused." and the fix to paste a new token; **Set token** with a new token recovers it.
+10. **Egress.** Expected: the **Privacy** page shows traffic under `sync:slack`, to `slack.com` only.
+
+### Checking Notion with a real account
+
+Share one test page (with a child page and a small database) with the integration.
+
+1. **Connect.** Create the integration with **Read content** only and paste the secret. Expected: the
+   integration's **Capabilities** show no update or insert rights. The source syncs only what you
+   shared.
+2. **First sync.** Expected: one item per shared page, per child page and per database row, plus one
+   per database. Pages you did not share are absent.
+3. **Edit.** Change a paragraph and choose **Sync now**. Expected: the new text is searchable. Notion
+   rounds edit times to the minute, so an edit a few seconds after the previous pass can need a second
+   **Sync now**.
+4. **Rename and move.** Rename the child page and move it under another shared page. Expected: the
+   item shows the new title.
+5. **Delete.** Move a page to Trash and choose **Sync now**. Expected: it disappears, at the latest at
+   the next full listing (every 6 hours). Removing the integration's connection from a page removes it
+   the same way.
+6. **Unicode.** Title a page `Notizen über Kuchen 🍰 日本語`. Expected: the title shows exactly that and
+   is searchable.
+7. **Large page and files.** Add a 20 MB PDF and an image to a page, and paste a very long text.
+   Expected: files appear by caption or name only (Notion's file links expire, so they are not kept);
+   a page past 3,000 blocks ends with "… (some nested content was not included)", and its text is cut
+   at 500,000 characters.
+8. **Revoke.** Delete the integration at notion.so/profile/integrations and choose **Sync now**.
+   Expected: **Needs sign-in** (health `reconnect`); **Set token** with a new secret recovers it.
+9. **Egress.** Expected: traffic under `sync:notion`, to `api.notion.com` only.
+
+### Checking GitHub with a real account
+
+Use a fine-grained token, and set `repos` to one test repository for a short first sync.
+
+1. **Connect.** Create the token with read-only Issues, Pull requests, Discussions and Metadata, and
+   paste it. Expected: GitHub's token page lists only those four permissions, all read-only. With the
+   device flow instead, GitHub's approval page asks for `repo` and `read:discussion`: that is GitHub's
+   limit for OAuth Apps, not a sign that Nugget writes.
+2. **First sync.** Expected: one item per issue, pull request and discussion in the repository that
+   involves you (or all of them with `all_activity`), updated in the window.
+3. **Edit.** Comment on an issue and edit its body. Choose **Sync now**. Expected: the item shows both.
+   GitHub's search can lag by a minute or so.
+4. **Rename and move.** Change an issue's title, and transfer another to a second repository you can
+   read. Expected: the title updates on the next pass. The transferred issue disappears from the old
+   repository at the next full listing (daily), and appears under the new one if that repository is
+   in scope.
+5. **Delete.** Delete an issue (repository admins can). Expected: it disappears at the next full
+   listing, at most a day later. Closing an issue does not remove it.
+6. **Unicode.** Title an issue `Grüße 🍰 日本語 test`. Expected: the title shows exactly that and is
+   searchable.
+7. **Large issue.** Attach a large file to a comment, and paste a very long body. Expected: the file
+   appears as a link only; bodies are cut at 60,000 characters and threads at 300 comments.
+8. **Revoke.** Delete the token (or revoke the OAuth App under **Settings → Applications**) and choose
+   **Sync now**. Expected: **Needs sign-in** (health `reconnect`) with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused."; a new token, or **Sign in** with the device
+   flow, recovers it.
+9. **Egress.** Expected: traffic under `sync:github`, to `api.github.com` (and `github.com` for the
+   device flow) only.
+
+### Checking Linear with a real account
+
+Set `teams` to one test team for a short first sync.
+
+1. **Connect.** Paste a personal API key with read access, or connect with OAuth. Expected: Linear's
+   OAuth consent screen asks for read access only (the `read` scope).
+2. **First sync.** Expected: one item per issue assigned to you, created by you or that you
+   subscribe to, in that team, updated in the last 365 days.
+3. **Edit.** Change an issue's description and add a comment. Choose **Sync now**. Expected: the item
+   shows both.
+4. **Rename and move.** Rename an issue and move it to another team you sync. Expected: the same item
+   updates, with the new title and the new identifier. Moved to a team you do not sync, it disappears
+   at the next full listing (every 6 hours).
+5. **Delete.** Delete an issue (it goes to Linear's trash), and archive another. Choose **Sync now**.
+   Expected: both disappear from search.
+6. **Unicode.** Title an issue `Café ☕ 会議`. Expected: the title shows exactly that and is
+   searchable.
+7. **Large issue.** Attach a large file and paste a very long description. Expected: attachments are
+   not indexed; the description is cut at 60,000 characters and comments at 300.
+8. **Revoke.** Revoke the API key (or the OAuth app's access) in Linear's settings and choose **Sync
+   now**. Expected: **Needs sign-in** (health `reconnect`) with the reason "<source name> no longer accepts Nugget's sign-in, so syncing is paused."; a new key or **Sign in** recovers it.
+9. **Egress.** Expected: traffic under `sync:linear`, to `api.linear.app` only.

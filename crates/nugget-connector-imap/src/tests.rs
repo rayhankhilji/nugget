@@ -1,3 +1,4 @@
+mod conformance;
 mod server;
 
 use std::collections::HashMap;

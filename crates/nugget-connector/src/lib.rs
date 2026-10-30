@@ -17,8 +17,12 @@
 //!   names in [`nugget_core::secrets`]. Missing or rejected credentials → `Error::Unauthorized`.
 //! - Honour `cancel` promptly: return `Error::Cancelled`.
 
+pub mod health;
 pub mod http;
 mod registry;
+pub mod retry;
+#[cfg(feature = "testkit")]
+pub mod testkit;
 mod types;
 
 pub use registry::{AuthKind, ConnectorFactory, KindInfo, Registry};
