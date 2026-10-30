@@ -1,0 +1,12 @@
+[
+  { "id": "q1", "q": "When is my dentist appointment?", "expect_any": ["12 November", "November 12", "12/11", "11/12", "Nov 12", "12 Nov"], "source": "dentist" },
+  { "id": "q2", "q": "What did Priya say about the Harbor budget?", "expect_any": ["contingency", "10%", "10 percent"], "source": "Harbor" },
+  { "id": "q3", "q": "What is the hotel booking reference for Lisbon?", "expect_any": ["QZ8-1142"], "source": "Lisbon" },
+  { "id": "q4", "q": "Who has our spare key?", "expect_any": ["Ines"], "source": "House" },
+  { "id": "q5", "q": "When will Saltmarsh confirm the API rate limits?", "expect_any": ["6 November", "November 6", "Nov 6", "6 Nov"], "source": "Saltmarsh" },
+  { "id": "q6", "q": "What time do I need to pick up the cake on Saturday and from where?", "expect_any": ["Bramble"], "source": "Saturday" },
+  { "id": "q7", "q": "Which warehouses are in the migration test?", "expect_any": ["Kestrel", "Dunmore", "Ashby"], "source": "Migration" },
+  { "id": "q8", "q": "What is my car insurance policy number?", "expect_any": ["HL-77310"], "source": "insurance" },
+  { "id": "q9", "q": "What is the capital of my dentist's cat?", "expect_any": [], "abstain": true, "source": null },
+  { "id": "q10", "q": "When does Leo Marchetti start?", "expect_any": ["16 November", "November 16", "Nov 16", "16 Nov"], "source": "Leo" }
+]

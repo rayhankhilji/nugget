@@ -1,0 +1,12 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//gg6//qa//EN
+BEGIN:VEVENT
+UID:gg6-steering@harbor-co.test
+DTSTART:20261109T140000Z
+DTEND:20261109T150000Z
+SUMMARY:Harbor steering meeting
+LOCATION:Room Fjord, 3rd floor
+DESCRIPTION:Agenda: budget, Saltmarsh rate limits, migration test date.
+END:VEVENT
+END:VCALENDAR
