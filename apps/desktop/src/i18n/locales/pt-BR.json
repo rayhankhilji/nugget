@@ -1166,7 +1166,7 @@
   "graph.help": "Arraste para mover, role para aplicar zoom, clique em uma entidade para abri-la e clique duas vezes para centralizar nela. Com o grafo em foco: as setas vão para a entidade mais próxima naquela direção (Shift+setas movem a visualização), Tab e Shift+Tab ou N e P percorrem as entidades, Enter abre, C centraliza, Esc limpa a seleção, + e − aplicam zoom, F ou 0 ajusta à tela.",
   "graph.hint": "Arraste para mover · role para dar zoom · clique para abrir",
   "graph.keysTitle": "Atalhos de teclado",
-  "graph.fitTitle": "Ajustar o grafo inteiro à tela (F)",
+  "graph.fitTitle": "Ajustar o grafo à tela (F). Pressione de novo para incluir entidades sem conexões.",
   "graph.legend": "Legenda",
   "graph.noneThatWay": "Nenhuma entidade nessa direção.",
   "merge.title": "Mesclar com {name}",

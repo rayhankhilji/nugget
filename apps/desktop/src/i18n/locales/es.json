@@ -1166,7 +1166,7 @@
   "graph.help": "Arrastra para moverte, desplázate para hacer zoom, haz clic en una entidad para abrirla y doble clic para centrar el grafo en ella. Con el grafo enfocado: las flechas van a la entidad más cercana en esa dirección (Mayús+flechas desplaza la vista), Tab y Mayús+Tab o N y P recorren las entidades, Intro abre, C centra, Escape borra la selección, + y − hacen zoom, F o 0 ajusta a la vista.",
   "graph.hint": "Arrastra para desplazarte · desplázate para hacer zoom · haz clic para abrir",
   "graph.keysTitle": "Atajos de teclado",
-  "graph.fitTitle": "Ajustar todo el grafo a la vista (F)",
+  "graph.fitTitle": "Ajustar el grafo a la vista (F). Pulsa de nuevo para incluir las entidades sin conexiones.",
   "graph.legend": "Leyenda",
   "graph.noneThatWay": "No hay ninguna entidad en esa dirección.",
   "merge.title": "Combinar con {name}",

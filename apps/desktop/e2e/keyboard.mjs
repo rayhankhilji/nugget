@@ -474,10 +474,14 @@ export async function keyboardScenario({ browser, bin }) {
 
       await page.keyboard.press(`${MOD}+1`);
       await pageMain(page, "app.nav.today").waitFor();
-      // Known action kinds show a short verb ("Draft reply"); the daemon's full label is the tooltip.
+      // Known action kinds show a short verb ("Draft reply"); the accessible name adds the
+      // daemon's full label ("Draft reply: Draft a reply to Ana") so two such actions differ.
       let actionName = action.label;
       try {
-        actionName = t(`today.actionKind.${action.kind}`);
+        const short = t(`today.actionKind.${action.kind}`);
+        if (short && !short.startsWith("today.")) {
+          actionName = short === action.label ? short : t("today.actionFullName").replace("{label}", short).replace("{full}", action.label);
+        }
       } catch {
         /* an unknown kind keeps the daemon's label */
       }

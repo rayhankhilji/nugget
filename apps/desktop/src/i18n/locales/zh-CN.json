@@ -1166,7 +1166,7 @@
   "graph.help": "拖动可移动，滚动可缩放，单击实体可打开，双击可将其设为中心。图谱获得焦点时：方向键跳到该方向上最近的实体（Shift+方向键平移），Tab 和 Shift+Tab 或 N 和 P 在实体间切换，Enter 打开，C 设为中心，Esc 清除选择，+ 和 − 缩放，F 或 0 适应窗口。",
   "graph.hint": "拖动以平移 · 滚动以缩放 · 点击以打开",
   "graph.keysTitle": "键盘快捷键",
-  "graph.fitTitle": "使整个图谱适应窗口 (F)",
+  "graph.fitTitle": "使图谱适应窗口 (F)。再按一次可包含未连接的实体。",
   "graph.legend": "图例",
   "graph.noneThatWay": "该方向上没有实体。",
   "merge.title": "与 {name} 合并",

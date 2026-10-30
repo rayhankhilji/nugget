@@ -71,6 +71,8 @@ export function TodayPage() {
   const [status, setStatus] = useState("");
   /** Cards acted on here, hidden until the next list arrives. */
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
+  /** Cards acted on this visit: kept out of the brief even if its copy is older than the action. */
+  const [acted, setActed] = useState<ReadonlySet<string>>(new Set());
   const [action, setAction] = useState<{ card: CardView; action: CardActionView } | null>(null);
   const seen = useRef(new Set<string>());
   const inboxRef = useRef<HTMLHeadingElement>(null);
@@ -124,9 +126,12 @@ export function TodayPage() {
     try {
       await proactiveApi.cardsFeedback({ card_id: card.id, ...request });
       setHidden((h) => new Set(h).add(card.id));
+      setActed((h) => new Set(h).add(card.id));
       setStatus(done);
       inboxRef.current?.focus();
       cards.reload();
+      // The brief lists cards too: refresh it so an acted-on card doesn't linger there.
+      brief.reload();
       metrics.reload();
       learning.reload();
     } catch (e) {
@@ -147,7 +152,7 @@ export function TodayPage() {
   const visible = (list?.cards ?? []).filter((c) => !hidden.has(c.id));
   const disabled = list !== undefined && !list.enabled;
   // Cards in the inbox (shown, or just acted on and hidden until the next list): not repeated in the brief.
-  const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden]), [list, hidden]);
+  const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden, ...acted]), [list, hidden, acted]);
   const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
   return (

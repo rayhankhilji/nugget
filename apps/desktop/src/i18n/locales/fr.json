@@ -1166,7 +1166,7 @@
   "graph.help": "Faites glisser pour déplacer, faites défiler pour zoomer, cliquez sur une entité pour l’ouvrir, double-cliquez pour centrer le graphe sur elle. Quand le graphe a le focus : les flèches vont à l’entité la plus proche dans cette direction (Maj+flèches déplacent la vue), Tab et Maj+Tab ou N et P parcourent les entités, Entrée ouvre, C centre, Échap efface la sélection, + et − zooment, F ou 0 ajuste la vue.",
   "graph.hint": "Faites glisser pour vous déplacer · faites défiler pour zoomer · cliquez pour ouvrir",
   "graph.keysTitle": "Raccourcis clavier",
-  "graph.fitTitle": "Ajuster tout le graphe à la vue (F)",
+  "graph.fitTitle": "Ajuster le graphe à la vue (F). Appuyez de nouveau pour inclure les entités non connectées.",
   "graph.legend": "Légende",
   "graph.noneThatWay": "Aucune entité dans cette direction.",
   "merge.title": "Fusionner avec {name}",
