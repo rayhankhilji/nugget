@@ -357,8 +357,8 @@ async fn gmail_backfill_across_many_pages_drops_and_duplicates_nothing() {
             assert!(replica.get(&format!("m{p}x{i}")).is_some());
         }
     }
-    // Start, one per page boundary, and the final commit.
-    assert_eq!(sink.checkpoint_calls(), 1 + 5 + 1);
+    // Start, one per page boundary, the closing cursor, and the final commit.
+    assert_eq!(sink.checkpoint_calls(), 1 + 5 + 1 + 1);
     h.assert_egress("sync:gmail").await;
 }
 
@@ -711,8 +711,12 @@ async fn regression_gmail_one_bad_message_does_not_stop_the_pass() {
         .await
         .unwrap();
     assert_eq!(replica.keys(), vec!["m3", "m5"]);
-    // Malformed answers are not retried forever.
-    assert!(out.get("refetch").is_none(), "{out}");
+    // The bad answers are carried with their failure counts (never indexed under the wrong
+    // key); they are dropped once they have failed in `MAX_ATTEMPTS` passes.
+    assert_eq!(
+        out["refetch"],
+        json!([{"id": "m1", "n": 1}, {"id": "m2", "n": 1}, {"id": "m4", "n": 1}])
+    );
     h.assert_egress("sync:gmail").await;
 }
 
@@ -743,7 +747,7 @@ async fn regression_gmail_message_5xx_is_carried_and_refetched() {
     assert_eq!(replica.keys(), vec!["m1", "m3"]);
     assert_eq!(
         out,
-        json!({"phase": "incremental", "history_id": "5", "refetch": ["m2"]})
+        json!({"phase": "incremental", "history_id": "5", "refetch": [{"id": "m2", "n": 1}]})
     );
 
     // The next pass fetches it again.
@@ -795,6 +799,15 @@ async fn gmail_backfill_and_incremental_survive_a_crash_anywhere() {
     gm_mount_profile(&h, "900").await;
     gm_mount_pages(&h, 3, 2).await;
     gm_mount_any_message(&h).await;
+    // Nothing new after the backfill: once its closing cursor is committed, a resumed pass
+    // runs the history from it.
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .and(query_param("startHistoryId", "900"))
+        .respond_with(gm_history(json!([]), None, "900"))
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
     // History for the incremental pass (and the follow-up passes the kit runs).
     Mock::given(method("GET"))
         .and(path(format!("{GM}/history")))
@@ -1967,7 +1980,9 @@ async fn regression_gdrive_export_5xx_is_carried_and_retried() {
     assert_eq!(replica.keys(), vec!["ok1"]);
     assert_eq!(
         out,
-        json!({"v": 1, "changes_token": "101", "retry": ["d1", "s1", "k1", "b1"]})
+        json!({"v": 1, "changes_token": "101", "retry": [
+            {"id": "d1", "n": 1}, {"id": "s1", "n": 1}, {"id": "k1", "n": 1}, {"id": "b1", "n": 1}
+        ]})
     );
     let out = run_pass(&*conn, Some(out), &ReplicaSink::new(replica.clone()))
         .await
@@ -2053,4 +2068,413 @@ async fn gdrive_listing_and_changes_survive_a_crash_anywhere() {
     .await;
     assert_eq!((report.sends, report.checkpoints), (4, 3), "{report:?}");
     h.assert_egress("sync:gdrive").await;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review follow-ups: carried failures never block a source
+// ---------------------------------------------------------------------------------------------
+
+#[tokio::test]
+async fn regression_gmail_poison_messages_cannot_block_a_source() {
+    // Before the fix eight messages that always fail ended every pass at the same history page
+    // (the streak counted them every time, and the failure counts were never saved).
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let replica = Replica::new();
+    gm_seed(&replica, "p0", "1@1");
+    let added: Vec<Value> = (0..9)
+        .map(|i| json!({"id": format!("{}", 101 + i), "messagesAdded": [{"message": {"id": format!("p{i}"), "labelIds": ["INBOX"]}}]}))
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .and(query_param("startHistoryId", "100"))
+        .respond_with(gm_history(json!(added), None, "200"))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .and(query_param("startHistoryId", "200"))
+        .respond_with(gm_history(json!([]), None, "200"))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(format!("^{GM}/messages/p[0-9]$")))
+        .respond_with(server_error(500, None))
+        .mount(&h.server)
+        .await;
+    let conn = gmail_conn(&h, replica.clone(), fast_retry(0));
+    let sink = ReplicaSink::new(replica.clone());
+    let r = run_pass(
+        &*conn,
+        Some(json!({"phase": "incremental", "history_id": "100"})),
+        &sink,
+    )
+    .await;
+    assert!(
+        matches!(r, Err(Error::Network(_))),
+        "an outage-like run: {r:?}"
+    );
+    // The counts were saved at the last position.
+    let mut cursor = sink.committed().unwrap();
+    assert_eq!(cursor["history_id"], "100");
+    assert_eq!(cursor["refetch"].as_array().unwrap().len(), 8);
+    assert!(
+        cursor["refetch"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|c| c["n"] == 1)
+    );
+    // Every later pass completes, and the poison is dropped after the limit.
+    let mut passes = 0;
+    while cursor.get("refetch").is_some() {
+        passes += 1;
+        assert!(passes <= 8, "poison never dropped: {cursor}");
+        cursor = run_pass(&*conn, Some(cursor), &ReplicaSink::new(replica.clone()))
+            .await
+            .unwrap();
+        assert_eq!(cursor["history_id"], "200");
+    }
+    // A history-phase failure keeps the indexed version.
+    assert_eq!(replica.get("p0").unwrap().version.as_deref(), Some("1@1"));
+    h.assert_egress("sync:gmail").await;
+}
+
+#[tokio::test]
+async fn regression_gmail_deletes_do_not_reset_the_failure_streak() {
+    // Before the fix every delete in a history page reset the streak, so an outage between
+    // deletes never ended the pass.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    let records: Vec<Value> = (0..8)
+        .flat_map(|i| {
+            [
+                json!({"id": format!("{}", 101 + 2 * i), "messagesAdded": [{"message": {"id": format!("f{i}"), "labelIds": ["INBOX"]}}]}),
+                json!({"id": format!("{}", 102 + 2 * i), "messagesDeleted": [{"message": {"id": format!("d{i}")}}]}),
+            ]
+        })
+        .collect();
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .respond_with(gm_history(json!(records), None, "200"))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path_regex(format!("^{GM}/messages/f[0-9]$")))
+        .respond_with(server_error(503, None))
+        .mount(&h.server)
+        .await;
+    let replica = Replica::new();
+    let conn = gmail_conn(&h, replica.clone(), fast_retry(0));
+    let r = run_pass(
+        &*conn,
+        Some(json!({"phase": "incremental", "history_id": "100"})),
+        &ReplicaSink::new(replica),
+    )
+    .await;
+    assert!(matches!(r, Err(Error::Network(_))), "{r:?}");
+}
+
+#[tokio::test]
+async fn regression_gmail_refetch_survives_history_expiry() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&h.server)
+        .await;
+    gm_mount_profile(&h, "300").await;
+    gm_mount_list(&h, &["m1"]).await;
+    gm_mount_any_message(&h).await;
+    let replica = Replica::new();
+    let conn = gmail_conn(&h, replica.clone(), fast_retry(0));
+    let sink = ReplicaSink::new(replica.clone());
+    let out = run_pass(
+        &*conn,
+        Some(
+            json!({"phase": "incremental", "history_id": "100", "refetch": [{"id": "m7", "n": 2}]}),
+        ),
+        &sink,
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, json!({"phase": "incremental", "history_id": "300"}));
+    assert_eq!(replica.keys(), vec!["m1", "m7"]);
+    // The resync's start carried the list.
+    let cps = sink.checkpoints.lock().unwrap().clone();
+    assert_eq!(cps[0]["phase"], "backfill");
+    assert_eq!(cps[0]["refetch"], json!([{"id": "m7", "n": 2}]));
+    h.assert_egress("sync:gmail").await;
+}
+
+#[tokio::test]
+async fn regression_gmail_refetch_of_a_deleted_message_deletes_it() {
+    // An older cursor (bare ids) whose carried message was deleted upstream.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/history")))
+        .respond_with(gm_history(json!([]), None, "101"))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/messages/m3")))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&h.server)
+        .await;
+    let replica = Replica::new();
+    gm_seed(&replica, "m3", "1@1");
+    let conn = gmail_conn(&h, replica.clone(), fast_retry(0));
+    let out = run_pass(
+        &*conn,
+        Some(json!({"phase": "incremental", "history_id": "100", "refetch": ["m3"]})),
+        &ReplicaSink::new(replica.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, json!({"phase": "incremental", "history_id": "101"}));
+    assert!(replica.is_empty());
+    h.assert_egress("sync:gmail").await;
+}
+
+#[tokio::test]
+async fn gmail_message_cap_is_on_the_raw_size() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    gm_mount_profile(&h, "5").await;
+    gm_mount_list(&h, &["big", "small"]).await;
+    // Its JSON fits the download cap, but the decoded message is over the raw cap.
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/messages/big")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(gm_message(
+            "big",
+            "3",
+            &["INBOX"],
+            "Big",
+            &big_text(40 * 1024),
+        )))
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{GM}/messages/small")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(gm_message(
+            "small",
+            "3",
+            &["INBOX"],
+            "Small",
+            &big_text(12 * 1024),
+        )))
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+    let replica = Replica::new();
+    let conn = gmail_factory(&h, fast_retry(0))
+        .with_max_message_bytes(16 * 1024)
+        .build(&gmail_settings(), ctx_with(&h, replica.clone()))
+        .unwrap();
+    let out = run_pass(&*conn, None, &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(replica.keys(), vec!["small"]);
+    assert!(out.get("refetch").is_none(), "{out}");
+}
+
+#[tokio::test]
+async fn regression_gdrive_poison_files_keep_their_version_and_are_dropped() {
+    // Before the fix a carried file that kept failing was retried forever, and enough of
+    // them ended every pass.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    drive_mount_start(&h, start_token("100")).await;
+    let x1 = dfile("x1", "x1.txt", "text/plain", "2");
+    Mock::given(method("GET"))
+        .and(path(format!("{DRIVE}/files")))
+        .respond_with(files_page(vec![x1.clone(), txt("ok1")], None))
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{DRIVE}/files/x1")))
+        .and(query_param("alt", "media"))
+        .respond_with(server_error(500, None))
+        .with_priority(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{DRIVE}/files/x1")))
+        .and(query_param_is_missing("alt"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(x1))
+        .mount(&h.server)
+        .await;
+    drive_mount_changes(&h, "100", changes_page(vec![], None, Some("101"))).await;
+    drive_mount_changes(&h, "101", changes_page(vec![], None, Some("101"))).await;
+    drive_mount_content(&h).await;
+    // Indexed before; the cursor was reset, so this is a reconciling listing.
+    let replica = Replica::new();
+    let mut d = Document::new("x1", "text/plain", Content::Text("old".into()));
+    d.version = Some("1|".into());
+    replica.apply(&Change::Upsert(d));
+    let conn = drive_conn(&h, replica.clone(), fast_retry(0));
+    let mut cursor = run_pass(&*conn, None, &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(cursor["retry"], json!([{"id": "x1", "n": 1}]));
+    let mut passes = 0;
+    while cursor.get("retry").is_some() {
+        passes += 1;
+        assert!(passes <= 6, "poison never dropped: {cursor}");
+        cursor = run_pass(&*conn, Some(cursor), &ReplicaSink::new(replica.clone()))
+            .await
+            .unwrap();
+    }
+    assert_eq!(passes, 5);
+    // Through all of it the indexed version stayed.
+    let x = replica.get("x1").unwrap();
+    assert_eq!(
+        (x.version.as_deref(), x.content.as_str()),
+        (Some("1|"), "old")
+    );
+    assert!(replica.get("ok1").is_some());
+    h.assert_egress("sync:gdrive").await;
+}
+
+#[tokio::test]
+async fn regression_gdrive_poison_files_cannot_block_a_source() {
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    drive_mount_start(&h, start_token("100")).await;
+    drive_mount_pages(&h, 1, 9).await;
+    Mock::given(method("GET"))
+        .and(path_regex(format!("^{DRIVE}/files/f0x[0-9]$")))
+        .and(query_param("alt", "media"))
+        .respond_with(server_error(503, None))
+        .mount(&h.server)
+        .await;
+    drive_mount_changes(&h, "100", changes_page(vec![], None, Some("101"))).await;
+    let replica = Replica::new();
+    let conn = drive_conn(&h, replica.clone(), fast_retry(0));
+    let sink = ReplicaSink::new(replica.clone());
+    let r = run_pass(&*conn, None, &sink).await;
+    assert!(matches!(r, Err(Error::Network(_))), "{r:?}");
+    let committed = sink.committed().unwrap();
+    assert_eq!(
+        committed["retry"].as_array().unwrap().len(),
+        8,
+        "{committed}"
+    );
+    // The next pass gets past them.
+    let out = run_pass(&*conn, Some(committed), &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(out["changes_token"], "101");
+    assert_eq!(out["retry"].as_array().unwrap().len(), 9);
+}
+
+#[tokio::test]
+async fn regression_gdrive_refused_carried_file_is_removed_not_fatal() {
+    // Before the fix a 403 on one carried file (permissions changed) was `Unauthorized` for
+    // the whole source.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    drive_mount_changes(&h, "101", changes_page(vec![], None, Some("102"))).await;
+    Mock::given(method("GET"))
+        .and(path(format!("{DRIVE}/files/x1")))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({"error": {
+            "code": 403, "message": "The user does not have sufficient permissions for this file.",
+            "errors": [{"reason": "insufficientFilePermissions"}]
+        }})))
+        .mount(&h.server)
+        .await;
+    let replica = Replica::new();
+    let mut d = Document::new("x1", "text/plain", Content::Text("old".into()));
+    d.version = Some("1|".into());
+    replica.apply(&Change::Upsert(d));
+    let conn = drive_conn(&h, replica.clone(), fast_retry(0));
+    let out = run_pass(
+        &*conn,
+        Some(json!({"v": 1, "changes_token": "101", "retry": [{"id": "x1", "n": 1}]})),
+        &ReplicaSink::new(replica.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, json!({"v": 1, "changes_token": "102"}));
+    assert!(replica.is_empty());
+    h.assert_egress("sync:gdrive").await;
+}
+
+#[tokio::test]
+async fn regression_gcal_resync_with_malformed_events() {
+    // Before the fix a malformed indexed event failed every resync (its existence check
+    // parsed the whole event), a malformed cancellation was lost, and `"attendees": null`
+    // made an event malformed.
+    let h = Harness::new().await;
+    h.seed_tokens("at", false);
+    Mock::given(method("GET"))
+        .and(path(EVENTS))
+        .and(query_param("syncToken", "st1"))
+        .respond_with(ResponseTemplate::new(410))
+        .mount(&h.server)
+        .await;
+    let mut e4 = ev_now("e4", "Null lists", "\"1\"", 1);
+    e4["attendees"] = Value::Null;
+    let mut e5 = ev_now("e5", "Null flags", "\"1\"", 1);
+    e5["attendees"] = json!([{"email": "a@example.com", "optional": null, "resource": null}]);
+    Mock::given(method("GET"))
+        .and(path(EVENTS))
+        .and(query_param_is_missing("syncToken"))
+        .respond_with(cal_page(
+            vec![
+                json!({"id": "e1", "status": "confirmed", "start": "bad"}),
+                json!({"id": "e2", "status": "cancelled", "start": 5}),
+                e4,
+                e5,
+            ],
+            None,
+            Some("st2"),
+        ))
+        .mount(&h.server)
+        .await;
+    // e3 was not listed; its check answers with a malformed (but not cancelled) event.
+    Mock::given(method("GET"))
+        .and(path(format!("{EVENTS}/e3")))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"id": "e3", "status": "confirmed", "start": "bad"})),
+        )
+        .expect(1)
+        .mount(&h.server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{EVENTS}/e1")))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&h.server)
+        .await;
+    let replica = Replica::new();
+    let s = OffsetDateTime::now_utc().unix_timestamp() + 86_400;
+    for id in ["e1", "e2", "e3"] {
+        let mut d = Document::new(
+            format!("primary/{id}"),
+            "text/plain",
+            Content::Text(id.into()),
+        );
+        d.version = Some(format!("\"1\"#{s}:{}", s + 3600));
+        replica.apply(&Change::Upsert(d));
+    }
+    let conn = gcal_conn(&h, replica.clone(), fast_retry(0));
+    let out = run_pass(
+        &*conn,
+        Some(json!({"v": 1, "calendars": {"primary": {"sync_token": "st1"}}})),
+        &ReplicaSink::new(replica.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(out["calendars"]["primary"]["sync_token"], "st2");
+    assert_eq!(
+        replica.keys(),
+        vec!["primary/e1", "primary/e3", "primary/e4", "primary/e5"]
+    );
+    assert_eq!(replica.get("primary/e1").unwrap().content, "e1");
+    h.assert_egress("sync:gcal").await;
 }

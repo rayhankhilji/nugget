@@ -30,10 +30,16 @@
 //! stubs, so raising the size cap fetches them again. The drive id lets every file of a shared
 //! drive the user left (or that was deleted) be removed when Drive reports only the drive.
 //!
-//! One bad file never stops a pass: a file whose content keeps failing (5xx or network after
-//! the in-pass retries) keeps its indexed version and is carried in the cursor as
-//! `"retry":["<id>",...]`, then fetched again (`files.get`) at the end of the next pass. Only
-//! [`MAX_FAILURE_STREAK`] failures in a row (an outage, not one file) end the pass.
+//! One bad file never stops a pass: a file whose content fails (5xx or network after the
+//! in-pass retries, or a malformed answer) keeps its indexed version (it still counts as
+//! listed) and is carried in the cursor as `"retry":[{"id":"<id>","n":<passes failed>},...]`
+//! (bare ids from older cursors read as `n: 0`), fetched again (`files.get`) at the end of the
+//! next pass, and dropped with a warning after failing in
+//! [`MAX_ATTEMPTS`](crate::carry::MAX_ATTEMPTS) passes. A carried file Drive now refuses (a
+//! 400 or non-rate 403, e.g. `insufficientFilePermissions`) is removed like a deleted one.
+//! [`MAX_FAILURE_STREAK`] first-time failures in a row (an outage, not one file) end the pass,
+//! after the failure counts are checkpointed; files that failed in earlier passes never count
+//! towards it, and failures while retrying carried files only stop the retrying.
 //!
 //! Scopes: `drive.readonly` only. It covers listing, the Changes API, downloads and Docs /
 //! Sheets / Slides exports (the Sheets and Slides read APIs accept it too); nothing is written.
@@ -54,7 +60,8 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::api::{GoogleApi, OAuthSettings, PageGuard, api_url};
+use crate::api::{GoogleApi, Media, OAuthSettings, PageGuard, api_url};
+use crate::carry::{Carried, Pending};
 use crate::drive_content::{ContentFetcher, Fetched, FileRef, is_container};
 use crate::settings::DriveSettings;
 use crate::text::truncate_chars;
@@ -81,6 +88,8 @@ const MAX_PAGES: u32 = 100_000;
 const MAX_FAILURE_STREAK: u32 = 8;
 /// Longest list of failed files carried in the cursor.
 const MAX_RETRY: usize = 1_000;
+/// Largest `files.get` answer for a carried file.
+const MAX_FILE_JSON: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 struct Cursor {
@@ -97,7 +106,7 @@ struct Cursor {
     changes_token: Option<String>,
     /// Files whose content failed, to fetch again.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    retry: Vec<String>,
+    retry: Vec<Carried>,
 }
 
 impl Cursor {
@@ -318,33 +327,32 @@ struct Pass {
     incomplete: bool,
     pages: u32,
     /// Files whose content failed in this or an earlier pass (see the module docs).
-    retry: Vec<String>,
+    retry: Pending,
     /// Files whose content was fetched in this pass (not retried again in it).
     tried: HashSet<String>,
-    /// Per-file failures in a row.
+    /// First-time per-file failures in a row.
     streak: u32,
+    /// The streak ended the pass: save the failure counts before failing.
+    tripped: bool,
 }
 
 impl Pass {
-    /// One file failed with `e`: carry it, unless failures keep coming (then fail the pass).
+    /// One file failed with `e`: carry it, unless first-time failures keep coming (then fail
+    /// the pass).
     fn failed(&mut self, key: &str, e: Error) -> Result<()> {
-        self.streak += 1;
-        if self.streak >= MAX_FAILURE_STREAK {
-            return Err(e);
-        }
-        tracing::warn!(
-            file = key,
-            "gdrive: content failed, retrying next pass: {e}"
-        );
-        if self.retry.len() < MAX_RETRY && !self.retry.iter().any(|r| r == key) {
-            self.retry.push(key.to_string());
+        if self.retry.fail(key, "gdrive", &e) {
+            self.streak += 1;
+            if self.streak >= MAX_FAILURE_STREAK {
+                self.tripped = true;
+                return Err(e);
+            }
         }
         Ok(())
     }
 
     /// Checkpoint `cur` with the carried failures.
     async fn checkpoint(&self, cur: &mut Cursor, sink: &dyn ChangeSink) -> Result<()> {
-        cur.retry = self.retry.clone();
+        cur.retry = self.retry.list();
         sink.checkpoint(cur.to_value()).await
     }
 
@@ -359,7 +367,7 @@ impl Pass {
     /// Forget `key`; `true` when it was indexed (so a delete is due).
     fn forget(&mut self, key: &str) -> bool {
         self.seen.remove(key);
-        self.retry.retain(|r| r != key);
+        self.retry.resolve(key);
         self.live.remove(key).is_some()
     }
 }
@@ -423,35 +431,55 @@ impl Connector for DriveConnector {
             seen: HashSet::new(),
             incomplete: false,
             pages: 0,
-            retry: std::mem::take(&mut cur.retry)
-                .into_iter()
-                .filter(|id| valid_id(id))
-                .take(MAX_RETRY)
-                .collect(),
+            retry: Pending::new(&std::mem::take(&mut cur.retry), MAX_RETRY, "gdrive file"),
             streak: 0,
             tried: HashSet::new(),
+            tripped: false,
         };
+        match self.run(&mut cur, &mut pass, sink, cancel).await {
+            Ok(()) => Ok(cur.to_value()),
+            Err(e) => {
+                if pass.tripped
+                    && let Err(ce) = pass.checkpoint(&mut cur, sink).await
+                {
+                    tracing::warn!(source = %self.ctx.source, "gdrive: could not save failure counts: {ce}");
+                }
+                Err(e)
+            }
+        }
+    }
+}
+
+impl DriveConnector {
+    /// One pass from `cur` (left at the last checkpointed position on error).
+    async fn run(
+        &self,
+        cur: &mut Cursor,
+        pass: &mut Pass,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         // Only what earlier passes carried in is retried at the end of this one.
-        let carried = pass.retry.clone();
+        let carried = pass.retry.take_carried();
         let mut restarts = 0u32;
         loop {
             let mut flow = Flow::Done;
             if cur.full {
-                flow = self.listing(&mut cur, &mut pass, sink, cancel).await?;
+                flow = self.listing(cur, pass, sink, cancel).await?;
             }
             if matches!(flow, Flow::Done) {
-                flow = self.changes(&mut cur, &mut pass, sink, cancel).await?;
+                flow = self.changes(cur, pass, sink, cancel).await?;
             }
             match flow {
                 Flow::Done => {
-                    self.retry_failed(carried, &mut pass, sink, cancel).await?;
-                    cur.retry = pass.retry;
-                    return Ok(cur.to_value());
+                    self.retry_failed(carried, pass, sink, cancel).await?;
+                    cur.retry = pass.retry.list();
+                    return Ok(());
                 }
                 Flow::Expired if restarts < MAX_RESTARTS => {
                     tracing::info!(source = %self.ctx.source, "gdrive token expired; reconciling listing");
                     restarts += 1;
-                    cur = Cursor::fresh(!pass.live.is_empty());
+                    *cur = Cursor::fresh(!pass.live.is_empty());
                     pass.seen.clear();
                     pass.incomplete = false;
                 }
@@ -688,6 +716,7 @@ impl DriveConnector {
     }
 
     /// Fetch the files carried from earlier failures again (`files.get`, then as if listed).
+    /// Every outcome is per file; a run of failures stops the retrying, never the pass.
     async fn retry_failed(
         &self,
         carried: Vec<String>,
@@ -695,46 +724,81 @@ impl DriveConnector {
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
+        pass.streak = 0;
         for id in carried {
-            if pass.tried.contains(&id) || !pass.retry.contains(&id) {
+            if pass.tried.contains(&id) || !pass.retry.is_pending(&id) {
                 // Fetched (or removed) earlier in this pass.
                 continue;
             }
-            pass.retry.retain(|r| *r != id);
+            if !valid_id(&id) {
+                pass.retry.resolve(&id);
+                continue;
+            }
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let url = api_url(
-                &self.base,
-                &["files", &id],
-                &[("fields", FILE_FIELDS), ("supportsAllDrives", "true")],
-            )?;
-            let resp = match self.api.get(&url, cancel).await {
-                Ok(r) => r,
-                Err(e @ Error::Network(_)) => {
-                    pass.failed(&id, e)?;
-                    continue;
+            let r = self.retry_one(&id, pass, sink, cancel).await;
+            match r {
+                Ok(()) => {}
+                Err(_) if pass.tripped => {
+                    // An outage: leave the rest for the next pass.
+                    pass.tripped = false;
+                    break;
                 }
                 Err(e) => return Err(e),
-            };
-            match resp.status.as_u16() {
-                200 => match serde_json::from_slice::<DriveFile>(&resp.body) {
-                    Ok(f) if f.id == id => self.apply_file(f, pass, sink, cancel).await?,
-                    _ => {
-                        tracing::warn!(source = %self.ctx.source, file = %id, "gdrive: unreadable files.get answer; dropping the retry")
-                    }
-                },
-                404 | 410 => {
-                    if pass.forget(&id) {
-                        sink.send(Change::Delete(ItemKey::new(id))).await?;
-                    }
-                }
-                s => {
-                    tracing::warn!(source = %self.ctx.source, file = %id, "gdrive files.get: HTTP {s}; dropping the retry")
-                }
             }
         }
         Ok(())
+    }
+
+    async fn retry_one(
+        &self,
+        id: &str,
+        pass: &mut Pass,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let url = api_url(
+            &self.base,
+            &["files", id],
+            &[("fields", FILE_FIELDS), ("supportsAllDrives", "true")],
+        )?;
+        let resp = match self
+            .api
+            .get_media(&url, "application/json", MAX_FILE_JSON, cancel)
+            .await
+        {
+            Ok(Media::Body(r)) => r,
+            Ok(Media::TooLarge) => {
+                return pass.failed(id, Error::Invalid("files.get answer too large".into()));
+            }
+            Ok(Media::Refused { status, reason, .. }) => {
+                // No longer readable by this user (permissions changed, app not authorized):
+                // gone from this source.
+                tracing::warn!(source = %self.ctx.source, file = %id, "gdrive files.get refused (HTTP {status} {reason}); removing it");
+                if pass.forget(id) {
+                    sink.send(Change::Delete(ItemKey::new(id))).await?;
+                }
+                return Ok(());
+            }
+            Err(e @ (Error::Network(_) | Error::Invalid(_) | Error::Other(_))) => {
+                return pass.failed(id, e);
+            }
+            Err(e) => return Err(e),
+        };
+        match resp.status.as_u16() {
+            200 => match serde_json::from_slice::<DriveFile>(&resp.body) {
+                Ok(f) if f.id == id => self.apply_file(f, pass, sink, cancel).await,
+                _ => pass.failed(id, Error::Invalid("unreadable files.get answer".into())),
+            },
+            404 | 410 => {
+                if pass.forget(id) {
+                    sink.send(Change::Delete(ItemKey::new(id))).await?;
+                }
+                Ok(())
+            }
+            s => pass.failed(id, Error::Other(format!("files.get: HTTP {s}"))),
+        }
     }
 
     async fn apply_change(
@@ -795,8 +859,6 @@ impl DriveConnector {
             return Ok(());
         }
         let key = file.id.clone();
-        // Carried again below if it fails again.
-        pass.retry.retain(|r| *r != key);
         if is_container(file.mime()) || !self.in_scope(&file) {
             if pass.forget(&key) {
                 sink.send(Change::Delete(ItemKey::new(key))).await?;
@@ -811,6 +873,7 @@ impl DriveConnector {
             .get(&key)
             .is_some_and(|v| v.as_deref() == Some(base.as_str()) || v.as_deref() == Some(&stub))
         {
+            pass.retry.resolve(&key);
             return Ok(());
         }
         let name = clean_line(file.name.as_deref().unwrap_or_default(), MAX_NAME);
@@ -833,11 +896,14 @@ impl DriveConnector {
         {
             Ok(f) => {
                 pass.streak = 0;
+                pass.retry.resolve(&key);
                 f
             }
-            // This file only (a 5xx or network failure after the retries): keep its indexed
-            // version and try again next pass.
-            Err(e @ Error::Network(_)) => return pass.failed(&key, e),
+            // This file only (a 5xx or network failure after the retries, a malformed answer):
+            // keep its indexed version and try again next pass.
+            Err(e @ (Error::Network(_) | Error::Invalid(_) | Error::Other(_))) => {
+                return pass.failed(&key, e);
+            }
             Err(e) => return Err(e),
         };
         let doc = match fetched {
