@@ -75,7 +75,7 @@ const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
  * What "Fit" frames: the connected entities when they are nearly all of them, so one or two
  * isolated nodes drifting to the edges don't shrink the main cluster to a corner.
  */
-function fitNodes(nodes: readonly SimNode[]): readonly SimNode[] {
+export function fitNodes(nodes: readonly SimNode[]): readonly SimNode[] {
   const linked = nodes.filter((n) => n.degree > 0);
   return linked.length >= 3 && linked.length >= nodes.length * 0.85 ? linked : nodes;
 }
@@ -343,10 +343,15 @@ export function GraphCanvas({
   };
 
   /** Fit the whole graph in view (until the user pans or zooms again). */
-  const fitNow = () => {
+  // Whether the view is the tight fit (connected entities only). Fit (button, F, 0) toggles: from
+  // the tight fit it frames every entity, so unconnected ones are never out of reach.
+  const tightFit = useRef(true);
+  const fitNow = (toggle = false) => {
     const { w, h } = sizeRef.current;
+    const all = toggle && tightFit.current && !userMoved.current;
     userMoved.current = false;
-    tRef.current = fitTransform(fitNodes(graphRef.current.nodes), w, h);
+    tightFit.current = !all;
+    tRef.current = fitTransform(all ? graphRef.current.nodes : fitNodes(graphRef.current.nodes), w, h);
   };
 
   const frame = () => {
@@ -363,7 +368,7 @@ export function GraphCanvas({
       // Keep the whole graph in view while it settles, until the user pans or zooms.
       if (!userMoved.current && gestureRef.current === null) {
         const { w, h } = sizeRef.current;
-        const target = fitTransform(fitNodes(graph.nodes), w, h);
+        const target = fitTransform(tightFit.current ? fitNodes(graph.nodes) : graph.nodes, w, h);
         const cur = tRef.current;
         const f = !again ? 1 : 0.2;
         tRef.current = { k: cur.k + (target.k - cur.k) * f, x: cur.x + (target.x - cur.x) * f, y: cur.y + (target.y - cur.y) * f };
@@ -638,7 +643,7 @@ export function GraphCanvas({
         case "0":
         case "f":
         case "F":
-          fitNow();
+          fitNow(true);
           break;
         case "n":
         case "N":
@@ -673,7 +678,7 @@ export function GraphCanvas({
   };
 
   const fit = () => {
-    fitNow();
+    fitNow(true);
     schedule();
   };
 

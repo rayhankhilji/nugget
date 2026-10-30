@@ -53,6 +53,14 @@ describe("Onboarding", () => {
     await flush();
     expect(container.querySelector("progress")?.getAttribute("value")).toBe("50");
     expect(container.textContent).toContain("Downloading · 50% · 1.3 GB of 2.5 GB");
+    // A download in progress doesn't set the step up yet (it can still fail): Continue would skip it.
+    const hint = () => container.querySelector("#ob-continue-hint");
+    expect(hint()?.textContent).toBe("Nothing set up here yet: Continue skips this step.");
+    expect(button(container, "Continue")!.getAttribute("aria-describedby")).toBe("ob-continue-hint");
+    await act(() => emit("nugget:models-progress", { id: "qwen3-4b-q4", downloaded: 2_500_000_000, total: 2_500_000_000, phase: "installed", error: null }));
+    await flush();
+    expect(hint()).toBeNull();
+    expect(button(container, "Continue")!.hasAttribute("aria-describedby")).toBe(false);
 
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Add your first source");
@@ -63,6 +71,9 @@ describe("Onboarding", () => {
     expect(byText(document.body, "dialog button", "Choose folders…")).toBeDefined();
     await click(document.querySelector<HTMLElement>('dialog button[aria-label="Close"]'));
     expect(document.querySelector("dialog")).toBeNull();
+    // The sources the daemon already has count: wait until the step knows about them.
+    await flush();
+    expect(hint()).toBeNull();
 
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("What Double Tap needs");
@@ -76,6 +87,13 @@ describe("Onboarding", () => {
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("You're all set");
     expect(container.textContent).toContain("Every step is done.");
+    // The summary says what was set up.
+    const summary = [...container.querySelectorAll(".ob-summary > div")].map((d) => d.textContent);
+    expect(summary[0]).toBe("AI modelOn this device (qwen3-4b-q4)");
+    expect(summary[1]).toBe("SourcesDocuments and Work mail");
+    expect(container.querySelectorAll(".ob-summary kbd").length).toBeGreaterThan(0);
+    // "Skip setup" keeps its slot on the last step but is hidden.
+    expect(button(container, "Skip setup")!.classList.contains("ob-invisible")).toBe(true);
     expect(onExit).not.toHaveBeenCalled();
     // The mocked daemon has an indexed source, so the last step points at Search.
     expect(container.textContent).toContain("1,234 items are indexed and searchable.");
@@ -112,6 +130,40 @@ describe("Onboarding", () => {
     const row = container.querySelector<HTMLElement>(".ob-index li")!;
     expect(row.dataset.phase).toBe("ready");
     expect(row.textContent).toContain("notes: 93 items indexed. Search works now.");
+  });
+
+  it("has nothing to skip on the welcome step", async () => {
+    mockDaemon();
+    const { container } = await render(<Onboarding connected onExit={() => {}} />);
+    expect(button(container, "Skip this step")).toBeUndefined();
+    expect(container.querySelector("#ob-continue-hint")).toBeNull();
+  });
+
+  it("summarises progress saved before setups were recorded without contradicting it", async () => {
+    mockDaemon({ sources_list: [], models_list: [], providers_list: [] });
+    const { container } = await render(
+      <Onboarding
+        connected
+        onExit={() => {}}
+        initial={{ ...INITIAL, step: "done", ai: "local", completed: ["welcome", "ai", "source", "permissions", "trigger"] }}
+      />,
+    );
+    await flush();
+    const summary = [...container.querySelectorAll(".ob-summary > div")].map((d) => d.textContent);
+    expect(summary[0]).toBe("AI modelOn this device");
+    expect(summary[1]).toBe("SourcesAdded");
+    expect(container.textContent).toContain("Every step is done.");
+  });
+
+  it("finds a key saved before when setup runs again", async () => {
+    mockDaemon();
+    const { container } = await render(<Onboarding connected onExit={() => {}} initial={{ ...INITIAL, step: "ai", ai: "byok" }} />);
+    await flush();
+    // The mocked daemon has an "anthropic" provider in its config.
+    expect(container.querySelector("#ob-continue-hint")).toBeNull();
+    await click(button(container, "Continue"));
+    expect(loadState().completed).toContain("ai");
+    expect(loadState().aiSetup).toEqual({ ai: "byok", what: "anthropic" });
   });
 
   it("offers one language picker on the welcome step, labelled, in the header", async () => {

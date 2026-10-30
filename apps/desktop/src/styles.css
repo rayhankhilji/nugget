@@ -1431,6 +1431,13 @@ h2.source-name {
   margin-inline-start: auto;
 }
 
+/* Why the submit can't go yet (Add folder), at the start of the footer. */
+.dialog-actions-hint {
+  margin: 0;
+  margin-inline-end: auto;
+  align-self: center;
+}
+
 details.advanced {
   margin: 0 0 var(--space-3);
 }

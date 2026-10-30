@@ -25,6 +25,8 @@ import {
   isCurrentStatus,
   isDroppedStatus,
   kindLabel,
+  MAX_QUOTE_CHARS,
+  truncateText,
   undoStatus,
   vaultLinks,
   type FactActionPlan,
@@ -533,13 +535,16 @@ function Fact({
             {c.evidence.map((ev, i) => {
               const e = formatEvidence(ev, sourceNames);
               e.source = sourceName(ev.item.source, sourceNames, sourceKinds);
-              if (!ev.title?.trim()) e.title = itemFileName(ev.item.key);
+              if (!ev.title?.trim()) e.title = itemFileName(ev.item.key, sourceKindOf(ev.item.source, sourceKinds)) ?? t("entity.untitled");
+              // Markdown stripped from the raw quote, then cut (so links and line starts are seen whole).
+              const plain = plainSnippet(ev.quote ?? "");
+              const cut = truncateText(plain, MAX_QUOTE_CHARS);
               const at = evidenceTime(ev);
               return (
                 <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${ev.chunk_id ?? i}`}>
-                  {e.quote ? (
-                    <blockquote className="evidence-quote" dir="auto" title={e.truncated ? ev.quote ?? undefined : undefined}>
-                      {plainSnippet(e.quote)}
+                  {plain ? (
+                    <blockquote className="evidence-quote" dir="auto" title={cut.truncated ? plain : undefined}>
+                      {cut.text}
                     </blockquote>
                   ) : (
                     <p className="muted small">{t("entity.noQuote")}</p>
@@ -602,7 +607,7 @@ function Mentions({
         {shown.map((m, i) => {
           const e = formatEvidence({ item: m.item, chunk_id: m.chunk_id, title: m.title, url: m.url, quote: null }, sourceNames);
           e.source = sourceName(m.item.source, sourceNames, sourceKinds);
-          if (!m.title?.trim()) e.title = itemFileName(m.item.key);
+          if (!m.title?.trim()) e.title = itemFileName(m.item.key, sourceKindOf(m.item.source, sourceKinds)) ?? t("entity.untitled");
           return (
             <li key={`${m.item.source}\u0000${m.item.key}\u0000${m.chunk_id ?? ""}\u0000${i}`}>
               <SourceIcon kind={sourceKindOf(m.item.source, sourceKinds)} size={14} />

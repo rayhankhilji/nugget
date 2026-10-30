@@ -175,14 +175,30 @@ function FormError({ error }: { error: unknown }) {
   );
 }
 
-function Actions({ onBack, busy, submitLabel, disabled = false }: { onBack: () => void; busy: boolean; submitLabel: string; disabled?: boolean }) {
+/**
+ * Back and submit. `blocked` says why submitting can't work yet: the submit stays focusable
+ * (aria-disabled, so pressing it explains) and the reason is shown next to it.
+ */
+function Actions({ onBack, busy, submitLabel, blocked }: { onBack: () => void; busy: boolean; submitLabel: string; blocked?: string | null }) {
   const t = useT();
+  const hintId = useId();
   return (
     <div className="dialog-actions">
+      {blocked && (
+        <p id={hintId} className="muted small dialog-actions-hint">
+          {blocked}
+        </p>
+      )}
       <button type="button" className="btn" onClick={onBack} disabled={busy}>
         {t("common.back")}
       </button>
-      <button type="submit" className="btn btn-primary" disabled={busy || disabled}>
+      <button
+        type="submit"
+        className="btn btn-primary"
+        disabled={busy}
+        aria-disabled={blocked ? true : undefined}
+        aria-describedby={blocked ? hintId : undefined}
+      >
         {busy ? (
           <>
             <Spinner label={t("addSource.working")} /> {submitLabel}
@@ -270,7 +286,10 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
     }
   };
 
-  const defaultName = roots.length === 1 ? baseName(roots[0]!) : roots.length > 1 ? t("addSource.folder.defaultMany") : t("addSource.folder.defaultNone");
+  // What an empty Name saves as: the folders listed plus a typed path not added yet.
+  const typed = draft.trim();
+  const named = typed && isAbsolutePath(typed) && !roots.includes(typed) ? [...roots, typed] : roots;
+  const defaultName = named.length === 1 ? baseName(named[0]!) : named.length > 1 ? t("addSource.folder.defaultMany") : t("addSource.folder.defaultNone");
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -360,7 +379,7 @@ function FolderForm({ kind, onBack, onClose, onAdded }: FormProps) {
         </Field>
       </details>
       <FormError error={error} />
-      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.folder.submit")} disabled={roots.length === 0 && !draft.trim()} />
+      <Actions onBack={onBack} busy={busy} submitLabel={t("addSource.folder.submit")} blocked={roots.length === 0 && !typed ? t("addSource.folder.needOneHint") : null} />
     </form>
   );
 }

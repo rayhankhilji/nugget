@@ -9,6 +9,18 @@ import { ErrorNote, Spinner } from "./ui";
 const RESULTS = 20;
 
 /**
+ * Something that tells two same-name entities apart: another alias, an identifier (an email),
+ * else the end of the id. Only used when the names collide.
+ */
+export function distinguishing(name: string, id: string, d: Pick<EntityDetail, "aliases" | "identifiers"> | null): string {
+  const alias = d?.aliases.find((a) => a.trim().toLocaleLowerCase() !== name.trim().toLocaleLowerCase());
+  if (alias) return alias;
+  const ident = d?.identifiers[0]?.[1];
+  if (ident) return ident;
+  return `#${id.slice(-6)}`;
+}
+
+/**
  * Merge another entity with `target`: pick it, choose which one stays, see what the result
  * will look like, then confirm. The merged-away id keeps resolving (links never break).
  */
@@ -39,6 +51,7 @@ export function MergeDialog({
   const otherDetail = other.data && other.data.id === picked?.id ? other.data : null;
 
   const into = keep === "target" ? target : otherDetail;
+  const sameName = picked !== null && picked.name.trim().toLocaleLowerCase() === target.name.trim().toLocaleLowerCase();
   const from = keep === "target" ? otherDetail : target;
 
   const submit = async (e: FormEvent) => {
@@ -105,14 +118,30 @@ export function MergeDialog({
               <input type="radio" name="merge-keep" checked={keep === "target"} onChange={() => setKeep("target")} />
               <span>
                 <bdi>{target.name}</bdi>{" "}
-                <span className="muted small">{t("merge.keepMeta", { kind: kindLabel(target.kind), claims: target.claims.length })}</span>
+                <span className="muted small">
+                  {t("merge.keepMeta", { kind: kindLabel(target.kind), claims: target.claims.length })}
+                  {sameName && (
+                    <>
+                      {" · "}
+                      <bdi>{distinguishing(target.name, target.id, target)}</bdi>
+                    </>
+                  )}
+                </span>
               </span>
             </label>
             <label className="check">
               <input type="radio" name="merge-keep" checked={keep === "other"} onChange={() => setKeep("other")} />
               <span>
                 <bdi>{picked.name}</bdi>{" "}
-                <span className="muted small">{t("merge.keepMeta", { kind: kindLabel(picked.kind), claims: picked.claims })}</span>
+                <span className="muted small">
+                  {t("merge.keepMeta", { kind: kindLabel(picked.kind), claims: picked.claims })}
+                  {sameName && (
+                    <>
+                      {" · "}
+                      <bdi>{distinguishing(picked.name, picked.id, otherDetail)}</bdi>
+                    </>
+                  )}
+                </span>
               </span>
             </label>
           </fieldset>

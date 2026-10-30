@@ -205,9 +205,18 @@ function EntityBrowser({
   const hasMore = (list.data?.length ?? 0) > PAGE_SIZE;
   const filtered = Boolean(query || kind);
   // Nothing extracted at all: no point offering search and kind filters.
-  const nothing = !filtered && page === 0 && list.data !== undefined && rows.length === 0;
+  // Only when the settled, unfiltered list is empty: never while a query or kind is set, typed but
+  // not yet debounced, or reloading (the stale result of an old query would unmount the field).
+  const nothing =
+    !filtered && !text.trim() && !kind && page === 0 && !list.loading && list.data !== undefined && rows.length === 0;
   const firstLoad = list.loading && !list.data;
-  const pages = !filtered && total != null && total > 0 ? Math.ceil(total / PAGE_SIZE) : null;
+  // Once the filters have been offered they stay mounted, so focus in them is never dropped.
+  const filtersShown = useRef(false);
+  const showFilters = filtersShown.current || (!nothing && !(firstLoad && !filtered) && !(list.error != null && !list.data));
+  filtersShown.current = showFilters;
+  // "of N" from the status count, but never fewer pages than the list itself shows.
+  const pages =
+    !filtered && total != null && total > 0 ? Math.max(Math.ceil(total / PAGE_SIZE), page + 1 + (hasMore ? 1 : 0)) : null;
   const from = page * PAGE_SIZE + 1;
   const to = page * PAGE_SIZE + rows.length;
 
@@ -230,7 +239,7 @@ function EntityBrowser({
 
   return (
     <section className="kb-list" aria-label={t("knowledge.entitiesLabel")}>
-      {!nothing && !(firstLoad && !filtered) && !(list.error != null && !list.data) && (
+      {showFilters && (
         <>
       <div className="field">
         <label htmlFor="kb-search" className="visually-hidden">

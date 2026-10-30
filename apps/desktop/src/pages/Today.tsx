@@ -146,7 +146,8 @@ export function TodayPage() {
   const list = cards.data;
   const visible = (list?.cards ?? []).filter((c) => !hidden.has(c.id));
   const disabled = list !== undefined && !list.enabled;
-  const listed = useMemo(() => new Set(visible.map((c) => c.id)), [visible]);
+  // Cards in the inbox (shown, or just acted on and hidden until the next list): not repeated in the brief.
+  const listed = useMemo(() => new Set([...(list?.cards ?? []).map((c) => c.id), ...hidden]), [list, hidden]);
   const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
   return (
@@ -170,7 +171,7 @@ export function TodayPage() {
         <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
       ) : (
         <>
-          <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} />
+          <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} inbox={visible.length} />
 
           <h2 id="today-inbox" ref={inboxRef} tabIndex={-1}>
             {t("today.inbox")}
@@ -253,6 +254,7 @@ function BriefSection({
   loading,
   onRetry,
   listed,
+  inbox,
 }: {
   brief: BriefView | undefined;
   error: unknown;
@@ -260,6 +262,8 @@ function BriefSection({
   onRetry: () => void;
   /** Cards shown under "Needs you": not repeated in the brief. */
   listed: ReadonlySet<string>;
+  /** Cards showing under "Needs you". */
+  inbox: number;
 }) {
   const t = useT();
   const headingId = useId();
@@ -278,7 +282,7 @@ function BriefSection({
     <section aria-labelledby={headingId} className="today-brief">
       <h2 id={headingId}>{t("today.brief.titleDate", { date: formatBriefDate(brief.date) })}</h2>
       {empty ? (
-        <p className="muted">{listed.size > 0 ? t("today.brief.nothingElse") : t("today.brief.empty")}</p>
+        <p className="muted">{inbox > 0 ? t("today.brief.nothingElse") : t("today.brief.empty")}</p>
       ) : (
         <div className="today-brief-grid">
           <BriefList title={t("today.brief.top")} items={top} />
@@ -469,7 +473,14 @@ function CardItem({
               const label = short ? t(short) : a.label;
               const full = short && a.label !== label ? a.label : undefined;
               return a.supported ? (
-                <button key={a.index} type="button" className="btn btn-small" title={full} onClick={() => onAction(a)}>
+                <button
+                  key={a.index}
+                  type="button"
+                  className="btn btn-small"
+                  title={full}
+                  aria-label={full ? t("today.actionFullName", { label, full }) : undefined}
+                  onClick={() => onAction(a)}
+                >
                   {label}
                 </button>
               ) : (
@@ -478,6 +489,7 @@ function CardItem({
                   type="button"
                   className="btn btn-small"
                   aria-disabled="true"
+                  aria-label={full ? t("today.actionFullName", { label, full }) : undefined}
                   aria-describedby={unsupportedId}
                   title={full ? `${full}. ${t("today.unsupported")}` : t("today.unsupported")}
                   onClick={(e) => e.preventDefault()}

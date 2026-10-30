@@ -99,6 +99,15 @@ describe("onboarding state machine", () => {
     expect(s.sources).toEqual(["Notes"]);
   });
 
+  it("counts steps completed in progress saved before setups were recorded", () => {
+    const old = parseState(JSON.stringify({ version: 1, step: "trigger", completed: ["welcome", "ai", "source"], skipped: [], ai: "local", finished: false }))!;
+    expect(stepGoalMet(old, "ai")).toBe(true);
+    expect(stepGoalMet(old, "source")).toBe(true);
+    // Once this run records a setup, that record decides.
+    expect(stepGoalMet({ ...old, aiSetup: { ai: "byok", what: "anthropic" } }, "ai")).toBe(false);
+    expect(stepGoalMet({ ...old, ai: "later" }, "ai")).toBe(false);
+  });
+
   it("restart keeps the AI choice", () => {
     const s = run({ type: "chooseAi", ai: "byok" }, { type: "skipAll" }, { type: "restart" });
     expect(s).toEqual({ ...INITIAL, ai: "byok" });
