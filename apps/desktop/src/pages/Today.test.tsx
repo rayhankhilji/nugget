@@ -178,6 +178,8 @@ describe("Today page", () => {
     expect(executes[1]).toEqual({ card_id: "c1", action: 0, digest: "d1", confirmed: true });
     expect(dialog.querySelector(".today-draft")?.textContent).toBe("Hi Ana, <i>numbers</i>");
     expect(dialog.querySelector("i")).toBeNull();
+    // Once the action ran, the dialog no longer says nothing has changed.
+    expect(dialog.textContent).not.toContain("This is a preview");
     await click(byText(dialog, "button", "Open in mail app"));
     expect(calls).toContain("open_mailto");
   });

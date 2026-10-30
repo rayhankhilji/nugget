@@ -1133,39 +1133,41 @@ mail before the numbers are quoted as product numbers.
   reasons ("before, with reasons") reproduces "before" exactly, metric for metric, and the
   reference engine and recency judge are unchanged.
 - **The crate learns per sender, domain, kind and thread** (`nugget_proactive::feedback`):
-  decayed accept and dismiss counts on each, bounded log-odds adjustments weighted by the reason
-  (*not important* counts fully on sender, domain and kind; *not relevant* half on kind), a
-  30-day half-life, and *already handled* hiding the thread until a newer message arrives. The
-  learning-off arm now also forgets these entries on every save.
+  decayed accept counts and reason-weighted dismissal penalties on each (a 60-day half-life),
+  turned into bounded log-odds adjustments (at most ±3 for a sender, ±1.5 for a domain, ±1 for a
+  kind, ±4 in total). *Not important* counts three times on sender and domain; *not relevant*
+  once, and half on the kind; *wrong info* barely; *already handled* teaches nothing about the
+  sender, and hides the thread's other conversation cards (unanswered, awaiting reply) that are
+  no newer than the dismissed one, never the user's own promises or commitments. A positive
+  kind effect cannot lift a card whose sender or domain was pushed down. Personal mailbox
+  domains get no domain entry. The shared logistic weights still learn; the old undecayed
+  per-sender weight moved into this layer (migrated on load). The learning-off arm now also
+  forgets these entries on every save.
 
 | Metric | before | after | learning off |
 |---|---|---|---|
-| precision@5 (target ≥ 0.7) | 0.849 | 0.847 | |
-| recall (target ≥ 0.8) | 0.997 | 0.974 | |
-| recall: unanswered / follow-up / commitment / meeting / renewal | 0.99 / 1.00 / 1.00 / 1.00 / 1.00 | 0.98 / 1.00 / 0.89 / 1.00 / 1.00 | |
-| distractor false-positive rate (target ≤ 0.05) | 0.031 | 0.033 | 0.063 |
-| FPR: newsletter / notification / bulk / answered / completed / cancelled / spam renewal | 0 / 0 / 0.21 / 0.03 / 0 / 0 / 0 | 0 / 0 / 0.22 / 0.03 / 0 / 0 / 0 | |
-| precision, days 1 to 10 → days 21 to 30 | 0.764 → 0.947 (+0.18) | 0.778 → 0.921 (+0.14) | → 0.750 |
-| gain over frozen weights, days 21 to 30 (target ≥ 0) | +0.197 | +0.171 | |
-| executed without approval (target 0) | 0 (63.6 probes, 38.1 executions per run) | 0 (63.4 probes, 37.1 executions per run) | |
-| shown per day / acceptance rate / accepted precision | 1.70 / 0.750 / 0.976 | 1.67 / 0.738 / 0.977 | |
+| precision@5 (target ≥ 0.7) | 0.849 | **0.883** | |
+| recall (target ≥ 0.8) | 0.997 | **0.997** | |
+| recall: unanswered / follow-up / commitment / meeting / renewal | 0.99 / 1.00 / 1.00 / 1.00 / 1.00 | 0.99 / 1.00 / 1.00 / 1.00 / 1.00 | |
+| distractor false-positive rate (target ≤ 0.05) | 0.031 | **0.018** | 0.063 |
+| FPR: newsletter / notification / bulk / answered / completed / cancelled / spam renewal | 0 / 0 / 0.21 / 0.03 / 0 / 0 / 0 | 0 / 0 / 0.10 / 0.03 / 0 / 0 / 0 | |
+| precision, days 1 to 10 → days 21 to 30 | 0.764 → 0.947 (+0.18) | 0.780 → 0.986 (+0.21) | → 0.750 |
+| gain over frozen weights, days 21 to 30 (target ≥ 0) | +0.197 | **+0.236** | |
+| executed without approval (target 0) | 0 (63.6 probes, 38.1 executions per run) | 0 (59.1 probes, 37.7 executions per run) | |
+| shown per day / acceptance rate / accepted precision | 1.70 / 0.750 / 0.976 | 1.61 / 0.779 / 0.984 | |
 
-Every target still passes, and early precision improves (+0.014), but on this world recall
-(−0.023) and late precision (−0.026) are worse than before. Two causes, from per-seed traces:
-
-- **"Already handled" hides a promise in the same thread.** In thread `t-112` Priya asks for a
-  scorecard and Sam replies the same day, "I'll send the hiring scorecard by 2026-09-18". The
-  adapter's arrival times wrap within a busy day (`8 + n mod 10` hours), so the reply is stamped
-  before the question; the crate shows the question as unanswered (the one answered-thread false
-  positive, in before and after alike) and the user dismisses it as already handled. That
-  suppresses the whole thread, including Sam's own promise (gold `g-023`, due days 16 to 18),
-  which is then missed in 27 of 30 seeds. This accounts for all of the commitment recall drop.
-- **Repeat bulk senders creep back over the threshold.** One *not important* dismissal of
-  `success@acme-crm.test` gives its later cards about −1.3 to −1.75 (sender) and −0.4 to −0.6
-  (domain), but accepts of other unanswered threads give the kind +0.3 to +0.4, and an unanswered
-  card's score rises with age. Its next cards sit just under `min_score` and cross it after a
-  week or so (ranks 0.45 to 0.55). Bulk false positives shown in days 21 to 30 rose from 23 to 35
-  over the 30 seeds; the old per-sender weight kept them further down.
+Every metric is as good as or better than before. The learning curve improves (late precision
++0.039, gain over frozen +0.039), precision@5 rises by 0.034, recall is unchanged, and the
+distractor FPR falls from 0.031 to 0.018. Nearly all of the FPR drop is unflagged bulk mail (0.21 → 0.10): one
+*not important* dismissal now keeps a sender's later cards below `min_score` for the rest of the
+month, where the old per-sender weight let them drift back as the kind gained weight from accepts.
+The constants were chosen on a 3-seed sweep (42, 7, 99: mean 0.881 / 0.999 / 0.018, late 0.986),
+not on this run alone. A first version suppressed the whole thread on *already handled*, which
+hid the user's own promise in that thread (gold `g-023`, missed in 27 of 30 seeds: recall
+0.974); suppression is now limited to conversation cards. The one answered-thread false
+positive in both columns comes from the adapter: arrival times wrap within a busy day
+(`8 + n mod 10` hours), so a reply can be stamped before the question. It is left as is so
+before and after stay comparable.
 
 **New assertions** (`src/suites/proactive/tests.rs`, the real crate on hand-built worlds, no
 network):
@@ -1174,8 +1176,8 @@ network):
   (and Bob's accepted); the next day Ana's new question ranks below Carl's otherwise-equal one
   (0.12 against 0.49; with learning off they score level, 0.602 and 0.601).
 - `already_handled_stops_the_thread_until_a_newer_message`: Sam's question to Kim is dismissed as
-  already handled; the promise in the same mail, due two days later, is not shown (with learning
-  off it is), and Kim's reply with a new question is.
+  already handled; until Kim writes again only the promise in the same mail (a commitment, which
+  suppression never hides) is shown from that thread, and Kim's reply with a new question is.
 - `learning_keeps_the_approval_gate`: with reasons, learning on and 30% user noise,
   `executed_without_approval` stays 0 and every execution matches its approved diff.
 - `simulated_user_gives_reasons_from_the_gold_labels` and `reasons_do_not_change_the_decisions`

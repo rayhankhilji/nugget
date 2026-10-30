@@ -88,7 +88,7 @@ export function ActionDialog({ card, action, onClose }: { card: CardView; action
             <Badge tone={riskTone(preview.risk)}>{t("today.action.risk", { risk: riskLabel(preview.risk) })}</Badge>
             <Badge>{t("today.action.target", { target: targetLabel(preview.target) })}</Badge>
           </div>
-          <p className="muted small">{t("today.action.dryRun")}</p>
+          {!executed && <p className="muted small">{t("today.action.dryRun")}</p>}
           {preview.diff.length > 0 ? (
             <ul className="today-diff" aria-label={t("today.action.diffLabel")}>
               {preview.diff.map((line, i) => (
