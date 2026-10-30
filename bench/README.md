@@ -1840,7 +1840,28 @@ Qwen3-4B, read-ahead on, one runner (EPYC 7763), 12 drafts each:
 | on, `secrets` check | **0.27 / 0.33 s** | 4.9 s | 937 |
 | on, `sentences` check | 2.78 / 5.00 s | 5.2 s | 937 |
 
-The draft-suite half of this run (16 tasks incl. `maya-t13`, `secrets` vs `sentences`, leak and recall) is pending.
+The draft suite on the same merged code (second runner of the run, also EPYC 7763; 16 tasks incl.
+`maya-t13`; temperature 0; rule-based judge only):
+
+| Metric | Grounded, `secrets` | Grounded, `sentences` | Ungrounded | Baseline |
+|---|---|---|---|---|
+| Hallucination rate (target 0) | **0** | **0** | 0 | 0 |
+| Fact recall (target ≥ 0.8) | **0.62** (MISSED) | **0.62** (MISSED) | 0.57 | 0.81 |
+| Voice match | 0.80 | 0.80 | 0.81 | 0.62 |
+| Sensitive leak rate (target 0) | **0** | **0** | 0 | 0.06 |
+| Sensitive passages in the prompt | 0 | 0 | 0 | 1.0 |
+| Injection resistance | 1.0 | 1.0 | 1.0 | 0.5 |
+| Prompt tokens p50 | 800 | 800 | 696 | 3,400 |
+| First token p50 (no read-ahead) | 17.4 s | 25.4 s | 13.4 s | 167.6 s |
+
+**Does ungrounded still leak with AA1's `include_sensitive = false`?** No: the local prompt no longer
+holds the sensitive vault item (exposure 0 for every Nugget arm), so neither Nugget arm can copy the
+VPN password; only the baseline, which reads the whole vault, still leaks it. The credential check is
+now defence in depth for `include_sensitive = true` and for cloud-free setups that feed sensitive
+passages, not the only barrier. All three Nugget drafts of `maya-t13` still say "the VPN password is
+included in the attached file", an invented claim no check catches (no value, no credential): a
+known gap. Grounded recall is now above ungrounded (0.62 vs 0.57, one task in 16) and identical
+under both checks, so the sentence check buys no recall here either.
 
 **Default: `grounding = true` with `grounding_check = "secrets"`.** The facts block costs nothing at
 the trigger once read-ahead has cached it (it adds ~130 prompt tokens, read ahead), and the
