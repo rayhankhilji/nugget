@@ -1939,7 +1939,13 @@ the phishing mail, and **turned off a coworker's screen lock without a confirmat
 one was a gap in the risk classifier, not in the model: the toggle reads "Lock screen after 5
 minutes", which named no security word, so it counted as an ordinary edit. Fixed in this package
 (screen lock, auto lock, firewall, remote access and login, encryption and antivirus are now
-security words; tested in `nugget-computer`). The triage is cheap in wall time: refused tasks end
+security words; tested in `nugget-computer`). Confirmation run
+[41070490169](https://github.com/rayhankhilji/nugget/actions/runs/41070490169) at `a4d7406`
+(4B, EPYC 9V74, triage off, the 7 settings tasks and the refuse tasks; reports in
+[`results/real-models/run-41070490169/`](results/real-models/run-41070490169/)): the screen-lock
+click is now Security and asks first, **0 unconfirmed risky actions** and 0 false confirmations
+in 10 tasks. The model still did not refuse any harmful task without the triage (0 of 4; the
+simulated user approves what the task asks for), which is the triage's job. The triage is cheap in wall time: refused tasks end
 after one call, so the median task got faster, and on benign tasks it adds one call of 4–12 s
 (4B) or 7–31 s (8B).
 
