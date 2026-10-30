@@ -51,7 +51,7 @@
 //!
 //! - Sam L: Same email address as Samantha Lee. (because: shared email) [^1]
 //!
-//! If any of these is a different person, you can split it off again in Nugget; the facts it brought will move to a page of its own.
+//! If any of these is a different person, you can split it off again in Nugget; … This section is generated: …
 //! <!-- nugget:end merged -->
 //!
 //! <!-- nugget:begin sources -->
@@ -63,13 +63,18 @@
 //! ```
 //! Within each predicate group the current facts (active and user-asserted claims, `<!-- c:ID -->`)
 //! come first, newest validity start first; superseded claims follow under `*Earlier:*` as
-//! indented history lines (`<!-- h:ID -->`) with their validity interval (`2026-09-01 –
-//! 2026-10-05`, `until …`, `since …`, or none when unknown), newest first, each with its own
-//! citations. History lines are read-only (see [`edits`](crate::edits)). Retracted and rejected
-//! claims are not shown, nor is a superseded claim without evidence (a replaced user assertion).
+//! indented history lines (`<!-- h:ID -->`) with their validity interval in UTC dates
+//! (`2026-09-01 – 2026-10-05`, `until …`, `from …`, or none when unknown), newest first, each
+//! with its own citations. History lines are read-only (see [`edits`](crate::edits)). Retracted
+//! and rejected claims are not shown, nor is a superseded claim without evidence (a replaced
+//! user assertion) or one the user corrected by editing its fact line: the manifest records
+//! those, and a superseded claim without an end date in a group with a later user assertion is
+//! treated the same (a corrected fact was never true, so it is not history).
 //! The `merged` block appears only when the entity has a merge log
-//! ([`nugget_graph::merge_log`]): one line per merged name with the reason and the item that
-//! corroborated it.
+//! ([`nugget_graph::merge_log`]): the newest 50 merged names with the reason and a footnote for
+//! the item that corroborated it (while the store still has that item). Like every generated
+//! block it is read-only: an edit to it is kept but reported as a conflict, never applied; the
+//! page says so. Splitting is done in the app.
 //! Links name the target page by its path stem, which ends in the entity's stable short id; they
 //! are regenerated on every render, and links in user text are rewritten when a page moves.
 //!
@@ -212,6 +217,10 @@ struct State {
     last_render: Option<OffsetDateTime>,
     #[serde(default)]
     invalid: Vec<String>,
+    /// Claims superseded because the user edited their fact line: corrections, never shown as
+    /// history.
+    #[serde(default)]
+    corrected: BTreeSet<ClaimId>,
 }
 
 /// Per-pass bookkeeping.
@@ -305,8 +314,11 @@ impl Vault {
 
     /// Whether the vault holds pages from an older page layout ([`STATE_VERSION`]) that a full
     /// pass has not re-rendered yet.
-    fn needs_upgrade(st: &State) -> bool {
-        st.version < STATE_VERSION && !st.pages.is_empty()
+    /// A manifest that was lost or unreadable (so starts at version 0 with no pages) while merge
+    /// bases from an earlier render are on disk counts as old too.
+    fn needs_upgrade(&self, st: &State) -> bool {
+        st.version < STATE_VERSION
+            && (!st.pages.is_empty() || self.fs.entry_exists(".nugget/base/entities"))
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -333,7 +345,7 @@ impl Vault {
             ids.extend(batch);
             cur = high;
         }
-        let mut report = if Self::needs_upgrade(&st) {
+        let mut report = if self.needs_upgrade(&st) {
             // Pages written by an older renderer: bring all of them to the current layout once.
             self.run(&mut st, None)?
         } else if ids.is_empty() {
@@ -540,7 +552,7 @@ impl Vault {
         let mut pass = Pass::default();
         // A partial pass over a vault from an older layout leaves the version alone, so the next
         // `render_changed` re-renders everything.
-        let upgraded = ids.is_none() || !Self::needs_upgrade(st);
+        let upgraded = ids.is_none() || !self.needs_upgrade(st);
         let ids = match ids {
             Some(v) => v,
             None => {
@@ -817,6 +829,8 @@ impl Vault {
                 let plan = plan_edits(b, u);
                 if !plan.is_empty() {
                     self.apply_plan(st, &entity, &plan, pass)?;
+                    st.corrected
+                        .extend(pass.report.edits.superseded.iter().copied());
                     ctx.forget();
                     if let Some(fresh) = ctx.entity(&id)? {
                         entity = fresh;
@@ -825,7 +839,7 @@ impl Vault {
             }
 
             let claims = self.graph.claims_for(&id, true)?;
-            let rendered = ctx.render_entity(&entity, &claims)?;
+            let rendered = ctx.render_entity(&entity, &claims, &st.corrected)?;
             let gen_text = rendered.doc.render();
             let mut rel = page_rel_path(entity.kind, &entity.name, &id, self.config.max_name_chars);
             if src.as_deref() != Some(rel.as_str()) && self.fs.is_file(&rel) {

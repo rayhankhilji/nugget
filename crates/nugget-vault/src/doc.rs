@@ -315,27 +315,28 @@ pub fn parse_fact(line: &str) -> Option<(Option<ClaimId>, String)> {
     Some((claim, collapse_ws(rest)))
 }
 
-/// A history line: a bullet (at any indentation) ending in a `<!-- h:N -->` marker. Returns the
-/// claim id; `None` for any other line (including a history marker whose id does not parse).
+/// A history line: any line carrying a well-formed `<!-- h:N -->` marker (wherever it is, so a
+/// line the user appended text to is still recognised and restored). Returns the claim id;
+/// `None` for any other line (including a history marker whose id does not parse).
 pub fn parse_history(line: &str) -> Option<ClaimId> {
-    let t = line.trim();
-    bullet_body(t)?;
-    let inner = t.strip_suffix("-->")?;
-    let at = inner.rfind(HIST_MARK)?;
-    inner[at + HIST_MARK.len()..].trim().parse().ok()
+    let at = line.find(HIST_MARK)?;
+    let rest = &line[at + HIST_MARK.len()..];
+    let end = rest.find("-->")?;
+    rest[..end].trim().parse().ok()
 }
 
 /// Whether a line carries a claim or history marker that does not parse (a broken marker).
 pub fn has_bad_marker(line: &str) -> bool {
+    if line.contains(HIST_MARK) && parse_history(line).is_none() {
+        return true;
+    }
     let t = line.trim_end();
-    for mark in [CLAIM_MARK, HIST_MARK] {
-        if let Some(at) = t.rfind(mark) {
-            let ok = t[at + mark.len()..]
-                .strip_suffix("-->")
-                .is_some_and(|id| id.trim().parse::<ClaimId>().is_ok());
-            if !ok || bullet_body(t.trim_start()).is_none() {
-                return true;
-            }
+    if let Some(at) = t.rfind(CLAIM_MARK) {
+        let ok = t[at + CLAIM_MARK.len()..]
+            .strip_suffix("-->")
+            .is_some_and(|id| id.trim().parse::<ClaimId>().is_ok());
+        if !ok || bullet_body(t.trim_start()).is_none() {
+            return true;
         }
     }
     false
@@ -509,6 +510,12 @@ mod tests {
         );
         assert_eq!(parse_history("- de-indented [^2] <!-- h:7 -->"), Some(7));
         assert_eq!(parse_history("- fact [^1] <!-- c:7 -->"), None);
+        assert_eq!(
+            parse_history("  - x [^1] <!-- h:7 --> and my words"),
+            Some(7)
+        );
+        assert!(!has_bad_marker("  - x [^1] <!-- h:7 --> and my words"));
+        assert!(has_bad_marker("  - x [^1] <!-- h:7 and my words"));
         assert_eq!(parse_history("  - x <!-- h:abc -->"), None);
         assert!(has_bad_marker("  - x <!-- h:abc -->"));
         assert!(has_bad_marker("- x <!-- c: -->"));

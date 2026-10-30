@@ -18,15 +18,17 @@
 //! History lines (superseded claims, listed under `*Earlier:*` and marked `<!-- h:ID -->`) are
 //! read-only: editing or deleting one changes nothing in the graph, and the next render restores
 //! it (an outdated fact is a record of what the sources said, not a current statement to
-//! correct). A history line stays one even if the user un-indents it; only removing its marker
-//! turns it into ordinary text. To state something new, add a fact line instead.
+//! correct). A line counts as history when it carries the marker of a claim the last render
+//! showed as history, wherever the marker sits (un-indented, or with text appended after it);
+//! a line with any other `<!-- h:N -->` marker, or none, is the user's own text and is kept.
+//! To state something new, add a fact line instead.
 
 use std::collections::{BTreeMap, HashSet};
 
 use nugget_graph::ClaimId;
 
 use crate::doc::*;
-use crate::merge::{FLine, classify_facts};
+use crate::merge::{FLine, classify_facts, classify_facts_with, history_ids};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct NewFact {
@@ -91,7 +93,7 @@ pub(crate) fn plan_edits(base: &Doc, user: &Doc) -> EditPlan {
 
     let mut seen = HashSet::new();
     let mut group: Option<String> = None;
-    for l in classify_facts(u) {
+    for l in classify_facts_with(u, Some(&history_ids(b))) {
         match l {
             FLine::Heading(p) => group = Some(p),
             FLine::Fact { claim, content } => {

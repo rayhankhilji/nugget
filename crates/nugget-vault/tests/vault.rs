@@ -369,8 +369,8 @@ fn edited_fact_becomes_user_asserted() {
         "- Prefers soy milk in coffee. (you) <!-- c:{} -->",
         new.id
     )));
-    // The replaced claim is history now (it is superseded, and its sources still say so).
-    assert!(t.contains("*Earlier:*\n  - Prefers oat milk in coffee. [^1][^2] <!-- h:2 -->\n"));
+    // A corrected fact was never true: it is not shown as history either.
+    assert!(!t.contains("oat milk") && !t.contains("*Earlier:*"), "{t}");
     let report = f.vault.validate().unwrap();
     assert!(report.is_ok(), "{report:?}");
     assert_eq!(report.user_facts, 1);
@@ -1067,7 +1067,7 @@ fn history_order_and_intervals() {
 - Director. [^1] <!-- c:{cur_new} -->\n\
 - Lead. [^1] <!-- c:{cur_old} -->\n\
 - Mentor. [^1] <!-- c:{cur_unk} -->\n\n\
-*Earlier:*\n  - Role A. (until 2026-10-05) [^1] <!-- h:{a} -->\n  - Role B. (2026-09-01 – 2026-10-05) [^1] <!-- h:{b} -->\n  - Role C. (since 2024-03-01) [^1] <!-- h:{c} -->\n  - Role D. [^1] <!-- h:{d} -->\n"
+*Earlier:*\n  - Role A. (until 2026-10-05) [^1] <!-- h:{a} -->\n  - Role B. (2026-09-01 – 2026-10-05) [^1] <!-- h:{b} -->\n  - Role C. (from 2024-03-01) [^1] <!-- h:{c} -->\n  - Role D. [^1] <!-- h:{d} -->\n"
     );
     assert!(t.contains(&want), "{t}");
     assert!(f.vault.validate().unwrap().is_ok());
@@ -1103,10 +1103,10 @@ fn editing_or_deleting_history_changes_nothing() {
 }
 
 #[test]
-fn edited_fact_moves_to_history() {
+fn corrected_facts_are_not_history() {
     let f = fixture();
     f.vault.render_all().unwrap();
-    // A note under the fact follows the claim it was written under (now history).
+    // A note under the corrected fact stays in its group.
     f.edit(&f.sam, |t| {
         t.replace(
             "- Prefers oat milk in coffee. [^1][^2] <!-- c:2 -->",
@@ -1115,16 +1115,44 @@ fn edited_fact_moves_to_history() {
     });
     let rep = f.vault.apply_user_edits(f.page(&f.sam)).unwrap();
     let new = rep.asserted[0];
+    let want = format!(
+        "### Prefers <!-- p:prefers -->\n- Prefers soy milk in coffee. (you) <!-- c:{new} -->\n  - (since the spring)\n\n### Works at"
+    );
     let t = f.read(&f.sam);
+    assert!(t.contains(&want), "{t}");
+    let report = f.vault.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+    assert_eq!(report.history_facts, 0);
+    // The manifest records the correction; without it, the rule still holds: a superseded claim
+    // with no end date and a later user assertion in its group is a correction.
+    std::fs::remove_file(f.root.join(".nugget/state.json")).unwrap();
+    let v2 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
+    v2.render_all().unwrap();
+    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    assert!(t.contains(&want) && !t.contains("oat milk"), "{t}");
+    // Later supersessions in the same group are history again: they carry an end date, or
+    // happened after the user's assertion.
+    let mut later = claim(
+        &f.sam,
+        "prefers",
+        ClaimObject::Literal("tea".into()),
+        "Prefers tea.",
+        vec![ev("mail", "msg-1", "Sam from Acme here")],
+    );
+    later.valid_to = Some(day(2026, 10, 20));
+    let later = f.graph.add_claim(&later).unwrap();
+    f.graph
+        .set_claim_status(later, ClaimStatus::Superseded)
+        .unwrap();
+    v2.render_all().unwrap();
+    let t = std::fs::read_to_string(v2.page_path(&f.sam).unwrap().unwrap()).unwrap();
     assert!(
         t.contains(&format!(
-            "### Prefers <!-- p:prefers -->\n- Prefers soy milk in coffee. (you) <!-- c:{new} -->\n\n*Earlier:*\n  - Prefers oat milk in coffee. [^1][^2] <!-- h:2 -->\n  - (since the spring)\n"
+            "*Earlier:*\n  - Prefers tea. (until 2026-10-20) [^1] <!-- h:{later} -->\n"
         )),
         "{t}"
     );
-    let report = f.vault.validate().unwrap();
-    assert!(report.is_ok(), "{report:?}");
-    assert_eq!(report.history_facts, 1);
+    assert!(!t.contains("oat milk"));
 }
 
 fn set_merge_log(f: &Fixture, log: serde_json::Value) {
@@ -1160,7 +1188,7 @@ fn merge_log_renders_a_cited_section() {
 Nugget recognised these as the same person and combined them into this page:\n\n\
 - Sam L: Same address sam@example.com as Samantha Lee. (because: shared email, nickname) [^3]\n\
 - S. &lt;!-- nugget:end merged --&gt; [ [x] ] ## Notes: Hostile &lt;!-- c:1 --&gt; detail [ ^1]\n\n\
-If any of these is a different person, you can split it off again in Nugget; the facts it brought will move to a page of its own.\n",
+If any of these is a different person, you can split it off again in Nugget; the facts it brought will move to a page of its own. This section is generated: edits to it are not applied, so keep your own notes below.\n",
         "{t}"
     );
     // The section sits between Related and the sources; its footnote is defined (no quote).
@@ -1183,6 +1211,93 @@ If any of these is a different person, you can split it off again in Nugget; the
         SAM_GOLDEN,
         "without history or merges a page renders as before"
     );
+}
+
+#[test]
+fn merge_log_drops_citations_of_deleted_items_and_escapes_links() {
+    let f = fixture();
+    set_merge_log(
+        &f,
+        serde_json::json!([
+            {"name": "Sam [L](https://evil.test)", "reasons": ["same_item"],
+             "detail": "See [here](javascript:alert(1)).", "item": {"source": "mail", "key": "gone"}}
+        ]),
+    );
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    // `gone` is unknown to the store: the record stays, its footnote does not.
+    assert!(
+        t.contains(
+            "- Sam [L] (https://evil.test): See [here] (javascript:alert(1)). (because: same item)\n"
+        ),
+        "{t}"
+    );
+    assert!(!t.contains("gone"), "{t}");
+    assert!(!t.contains("[^3]"), "{t}");
+    assert!(f.vault.validate().unwrap().is_ok());
+}
+
+#[test]
+fn merge_log_shows_the_newest_fifty() {
+    let f = fixture();
+    let log: Vec<serde_json::Value> = (0..53)
+        .map(|i| serde_json::json!({"name": format!("Name {i}")}))
+        .collect();
+    set_merge_log(&f, serde_json::Value::Array(log));
+    f.vault.render_all().unwrap();
+    let body = block_body(&f.read(&f.sam), "merged");
+    let lines: Vec<&str> = body.lines().filter(|l| l.starts_with("- ")).collect();
+    assert_eq!(lines.len(), 51);
+    assert_eq!(lines[0], "- … and 3 earlier");
+    assert_eq!(lines[1], "- Name 3");
+    assert_eq!(lines[50], "- Name 52");
+}
+
+#[test]
+fn history_marker_edits_are_restored_and_foreign_markers_kept() {
+    let f = fixture();
+    let (_, worked_at, _) = add_history(&f);
+    f.vault.render_all().unwrap();
+    let before = f.read(&f.sam);
+    // Text appended after a history marker: the line is still history and gets restored.
+    f.edit(&f.sam, |t| {
+        t.replace(
+            &format!("<!-- h:{worked_at} -->"),
+            &format!("<!-- h:{worked_at} --> (not sure)"),
+        )
+    });
+    assert!(f.vault.apply_user_edits(f.page(&f.sam)).unwrap().is_empty());
+    assert_eq!(f.read(&f.sam), before);
+    assert!(f.vault.validate().unwrap().is_ok());
+    // A line with a marker the render never showed is the user's text: kept, not applied.
+    f.edit(&f.sam, |t| {
+        t.replace(
+            "<!-- c:1 -->\n",
+            "<!-- c:1 -->\n- copied from elsewhere [^1] <!-- h:999 -->\n",
+        )
+    });
+    assert!(f.vault.apply_user_edits(f.page(&f.sam)).unwrap().is_empty());
+    assert!(
+        f.read(&f.sam)
+            .contains("- copied from elsewhere [^1] <!-- h:999 -->\n")
+    );
+}
+
+#[test]
+fn lost_manifest_with_old_pages_upgrades_on_render_changed() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    let high = f.graph.changes_since(0, 100_000).unwrap().1;
+    // An unreadable manifest: the vault starts from an empty state, but old pages and merge
+    // bases are on disk.
+    std::fs::write(f.root.join(".nugget/state.json"), "{not json").unwrap();
+    let v3 = Vault::new(&f.root, f.graph.clone(), Arc::new(lookup), config()).unwrap();
+    // Even with nothing changed in the graph, render_changed does a full pass and records it.
+    let r = v3.render_changed(high).unwrap();
+    assert_eq!(state_version(&f.root), 2);
+    assert!(r.conflicts.is_empty(), "{r:?}");
+    assert_eq!(v3.status().pages, 2);
+    assert!(v3.validate().unwrap().is_ok());
 }
 
 #[test]

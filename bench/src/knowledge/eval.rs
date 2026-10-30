@@ -1037,8 +1037,13 @@ pub struct VaultScores {
     pub pages: usize,
     pub facts: usize,
     pub cited_facts: usize,
-    /// Citations that do not check out (deleted or unknown item, foreign chunk, missing quote).
+    /// Citations that do not check out (deleted or unknown item, foreign chunk, missing quote),
+    /// on facts and history lines alike.
     pub invalid_citations: usize,
+    /// History lines (superseded claims), not counted in `facts`.
+    pub history: usize,
+    /// History lines with at least one citation.
+    pub cited_history: usize,
     /// Pages the render reported that are not on disk.
     pub missing_pages: usize,
 }
@@ -1048,11 +1053,18 @@ impl VaultScores {
         ratio(self.cited_facts, self.facts)
     }
 
+    /// Share of history lines that carry a citation.
+    pub fn history_coverage(&self) -> f64 {
+        ratio(self.cited_history, self.history)
+    }
+
     pub fn add(&mut self, o: &VaultScores) {
         self.pages += o.pages;
         self.facts += o.facts;
         self.cited_facts += o.cited_facts;
         self.invalid_citations += o.invalid_citations;
+        self.history += o.history;
+        self.cited_history += o.cited_history;
         self.missing_pages += o.missing_pages;
     }
 }
@@ -1076,6 +1088,17 @@ pub fn score_vault(
         s.facts += 1;
         if f.footnotes > 0 {
             s.cited_facts += 1;
+        }
+        s.invalid_citations += f
+            .citations
+            .iter()
+            .filter(|e| !evidence_ok(e, ing, deleted))
+            .count();
+    }
+    for f in v.history() {
+        s.history += 1;
+        if f.footnotes > 0 {
+            s.cited_history += 1;
         }
         s.invalid_citations += f
             .citations
@@ -1284,6 +1307,45 @@ mod tests {
         assert_eq!(s.overall.tp, 2);
         assert_eq!(s.overall.fp, 2, "duplicate Maggie and the unknown name");
         assert_eq!(s.overall.fn_, fx.stats().entities - 2);
+    }
+
+    #[test]
+    fn vault_history_lines_are_checked_but_not_counted_as_facts() {
+        use crate::knowledge::system::RenderedFact;
+        let fx = Fixture::builtin().unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let ing = ingest(&store, &fx).unwrap();
+        let item = fx.item("mail-022").unwrap().item_ref();
+        let chunk = ing.get("mail-022").unwrap().chunks[0].0;
+        let ev = |q: &str| Evidence {
+            item: item.clone(),
+            chunk_id: Some(chunk),
+            quote: Some(q.into()),
+        };
+        let fact = |history: bool, citations: Vec<Evidence>| RenderedFact {
+            claim: Some(1),
+            text: "- x".into(),
+            footnotes: citations.len(),
+            citations,
+            history,
+        };
+        let v = RenderedVault {
+            pages: vec![RenderedPage {
+                entity: EntityId::new("ent_1"),
+                path: "missing.md".into(),
+                facts: vec![
+                    fact(false, vec![ev("as Head of Data")]),
+                    fact(true, vec![ev("as Head of Data")]),
+                    fact(true, vec![ev("not in the mail at all")]),
+                    fact(true, Vec::new()),
+                ],
+            }],
+        };
+        let s = score_vault(Path::new("/nonexistent"), &v, &ing, &HashSet::new());
+        assert_eq!((s.facts, s.cited_facts), (1, 1));
+        assert_eq!((s.history, s.cited_history), (3, 2));
+        assert_eq!(s.invalid_citations, 1);
+        assert_eq!(v.facts().count(), 1);
     }
 
     #[test]

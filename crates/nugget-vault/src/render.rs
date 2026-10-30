@@ -13,7 +13,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
-use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, merge_log};
+use nugget_graph::{
+    Claim, ClaimId, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, merge_log,
+};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
@@ -26,7 +28,8 @@ pub(crate) struct Ctx<'a> {
     pub graph: &'a dyn GraphStore,
     pub items: &'a dyn ItemLookup,
     pub cfg: &'a VaultConfig,
-    sources: RefCell<HashMap<ItemRef, SourceInfo>>,
+    /// `None`: the item store does not know the item (deleted).
+    sources: RefCell<HashMap<ItemRef, Option<SourceInfo>>>,
     entities: RefCell<HashMap<EntityId, Option<Entity>>>,
 }
 
@@ -49,6 +52,7 @@ pub(crate) fn inline(s: &str) -> String {
         .replace("[[", "[ [")
         .replace("]]", "] ]")
         .replace("[^", "[ ^")
+        .replace("](", "] (")
 }
 
 /// Text shown inside `[[target|display]]`.
@@ -136,6 +140,25 @@ fn find_word(hay: &str, word: &str) -> Option<usize> {
     None
 }
 
+/// Whether a superseded claim is shown under `*Earlier:*`. Not when:
+/// - it has no evidence (a replaced user assertion: nothing to cite);
+/// - the user corrected it: the vault records claims superseded by an edit of their fact line
+///   (`corrected`), and, should that record be lost, a superseded claim without an end date
+///   whose group holds a user assertion made at or after the claim last changed is taken to be
+///   such a correction (extraction's own supersessions set `valid_to` when it is known).
+///
+/// A corrected fact was wrong, not true once, so it is not history.
+fn shown_as_history(c: &Claim, current: &[&Claim], corrected: &BTreeSet<ClaimId>) -> bool {
+    if c.evidence.is_empty() || corrected.contains(&c.id) {
+        return false;
+    }
+    let replaced_by_user = c.valid_to.is_none()
+        && current
+            .iter()
+            .any(|u| u.status == ClaimStatus::UserAsserted && u.created_at >= c.updated_at);
+    !replaced_by_user
+}
+
 /// At most this many merge records are listed on a page.
 const MAX_MERGE_RECORDS: usize = 50;
 
@@ -144,13 +167,13 @@ fn date(t: time::OffsetDateTime) -> String {
     format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
 }
 
-/// A claim's validity interval in dates: `2026-09-01 – 2026-10-05`, `until 2026-10-05`,
-/// `since 2026-09-01`, or `None` when unknown.
+/// A history line's validity interval in UTC dates: `2026-09-01 – 2026-10-05`,
+/// `until 2026-10-05`, `from 2026-09-01` (start known, end not), or `None` when unknown.
 fn interval(c: &Claim) -> Option<String> {
     match (c.valid_from, c.valid_to) {
         (Some(a), Some(b)) => Some(format!("{} – {}", date(a), date(b))),
         (None, Some(b)) => Some(format!("until {}", date(b))),
-        (Some(a), None) => Some(format!("since {}", date(a))),
+        (Some(a), None) => Some(format!("from {}", date(a))),
         (None, None) => None,
     }
 }
@@ -199,19 +222,25 @@ impl<'a> Ctx<'a> {
         self.entities.borrow_mut().clear();
     }
 
-    fn source(&self, item: &ItemRef) -> SourceInfo {
+    /// What the item store says about `item`: `None` when it does not know the item. A failed
+    /// lookup counts as known (with no title or url).
+    fn lookup_source(&self, item: &ItemRef) -> Option<SourceInfo> {
         if let Some(s) = self.sources.borrow().get(item) {
             return s.clone();
         }
         let info = match self.items.source_info(item) {
-            Ok(i) => i.unwrap_or_default(),
+            Ok(i) => i,
             Err(e) => {
                 tracing::warn!(error = %e, "vault: source lookup failed");
-                SourceInfo::default()
+                Some(SourceInfo::default())
             }
         };
         self.sources.borrow_mut().insert(item.clone(), info.clone());
         info
+    }
+
+    fn source(&self, item: &ItemRef) -> SourceInfo {
+        self.lookup_source(item).unwrap_or_default()
     }
 
     fn frontmatter(&self, e: &Entity) -> Vec<String> {
@@ -233,21 +262,31 @@ impl<'a> Ctx<'a> {
         fm
     }
 
-    pub fn render_entity(&self, e: &Entity, claims: &[Claim]) -> Result<Rendered> {
+    /// Render an entity page. `corrected` holds claims the user replaced by editing their fact
+    /// line in the vault; they are never shown as history.
+    pub fn render_entity(
+        &self,
+        e: &Entity,
+        claims: &[Claim],
+        corrected: &BTreeSet<ClaimId>,
+    ) -> Result<Rendered> {
         let mut links = BTreeSet::new();
 
         // ---- facts ----
-        // Per predicate: live facts (active, user-asserted) and history (superseded claims that
-        // can be cited; a superseded user assertion has no source and is not shown).
+        // Per predicate: live facts (active, user-asserted) and history (superseded claims).
         type Group<'c> = (Vec<&'c Claim>, Vec<&'c Claim>);
         let mut groups: BTreeMap<&str, Group> = BTreeMap::new();
         for c in claims.iter().filter(|c| c.subject == e.id) {
             if c.status.is_active() {
                 groups.entry(c.predicate.as_str()).or_default().0.push(c);
-            } else if c.status == ClaimStatus::Superseded && !c.evidence.is_empty() {
+            } else if c.status == ClaimStatus::Superseded {
                 groups.entry(c.predicate.as_str()).or_default().1.push(c);
             }
         }
+        for (current, history) in groups.values_mut() {
+            history.retain(|c| shown_as_history(c, current, corrected));
+        }
+        groups.retain(|_, (current, history)| !current.is_empty() || !history.is_empty());
         let mut notes: Vec<String> = Vec::new();
         let mut note_ids: HashMap<(ItemRef, Option<String>), usize> = HashMap::new();
         let mut facts = vec!["## Facts".to_owned(), String::new()];
@@ -478,7 +517,12 @@ impl<'a> Ctx<'a> {
             format!("Nugget recognised these as the same {noun} and combined them into this page:"),
             String::new(),
         ];
-        for r in log.iter().take(MAX_MERGE_RECORDS) {
+        // The newest records (the log is oldest first), in log order.
+        let skip = log.len().saturating_sub(MAX_MERGE_RECORDS);
+        if skip > 0 {
+            body.push(format!("- … and {skip} earlier"));
+        }
+        for r in &log[skip..] {
             let name = truncate(&inline(&r.name), 120);
             let mut line = format!(
                 "- {}",
@@ -503,19 +547,20 @@ impl<'a> Ctx<'a> {
             if !reasons.is_empty() {
                 line.push_str(&format!(" (because: {})", reasons.join(", ")));
             }
-            if let Some(item) = &r.item {
+            // Cite the corroborating item only while the store still has it.
+            if let Some(item) = &r.item
+                && self.lookup_source(item).is_some()
+            {
                 line.push(' ');
                 line.push_str(&self.cite(item, None, notes, note_ids));
             }
             body.push(line);
         }
-        if log.len() > MAX_MERGE_RECORDS {
-            body.push(format!("- … and {} more", log.len() - MAX_MERGE_RECORDS));
-        }
         body.push(String::new());
         body.push(format!(
             "If any of these is a different {noun}, you can split it off again in Nugget; \
-             the facts it brought will move to a page of its own."
+             the facts it brought will move to a page of its own. This section is generated: \
+             edits to it are not applied, so keep your own notes below."
         ));
         Some(body)
     }
@@ -656,6 +701,10 @@ mod tests {
         assert_eq!(
             inline("a\nb <!-- c:1 --> [[x]] [^1]"),
             "a b &lt;!-- c:1 --&gt; [ [x] ] [ ^1]"
+        );
+        assert_eq!(
+            inline("[click](javascript:x) [a]((b)"),
+            "[click] (javascript:x) [a] ((b)"
         );
         assert_eq!(find_word("Alan met Al", "Al"), Some(9));
     }
