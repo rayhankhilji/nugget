@@ -37,7 +37,7 @@ use crate::store::VerifiedPlugin;
 /// Generated from the inline copy of `wit/plugin.wit` (see that module for why it is inline).
 mod bindings;
 
-use bindings::nugget::plugin::{clock, http, kv, log, secrets, sink, types};
+use bindings::nugget::plugin::{clock, fs, http, kv, log, secrets, sink, types};
 use bindings::{Plugin, PluginPre};
 use types::PluginError;
 
@@ -46,7 +46,9 @@ const EPOCH_TICK: Duration = Duration::from_millis(10);
 /// Fuel consumed between voluntary yields to the async runtime.
 const FUEL_YIELD_INTERVAL: u64 = 10_000_000;
 /// Interfaces of the `nugget:plugin` package a component may import.
-const HOST_INTERFACES: &[&str] = &["types", "http", "kv", "secrets", "log", "clock", "sink"];
+const HOST_INTERFACES: &[&str] = &[
+    "types", "http", "kv", "secrets", "log", "clock", "fs", "sink",
+];
 /// Header names a plugin may not set.
 const FORBIDDEN_HEADERS: &[&str] = &[
     "host",
@@ -1168,6 +1170,19 @@ impl clock::Host for HostState {
     async fn now(&mut self) -> wasmtime::Result<i64> {
         let now = OffsetDateTime::now_utc();
         Ok((now.unix_timestamp_nanos() / 1_000_000) as i64)
+    }
+}
+
+impl fs::Host for HostState {
+    // Placeholder until file roots land: every call is denied.
+    async fn read_dir(&mut self, _root: String, _path: String) -> HostResult<Vec<fs::DirEntry>> {
+        Ok(Err(self.deny("file access is not available".into())))
+    }
+    async fn read_file(&mut self, _root: String, _path: String) -> HostResult<Vec<u8>> {
+        Ok(Err(self.deny("file access is not available".into())))
+    }
+    async fn stat(&mut self, _root: String, _path: String) -> HostResult<fs::DirEntry> {
+        Ok(Err(self.deny("file access is not available".into())))
     }
 }
 
