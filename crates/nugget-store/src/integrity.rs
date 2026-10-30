@@ -45,7 +45,16 @@ pub enum FileHealth {
 /// - `-wal` and `-shm` (a running store, or one that crashed): opened read-only with a read-only
 ///   `-shm`, so pending WAL content is checked too;
 /// - a non-empty `-wal` without `-shm`, or a hot `-journal`: the file and that side file are
-///   copied to a private temporary directory and the copy is checked (its recovery needs writes).
+///   copied to a hidden, owner-only directory beside the file (same file system, removed
+///   afterwards) and the copy is checked (its recovery needs writes).
+///
+/// A non-empty `-wal` is also scanned frame by frame first, because SQLite silently treats its
+/// first invalid frame as the end of the log, dropping every commit after it (see
+/// [`wal_problem`]). Damage that loses committed transactions is reported as `Corrupt`; the
+/// uncommitted tail a crash leaves behind is not.
+///
+/// Meant for stores that are closed (or crashed): a store being written while it is checked
+/// may show a frame being written as damage.
 ///
 /// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
 /// as a busy database or an unreadable directory.
@@ -71,6 +80,9 @@ pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth>
             "the file is truncated ({} bytes is not a whole number of pages)",
             meta.len()
         )));
+    }
+    if let Some(problem) = wal_problem(&sidecar(path, "-wal"))? {
+        return Ok(FileHealth::Corrupt(problem));
     }
     let db = ReadOnlyDb::open(path, key)?;
     match db.first_read() {
@@ -109,6 +121,156 @@ fn starts_with_plaintext_header(path: &Path) -> Result<bool> {
 
 fn is_not_a_database(e: &rusqlite::Error) -> bool {
     matches!(e, rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::NotADatabase)
+}
+
+const WAL_HEADER: usize = 32;
+const WAL_FRAME_HEADER: usize = 24;
+const WAL_MAGIC_LE: u32 = 0x377f_0682;
+const WAL_MAGIC_BE: u32 = 0x377f_0683;
+const WAL_VERSION: u32 = 3_007_000;
+
+fn be32(b: &[u8]) -> u32 {
+    u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+}
+
+/// SQLite's WAL checksum over `data` (a multiple of 8 bytes), continuing from `s`. Words are
+/// big-endian when the magic number's low bit is set, little-endian otherwise.
+fn wal_checksum(big_endian: bool, data: &[u8], s: (u32, u32)) -> (u32, u32) {
+    let (mut s0, mut s1) = s;
+    for w in data.chunks_exact(8) {
+        let (x0, x1) = if big_endian {
+            (be32(&w[..4]), be32(&w[4..]))
+        } else {
+            (
+                u32::from_le_bytes([w[0], w[1], w[2], w[3]]),
+                u32::from_le_bytes([w[4], w[5], w[6], w[7]]),
+            )
+        };
+        s0 = s0.wrapping_add(x0).wrapping_add(s1);
+        s1 = s1.wrapping_add(x1).wrapping_add(s0);
+    }
+    (s0, s1)
+}
+
+/// Read up to `buf.len()` bytes; returns how many were read (fewer only at end of file).
+fn read_full(r: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    let mut n = 0;
+    while n < buf.len() {
+        match r.read(&mut buf[n..])? {
+            0 => break,
+            k => n += k,
+        }
+    }
+    Ok(n)
+}
+
+/// Scan the write-ahead log at `wal` (read-only, streamed one frame at a time) for damage that
+/// SQLite would silently treat as the end of the log, losing committed transactions. `None`
+/// when it is absent, empty or sound.
+///
+/// Following the WAL format (32-byte header, then frames of a 24-byte header and one page,
+/// each with a cumulative checksum and the header's salts), it finds the last valid commit
+/// frame, then classifies what follows:
+/// - valid frames without a commit after them: the uncommitted tail of a crash (sound);
+/// - frames with other salts: left over from before the log was last restarted (sound),
+///   unless frames with the current salts follow them (a damaged frame: corrupt);
+/// - a frame with the current salts but a bad checksum: corrupt if it, or any later frame
+///   with the current salts, is a commit frame (committed transactions would be lost);
+///   otherwise the overwritten remains of an uncommitted transaction (sound);
+/// - a partial frame at the end that carries the current salts (or is too short to tell), or
+///   a damaged header: corrupt. (A crash in the middle of writing a frame looks the same; it
+///   is reported, conservatively.)
+pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
+    use std::io::BufReader;
+    let len = match fs::metadata(wal) {
+        Ok(m) => m.len(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    if len == 0 {
+        return Ok(None);
+    }
+    let mut r = BufReader::new(fs::File::open(wal)?);
+    let invalid = |valid_end: u64, why: &str| {
+        Some(format!(
+            "write-ahead log has {} bytes of invalid frames after the last valid commit ({why})",
+            len - valid_end
+        ))
+    };
+    let mut hdr = [0u8; WAL_HEADER];
+    if read_full(&mut r, &mut hdr)? < WAL_HEADER {
+        return Ok(invalid(0, "truncated inside its header"));
+    }
+    let magic = be32(&hdr[0..]);
+    let page_size = be32(&hdr[8..]) as usize;
+    let big_endian = magic == WAL_MAGIC_BE;
+    let header_ok = (magic == WAL_MAGIC_LE || magic == WAL_MAGIC_BE)
+        && be32(&hdr[4..]) == WAL_VERSION
+        && (512..=65536).contains(&page_size)
+        && page_size.is_power_of_two()
+        && wal_checksum(big_endian, &hdr[..24], (0, 0)) == (be32(&hdr[24..]), be32(&hdr[28..]));
+    if !header_ok {
+        return Ok(invalid(0, "damaged header"));
+    }
+    let salts = &hdr[16..24];
+    let mut cks = (be32(&hdr[24..]), be32(&hdr[28..]));
+    let mut offset = WAL_HEADER as u64;
+    let mut last_commit_end = offset;
+    let mut frame = vec![0u8; WAL_FRAME_HEADER + page_size];
+    // Set once the first invalid frame is met: whether it had the current salts.
+    let mut broken: Option<bool> = None;
+    loop {
+        let n = read_full(&mut r, &mut frame)?;
+        if n == 0 {
+            break;
+        }
+        let fh = &frame[..WAL_FRAME_HEADER];
+        if n < frame.len() {
+            // A partial frame ends the file.
+            let current = n < 16 || &fh[8..16] == salts;
+            if current {
+                return Ok(invalid(last_commit_end, "truncated frame"));
+            }
+            break;
+        }
+        let current = &fh[8..16] == salts;
+        let commit = be32(&fh[4..]) != 0;
+        match broken {
+            None if current => {
+                let next = wal_checksum(big_endian, &fh[..8], cks);
+                let next = wal_checksum(big_endian, &frame[WAL_FRAME_HEADER..], next);
+                if next == (be32(&fh[16..]), be32(&fh[20..])) {
+                    cks = next;
+                    if commit {
+                        last_commit_end = offset + frame.len() as u64;
+                    }
+                } else if commit {
+                    return Ok(invalid(
+                        last_commit_end,
+                        "a commit frame fails its checksum",
+                    ));
+                } else {
+                    broken = Some(true);
+                }
+            }
+            None => broken = Some(false),
+            Some(true) if current && commit => {
+                return Ok(invalid(
+                    last_commit_end,
+                    "a damaged frame hides later commits",
+                ));
+            }
+            Some(false) if current => {
+                return Ok(invalid(
+                    last_commit_end,
+                    "frames of the current log follow a damaged frame",
+                ));
+            }
+            Some(_) => {}
+        }
+        offset += frame.len() as u64;
+    }
+    Ok(None)
 }
 
 /// Errors that say nothing about the file's content.
@@ -224,8 +386,7 @@ impl ReadOnlyDb {
     }
 }
 
-/// A `file:` URI for `path` (absolute, percent-encoded; `/` separators, and a leading `/` before
-/// a Windows drive letter).
+/// A `file:` URI for `path` (made absolute; see [`uri_for`]).
 fn file_uri(path: &Path) -> Result<String> {
     let abs = std::path::absolute(path)?;
     let s = abs.to_str().ok_or_else(|| {
@@ -234,16 +395,31 @@ fn file_uri(path: &Path) -> Result<String> {
             abs.to_string_lossy()
         ))
     })?;
-    let s = if cfg!(windows) {
-        s.replace('\\', "/")
-    } else {
-        s.to_owned()
-    };
-    let mut out = String::from("file:");
-    if !s.starts_with('/') {
-        out.push('/');
+    Ok(uri_for(s, cfg!(windows)))
+}
+
+/// A `file:` URI for the absolute path `s`, percent-encoded. With `windows`: `\` separators
+/// become `/`, a verbatim prefix is dropped (`\\?\C:\x` is `C:\x`, `\\?\UNC\srv\share` is
+/// `\\srv\share`), a drive path gets an empty authority (`file:///C:/x`) and a UNC path keeps
+/// its leading `//` after one (`file:////srv/share/x`).
+fn uri_for(s: &str, windows: bool) -> String {
+    let mut p = s.to_owned();
+    if windows {
+        p = p.replace('\\', "/");
+        if let Some(rest) = p.strip_prefix("//?/UNC/") {
+            p = format!("//{rest}");
+        } else if let Some(rest) = p.strip_prefix("//?/") {
+            p = rest.to_owned();
+        }
     }
-    for b in s.bytes() {
+    let mut out = String::from(if p.starts_with("//") {
+        "file://"
+    } else if p.starts_with('/') {
+        "file:"
+    } else {
+        "file:///"
+    });
+    for b in p.bytes() {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
                 out.push(b as char)
@@ -251,11 +427,11 @@ fn file_uri(path: &Path) -> Result<String> {
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
-    Ok(out)
+    out
 }
 
-/// A private temporary directory holding a copy of a database and its side files; removed on
-/// drop. The copy stays encrypted.
+/// A hidden, owner-only directory beside a database holding a copy of it and its side files
+/// (same file system, so no other disk fills up); removed on drop. The copy stays encrypted.
 struct TempCopy {
     dir: PathBuf,
     db: PathBuf,
@@ -266,7 +442,14 @@ impl TempCopy {
         let mut rand = [0u8; 8];
         getrandom::fill(&mut rand)
             .map_err(|e| Error::Other(format!("OS random number generator failed: {e}")))?;
-        let dir = std::env::temp_dir().join(format!("nugget-check-{}", hex::encode(rand)));
+        let name = path
+            .file_name()
+            .map_or_else(|| "store".into(), |n| n.to_string_lossy().into_owned());
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let dir = parent.join(format!(".{name}.check-{}", hex::encode(rand)));
         if dir.exists() {
             return Err(Error::Storage(format!(
                 "temporary directory {} already exists",
@@ -516,18 +699,27 @@ fn check_snapshot(c: &Connection, problems: &mut Vec<String>) -> Result<(i64, i6
         Err(e) => problems.push(format!("foreign key check failed: {e}")),
     }
     run_checks(&tx, ROW_CHECKS, problems);
-    if crate::items::embedding_dim(&tx)?.is_some() {
-        if table_exists(&tx, "chunk_vec_rowids").db("look up vector table")? {
-            run_checks(&tx, VECTOR_CHECKS, problems);
-        } else {
-            problems.push("the embedding dimension is set but the vector table is missing".into());
-        }
+    match crate::items::embedding_dim(&tx) {
+        Ok(None) => {}
+        Ok(Some(_)) => match table_exists(&tx, "chunk_vec_rowids") {
+            Ok(true) => run_checks(&tx, VECTOR_CHECKS, problems),
+            Ok(false) => problems
+                .push("the embedding dimension is set but the vector table is missing".into()),
+            Err(e) => problems.push(format!("cannot look up the vector table: {e}")),
+        },
+        Err(e) => problems.push(format!("cannot read the embedding dimension: {e}")),
     }
-    if table_exists(&tx, "ann_vectors").db("look up approximate index")? {
-        run_checks(&tx, ANN_CHECKS, problems);
-        if crate::vector::ann_ready(&tx)? {
-            run_checks(&tx, ANN_READY_CHECKS, problems);
+    match table_exists(&tx, "ann_vectors") {
+        Ok(false) => {}
+        Ok(true) => {
+            run_checks(&tx, ANN_CHECKS, problems);
+            match crate::vector::ann_ready(&tx) {
+                Ok(true) => run_checks(&tx, ANN_READY_CHECKS, problems),
+                Ok(false) => {}
+                Err(e) => problems.push(format!("cannot read the approximate index state: {e}")),
+            }
         }
+        Err(e) => problems.push(format!("cannot look up the approximate index: {e}")),
     }
     let counts = tx
         .query_row(
@@ -610,21 +802,139 @@ mod tests {
         assert_eq!(snapshot(&backup), before);
     }
 
-    /// A store that crashed with pending WAL content: checked including that content, with
-    /// nothing written; also when the `-shm` is gone.
-    #[test]
-    fn crashed_store_with_wal_is_checked_without_writing() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nugget.db");
+    /// A crashed copy (database, WAL and `-shm` of a store that is still open) of a store with
+    /// many small commits, in its own directory.
+    fn crashed_copy(dir: &Path, items: usize) -> PathBuf {
+        let path = dir.join("nugget.db");
         let s = Store::open(&path, &key()).unwrap();
-        populate(&s, 10);
-        let crash = dir.path().join("crash");
+        populate(&s, items);
+        let crash = dir.join("crash");
         fs::create_dir(&crash).unwrap();
         let copy = crash.join("nugget.db");
         for suffix in ["", "-wal", "-shm"] {
             fs::copy(sidecar(&path, suffix), sidecar(&copy, suffix)).unwrap();
         }
-        drop(s);
+        copy
+    }
+
+    /// `(offset, length, is commit)` of each whole frame of a WAL.
+    fn frames(wal: &[u8]) -> Vec<(usize, usize, bool)> {
+        let page = be32(&wal[8..]) as usize;
+        let len = WAL_FRAME_HEADER + page;
+        (WAL_HEADER..)
+            .step_by(len)
+            .take_while(|o| o + len <= wal.len())
+            .map(|o| (o, len, be32(&wal[o + 4..]) != 0))
+            .collect()
+    }
+
+    fn health_with_wal(copy: &Path, wal: &[u8]) -> FileHealth {
+        fs::write(sidecar(copy, "-wal"), wal).unwrap();
+        let before = snapshot(copy);
+        let h = check_file(copy, &key(), false).unwrap();
+        assert_eq!(snapshot(copy), before, "check_file wrote");
+        h
+    }
+
+    /// Damage SQLite would silently treat as the end of the log is reported; the tails a crash
+    /// legitimately leaves (uncommitted frames, frames from before a restart) are not.
+    #[test]
+    fn wal_damage_is_told_apart_from_crash_tails() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = crashed_copy(dir.path(), 12);
+        let wal = fs::read(sidecar(&copy, "-wal")).unwrap();
+        let fr = frames(&wal);
+        assert!(fr.iter().filter(|f| f.2).count() > 10, "too few commits");
+        assert_eq!(health_with_wal(&copy, &wal), FileHealth::Healthy);
+
+        let corrupt = |h: FileHealth| matches!(&h, FileHealth::Corrupt(m) if m.contains("write-ahead log has"));
+
+        // A flipped byte in a page early in the log, with commits after it.
+        let mut bad = wal.clone();
+        bad[fr[1].0 + WAL_FRAME_HEADER + 100] ^= 0x01;
+        let h = health_with_wal(&copy, &bad);
+        assert!(corrupt(h.clone()), "{h:?}");
+        // Without -shm too (the copy path).
+        fs::remove_file(sidecar(&copy, "-shm")).unwrap();
+        let h = health_with_wal(&copy, &bad);
+        assert!(corrupt(h.clone()), "{h:?}");
+
+        // A damaged salt in the middle: frames of the current log follow it.
+        let mut bad = wal.clone();
+        bad[fr[2].0 + 8] ^= 0xff;
+        assert!(corrupt(health_with_wal(&copy, &bad)));
+
+        // Truncated in the middle of a frame.
+        let cut = fr[fr.len() / 2].0 + 100;
+        assert!(corrupt(health_with_wal(&copy, &wal[..cut])));
+        // A damaged header.
+        let mut bad = wal.clone();
+        bad[12] ^= 0x01;
+        assert!(corrupt(health_with_wal(&copy, &bad)));
+        // Truncated inside the header.
+        assert!(corrupt(health_with_wal(&copy, &wal[..20])));
+        // A damaged last commit frame.
+        let last_commit = fr.iter().rev().find(|f| f.2).unwrap();
+        let mut bad = wal[..last_commit.0 + last_commit.1].to_vec();
+        bad[last_commit.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
+        assert!(corrupt(health_with_wal(&copy, &bad)));
+
+        // Crash tail: valid frames of a transaction that never committed.
+        let tail = (1..fr.len())
+            .find(|&i| fr[i - 1].2 && !fr[i].2)
+            .expect("a transaction of several frames");
+        let uncommitted = &wal[..fr[tail].0 + fr[tail].1];
+        assert_eq!(health_with_wal(&copy, uncommitted), FileHealth::Healthy);
+        // ...also when its frame no longer checks out (overwritten remains, no commit after).
+        let mut torn = uncommitted.to_vec();
+        let at = torn.len() - 10;
+        torn[at] ^= 0x01;
+        assert_eq!(health_with_wal(&copy, &torn), FileHealth::Healthy);
+        // Frames from before a restart (other salts) after the valid ones.
+        let mut stale = wal.clone();
+        let mut old = wal[fr[0].0..fr[0].0 + fr[0].1].to_vec();
+        old[8] ^= 0xff;
+        old[12] ^= 0xff;
+        stale.extend_from_slice(&old);
+        stale.extend_from_slice(&old);
+        assert_eq!(health_with_wal(&copy, &stale), FileHealth::Healthy);
+        // An empty WAL is no WAL.
+        assert_eq!(health_with_wal(&copy, b""), FileHealth::Healthy);
+    }
+
+    /// The copy a WAL without `-shm` needs is made beside the file, hidden, and removed.
+    #[test]
+    fn recovery_copy_is_made_beside_the_file_and_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = crashed_copy(dir.path(), 3);
+        fs::remove_file(sidecar(&copy, "-shm")).unwrap();
+        let listing = || {
+            let mut v: Vec<String> = fs::read_dir(copy.parent().unwrap())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            v.sort();
+            v
+        };
+        let before = listing();
+        let db = ReadOnlyDb::open(&copy, &key()).unwrap();
+        let during = listing();
+        let hidden: Vec<_> = during
+            .iter()
+            .filter(|n| n.starts_with(".nugget.db.check-"))
+            .collect();
+        assert_eq!(hidden.len(), 1, "{during:?}");
+        db.first_read().unwrap();
+        drop(db);
+        assert_eq!(listing(), before);
+    }
+
+    /// A store that crashed with pending WAL content: checked including that content, with
+    /// nothing written; also when the `-shm` is gone.
+    #[test]
+    fn crashed_store_with_wal_is_checked_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = crashed_copy(dir.path(), 10);
         assert!(fs::metadata(sidecar(&copy, "-wal")).unwrap().len() > 0);
 
         let before = snapshot(&copy);
@@ -726,11 +1036,18 @@ mod tests {
 
     #[test]
     fn file_uris_are_absolute_and_escaped() {
-        let uri = file_uri(Path::new("/tmp/a b/c%d?e#f.db")).unwrap();
-        if cfg!(windows) {
-            assert!(uri.starts_with("file:/"), "{uri}");
-        } else {
-            assert_eq!(uri, "file:/tmp/a%20b/c%25d%3Fe%23f.db");
+        assert_eq!(
+            uri_for("/tmp/a b/c%d?e#f.db", false),
+            "file:/tmp/a%20b/c%25d%3Fe%23f.db"
+        );
+        let windows = [
+            (r"C:\Users\a b\x.db", "file:///C:/Users/a%20b/x.db"),
+            (r"\\server\share\d\x.db", "file:////server/share/d/x.db"),
+            (r"\\?\C:\data\x.db", "file:///C:/data/x.db"),
+            (r"\\?\UNC\server\share\x.db", "file:////server/share/x.db"),
+        ];
+        for (path, uri) in windows {
+            assert_eq!(uri_for(path, true), uri, "{path}");
         }
         assert!(file_uri(Path::new("rel.db")).unwrap().starts_with("file:/"));
     }

@@ -16,16 +16,18 @@
 //! [`read_backup_files`], drops the table with [`strip_backup_files`] and opens the file as a
 //! store.
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Component, Path};
 
 use nugget_core::{Error, Result};
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::Store;
 use crate::error::DbExt;
 use crate::integrity::{ReadOnlyDb, sidecar};
-use crate::key::{StoreKey, create_private_dir, sync_dir};
+use crate::key::{StoreKey, create_private_dir, sync_dir, sync_file};
 use crate::store::{open_keyed, restrict_file_permissions, set_common_pragmas};
 
 /// The table carrying files in a backup database.
@@ -49,27 +51,22 @@ pub struct BackupStats {
 impl Store {
     /// Write an online, consistent, encrypted copy of this store to `dest` (which must not
     /// exist; its directory is created owner-only if missing), with `files` (`(relative path,
-    /// content)`, `/`-separated, no `..`) stored in its `nugget_backup_files` table.
+    /// content)`) stored in its `nugget_backup_files` table. File paths must be safe to write
+    /// out on every OS (see [`read_backup_files`]).
     ///
-    /// The copy is encrypted with this store's key, verified with `PRAGMA integrity_check`, and
-    /// synced to disk before this returns; on any failure the partial file is removed. Writers
-    /// are not blocked meanwhile (see the module docs). `Error::Unsupported` for an in-memory
-    /// store, `Error::Invalid` for an existing `dest` or a bad file path.
+    /// `dest` is first created exclusively (`O_EXCL`, `0600` on Unix), so an existing file or a
+    /// planted symlink fails the backup instead of being followed. The copy is encrypted with
+    /// this store's key, verified with `PRAGMA integrity_check`, and synced to disk before this
+    /// returns; on any failure the files this call created are removed. Writers are not blocked
+    /// meanwhile (see the module docs). `Error::Unsupported` for an in-memory store,
+    /// `Error::Invalid` for an existing `dest` or a bad file path.
     pub fn backup_into(&self, dest: &Path, files: &[(String, Vec<u8>)]) -> Result<BackupStats> {
         let Some((path, key)) = self.file() else {
             return Err(Error::Unsupported(
                 "an in-memory store cannot be backed up".into(),
             ));
         };
-        for (name, _) in files {
-            validate_file_path(name).map_err(Error::Invalid)?;
-        }
-        if fs::symlink_metadata(dest).is_ok() {
-            return Err(Error::Invalid(format!(
-                "backup destination {} already exists",
-                dest.display()
-            )));
-        }
+        validate_file_set(files.iter().map(|(name, _)| name.as_str())).map_err(Error::Invalid)?;
         let dest_str = dest.to_str().ok_or_else(|| {
             Error::Invalid(format!(
                 "backup destination {} is not valid UTF-8",
@@ -79,23 +76,58 @@ impl Store {
         if let Some(dir) = dest.parent() {
             create_private_dir(dir)?;
         }
+        let journal = sidecar(dest, "-journal");
+        let journal_existed = fs::symlink_metadata(&journal).is_ok();
+        create_exclusive(dest)?;
         let result = copy_store(path, key, dest_str).and_then(|()| finish_backup(dest, key, files));
         if result.is_err() {
-            for p in [dest.to_path_buf(), sidecar(dest, "-journal")] {
-                let _ = fs::remove_file(p);
+            let _ = fs::remove_file(dest);
+            if !journal_existed {
+                let _ = fs::remove_file(&journal);
             }
         }
         result
     }
 
     /// After a deliberate restore of an older copy, make this log's current head the audit
-    /// anchor, replacing an anchor that is ahead of (or otherwise conflicts with) the log, so
-    /// [`Store::verify_audit_chain`] passes and appends are anchored again. Verifies the chain,
-    /// head and seal first, ignoring the anchor: `Error::Integrity` if they do not verify (the
-    /// anchor is then left as it is). Does nothing more without an anchor. On an empty log the
-    /// anchor is replaced by the next append.
-    pub fn reset_audit_anchor(&self) -> Result<()> {
-        crate::audit::reset_anchor(self)
+    /// anchor, so [`Store::verify_audit_chain`] passes and appends are anchored again. The
+    /// restore should append an audit entry (such as `backup.restore`) right after.
+    ///
+    /// The log's chain, head and seal must verify (ignoring the anchor), else
+    /// `Error::Integrity` and nothing changes. Without `force`, the anchor is only replaced when
+    /// it shows a genuine rollback: it names an entry **after** the log's last one. It is
+    /// refused (`Error::Integrity`) when the anchored entry is in the log with a different hash
+    /// (the log was rewritten, not rolled back), when the anchor is unreadable or not written
+    /// for this key, and when the log is empty while an anchor exists. `force` replaces the
+    /// anchor in all those cases (an explicit user decision). An anchor that already matches is
+    /// just moved to the head. The new value is written durably before this returns (for an
+    /// empty log, a value that anchors "no entries yet"). Without a configured anchor this only
+    /// verifies the log.
+    pub fn reset_audit_anchor(&self, force: bool) -> Result<()> {
+        crate::audit::reset_anchor(self, force)
+    }
+}
+
+/// Create `path` empty and exclusively (fails if anything, even a dangling symlink, is there),
+/// owner-only.
+fn create_exclusive(path: &Path) -> Result<()> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    match opts.open(path) {
+        Ok(_) => {
+            crate::acl::restrict_file(path);
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(Error::Invalid(format!(
+            "backup destination {} already exists",
+            path.display()
+        ))),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -111,7 +143,6 @@ fn copy_store(path: &Path, key: &StoreKey, dest: &str) -> Result<()> {
 /// Add the files to the copy, verify and count it, and make it durable.
 fn finish_backup(dest: &Path, key: &StoreKey, files: &[(String, Vec<u8>)]) -> Result<BackupStats> {
     restrict_file_permissions(dest);
-    crate::acl::restrict_file(dest);
     let mut head = [0u8; 16];
     {
         use std::io::Read;
@@ -161,7 +192,7 @@ fn finish_backup(dest: &Path, key: &StoreKey, files: &[(String, Vec<u8>)]) -> Re
     }
     let mut stats = counts(&conn)?;
     drop(conn);
-    fs::File::open(dest)?.sync_all()?;
+    sync_file(dest)?;
     if let Some(dir) = dest.parent() {
         sync_dir(dir);
     }
@@ -188,19 +219,36 @@ fn counts(c: &Connection) -> Result<BackupStats> {
     .db("count backup")
 }
 
-/// A file path as stored in a backup: relative, `/`-separated, without empty, `.` or `..`
-/// segments, backslashes, colons or NULs, so writing it out under a directory stays inside it.
+/// Windows device names, reserved with any extension and in any case.
+const RESERVED_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// A file path as stored in a backup: relative and `/`-separated, and writable as is on every
+/// OS: no empty, `.` or `..` segments, no backslash, colon, `<>"|?*` or control characters, no
+/// segment ending in `.` or a space, no Windows device name (`CON`, `com1.txt`, ...).
 fn validate_file_path(name: &str) -> std::result::Result<(), String> {
     let bad = |why: &str| Err(format!("backup file path {name:?} is not allowed: {why}"));
     if name.is_empty() {
         return bad("empty");
     }
-    if name.contains(['\\', ':', '\0']) {
-        return bad("contains a backslash, colon or NUL");
+    if name
+        .chars()
+        .any(|c| c.is_control() || matches!(c, '\\' | ':' | '<' | '>' | '"' | '|' | '?' | '*'))
+    {
+        return bad("contains a backslash, colon, one of <>\"|?* or a control character");
     }
     for seg in name.split('/') {
         if seg.is_empty() || seg == "." || seg == ".." {
             return bad("empty, `.` or `..` segment, or absolute");
+        }
+        if seg.ends_with('.') || seg.ends_with(' ') {
+            return bad("a segment ends with `.` or a space");
+        }
+        let stem = seg.split('.').next().unwrap_or(seg).trim_end();
+        if RESERVED_NAMES.iter().any(|r| stem.eq_ignore_ascii_case(r)) {
+            return bad("a segment is a Windows device name");
         }
     }
     if !Path::new(name)
@@ -212,9 +260,46 @@ fn validate_file_path(name: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// How a path compares on case-insensitive, normalising file systems (macOS, Windows): NFC,
+/// lowercased.
+fn fold(name: &str) -> String {
+    name.nfc().collect::<String>().to_lowercase()
+}
+
+/// [`validate_file_path`] for each path, and no two paths that would land on the same file
+/// (equal after [`fold`]) or where one is a file and the other needs it as a directory.
+fn validate_file_set<'a>(names: impl Iterator<Item = &'a str>) -> std::result::Result<(), String> {
+    let mut folded = HashSet::new();
+    let mut all = Vec::new();
+    for name in names {
+        validate_file_path(name)?;
+        let f = fold(name);
+        if !folded.insert(f.clone()) {
+            return Err(format!(
+                "backup file path {name:?} collides with another path (paths differing only in \
+                 case or Unicode normalisation land on the same file)"
+            ));
+        }
+        all.push((name, f));
+    }
+    for (name, f) in &all {
+        for (i, _) in f.match_indices('/') {
+            if folded.contains(&f[..i]) {
+                return Err(format!(
+                    "backup file path {name:?} needs {:?} as a directory, but it is a file",
+                    &f[..i]
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Read the files stored in the backup database at `path` (opened read-only with `key`, never
 /// written), sorted by path. `Error::Integrity` when `key` does not open it, it is not a backup
-/// (no files table), or a stored path is unsafe to write out (absolute, `..`, ...).
+/// (no files table), or a stored path is unsafe to write out on any OS: absolute, `..`,
+/// reserved names or characters (see `validate_file_path`), or two paths that land on the same
+/// file of a case-insensitive file system, or that need a file as a directory.
 pub fn read_backup_files(path: &Path, key: &StoreKey) -> Result<Vec<(String, Vec<u8>)>> {
     if !path.exists() {
         return Err(Error::NotFound(format!("backup file {}", path.display())));
@@ -248,9 +333,7 @@ pub fn read_backup_files(path: &Path, key: &StoreKey) -> Result<Vec<(String, Vec
         .db("read backup files")?
         .collect::<rusqlite::Result<Vec<_>>>()
         .db("read backup files")?;
-    for (name, _) in &files {
-        validate_file_path(name).map_err(Error::Integrity)?;
-    }
+    validate_file_set(files.iter().map(|(name, _)| name.as_str())).map_err(Error::Integrity)?;
     Ok(files)
 }
 
@@ -270,7 +353,7 @@ pub fn strip_backup_files(path: &Path, key: &StoreKey) -> Result<()> {
     ))
     .db("drop backup files")?;
     drop(conn);
-    fs::File::open(path)?.sync_all()?;
+    sync_file(path)?;
     Ok(())
 }
 
@@ -600,7 +683,7 @@ mod tests {
             assert!(matches!(err, Error::Invalid(_)), "{bad:?}: {err}");
             assert!(!fresh.exists());
         }
-        // A failure after the copy started leaves nothing behind (duplicate path).
+        // A failure leaves nothing behind (duplicate path).
         let dup = vec![("a".to_owned(), vec![1]), ("a".to_owned(), vec![2])];
         assert!(s.backup_into(&fresh, &dup).is_err());
         assert!(!fresh.exists());
@@ -655,7 +738,7 @@ mod tests {
         assert!(r.verify_audit_chain().is_err());
 
         // ...until the restore is acknowledged.
-        r.reset_audit_anchor().unwrap();
+        r.reset_audit_anchor(false).unwrap();
         assert!(
             anchor
                 .0
@@ -702,16 +785,24 @@ mod tests {
             .db("tamper")
         })
         .unwrap();
-        assert!(matches!(s.reset_audit_anchor(), Err(Error::Integrity(_))));
+        assert!(matches!(
+            s.reset_audit_anchor(false),
+            Err(Error::Integrity(_))
+        ));
         assert_eq!(*anchor.0.lock().unwrap(), before);
 
         // Without an anchor it only verifies.
         let fresh = Store::open(dir.path().join("other.db"), &key()).unwrap();
-        fresh.reset_audit_anchor().unwrap();
+        fresh.reset_audit_anchor(false).unwrap();
+    }
+
+    /// The anchor's current value (panics when nothing is stored).
+    fn anchored(anchor: &MemAnchor) -> String {
+        anchor.0.lock().unwrap().clone().unwrap()
     }
 
     #[test]
-    fn reset_audit_anchor_on_an_empty_log_is_replaced_by_the_next_append() {
+    fn reset_audit_anchor_on_an_empty_log_needs_force_and_is_durable() {
         let dir = tempfile::tempdir().unwrap();
         let anchor = MemAnchor::default();
         // An anchor left by another (longer) log of the same key.
@@ -719,30 +810,213 @@ mod tests {
         s.set_audit_anchor(Some(Arc::new(anchor.clone())));
         populate(&s, 1);
         drop(s);
+        let before = anchored(&anchor);
         let r = Store::open(dir.path().join("b.db"), &key()).unwrap();
         r.set_audit_anchor(Some(Arc::new(anchor.clone())));
         assert!(r.verify_audit_chain().is_err());
-        r.reset_audit_anchor().unwrap();
-        audit(&r, "first");
-        assert!(
-            anchor
-                .0
-                .lock()
-                .unwrap()
-                .as_deref()
-                .unwrap()
-                .starts_with("v1:1:")
-        );
+        assert!(matches!(
+            r.reset_audit_anchor(false),
+            Err(Error::Integrity(_))
+        ));
+        assert_eq!(anchored(&anchor), before);
+
+        r.reset_audit_anchor(true).unwrap();
+        assert!(anchored(&anchor).starts_with("v1:0:"));
         r.verify_audit_chain().unwrap();
+        // Durable: a new handle (a restart) verifies before anything is appended.
+        drop(r);
+        let r = Store::open(dir.path().join("b.db"), &key()).unwrap();
+        r.set_audit_anchor(Some(Arc::new(anchor.clone())));
+        r.verify_audit_chain().unwrap();
+        audit(&r, "first");
+        assert!(anchored(&anchor).starts_with("v1:1:"));
+        r.verify_audit_chain().unwrap();
+    }
+
+    /// A log rewritten under the same key (the anchored entry is there with another hash) is
+    /// not blessed without `force`.
+    #[test]
+    fn reset_audit_anchor_refuses_a_rewritten_log_without_force() {
+        let dir = tempfile::tempdir().unwrap();
+        let anchor = MemAnchor::default();
+        let s = Store::open(dir.path().join("a.db"), &key()).unwrap();
+        s.set_audit_anchor(Some(Arc::new(anchor.clone())));
+        for n in 0..3 {
+            audit(&s, &format!("original.{n}"));
+        }
+        drop(s);
+        let before = anchored(&anchor);
+        assert!(before.starts_with("v1:3:"));
+        // Another log of the same key, just as long: entry 3 differs.
+        let r = Store::open(dir.path().join("b.db"), &key()).unwrap();
+        for n in 0..4 {
+            audit(&r, &format!("rewritten.{n}"));
+        }
+        r.set_audit_anchor(Some(Arc::new(anchor.clone())));
+        assert!(r.verify_audit_chain().is_err());
+        let err = r.reset_audit_anchor(false).unwrap_err();
+        assert!(
+            matches!(&err, Error::Integrity(m) if m.contains("rewritten")),
+            "{err}"
+        );
+        assert_eq!(anchored(&anchor), before);
+
+        r.reset_audit_anchor(true).unwrap();
+        assert!(anchored(&anchor).starts_with("v1:4:"));
+        r.verify_audit_chain().unwrap();
+
+        // An anchor that is not this key's (or garbage) also needs force.
+        *anchor.0.lock().unwrap() = Some("v1:2:abc:def".into());
+        assert!(matches!(
+            r.reset_audit_anchor(false),
+            Err(Error::Integrity(_))
+        ));
+        r.reset_audit_anchor(true).unwrap();
+        r.verify_audit_chain().unwrap();
+        // A matching anchor is simply moved to the head.
+        audit(&r, "more");
+        r.reset_audit_anchor(false).unwrap();
+        assert!(anchored(&anchor).starts_with("v1:5:"));
     }
 
     #[test]
     fn file_paths_are_validated() {
-        for ok in ["config/config.toml", "vault/a b/ç.md", "x"] {
+        for ok in [
+            "config/config.toml",
+            "vault/a b/ç.md",
+            "x",
+            "vault/console.md",
+            "vault/.hidden",
+        ] {
             assert!(validate_file_path(ok).is_ok(), "{ok}");
         }
-        for bad in ["", "/a", "a/", "a/../b", "..", ".", "a\0b", "c:x", "a\\b"] {
+        for bad in [
+            "",
+            "/a",
+            "a/",
+            "a/../b",
+            "..",
+            ".",
+            "a\0b",
+            "c:x",
+            "a\\b",
+            "vault/CON",
+            "vault/con.md",
+            "Nul.txt",
+            "a/com1",
+            "LPT9.x.y",
+            "a./b",
+            "a /b",
+            "trailing.",
+            "trailing ",
+            "a<b",
+            "a>b",
+            "a\"b",
+            "a|b",
+            "a?b",
+            "a*b",
+            "a\u{1}b",
+            "a\nb",
+        ] {
             assert!(validate_file_path(bad).is_err(), "{bad:?}");
         }
+        let set = |names: &[&str]| validate_file_set(names.iter().copied());
+        assert!(set(&["vault/a.md", "vault/b.md", "config/config.toml"]).is_ok());
+        assert!(set(&["vault/A.md", "vault/a.md"]).is_err(), "case");
+        assert!(
+            set(&["vault/caf\u{e9}.md", "vault/cafe\u{301}.md"]).is_err(),
+            "NFC"
+        );
+        assert!(
+            set(&["vault/x", "vault/x/y.md"]).is_err(),
+            "file used as a directory"
+        );
+        assert!(
+            set(&["vault/X", "vault/x/y.md"]).is_err(),
+            "file used as a directory, case"
+        );
+        assert!(set(&["vault/x.md", "vault/x.md"]).is_err(), "duplicate");
+    }
+
+    /// Both directions enforce the same rules: a backup carrying a bad set (written past
+    /// `backup_into`, e.g. by a crafted file) is refused on read.
+    #[test]
+    fn unsafe_paths_in_a_backup_are_refused_on_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("nugget.db"), &key()).unwrap();
+        populate(&s, 1);
+        assert!(matches!(
+            s.backup_into(
+                &dir.path().join("x.nbk"),
+                &[("vault/A.md".into(), vec![]), ("vault/a.md".into(), vec![])]
+            ),
+            Err(Error::Invalid(_))
+        ));
+        for bad in [
+            vec!["vault/AUX.md"],
+            vec!["vault/A.md", "vault/a.md"],
+            vec!["../x"],
+        ] {
+            let dest = dir.path().join(format!("b{}.nbk", bad.len()));
+            let _ = fs::remove_file(&dest);
+            s.backup_into(&dest, &[]).unwrap();
+            let c = open_keyed(&dest, &key(), OpenFlags::empty()).unwrap();
+            for name in &bad {
+                c.execute(
+                    &format!("INSERT INTO {FILES_TABLE} (path, content) VALUES (?1, x'00')"),
+                    [name],
+                )
+                .unwrap();
+            }
+            drop(c);
+            assert!(
+                matches!(read_backup_files(&dest, &key()), Err(Error::Integrity(_))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_does_not_follow_a_planted_symlink_or_remove_files_it_did_not_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("nugget.db"), &key()).unwrap();
+        populate(&s, 2);
+        let target = dir.path().join("victim");
+        fs::write(&target, b"precious").unwrap();
+        let dest = dir.path().join("store.nbk");
+        std::os::unix::fs::symlink(&target, &dest).unwrap();
+        assert!(matches!(s.backup_into(&dest, &[]), Err(Error::Invalid(_))));
+        assert_eq!(fs::read(&target).unwrap(), b"precious");
+        assert!(
+            fs::symlink_metadata(&dest)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        // Dangling symlink too.
+        let dangling = dir.path().join("dangling.nbk");
+        std::os::unix::fs::symlink(dir.path().join("nowhere"), &dangling).unwrap();
+        assert!(s.backup_into(&dangling, &[]).is_err());
+        assert!(!dir.path().join("nowhere").exists());
+
+        // A failing backup removes its own file but not a journal that was already there.
+        let fresh = dir.path().join("fresh.nbk");
+        let journal = sidecar(&fresh, "-journal");
+        fs::write(&journal, b"someone else's").unwrap();
+        let dup = vec![("a".to_owned(), vec![1]), ("A".to_owned(), vec![2])];
+        assert!(s.backup_into(&fresh, &dup).is_err());
+        let dup = vec![("a".to_owned(), vec![1]), ("a/b".to_owned(), vec![2])];
+        assert!(s.backup_into(&fresh, &dup).is_err());
+        assert!(!fresh.exists());
+        assert_eq!(fs::read(&journal).unwrap(), b"someone else's");
+        // The new file is owner-only from the start.
+        let ok = dir.path().join("ok.nbk");
+        s.backup_into(&ok, &[]).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&ok).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 }

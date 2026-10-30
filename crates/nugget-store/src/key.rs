@@ -122,8 +122,15 @@ impl StoreKey {
     /// example the one moved aside by a restore) stays readable; it is never silently discarded.
     /// A key file left over once the key is in the keychain is removed after that copy.
     ///
-    /// Fails without changing anything if the keychain holds a different key but refuses the
-    /// new one: a key file would then be shadowed by the keychain entry.
+    /// A malformed secret found there is saved the same way (as found) and replaced.
+    ///
+    /// Refuses (`Error::Storage`) rather than write a key file that a keychain entry would
+    /// shadow on the next start: when the keychain is enabled but cannot be read and the home
+    /// has no key file yet (the current key may be in a locked keychain: unlock it, or set
+    /// [`KEYCHAIN_ENV`]`=off` consistently), and when the keychain holds a different key but
+    /// refuses the new one or does not return it after storing it (the previous entry is then
+    /// put back, best effort). When the keychain cannot be read but the home already keeps its
+    /// key in a file, the file is used, as [`StoreKey::load_or_create`] does.
     pub fn install(paths: &Paths, key: &StoreKey) -> Result<KeySource> {
         if keychain_disabled_by_env() {
             return install_with(paths, key, None);
@@ -275,29 +282,74 @@ pub(crate) fn load_existing_with(
     Ok(None)
 }
 
+/// A secret found where a store key is kept: a well-formed key, or the raw text of a malformed
+/// one (still saved before it is replaced: it may be a damaged copy worth recovering).
+enum Stored {
+    Key(StoreKey),
+    Malformed(Zeroizing<String>),
+}
+
+impl Stored {
+    fn parse(raw: Zeroizing<String>, source: KeySource) -> Self {
+        match StoreKey::from_hex(&raw, source) {
+            Ok(k) => Self::Key(k),
+            Err(_) => Self::Malformed(raw),
+        }
+    }
+
+    fn is(&self, key: &StoreKey) -> bool {
+        matches!(self, Self::Key(k) if k.as_bytes() == key.as_bytes())
+    }
+
+    /// The text to save: the key's hex, or the malformed text as found.
+    fn raw(&self) -> Zeroizing<String> {
+        match self {
+            Self::Key(k) => k.to_hex(),
+            Self::Malformed(raw) => Zeroizing::new(raw.trim().to_owned()),
+        }
+    }
+}
+
 pub(crate) fn install_with(
     paths: &Paths,
     key: &StoreKey,
     keychain: Option<&dyn SecretBackend>,
 ) -> Result<KeySource> {
     let new_hex = key.to_hex();
-    // What the keychain holds: Ok(Some/None) when it answers, Err when it is unusable.
-    let in_keychain = match keychain.map(|k| k.get()) {
-        Some(Ok(v)) => Ok(v
-            .map(|h| StoreKey::from_hex(&h, KeySource::Keychain))
-            .transpose()?),
-        Some(Err(e)) => Err(e),
-        None => Err("disabled".to_owned()),
-    };
     let file = key_file(paths);
     let in_file = if file.exists() {
-        Some(read_key_file(&file)?)
+        tighten_permissions(&file)?;
+        Some(Stored::parse(
+            Zeroizing::new(fs::read_to_string(&file)?),
+            KeySource::File,
+        ))
     } else {
         None
     };
+    // What the keychain holds: Ok(Some/None) when it answers, Err when it is unusable.
+    let in_keychain = match keychain.map(|k| k.get()) {
+        Some(Ok(v)) => Ok(v.map(|raw| Stored::parse(raw, KeySource::Keychain))),
+        Some(Err(e)) => {
+            if in_file.is_none() {
+                // This home's current key may well be in there (a locked keychain): a key file
+                // written now would be shadowed by it on the next start.
+                return Err(Error::Storage(format!(
+                    "cannot read the OS keychain ({e}), which may hold this home's current store \
+                     key; a key file written now would be shadowed by it. Unlock the keychain and \
+                     retry, or set {KEYCHAIN_ENV}=off (for this and every later start) to keep the \
+                     key in a file"
+                )));
+            }
+            // The home already keeps its key in a file and the keychain does not answer: stay
+            // with the file, as `load_or_create` does.
+            Err(e)
+        }
+        None => Err("disabled".to_owned()),
+    };
 
-    // Save every different key first, so nothing below can lose one.
-    let mut saved: Vec<[u8; 32]> = Vec::new();
+    // Save every different secret first, so nothing below can lose one.
+    let mut saved: Vec<Zeroizing<String>> = Vec::new();
+    let mut saved_to: Vec<PathBuf> = Vec::new();
     for old in in_keychain
         .as_ref()
         .ok()
@@ -305,68 +357,114 @@ pub(crate) fn install_with(
         .into_iter()
         .chain(&in_file)
     {
-        if old.as_bytes() != key.as_bytes() && !saved.contains(old.as_bytes()) {
-            let to = save_replaced_key(paths, old)?;
-            tracing::warn!(
-                path = %to.display(),
-                key_id = %old.key_id(),
-                "store key replaced; the previous key was saved"
-            );
-            saved.push(*old.as_bytes());
+        let raw = old.raw();
+        if !old.is(key) && !saved.contains(&raw) {
+            let to = save_replaced_key(paths, &raw)?;
+            match old {
+                Stored::Key(k) => tracing::warn!(
+                    path = %to.display(),
+                    key_id = %k.key_id(),
+                    "store key replaced; the previous key was saved"
+                ),
+                Stored::Malformed(_) => tracing::warn!(
+                    path = %to.display(),
+                    "a malformed store key was replaced; its text was saved"
+                ),
+            }
+            saved.push(raw);
+            saved_to.push(to);
         }
+    }
+    if !saved_to.is_empty() {
+        // The copies are durable before anything they protect is overwritten or removed.
+        sync_dir(&paths.data);
     }
 
     if let (Some(kc), Ok(current)) = (keychain, &in_keychain) {
-        let already = current
-            .as_ref()
-            .is_some_and(|k| k.as_bytes() == key.as_bytes());
-        let stored = if already {
-            Ok(())
-        } else {
-            kc.set(&new_hex).and_then(|()| match kc.get() {
-                Ok(Some(back)) if *back == *new_hex => Ok(()),
-                Ok(_) => Err("keychain did not return the stored key".to_owned()),
-                Err(e) => Err(e),
-            })
-        };
-        match stored {
-            Ok(()) => {
-                if in_file.is_some() {
-                    // Its key (if different) was saved above; left in place it would only
-                    // confuse a later fallback.
-                    fs::remove_file(&file)?;
+        if !current.as_ref().is_some_and(|c| c.is(key)) {
+            if let Err(e) = kc.set(&new_hex) {
+                if current.is_some() {
+                    return Err(Error::Storage(format!(
+                        "the OS keychain holds another store key and refused the new one ({e}); \
+                         a key file would be shadowed by it"
+                    )));
                 }
-                return Ok(KeySource::Keychain);
-            }
-            Err(e) if current.is_some() => {
-                return Err(Error::Storage(format!(
-                    "the OS keychain holds another store key and refused the new one ({e}); a                      key file would be shadowed by it"
-                )));
-            }
-            Err(e) => {
                 tracing::warn!(error = %e, "OS keychain rejected the store key; using a key file");
+                return install_file(paths, key, &new_hex, in_file.as_ref());
+            }
+            match kc.get() {
+                Ok(Some(back)) if *back == *new_hex => {}
+                // Accepted but not kept (like keyring's mock store) and nothing to shadow.
+                Ok(None) if current.is_none() => {
+                    tracing::warn!("OS keychain did not keep the store key; using a key file");
+                    return install_file(paths, key, &new_hex, in_file.as_ref());
+                }
+                readback => {
+                    let what = match readback {
+                        Ok(Some(_)) => "returned another value".to_owned(),
+                        Ok(None) => "returned nothing".to_owned(),
+                        Err(e) => format!("could not be read back: {e}"),
+                    };
+                    let restored = match current {
+                        Some(old) => match kc.set(&old.raw()) {
+                            Ok(()) => "the previous entry was put back".to_owned(),
+                            Err(e) => format!("putting the previous entry back failed too: {e}"),
+                        },
+                        None => "there was no previous entry to put back".to_owned(),
+                    };
+                    let copies = if saved_to.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            "; previous keys were saved to {}",
+                            saved_to
+                                .iter()
+                                .map(|p| p.display().to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+                    return Err(Error::Storage(format!(
+                        "the OS keychain accepted the new store key but then {what}; {restored}{copies}"
+                    )));
+                }
             }
         }
-    } else if let Err(e) = &in_keychain {
+        if in_file.is_some() {
+            // Its secret (if different) was saved above; left in place it would only confuse a
+            // later fallback.
+            fs::remove_file(&file)?;
+            sync_dir(&paths.data);
+        }
+        return Ok(KeySource::Keychain);
+    }
+    if let Err(e) = &in_keychain {
         tracing::warn!(
             error = %e,
             path = %file.display(),
             "OS keychain unavailable; storing the store key in a 0600 key file"
         );
     }
+    install_file(paths, key, &new_hex, in_file.as_ref())
+}
 
-    if in_file
-        .as_ref()
-        .is_some_and(|k| k.as_bytes() == key.as_bytes())
-    {
+/// Make `key` the content of the key file (unless it already is).
+fn install_file(
+    paths: &Paths,
+    key: &StoreKey,
+    new_hex: &str,
+    in_file: Option<&Stored>,
+) -> Result<KeySource> {
+    if in_file.is_some_and(|f| f.is(key)) {
         return Ok(KeySource::File);
     }
     // Written beside the key file, then renamed over it: a crash leaves the old or the new key,
     // never a torn file.
+    let file = key_file(paths);
     let tmp = paths
         .data
         .join(format!("{KEY_FILE_NAME}.tmp-{}", random_suffix()?));
-    write_key_file(&tmp, &new_hex)?;
+    write_key_file(&tmp, new_hex)?;
     if let Err(e) = fs::rename(&tmp, &file) {
         let _ = fs::remove_file(&tmp);
         return Err(e.into());
@@ -375,8 +473,9 @@ pub(crate) fn install_with(
     Ok(KeySource::File)
 }
 
-/// Save `old` to a new `<data>/store.key.replaced-<UTC timestamp>[-n]` key file.
-fn save_replaced_key(paths: &Paths, old: &StoreKey) -> Result<PathBuf> {
+/// Save `raw` (a key's hex, or a malformed key's text) to a new
+/// `<data>/store.key.replaced-<UTC timestamp>[-n]` file (`0600`).
+fn save_replaced_key(paths: &Paths, raw: &str) -> Result<PathBuf> {
     let now = time::OffsetDateTime::now_utc();
     let stamp = format!(
         "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
@@ -393,7 +492,7 @@ fn save_replaced_key(paths: &Paths, old: &StoreKey) -> Result<PathBuf> {
             n => format!("{KEY_FILE_NAME}.replaced-{stamp}-{n}"),
         };
         let path = paths.data.join(name);
-        match write_key_file(&path, &old.to_hex()) {
+        match write_key_file(&path, raw) {
             Ok(()) => return Ok(path),
             Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(e),
@@ -411,7 +510,18 @@ fn random_suffix() -> Result<String> {
     Ok(hex::encode(b))
 }
 
-/// Make a rename in `dir` durable (Unix; best effort).
+/// Flush `path`'s content to disk. Opened for writing: Windows' `FlushFileBuffers` refuses a
+/// read-only handle.
+pub(crate) fn sync_file(path: &Path) -> std::io::Result<()> {
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?
+        .sync_all()
+}
+
+/// Make a rename in `dir` durable (Unix; best effort). Windows cannot open a directory this
+/// way, and its file system commits renames itself.
 pub(crate) fn sync_dir(dir: &Path) {
     #[cfg(unix)]
     if let Err(e) = fs::File::open(dir).and_then(|d| d.sync_all()) {
@@ -840,11 +950,7 @@ mod tests {
 
     #[test]
     fn install_into_key_file_without_a_keychain() {
-        for kc in [
-            None,
-            Some(&BrokenKeychain as &dyn SecretBackend),
-            Some(&ForgetfulKeychain),
-        ] {
+        for kc in [None, Some(&ForgetfulKeychain as &dyn SecretBackend)] {
             let (_d, paths) = paths();
             let first = StoreKey::from_bytes([5; 32]);
             assert_eq!(install_with(&paths, &first, kc).unwrap(), KeySource::File);
@@ -903,5 +1009,115 @@ mod tests {
             install_with(&paths, &StoreKey::from_bytes([7; 32]), Some(&kc)).unwrap(),
             KeySource::Keychain
         );
+    }
+
+    /// An enabled keychain that cannot be read may hold the current key: no key file is
+    /// written beside it, unless the home already keeps its key in a file.
+    #[test]
+    fn install_refuses_an_unreadable_keychain_without_a_key_file() {
+        let (_d, paths) = paths();
+        let err = install_with(
+            &paths,
+            &StoreKey::from_bytes([1; 32]),
+            Some(&BrokenKeychain),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&err, Error::Storage(m) if m.contains(KEYCHAIN_ENV)),
+            "{err}"
+        );
+        assert!(!key_file(&paths).exists());
+
+        load_or_create_with(&paths, None).unwrap();
+        let second = StoreKey::from_bytes([2; 32]);
+        assert_eq!(
+            install_with(&paths, &second, Some(&BrokenKeychain)).unwrap(),
+            KeySource::File
+        );
+        assert_eq!(replaced(&paths).len(), 1);
+        assert_eq!(
+            load_or_create_with(&paths, Some(&BrokenKeychain))
+                .unwrap()
+                .as_bytes(),
+            second.as_bytes()
+        );
+    }
+
+    /// Accepts writes, but reads back something else.
+    struct LyingKeychain(Mutex<Vec<String>>);
+
+    impl SecretBackend for LyingKeychain {
+        fn get(&self) -> std::result::Result<Option<Zeroizing<String>>, String> {
+            let sets = self.0.lock().unwrap();
+            // Always the first value ever stored (the "old" key), whatever was set since.
+            Ok(sets.first().cloned().map(Zeroizing::new))
+        }
+        fn set(&self, secret: &str) -> std::result::Result<(), String> {
+            self.0.lock().unwrap().push(secret.to_owned());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn install_puts_the_previous_keychain_entry_back_when_readback_fails() {
+        let (_d, paths) = paths();
+        let old = hex::encode([3u8; 32]);
+        let kc = LyingKeychain(Mutex::new(vec![old.clone()]));
+        let err = install_with(&paths, &StoreKey::from_bytes([4; 32]), Some(&kc)).unwrap_err();
+        assert!(
+            matches!(&err, Error::Storage(m) if m.contains("put back") && m.contains("replaced-")),
+            "{err}"
+        );
+        let sets = kc.0.lock().unwrap().clone();
+        assert_eq!(
+            sets.last(),
+            Some(&old),
+            "previous entry not restored: {sets:?}"
+        );
+        assert_eq!(replaced(&paths), vec![[3; 32]]);
+        assert!(!key_file(&paths).exists());
+    }
+
+    #[test]
+    fn install_replaces_a_malformed_key_and_keeps_its_text() {
+        let (_d, paths) = paths();
+        fs::create_dir_all(&paths.data).unwrap();
+        fs::write(key_file(&paths), "not a key\n").unwrap();
+        let key = StoreKey::from_bytes([5; 32]);
+        assert_eq!(install_with(&paths, &key, None).unwrap(), KeySource::File);
+        assert_eq!(
+            load_or_create_with(&paths, None).unwrap().as_bytes(),
+            key.as_bytes()
+        );
+        let saved: Vec<String> = fs::read_dir(&paths.data)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.to_string_lossy().contains(".replaced-"))
+            .map(|p| fs::read_to_string(p).unwrap())
+            .collect();
+        assert_eq!(saved, vec!["not a key\n".to_owned()]);
+
+        // A malformed keychain entry too.
+        let (_d, paths) = self::paths();
+        let kc = FakeKeychain(Mutex::new(Some("garbage".into())));
+        assert_eq!(
+            install_with(&paths, &key, Some(&kc)).unwrap(),
+            KeySource::Keychain
+        );
+        assert_eq!(
+            load_or_create_with(&paths, Some(&kc)).unwrap().as_bytes(),
+            key.as_bytes()
+        );
+    }
+
+    #[test]
+    fn sync_file_opens_for_writing() {
+        let (_d, paths) = paths();
+        fs::create_dir_all(&paths.data).unwrap();
+        let f = paths.data.join("f");
+        fs::write(&f, b"x").unwrap();
+        sync_file(&f).unwrap();
+        sync_dir(&paths.data);
+        assert_eq!(fs::read(&f).unwrap(), b"x");
     }
 }

@@ -301,7 +301,9 @@ fn parse_anchor(key: &[u8; 32], value: &str) -> Result<(i64, String)> {
         return Err(bad());
     };
     let seq: i64 = seq.parse().map_err(|_| bad())?;
-    if seq < 1 || anchor_value(key, seq, hash) != value.trim() {
+    // Seq 0 (with the genesis hash) anchors an empty log, after a forced reset.
+    let empty_ok = seq != 0 || hash == GENESIS;
+    if seq < 0 || !empty_ok || anchor_value(key, seq, hash) != value.trim() {
         return Err(bad());
     }
     Ok((seq, hash.to_owned()))
@@ -311,6 +313,10 @@ fn parse_anchor(key: &[u8; 32], value: &str) -> Result<(i64, String)> {
 /// unchanged.
 fn check_anchor(conn: &Connection, anchor: (i64, &str)) -> Result<()> {
     let (seq, hash) = anchor;
+    if seq == 0 {
+        // "No entries yet": every log extends it.
+        return Ok(());
+    }
     let last: i64 = conn
         .query_row("SELECT coalesce(max(seq), 0) FROM audit", [], |r| r.get(0))
         .db("read audit tail")?;
@@ -616,47 +622,89 @@ fn verify_log(c: &Connection, key: &[u8; 32]) -> Result<()> {
     }
 }
 
-/// Point the anchor at this log's current head, replacing whatever it holds (also a value that
-/// conflicts with this log, which [`Store::anchor_head`] would otherwise keep as evidence).
-/// Verifies the log first, ignoring the anchor; fails with `Error::Integrity` if it does not
-/// verify, leaving the anchor untouched. With no anchor configured this only verifies.
-///
-/// An empty log has no head to anchor: the anchor is then marked for replacement and overwritten
-/// by the next append.
-pub(crate) fn reset_anchor(store: &Store) -> Result<()> {
+/// Point the anchor at this log's current head after a restore (see
+/// [`Store::reset_audit_anchor`] for when it refuses and what `force` overrides). Verifies the
+/// log first, ignoring the anchor, and leaves the anchor untouched on any refusal. The new value
+/// is stored before this returns; for an empty log it is the seq-0 "no entries yet" value.
+pub(crate) fn reset_anchor(store: &Store, force: bool) -> Result<()> {
     let state = store.audit_state();
     let key = state.mac_key();
     // Held throughout, so an append cannot anchor in between (it waits, then writes its newer
     // head: `written` stays below its seq).
     let mut slot = state.anchor.lock().unwrap_or_else(PoisonError::into_inner);
-    let head = store.with_conn(|c| {
-        verify_log(c, &key)?;
-        c.query_row(
-            "SELECT seq, hash FROM audit ORDER BY seq DESC LIMIT 1",
-            [],
-            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
-        )
-        .optional()
-        .db("read audit tail")
-    })?;
     let Some(backend) = slot.backend.clone() else {
-        return Ok(());
+        return store.with_conn(|c| verify_log(c, &key));
     };
-    match &head {
-        Some((seq, hash)) => {
-            backend
-                .store(&anchor_value(&key, *seq, hash))
-                .map_err(|e| Error::Storage(format!("cannot reset the audit anchor: {e}")))?;
-            slot.written = *seq;
+    let stored = backend
+        .load()
+        .map_err(|e| Error::Storage(format!("cannot read the audit anchor: {e}")))?;
+    let (head, anchored_entry) = store.with_conn(|c| {
+        verify_log(c, &key)?;
+        let head = c
+            .query_row(
+                "SELECT seq, hash FROM audit ORDER BY seq DESC LIMIT 1",
+                [],
+                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()
+            .db("read audit tail")?;
+        // The anchor as parsed, and the hash the log has at the anchored seq.
+        let anchored = match stored.as_deref().map(|v| parse_anchor(&key, v)) {
+            Some(Ok((seq, hash))) => {
+                let in_log: Option<String> = c
+                    .query_row("SELECT hash FROM audit WHERE seq = ?1", [seq], |r| r.get(0))
+                    .optional()
+                    .db("read anchored audit entry")?;
+                Some(Ok((seq, hash, in_log)))
+            }
+            Some(Err(e)) => Some(Err(e)),
+            None => None,
+        };
+        Ok((head, anchored))
+    })?;
+    let last = head.as_ref().map_or(0, |h| h.0);
+    if !force {
+        match &anchored_entry {
+            None => {}
+            Some(Err(e)) => {
+                return Err(Error::Integrity(format!(
+                    "{e}; not resetting it without force"
+                )));
+            }
+            Some(Ok((0, _, _))) => {}
+            Some(Ok((_, _, _))) if last == 0 => {
+                return Err(Error::Integrity(
+                    "audit log: the log is empty but an anchor names an entry; not resetting it \
+                     without force"
+                        .into(),
+                ));
+            }
+            // Ahead of the tail: a genuine rollback to an older copy.
+            Some(Ok((seq, _, _))) if *seq > last => {}
+            Some(Ok((_, hash, Some(in_log)))) if in_log == hash => {}
+            Some(Ok((seq, _, _))) => {
+                return Err(Error::Integrity(format!(
+                    "audit log: entry {seq} differs from the anchored head, so the log was \
+                     rewritten rather than rolled back; not resetting the anchor without force"
+                )));
+            }
         }
-        None => slot.written = 0,
     }
+    let value = match &head {
+        Some((seq, hash)) => anchor_value(&key, *seq, hash),
+        None => anchor_value(&key, 0, GENESIS),
+    };
+    backend
+        .store(&value)
+        .map_err(|e| Error::Storage(format!("cannot reset the audit anchor: {e}")))?;
+    slot.written = last;
     slot.checked = true;
     slot.conflict = false;
     state.anchor_warned.store(false, Ordering::Relaxed);
-    tracing::info!(
-        seq = head.as_ref().map_or(0, |h| h.0),
-        "audit anchor reset to this log's head"
+    tracing::warn!(
+        seq = last,
+        force,
+        "audit anchor reset to this log's head after a restore"
     );
     Ok(())
 }

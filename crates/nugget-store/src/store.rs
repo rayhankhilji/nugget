@@ -381,10 +381,16 @@ pub(crate) fn set_key(conn: &Connection, key: &StoreKey) -> Result<()> {
         .db("configure SQLCipher logging")?;
 
     // Raw 256-bit key (x'..' form): no KDF needed, the key is already uniformly random.
-    let pragma = Zeroizing::new(format!(
-        "PRAGMA key = \"x'{}'\";",
-        hex::encode(key.as_bytes())
-    ));
+    // Built in place in a zeroized buffer of its final size, so no copy of the hex key is left
+    // behind in a temporary or a reallocated buffer.
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut pragma = Zeroizing::new(String::with_capacity(24 + 64));
+    pragma.push_str("PRAGMA key = \"x'");
+    for b in key.as_bytes() {
+        pragma.push(char::from(HEX[usize::from(b >> 4)]));
+        pragma.push(char::from(HEX[usize::from(b & 0x0f)]));
+    }
+    pragma.push_str("'\";");
     conn.execute_batch(&pragma).db("set store key")
 }
 

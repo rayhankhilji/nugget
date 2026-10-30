@@ -5,13 +5,18 @@
 //! 256-bit key that seals the store key with XChaCha20-Poly1305 under a random 24-byte nonce.
 //! The associated data binds the format version, the KDF and its parameters, the salt, the AEAD
 //! and the key id, so editing any of them (for example lowering the KDF cost) makes opening fail.
-//! The KDF parameters are read from the envelope, so it can be opened whatever they were.
+//! The KDF parameters are read from the envelope (within bounds checked before the KDF runs),
+//! so it can be opened whatever they were.
+//!
+//! The passphrase is NFC-normalised before key derivation, so the same passphrase typed on
+//! systems that compose accented characters differently opens the envelope.
 
 use argon2::{Algorithm, Argon2, Params, Version};
 use chacha20poly1305::aead::{Aead, KeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use nugget_core::{Error, Result};
 use serde::{Deserialize, Serialize};
+use unicode_normalization::UnicodeNormalization;
 use zeroize::Zeroizing;
 
 use crate::key::StoreKey;
@@ -25,9 +30,12 @@ const DEFAULT_T: u32 = 3;
 const DEFAULT_P: u32 = 1;
 /// Upper bounds on parameters read from an envelope, so a crafted file cannot make opening it
 /// allocate unbounded memory or spin for hours.
-const MAX_M_KIB: u32 = 1024 * 1024;
-const MAX_T: u32 = 64;
+const MAX_M_KIB: u32 = 256 * 1024;
+const MAX_T: u32 = 10;
 const MAX_P: u32 = 16;
+/// Least cost [`KeyEnvelope::seal_with`] accepts (8 MiB, 1 pass).
+const MIN_M_KIB: u32 = 8 * 1024;
+const MIN_T: u32 = 1;
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 24;
 const AD_DOMAIN: &str = "nugget-key-envelope";
@@ -58,10 +66,39 @@ impl KeyEnvelope {
         Self::seal_with(key, passphrase, DEFAULT_M_KIB, DEFAULT_T, DEFAULT_P)
     }
 
-    /// Seal `key` under `passphrase` with explicit Argon2id parameters: memory `m_kib` KiB, `t`
-    /// passes, `p` lanes (tests use tiny ones). `Error::Invalid` for parameters Argon2 rejects or
-    /// above the limits [`KeyEnvelope::open`] accepts.
+    /// Seal `key` under `passphrase` with explicit Argon2id parameters: memory `m_kib` KiB
+    /// (8 MiB to 256 MiB), `t` passes (1 to 10), `p` lanes (1 to 16). `Error::Invalid` outside
+    /// those bounds or for parameters Argon2 rejects.
     pub fn seal_with(key: &StoreKey, passphrase: &str, m_kib: u32, t: u32, p: u32) -> Result<Self> {
+        if m_kib < MIN_M_KIB || t < MIN_T {
+            return Err(Error::Invalid(format!(
+                "key envelope KDF parameters m={m_kib} KiB, t={t} are below the minimum \
+                 (m >= {MIN_M_KIB}, t >= {MIN_T})"
+            )));
+        }
+        Self::seal_unchecked(key, passphrase, m_kib, t, p)
+    }
+
+    /// [`KeyEnvelope::seal_with`] without the minimum cost, so tests can seal in microseconds.
+    /// Never use it for a real envelope.
+    #[doc(hidden)]
+    pub fn seal_insecure_for_tests(
+        key: &StoreKey,
+        passphrase: &str,
+        m_kib: u32,
+        t: u32,
+        p: u32,
+    ) -> Result<Self> {
+        Self::seal_unchecked(key, passphrase, m_kib, t, p)
+    }
+
+    fn seal_unchecked(
+        key: &StoreKey,
+        passphrase: &str,
+        m_kib: u32,
+        t: u32,
+        p: u32,
+    ) -> Result<Self> {
         let mut salt = [0u8; SALT_LEN];
         let mut nonce = [0u8; NONCE_LEN];
         getrandom::fill(&mut salt)
@@ -156,9 +193,10 @@ impl KeyEnvelope {
         }
         let params = Params::new(self.m_kib, self.t, self.p, Some(32))
             .map_err(|e| Error::Invalid(format!("key envelope KDF parameters: {e}")))?;
+        let normalized = Zeroizing::new(passphrase.nfc().collect::<String>());
         let mut kek = Zeroizing::new([0u8; 32]);
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
-            .hash_password_into(passphrase.as_bytes(), salt, kek.as_mut_slice())
+            .hash_password_into(normalized.as_bytes(), salt, kek.as_mut_slice())
             .map_err(|e| Error::Invalid(format!("key envelope KDF: {e}")))?;
         Ok(kek)
     }
@@ -179,7 +217,7 @@ mod tests {
 
     /// Small Argon2 parameters so tests run fast.
     fn seal(key: &StoreKey, pass: &str) -> KeyEnvelope {
-        KeyEnvelope::seal_with(key, pass, 64, 1, 1).unwrap()
+        KeyEnvelope::seal_insecure_for_tests(key, pass, 64, 1, 1).unwrap()
     }
 
     #[test]
@@ -210,6 +248,56 @@ mod tests {
             env.open("passphrase").unwrap().as_bytes(),
             StoreKey::from_bytes([3; 32]).as_bytes()
         );
+    }
+
+    #[test]
+    fn cost_bounds_are_enforced() {
+        let key = StoreKey::from_bytes([2; 32]);
+        for (m, t) in [
+            (64, 1),
+            (MIN_M_KIB - 1, 1),
+            (MIN_M_KIB, 0),
+            (MAX_M_KIB + 1, 1),
+            (MIN_M_KIB, MAX_T + 1),
+        ] {
+            assert!(
+                matches!(
+                    KeyEnvelope::seal_with(&key, "passphrase", m, t, 1),
+                    Err(Error::Invalid(_))
+                ),
+                "m={m} t={t}"
+            );
+        }
+        // Opening checks the bounds before running the KDF.
+        let env = seal(&key, "passphrase");
+        for bad in [
+            KeyEnvelope {
+                m_kib: MAX_M_KIB + 1,
+                ..env.clone()
+            },
+            KeyEnvelope {
+                t: MAX_T + 1,
+                ..env.clone()
+            },
+            KeyEnvelope {
+                p: MAX_P + 1,
+                ..env.clone()
+            },
+        ] {
+            let started = std::time::Instant::now();
+            assert!(matches!(bad.open("passphrase"), Err(Error::Invalid(_))));
+            assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn passphrases_are_nfc_normalised() {
+        let key = StoreKey::from_bytes([6; 32]);
+        let composed = "caf\u{e9} cr\u{e8}me";
+        let decomposed = "cafe\u{301} cre\u{300}me";
+        assert_ne!(composed, decomposed);
+        let env = seal(&key, composed);
+        assert_eq!(env.open(decomposed).unwrap().as_bytes(), key.as_bytes());
     }
 
     #[test]

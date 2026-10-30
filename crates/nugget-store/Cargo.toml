@@ -26,7 +26,9 @@ getrandom = "0.3"
 fs4 = "1"
 zeroize = "1"
 # Backup key envelope: passphrase KDF and AEAD.
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["zeroize"] }
+# NFC for backup passphrases and backup file paths (already in the workspace lock).
+unicode-normalization = "0.1"
 chacha20poly1305 = "0.10"
 
 # OS keychains. Each target only pulls in its native backend; anything else falls back to a key file.
