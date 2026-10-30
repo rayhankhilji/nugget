@@ -128,7 +128,10 @@ fn canonical_predicate(p: &str) -> Option<String> {
         match p.as_str() {
             "employed_by" | "works_for" | "employee_of" | "employed_at" => "works_at",
             "lives_at" | "resides_in" | "based_in" | "lives" => "lives_in",
-            "title" | "job_title" | "role" | "has_role" | "position" => "has_title",
+            // One job title at a time: every name a model uses for it maps to the one
+            // single-valued predicate.
+            "title" | "job_title" | "role" | "has_role" | "position" | "job" | "works_as"
+            | "occupation" | "has_position" | "has_job_title" | "serves_as" => "has_title",
             "due" | "deadline" | "due_by" | "due_date" => "due_on",
             "likes" | "prefer" => "prefers",
             "promised" | "commits_to" | "committed" | "will_do" | "promised_to" => "committed_to",
@@ -1077,6 +1080,12 @@ fn commitment_core(name: &str) -> String {
 /// Strip a leading article or possessive from a job title (`our Senior Data Scientist`).
 fn clean_title(s: &str) -> String {
     let mut t = trim_name(s);
+    // "Head of Data at Quillfeather": the employer is a `works_at` of its own.
+    if let Some(i) = t.find(" at ")
+        && i > 0
+    {
+        t.truncate(i);
+    }
     'strip: loop {
         let lower = t.to_lowercase();
         for p in [

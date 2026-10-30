@@ -19,13 +19,34 @@
 //!    providers only by default; every claim must carry a quote found verbatim in the text.
 //! 4. **Entity resolution** (`resolve`): identifiers, then names and aliases,
 //!    then (optionally) embeddings and LLM adjudication; never across conflicting identifiers.
-//! 5. **Claim lifecycle:** single-valued predicates (`works_at`, `lives_in`, ...) keep one
-//!    active value, the one with the freshest evidence; a superseded value gets `valid_to` (when
-//!    the newer value's evidence is from); confidence rises with independent evidence
-//!    (noisy-OR). A fact the user **rejected** stays rejected: re-extraction only adds evidence
-//!    to it. One item's mention, claim, evidence and provenance writes are applied as one
-//!    `GraphBatch` (one transaction). Entities left with nothing behind them after retractions
-//!    are pruned (never the user's entity).
+//! 5. **Claim lifecycle** (time-aware). Every claim the pipeline writes carries `valid_from`:
+//!    the date of its earliest evidence item (a mail's `Date`, a note's frontmatter date or
+//!    modification time, an item's time), or the start the extractor knows (a calendar event's,
+//!    which evidence from other items never moves). Confidence rises with independent evidence
+//!    (noisy-OR). Single-valued predicates ([`SINGLE_VALUED_PREDICATES`]: `works_at`,
+//!    `has_title`, `lives_in`, `reports_to`, ...) keep one current value; after every item, merge
+//!    or deletion that touches one, the (subject, predicate) pair is *settled* from scratch, as
+//!    a deterministic function of its claims' evidence, so the order items arrive in never
+//!    changes the outcome:
+//!    - a quote saying the fact **ended** ("my last day at X", "left X", "moved from X",
+//!      "former", "previously", "used to", "no longer", "ex-"; see `temporal`) is kept as
+//!      cited evidence but never makes its value current: a value whose newest ended-quote is
+//!      at least as recent as its newest other evidence is superseded, with `valid_to` that
+//!      date;
+//!    - among the other values the one seen most recently is current; a tie (one note naming
+//!      both) goes to the value whose quote marks a start ("joined", "now", "new role", "moved
+//!      to", "from X to Y"), then to the one later in the text, then by name;
+//!    - a superseded value is valid until the first date another value is seen at or after its
+//!      last sighting (when the value that replaced it starts);
+//!    - a user-asserted value is current whatever the evidence says; a value the user
+//!      **rejected** stays rejected (re-extraction only adds evidence to it); when the current
+//!      value loses its evidence (a deletion), the best remaining superseded value is current
+//!      again, open-ended.
+//!
+//!    Graphs written before validity intervals are migrated once, without the LLM, at the start
+//!    of the next run (`state::TEMPORAL_VERSION`). One item's mention, claim, evidence and
+//!    provenance writes are applied as one `GraphBatch` (one transaction). Entities left with
+//!    nothing behind them after retractions are pruned (never the user's entity).
 //!
 //! Every claim carries [`Evidence`](nugget_graph::Evidence) `{ item, chunk_id when known,
 //! quote }`, and every entity occurrence is recorded as a mention.
@@ -45,6 +66,7 @@ mod session;
 mod spec;
 mod splits;
 mod state;
+mod temporal;
 mod text;
 
 pub use config::{

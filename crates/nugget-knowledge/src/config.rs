@@ -21,8 +21,10 @@ pub struct KnowledgeConfig {
     /// Messages with more participants than this produce no `corresponded_with` claims for the
     /// recipients (mailing lists, announcements); the sender is still linked.
     pub max_correspondents: usize,
-    /// Predicates that hold one value at a time: a fresher claim supersedes older ones with a
-    /// different object. Replaces the built-in list when non-empty.
+    /// Predicates that hold one value at a time: the value seen most recently (and not said to
+    /// have ended) is current, the others are superseded history (see the crate docs, "Claim
+    /// lifecycle"). Replaces the built-in list ([`crate::SINGLE_VALUED_PREDICATES`]) when
+    /// non-empty.
     pub single_valued_predicates: Vec<String>,
     /// The optional LLM extractor.
     pub llm: LlmConfig,
