@@ -75,7 +75,7 @@ dump_logs() {
 # xdg-desktop-portal 1.19+ names an unsandboxed app only from a desktop file matching the app id
 # it registers (nugget-hotkey registers dev.nugget.desktop), and GLib loads that file only when
 # its Exec program exists (on PATH, or an absolute path). Use the installed package's, or provide
-# a test one. Older portals ignore it. ($runtime/data also holds the session's own desktop files.)
+# a test one. Older portals ignore it.
 mkdir -p "$runtime/data/applications"
 export XDG_DATA_DIRS="$runtime/data:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 installed_desktop=/usr/share/applications/dev.nugget.desktop.desktop
@@ -86,15 +86,6 @@ else
     printf '[Desktop Entry]\nType=Application\nName=Nugget\nExec=%s\nNoDisplay=true\n' "$exec_path" \
         >"$runtime/data/applications/dev.nugget.desktop.desktop"
     echo "wayland-session: desktop file: a test dev.nugget.desktop.desktop with Exec=$exec_path"
-fi
-if [ "$compositor" = kwin ]; then
-    # KWin 6 gives its restricted Wayland interfaces (org_kde_kwin_fake_input among them) only to
-    # a program whose desktop file asks for them in X-KDE-Wayland-Interfaces, matched by the
-    # client's executable, as KDE Connect's does. virtual-keyboard.py runs on python3: this
-    # session's KWin trusts python3 with fake input. (Not shown in menus: no Categories.)
-    py="$(readlink -f "$(command -v python3)")"
-    printf '[Desktop Entry]\nType=Application\nName=Nugget CI virtual keyboard\nExec=%s\nX-KDE-Wayland-Interfaces=org_kde_kwin_fake_input\n' \
-        "$py" >"$runtime/data/applications/nugget-ci-virtual-keyboard.desktop"
 fi
 
 # The desktop name decides which portal backends the front end uses (kde-portals.conf,
@@ -166,10 +157,16 @@ kwin)
             >"$runtime/.config/kglobalshortcutsrc"
         echo "wayland-session: PRE-SEEDED consent: dev.nugget.desktop/double-tap in kglobalshortcutsrc (no dialog)"
     fi
-    # No GPU: composite with QPainter rather than through EGL.
+    # No GPU: composite with QPainter rather than through EGL. KWin 6.6 gives its restricted
+    # Wayland interfaces (org_kde_kwin_fake_input, which virtual-keyboard.py uses) only to a
+    # program whose desktop file lists them in X-KDE-Wayland-Interfaces, as KDE Connect's does;
+    # a python3 desktop file was not found by this root-run KWin's service cache, so this CI
+    # compositor runs with KWin's own switch for that check off. Nothing else changes: the key
+    # events still enter as an input device's, through KWin's shortcut handling.
     "${as_root[@]}" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
         XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland HOME="$runtime" KWIN_COMPOSE=Q \
         XDG_DATA_DIRS="$XDG_DATA_DIRS" QT_LOGGING_RULES="${NUGGET_WAYLAND_KWIN_LOGGING:-}" \
+        KWIN_WAYLAND_NO_PERMISSION_CHECKS=1 \
         "$runtime/kwin_wayland" --virtual --no-lockscreen \
         --width 1280 --height 800 --socket wayland-1 >"$logs/kwin.log" 2>&1 &
     pids+=($!)

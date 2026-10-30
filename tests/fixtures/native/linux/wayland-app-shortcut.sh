@@ -85,6 +85,36 @@ for _ in $(seq 1 450); do
 done
 listener="$(grep -m1 '"event":"listener"' "$probe" 2>/dev/null)"
 log "probe: ${listener:-no listener event in 90 s}"
+if [ "$compositor" = sway ]; then
+    # No GlobalShortcuts (xdg-desktop-portal-wlr): the listener must report the documented
+    # error, and the fallback a sway user binds (bindsym ... exec nugget-desktop --double-tap)
+    # must fire Double Tap in the running app through the single-instance hand-off.
+    registered="-"
+    activation="nugget-desktop --double-tap (second instance)"
+    if ! echo "$listener" | grep -q '"listening":false' || ! echo "$listener" | grep -q 'GlobalShortcuts'; then
+        log "expected the documented 'GlobalShortcuts unavailable' error on sway"
+        row
+        exit 1
+    fi
+    session="unavailable (documented error)"
+    sleep 2
+    before="$(probe_count trigger)"
+    t0="$(date +%s%N)"
+    GDK_BACKEND=wayland "$app" --double-tap >"$out/second-instance.log" 2>&1
+    log "second instance exited with $?"
+    for _ in $(seq 1 50); do
+        [ "$(probe_count trigger)" -gt "$before" ] && break
+        sleep 0.1
+    done
+    if [ "$(probe_count trigger)" -gt "$before" ]; then
+        fired="yes"
+        fire_ms="$((($(date +%s%N) - t0) / 1000000)) (launch to probe, upper bound)"
+    fi
+    cat "$probe"
+    row
+    [ "$fired" = yes ] || { tail -n 60 "$out/nugget-desktop.log"; exit 1; }
+    exit 0
+fi
 if ! echo "$listener" | grep -q '"listening":true'; then
     log "the Double Tap listener did not start"
     tail -n 80 "$out/nugget-desktop.log"
