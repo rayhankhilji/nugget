@@ -75,18 +75,26 @@ dump_logs() {
 # xdg-desktop-portal 1.19+ names an unsandboxed app only from a desktop file matching the app id
 # it registers (nugget-hotkey registers dev.nugget.desktop), and GLib loads that file only when
 # its Exec program exists (on PATH, or an absolute path). Use the installed package's, or provide
-# a test one. Older portals ignore it.
-export XDG_DATA_DIRS="${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+# a test one. Older portals ignore it. ($runtime/data also holds the session's own desktop files.)
+mkdir -p "$runtime/data/applications"
+export XDG_DATA_DIRS="$runtime/data:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 installed_desktop=/usr/share/applications/dev.nugget.desktop.desktop
 if [ -f "$installed_desktop" ] && [ -z "${NUGGET_WAYLAND_DESKTOP_EXEC:-}" ]; then
     echo "wayland-session: desktop file: the installed $installed_desktop ($(grep -m1 '^Exec=' "$installed_desktop"))"
 else
     exec_path="${NUGGET_WAYLAND_DESKTOP_EXEC:-/usr/bin/true}"
-    mkdir -p "$runtime/data/applications"
     printf '[Desktop Entry]\nType=Application\nName=Nugget\nExec=%s\nNoDisplay=true\n' "$exec_path" \
         >"$runtime/data/applications/dev.nugget.desktop.desktop"
-    export XDG_DATA_DIRS="$runtime/data:$XDG_DATA_DIRS"
     echo "wayland-session: desktop file: a test dev.nugget.desktop.desktop with Exec=$exec_path"
+fi
+if [ "$compositor" = kwin ]; then
+    # KWin 6 gives its restricted Wayland interfaces (org_kde_kwin_fake_input among them) only to
+    # a program whose desktop file asks for them in X-KDE-Wayland-Interfaces, matched by the
+    # client's executable, as KDE Connect's does. virtual-keyboard.py runs on python3: this
+    # session's KWin trusts python3 with fake input. (Not shown in menus: no Categories.)
+    py="$(readlink -f "$(command -v python3)")"
+    printf '[Desktop Entry]\nType=Application\nName=Nugget CI virtual keyboard\nExec=%s\nX-KDE-Wayland-Interfaces=org_kde_kwin_fake_input\n' \
+        "$py" >"$runtime/data/applications/nugget-ci-virtual-keyboard.desktop"
 fi
 
 # The desktop name decides which portal backends the front end uses (kde-portals.conf,
@@ -161,6 +169,7 @@ kwin)
     # No GPU: composite with QPainter rather than through EGL.
     "${as_root[@]}" env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
         XDG_CURRENT_DESKTOP=KDE XDG_SESSION_TYPE=wayland HOME="$runtime" KWIN_COMPOSE=Q \
+        XDG_DATA_DIRS="$XDG_DATA_DIRS" QT_LOGGING_RULES="${NUGGET_WAYLAND_KWIN_LOGGING:-}" \
         "$runtime/kwin_wayland" --virtual --no-lockscreen \
         --width 1280 --height 800 --socket wayland-1 >"$logs/kwin.log" 2>&1 &
     pids+=($!)
@@ -179,7 +188,8 @@ gnome)
     # Headless Mutter renders with llvmpipe through surfaceless EGL; the virtual monitor is the
     # session's only output. No logind seat is needed in headless mode.
     export GSK_RENDERER=cairo
-    gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 \
+    MUTTER_DEBUG="${NUGGET_WAYLAND_MUTTER_DEBUG:-}" \
+        gnome-shell --headless --wayland --no-x11 --virtual-monitor 1280x800 \
         --wayland-display wayland-1 >"$logs/gnome-shell.log" 2>&1 &
     pids+=($!)
     ;;
@@ -256,6 +266,17 @@ if [ "$compositor" = gnome ]; then
         sleep 0.2
     done
     echo "wayland-session: gnome-shell $(shell_prop ShellVersion) overview $(shell_prop OverviewActive)"
+    # Start the GNOME portal backend ourselves (rather than by activation) so its log is kept,
+    # once the shell it talks to is up.
+    xdpg="$(ls /usr/libexec/xdg-desktop-portal-gnome /usr/lib/*/libexec/xdg-desktop-portal-gnome 2>/dev/null | head -n 1)"
+    if [ -n "$xdpg" ]; then
+        G_MESSAGES_DEBUG="${NUGGET_WAYLAND_GNOME_PORTAL_DEBUG:-}" "$xdpg" -r >"$logs/portal-gnome.log" 2>&1 &
+        pids+=($!)
+    fi
+    for _ in $(seq 1 100); do
+        has_name org.freedesktop.impl.portal.desktop.gnome && break
+        sleep 0.1
+    done
 fi
 
 if [ "$compositor" = sway ]; then
@@ -264,6 +285,12 @@ if [ "$compositor" = sway ]; then
     # A virtual keyboard (zwp_virtual_keyboard_v1, held open by a sleeping wtype) gives seat0
     # one, as a real session has. It presses nothing.
     wtype -s 86400000 >"$logs/wtype.log" 2>&1 &
+    pids+=($!)
+fi
+
+# Every D-Bus message on the session bus, for diagnosis (NUGGET_WAYLAND_DBUS_MONITOR=1).
+if [ "${NUGGET_WAYLAND_DBUS_MONITOR:-0}" = 1 ]; then
+    dbus-monitor --session >"$logs/dbus-monitor.log" 2>&1 &
     pids+=($!)
 fi
 
