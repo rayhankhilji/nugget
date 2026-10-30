@@ -1649,5 +1649,11 @@
   "doubletap.hint.atspi": "Double Tap は AT-SPI を使ってテキスト欄を読み取りますが、このデスクトップでは無効です。次のコマンドで有効にしてください：gsettings set org.gnome.desktop.interface toolkit-accessibility true — その後、ログアウトして再ログインします。",
   "doubletap.hint.accessibility": "Nugget がフォーカス中の欄を読み取り下書きを挿入するには、アクセシビリティの許可が必要です。システム設定 → プライバシーとセキュリティ → アクセシビリティで Nugget をオンにしてください。",
   "doubletap.hint.wayland_chord": "Wayland ではアプリが単独のキー入力を検出できないため、ダブルタップは使えません。代わりにキーの組み合わせをトリガーにしてください。",
-  "doubletap.hint.macos_permissions": "Double Tap にはアクセシビリティと入力監視の権限が必要です。「権限の確認を開く」をクリックし、システム設定 → プライバシーとセキュリティで Nugget をオンにしてから戻ってください。"
+  "doubletap.hint.macos_permissions": "Double Tap にはアクセシビリティと入力監視の権限が必要です。「権限の確認を開く」をクリックし、システム設定 → プライバシーとセキュリティで Nugget をオンにしてから戻ってください。",
+  "doubletap.hint.wayland_no_portal": "このデスクトップにはグローバルショートカットのポータルがないため（sway や古い xdg-desktop-portal など）、Nugget はキーの組み合わせを登録できません。Nugget を起動したまま、コンポジターの設定で nugget-desktop --double-tap を実行するキーを割り当ててください（sway の場合：bindsym $mod+Shift+space exec nugget-desktop --double-tap）。または、トレイの「Open Nugget」から Nugget を開き、「試してみる」をクリックしてください。",
+  "doubletap.shortcut.awaiting_consent": "デスクトップが、Nugget にこのショートカットの使用を許可するか確認しています。ダイアログで許可すると、このショートカットで Double Tap を開始できます。",
+  "doubletap.shortcut.not_assigned": "デスクトップが Double Tap にキーを割り当てていません。デスクトップのキーボードショートカット設定で「Nugget: draft a reply」にキーを割り当てると、すぐに使えるようになります。それまでは、トレイから Nugget を開き「試してみる」をクリックしてください。",
+  "doubletap.shortcut.rebinding": "デスクトップがショートカットを解除しました。Nugget が再設定しています…",
+  "doubletap.shortcut.active_desktop": "デスクトップでは {trigger} で Double Tap を開始します。",
+  "doubletap.shortcut.failed": "デスクトップのショートカットが動作しなくなりました：{error}"
 }

@@ -2,8 +2,8 @@
 import axe from "axe-core";
 import { act } from "react";
 import { emit } from "@tauri-apps/api/event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { DoubleTapSettings, DoubleTapStatus, VoiceStatus } from "../api";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DoubleTapSettings, DoubleTapStatus, ShortcutStatus, VoiceStatus } from "../api";
 import { App } from "../App";
 import { byText, cleanup, click, flush, installDomShims, mockDaemon, render } from "../test/render";
 
@@ -182,5 +182,45 @@ describe("Double Tap settings page", () => {
     expect((sent[0] as DoubleTapSettings).app_providers).toEqual({ "mail.google.com": "anthropic", slack: "local-chat" });
     await click(byText(document, "button", "Try it"));
     expect(calls).toContain("doubletap_fire");
+  });
+
+  it("shows the desktop's shortcut consent and checks back until it is approved", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let shortcut: ShortcutStatus = { state: "awaiting_consent", trigger: null, error: null };
+      const { calls } = setup({ doubletap_status: () => ({ ...status, listening: true, trigger_error: null, shortcut }) });
+      const polls = () => calls.filter((c) => c === "doubletap_status").length;
+      await render(<App />);
+      await flush(10);
+      const note = () => document.querySelector("main")!.textContent;
+      expect(note()).toContain("Approve it in the dialog");
+
+      shortcut = { state: "active", trigger: "Super+D", error: null };
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      await flush(5);
+      expect(note()).toContain("Your desktop starts Double Tap with Super+D.");
+
+      // Active: no more checking back.
+      const settled = polls();
+      await act(async () => {
+        vi.advanceTimersByTime(6000);
+      });
+      await flush(3);
+      expect(polls()).toBe(settled);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("alerts when the desktop shortcut fails", async () => {
+    setup({
+      doubletap_status: { ...status, listening: true, trigger_error: null, shortcut: { state: "failed", trigger: null, error: "portal gone" } },
+    });
+    await render(<App />);
+    await flush(10);
+    const alerts = Array.from(document.querySelectorAll('[role="alert"]')).map((a) => a.textContent);
+    expect(alerts).toContain("The desktop shortcut stopped working: portal gone");
   });
 });
