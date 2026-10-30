@@ -33,7 +33,7 @@
 //! `osascript` on macOS) or the fake server, or on another OS. Linux also needs a session bus
 //! with AT-SPI and a window manager, started by the caller: `bench/scripts/energy-linux.sh`.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -62,6 +62,7 @@ const PROVIDER: &str = "bench-local";
 /// How long to wait for the shell's probe line (and the settle period of a release build).
 const PROBE_WAIT: Duration = Duration::from_secs(30);
 /// Upper bound on a helper command (one focus switch, opening windows).
+#[cfg(unix)]
 const HELPER_LIMIT: Duration = Duration::from_secs(20);
 const DIM: usize = 384;
 /// The Linux text window (`bench/scripts/energy-text-window.py`), written to the run's temp dir.
@@ -311,7 +312,9 @@ fn run_plan(
 }
 
 /// Run `cmd`, at most [`HELPER_LIMIT`]; its stdout, or why it failed.
+#[cfg(unix)]
 fn run_bounded(cmd: &mut Command) -> Result<String, String> {
+    use std::io::Read as _;
     let what = format!("{:?}", cmd.get_program());
     let mut child = cmd
         .stdin(Stdio::null())
