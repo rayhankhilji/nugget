@@ -11,7 +11,7 @@ Report: `docs/qa/GG1.md`. Everything here is synthetic and written for GG1.
   `gg1 lint` prints each scenario's classification and gate.
 - `world/*.json`: personas (`id`, `name`, `emails`, `voice`, `sent[]`, `vault[]`).
 - `scenarios/*.json`: `{"scenarios": [{id, persona, area, description, request: DraftRequest,
-  fake_reply?, config?: {include_sensitive, grounding, excluded_apps, allow_terminals}, expect}]}`.
+  fake_reply?, config?: {include_sensitive, grounding, grounding_check, excluded_apps, allow_terminals}, expect}]}`.
 - `check.py`: deterministic checks of `expect` (`refuse`, `kind`, `language`, `gold`,
   `forbidden`, `secrets`, `secrets_not_in_prompt`, `injection_markers`, `min_words`,
   `max_words`, `single_line`, `no_markdown`, `no_greeting`, `no_repeat_prefix`,

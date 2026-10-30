@@ -130,6 +130,9 @@ struct ScenarioConfig {
     excluded_apps: Vec<String>,
     #[serde(default)]
     allow_terminals: Option<bool>,
+    /// `sentences` or `secrets` (the product default).
+    #[serde(default)]
+    grounding_check: Option<nugget_draft::GroundingCheck>,
 }
 
 fn load_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
@@ -572,6 +575,9 @@ fn draft_config(sc: &ScenarioConfig, temperature: Option<f32>, read_ahead: bool)
     }
     if let Some(v) = sc.allow_terminals {
         c.allow_terminals = v;
+    }
+    if let Some(v) = sc.grounding_check {
+        c.grounding_check = v;
     }
     c.excluded_apps.extend(sc.excluded_apps.iter().cloned());
     // Each scenario stands for a focus change well apart from the last (the bench does the same).
