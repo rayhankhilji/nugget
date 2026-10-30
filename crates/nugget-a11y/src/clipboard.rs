@@ -80,44 +80,85 @@ impl Default for PasteTiming {
     }
 }
 
+/// What a read-back of the field shows while waiting for a paste.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteCheck {
+    /// The text arrived as expected.
+    Verified,
+    /// The field changed, but not as expected.
+    Changed,
+    Unchanged,
+}
+
 /// Result of [`paste_with_restore`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PasteResult {
     pub verified: bool,
+    /// The last read-back: `Changed` or `Unchanged` when not verified. Either way the paste was
+    /// sent and may still land, so the caller must not insert the text another way.
+    pub check: PasteCheck,
     /// The previous clipboard contents were put back.
     pub restored: bool,
+}
+
+/// Why [`paste_with_restore`] failed, and whether the paste was sent before it did.
+#[derive(Debug)]
+pub enum PasteError {
+    /// Nothing reached the app (clipboard unavailable, too large to save, `set_text` failed):
+    /// another insertion method may be tried.
+    NotSent(Error),
+    /// The paste was sent, or may have been (`paste` or `verify` failed): never insert the
+    /// text another way.
+    Sent(Error),
+}
+
+impl PasteError {
+    pub fn sent(&self) -> bool {
+        matches!(self, PasteError::Sent(_))
+    }
+}
+
+impl From<PasteError> for Error {
+    fn from(e: PasteError) -> Self {
+        match e {
+            PasteError::NotSent(e) | PasteError::Sent(e) => e,
+        }
+    }
 }
 
 /// Paste `text` through the clipboard and put the previous contents back.
 ///
 /// `paste` synthesises the paste (Cmd/Ctrl+V, or a toolkit paste action); it never sends
-/// Return. `verify` reads the field back and reports whether the text arrived; it is polled
-/// until it returns `true` or the timeout and the grace period pass. The previous clipboard
-/// contents are restored
-/// on every path after they were saved, including errors from `set_text`, `paste` or `verify`.
+/// Return. `check` reads the field back; it is polled until it reports
+/// [`PasteCheck::Verified`] or the timeout passes, then through the grace period until it is
+/// verified, the field has changed (the paste landed, verification has decided), or the grace
+/// period ends. The previous clipboard contents are restored on every path after they were
+/// saved. Once the paste was attempted, a failure waits out the grace period before restoring,
+/// so an app that reads the clipboard late never pastes the old contents into the field.
 pub fn paste_with_restore(
     clipboard: &mut dyn Clipboard,
     text: &str,
     paste: &mut dyn FnMut() -> Result<()>,
-    verify: &mut dyn FnMut() -> Result<bool>,
+    check: &mut dyn FnMut() -> Result<PasteCheck>,
     timing: PasteTiming,
-) -> Result<PasteResult> {
-    let saved = clipboard.snapshot()?;
+) -> std::result::Result<PasteResult, PasteError> {
+    let saved = clipboard.snapshot().map_err(PasteError::NotSent)?;
     if saved.total_bytes() > MAX_SNAPSHOT_BYTES {
-        return Err(Error::Unsupported(
+        return Err(PasteError::NotSent(Error::Unsupported(
             "clipboard holds too much data to save and restore safely".into(),
-        ));
+        )));
     }
-    let outcome = (|| -> Result<bool> {
-        clipboard.set_text(text)?;
+    let outcome = (|| -> std::result::Result<PasteCheck, PasteError> {
+        clipboard.set_text(text).map_err(PasteError::NotSent)?;
         sleep(timing.before_paste);
-        paste()?;
+        // From here on the app may have received the paste.
+        paste().map_err(PasteError::Sent)?;
         let deadline = Instant::now() + timing.verify_timeout;
         loop {
             sleep(timing.poll);
-            if verify()? {
+            if check().map_err(PasteError::Sent)? == PasteCheck::Verified {
                 sleep(timing.before_restore);
-                return Ok(true);
+                return Ok(PasteCheck::Verified);
             }
             if Instant::now() >= deadline {
                 break;
@@ -126,19 +167,26 @@ pub fn paste_with_restore(
         // The paste may still be in flight (a long paste into a rich editor can take a while
         // to reach the accessibility tree): restoring now could make the app paste the old
         // clipboard instead. Keep looking through the grace period; restore as soon as it
-        // lands, or when the grace period is over.
+        // has landed, or when the grace period is over.
         let grace_end = Instant::now() + timing.unverified_grace;
         loop {
             sleep(timing.poll.max(Duration::from_millis(1)));
-            if verify()? {
+            let c = check().map_err(PasteError::Sent)?;
+            if c != PasteCheck::Unchanged {
                 sleep(timing.before_restore);
-                return Ok(true);
+                return Ok(c);
             }
             if Instant::now() >= grace_end {
-                return Ok(false);
+                return Ok(c);
             }
         }
     })();
+    if let Err(e) = &outcome
+        && e.sent()
+    {
+        // The paste may be in flight: give the app the grace period to read our text.
+        sleep(timing.unverified_grace);
+    }
     let restored = match clipboard.restore(&saved) {
         Ok(()) => true,
         Err(e) => {
@@ -146,8 +194,12 @@ pub fn paste_with_restore(
             false
         }
     };
-    let verified = outcome?;
-    Ok(PasteResult { verified, restored })
+    let check = outcome?;
+    Ok(PasteResult {
+        verified: check == PasteCheck::Verified,
+        check,
+        restored,
+    })
 }
 
 fn sleep(d: Duration) {
@@ -191,6 +243,14 @@ impl Clipboard for MemoryClipboard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn check(verified: bool) -> PasteCheck {
+        if verified {
+            PasteCheck::Verified
+        } else {
+            PasteCheck::Unchanged
+        }
+    }
 
     fn fast() -> PasteTiming {
         PasteTiming {
@@ -258,7 +318,7 @@ mod tests {
                     .push_str(std::str::from_utf8(data).unwrap());
                 Ok(())
             },
-            &mut || Ok(field.borrow().as_str() == "Hi there"),
+            &mut || Ok(check(field.borrow().as_str() == "Hi there")),
             fast(),
         )
         .unwrap();
@@ -266,6 +326,7 @@ mod tests {
             r,
             PasteResult {
                 verified: true,
+                check: PasteCheck::Verified,
                 restored: true
             }
         );
@@ -303,7 +364,7 @@ mod tests {
                     );
                     landed.set(true);
                 }
-                Ok(landed.get())
+                Ok(check(landed.get()))
             },
             timing,
         )
@@ -343,7 +404,7 @@ mod tests {
                     *field.borrow_mut() =
                         String::from_utf8(st.contents.items[0][0].data.clone()).unwrap();
                 }
-                Ok(*field.borrow() == text)
+                Ok(check(*field.borrow() == text))
             },
             timing,
         )
@@ -355,13 +416,115 @@ mod tests {
     }
 
     #[test]
+    fn errors_say_whether_the_paste_was_sent() {
+        // Before the keystroke: not sent.
+        let mut cb = MemoryClipboard {
+            contents: rich(),
+            fail_set: true,
+            ..Default::default()
+        };
+        let e = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Ok(()),
+            &mut || Ok(PasteCheck::Verified),
+            fast(),
+        )
+        .unwrap_err();
+        assert!(!e.sent());
+        assert_eq!(cb.contents, rich());
+        // The keystroke failed, or the read-back failed after it: sent (it may land).
+        let mut cb = MemoryClipboard {
+            contents: rich(),
+            ..Default::default()
+        };
+        let e = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Err(Error::Unsupported("no paste".into())),
+            &mut || Ok(PasteCheck::Verified),
+            fast(),
+        )
+        .unwrap_err();
+        assert!(e.sent());
+        let e = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Ok(()),
+            &mut || Err(Error::Other("gone".into())),
+            fast(),
+        )
+        .unwrap_err();
+        assert!(e.sent());
+        assert_eq!(cb.contents, rich());
+    }
+
+    #[test]
+    fn restore_after_a_failed_keystroke_waits_out_the_grace_period() {
+        // A paste keystroke that reports failure may still have been delivered: restoring at
+        // once would let the app paste the old clipboard into the field.
+        let mut cb = MemoryClipboard {
+            contents: rich(),
+            ..Default::default()
+        };
+        let mut timing = fast();
+        timing.unverified_grace = Duration::from_millis(60);
+        let start = Instant::now();
+        let e = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Err(Error::Other("partial".into())),
+            &mut || Ok(PasteCheck::Verified),
+            timing,
+        )
+        .unwrap_err();
+        assert!(e.sent());
+        assert!(start.elapsed() >= Duration::from_millis(60));
+        assert_eq!(cb.restores, 1);
+        assert_eq!(cb.contents, rich());
+    }
+
+    #[test]
+    fn grace_polling_stops_once_the_field_changed() {
+        let mut cb = MemoryClipboard {
+            contents: rich(),
+            ..Default::default()
+        };
+        let mut timing = fast();
+        timing.unverified_grace = Duration::from_secs(5);
+        let calls = std::cell::Cell::new(0);
+        let start = Instant::now();
+        let r = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Ok(()),
+            &mut || {
+                calls.set(calls.get() + 1);
+                // Garbled from the first read on: decided, no point waiting 5 s.
+                Ok(PasteCheck::Changed)
+            },
+            timing,
+        )
+        .unwrap();
+        assert_eq!(r.check, PasteCheck::Changed);
+        assert!(!r.verified && r.restored);
+        assert!(start.elapsed() < Duration::from_secs(1));
+        assert_eq!(cb.contents, rich());
+    }
+    #[test]
     fn restores_when_unverified() {
         let mut cb = MemoryClipboard {
             contents: rich(),
             ..Default::default()
         };
-        let r =
-            paste_with_restore(&mut cb, "x", &mut || Ok(()), &mut || Ok(false), fast()).unwrap();
+        let r = paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Ok(()),
+            &mut || Ok(PasteCheck::Unchanged),
+            fast(),
+        )
+        .unwrap();
         assert!(!r.verified);
         assert!(r.restored);
         assert_eq!(cb.contents, rich());
@@ -377,7 +540,7 @@ mod tests {
             &mut cb,
             "x",
             &mut || Err(Error::Unsupported("no paste".into())),
-            &mut || Ok(true),
+            &mut || Ok(PasteCheck::Verified),
             fast(),
         );
         assert!(err.is_err());
@@ -393,7 +556,14 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            paste_with_restore(&mut cb, "x", &mut || Ok(()), &mut || Ok(true), fast()).is_err()
+            paste_with_restore(
+                &mut cb,
+                "x",
+                &mut || Ok(()),
+                &mut || Ok(PasteCheck::Verified),
+                fast()
+            )
+            .is_err()
         );
         assert_eq!(cb.restores, 1);
 
@@ -417,7 +587,14 @@ mod tests {
     #[test]
     fn empty_clipboard_is_restored_empty() {
         let mut cb = MemoryClipboard::default();
-        paste_with_restore(&mut cb, "x", &mut || Ok(()), &mut || Ok(true), fast()).unwrap();
+        paste_with_restore(
+            &mut cb,
+            "x",
+            &mut || Ok(()),
+            &mut || Ok(PasteCheck::Verified),
+            fast(),
+        )
+        .unwrap();
         assert!(cb.contents.is_empty());
     }
 
@@ -441,7 +618,14 @@ mod tests {
             }
         }
         assert!(
-            paste_with_restore(&mut Huge, "x", &mut || Ok(()), &mut || Ok(true), fast()).is_err()
+            paste_with_restore(
+                &mut Huge,
+                "x",
+                &mut || Ok(()),
+                &mut || Ok(PasteCheck::Verified),
+                fast()
+            )
+            .is_err()
         );
     }
 }

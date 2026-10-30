@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use nugget_core::ipc::{AppInfo, FieldInfo};
 use nugget_core::{Error, Result};
 
-use crate::clipboard::{self, Clipboard, PasteTiming};
+use crate::clipboard::{self, Clipboard, PasteCheck, PasteError, PasteTiming};
 use crate::deny::DenyList;
 use crate::role::{FieldHints, FieldRole, Role, field_role};
 use crate::sanitize;
@@ -131,11 +131,12 @@ impl<E> Field<E> {
     }
 }
 
-/// How one insertion attempt ended.
+/// How an accessibility insertion ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Attempt {
     Verified,
-    /// The field changed, but not as expected: never insert a second copy.
+    /// The field changed, but not as expected, or it could not be read back completely: never
+    /// insert a second copy.
     Changed,
     Unchanged,
 }
@@ -367,7 +368,9 @@ impl<P: Platform> Backend<P> {
     }
 
     /// Insert through the accessibility API and poll the field until it verifies or the
-    /// timeout passes.
+    /// timeout passes. Only an error from the insertion itself is returned (nothing was
+    /// inserted, another method may be tried); once it succeeded, a failed read-back counts as
+    /// [`Attempt::Changed`].
     fn try_accessibility(
         &self,
         field: &Field<P::Element>,
@@ -378,7 +381,13 @@ impl<P: Platform> Backend<P> {
             .insert_text(field.write_el(), text, &field.write_state)?;
         let deadline = Instant::now() + self.config.verify_timeout;
         loop {
-            let after = self.read_back(&field.root)?;
+            let after = match self.read_back(&field.root) {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::debug!(error = %e, "read-back after insertion failed");
+                    return Ok(Attempt::Changed);
+                }
+            };
             if verify::verify_insert(before, text, &after) {
                 return Ok(Attempt::Verified);
             }
@@ -393,36 +402,33 @@ impl<P: Platform> Backend<P> {
         }
     }
 
-    /// Paste through the clipboard (saved and restored on every path) and verify.
+    /// Paste through the clipboard (saved and restored on every path) and verify. `Ok(false)`:
+    /// the paste was sent but not verified (it may still land). `Err(NotSent)`: nothing reached
+    /// the app.
     fn try_paste(
         &self,
         field: &Field<P::Element>,
         text: &str,
         before: &FieldState,
-    ) -> Result<Attempt> {
-        let mut cb = self.platform.clipboard()?;
+    ) -> std::result::Result<bool, PasteError> {
+        let mut cb = self.platform.clipboard().map_err(PasteError::NotSent)?;
         let r = clipboard::paste_with_restore(
             cb.as_mut(),
             text,
             &mut || self.platform.paste(field.write_el()),
             &mut || {
-                Ok(verify::verify_insert(
-                    before,
-                    text,
-                    &self.read_back(&field.root)?,
-                ))
+                let after = self.read_back(&field.root)?;
+                Ok(if verify::verify_insert(before, text, &after) {
+                    PasteCheck::Verified
+                } else if verify::changed(before, &after) {
+                    PasteCheck::Changed
+                } else {
+                    PasteCheck::Unchanged
+                })
             },
             self.config.paste,
         )?;
-        if r.verified {
-            return Ok(Attempt::Verified);
-        }
-        let after = self.read_back(&field.root)?;
-        Ok(if verify::changed(before, &after) {
-            Attempt::Changed
-        } else {
-            Attempt::Unchanged
-        })
+        Ok(r.verified)
     }
 
     fn insert_inner(&self, text: &str) -> Result<InsertOutcome> {
@@ -453,25 +459,21 @@ impl<P: Platform> Backend<P> {
         let strategy = self.config.insert;
 
         if strategy == InsertStrategy::ClipboardOnly {
-            let a = self.try_paste(&field, &text, &before)?;
-            return Ok(outcome(InsertMethod::Clipboard, a == Attempt::Verified));
+            let verified = self.try_paste(&field, &text, &before)?;
+            return Ok(outcome(InsertMethod::Clipboard, verified));
         }
 
-        // Rich web editors: paste first, accessibility insertion only when the paste left the
-        // field unchanged.
+        // Rich web editors: paste first. Once the paste was sent it may still land, so the
+        // only fallback is for a paste that never reached the app.
         if strategy == InsertStrategy::Auto && self.wants_rich_paste(&field, &text) {
             match self.try_paste(&field, &text, &before) {
-                Ok(Attempt::Verified) => return Ok(outcome(InsertMethod::Clipboard, true)),
-                Ok(Attempt::Changed) => return Ok(outcome(InsertMethod::Clipboard, false)),
-                Ok(Attempt::Unchanged) => {
-                    tracing::debug!("paste left the rich editor unchanged; inserting directly");
+                Ok(verified) => return Ok(outcome(InsertMethod::Clipboard, verified)),
+                Err(PasteError::Sent(e)) => {
+                    tracing::debug!(error = %e, "rich editor paste failed after it was sent");
+                    return Ok(outcome(InsertMethod::Clipboard, false));
                 }
-                Err(e) => {
-                    // Fall back only when the field is known to be unchanged.
-                    if verify::changed(&before, &self.read_back(&field.root)?) {
-                        return Ok(outcome(InsertMethod::Clipboard, false));
-                    }
-                    tracing::debug!(error = %e, "rich editor paste failed; inserting directly");
+                Err(PasteError::NotSent(e)) => {
+                    tracing::debug!(error = %e, "clipboard unavailable; inserting directly");
                 }
             }
             let a = self.try_accessibility(&field, &text, &before)?;
@@ -480,7 +482,8 @@ impl<P: Platform> Backend<P> {
 
         match self.try_accessibility(&field, &text, &before) {
             Ok(Attempt::Verified) => return Ok(outcome(InsertMethod::Accessibility, true)),
-            // Something landed but not what we expected: never insert a second copy.
+            // Something landed but not what we expected (or a read could not tell): never
+            // insert a second copy.
             Ok(Attempt::Changed) => return Ok(outcome(InsertMethod::Accessibility, false)),
             Ok(Attempt::Unchanged) if strategy == InsertStrategy::AccessibilityOnly => {
                 return Ok(outcome(InsertMethod::Accessibility, false));
@@ -491,8 +494,8 @@ impl<P: Platform> Backend<P> {
             }
             Err(e) => tracing::debug!(error = %e, "accessibility insertion failed; pasting"),
         }
-        let a = self.try_paste(&field, &text, &before)?;
-        Ok(outcome(InsertMethod::Clipboard, a == Attempt::Verified))
+        let verified = self.try_paste(&field, &text, &before)?;
+        Ok(outcome(InsertMethod::Clipboard, verified))
     }
 }
 
@@ -1078,6 +1081,15 @@ mod tests {
         clipboard: Arc<Mutex<MemoryClipboard>>,
         pasted: Mutex<u32>,
         inserted: Mutex<u32>,
+        /// Reads fail from now on (the app went away after an insertion).
+        blind: Mutex<bool>,
+        /// Report the root's reads as truncated at the read cap.
+        truncated: bool,
+        /// AX only: the backend exposes `AXEditableAncestor` (as `states.editable` on every
+        /// element inside the contenteditable) and `AXHighestEditableAncestor` (as the
+        /// `editable_root` attr on the root). Without them (today's macOS backend) only the
+        /// root, an `AXTextArea`, is editable.
+        ax_editable_signals: bool,
     }
 
     fn png_clipboard() -> Arc<Mutex<MemoryClipboard>> {
@@ -1140,6 +1152,9 @@ mod tests {
                 clipboard: png_clipboard(),
                 pasted: Mutex::new(0),
                 inserted: Mutex::new(0),
+                blind: Mutex::new(false),
+                truncated: false,
+                ax_editable_signals: true,
             };
             f.sync();
             f
@@ -1159,8 +1174,12 @@ mod tests {
             for &i in &self.editor {
                 root = &mut root.children[i];
             }
+            // AT-SPI: the root is editable (State::Editable); AX: an AXTextArea is.
             root.states.editable = true;
             root.states.focused = self.focus_kind == "root";
+            if !self.hypertext && self.ax_editable_signals {
+                root.attrs.insert("editable_root".into(), "true".into());
+            }
             root.value = (!self.hypertext).then(|| doc.paras.join("\n"));
             root.children = doc
                 .paras
@@ -1179,16 +1198,16 @@ mod tests {
                         let mut leaf = Node::new(Role::StaticText);
                         leaf.raw_role = "AXStaticText".into();
                         leaf.value = value;
-                        leaf.states.editable = true;
+                        leaf.states.editable = self.ax_editable_signals;
                         leaf.states.focused = caret && self.focus_kind == "leaf";
                         let mut g = Node::new(Role::Group);
                         g.raw_role = "AXGroup".into();
                         g.children = vec![leaf];
                         g
                     };
-                    // Over AT-SPI (and AX with editable ancestors), descendants of a
-                    // contenteditable are editable too.
-                    p.states.editable = true;
+                    // Firefox reports State::Editable on every element inside a
+                    // contenteditable; AX only through `AXEditableAncestor`.
+                    p.states.editable = self.hypertext || self.ax_editable_signals;
                     p.states.focused = caret && self.focus_kind == "para";
                     p
                 })
@@ -1237,6 +1256,9 @@ mod tests {
             }))
         }
         fn read_field(&self, el: &LiveEl, _max: usize) -> Result<FieldRead> {
+            if *self.blind.lock().unwrap() {
+                return Err(Error::Other("element is gone".into()));
+            }
             let node = el.node();
             let doc = self.doc.lock().unwrap();
             let state = if node.states.secure {
@@ -1252,13 +1274,13 @@ mod tests {
                     FieldState {
                         value: "\u{FFFC}".repeat(doc.paras.len()),
                         selection: Some((doc.para as u32, doc.para as u32)),
-                        truncated: false,
+                        truncated: self.truncated,
                     }
                 } else {
                     FieldState {
                         value: doc.paras.join("\n"),
                         selection: Some((abs, abs)),
-                        truncated: false,
+                        truncated: self.truncated,
                     }
                 }
             } else if el.path.len() > self.editor.len() && el.path.starts_with(&self.editor) {
@@ -1299,6 +1321,10 @@ mod tests {
             assert_eq!(*before, self.read_field(el, 0)?.state, "native offsets");
             match self.a11y {
                 "ok" => self.doc.lock().unwrap().insert(text, false),
+                "ok-blind" => {
+                    self.doc.lock().unwrap().insert(text, false);
+                    *self.blind.lock().unwrap() = true;
+                }
                 "no-breaks" => self
                     .doc
                     .lock()
@@ -1311,6 +1337,11 @@ mod tests {
             Ok(())
         }
         fn clipboard(&self) -> Result<Box<dyn Clipboard>> {
+            match self.paste {
+                "no-clipboard" => return Err(Error::Unsupported("no clipboard".into())),
+                "set-fails" => self.clipboard.lock().unwrap().fail_set = true,
+                _ => {}
+            }
             Ok(Box::new(SharedCb(self.clipboard.clone())))
         }
         fn paste(&self, el: &LiveEl) -> Result<()> {
@@ -1467,8 +1498,10 @@ mod tests {
     }
 
     #[test]
-    fn rich_paste_falls_back_to_accessibility_when_the_field_is_unchanged() {
-        for paste in ["fail", "noop"] {
+    fn rich_paste_falls_back_only_when_nothing_was_sent() {
+        // The clipboard is unavailable, or the text could not be put on it: the field is
+        // untouched, so accessibility insertion follows.
+        for paste in ["no-clipboard", "set-fails"] {
             let b = Backend::new(prosemirror().with("ok", paste), fast_config());
             let out = b.insert(PARAS).unwrap();
             assert_eq!(
@@ -1480,8 +1513,8 @@ mod tests {
                 "{paste}"
             );
             let p = b.platform();
-            assert_eq!(*p.pasted.lock().unwrap(), 1);
-            assert_eq!(*p.inserted.lock().unwrap(), 1);
+            assert_eq!(*p.pasted.lock().unwrap(), 0, "{paste}");
+            assert_eq!(*p.inserted.lock().unwrap(), 1, "{paste}");
             assert_eq!(
                 p.value(),
                 "Draft: hello\nsecond lineThanks!\n\nSee you Thursday."
@@ -1489,11 +1522,88 @@ mod tests {
             assert!(png_restored(p), "{paste}");
         }
         // Neither landed: reported unverified, nothing inserted.
-        let b = Backend::new(prosemirror().with("noop", "noop"), fast_config());
+        let b = Backend::new(prosemirror().with("noop", "no-clipboard"), fast_config());
         let out = b.insert(PARAS).unwrap();
         assert_eq!(out.method, InsertMethod::Accessibility);
         assert!(!out.verified);
         assert_eq!(b.platform().value(), "Draft: hello\nsecond line");
+    }
+
+    #[test]
+    fn a_sent_paste_is_never_followed_by_a_second_copy() {
+        // `noop`: the keystroke went out but the paste never showed up in time (it may land
+        // late). `fail`: the keystroke reported an error after it may have been delivered.
+        for paste in ["noop", "fail"] {
+            let b = Backend::new(prosemirror().with("ok", paste), fast_config());
+            let out = b.insert(PARAS).unwrap();
+            assert_eq!(
+                out,
+                InsertOutcome {
+                    method: InsertMethod::Clipboard,
+                    verified: false
+                },
+                "{paste}"
+            );
+            let p = b.platform();
+            assert_eq!(*p.pasted.lock().unwrap(), 1, "{paste}");
+            assert_eq!(*p.inserted.lock().unwrap(), 0, "{paste}");
+            assert!(png_restored(p), "{paste}");
+        }
+    }
+
+    #[test]
+    fn a_failed_read_after_a_successful_insertion_does_not_paste() {
+        // Plain path (short text): accessibility first, then the field cannot be read.
+        let b = Backend::new(prosemirror().with("ok-blind", "ok"), fast_config());
+        let out = b.insert(" ok").unwrap();
+        assert_eq!(
+            out,
+            InsertOutcome {
+                method: InsertMethod::Accessibility,
+                verified: false
+            }
+        );
+        assert_eq!(*b.platform().pasted.lock().unwrap(), 0);
+        assert_eq!(b.platform().value(), "Draft: hello\nsecond line ok");
+    }
+
+    #[test]
+    fn a_truncated_read_is_never_followed_by_a_second_copy() {
+        // The field is read cut at the cap: an unchanged-looking read proves nothing.
+        let mut p = prosemirror().with("noop", "ok");
+        p.truncated = true;
+        let b = Backend::new(p, fast_config());
+        let out = b.insert(" ok").unwrap();
+        assert_eq!(out.method, InsertMethod::Accessibility);
+        assert!(!out.verified);
+        assert_eq!(*b.platform().pasted.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn focus_on_a_text_run_needs_editable_ancestor_signals() {
+        // The climb from a text run relies on the AX backend reporting `AXEditableAncestor`
+        // as `states.editable` (and `AXHighestEditableAncestor` as the `editable_root` attr).
+        // Without them the run is not a field: nothing is reported rather than a wrong field.
+        let mut p = lexical("leaf");
+        p.ax_editable_signals = false;
+        p.sync();
+        let b = Backend::new(p, fast_config());
+        assert!(b.focused().unwrap().is_none());
+        assert!(b.insert("x").is_err());
+        // With them, the run resolves to the editor root.
+        let b = Backend::new(lexical("leaf"), fast_config());
+        let f = b.focused().unwrap().unwrap();
+        assert_eq!(f.field.value, "Draft: hello\nsecond line");
+        assert_eq!(f.field.selection, Some((24, 24)));
+        // Focus on the root itself (Chromium's usual case) works either way.
+        let mut p = lexical("root");
+        p.ax_editable_signals = false;
+        p.sync();
+        let b = Backend::new(p, fast_config());
+        assert_eq!(
+            b.focused().unwrap().unwrap().field.value,
+            "Draft: hello\nsecond line"
+        );
     }
 
     #[test]

@@ -206,9 +206,12 @@ pub fn extract(
     } else {
         detect_family(app)
     };
-    let recipients = recipients(&snap.root);
-    let subject = subject(&snap.root, app, family);
-    // A web page with a Subject or To field around the composer is a mail compose.
+    let (recipients, subject) = if family.is_mail() {
+        (recipients(&snap.root), subject(&snap.root, app, family))
+    } else {
+        compose_fields_near_composer(snap)
+    };
+    // A page with a To or Subject field right around the composer is a mail compose.
     let mail = family.is_mail() || !recipients.is_empty() || subject.is_some();
     let mut messages = find_container(snap)
         .map(|c| messages_from_container(c, family, mail, limits))
@@ -888,9 +891,10 @@ fn group_by_author(drafts: &mut [Draft], family: AppFamily) {
         match (&d.author, &last) {
             (Some(a), _) => last = Some((a.clone(), d.indent)),
             (None, Some((a, indent))) => {
+                // Without geometry there is nothing to tell a continuation from the user's
+                // own unlabelled bubble.
                 let same_column = match (d.indent, *indent) {
                     (Some(x), Some(y)) => (x - y).abs() <= 8.0,
-                    (None, None) => true,
                     _ => false,
                 };
                 if family.groups_by_author() || same_column {
@@ -935,6 +939,27 @@ fn strip_quoted(text: &str) -> String {
     }
 }
 
+/// Some messages are by "You" (or a self name), and every message by another named author has
+/// its body in a different column from all of them.
+fn self_column_is_distinct(drafts: &[Draft], limits: &ThreadLimits) -> bool {
+    let is_self = |d: &Draft| d.author.as_deref().is_some_and(|a| is_self_name(a, limits));
+    let mine: Vec<Option<f64>> = drafts
+        .iter()
+        .filter(|d| is_self(d))
+        .map(|d| d.indent)
+        .collect();
+    if mine.is_empty() || mine.iter().any(Option::is_none) {
+        return false;
+    }
+    drafts
+        .iter()
+        .filter(|d| d.author.is_some() && !is_self(d))
+        .all(|d| {
+            d.indent
+                .is_some_and(|x| mine.iter().flatten().all(|m| (x - m).abs() > 8.0))
+        })
+}
+
 fn messages_from_container(
     container: &Node,
     family: AppFamily,
@@ -958,11 +983,9 @@ fn messages_from_container(
     if family.groups_by_author() || family == AppFamily::Generic {
         group_by_author(&mut drafts, family);
     }
-    // An app that shows the user as "You" shows everyone else by name.
-    let labels_you = family.labels_self_as_you()
-        || drafts
-            .iter()
-            .any(|d| d.author.as_deref().is_some_and(|a| is_self_name(a, limits)));
+    // An app that shows the user as "You" shows everyone else by name. For apps not known to
+    // do so, only when the user's messages sit in a column of their own.
+    let labels_you = family.labels_self_as_you() || self_column_is_distinct(&drafts, limits);
     for d in &mut drafts {
         if d.from_me.is_none()
             && let Some(a) = &d.author
@@ -1033,7 +1056,28 @@ fn field_label(n: &Node) -> Option<String> {
     Some(l.trim().trim_end_matches(':').trim().to_lowercase())
 }
 
+/// Recipient labels as a whole ("To", "Cc", "To recipients"...).
+fn is_recipient_label_exact(l: &str) -> bool {
+    matches!(
+        l,
+        "to" | "cc"
+            | "bcc"
+            | "an"
+            | "à"
+            | "para"
+            | "kopie"
+            | "cci"
+            | "recipients"
+            | "to recipients"
+            | "cc recipients"
+            | "bcc recipients"
+    )
+}
+
 fn is_recipient_label(l: &str) -> bool {
+    if l.starts_with("to do") || l.starts_with("to-do") || l.starts_with("todo") {
+        return false;
+    }
     matches!(
         l,
         "to" | "cc" | "bcc" | "an" | "à" | "para" | "kopie" | "cci"
@@ -1089,8 +1133,62 @@ fn collect_recipient_tokens(field: &Node, out: &mut Vec<String>) {
 /// Recipients from To/Cc/Bcc fields: labelled inputs or token groups, or an input that follows
 /// a "To:" label.
 pub fn recipients(root: &Node) -> Vec<String> {
+    recipients_in(root, false)
+}
+
+/// Ancestor levels above the composer searched for To/Subject fields in apps that are not
+/// known mail clients (never the whole page: the search stops below a web area or document).
+const COMPOSE_FIELD_LEVELS: usize = 3;
+
+/// Recipients and subject for an app that is not a known mail client: only from fields right
+/// around the composer (its nearest ancestors), labelled exactly ("To", "Cc", "Subject"...) and
+/// holding an editable input, so a "To Do" list or a search form elsewhere on the page does not
+/// count.
+fn compose_fields_near_composer(snap: &Snapshot) -> (Vec<String>, Option<String>) {
+    let path = editor_root_path(snap);
+    for up in 1..=COMPOSE_FIELD_LEVELS.min(path.len()) {
+        let Some(scope) = snap.node_at(&path[..path.len() - up]) else {
+            break;
+        };
+        if matches!(
+            scope.role,
+            Role::WebArea | Role::Document | Role::Window | Role::Application
+        ) {
+            break;
+        }
+        let recipients = recipients_in(scope, true);
+        let subject = subject_field(scope, true);
+        if !recipients.is_empty() || subject.is_some() {
+            return (recipients, subject);
+        }
+    }
+    (Vec::new(), None)
+}
+
+/// An editable text input, or a token field holding one.
+fn holds_editable_input(n: &Node) -> bool {
+    n.iter()
+        .take(200)
+        .any(|d| d.states.editable && d.role.is_text_input() && !d.states.secure)
+}
+
+fn recipients_in(root: &Node, strict: bool) -> Vec<String> {
     let mut out = Vec::new();
-    fn visit(n: &Node, out: &mut Vec<String>, budget: &mut usize) {
+    let label_ok = |l: &str| {
+        if strict {
+            is_recipient_label_exact(l)
+        } else {
+            is_recipient_label(l)
+        }
+    };
+    let field_ok = |c: &Node| !strict || holds_editable_input(c);
+    fn visit(
+        n: &Node,
+        out: &mut Vec<String>,
+        budget: &mut usize,
+        label_ok: &dyn Fn(&str) -> bool,
+        field_ok: &dyn Fn(&Node) -> bool,
+    ) {
         if *budget == 0 {
             return;
         }
@@ -1103,19 +1201,19 @@ pub fn recipients(root: &Node) -> Vec<String> {
                     c.role,
                     Role::Group | Role::List | Role::Section | Role::Unknown
                 );
-            if is_input_like && lbl.as_deref().is_some_and(is_recipient_label) {
+            if is_input_like && lbl.as_deref().is_some_and(label_ok) && field_ok(c) {
                 collect_recipient_tokens(c, out);
                 label_pending = false;
                 continue;
             }
-            if label_pending && is_input_like {
+            if label_pending && is_input_like && field_ok(c) {
                 collect_recipient_tokens(c, out);
                 label_pending = false;
                 continue;
             }
             label_pending = c.role == Role::StaticText
                 && c.own_text().is_some_and(|t| {
-                    is_recipient_label(
+                    label_ok(
                         t.trim()
                             .trim_end_matches(':')
                             .trim()
@@ -1123,11 +1221,11 @@ pub fn recipients(root: &Node) -> Vec<String> {
                             .as_str(),
                     )
                 });
-            visit(c, out, budget);
+            visit(c, out, budget, label_ok, field_ok);
         }
     }
     let mut budget = 5000;
-    visit(root, &mut out, &mut budget);
+    visit(root, &mut out, &mut budget, &label_ok, &field_ok);
     out
 }
 
@@ -1145,10 +1243,15 @@ fn strip_mail_title(title: &str) -> Option<String> {
     prefixed.then(|| sanitize::clean_line(t, sanitize::MAX_SHORT * 2))
 }
 
-/// The subject: a field labelled "Subject", else a reply-style window title.
-pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> {
+/// The value of a field labelled "Subject". `strict`: the label exactly, on an editable text
+/// input.
+fn subject_field(root: &Node, strict: bool) -> Option<String> {
     for n in root.iter().take(5000) {
-        if !(n.role.is_text_input() || n.role == Role::Unknown || n.role == Role::Group) {
+        if strict {
+            if !(n.role.is_text_input() && n.states.editable) || n.states.secure {
+                continue;
+            }
+        } else if !(n.role.is_text_input() || n.role == Role::Unknown || n.role == Role::Group) {
             continue;
         }
         let lbl = field_label(n);
@@ -1157,11 +1260,19 @@ pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> 
                 || l == "betreff"
                 || l == "objet"
                 || l == "asunto"
-                || l.starts_with("subject ")
+                || (!strict && l.starts_with("subject "))
         }) && let Some(v) = n.value.as_deref().filter(|v| !v.trim().is_empty())
         {
             return Some(sanitize::clean_line(v, sanitize::MAX_SHORT * 2));
         }
+    }
+    None
+}
+
+/// The subject: a field labelled "Subject", else a reply-style window title.
+pub fn subject(root: &Node, app: &AppInfo, family: AppFamily) -> Option<String> {
+    if let Some(s) = subject_field(root, false) {
+        return Some(s);
     }
     let title = app.window_title.as_deref()?;
     match family {
@@ -1626,23 +1737,24 @@ mod tests {
     // -----------------------------------------------------------------------------------------
     // Web editor fixtures (the FF3 app-matrix pages, modelled per platform)
 
-    /// The chat context of the FF3 pages, oldest first.
+    /// The chat context of the FF3 pages, oldest first. Everyone's messages sit in one column
+    /// (Slack-like), so for a generic page only "You" is known; the others stay unknown.
     fn chat_truth() -> Vec<(Option<&'static str>, &'static str, Option<bool>)> {
         vec![
             (
                 Some("Maya Chen"),
                 "Morning! Did everyone get a chance to look at the venue options?",
-                Some(false),
+                None,
             ),
             (
                 Some("Maya Chen"),
                 "The second one has a terrace and fits all twelve of us.",
-                Some(false),
+                None,
             ),
             (
                 Some("Sam Ortiz"),
                 "Terrace sounds great for September.\nCan we check the catering menu first?",
-                Some(false),
+                None,
             ),
             (
                 Some("You"),
@@ -1816,6 +1928,67 @@ mod tests {
     }
 
     #[test]
+    fn to_do_lists_and_far_subject_fields_are_not_a_compose() {
+        let (mut snap, app) = load("web_lexical_chat_ax");
+        // A "To Do" widget right next to the composer, and a "Subject" input in the sidebar.
+        let mut todo = Node::new(Role::Group);
+        todo.name = Some("To Do".into());
+        for t in ["Book the venue", "Order catering"] {
+            let mut b = Node::new(Role::Button);
+            b.name = Some(t.into());
+            todo.children.push(b);
+        }
+        let mut add = Node::new(Role::TextField);
+        add.name = Some("Add a task".into());
+        add.states.editable = true;
+        todo.children.push(add);
+        let mut subject = Node::new(Role::TextField);
+        subject.name = Some("Subject".into());
+        subject.value = Some("Weekly notes".into());
+        subject.states.editable = true;
+        let web = &mut snap.root.children[1].children[0];
+        web.children[0].children.push(subject);
+        // A read-only "To" header with a name after it, also near the composer.
+        let mut to = Node::new(Role::StaticText);
+        to.value = Some("To".into());
+        let mut who = Node::new(Role::Group);
+        who.children = vec![static_text("Design team", [0.0, 0.0, 10.0, 10.0])];
+        let main = &mut web.children[1];
+        main.children.insert(3, todo);
+        main.children.insert(3, who);
+        main.children.insert(3, to);
+        snap.focus_path[3] += 3;
+        assert!(snap.focused().is_some_and(|f| f.states.focused));
+        let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+        assert!(ctx.recipients.is_empty(), "{:?}", ctx.recipients);
+        assert_eq!(ctx.subject, None);
+        assert_eq!(ctx.messages.len(), 4);
+        // Mail clients do not take a "To Do" list for recipients either.
+        assert!(!is_recipient_label("to do"));
+        assert!(!is_recipient_label("to-do list"));
+        assert!(is_recipient_label("to recipients"));
+    }
+
+    #[test]
+    fn you_marks_others_only_when_the_user_has_a_column() {
+        let draft = |author: &str, x: Option<f64>| Draft {
+            author: Some(author.into()),
+            text: "text".into(),
+            indent: x,
+            ..Default::default()
+        };
+        let limits = ThreadLimits::default();
+        // One column for everyone (Slack-like): "You" says nothing about the others.
+        let same = [draft("Maya", Some(60.0)), draft("You", Some(60.0))];
+        assert!(!self_column_is_distinct(&same, &limits));
+        // No geometry: unknown.
+        let none = [draft("Maya", None), draft("You", None)];
+        assert!(!self_column_is_distinct(&none, &limits));
+        // Bubbles: the user's on the right.
+        let bubbles = [draft("Maya", Some(60.0)), draft("You", Some(420.0))];
+        assert!(self_column_is_distinct(&bubbles, &limits));
+    }
+    #[test]
     fn generic_grouping_follows_the_column() {
         let draft = |author: Option<&str>, x: f64| Draft {
             author: author.map(str::to_string),
@@ -1832,6 +2005,19 @@ mod tests {
         let authors: Vec<_> = drafts.iter().map(|d| d.author.as_deref()).collect();
         // A continuation in the same column joins; a bubble in the other column does not.
         assert_eq!(authors, [Some("Maya Chen"), Some("Maya Chen"), None]);
+        // Without geometry, an authorless message is not grouped in a generic app.
+        let mut drafts = vec![
+            Draft {
+                indent: None,
+                ..draft(Some("Maya Chen"), 0.0)
+            },
+            Draft {
+                indent: None,
+                ..draft(None, 0.0)
+            },
+        ];
+        group_by_author(&mut drafts, AppFamily::Generic);
+        assert_eq!(drafts[1].author, None);
         // Slack groups regardless of the column.
         let mut drafts = vec![draft(Some("Maya Chen"), 60.0), draft(None, 420.0)];
         group_by_author(&mut drafts, AppFamily::Slack);
