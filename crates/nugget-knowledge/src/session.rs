@@ -1064,7 +1064,11 @@ impl<'a> Session<'a> {
             ex,
             &mut extra,
         );
-        fold_first_names(ex, &mut extra);
+        let me_name = match &self.state.me {
+            Some(m) => self.graph().get_entity(m).ok().flatten().map(|e| e.name),
+            None => None,
+        };
+        fold_first_names(ex, &mut extra, &self.me_set, me_name.as_deref());
         crate::llm::fold_first_names_in_graph(
             self.inner.graph.as_ref(),
             self.state.me.as_ref(),
@@ -1903,7 +1907,8 @@ impl Session<'_> {
         )
         .with_splits(&splits, None)
         .with_feed(self.inner.feed.as_ref());
-        let merges = resolver.settle_pending(self.inner.feed.as_ref(), &self.touched)?;
+        let mut merges = resolver.settle_job_changes(&self.touched)?;
+        merges.extend(resolver.settle_pending(self.inner.feed.as_ref(), &self.touched)?);
         for (into, from) in merges {
             self.stats.entities_merged += 1;
             self.touch(&from);
@@ -1919,8 +1924,14 @@ impl Session<'_> {
 /// first name, nickname, initials), when there is exactly one: the occurrence takes that
 /// person's name and identifiers, so both resolve together, and notes why (a merge record on
 /// the entity). Being on the same item is the corroboration; two candidates (two Sams) fold
-/// nothing.
-fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
+/// nothing. The user (by one of `me_emails`, or by `me_name`) is never a target and blocks the
+/// fold when the short name fits them too: a third party's "Rob" is not the user Robert.
+fn fold_first_names(
+    base: &Extraction,
+    extra: &mut Extraction,
+    me_emails: &HashSet<String>,
+    me_name: Option<&str>,
+) {
     for i in 0..extra.entities.len() {
         let e = &extra.entities[i];
         if e.kind != EntityKind::Person
@@ -1932,6 +1943,14 @@ fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
         }
         let own = normalize_name(&e.name);
         let shorts: Vec<&String> = std::iter::once(&e.name).chain(&e.aliases).collect();
+        if me_name.is_some_and(|m| {
+            shorts
+                .iter()
+                .any(|s| crate::names::compatible(s, m).is_some())
+        }) {
+            continue;
+        }
+        let mut blocked = false;
         // Candidates by display name, de-duplicated by normalised name.
         let mut cands: Vec<(String, &crate::spec::EntitySpec, Vec<&'static str>)> = Vec::new();
         let others = base.entities.iter().chain(
@@ -1967,8 +1986,18 @@ fn fold_first_names(base: &Extraction, extra: &mut Extraction) {
                 }
             }
             if !reasons.is_empty() {
+                if c.identifiers
+                    .iter()
+                    .any(|i| i.scheme == "email" && me_emails.contains(&i.value.to_lowercase()))
+                {
+                    blocked = true;
+                    break;
+                }
                 cands.push((key, c, reasons));
             }
+        }
+        if blocked {
+            continue;
         }
         let [(_, target, reasons)] = &cands[..] else {
             continue;
@@ -1996,6 +2025,7 @@ mod tests {
     use super::{aggregate, fold_first_names, trust_note_identifiers};
     use crate::spec::{EntitySpec, Extraction};
     use nugget_graph::{EntityKind, Identifier};
+    use std::collections::HashSet;
 
     fn header(name: &str, email: &str) -> EntitySpec {
         EntitySpec::new(EntityKind::Person, name).ident("email", email)
@@ -2009,7 +2039,7 @@ mod tests {
         let mut extra = Extraction::default();
         extra.entity(EntitySpec::new(EntityKind::Person, "Maggie"));
         extra.entity(EntitySpec::new(EntityKind::Person, "Unknown"));
-        fold_first_names(&base, &mut extra);
+        fold_first_names(&base, &mut extra, &HashSet::new(), None);
         let m = &extra.entities[0];
         assert_eq!(m.name, "Maggie T");
         assert_eq!(m.aliases, vec!["Maggie".to_string()]);
@@ -2036,10 +2066,34 @@ mod tests {
         base.entity(header("Sam Whitlock", "sam@marrowbank.test"));
         let mut extra = Extraction::default();
         extra.entity(EntitySpec::new(EntityKind::Person, "Sam"));
-        fold_first_names(&base, &mut extra);
+        fold_first_names(&base, &mut extra, &HashSet::new(), None);
         assert_eq!(extra.entities[0].name, "Sam");
         assert!(extra.entities[0].identifiers.is_empty());
         assert!(extra.entities[0].folds.is_empty());
+    }
+
+    #[test]
+    fn a_third_partys_nickname_never_folds_into_the_user() {
+        let me: HashSet<String> = ["robert@ashgrove.test".to_string()].into();
+        // The user's own header (when an extractor lists it as a person): never a target.
+        let mut base = Extraction::default();
+        base.entity(header("Robert Ashgrove", "robert@ashgrove.test"));
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Bob"));
+        fold_first_names(&base, &mut extra, &me, None);
+        assert_eq!(extra.entities[0].name, "Bob");
+        // A short name the user answers to blocks the fold into anyone else.
+        let mut base = Extraction::default();
+        base.entity(header("Robert Ferrand", "rf@glimmer.test"));
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Bob"));
+        fold_first_names(&base, &mut extra, &me, Some("Robert Ashgrove"));
+        assert_eq!(extra.entities[0].name, "Bob");
+        // "Rob" is not the user Robin's: it is Robert Ferrand's.
+        let mut extra = Extraction::default();
+        extra.entity(EntitySpec::new(EntityKind::Person, "Rob"));
+        fold_first_names(&base, &mut extra, &HashSet::new(), Some("Robin Ashgrove"));
+        assert_eq!(extra.entities[0].name, "Robert Ferrand");
     }
 
     #[test]
@@ -2058,7 +2112,7 @@ mod tests {
         extra.entity(EntitySpec::new(EntityKind::Person, "M."));
         // "Mark" is not a form of "Margaret".
         extra.entity(EntitySpec::new(EntityKind::Person, "Marky"));
-        fold_first_names(&base, &mut extra);
+        fold_first_names(&base, &mut extra, &HashSet::new(), None);
         let reasons: Vec<Vec<String>> = extra.entities[..3]
             .iter()
             .map(|e| {

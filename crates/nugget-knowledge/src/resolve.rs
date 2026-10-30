@@ -37,7 +37,7 @@
 
 mod short;
 
-pub(crate) use short::{ItemContext, describe, forget_item, merge_recorded};
+pub(crate) use short::{ItemContext, describe, forget_item, forget_split, merge_recorded};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -119,6 +119,8 @@ pub(crate) struct Resolver<'a> {
     feed: Option<&'a dyn crate::feed::ItemFeed>,
     /// The splits that apply now; recomputed after a merge.
     live: Mutex<Option<Vec<Live>>>,
+    /// The user's own mail domains (never evidence of a shared organisation), once computed.
+    user_domains: Mutex<Option<std::collections::BTreeSet<String>>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -140,6 +142,7 @@ impl<'a> Resolver<'a> {
             ctx: None,
             feed: None,
             live: Mutex::new(None),
+            user_domains: Mutex::new(None),
         }
     }
 
@@ -345,7 +348,7 @@ impl Resolver<'_> {
         // A short name ("Maggie", "M. Thistlewood") of the one corroborated full-name person.
         if short::wants_full(spec) {
             let side = short::Short::of_spec(spec, self.ctx.is_some());
-            if let Some(pick) = self.full_for(&side, None)? {
+            if let Some(pick) = self.full_for(&side, None)?.sole() {
                 let e = self.redirect(pick.entity, spec)?;
                 let mut touched = self.attach(&e, spec)?;
                 if self.record(
@@ -1255,8 +1258,50 @@ mod tests {
         }
     }
 
+    async fn on_item_as(
+        g: &dyn GraphStore,
+        item: &nugget_store::Item,
+        ex: &crate::spec::Extraction,
+        spec: &EntitySpec,
+        feed: Option<&dyn crate::feed::ItemFeed>,
+        me: Option<EntityId>,
+    ) -> Resolved {
+        let cfg = KnowledgeConfig::default();
+        let cache = Mutex::new(HashMap::new());
+        let ctx = ItemContext::new(item, ex, feed);
+        Resolver::new(g, &cfg, None, &cache, me)
+            .with_splits(&[], Some(&item.item))
+            .with_context(&ctx)
+            .resolve(spec)
+            .await
+            .unwrap()
+    }
+
+    /// The end-of-run passes over `touched`.
+    fn settle(
+        g: &dyn GraphStore,
+        feed: &dyn crate::feed::ItemFeed,
+        touched: &[EntityId],
+        me: Option<EntityId>,
+    ) -> Vec<(EntityId, EntityId)> {
+        let cfg = KnowledgeConfig::default();
+        let cache = Mutex::new(HashMap::new());
+        let r = Resolver::new(g, &cfg, None, &cache, me)
+            .with_splits(&[], None)
+            .with_feed(feed);
+        let t: std::collections::BTreeSet<EntityId> = touched.iter().cloned().collect();
+        let mut m = r.settle_job_changes(&t).unwrap();
+        m.extend(r.settle_pending(feed, &t).unwrap());
+        m
+    }
+
+    fn headers(from: &str) -> Value {
+        json!({"from": from, "to": ["Robin Ashgrove <robin@glimmerfen.test>"]})
+    }
+
     #[tokio::test]
     async fn two_people_sharing_a_first_name_are_never_merged_on_it() {
+        let store = nugget_store::Store::open_in_memory().unwrap();
         let g = nugget_graph::MemGraph::new();
         let okafor = person(&g, "Sam Okafor", Some("sam.okafor@ostrander.test"));
         let whitlock = person(&g, "Sam Whitlock", Some("sam@marrowbank.test"));
@@ -1264,39 +1309,83 @@ mod tests {
         let mut ex = crate::spec::Extraction::default();
         ex.entity(header("Sam Okafor", "sam.okafor@ostrander.test"));
         ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
-        let got = on_item(&g, &it, &ex, &short("Sam"), None).await;
-        assert!(got.created);
-        assert!(got.id != okafor && got.id != whitlock);
-        // Only one of them on the item: that one.
-        let it = mail_item("4", json!({}));
+        let first = on_item(&g, &it, &ex, &short("Sam"), Some(&store)).await;
+        assert!(first.created);
+        assert!(first.id != okafor && first.id != whitlock);
+        // Only Whitlock on the item: with another Sam known, the join waits for the end of the
+        // run, when the one corroborated Sam is picked.
+        let it = mail_item("4", headers("Sam Whitlock <sam@marrowbank.test>"));
         let mut ex = crate::spec::Extraction::default();
         ex.entity(header("Sam Whitlock", "sam@marrowbank.test"));
-        let got = on_item(&g, &it, &ex, &short("Sam"), None).await;
-        assert_eq!(got.id, whitlock);
+        let got = on_item(&g, &it, &ex, &short("Sam"), Some(&store)).await;
+        assert!(got.created);
+        mention(&g, &got.id, "4", "Sam");
+        mention(&g, &whitlock, "4", "Sam Whitlock");
+        mention(&g, &first.id, "3", "Sam");
+        mention(&g, &okafor, "3", "Sam Okafor");
+        mention(&g, &whitlock, "3", "Sam Whitlock");
+        let merges = settle(&g, &store, &[got.id.clone(), first.id.clone()], None);
+        assert_eq!(merges, vec![(whitlock.clone(), got.id.clone())]);
+        assert_eq!(g.get_entity(&first.id).unwrap().unwrap().id, first.id);
     }
 
     #[tokio::test]
-    async fn the_same_organisation_corroborates_and_conflicting_addresses_never_join() {
+    async fn the_same_organisation_counts_only_from_headers_and_when_the_name_is_unique_there() {
         let g = nugget_graph::MemGraph::new();
         let maggie = person(
             &g,
             "Margaret Thistlewood",
             Some("margaret.thistlewood@cindergate.test"),
         );
-        // A colleague's mail mentions "Maggie": her mail domain is the sender's.
-        let it = mail_item("5", json!({}));
+        // A colleague's mail (a header at her domain) mentions "Maggie".
+        let it = mail_item("5", headers("Bart Fenwick <bart.fenwick@cindergate.test>"));
         let mut ex = crate::spec::Extraction::default();
         ex.entity(header("Bart Fenwick", "bart.fenwick@cindergate.test"));
         let got = on_item(&g, &it, &ex, &short("Maggie"), None).await;
         assert_eq!(got.id, maggie);
         let log = nugget_graph::merge_log(&g.get_entity(&maggie).unwrap().unwrap());
         assert_eq!(log[0].reasons, ["nickname", "same_org"]);
+        assert_eq!(log[0].item.as_ref(), Some(&it.item));
+
+        // Her organisation merely named in a body: nothing.
+        let body = mail_item("6", headers("Jo Bloggs <jo@elsewhere.test>"));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(EntitySpec::new(EntityKind::Organization, "Cindergate"));
+        assert!(
+            on_item(&g, &body, &ex, &short("Maggie"), None)
+                .await
+                .created
+        );
+
         // A webmail domain says nothing about an organisation.
         let g2 = nugget_graph::MemGraph::new();
         person(&g2, "Margaret Thistlewood", Some("maggie.t@gmail.com"));
+        let web = mail_item("7", headers("Jo Bloggs <jo@gmail.com>"));
+        assert!(
+            on_item(&g2, &web, &ex, &short("Maggie"), None)
+                .await
+                .created
+        );
+
+        // Nor does the user's own domain (the user is on every item).
+        let g3 = nugget_graph::MemGraph::new();
+        let me = person(&g3, "Robin Ashgrove", Some("robin@glimmerfen.test"));
+        person(&g3, "Felix Ravensworth", Some("felix@glimmerfen.test"));
+        let own = mail_item("8", headers("Theo Brannigan <theo@glimmerfen.test>"));
+        let got = on_item_as(&g3, &own, &ex, &short("Felix"), None, Some(me)).await;
+        assert!(got.created);
+
+        // Two people at the domain that "Maggie" fits: the organisation tells nobody apart.
+        let g4 = nugget_graph::MemGraph::new();
+        person(
+            &g4,
+            "Margaret Thistlewood",
+            Some("margaret.thistlewood@cindergate.test"),
+        );
+        person(&g4, "Margaret Ellis", Some("m.ellis@cindergate.test"));
         let mut ex = crate::spec::Extraction::default();
-        ex.entity(header("Jo Bloggs", "jo@gmail.com"));
-        assert!(on_item(&g2, &it, &ex, &short("Maggie"), None).await.created);
+        ex.entity(header("Bart Fenwick", "bart.fenwick@cindergate.test"));
+        assert!(on_item(&g4, &it, &ex, &short("Maggie"), None).await.created);
 
         // Her personal address is not her work one: the same item does not join them.
         let mut ex = crate::spec::Extraction::default();
@@ -1307,6 +1396,189 @@ mod tests {
         let spec = header("Maggie T", "maggie.t@mail.test");
         let got = on_item(&g, &it, &ex, &spec, None).await;
         assert!(got.created && got.id != maggie);
+    }
+
+    #[tokio::test]
+    async fn full_names_are_people_of_their_own() {
+        let g = nugget_graph::MemGraph::new();
+        let jonathan = person(&g, "Jonathan Lee", Some("jl@acme.test"));
+        let margaret = person(&g, "Margaret Smith", Some("ms@acme.test"));
+        let william = person(&g, "William Murphy", Some("wm@acme.test"));
+        let it = mail_item("20", headers("Jonathan Lee <jl@acme.test>"));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Jonathan Lee", "jl@acme.test"));
+        ex.entity(header("Margaret Smith", "ms@acme.test"));
+        ex.entity(header("William Murphy", "wm@acme.test"));
+        // A different written-out given name is a different person, nickname or not, even on
+        // the same item and at the same organisation.
+        for n in ["Nathan Lee", "Maggie Smith", "Liam Murphy"] {
+            let got = on_item(&g, &it, &ex, &short(n), None).await;
+            assert!(got.created, "{n}");
+        }
+        // "Liam" alone is a name of its own, not William's nickname.
+        assert!(on_item(&g, &it, &ex, &short("Liam"), None).await.created);
+
+        // Reverse: an entity with a written-out name among its names is never absorbed as a
+        // short form of another full name.
+        let s = g
+            .create_entity(&{
+                let mut n = NewEntity::new(EntityKind::Person, "Maggie");
+                n.aliases = vec!["Maggie Brown".into()];
+                n
+            })
+            .unwrap();
+        mention(&g, &s, "21", "Maggie");
+        mention(&g, &margaret, "21", "Margaret Smith");
+        let it = mail_item("22", headers("Margaret Smith <ms@acme.test>"));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Margaret Smith", "ms@acme.test"));
+        let got = on_item(
+            &g,
+            &it,
+            &ex,
+            &header("Margaret Smith", "ms@acme.test"),
+            None,
+        )
+        .await;
+        assert_eq!(got.id, margaret);
+        assert!(got.merged.is_empty());
+        assert_eq!(g.get_entity(&s).unwrap().unwrap().id, s);
+        assert_eq!(g.get_entity(&jonathan).unwrap().unwrap().id, jonathan);
+        assert_eq!(g.get_entity(&william).unwrap().unwrap().id, william);
+    }
+
+    #[tokio::test]
+    async fn a_nickname_the_user_answers_to_joins_nobody() {
+        let g = nugget_graph::MemGraph::new();
+        let me = person(&g, "Robert Ashgrove", Some("robert@ashgrove.test"));
+        let ferrand = person(&g, "Robert Ferrand", Some("rf@glimmer.test"));
+        let it = mail_item("30", headers("Robert Ferrand <rf@glimmer.test>"));
+        let mut ex = crate::spec::Extraction::default();
+        ex.entity(header("Robert Ferrand", "rf@glimmer.test"));
+        let got = on_item_as(&g, &it, &ex, &short("Bob"), None, Some(me)).await;
+        assert!(got.created && got.id != ferrand);
+        // "Rob" is not a form of the user's "Robin": Robert Ferrand's.
+        let g = nugget_graph::MemGraph::new();
+        let me = person(&g, "Robin Ashgrove", Some("robin@glimmerfen.test"));
+        let ferrand = person(&g, "Robert Ferrand", Some("rf@glimmer.test"));
+        for n in ["Rob", "Bob"] {
+            let got = on_item_as(&g, &it, &ex, &short(n), None, Some(me.clone())).await;
+            assert_eq!(got.id, ferrand, "{n}");
+        }
+    }
+
+    #[tokio::test]
+    async fn too_many_namesakes_are_ambiguous() {
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        let g = nugget_graph::MemGraph::new();
+        for i in 0..(short::CAND_MAX + 10) {
+            person(&g, &format!("Sam Person{i}"), None);
+        }
+        let whitlock = person(&g, "Sam Whitlock", Some("sam@marrowbank.test"));
+        let s = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Sam"))
+            .unwrap();
+        mention(&g, &s, "40", "Sam");
+        mention(&g, &whitlock, "40", "Sam Whitlock");
+        // Whitlock is the only corroborated Sam, but the lookup cannot see every Sam.
+        assert!(settle(&g, &store, std::slice::from_ref(&s), None).is_empty());
+        assert_eq!(g.get_entity(&s).unwrap().unwrap().id, s);
+    }
+
+    #[tokio::test]
+    async fn the_same_full_name_at_two_addresses_joins_only_on_a_job_change_statement() {
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        let put = |key: &str, from: &str, text: &str| {
+            store
+                .upsert_item_with_chunks(
+                    &nugget_store::NewItem::new("mail", key, format!("h{key}"))
+                        .with_mime("message/rfc822")
+                        .with_metadata(json!({"extracted": {"from": from}})),
+                    &[nugget_store::NewChunk::text(text)],
+                )
+                .unwrap();
+        };
+        put(
+            "53",
+            "Delphine Corrigan <delphine.corrigan@glimmerfen.test>",
+            "I've joined Glimmerfen Labs; my Vellum & Thistle address no longer works.",
+        );
+        put(
+            "55",
+            "Delphine Corrigan <delphine.corrigan@vellumthistle.test>",
+            "Here is the engagement letter.",
+        );
+        put(
+            "60",
+            "Ann Lee <ann@one.test>",
+            "Hello from One. I used to be at Two.",
+        );
+        put("61", "Ann Lee <ann@two.test>", "Hello.");
+        let g = nugget_graph::MemGraph::new();
+        let old = person(
+            &g,
+            "Delphine Corrigan",
+            Some("delphine.corrigan@vellumthistle.test"),
+        );
+        let new = person(
+            &g,
+            "Delphine Corrigan",
+            Some("delphine.corrigan@glimmerfen.test"),
+        );
+        // A name-only twin from a third party's mail.
+        let twin = person(&g, "Delphine Corrigan", None);
+        mention(&g, &old, "55", "Delphine Corrigan");
+        mention(&g, &new, "53", "Delphine Corrigan");
+        // Same name, two addresses, nothing said about the other: two people. ("Two" is too
+        // short to count as an organisation's name.)
+        let a1 = person(&g, "Ann Lee", Some("ann@one.test"));
+        let a2 = person(&g, "Ann Lee", Some("ann@two.test"));
+        mention(&g, &a1, "60", "Ann Lee");
+        mention(&g, &a2, "61", "Ann Lee");
+        let merges = settle(&g, &store, &[old.clone(), a1.clone(), a2.clone()], None);
+        assert_eq!(
+            merges,
+            vec![(new.clone(), old.clone()), (new.clone(), twin.clone())]
+        );
+        let e = g.get_entity(&old).unwrap().unwrap();
+        assert_eq!(e.id, new);
+        let log = nugget_graph::merge_log(&e);
+        assert_eq!(log[0].reasons, ["same_name", "job_change"]);
+        assert_eq!(log[0].item.as_ref().map(|i| i.key.as_str()), Some("53"));
+        assert_ne!(
+            g.get_entity(&a1).unwrap().unwrap().id,
+            g.get_entity(&a2).unwrap().unwrap().id
+        );
+    }
+
+    #[test]
+    fn a_user_split_drops_the_records_of_the_merge_it_undid() {
+        let g = nugget_graph::MemGraph::new();
+        let full = person(&g, "Margaret Thistlewood", None);
+        let maggie = person(&g, "Maggie", None);
+        let mt = person(&g, "M. Thistlewood", None);
+        merge_recorded(
+            &g,
+            &full,
+            &maggie,
+            vec!["nickname".into()],
+            "x".into(),
+            None,
+        )
+        .unwrap();
+        merge_recorded(&g, &full, &mt, vec!["initial".into()], "y".into(), None).unwrap();
+        let split_off = person(&g, "Maggie", None);
+        let split = crate::splits::Split {
+            from: full.clone(),
+            to: split_off,
+            names: vec!["maggie".into()],
+            identifiers: vec![],
+            items: vec![],
+        };
+        assert!(forget_split(&g, &split).unwrap());
+        let log = nugget_graph::merge_log(&g.get_entity(&full).unwrap().unwrap());
+        let names: Vec<&str> = log.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(names, ["M. Thistlewood"]);
     }
 
     #[tokio::test]

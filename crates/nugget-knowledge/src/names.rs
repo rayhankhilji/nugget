@@ -11,25 +11,23 @@
 
 use nugget_graph::normalize_name;
 
-/// Canonical given names and their common English diminutives and nicknames (lower case).
+/// Canonical given names and their pure diminutives and nicknames (lower case): forms that are
+/// rarely a given name of their own. See [`STANDALONE`] for the ones that are.
 const DIMINUTIVES: &[(&str, &[&str])] = &[
-    ("abigail", &["abby", "abbie", "gail"]),
+    ("abigail", &["abby", "abbie"]),
     ("abraham", &["abe", "bram"]),
-    ("adelaide", &["addie", "ada"]),
-    ("agnes", &["aggie", "nessa"]),
+    ("adelaide", &["addie"]),
+    ("agnes", &["aggie"]),
     ("albert", &["al", "bert", "bertie"]),
-    (
-        "alexander",
-        &["alex", "alec", "al", "sandy", "xander", "lex"],
-    ),
-    ("alexandra", &["alex", "lexi", "sandra", "sandy", "alexa"]),
+    ("alexander", &["alex", "alec", "al", "xander", "lex"]),
+    ("alexandra", &["alex", "lexi", "alexa"]),
     ("alfred", &["alf", "alfie", "fred", "freddie", "al"]),
     ("alice", &["ally", "allie"]),
     ("alison", &["ali", "allie"]),
     ("amanda", &["mandy", "manda"]),
-    ("andrew", &["andy", "drew"]),
+    ("andrew", &["andy"]),
     ("angela", &["angie"]),
-    ("anne", &["annie", "nan", "nancy"]),
+    ("anne", &["annie"]),
     ("anna", &["annie"]),
     ("anthony", &["tony", "ant"]),
     ("antonia", &["toni"]),
@@ -45,17 +43,17 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ),
     (
         "katherine",
-        &["kathy", "kath", "kate", "katie", "kit", "kat", "kay"],
+        &["kathy", "kath", "kate", "katie", "kit", "kat"],
     ),
     ("charles", &["charlie", "chuck", "chas", "chaz"]),
-    ("charlotte", &["charlie", "lottie", "lotte"]),
+    ("charlotte", &["charlie", "lotte"]),
     ("christian", &["chris"]),
-    ("christina", &["chris", "tina", "chrissy"]),
+    ("christina", &["chris", "chrissy"]),
     ("christine", &["chris", "chrissy"]),
     ("christopher", &["chris", "kit", "topher"]),
     ("clement", &["clem"]),
     ("clementine", &["clem", "clemmie"]),
-    ("cornelius", &["neil", "connie"]),
+    ("cornelius", &["corny"]),
     ("cynthia", &["cindy"]),
     ("daniel", &["dan", "danny"]),
     ("danielle", &["dani"]),
@@ -64,23 +62,20 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("dennis", &["denny"]),
     ("dominic", &["dom"]),
     ("donald", &["don", "donnie"]),
-    ("dorothy", &["dot", "dottie", "dolly", "dora"]),
+    ("dorothy", &["dot", "dottie", "dolly"]),
     ("douglas", &["doug"]),
     ("edmund", &["ed", "eddie", "ned"]),
     ("edward", &["ed", "eddie", "eddy", "ned", "ted", "teddy"]),
     ("edwin", &["ed", "eddie"]),
-    ("eleanor", &["ellie", "nell", "nellie", "nora", "elle"]),
+    ("eleanor", &["ellie", "nellie"]),
     (
         "elizabeth",
-        &[
-            "liz", "lizzie", "beth", "betty", "bess", "betsy", "eliza", "libby", "lisa",
-        ],
+        &["liz", "lizzie", "beth", "betty", "bess", "betsy", "libby"],
     ),
-    ("emily", &["em", "emmy", "millie"]),
+    ("emily", &["em", "emmy"]),
     ("emma", &["em", "emmy"]),
-    ("eugene", &["gene"]),
-    ("evelyn", &["evie", "eve"]),
-    ("florence", &["flo", "flora", "florrie"]),
+    ("evelyn", &["evie"]),
+    ("florence", &["flo", "florrie"]),
     ("frances", &["fran", "frankie", "fanny"]),
     ("francis", &["frank", "frankie", "fran"]),
     ("frederick", &["fred", "freddie", "freddy", "rick"]),
@@ -89,46 +84,43 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("geoffrey", &["geoff"]),
     ("gerald", &["gerry", "jerry"]),
     ("gregory", &["greg"]),
-    ("gwendolyn", &["gwen", "wendy"]),
-    ("harold", &["harry", "hal"]),
-    ("harriet", &["hattie", "harry"]),
-    ("henry", &["harry", "hank", "hal"]),
+    ("gwendolyn", &["gwen"]),
+    ("harold", &["hal"]),
+    ("harriet", &["hattie"]),
+    ("henry", &["hank", "hal"]),
     ("herbert", &["herb", "bert"]),
-    ("isabella", &["bella", "izzy", "isa"]),
+    ("isabella", &["izzy", "isa"]),
     ("isabel", &["bel", "izzy", "isa"]),
-    ("jacob", &["jake", "jack"]),
+    ("jacob", &["jake"]),
     ("james", &["jim", "jimmy", "jamie", "jem"]),
     ("jane", &["janie", "jenny"]),
     ("jennifer", &["jen", "jenny", "jenn"]),
     ("jessica", &["jess", "jessie"]),
     ("joanna", &["jo", "joanie"]),
     ("joanne", &["jo", "joanie"]),
-    ("john", &["jack", "johnny", "jon"]),
-    ("jonathan", &["jon", "jonny", "nathan"]),
+    ("john", &["johnny", "jon"]),
+    ("jonathan", &["jon", "jonny"]),
     ("joseph", &["joe", "joey", "jos"]),
-    ("josephine", &["jo", "josie", "posy"]),
+    ("josephine", &["jo", "josie"]),
     ("joshua", &["josh"]),
     ("judith", &["judy", "jude"]),
     ("julia", &["jules", "julie"]),
-    ("katrina", &["kat", "trina"]),
+    ("katrina", &["kat"]),
     ("kenneth", &["ken", "kenny"]),
     ("lawrence", &["larry", "laurie"]),
-    ("leonard", &["leo", "len", "lenny"]),
+    ("leonard", &["len", "lenny"]),
     ("louisa", &["lou", "lulu"]),
     ("louise", &["lou", "lulu"]),
     ("lucinda", &["lucy", "cindy"]),
     ("madeline", &["maddie", "maddy"]),
     (
         "margaret",
-        &[
-            "maggie", "meg", "peggy", "maisie", "madge", "greta", "daisy", "marge", "margie",
-            "molly",
-        ],
+        &["maggie", "meg", "peggy", "madge", "marge", "margie"],
     ),
     ("matilda", &["tilly", "tilda", "mattie"]),
     ("matthew", &["matt", "matty"]),
     ("michael", &["mike", "mick", "mickey", "mikey"]),
-    ("nathaniel", &["nat", "nate", "nathan"]),
+    ("nathaniel", &["nat", "nate"]),
     ("nicholas", &["nick", "nicky", "nico"]),
     ("nicola", &["nicky", "nikki"]),
     ("oliver", &["ollie", "olly"]),
@@ -144,10 +136,10 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("robert", &["rob", "robbie", "bob", "bobby", "bert"]),
     ("ronald", &["ron", "ronnie"]),
     ("rosalind", &["ros", "roz", "rosie"]),
-    ("rosemary", &["rose", "rosie"]),
+    ("rosemary", &["rosie"]),
     ("samantha", &["sam", "sammy"]),
     ("samuel", &["sam", "sammy"]),
-    ("sarah", &["sally", "sadie"]),
+    ("sarah", &["sally"]),
     ("sebastian", &["seb", "bastian"]),
     ("stephanie", &["steph", "stevie"]),
     ("stephen", &["steve", "stevie"]),
@@ -155,7 +147,7 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("susan", &["sue", "susie", "suzy"]),
     ("suzanne", &["sue", "suzy"]),
     ("theodore", &["theo", "ted", "teddy"]),
-    ("theresa", &["tess", "tessa", "terri"]),
+    ("theresa", &["tess", "terri"]),
     ("thomas", &["tom", "tommy"]),
     ("timothy", &["tim", "timmy"]),
     ("tobias", &["toby"]),
@@ -165,15 +157,28 @@ const DIMINUTIVES: &[(&str, &[&str])] = &[
     ("vincent", &["vince", "vinny"]),
     ("virginia", &["ginny", "ginger"]),
     ("walter", &["walt", "wally"]),
-    ("wilhelmina", &["mina", "willa"]),
-    ("william", &["will", "bill", "billy", "willy", "liam"]),
-    ("winifred", &["winnie", "freda"]),
+    ("william", &["will", "bill", "billy", "willy"]),
+    ("winifred", &["winnie"]),
     ("zachary", &["zach", "zack", "zac"]),
 ];
 
+/// Names that are diminutives of a longer name *and* common given names in their own right
+/// ("Liam" is a name, not only short for William; "Nathan", "Harry", "Ada", "Rose"). They never
+/// count as equivalent to a different full given name: "Liam Murphy" and "William Murphy" may be
+/// two people. They are kept out of the table above; the list documents why and guards it.
+pub(crate) const STANDALONE: &[&str] = &[
+    "ada", "bella", "daisy", "dora", "drew", "eliza", "elle", "eve", "flora", "freda", "gail",
+    "gene", "greta", "harry", "jack", "kay", "leo", "liam", "lisa", "lottie", "maisie", "millie",
+    "mina", "molly", "nan", "nancy", "nathan", "nell", "nora", "posy", "rose", "sadie", "sandra",
+    "sandy", "tessa", "tina", "trina", "wendy", "willa",
+];
+
 /// The canonical names a given name stands for: itself, plus every canonical name that lists
-/// it as a diminutive. Lower-case input.
+/// it as a diminutive (none for a [`STANDALONE`] name). Lower-case input.
 fn keys(given: &str) -> Vec<&str> {
+    if STANDALONE.contains(&given) {
+        return vec![given];
+    }
     let mut out: Vec<&str> = DIMINUTIVES
         .iter()
         .filter(|(_, nicks)| nicks.contains(&given))
@@ -208,7 +213,12 @@ pub(crate) fn given_name_variants(given: &str) -> Vec<String> {
     for k in keys(&g) {
         out.push(k.to_owned());
         if let Some((_, nicks)) = DIMINUTIVES.iter().find(|(c, _)| *c == k) {
-            out.extend(nicks.iter().map(|n| (*n).to_owned()));
+            out.extend(
+                nicks
+                    .iter()
+                    .filter(|n| !STANDALONE.contains(n))
+                    .map(|n| (*n).to_owned()),
+            );
         }
     }
     out.sort();
@@ -286,8 +296,14 @@ impl PersonName {
         {
             return None;
         }
+        let mut titled = false;
         while toks.len() > 1 && HONORIFICS.contains(&toks[0].as_str()) {
             toks.remove(0);
+            titled = true;
+        }
+        if titled && toks.len() == 1 {
+            // "Ms. Jordan", "Dr. Kerrigan-Holt": a surname, not a given name.
+            return None;
         }
         while toks.len() > 1 && toks.last().is_some_and(|t| SUFFIXES.contains(&t.as_str())) {
             toks.pop();
@@ -734,5 +750,50 @@ mod tests {
             .unwrap();
         assert_eq!((h.given, h.surname), (Part::Full("sam".into()), None));
         assert!(LocalPart::parse("team@x.test").is_none());
+    }
+
+    #[test]
+    fn standalone_names_and_wrong_mappings_never_match_another_name() {
+        for (a, b) in [
+            ("Liam", "William"),
+            ("Nathan", "Jonathan"),
+            ("Nathan", "Nathaniel"),
+            ("Jack", "John"),
+            ("Harry", "Henry"),
+            ("Ada", "Adelaide"),
+            ("Lisa", "Elizabeth"),
+            ("Rose", "Rosemary"),
+            ("Molly", "Margaret"),
+            ("Daisy", "Margaret"),
+            ("Neil", "Cornelius"),
+            ("Connie", "Cornelius"),
+            ("Nessa", "Agnes"),
+        ] {
+            assert!(!given_names_equivalent(a, b), "{a} !~ {b}");
+            assert!(!given_names_equivalent(b, a), "{b} !~ {a}");
+        }
+        for n in STANDALONE {
+            assert_eq!(given_name_variants(n), vec![(*n).to_string()], "{n}");
+            assert!(
+                DIMINUTIVES
+                    .iter()
+                    .all(|(c, nicks)| c != n && !nicks.contains(n)),
+                "{n} is in the diminutive table"
+            );
+        }
+        assert!(!given_name_variants("William").contains(&"liam".to_string()));
+        assert_eq!(compatible("Liam", "William Murphy"), None);
+        assert_eq!(compatible("Nathan Lee", "Jonathan Lee"), None);
+    }
+
+    #[test]
+    fn a_title_before_one_word_is_a_surname() {
+        assert!(PersonName::parse("Ms. Jordan").is_none());
+        assert!(PersonName::parse("Dr Kerrigan-Holt").is_none());
+        assert!(!is_short_form("Ms. Jordan"));
+        assert_eq!(compatible("Ms. Jordan", "Jordan Lee"), None);
+        assert_eq!(compatible("Mr Sam", "Sam Okafor"), None);
+        // A title before a full name is dropped as before.
+        assert!(PersonName::parse("Ms. Jordan Lee").is_some_and(|p| p.is_complete()));
     }
 }
