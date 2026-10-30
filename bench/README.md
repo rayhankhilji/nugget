@@ -1431,6 +1431,64 @@ pass came back **empty** after 47–48 s: the reasoning used up the 400-token ou
 exactly like that. Fixed in this package: `nugget-runtime`'s chat config now sets
 `chat_template_kwargs.enable_thinking = false` (ignored by templates without the flag).
 
+#### Smaller local prompts and prefix caching (wave AA, AA1)
+
+AA1 gave on-device providers their own prompt budget (`[draft.local]`: a 300-token retrieval
+budget, the 3 best snippets, a 1,200-character thread, 2 short exemplars and a terser voice block;
+cloud prompts are unchanged), put the stable part first (the drafting rules, then the voice) with a
+`draft:<channel>` cache key, and prewarms that exact prefix into `llama-server`'s cache on the
+first tap (`draft.prewarm`), skipping the warm-up when the server already holds it. The bench now
+also prewarms the rules once at start (as `[draft] prewarm_on_start` does), fixes temperature 0
+and seed 42, and reports the time to the first inserted *character*, latency measured from the
+trigger, and the prompt tokens read from cache versus evaluated.
+
+Run [40968143427](https://github.com/rayhankhilji/nugget/actions/runs/40968143427) at `c06a927`
+(2026-10-29), reports in [`results/real-models/run-40968143427/`](results/real-models/run-40968143427/).
+Each runner drafts the same 12 tasks with the local budget **off** (the old prompt) and then
+**on**, so before and after share one machine. Times are from `begin`; from the trigger they are
+the same to the millisecond, because prewarming the prefix at the trigger overlaps the request.
+
+| Runner | Budget | Prompt tokens p50 | From cache / evaluated p50 | First inserted char p50 / p95 | Full draft p50 | Target (p50 ≤ 3 s) |
+|---|---|---|---|---|---|---|
+| Linux, EPYC 7763, 2 cores, CPU (22–24 prompt tok/s) | off | 1,182 | 301 / 751 | 41.0 / 65.2 s | 46.9 s | **MISSED** |
+| Linux, EPYC 7763, 2 cores, CPU | **on** | 809 | 283 / 494 | **30.2** / 34.4 s | 34.8 s | **MISSED** |
+| macOS, Apple M2 Pro (virtual), Metal (74–90 prompt tok/s) | off | 1,182 | 301 / 751 | 14.4 / 21.0 s | 26.6 s | **MISSED** |
+| macOS, Apple M2 Pro (virtual), Metal | **on** | 809 | 283 / 494 | **10.4** / 14.8 s | 18.6 s | **MISSED** |
+
+The first inserted character arrives with the first token on every row: post-processing never
+held text back.
+
+**Repeat drafts and the prefix cache work.** Drafting the same task twice in a row, the second
+request reads 1 token of 674 (budget on) or 1,032 (off) from the prompt and the rest from
+`llama-server`'s cache: the first inserted character comes in **0.14 s on Linux CPU and 0.21 s on
+macOS** (first draft of that task: 9.9 s and 3.1 s). A third draft of the task in the product flow
+(prefix prewarm at the trigger, then `begin`) is just as fast (0.15 s), so the prewarm no longer
+evicts the cached thread. The rules (~280 tokens) are always served from cache after the first
+draft; what is left to read is the voice block when the persona or channel changes (~150 tokens)
+and the per-draft field, thread and snippets (~350 tokens). In the bench every draft changes
+persona, recipient and thread, which is the worst case for the cache. (The `cache_reuse.prewarmed`
+row reads 1 token because `llama-server` restores the task's earlier full prompt from its RAM prompt
+cache after the bench's cache reset; it measures a repeat, not a cold prefix prewarm.)
+
+**Verdict: still missed, by 3.5× on the Apple Silicon runner and 10× on the CPU runner.** Under 3 s
+needs about 500 uncached prompt tokens read in under ~2.5 s, i.e. at least ~200 prompt tokens/s.
+The GitHub macOS runner is a virtual M2 Pro whose paravirtualised GPU reads 74–90 tokens/s and
+generates 4–5 tokens/s, far below what a physical M-series Mac reaches with Metal; a physical
+Apple Silicon or GPU laptop has not been measured here. On a 2-core CPU at 22 tokens/s, the
+target needs a prompt of ~60 uncached tokens, which no useful draft prompt is: that hardware needs
+a smaller model or a GPU. A smaller draft-tier model was not proposed in `manifests/pending/`
+because none was measured.
+
+**Drafting quality, budget off / on** (`draft --local-models --draft-judge model`, same EPYC 7763
+runner, 8 tasks): voice match 0.91 / 0.91, fact recall 0.70 / 0.70, hallucination rate 0.33 /
+0.33, injection resistance 1.0 / 1.0, prompt tokens p50 681 / 494, time to first token p50 26.3 /
+19.5 s, rule-based win rate vs baseline 0.625 / 0.50, judge win rate 0.75 / 0.375 (inconsistent
+0.125 / 0.50: the 4B self-judge flips with order on half the pairs). **Sensitive leak rate 0 /
+0.125**: with only three snippets, the planted card number of the `sensitive_probe` task made the
+cut and the model pasted it into the draft. Fixed after this run: local prompts now leave passages
+marked sensitive out unless `[draft.local] include_sensitive = true` (the draft bench's local arm
+follows the engine).
+
 ### Drafting quality
 
 `draft --local-models --draft-judge model`, 8 tasks, both arms on the same model. The baseline's
