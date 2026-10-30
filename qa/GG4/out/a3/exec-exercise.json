@@ -1,0 +1,641 @@
+[
+ {
+  "card": "2d3d00eb718e0993",
+  "card_kind": "commitment",
+  "title": "Due 2026-10-30: Submit the October expense report (due 2026-10-30)",
+  "action": {
+   "index": 0,
+   "kind": "reminder",
+   "label": "Remind me 2026-10-29T17:00:00-04:00",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 0,
+   "card_id": "2d3d00eb718e0993",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Reminder at 2026-10-29T17:00:00-04:00: Submit the October expense report (due 2026-10-30)"
+    }
+   ],
+   "digest": "99da73e8ffbcc7656b9f24514481fe9be03957c124265d6eb697826ae248f614",
+   "kind": "reminder",
+   "risk": "edit",
+   "summary": "Remind me 2026-10-29T17:00:00-04:00",
+   "target": "reminders"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": null,
+   "detail": "Nugget is about to send something on your behalf in reminders: create_reminder \u201cSubmit the October expense report (due 2026-10-30)\u201d with \u201cSubmit the October expense report (due 2026-10-30)\u201d. Treated as send (label matches send keyword \u201csubmit\u201d). Task proactive:2d3d00eb718e0993.",
+   "outcome": "needs_confirmation"
+  },
+  "exec_unconfirmed_error": null,
+  "exec_confirmed": {
+   "artifact": {
+    "at": "2026-10-29T17:00:00-04:00",
+    "kind": "reminder",
+    "path": null,
+    "text": "Submit the October expense report (due 2026-10-30)",
+    "url": null
+   },
+   "detail": "rem_9dee02ee97a74c15933a435482e3733d",
+   "outcome": "executed"
+  },
+  "exec_confirmed_error": null,
+  "confirmation_asked": true,
+  "state_after": "done",
+  "executed": true,
+  "reminder_stored": [
+   {
+    "about": {
+     "key": "0:Documents/todo.md",
+     "source": "files-1"
+    },
+    "at": "2026-10-29T17:00:00-04:00",
+    "card_id": null,
+    "id": "rem_9dee02ee97a74c15933a435482e3733d",
+    "text": "Submit the October expense report (due 2026-10-30)"
+   }
+  ],
+  "at_local": "2026-10-29T17:00:00-04:00",
+  "policy_checked": true
+ },
+ {
+  "card": "dde0aab3a978df92",
+  "card_kind": "follow_up",
+  "title": "You told Owen Hart: \"Sure, I'll send the vendor shortlist by Friday.\"",
+  "action": {
+   "index": 0,
+   "kind": "draft_reply",
+   "label": "Draft a reply to owen@larkspur.example",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 0,
+   "card_id": "dde0aab3a978df92",
+   "diff": [
+    {
+     "op": "add",
+     "text": "To: owen@larkspur.example"
+    },
+    {
+     "op": "add",
+     "text": "Subject: Re: Vendor shortlist"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Hi there,"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Thanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Best,"
+    },
+    {
+     "op": "add",
+     "text": "Maya"
+    },
+    {
+     "op": "context",
+     "text": "Nothing is sent: copy the draft or open it in your mail app to send it yourself."
+    }
+   ],
+   "digest": "ee52a6cd1a3fc4a1529fe09903af739dc8f93be2abdda675370af3aae2608cd2",
+   "kind": "draft_reply",
+   "risk": "edit",
+   "summary": "Draft a reply to owen@larkspur.example",
+   "target": "mail:compose"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": {
+    "at": null,
+    "kind": "draft",
+    "path": null,
+    "text": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya",
+    "url": "mailto:owen@larkspur.example?subject=Re%3A%20Vendor%20shortlist&body=Hi%20there%2C%0D%0A%0D%0AThanks%20for%20your%20patience.%20I%20am%20on%20it%20and%20will%20get%20back%20to%20you%20today.%20%5BFAKE-LLM-7731%5D%0D%0A%0D%0ABest%2C%0D%0AMaya"
+   },
+   "detail": "draft_bf928b62a07d45fdaf87cdc4dcdf9fb9",
+   "outcome": "executed"
+  },
+  "exec_unconfirmed_error": null,
+  "confirmation_asked": false,
+  "state_after": "done",
+  "executed": true,
+  "mailto": {
+   "to": [
+    "owen@larkspur.example"
+   ],
+   "cc": [],
+   "subject": "Re: Vendor shortlist",
+   "body": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya"
+  }
+ },
+ {
+  "card": "501b96a0b86184e4",
+  "card_kind": "renewal",
+  "title": "Inkwell Studio renews 2026-11-03 \u2014 $96.00",
+  "action": {
+   "index": 0,
+   "kind": "reminder",
+   "label": "Remind me 2026-11-02T09:00:00-04:00",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 0,
+   "card_id": "501b96a0b86184e4",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Reminder at 2026-11-02T09:00:00-04:00: Renewal: Inkwell Studio \u2014 $96.00"
+    }
+   ],
+   "digest": "303336d3d2ad882b6d8872645f9305d1e90932093bcfcf4543b8196dbf96e73c",
+   "kind": "reminder",
+   "risk": "edit",
+   "summary": "Remind me 2026-11-02T09:00:00-04:00",
+   "target": "reminders"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": null,
+   "detail": "Nugget is about to spend money or commit you to something in reminders: create_reminder \u201cRenewal: Inkwell Studio \u2014 $96.00\u201d with \u201cRenewal: Inkwell Studio \u2014 $96.00\u201d. Treated as spend (label matches spend keyword \u201crenew\u201d). Task proactive:501b96a0b86184e4.",
+   "outcome": "needs_confirmation"
+  },
+  "exec_unconfirmed_error": null,
+  "exec_confirmed": {
+   "artifact": {
+    "at": "2026-11-02T09:00:00-04:00",
+    "kind": "reminder",
+    "path": null,
+    "text": "Renewal: Inkwell Studio \u2014 $96.00",
+    "url": null
+   },
+   "detail": "rem_f688abadfb814ce993aa65d540b0657e",
+   "outcome": "executed"
+  },
+  "exec_confirmed_error": null,
+  "confirmation_asked": true,
+  "state_after": "done",
+  "executed": true,
+  "reminder_stored": [
+   {
+    "about": {
+     "key": "0:Mail/Inbox/r1-inkwell-renewal.eml",
+     "source": "files-1"
+    },
+    "at": "2026-11-02T09:00:00-04:00",
+    "card_id": null,
+    "id": "rem_f688abadfb814ce993aa65d540b0657e",
+    "text": "Renewal: Inkwell Studio \u2014 $96.00"
+   }
+  ],
+  "at_local": "2026-11-02T08:00:00-05:00",
+  "policy_checked": true
+ },
+ {
+  "card": "fc6406a22e182988",
+  "card_kind": "follow_up",
+  "title": "No answer from Iris Chen: Usability study results",
+  "action": {
+   "index": 0,
+   "kind": "draft_reply",
+   "label": "Draft a reply to iris@quarry-labs.example",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 0,
+   "card_id": "fc6406a22e182988",
+   "diff": [
+    {
+     "op": "add",
+     "text": "To: iris@quarry-labs.example"
+    },
+    {
+     "op": "add",
+     "text": "Subject: Re: Usability study results"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Hi there,"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Thanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Best,"
+    },
+    {
+     "op": "add",
+     "text": "Maya"
+    },
+    {
+     "op": "context",
+     "text": "Nothing is sent: copy the draft or open it in your mail app to send it yourself."
+    }
+   ],
+   "digest": "b319eafaa421a22c52e419a03dbe79c1bb733b4e07984087afb6fe2daed79fae",
+   "kind": "draft_reply",
+   "risk": "edit",
+   "summary": "Draft a reply to iris@quarry-labs.example",
+   "target": "mail:compose"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": {
+    "at": null,
+    "kind": "draft",
+    "path": null,
+    "text": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya",
+    "url": "mailto:iris@quarry-labs.example?subject=Re%3A%20Usability%20study%20results&body=Hi%20there%2C%0D%0A%0D%0AThanks%20for%20your%20patience.%20I%20am%20on%20it%20and%20will%20get%20back%20to%20you%20today.%20%5BFAKE-LLM-7731%5D%0D%0A%0D%0ABest%2C%0D%0AMaya"
+   },
+   "detail": "draft_e8a69eb741454e66a6812d2236f46fdc",
+   "outcome": "executed"
+  },
+  "exec_unconfirmed_error": null,
+  "confirmation_asked": false,
+  "state_after": "done",
+  "executed": true,
+  "mailto": {
+   "to": [
+    "iris@quarry-labs.example"
+   ],
+   "cc": [],
+   "subject": "Re: Usability study results",
+   "body": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya"
+  }
+ },
+ {
+  "card": "637bc900b1a725f8",
+  "card_kind": "unanswered_thread",
+  "title": "Reply to Lena Fischer: Packaging dieline questions",
+  "action": {
+   "index": 0,
+   "kind": "draft_reply",
+   "label": "Draft a reply to lena@cobaltworks.example",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 0,
+   "card_id": "637bc900b1a725f8",
+   "diff": [
+    {
+     "op": "add",
+     "text": "To: lena@cobaltworks.example"
+    },
+    {
+     "op": "add",
+     "text": "Cc: raj@cobaltworks.example"
+    },
+    {
+     "op": "add",
+     "text": "Subject: Re: Packaging dieline questions"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Hi there,"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Thanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]"
+    },
+    {
+     "op": "add",
+     "text": ""
+    },
+    {
+     "op": "add",
+     "text": "Best,"
+    },
+    {
+     "op": "add",
+     "text": "Maya"
+    },
+    {
+     "op": "context",
+     "text": "Nothing is sent: copy the draft or open it in your mail app to send it yourself."
+    }
+   ],
+   "digest": "6a7dc76ee0a8f5146f78432e921aa9714e0be0d7d1020fa56f8a11877dfed9be",
+   "kind": "draft_reply",
+   "risk": "edit",
+   "summary": "Draft a reply to lena@cobaltworks.example",
+   "target": "mail:compose"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": {
+    "at": null,
+    "kind": "draft",
+    "path": null,
+    "text": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya",
+    "url": "mailto:lena@cobaltworks.example?cc=raj@cobaltworks.example&subject=Re%3A%20Packaging%20dieline%20questions&body=Hi%20there%2C%0D%0A%0D%0AThanks%20for%20your%20patience.%20I%20am%20on%20it%20and%20will%20get%20back%20to%20you%20today.%20%5BFAKE-LLM-7731%5D%0D%0A%0D%0ABest%2C%0D%0AMaya"
+   },
+   "detail": "draft_371c45c53f944e7a8d7326ce1cb00788",
+   "outcome": "executed"
+  },
+  "exec_unconfirmed_error": null,
+  "confirmation_asked": false,
+  "state_after": "done",
+  "executed": true,
+  "mailto": {
+   "to": [
+    "lena@cobaltworks.example"
+   ],
+   "cc": [
+    "raj@cobaltworks.example"
+   ],
+   "subject": "Re: Packaging dieline questions",
+   "body": "Hi there,\n\nThanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]\n\nBest,\nMaya"
+  }
+ },
+ {
+  "card": "2d3d00eb718e0993",
+  "card_kind": "commitment",
+  "title": "Due 2026-10-30: Submit the October expense report (due 2026-10-30)",
+  "action": {
+   "index": 1,
+   "kind": "create_event",
+   "label": "Create calendar event \"Focus: Submit the October expense report (due 2026-10-30)\"",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 1,
+   "card_id": "2d3d00eb718e0993",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Event: Focus: Submit the October expense report (due 2026-10-30)"
+    },
+    {
+     "op": "add",
+     "text": "When: 2026-10-29T18:00:00-04:00 \u2013 2026-10-29T19:00:00-04:00"
+    },
+    {
+     "op": "add",
+     "text": "Due 2026-10-30."
+    }
+   ],
+   "digest": "351486a0a59d8a4aea16a921eccd0737f555cfa06b70537258db2a1effd2bbe7",
+   "kind": "create_event",
+   "risk": "edit",
+   "summary": "Create calendar event \"Focus: Submit the October expense report (due 2026-10-30)\"",
+   "target": "calendar"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": null,
+   "detail": "Nugget is about to send something on your behalf in calendar: create_event \u201cFocus: Submit the October expense report (due 2026-10-30)\u201d. Treated as send (label matches send keyword \u201csubmit\u201d). Task proactive:2d3d00eb718e0993.",
+   "outcome": "needs_confirmation"
+  },
+  "exec_unconfirmed_error": null,
+  "exec_confirmed": {
+   "artifact": {
+    "at": null,
+    "kind": "file",
+    "path": "/tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a3/r4/exec-v1/home/data/proactive/events/Focus-Submit-the-October-expense-report-due-2026-10-30-8a486f4f.ics",
+    "text": null,
+    "url": null
+   },
+   "detail": "/tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a3/r4/exec-v1/home/data/proactive/events/Focus-Submit-the-October-expense-report-due-2026-10-30-8a486f4f.ics",
+   "outcome": "executed"
+  },
+  "exec_confirmed_error": null,
+  "confirmation_asked": true,
+  "state_after": "done",
+  "executed": true,
+  "ics_files": [
+   "/tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a3/r4/exec-v1/home/data/proactive/events/Focus-Submit-the-October-expense-report-due-2026-10-30-8a486f4f.ics"
+  ],
+  "ics_text": "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nugget//Proactive//EN\r\nCALSCALE:GREGORIAN\r\nMETHOD:PUBLISH\r\nBEGIN:VEVENT\r\nUID:8a486f4f79844e1e9f9fc0d6cf5eae24@nugget\r\nDTSTAMP:20261029T130002Z\r\nDTSTART:20261029T220000Z\r\nDTEND:20261029T230000Z\r\nSUMMARY:Focus: Submit the October expense report (due 2026-10-30)\r\nDESCRIPTION:Due 2026-10-30.\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+  "ics_local_start": "2026-10-29T18:00:00-04:00",
+  "policy_checked": true
+ },
+ {
+  "card": "dde0aab3a978df92",
+  "card_kind": "follow_up",
+  "title": "You told Owen Hart: \"Sure, I'll send the vendor shortlist by Friday.\"",
+  "action": {
+   "index": 1,
+   "kind": "reminder",
+   "label": "Remind me 2026-10-30T17:00:00-04:00",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 1,
+   "card_id": "dde0aab3a978df92",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Reminder at 2026-10-30T17:00:00-04:00: Sure, I'll send the vendor shortlist by Friday."
+    }
+   ],
+   "digest": "d369d82428e33721affd0b42987f5625206195307e45ff108557a9c4a921b615",
+   "kind": "reminder",
+   "risk": "edit",
+   "summary": "Remind me 2026-10-30T17:00:00-04:00",
+   "target": "reminders"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": null,
+   "detail": "Nugget is about to send something on your behalf in reminders: create_reminder \u201cSure, I'll send the vendor shortlist by Friday.\u201d with \u201cSure, I'll send the vendor shortlist by Friday.\u201d. Treated as send (label matches send keyword \u201csend\u201d). Task proactive:dde0aab3a978df92.",
+   "outcome": "needs_confirmation"
+  },
+  "exec_unconfirmed_error": null,
+  "exec_confirmed": {
+   "artifact": {
+    "at": "2026-10-30T17:00:00-04:00",
+    "kind": "reminder",
+    "path": null,
+    "text": "Sure, I'll send the vendor shortlist by Friday.",
+    "url": null
+   },
+   "detail": "rem_5bf3733695b0431996989399a2b34b18",
+   "outcome": "executed"
+  },
+  "exec_confirmed_error": null,
+  "confirmation_asked": true,
+  "state_after": "done",
+  "executed": true,
+  "reminder_stored": [
+   {
+    "about": {
+     "key": "0:Mail/Sent/f1-maya-promise.eml",
+     "source": "files-1"
+    },
+    "at": "2026-10-30T17:00:00-04:00",
+    "card_id": null,
+    "id": "rem_5bf3733695b0431996989399a2b34b18",
+    "text": "Sure, I'll send the vendor shortlist by Friday."
+   }
+  ],
+  "at_local": "2026-10-30T17:00:00-04:00",
+  "policy_checked": true
+ },
+ {
+  "card": "fc6406a22e182988",
+  "card_kind": "follow_up",
+  "title": "No answer from Iris Chen: Usability study results",
+  "action": {
+   "index": 1,
+   "kind": "reminder",
+   "label": "Remind me 2026-10-29T15:00:02.233883163Z",
+   "risk": "edit",
+   "supported": true
+  },
+  "preview": {
+   "action": 1,
+   "card_id": "fc6406a22e182988",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Reminder at 2026-10-29T15:00:02.233883163Z: Follow up with Iris Chen: Usability study results"
+    }
+   ],
+   "digest": "5dab6b107c71da90e58aee92cab9036454104aad3b5bf8c74f6a8412a6dfe4f0",
+   "kind": "reminder",
+   "risk": "edit",
+   "summary": "Remind me 2026-10-29T15:00:02.233883163Z",
+   "target": "reminders"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": {
+    "at": "2026-10-29T15:00:02.233883163Z",
+    "kind": "reminder",
+    "path": null,
+    "text": "Follow up with Iris Chen: Usability study results",
+    "url": null
+   },
+   "detail": "rem_973f62ca1d4a4162b3fcc3d879f82f96",
+   "outcome": "executed"
+  },
+  "exec_unconfirmed_error": null,
+  "confirmation_asked": false,
+  "state_after": "done",
+  "executed": true,
+  "reminder_stored": [
+   {
+    "about": {
+     "key": "0:Mail/Sent/f2-maya-question.eml",
+     "source": "files-1"
+    },
+    "at": "2026-10-29T15:00:02.233883163Z",
+    "card_id": null,
+    "id": "rem_973f62ca1d4a4162b3fcc3d879f82f96",
+    "text": "Follow up with Iris Chen: Usability study results"
+   }
+  ],
+  "at_local": "2026-10-29T11:00:02.233883-04:00"
+ },
+ {
+  "card": "637bc900b1a725f8",
+  "card_kind": "unanswered_thread",
+  "title": "Reply to Lena Fischer: Packaging dieline questions",
+  "action": {
+   "index": 1,
+   "kind": "archive_thread",
+   "label": "Archive \"Packaging dieline questions\"",
+   "risk": "destroy",
+   "supported": false
+  },
+  "preview": {
+   "action": 1,
+   "card_id": "637bc900b1a725f8",
+   "diff": [
+    {
+     "op": "remove",
+     "text": "Inbox: Packaging dieline questions (1 message)"
+    },
+    {
+     "op": "add",
+     "text": "Archive: Packaging dieline questions"
+    },
+    {
+     "op": "context",
+     "text": "Messages are kept; they only leave the inbox."
+    }
+   ],
+   "digest": "e49187da3d9087b04742112733de0fe9060e1cc7ab31c7357aa729f79ee90f26",
+   "kind": "archive_thread",
+   "risk": "destroy",
+   "summary": "Archive \"Packaging dieline questions\"",
+   "target": "mail:inbox"
+  },
+  "preview_error": null,
+  "exec_unconfirmed": {
+   "artifact": null,
+   "detail": "Nugget is about to delete or overwrite data in mail: archive_thread \u201cPackaging dieline questions\u201d. Task proactive:637bc900b1a725f8.",
+   "outcome": "needs_confirmation"
+  },
+  "exec_unconfirmed_error": null,
+  "exec_confirmed": null,
+  "exec_confirmed_error": {
+   "code": -32002,
+   "message": "none of these messages is in a mailbox that can archive"
+  },
+  "confirmation_asked": true,
+  "state_after": "new",
+  "executed": false,
+  "archive": {
+   "supported": false,
+   "unconfirmed": {
+    "artifact": null,
+    "detail": "Nugget is about to delete or overwrite data in mail: archive_thread \u201cPackaging dieline questions\u201d. Task proactive:637bc900b1a725f8.",
+    "outcome": "needs_confirmation"
+   },
+   "confirmed": null,
+   "confirmed_error": {
+    "code": -32002,
+    "message": "none of these messages is in a mailbox that can archive"
+   }
+  },
+  "archive_checked": true
+ }
+]

@@ -1,0 +1,20 @@
+{
+ "Europe/London": {
+  "expected": {
+   "friday": "2026-11-06",
+   "renew": "2026-11-09",
+   "todo_due": "2026-11-05",
+   "meeting_start": "2026-11-05T14:00:00+00:00"
+  },
+  "focus_local": "2026-11-04T18:00:00+00:00"
+ },
+ "America/New_York": {
+  "expected": {
+   "friday": "2026-10-30",
+   "renew": "2026-11-03",
+   "todo_due": "2026-10-30",
+   "meeting_start": "2026-10-30T14:00:00-04:00"
+  },
+  "focus_local": "2026-10-29T18:00:00-04:00"
+ }
+}

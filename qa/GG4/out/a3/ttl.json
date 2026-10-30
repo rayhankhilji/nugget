@@ -1,0 +1,123 @@
+{
+ "F1_preview": {
+  "action": 1,
+  "card_id": "dde0aab3a978df92",
+  "diff": [
+   {
+    "op": "add",
+    "text": "Reminder at 2026-10-30T17:00:00-04:00: Sure, I'll send the vendor shortlist by Friday."
+   }
+  ],
+  "digest": "2cd0f28881865980fd59a1779830bbd468dc1a108a419b3618355e4a9d15254a",
+  "kind": "reminder",
+  "risk": "edit",
+  "summary": "Remind me 2026-10-30T17:00:00-04:00",
+  "target": "reminders"
+ },
+ "R_preview": {
+  "action": 0,
+  "card_id": "501b96a0b86184e4",
+  "diff": [
+   {
+    "op": "add",
+    "text": "Reminder at 2026-11-02T09:00:00-04:00: Renewal: Inkwell Studio \u2014 $96.00"
+   }
+  ],
+  "digest": "eded5421b7ee66ea525a5df3721ebe888d670376a4058a92902b8e85728aba09",
+  "kind": "reminder",
+  "risk": "edit",
+  "summary": "Remind me 2026-11-02T09:00:00-04:00",
+  "target": "reminders"
+ },
+ "R_exec": {
+  "artifact": {
+   "at": "2026-11-02T09:00:00-04:00",
+   "kind": "reminder",
+   "path": null,
+   "text": "Renewal: Inkwell Studio \u2014 $96.00",
+   "url": null
+  },
+  "detail": "rem_0a49c9641f43432fbd396743a75285e2",
+  "outcome": "executed"
+ },
+ "reminders": [
+  {
+   "about": {
+    "key": "0:Mail/Sent/f1-maya-promise.eml",
+    "source": "files-1"
+   },
+   "at": "2026-10-30T17:00:00-04:00",
+   "card_id": null,
+   "id": "rem_b008e049acad4e4394911502f0564c8d",
+   "text": "Sure, I'll send the vendor shortlist by Friday."
+  },
+  {
+   "about": {
+    "key": "0:Mail/Inbox/r1-inkwell-renewal.eml",
+    "source": "files-1"
+   },
+   "at": "2026-11-02T09:00:00-04:00",
+   "card_id": null,
+   "id": "rem_0a49c9641f43432fbd396743a75285e2",
+   "text": "Renewal: Inkwell Studio \u2014 $96.00"
+  }
+ ],
+ "fired": [
+  {
+   "rem": {
+    "about": {
+     "key": "0:Mail/Sent/f1-maya-promise.eml",
+     "source": "files-1"
+    },
+    "at": "2026-10-30T17:00:00-04:00",
+    "card_id": null,
+    "id": "rem_b008e049acad4e4394911502f0564c8d",
+    "text": "Sure, I'll send the vendor shortlist by Friday."
+   },
+   "note": {
+    "params": {
+     "about": {
+      "key": "0:Mail/Sent/f1-maya-promise.eml",
+      "source": "files-1"
+     },
+     "at": "2026-10-30T17:00:00-04:00",
+     "card_id": null,
+     "id": "rem_b008e049acad4e4394911502f0564c8d",
+     "text": "Sure, I'll send the vendor shortlist by Friday."
+    },
+    "jsonrpc": "2.0",
+    "method": "reminder.due"
+   },
+   "sim_at_note": "2026-10-30T17:00:42.794957-04:00",
+   "at_local": "2026-10-30T17:00:00-04:00"
+  },
+  {
+   "rem": {
+    "about": {
+     "key": "0:Mail/Inbox/r1-inkwell-renewal.eml",
+     "source": "files-1"
+    },
+    "at": "2026-11-02T09:00:00-04:00",
+    "card_id": null,
+    "id": "rem_0a49c9641f43432fbd396743a75285e2",
+    "text": "Renewal: Inkwell Studio \u2014 $96.00"
+   },
+   "note": {
+    "params": {
+     "about": {
+      "key": "0:Mail/Inbox/r1-inkwell-renewal.eml",
+      "source": "files-1"
+     },
+     "at": "2026-11-02T09:00:00-04:00",
+     "card_id": null,
+     "id": "rem_0a49c9641f43432fbd396743a75285e2",
+     "text": "Renewal: Inkwell Studio \u2014 $96.00"
+    },
+    "jsonrpc": "2.0",
+    "method": "reminder.due"
+   },
+   "sim_at_note": "2026-11-02T08:00:29.945612-05:00",
+   "at_local": "2026-11-02T08:00:00-05:00"
+  }
+ ]
+}

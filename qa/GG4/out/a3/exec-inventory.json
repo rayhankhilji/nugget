@@ -1,0 +1,100 @@
+[
+ {
+  "id": "2d3d00eb718e0993",
+  "kind": "commitment",
+  "title": "Due 2026-10-30: Submit the October expense report (due 2026-10-30)",
+  "actions": [
+   {
+    "index": 0,
+    "kind": "reminder",
+    "label": "Remind me 2026-10-29T17:00:00-04:00",
+    "risk": "edit",
+    "supported": true
+   },
+   {
+    "index": 1,
+    "kind": "create_event",
+    "label": "Create calendar event \"Focus: Submit the October expense report (due 2026-10-30)\"",
+    "risk": "edit",
+    "supported": true
+   }
+  ]
+ },
+ {
+  "id": "dde0aab3a978df92",
+  "kind": "follow_up",
+  "title": "You told Owen Hart: \"Sure, I'll send the vendor shortlist by Friday.\"",
+  "actions": [
+   {
+    "index": 0,
+    "kind": "draft_reply",
+    "label": "Draft a reply to owen@larkspur.example",
+    "risk": "edit",
+    "supported": true
+   },
+   {
+    "index": 1,
+    "kind": "reminder",
+    "label": "Remind me 2026-10-30T17:00:00-04:00",
+    "risk": "edit",
+    "supported": true
+   }
+  ]
+ },
+ {
+  "id": "501b96a0b86184e4",
+  "kind": "renewal",
+  "title": "Inkwell Studio renews 2026-11-03 \u2014 $96.00",
+  "actions": [
+   {
+    "index": 0,
+    "kind": "reminder",
+    "label": "Remind me 2026-11-02T09:00:00-04:00",
+    "risk": "edit",
+    "supported": true
+   }
+  ]
+ },
+ {
+  "id": "fc6406a22e182988",
+  "kind": "follow_up",
+  "title": "No answer from Iris Chen: Usability study results",
+  "actions": [
+   {
+    "index": 0,
+    "kind": "draft_reply",
+    "label": "Draft a reply to iris@quarry-labs.example",
+    "risk": "edit",
+    "supported": true
+   },
+   {
+    "index": 1,
+    "kind": "reminder",
+    "label": "Remind me 2026-10-29T15:00:02.228475292Z",
+    "risk": "edit",
+    "supported": true
+   }
+  ]
+ },
+ {
+  "id": "637bc900b1a725f8",
+  "kind": "unanswered_thread",
+  "title": "Reply to Lena Fischer: Packaging dieline questions",
+  "actions": [
+   {
+    "index": 0,
+    "kind": "draft_reply",
+    "label": "Draft a reply to lena@cobaltworks.example",
+    "risk": "edit",
+    "supported": true
+   },
+   {
+    "index": 1,
+    "kind": "archive_thread",
+    "label": "Archive \"Packaging dieline questions\"",
+    "risk": "destroy",
+    "supported": false
+   }
+  ]
+ }
+]

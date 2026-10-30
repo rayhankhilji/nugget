@@ -1,0 +1,155 @@
+{
+ "cards": {
+  "R": "501b96a0b86184e4",
+  "T": "2d3d00eb718e0993",
+  "F1": "dde0aab3a978df92",
+  "F2": "fc6406a22e182988",
+  "U": "637bc900b1a725f8"
+ },
+ "refresh_case": {
+  "preview": {
+   "action": 1,
+   "card_id": "fc6406a22e182988",
+   "diff": [
+    {
+     "op": "add",
+     "text": "Reminder at 2026-10-29T15:00:04.284803624Z: Follow up with Iris Chen: Usability study results"
+    }
+   ],
+   "digest": "84e036e796afcf2ae1e6798e926bb924bffcb60d532bbaa10f7bb8122edf8261",
+   "kind": "reminder",
+   "risk": "edit",
+   "summary": "Remind me 2026-10-29T15:00:04.284803624Z",
+   "target": "reminders"
+  },
+  "after": {
+   "actions": [
+    {
+     "index": 0,
+     "kind": "draft_reply",
+     "label": "Draft a reply to iris@quarry-labs.example",
+     "risk": "edit",
+     "supported": true
+    },
+    {
+     "index": 1,
+     "kind": "reminder",
+     "label": "Remind me 2026-10-29T15:00:05.855263614Z",
+     "risk": "edit",
+     "supported": true
+    }
+   ],
+   "created_at": "2026-10-29T13:00:01.226909248Z",
+   "detail": "You asked 3 days ago and haven't heard back.",
+   "due": null,
+   "evidence": [
+    {
+     "item": {
+      "key": "0:Mail/Sent/f2-maya-question.eml",
+      "source": "files-1"
+     },
+     "quote": "Could you share the usability study results from last week's sessions?",
+     "url": "file:///tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a3/r4/binding/maya/Mail/Sent/f2-maya-question.eml"
+    }
+   ],
+   "factors": [
+    {
+     "contribution": 0.5141373995901016,
+     "name": "importance",
+     "value": 0.3525828687777642,
+     "weight": 1.4582030073451089
+    },
+    {
+     "contribution": 0.5,
+     "name": "question",
+     "value": 1.0,
+     "weight": 0.5
+    },
+    {
+     "contribution": 0.43559342241651594,
+     "name": "direct",
+     "value": 1.0,
+     "weight": 0.43559342241651594
+    }
+   ],
+   "id": "fc6406a22e182988",
+   "kind": "follow_up",
+   "learned": [
+    {
+     "accepted": 0,
+     "contribution": -0.11111109119364636,
+     "direction": "less",
+     "dismissed": 1,
+     "key": "follow_up",
+     "reason": "not_relevant",
+     "scope": "kind"
+    }
+   ],
+   "people": [
+    "iris@quarry-labs.example"
+   ],
+   "rank": 0.5990476415360785,
+   "score": 0.5990476415360785,
+   "sensitive": false,
+   "snoozed_until": null,
+   "state": "new",
+   "summary": null,
+   "title": "No answer from Iris Chen: Usability study results"
+  }
+ },
+ "U_preview": {
+  "action": 0,
+  "card_id": "637bc900b1a725f8",
+  "diff": [
+   {
+    "op": "add",
+    "text": "To: lena@cobaltworks.example"
+   },
+   {
+    "op": "add",
+    "text": "Cc: raj@cobaltworks.example"
+   },
+   {
+    "op": "add",
+    "text": "Subject: Re: Packaging dieline questions"
+   },
+   {
+    "op": "add",
+    "text": ""
+   },
+   {
+    "op": "add",
+    "text": "Hi there,"
+   },
+   {
+    "op": "add",
+    "text": ""
+   },
+   {
+    "op": "add",
+    "text": "Thanks for your patience. I am on it and will get back to you today. [FAKE-LLM-7731]"
+   },
+   {
+    "op": "add",
+    "text": ""
+   },
+   {
+    "op": "add",
+    "text": "Best,"
+   },
+   {
+    "op": "add",
+    "text": "Maya"
+   },
+   {
+    "op": "context",
+    "text": "Nothing is sent: copy the draft or open it in your mail app to send it yourself."
+   }
+  ],
+  "digest": "bfc2e119ec5cff8c76553b06daf16aa5497b6f7db9e1ff121006cab2da3fb866",
+  "kind": "draft_reply",
+  "risk": "edit",
+  "summary": "Draft a reply to lena@cobaltworks.example",
+  "target": "mail:compose"
+ }
+}
