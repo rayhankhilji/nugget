@@ -1,0 +1,754 @@
+{
+ "note": "Modelled on Edge on Windows (UIA) for a CKEditor 5-like editor replying in a mail thread: articles with sender headings and dates, the second quoting the first after an 'On ... wrote:' line; To chip and Subject input on the reply; a decoy sidebar of other conversations with previews; a password field.",
+ "app": {
+  "id": "msedge.exe",
+  "name": "Microsoft Edge",
+  "window_title": "Nugget fixture: CKEditor 5 - Profile 1 - Microsoft Edge"
+ },
+ "field_value": "Draft: thanks, Thursday it is.",
+ "root": {
+  "role": "window",
+  "raw_role": "50032",
+  "name": "Nugget fixture: CKEditor 5 - Profile 1 - Microsoft Edge",
+  "bounds": [
+   0,
+   0,
+   1280,
+   860
+  ],
+  "children": [
+   {
+    "role": "toolbar",
+    "raw_role": "50021",
+    "name": "App bar",
+    "bounds": [
+     0,
+     0,
+     1280,
+     80
+    ],
+    "children": [
+     {
+      "role": "text_field",
+      "raw_role": "50004",
+      "name": "Address and search bar",
+      "value": "127.0.0.1:41873/index.html?editor=ckeditor",
+      "states": {
+       "editable": true,
+       "multiline": false
+      }
+     }
+    ]
+   },
+   {
+    "role": "scroll_area",
+    "raw_role": "50033",
+    "bounds": [
+     0,
+     80,
+     1280,
+     780
+    ],
+    "children": [
+     {
+      "role": "web_area",
+      "raw_role": "50030",
+      "name": "Nugget fixture: CKEditor 5",
+      "bounds": [
+       0,
+       80,
+       1280,
+       780
+      ],
+      "attrs": {
+       "class": "Chrome_RenderWidgetHostHWND",
+       "url": "http://127.0.0.1:41873/index.html?editor=ckeditor"
+      },
+      "children": [
+       {
+        "role": "section",
+        "raw_role": "50026",
+        "name": "Conversations",
+        "bounds": [
+         0,
+         80,
+         300,
+         780
+        ],
+        "children": [
+         {
+          "role": "list",
+          "raw_role": "50008",
+          "name": "Inbox",
+          "bounds": [
+           0,
+           130,
+           300,
+           288
+          ],
+          "children": [
+           {
+            "role": "list_item",
+            "raw_role": "50007",
+            "name": "Jordan Lee, Q3 offsite venue, Can we move the offsite to Thursday instead?, 9:41 AM",
+            "bounds": [
+             0,
+             130,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Jordan Lee",
+              "bounds": [
+               16,
+               134,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Q3 offsite venue",
+              "bounds": [
+               16,
+               152,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Can we move the offsite to Thursday instead?",
+              "bounds": [
+               16,
+               170,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "9:41 AM",
+              "bounds": [
+               220,
+               134,
+               60,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "50007",
+            "name": "Priya Patel, Lunch plans, Are we still on for lunch tomorrow at noon?, Yesterday",
+            "bounds": [
+             0,
+             202,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Priya Patel",
+              "bounds": [
+               16,
+               206,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Lunch plans",
+              "bounds": [
+               16,
+               224,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Are we still on for lunch tomorrow at noon?",
+              "bounds": [
+               16,
+               242,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Yesterday",
+              "bounds": [
+               220,
+               206,
+               60,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "50007",
+            "name": "Design team, Sprint review, Slides are in the shared folder, take a look., Mon",
+            "bounds": [
+             0,
+             274,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Design team",
+              "bounds": [
+               16,
+               278,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Sprint review",
+              "bounds": [
+               16,
+               296,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Slides are in the shared folder, take a look.",
+              "bounds": [
+               16,
+               314,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Mon",
+              "bounds": [
+               220,
+               278,
+               60,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "list_item",
+            "raw_role": "50007",
+            "name": "Alex Kim, Invoice #2041, Thanks for the quick turnaround on this one!, Oct 24",
+            "bounds": [
+             0,
+             346,
+             300,
+             70
+            ],
+            "children": [
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Alex Kim",
+              "bounds": [
+               16,
+               350,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Invoice #2041",
+              "bounds": [
+               16,
+               368,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Thanks for the quick turnaround on this one!",
+              "bounds": [
+               16,
+               386,
+               260,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Oct 24",
+              "bounds": [
+               220,
+               350,
+               60,
+               18
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "section",
+        "raw_role": "50026",
+        "bounds": [
+         300,
+         80,
+         980,
+         780
+        ],
+        "children": [
+         {
+          "role": "heading",
+          "raw_role": "50020",
+          "name": "Q3 offsite venue",
+          "bounds": [
+           340,
+           90,
+           600,
+           30
+          ]
+         },
+         {
+          "role": "section",
+          "raw_role": "50026",
+          "name": "Conversation",
+          "bounds": [
+           300,
+           140,
+           980,
+           400
+          ],
+          "children": [
+           {
+            "role": "article",
+            "raw_role": "50026",
+            "bounds": [
+             320,
+             150,
+             940,
+             80
+            ],
+            "children": [
+             {
+              "role": "heading",
+              "raw_role": "50020",
+              "name": "Maya Chen",
+              "bounds": [
+               340,
+               150,
+               200,
+               20
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "<maya@example.com>",
+              "bounds": [
+               550,
+               150,
+               220,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Mon, Oct 27, 4:02 PM",
+              "bounds": [
+               1080,
+               150,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "50026",
+              "bounds": [
+               340,
+               178,
+               860,
+               40
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "50020",
+                "name": "Hi Jordan,",
+                "bounds": [
+                 340,
+                 178,
+                 860,
+                 18
+                ]
+               },
+               {
+                "role": "paragraph",
+                "raw_role": "50020",
+                "name": "Could we hold the offsite at the lakeside venue this year? It has room for everyone.",
+                "bounds": [
+                 340,
+                 198,
+                 860,
+                 18
+                ]
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "role": "article",
+            "raw_role": "50026",
+            "bounds": [
+             320,
+             242,
+             940,
+             140
+            ],
+            "children": [
+             {
+              "role": "heading",
+              "raw_role": "50020",
+              "name": "Jordan Lee",
+              "bounds": [
+               340,
+               242,
+               200,
+               20
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "<jordan@example.com>",
+              "bounds": [
+               550,
+               242,
+               220,
+               18
+              ]
+             },
+             {
+              "role": "static_text",
+              "raw_role": "50020",
+              "name": "Tue, Oct 28, 9:15 AM",
+              "bounds": [
+               1080,
+               242,
+               180,
+               18
+              ]
+             },
+             {
+              "role": "group",
+              "raw_role": "50026",
+              "bounds": [
+               340,
+               270,
+               860,
+               100
+              ],
+              "children": [
+               {
+                "role": "paragraph",
+                "raw_role": "50020",
+                "name": "Lakeside works for me. Thursday is better than Friday though.",
+                "bounds": [
+                 340,
+                 270,
+                 860,
+                 18
+                ]
+               },
+               {
+                "role": "paragraph",
+                "raw_role": "50020",
+                "name": "On Mon, Oct 27, 2025 at 4:02 PM Maya Chen <maya@example.com> wrote:",
+                "bounds": [
+                 340,
+                 290,
+                 860,
+                 18
+                ]
+               },
+               {
+                "role": "group",
+                "raw_role": "50026",
+                "bounds": [
+                 360,
+                 310,
+                 840,
+                 40
+                ],
+                "children": [
+                 {
+                  "role": "paragraph",
+                  "raw_role": "50020",
+                  "name": "Hi Jordan,",
+                  "bounds": [
+                   360,
+                   310,
+                   840,
+                   18
+                  ]
+                 },
+                 {
+                  "role": "paragraph",
+                  "raw_role": "50020",
+                  "name": "Could we hold the offsite at the lakeside venue this year? It has room for everyone.",
+                  "bounds": [
+                   360,
+                   330,
+                   840,
+                   18
+                  ]
+                 }
+                ]
+               },
+               {
+                "role": "button",
+                "raw_role": "50000",
+                "name": "Show trimmed content",
+                "bounds": [
+                 340,
+                 350,
+                 30,
+                 16
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "role": "group",
+          "raw_role": "50026",
+          "name": "Reply",
+          "bounds": [
+           320,
+           560,
+           960,
+           240
+          ],
+          "children": [
+           {
+            "role": "static_text",
+            "raw_role": "50020",
+            "name": "To",
+            "bounds": [
+             340,
+             566,
+             30,
+             20
+            ]
+           },
+           {
+            "role": "group",
+            "raw_role": "50026",
+            "bounds": [
+             380,
+             562,
+             860,
+             28
+            ],
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "50000",
+              "name": "Maya Chen",
+              "bounds": [
+               380,
+               564,
+               100,
+               24
+              ]
+             },
+             {
+              "role": "text_field",
+              "raw_role": "50004",
+              "name": "Add recipients",
+              "states": {
+               "editable": true,
+               "multiline": false
+              },
+              "bounds": [
+               490,
+               564,
+               700,
+               24
+              ]
+             }
+            ]
+           },
+           {
+            "role": "text_field",
+            "raw_role": "50004",
+            "name": "Subject",
+            "value": "Re: Q3 offsite venue",
+            "states": {
+             "editable": true,
+             "multiline": false
+            },
+            "bounds": [
+             340,
+             596,
+             900,
+             28
+            ]
+           },
+           {
+            "role": "toolbar",
+            "raw_role": "50021",
+            "name": "Editor toolbar",
+            "bounds": [
+             340,
+             616,
+             400,
+             22
+            ],
+            "children": [
+             {
+              "role": "button",
+              "raw_role": "50000",
+              "name": "Bold"
+             },
+             {
+              "role": "button",
+              "raw_role": "50000",
+              "name": "Italic"
+             },
+             {
+              "role": "button",
+              "raw_role": "50000",
+              "name": "Bulleted List"
+             }
+            ]
+           },
+           {
+            "role": "text_area",
+            "raw_role": "50026",
+            "name": "Rich Text Editor. Editing area: main",
+            "value": "Draft: thanks, Thursday it is.",
+            "states": {
+             "focused": true,
+             "editable": true,
+             "multiline": true
+            },
+            "bounds": [
+             340,
+             640,
+             900,
+             140
+            ],
+            "attrs": {
+             "class": "ck ck-content ck-editor__editable ck-rounded-corners ck-editor__editable_inline ck-blurred",
+             "identifier": "editor"
+            },
+            "children": [
+             {
+              "role": "paragraph",
+              "raw_role": "50020",
+              "name": "Draft: thanks, Thursday it is.",
+              "bounds": [
+               350,
+               645,
+               880,
+               18
+              ]
+             }
+            ]
+           },
+           {
+            "role": "button",
+            "raw_role": "50000",
+            "name": "Send",
+            "bounds": [
+             340,
+             790,
+             60,
+             28
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "role": "group",
+        "raw_role": "50026",
+        "name": "Account",
+        "bounds": [
+         0,
+         820,
+         300,
+         40
+        ],
+        "children": [
+         {
+          "role": "text_field",
+          "raw_role": "50004",
+          "name": "Password",
+          "states": {
+           "editable": true,
+           "secure": true,
+           "multiline": false
+          },
+          "bounds": [
+           8,
+           824,
+           284,
+           28
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "focus_path": [
+  1,
+  0,
+  1,
+  2,
+  4
+ ]
+}

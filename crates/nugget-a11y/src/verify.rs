@@ -13,15 +13,41 @@ fn normalize(s: &str) -> String {
     s.replace("\r\n", "\n")
         .chars()
         .map(|c| match c {
-            '\r' | '\u{2028}' | '\u{2029}' => '\n',
+            '\r' | '\u{2028}' | '\u{2029}' | '\u{0085}' => '\n',
             '\u{00A0}' => ' ',
             c => c,
         })
         // Rich editors add or drop a trailing newline and zero-width characters freely.
-        .filter(|c| !matches!(c, '\u{200B}' | '\u{FEFF}' | '\u{FFFC}'))
+        .filter(|c| !matches!(c, '\u{200B}' | '\u{2060}' | '\u{FEFF}' | '\u{FFFC}'))
         .collect::<String>()
         .trim_end_matches('\n')
         .to_string()
+}
+
+/// [`normalize`], then blank lines dropped and spaces collapsed within each line: what is left
+/// is the non-whitespace content in order, with line breaks where there were any. Rich editors
+/// report paragraphs with `\n` or `\n\n` between them (or drop an empty paragraph, or pad one
+/// with an NBSP), so this is the form their values are compared in when the exact comparison
+/// fails.
+fn loose(s: &str) -> String {
+    let n = normalize(s);
+    let mut out = String::with_capacity(n.len());
+    for line in n.split('\n') {
+        let mut words = line.split([' ', '\t']).filter(|w| !w.is_empty()).peekable();
+        if words.peek().is_none() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        for (i, w) in words.enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            out.push_str(w);
+        }
+    }
+    out
 }
 
 fn char_to_byte(s: &str, idx: u32) -> usize {
@@ -44,25 +70,61 @@ pub fn expected_after_insert(before: &FieldState, text: &str) -> Option<String> 
     Some(out)
 }
 
-/// Whether `after` shows `text` inserted into `before`.
+/// Whether `after` shows `text` inserted into `before`, exactly once.
 ///
-/// Exact when the selection was known and neither value was truncated (after normalising line
-/// endings, NBSP and trailing newlines). Otherwise, the inserted text must appear in `after`
-/// more often than in `before`.
+/// 1. Exact: when the selection was known and neither value was truncated, the expected value
+///    and `after` are compared after normalising line endings, U+2028/2029, NBSP, zero-width
+///    characters, U+FFFC and trailing newlines.
+/// 2. Loose (rich editors): when that fails and the field changed, both are compared with blank
+///    lines dropped and spaces collapsed, so `\n` against `\n\n` between paragraphs, a lost
+///    empty paragraph or a dropped trailing newline still verify. The whole value must match,
+///    so every non-whitespace character of `text` is present, in order, at the caret.
+/// 3. Occurrences (selection unknown or a value truncated): `text` (exact, then loose form)
+///    must appear in `after` more often than in `before`, and not more often than in the
+///    expected value, so a second copy is rejected.
+///
+/// A partial insertion (one paragraph of several, text cut at a length limit) fails all three.
 pub fn verify_insert(before: &FieldState, text: &str, after: &FieldState) -> bool {
     let text_n = normalize(text);
     if text_n.is_empty() {
         return true;
     }
+    let expected = expected_after_insert(before, text);
     if !before.truncated
         && !after.truncated
-        && let Some(expected) = expected_after_insert(before, text)
-        && normalize(&expected) == normalize(&after.value)
+        && let Some(expected) = &expected
     {
-        return true;
+        if normalize(expected) == normalize(&after.value) {
+            return true;
+        }
+        if changed(before, after)
+            && !loose(text).is_empty()
+            && loose(expected) == loose(&after.value)
+        {
+            return true;
+        }
     }
-    let count = |hay: &str| normalize(hay).matches(text_n.as_str()).count();
-    count(&after.value) > count(&before.value)
+    let expected = expected.as_deref();
+    occurs_once_more(before, &text_n, after, expected, normalize)
+        || occurs_once_more(before, &loose(text), after, expected, loose)
+}
+
+/// `needle` (already in `form`) appears in `after` more often than in `before`, and no more
+/// often than in the expected value (or once more than before when that is unknown).
+fn occurs_once_more(
+    before: &FieldState,
+    needle: &str,
+    after: &FieldState,
+    expected: Option<&str>,
+    form: fn(&str) -> String,
+) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let count = |hay: &str| form(hay).matches(needle).count();
+    let (b, a) = (count(&before.value), count(&after.value));
+    let ceiling = expected.map_or(b + 1, count).max(b + 1);
+    a > b && a <= ceiling
 }
 
 /// Whether the field changed at all (used to avoid a second, duplicate insertion by another
@@ -116,6 +178,148 @@ mod tests {
             "Thanks!",
             &st("Hi\u{00A0}\nThanks!\n\n", None)
         ));
+    }
+
+    /// Before: "Hi " with the caret at the end.
+    fn hi() -> FieldState {
+        st("Hi ", Some((3, 3)))
+    }
+
+    const PARAS: &str = "Para one.\n\nPara two.\n\nPara three.";
+
+    #[test]
+    fn rich_paragraph_separators_verify() {
+        // Paragraphs reported with blank lines as inserted.
+        assert!(verify_insert(
+            &hi(),
+            PARAS,
+            &st(&format!("Hi {PARAS}"), None)
+        ));
+        // One `\n` per paragraph (the blank lines are paragraph boundaries in the model).
+        let one = "Hi Para one.\nPara two.\nPara three.";
+        assert!(verify_insert(&hi(), PARAS, &st(one, None)));
+        // `\n\n` reported where `\n` was inserted.
+        let text = "a\nb";
+        assert!(verify_insert(&hi(), text, &st("Hi a\n\nb", None)));
+        // U+2029, U+FFFC, CRLF, NBSP-padded empty paragraphs.
+        let odd = "Hi Para one.\u{2029}\u{00A0}\u{2029}Para two.\r\n\u{FFFC}\r\nPara three.";
+        assert!(verify_insert(&hi(), PARAS, &st(odd, None)));
+    }
+
+    #[test]
+    fn lost_blank_line_and_trailing_newline_verify() {
+        let text = "Line one\n\n\nLine two\n";
+        assert!(verify_insert(
+            &hi(),
+            text,
+            &st("Hi Line one\n\nLine two", None)
+        ));
+        assert!(verify_insert(
+            &hi(),
+            text,
+            &st("Hi Line one\nLine two\n\n", None)
+        ));
+        // Inserted in the middle: the trailing text stays after it.
+        let b = st("Hi  bye", Some((3, 3)));
+        assert!(verify_insert(&b, "x\n\ny", &st("Hi x\ny\u{00A0}bye", None)));
+    }
+
+    #[test]
+    fn partial_insertions_are_rejected() {
+        // Only the first paragraph landed.
+        assert!(!verify_insert(&hi(), PARAS, &st("Hi Para one.", None)));
+        // Paragraphs lost their order.
+        assert!(!verify_insert(
+            &hi(),
+            PARAS,
+            &st("Hi Para two.\nPara one.\nPara three.", None)
+        ));
+        // Same without a known selection.
+        assert!(!verify_insert(
+            &st("Hi ", None),
+            PARAS,
+            &st("Hi Para one.", None)
+        ));
+        // A whitespace-only change does not count as the text.
+        assert!(!verify_insert(&hi(), PARAS, &st("Hi \n", None)));
+    }
+
+    #[test]
+    fn duplicates_are_rejected() {
+        let twice = format!("Hi {PARAS}{PARAS}");
+        assert!(!verify_insert(&hi(), PARAS, &st(&twice, None)));
+        let twice = format!("Hi {PARAS}\n{PARAS}");
+        assert!(!verify_insert(&st("Hi ", None), PARAS, &st(&twice, None)));
+        let b = st("ok ok", None);
+        assert!(!verify_insert(&b, "ok", &st("ok ok ok ok", None)));
+        // A loose second copy (different separators) is caught too.
+        let loose_twice = "Hi Para one.\nPara two.\nPara three.Para one.\nPara two.\nPara three.";
+        assert!(!verify_insert(&hi(), PARAS, &st(loose_twice, None)));
+    }
+
+    fn long_text() -> String {
+        // ~5000 characters in paragraphs of mixed scripts.
+        let mut t = String::new();
+        let mut i = 0;
+        while t.chars().count() < 5000 {
+            t.push_str(&format!(
+                "Paragraph {i}: the quick brown fox jumps over the lazy dog. "
+            ));
+            if i % 5 == 4 {
+                t.push_str("\n\n");
+            }
+            i += 1;
+        }
+        t
+    }
+
+    #[test]
+    fn long_text_verifies_and_truncation_is_rejected() {
+        let text = long_text();
+        assert!(text.chars().count() >= 5000);
+        let after = format!("Hi {text}");
+        assert!(verify_insert(&hi(), &text, &st(&after, None)));
+        let rich = format!("Hi {}", text.replace("\n\n", "\n"));
+        assert!(verify_insert(&hi(), &text, &st(&rich, None)));
+        // Read back truncated (the read cap): the occurrence check still sees all of it.
+        let mut cut = st(&format!("{after} and more"), None);
+        cut.truncated = true;
+        assert!(verify_insert(&hi(), &text, &cut));
+        // The editor kept only the first 4096 characters.
+        let kept: String = text.chars().take(4096).collect();
+        assert!(!verify_insert(
+            &hi(),
+            &text,
+            &st(&format!("Hi {kept}"), None)
+        ));
+        let mut kept_t = st(&format!("Hi {kept}"), None);
+        kept_t.truncated = true;
+        assert!(!verify_insert(&hi(), &text, &kept_t));
+    }
+
+    #[test]
+    fn unicode_verifies_exactly() {
+        for text in [
+            // Emoji ZWJ sequences, skin tones, flags, keycaps.
+            "Family: 👩\u{200D}👩\u{200D}👧\u{200D}👦 and 👍🏽 🇯🇵 1\u{FE0F}\u{20E3}",
+            // Combining marks (decomposed é, Vietnamese stacked diacritics, Devanagari).
+            "Cafe\u{0301} Vie\u{0323}\u{0302}t नमस्ते",
+            // Right-to-left text, mixed with Latin and digits.
+            "שלום עולם, see you at 10:30 مرحبا بالعالم",
+        ] {
+            let after = st(&format!("Hi {text}"), None);
+            assert!(verify_insert(&hi(), text, &after), "{text}");
+            // One grapheme missing is a different text.
+            let mut short = text.to_string();
+            short.pop();
+            assert!(
+                !verify_insert(&hi(), text, &st(&format!("Hi {short}"), None)),
+                "{text}"
+            );
+        }
+        // Multi-paragraph RTL through a rich editor.
+        let rtl = "שלום\n\nمرحبا";
+        assert!(verify_insert(&hi(), rtl, &st("Hi שלום\nمرحبا", None)));
     }
 
     #[test]

@@ -2,17 +2,23 @@
 //! into [`ThreadMessage`]s, plus mail recipients and subject.
 //!
 //! The approach is platform-neutral and runs on snapshots, so it is tested on recorded trees:
-//! 1. Walk the composer's ancestors nearest-first. At each level, score every container in the
-//!    sibling subtrees by how many message-like children it has, its role (`log` > `list`), its
-//!    name ("Messages", "Conversation"...), and its geometry (same column as the composer and
-//!    above it; sidebars are penalised). The first level with a good candidate wins.
+//! 1. Walk the composer's ancestors nearest-first, starting at the editor root when focus sits
+//!    inside a contenteditable (a paragraph of the draft is not the composer). At each level,
+//!    score every container in the sibling subtrees by how many message-like children it has,
+//!    its role (`log` > `list`), its name ("Messages", "Conversation"...), and its geometry (same
+//!    column as the composer and above it). Sidebars, navigation landmarks and lists of other
+//!    conversations (items that are one link each) are penalised; table rows are never a
+//!    thread. The first level with a good candidate wins.
 //! 2. Each child item becomes a message: its text leaves are split into author, timestamp and
 //!    body; summaries such as "Your iMessage, hi, 10:41" or "Alice: hi" are parsed when the
 //!    item has no text children.
 //! 3. `from_me` comes from the author ("You", or one of the configured self names), the item's
-//!    summary, or (chat apps) bubble alignment.
-//! 4. Mail: recipients from To/Cc/Bcc fields, the subject from the Subject field or the window
-//!    title, and the quoted original when the composer holds one.
+//!    summary, or (chat apps) bubble alignment. When one author is the user's "You", the other
+//!    named authors are not the user.
+//! 4. Mail (mail apps, and any page with a Subject or To field next to the composer):
+//!    recipients from To/Cc/Bcc fields, the subject from the Subject field or the window title,
+//!    quoted history ("On ... wrote:" and what follows, `>` lines) cut from each message, and the
+//!    quoted original when the composer holds one.
 //!
 //! The result keeps the newest messages within [`ThreadLimits`].
 
@@ -20,7 +26,7 @@ use nugget_core::ipc::{AppInfo, ThreadMessage};
 
 use crate::role::Role;
 use crate::sanitize;
-use crate::tree::{Node, Snapshot};
+use crate::tree::{Node, Snapshot, editor_root_path};
 
 /// Default cap on messages returned.
 pub const MAX_MESSAGES: usize = 30;
@@ -200,19 +206,21 @@ pub fn extract(
     } else {
         detect_family(app)
     };
-    let mut ctx = ThreadContext::default();
+    let recipients = recipients(&snap.root);
+    let subject = subject(&snap.root, app, family);
+    // A web page with a Subject or To field around the composer is a mail compose.
+    let mail = family.is_mail() || !recipients.is_empty() || subject.is_some();
     let mut messages = find_container(snap)
-        .map(|c| messages_from_container(c, family, limits))
+        .map(|c| messages_from_container(c, family, mail, limits))
         .unwrap_or_default();
-    if family.is_mail() {
-        ctx.recipients = recipients(&snap.root);
-        ctx.subject = subject(&snap.root, app, family);
-        if messages.is_empty() {
-            messages = quoted_messages(field_value);
-        }
+    if mail && messages.is_empty() {
+        messages = quoted_messages(field_value);
     }
-    ctx.messages = cap_messages(messages, limits);
-    ctx
+    ThreadContext {
+        messages: cap_messages(messages, limits),
+        recipients,
+        subject,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -229,6 +237,7 @@ const MESSAGE_WORDS: &[&str] = &[
     "replies",
 ];
 const NAVIGATION_WORDS: &[&str] = &[
+    "conversations",
     "chat list",
     "list of chats",
     "chats",
@@ -291,13 +300,69 @@ fn is_message_like(n: &Node) -> bool {
     chars >= 2 && !contains_editable(n)
 }
 
+/// Labels of regions that hold other conversations or folders, whose whole subtree is
+/// navigation (a narrower list than [`NAVIGATION_WORDS`], which also applies to the container
+/// itself).
+const NAVIGATION_REGIONS: &[&str] = &[
+    "sidebar",
+    "conversations",
+    "chat list",
+    "chats",
+    "channels",
+    "inbox",
+    "folders",
+    "mailboxes",
+    "contacts",
+];
+
+/// A navigation or complementary landmark (AX subroles, AT-SPI/UIA `xml-roles`), or a region
+/// labelled as a list of other conversations.
+fn is_navigation_region(n: &Node) -> bool {
+    let raw = n.raw_role.to_ascii_lowercase();
+    if raw.contains("landmarknavigation") || raw.contains("landmarkcomplementary") {
+        return true;
+    }
+    if n.attr("xml_roles").is_some_and(|x| {
+        x.split_whitespace()
+            .any(|r| r == "navigation" || r == "complementary")
+    }) {
+        return true;
+    }
+    let label = label_of(n);
+    !label.is_empty() && NAVIGATION_REGIONS.iter().any(|w| label.contains(w))
+}
+
+/// An item whose text all sits in one link or button (an entry in a list of conversations,
+/// with its preview): following single children down to a link or button.
+fn is_link_wrapped(item: &Node) -> bool {
+    let mut n = item;
+    for _ in 0..6 {
+        if matches!(
+            n.role,
+            Role::Link | Role::Button | Role::MenuItem | Role::Tab
+        ) {
+            return true;
+        }
+        match n.children.as_slice() {
+            [only] => n = only,
+            _ => return false,
+        }
+    }
+    false
+}
+
 fn overlap_x(a: &crate::Rect, b: &crate::Rect) -> f64 {
     let l = a.x.max(b.x);
     let r = (a.x + a.width).min(b.x + b.width);
     (r - l).max(0.0)
 }
 
-fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
+/// Score `c` as the message container. `in_nav`: it sits in a navigation region.
+fn score(c: &Node, composer: Option<&Node>, precedes: bool, in_nav: bool) -> f64 {
+    // A table row's cells are the columns of one record, not messages.
+    if c.role == Role::Row {
+        return 0.0;
+    }
     let items: Vec<&Node> = c.children.iter().filter(|k| is_message_like(k)).collect();
     let n = items.len();
     let label = label_of(c);
@@ -317,8 +382,10 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
         Role::List | Role::Table => 3.0,
         _ => 0.0,
     };
-    if named_nav {
-        s *= 0.2;
+    // Penalties multiply the whole score, bonuses included.
+    let mut factor = 1.0;
+    if named_nav || in_nav {
+        factor *= 0.2;
     } else if named_msgs {
         s += 6.0;
     }
@@ -332,16 +399,16 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
     });
     let avg = total_chars as f64 / n as f64;
     if avg < 14.0 {
-        s *= 0.4;
+        factor *= 0.4;
     }
     if structured == 0 && !matches!(c.role, Role::Log | Role::List | Role::Table) {
-        s *= 0.5;
+        factor *= 0.5;
     }
-    if items
-        .iter()
-        .all(|k| matches!(k.role, Role::Link | Role::MenuItem | Role::Tab))
-    {
-        s *= 0.2;
+    let wrapped = items.iter().filter(|k| is_link_wrapped(k)).count();
+    if wrapped == n {
+        factor *= 0.2;
+    } else if wrapped * 2 >= n {
+        factor *= 0.4;
     }
     if let (Some(cb), Some(fb)) = (c.bounds, composer.and_then(|f| f.bounds)) {
         if cb.width > 0.0 && fb.width > 0.0 {
@@ -349,7 +416,7 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
             if ov >= 0.5 {
                 s += 4.0;
             } else if ov < 0.1 {
-                s *= 0.3;
+                factor *= 0.3;
             }
             if cb.y + cb.height <= fb.y + fb.height * 0.5 + 4.0 {
                 s += 2.0;
@@ -358,13 +425,52 @@ fn score(c: &Node, composer: Option<&Node>, precedes: bool) -> f64 {
     } else if precedes {
         s += 1.0;
     }
-    s
+    s * factor
 }
 
-/// The best message container around the focused element, searching outward.
+/// Visit the containers under `n` (pre-order, bounded), with whether each sits in a navigation
+/// region.
+fn visit_containers<'a>(
+    n: &'a Node,
+    in_nav: bool,
+    budget: &mut usize,
+    f: &mut impl FnMut(&'a Node, bool),
+) {
+    if *budget == 0 {
+        return;
+    }
+    *budget -= 1;
+    if n.children.is_empty() {
+        return;
+    }
+    let nav = in_nav || is_navigation_region(n);
+    f(n, nav);
+    for c in &n.children {
+        visit_containers(c, nav, budget, f);
+    }
+}
+
+/// Ancestors of the node at `path`, nearest first, each with the index of the child on the path.
+fn ancestors_at<'a>(root: &'a Node, path: &[usize]) -> Vec<(&'a Node, usize)> {
+    let mut out = Vec::with_capacity(path.len());
+    let mut n = root;
+    for &i in path {
+        out.push((n, i));
+        match n.children.get(i) {
+            Some(c) => n = c,
+            None => break,
+        }
+    }
+    out.reverse();
+    out
+}
+
+/// The best message container around the focused element (the editor root when focus is
+/// inside one), searching outward.
 pub fn find_container(snap: &Snapshot) -> Option<&Node> {
-    let composer = snap.focused();
-    for (level, (anc, on_path)) in snap.ancestors().into_iter().enumerate() {
+    let path = editor_root_path(snap);
+    let composer = snap.node_at(&path);
+    for (level, (anc, on_path)) in ancestors_at(&snap.root, &path).into_iter().enumerate() {
         if level >= MAX_LEVELS {
             break;
         }
@@ -373,15 +479,13 @@ pub fn find_container(snap: &Snapshot) -> Option<&Node> {
             if j == on_path {
                 continue;
             }
-            for c in sib.iter().take(5000) {
-                if c.children.is_empty() {
-                    continue;
-                }
-                let s = score(c, composer, j < on_path);
+            let mut budget = 5000;
+            visit_containers(sib, false, &mut budget, &mut |c, in_nav| {
+                let s = score(c, composer, j < on_path, in_nav);
                 if s >= 3.0 && best.is_none_or(|(b, _)| s > b) {
                     best = Some((s, c));
                 }
-            }
+            });
         }
         if let Some((_, c)) = best {
             return Some(c);
@@ -775,9 +879,66 @@ fn unwrap_container(mut c: &Node) -> &Node {
     c
 }
 
+/// Group consecutive messages under the last author shown (Slack-like grouping shows the author
+/// on the first message only). Generic apps also draw the user's bubbles without an author, so
+/// there an authorless message joins the group only when its body starts in the same column.
+fn group_by_author(drafts: &mut [Draft], family: AppFamily) {
+    let mut last: Option<(String, Option<f64>)> = None;
+    for d in drafts.iter_mut() {
+        match (&d.author, &last) {
+            (Some(a), _) => last = Some((a.clone(), d.indent)),
+            (None, Some((a, indent))) => {
+                let same_column = match (d.indent, *indent) {
+                    (Some(x), Some(y)) => (x - y).abs() <= 8.0,
+                    (None, None) => true,
+                    _ => false,
+                };
+                if family.groups_by_author() || same_column {
+                    d.author = Some(a.clone());
+                }
+            }
+            (None, None) => {}
+        }
+    }
+}
+
+/// Cut quoted history from a mail message: everything from an attribution line ("On ...
+/// wrote:", "Am ... schrieb:", an Outlook "From:" + "Sent:" header) on, and `>` lines. The text
+/// is kept whole when nothing else would be left.
+fn strip_quoted(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut kept: Vec<&str> = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let l = line.trim();
+        let lower = l.to_lowercase();
+        let attribution = l.len() < 300
+            && (lower.ends_with("wrote:")
+                || lower.ends_with("schrieb:")
+                || lower.ends_with("a écrit :"));
+        let outlook = lower.starts_with("from:")
+            && lines.get(i + 1).is_some_and(|n| {
+                let n = n.trim().to_lowercase();
+                n.starts_with("sent:") || n.starts_with("date:")
+            });
+        if attribution || outlook {
+            break;
+        }
+        if !l.starts_with('>') {
+            kept.push(line);
+        }
+    }
+    let out = kept.join("\n");
+    if out.trim().is_empty() {
+        text.to_string()
+    } else {
+        out
+    }
+}
+
 fn messages_from_container(
     container: &Node,
     family: AppFamily,
+    mail: bool,
     limits: &ThreadLimits,
 ) -> Vec<ThreadMessage> {
     let container = unwrap_container(container);
@@ -789,22 +950,26 @@ fn messages_from_container(
         .collect();
     // Day separators ("Yesterday", "Monday 3 March") are not messages.
     drafts.retain(|d| !(d.author.is_none() && looks_like_timestamp(&d.text)));
-    if family.groups_by_author() {
-        let mut last: Option<String> = None;
+    if mail {
         for d in &mut drafts {
-            match &d.author {
-                Some(a) => last = Some(a.clone()),
-                None => d.author.clone_from(&last),
-            }
+            d.text = strip_quoted(&d.text);
         }
     }
+    if family.groups_by_author() || family == AppFamily::Generic {
+        group_by_author(&mut drafts, family);
+    }
+    // An app that shows the user as "You" shows everyone else by name.
+    let labels_you = family.labels_self_as_you()
+        || drafts
+            .iter()
+            .any(|d| d.author.as_deref().is_some_and(|a| is_self_name(a, limits)));
     for d in &mut drafts {
         if d.from_me.is_none()
             && let Some(a) = &d.author
         {
             if is_self_name(a, limits) {
                 d.from_me = Some(true);
-            } else if family.labels_self_as_you() || !limits.self_names.is_empty() {
+            } else if labels_you || !limits.self_names.is_empty() {
                 d.from_me = Some(false);
             }
         }
@@ -1456,5 +1621,220 @@ mod tests {
         let (ctx, _) = run("generic_chat", &limits);
         assert_eq!(ctx.messages.len(), 2);
         assert_eq!(ctx.messages[1].text, "Yes, noon works for me.");
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Web editor fixtures (the FF3 app-matrix pages, modelled per platform)
+
+    /// The chat context of the FF3 pages, oldest first.
+    fn chat_truth() -> Vec<(Option<&'static str>, &'static str, Option<bool>)> {
+        vec![
+            (
+                Some("Maya Chen"),
+                "Morning! Did everyone get a chance to look at the venue options?",
+                Some(false),
+            ),
+            (
+                Some("Maya Chen"),
+                "The second one has a terrace and fits all twelve of us.",
+                Some(false),
+            ),
+            (
+                Some("Sam Ortiz"),
+                "Terrace sounds great for September.\nCan we check the catering menu first?",
+                Some(false),
+            ),
+            (
+                Some("You"),
+                "Let's book it, I'll ask about catering.",
+                Some(true),
+            ),
+        ]
+    }
+
+    #[test]
+    fn fixture_web_lexical_chat_ax() {
+        let (ctx, _) = run("web_lexical_chat_ax", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), chat_truth());
+        assert_eq!(ctx.messages[0].timestamp.as_deref(), Some("10:02 AM"));
+        assert_eq!(ctx.messages[1].timestamp.as_deref(), Some("10:03 AM"));
+        assert!(ctx.recipients.is_empty());
+        assert_eq!(ctx.subject, None);
+    }
+
+    #[test]
+    fn fixture_web_prosemirror_atspi_focus_in_paragraph() {
+        let (ctx, _) = run("web_prosemirror_atspi", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), chat_truth());
+        assert_eq!(ctx.messages[3].timestamp.as_deref(), Some("10:20 AM"));
+        assert!(ctx.recipients.is_empty());
+    }
+
+    #[test]
+    fn fixture_web_ckeditor_mail_uia() {
+        let (ctx, _) = run("web_ckeditor_mail_uia", &ThreadLimits::default());
+        assert_eq!(
+            summary(&ctx),
+            vec![
+                (
+                    Some("Maya Chen <maya@example.com>"),
+                    "Hi Jordan,\nCould we hold the offsite at the lakeside venue this year? It has room for everyone.",
+                    None
+                ),
+                (
+                    Some("Jordan Lee <jordan@example.com>"),
+                    "Lakeside works for me. Thursday is better than Friday though.",
+                    None
+                ),
+            ]
+        );
+        assert_eq!(
+            ctx.messages[1].timestamp.as_deref(),
+            Some("Tue, Oct 28, 9:15 AM")
+        );
+        assert_eq!(ctx.recipients, vec!["Maya Chen"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Re: Q3 offsite venue"));
+    }
+
+    #[test]
+    fn fixture_web_mail_compose_ax() {
+        let (ctx, _) = run("web_mail_compose_ax", &ThreadLimits::default());
+        // The inbox of other conversations is not this thread.
+        assert_eq!(summary(&ctx), vec![]);
+        assert_eq!(ctx.recipients, vec!["Jordan Lee"]);
+        assert_eq!(ctx.subject.as_deref(), Some("Q3 offsite venue"));
+    }
+
+    fn load(name: &str) -> (Snapshot, AppInfo) {
+        let path = format!(
+            "{}/tests/fixtures/trees/{name}.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let json = std::fs::read_to_string(&path).unwrap();
+        let fx: Fixture = serde_json::from_str(&json).unwrap();
+        (Snapshot::from_json(&json).unwrap(), fx.app)
+    }
+
+    fn static_text(s: &str, bounds: [f64; 4]) -> Node {
+        Node {
+            role: Role::StaticText,
+            value: Some(s.into()),
+            bounds: Some(crate::Rect {
+                x: bounds[0],
+                y: bounds[1],
+                width: bounds[2],
+                height: bounds[3],
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn decoy_sidebar_alone_is_not_a_thread() {
+        for (name, log_at) in [
+            ("web_lexical_chat_ax", vec![1, 0, 1]),
+            ("web_prosemirror_atspi", vec![1, 0, 1]),
+        ] {
+            let (mut snap, app) = load(name);
+            // Remove the chat log: what is left (the sidebar of other conversations with
+            // previews, the status line, the toolbar) is not a thread.
+            let mut main = &mut snap.root;
+            for &i in &log_at {
+                main = &mut main.children[i];
+            }
+            main.children.remove(1);
+            snap.focus_path[log_at.len()] -= 1;
+            assert!(snap.focused().is_some_and(|f| f.states.focused), "{name}");
+            let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+            assert_eq!(summary(&ctx), vec![], "{name}");
+        }
+    }
+
+    #[test]
+    fn formatted_draft_paragraphs_are_not_a_thread() {
+        // Focus on a text run inside a Lexical paragraph (Chromium after a click), the draft
+        // holding another paragraph of several formatted runs, and no chat log on the page.
+        let (mut snap, app) = load("web_lexical_chat_ax");
+        let main = &mut snap.root.children[1].children[0].children[1];
+        main.children.remove(1);
+        let editor = &mut main.children[3];
+        editor.states.focused = false;
+        let mut runs = Node::new(Role::Group);
+        runs.states.editable = true;
+        runs.bounds = Some(crate::Rect {
+            x: 340.0,
+            y: 700.0,
+            width: 800.0,
+            height: 18.0,
+        });
+        runs.children = vec![
+            static_text(
+                "The first part of the draft says ",
+                [340.0, 700.0, 220.0, 18.0],
+            ),
+            static_text(
+                "something in bold that matters",
+                [560.0, 700.0, 200.0, 18.0],
+            ),
+            static_text(
+                " and then it carries on for a while",
+                [760.0, 700.0, 240.0, 18.0],
+            ),
+        ];
+        let mut leaf = static_text("Second paragraph", [340.0, 720.0, 200.0, 18.0]);
+        leaf.states.focused = true;
+        leaf.states.editable = true;
+        let mut second = Node::new(Role::Group);
+        second.states.editable = true;
+        second.children = vec![leaf];
+        editor.children = vec![runs, second];
+        snap.focus_path = vec![1, 0, 1, 3, 1, 0];
+        assert!(snap.focused().is_some_and(|f| f.states.focused));
+        assert_eq!(crate::tree::editor_root_path(&snap), vec![1, 0, 1, 3]);
+        let ctx = extract(&snap, &app, "", &ThreadLimits::default());
+        assert_eq!(summary(&ctx), vec![]);
+    }
+
+    #[test]
+    fn quoted_history_is_cut_from_mail_messages() {
+        assert_eq!(
+            strip_quoted(
+                "Works for me.\nOn Mon, Oct 27, 2025 at 4:02 PM Maya <m@x.com> wrote:\nHi"
+            ),
+            "Works for me."
+        );
+        assert_eq!(
+            strip_quoted("Sure\n> earlier\n> text\nThanks"),
+            "Sure\nThanks"
+        );
+        assert_eq!(
+            strip_quoted("Numbers below.\nFrom: Bob <bob@x.com>\nSent: Monday\nQ1"),
+            "Numbers below."
+        );
+        // Nothing but a quote: kept as it is.
+        assert_eq!(strip_quoted("> only quoted"), "> only quoted");
+    }
+
+    #[test]
+    fn generic_grouping_follows_the_column() {
+        let draft = |author: Option<&str>, x: f64| Draft {
+            author: author.map(str::to_string),
+            text: "text".into(),
+            indent: Some(x),
+            ..Default::default()
+        };
+        let mut drafts = vec![
+            draft(Some("Maya Chen"), 60.0),
+            draft(None, 60.0),
+            draft(None, 420.0),
+        ];
+        group_by_author(&mut drafts, AppFamily::Generic);
+        let authors: Vec<_> = drafts.iter().map(|d| d.author.as_deref()).collect();
+        // A continuation in the same column joins; a bubble in the other column does not.
+        assert_eq!(authors, [Some("Maya Chen"), Some("Maya Chen"), None]);
+        // Slack groups regardless of the column.
+        let mut drafts = vec![draft(Some("Maya Chen"), 60.0), draft(None, 420.0)];
+        group_by_author(&mut drafts, AppFamily::Slack);
+        assert_eq!(drafts[1].author.as_deref(), Some("Maya Chen"));
     }
 }

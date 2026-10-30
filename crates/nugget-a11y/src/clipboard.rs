@@ -59,8 +59,12 @@ pub struct PasteTiming {
     /// Wait after a successful verification before restoring, for apps that read the
     /// clipboard lazily.
     pub before_restore: Duration,
-    /// When the paste was sent but never showed up, wait this long (and check once more) before
-    /// restoring, so a slow app does not read the restored old contents and paste those.
+    /// When the paste has not shown up by `verify_timeout`, keep polling this much longer
+    /// before restoring, so a slow app does not read the restored old contents and paste those.
+    /// With the defaults a paste is looked for during 2.7 s in all, which covers a 5000-character
+    /// paste into a rich web editor (one input event, but the accessibility tree of a large
+    /// document can take a few hundred milliseconds to catch up); a paste that lands earlier
+    /// returns as soon as it is seen.
     pub unverified_grace: Duration,
 }
 
@@ -88,7 +92,8 @@ pub struct PasteResult {
 ///
 /// `paste` synthesises the paste (Cmd/Ctrl+V, or a toolkit paste action); it never sends
 /// Return. `verify` reads the field back and reports whether the text arrived; it is polled
-/// until it returns `true` or the timeout passes. The previous clipboard contents are restored
+/// until it returns `true` or the timeout and the grace period pass. The previous clipboard
+/// contents are restored
 /// on every path after they were saved, including errors from `set_text`, `paste` or `verify`.
 pub fn paste_with_restore(
     clipboard: &mut dyn Clipboard,
@@ -115,10 +120,22 @@ pub fn paste_with_restore(
                 return Ok(true);
             }
             if Instant::now() >= deadline {
-                // The paste may still be in flight: restoring now could make the app paste
-                // the old clipboard instead. Wait out the grace period, then look once more.
-                sleep(timing.unverified_grace);
-                return verify();
+                break;
+            }
+        }
+        // The paste may still be in flight (a long paste into a rich editor can take a while
+        // to reach the accessibility tree): restoring now could make the app paste the old
+        // clipboard instead. Keep looking through the grace period; restore as soon as it
+        // lands, or when the grace period is over.
+        let grace_end = Instant::now() + timing.unverified_grace;
+        loop {
+            sleep(timing.poll.max(Duration::from_millis(1)));
+            if verify()? {
+                sleep(timing.before_restore);
+                return Ok(true);
+            }
+            if Instant::now() >= grace_end {
+                return Ok(false);
             }
         }
     })();
@@ -292,6 +309,48 @@ mod tests {
         )
         .unwrap();
         assert!(r.verified && r.restored);
+        assert_eq!(state.borrow().contents, rich());
+    }
+
+    #[test]
+    fn long_paste_landing_in_the_grace_period_is_verified_then_restored() {
+        let state = std::rc::Rc::new(std::cell::RefCell::new(MemoryClipboard {
+            contents: rich(),
+            ..Default::default()
+        }));
+        let mut cb = Shared(state.clone());
+        let text = "lorem ipsum dolor sit amet ".repeat(200);
+        assert!(text.len() >= 5000);
+        let started = std::cell::Cell::new(None::<Instant>);
+        let field = std::cell::RefCell::new(String::new());
+        let mut timing = fast();
+        timing.unverified_grace = Duration::from_secs(5);
+        let r = paste_with_restore(
+            &mut cb,
+            &text,
+            &mut || {
+                started.set(Some(Instant::now()));
+                Ok(())
+            },
+            &mut || {
+                // The editor shows the paste 60 ms in: past the verify timeout. It reads the
+                // clipboard then, so it must still hold the text.
+                if field.borrow().is_empty()
+                    && started.get().unwrap().elapsed() >= Duration::from_millis(60)
+                {
+                    let st = state.borrow();
+                    assert_eq!(st.restores, 0, "restored before the paste landed");
+                    *field.borrow_mut() =
+                        String::from_utf8(st.contents.items[0][0].data.clone()).unwrap();
+                }
+                Ok(*field.borrow() == text)
+            },
+            timing,
+        )
+        .unwrap();
+        assert!(r.verified && r.restored);
+        // Returned when it landed, not at the end of the 5 s grace period.
+        assert!(started.get().unwrap().elapsed() < Duration::from_secs(2));
         assert_eq!(state.borrow().contents, rich());
     }
 
