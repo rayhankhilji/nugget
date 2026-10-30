@@ -19,6 +19,8 @@ on:
         description: "Manifest id of the chat model (empty: the smallest)"
         default: ""
         type: string
+  push:
+    branches: [aa/grounding]
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
@@ -180,30 +182,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: doubletap
+          # TEMP (AA3): read-ahead on, Qwen3-4B, grounding off / secrets / sentences, one runner.
+          - suite: aa3-doubletap
             os: ubuntu-latest
             runs: |
-              4b-read-ahead-off doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead off
-              4b-read-ahead-on doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on
-              1.7b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead off
-              1.7b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead on
-              0.6b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead off
-              0.6b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead on
-          - suite: doubletap-macos
-            os: macos-latest
-            runs: |
-              4b-read-ahead-off doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead off
-              4b-read-ahead-on doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on
-              1.7b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead off
-              1.7b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --doubletap-read-ahead on
-              0.6b-read-ahead-off doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead off
-              0.6b-read-ahead-on doubletap --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --doubletap-read-ahead on
-          - suite: draft-quality
+              ground-off doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on --doubletap-grounding off
+              ground-secrets doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on --doubletap-grounding on --draft-grounding-check secrets
+              ground-sentences doubletap --local-chat-model qwen3-4b-q4km --doubletap-read-ahead on --doubletap-grounding on --draft-grounding-check sentences
+          # TEMP (AA3): 16 tasks incl. maya-t13, grounded (secrets) vs ungrounded vs baseline, then
+          # grounded with the sentence check, one runner.
+          - suite: aa3-draft
             os: ubuntu-latest
+            scale: standard
             runs: |
-              draft-4b draft --draft-judge model --local-chat-model qwen3-4b-q4km --draft-dump eval-results/draft-4b/drafts.jsonl
-              draft-1.7b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-1.7b-q8 --draft-dump eval-results/draft-1.7b/drafts.jsonl
-              draft-0.6b draft --draft-judge model --local-pending manifests/pending/doubletap-small.json --local-chat-model qwen3-0.6b-q8 --draft-dump eval-results/draft-0.6b/drafts.jsonl
+              draft-secrets draft --local-chat-model qwen3-4b-q4km --draft-grounding both --draft-grounding-check secrets --draft-temperature 0 --draft-judge heuristic --draft-dump eval-results/draft-secrets/drafts.jsonl
+              draft-sentences draft --local-chat-model qwen3-4b-q4km --draft-grounding on --draft-grounding-check sentences --draft-temperature 0 --draft-judge heuristic --draft-dump eval-results/draft-sentences/drafts.jsonl
     steps:
       - uses: actions/checkout@v5
         with:
