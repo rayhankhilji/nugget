@@ -1,0 +1,125 @@
+name: QA GG3 (computer-use agent, real models)
+
+# GG3 QA package (docs/qa/GG3.md): the bench's 51 `cua` tasks plus the 30 GG3 tasks
+# (qa/GG3/tasks) through the real agent loop, with the manifest's 4B and 8B chat models served by
+# llama-server exactly as `nugget-bench --local-models` does, on CPU-only runners. The harness is
+# qa/GG3/harness (its own Cargo workspace; it never changes the product build). Each job uploads
+# its JSON report (scores, outcomes, confirmations, wrapper log, full action trace per task).
+
+on:
+  # TEMPORARY (removed before the final push): run on pushes to qa/agent.
+  push:
+    branches: [qa/agent]
+    paths: [qa/GG3/RUN]
+  workflow_dispatch:
+    inputs:
+      task_timeout_s:
+        description: "Per-task wall-clock limit (seconds)"
+        default: "300"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Models come from the dev-signed bundled manifest, as in evals.yml.
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUST_BACKTRACE: "1"
+  NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/qa-results
+  TASK_TIMEOUT_S: ${{ inputs.task_timeout_s || '300' }}
+
+jobs:
+  cua:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 4B (the default chat tier), bench triage on (as the bench runs it), all 81 tasks.
+          - { label: 4b-s0, model: qwen3-4b-q4km, args: "--set all --shard 0 --shard-count 2" }
+          - { label: 4b-s1, model: qwen3-4b-q4km, args: "--set all --shard 1 --shard-count 2" }
+          # 4B with triage off: what the daemon runs today (it does not turn triage on).
+          - { label: 4b-notriage-s0, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 0 --shard-count 2" }
+          - { label: 4b-notriage-s1, model: qwen3-4b-q4km, args: "--set all --no-triage --shard 1 --shard-count 2" }
+          # 8B (agentic tier), slower: four shards.
+          - { label: 8b-s0, model: qwen3-8b-q4km, args: "--set all --shard 0 --shard-count 4" }
+          - { label: 8b-s1, model: qwen3-8b-q4km, args: "--set all --shard 1 --shard-count 4" }
+          - { label: 8b-s2, model: qwen3-8b-q4km, args: "--set all --shard 2 --shard-count 4" }
+          - { label: 8b-s3, model: qwen3-8b-q4km, args: "--set all --shard 3 --shard-count 4" }
+          # The Xvfb desktop (kiosk Chromium windows, AT-SPI) with the GG3 tasks, 4B.
+          - { label: 4b-xvfb-gg3, model: qwen3-4b-q4km, args: "--set gg3 --env xvfb", xvfb: true }
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg3
+          workspaces: qa/GG3/harness -> ../../../target
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Desktop packages
+        if: matrix.xvfb
+        run: sudo bench/cua/env/setup-debian.sh
+
+      - name: Build the harness
+        run: cargo build --release --manifest-path qa/GG3/harness/Cargo.toml --target-dir target
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "job: ${{ matrix.label }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-${{ matrix.label }}.txt"
+
+      - name: Run ${{ matrix.label }}
+        run: |
+          # Word splitting of the matrix args is intended.
+          # shellcheck disable=SC2086
+          ./target/release/gg3-cua --agent real --local-models --local-chat-model "${{ matrix.model }}" \
+            ${{ matrix.args }} --task-timeout-s "$TASK_TIMEOUT_S" \
+            --out "$RESULTS/gg3-${{ matrix.label }}.json"
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json; do
+            [ -e "$f" ] || continue
+            jq -r '"== \(.model) env=\(.env) triage=\(.triage) shard=\(.shard): \(.gg3_passed)/\(.tasks) GG3 pass",
+                   (.results[] | "\(if .gg3_pass then "PASS" else "FAIL" end) \(.id) outcome=\(.outcome) steps=\(.steps) wall=\(.wall_s|floor)s conf=\(.confirmations) false=\(.false_confirmations) unconf=\(.unconfirmed_risky_actions) inj=\(.injection_complied) \(.gg3_reasons|join("; ")|.[0:200])")' "$f"
+          done
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-gg3-${{ matrix.label }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90

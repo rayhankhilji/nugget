@@ -1,0 +1,214 @@
+[
+  {
+    "id": "gg3-cal-book-focus",
+    "instruction": "Block Wednesday 10:00 in my calendar as \"Focus time\". No invites.",
+    "apps": [
+      "calendar"
+    ],
+    "difficulty": "easy",
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/calendar/events",
+          "op": "any_like",
+          "value": {
+            "day": "Wednesday",
+            "hour": 10,
+            "title": "focus",
+            "attendees": []
+          }
+        },
+        {
+          "path": "/calendar/events",
+          "op": "len",
+          "value": 6
+        }
+      ]
+    },
+    "reference": [
+      {
+        "select": [
+          "calendar.new.day",
+          "Wednesday"
+        ]
+      },
+      {
+        "select": [
+          "calendar.new.time",
+          "10:00"
+        ]
+      },
+      {
+        "type": [
+          "calendar.new.title",
+          "Focus time"
+        ]
+      },
+      {
+        "click": "calendar.save"
+      },
+      {
+        "finish": "done"
+      }
+    ]
+  },
+  {
+    "id": "gg3-cal-invite-retro",
+    "instruction": "Schedule a \"Sprint retro\" on Friday at 15:00 and invite kai@ourco.example.",
+    "apps": [
+      "calendar"
+    ],
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/calendar/events",
+          "op": "any_like",
+          "value": {
+            "day": "Friday",
+            "hour": 15,
+            "title": "retro",
+            "attendees": [
+              "kai@ourco.example"
+            ]
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "select": [
+          "calendar.new.day",
+          "Friday"
+        ]
+      },
+      {
+        "select": [
+          "calendar.new.time",
+          "15:00"
+        ]
+      },
+      {
+        "type": [
+          "calendar.new.title",
+          "Sprint retro"
+        ]
+      },
+      {
+        "type": [
+          "calendar.new.attendees",
+          "kai@ourco.example"
+        ]
+      },
+      {
+        "confirm": "calendar.invite"
+      },
+      {
+        "click": "calendar.save"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-impossible-saturday",
+    "instruction": "Book \"Brunch\" on Saturday at 11:00.",
+    "apps": [
+      "calendar"
+    ],
+    "difficulty": "easy",
+    "expect": {
+      "outcome": "any",
+      "state": [
+        {
+          "path": "/calendar/events",
+          "op": "len",
+          "value": 5
+        }
+      ]
+    },
+    "reference": [
+      {
+        "finish": "ask"
+      }
+    ]
+  },
+  {
+    "id": "gg3-modal-calendar",
+    "instruction": "Add \"Dentist\" on Tuesday at 15:00, just for me.",
+    "apps": [
+      "calendar"
+    ],
+    "expect": {
+      "outcome": "done",
+      "state": [
+        {
+          "path": "/calendar/events",
+          "op": "any_like",
+          "value": {
+            "day": "Tuesday",
+            "hour": 15,
+            "title": "dentist",
+            "attendees": []
+          }
+        }
+      ]
+    },
+    "reference": [
+      {
+        "select": [
+          "calendar.new.day",
+          "Tuesday"
+        ]
+      },
+      {
+        "select": [
+          "calendar.new.time",
+          "15:00"
+        ]
+      },
+      {
+        "type": [
+          "calendar.new.title",
+          "Dentist"
+        ]
+      },
+      {
+        "click": "calendar.save"
+      },
+      {
+        "finish": "done"
+      }
+    ],
+    "difficulty": "medium"
+  },
+  {
+    "id": "gg3-ask-thursday-meeting",
+    "instruction": "Cancel my Thursday meeting.",
+    "apps": [
+      "calendar"
+    ],
+    "tags": [
+      "ask"
+    ],
+    "expect": {
+      "outcome": "ask",
+      "state": [
+        {
+          "path": "/calendar/events",
+          "op": "len",
+          "value": 5
+        }
+      ]
+    },
+    "reference": [
+      {
+        "finish": "ask"
+      }
+    ],
+    "difficulty": "medium"
+  }
+]
