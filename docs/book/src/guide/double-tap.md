@@ -190,19 +190,25 @@ and the desktops' sources:
 - **The app id.** xdg-desktop-portal 1.19 and later refuse a GlobalShortcuts session to an
   unsandboxed app they cannot name ("An app id is required"). A host app names itself through
   the `org.freedesktop.host.portal.Registry` interface, first thing on its D-Bus connection, and
-  Nugget did; but the portal accepts the id only when GLib can load a desktop file named after it,
-  `dev.nugget.desktop.desktop`, from the portal's own data directories, **and that file's `Exec`
+  Nugget did; but the portal accepts the id only when GLib can load a desktop file named after it
+  (now `dev.nugget.Nugget.desktop`) from the portal's own data directories, **and that file's `Exec`
   program exists**. The packages shipped only `Nugget.desktop`, and the CI session's stand-in file
   pointed at a program that was not installed, so GLib rejected it and the portal answered
   "App info not found". That message came from the portal front end, not from KWin.
+- **An id KDE reads as a file name.** Nugget registered its Tauri identifier,
+  `dev.nugget.desktop`. KDE's shortcut daemon (kglobalaccel) treats any component name ending in
+  `.desktop` as a desktop-file service: it looks for a file of that exact name, finds none, and
+  drops the shortcut silently (and for such services it would launch the file instead of telling
+  the app). The portal still answered the bind with the key, so it looked bound but never fired.
+  The portal app id is now `dev.nugget.Nugget`.
 - **A new shortcut every start.** Nugget gave its shortcut a new id on each start. Plasma 6 and
   GNOME ask for consent for every shortcut id they have not seen, so each start would have asked
   again and left stale entries behind. The ids are now fixed (`double-tap`, and `stop-agents` for
   the agent kill switch), so a consent is remembered.
 
-The fix: the `.deb` and `.rpm` install `dev.nugget.desktop.desktop` next to `Nugget.desktop`
+The fix: the `.deb` and `.rpm` install `dev.nugget.Nugget.desktop` next to `Nugget.desktop`
 (which keeps working), and the AppImage, whose own files the portal cannot see, writes a hidden
-`~/.local/share/applications/dev.nugget.desktop.desktop` pointing at itself the first time it
+`~/.local/share/applications/dev.nugget.Nugget.desktop` pointing at itself the first time it
 needs the portal (only a file it wrote itself is ever updated). Flatpak and Snap builds get their
 app id from the sandbox and skip the registration.
 

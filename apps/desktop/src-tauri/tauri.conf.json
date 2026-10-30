@@ -58,13 +58,13 @@
         "section": "utils",
         "depends": [],
         "files": {
-          "/usr/share/applications/dev.nugget.desktop.desktop": "../../../packaging/linux/dev.nugget.desktop.desktop"
+          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
         }
       },
       "rpm": {
         "release": "1",
         "files": {
-          "/usr/share/applications/dev.nugget.desktop.desktop": "../../../packaging/linux/dev.nugget.desktop.desktop"
+          "/usr/share/applications/dev.nugget.Nugget.desktop": "../../../packaging/linux/dev.nugget.Nugget.desktop"
         }
       },
       "appimage": {

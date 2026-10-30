@@ -183,11 +183,14 @@ pub trait Listener: Send {
     }
 }
 
-/// The app id Nugget registers with the XDG desktop portal on Wayland: the Tauri `identifier`.
-/// The portal (1.19+) accepts it only when a desktop file named `dev.nugget.desktop.desktop`,
-/// whose `Exec` program exists, is installed in its `XDG_DATA_DIRS`; desktops key the shortcut's
-/// consent and settings by it.
-pub const APP_ID: &str = "dev.nugget.desktop";
+/// The app id Nugget registers with the XDG desktop portal on Wayland. The portal (1.19+) accepts
+/// it only when a desktop file named `dev.nugget.Nugget.desktop`, whose `Exec` program exists, is
+/// installed in its `XDG_DATA_DIRS`; desktops key the shortcut's consent and settings by it.
+///
+/// Not the Tauri `identifier` (`dev.nugget.desktop`): KDE's kglobalaccel treats a component name
+/// ending in `.desktop` as a desktop-file service whose shortcuts launch that file, so a portal
+/// shortcut under that id is never registered and never reaches the app.
+pub const APP_ID: &str = "dev.nugget.Nugget";
 
 /// The portal shortcut ids, stable across runs so a desktop that remembers a consent (GNOME,
 /// Plasma 6) binds a returning shortcut without asking again.

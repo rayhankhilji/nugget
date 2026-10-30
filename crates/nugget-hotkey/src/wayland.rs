@@ -545,11 +545,11 @@ mod tests {
     fn refused_session_names_the_desktop_file() {
         let msg = unnamed_app_err(
             "An app id is required",
-            "App info not found for 'dev.nugget.desktop'",
+            "App info not found for 'dev.nugget.Nugget'",
         )
         .to_string();
         assert!(msg.contains("app id"), "{msg}");
-        assert!(msg.contains("dev.nugget.desktop.desktop"), "{msg}");
+        assert!(msg.contains("dev.nugget.Nugget.desktop"), "{msg}");
         assert!(msg.contains("Exec"), "{msg}");
         assert!(msg.contains("AppImage"), "{msg}");
         assert!(msg.contains("App info not found"), "{msg}");

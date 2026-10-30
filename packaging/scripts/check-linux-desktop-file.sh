@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Check that a Linux package ships the desktop entry named after the app id, which the XDG
-# desktop portal needs to accept "dev.nugget.desktop" from an unsandboxed app (GlobalShortcuts
+# desktop portal needs to accept "dev.nugget.Nugget" from an unsandboxed app (GlobalShortcuts
 # refuses a session without it), and that its Exec and Icon resolve inside the package.
 # Usage: packaging/scripts/check-linux-desktop-file.sh <deb|rpm> path/to/package
 #
@@ -14,7 +14,7 @@ kind="$1"
 pkg="$2"
 [ -f "$pkg" ] || { echo "check-desktop: no such file: $pkg" >&2; exit 2; }
 
-app_id_file="usr/share/applications/dev.nugget.desktop.desktop"
+app_id_file="usr/share/applications/dev.nugget.Nugget.desktop"
 tauri_file="usr/share/applications/Nugget.desktop"
 binary="/usr/bin/nugget-desktop"
 icon="nugget-desktop"

@@ -1,14 +1,14 @@
 //! A desktop entry named after the app id, for AppImage runs on Linux.
 //!
 //! The XDG desktop portal only lets an unsandboxed app name itself (`host.portal.Registry`) when
-//! GLib, in the portal's own environment, can load `dev.nugget.desktop.desktop`: the file must
+//! GLib, in the portal's own environment, can load `dev.nugget.Nugget.desktop`: the file must
 //! sit in `$XDG_DATA_HOME/applications` or `$XDG_DATA_DIRS/*/applications`, and its `Exec`
 //! program (and `TryExec`, if any) must exist. Without that, `GlobalShortcuts` refuses the
 //! session. The .deb and .rpm install that file under `/usr/share/applications`; an AppImage's
 //! own copy is inside its image, where the portal cannot see it. So an AppImage run writes a
 //! hidden (`NoDisplay=true`) entry pointing at the AppImage file into the user's data dir.
 //!
-//! GLib takes the first `dev.nugget.desktop.desktop` it finds in precedence order (the user's
+//! GLib takes the first `dev.nugget.Nugget.desktop` it finds in precedence order (the user's
 //! data dir, then each system data dir) and does not fall back when that one fails to load, so
 //! the decision below looks at the first match only. A file is rewritten only if it carries
 //! [`MARKER`], i.e. an earlier run wrote it; anything else is left alone.
@@ -20,7 +20,7 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 /// The desktop file id: the app id (the Tauri `identifier`) plus `.desktop`.
-const FILE_NAME: &str = "dev.nugget.desktop.desktop";
+const FILE_NAME: &str = "dev.nugget.Nugget.desktop";
 
 /// Key that marks a file this module wrote, so it may be rewritten later.
 const MARKER: &str = "X-Nugget-Generated";
@@ -57,7 +57,7 @@ impl Env {
     }
 }
 
-/// When running from an AppImage and no loadable `dev.nugget.desktop.desktop` is visible in the
+/// When running from an AppImage and no loadable `dev.nugget.Nugget.desktop` is visible in the
 /// XDG data dirs, write one to `$XDG_DATA_HOME/applications` (default
 /// `~/.local/share/applications`). Returns the path written, or `None` when nothing was needed
 /// (not an AppImage, a usable entry already exists, or a file we did not write is in the way).
@@ -140,7 +140,7 @@ fn search_dirs(
     Some((data_home, dirs))
 }
 
-/// The first `<dir>/applications/dev.nugget.desktop.desktop` that exists, in the given order.
+/// The first `<dir>/applications/dev.nugget.Nugget.desktop` that exists, in the given order.
 fn find_entry(dirs: &[PathBuf]) -> Option<PathBuf> {
     dirs.iter()
         .map(|d| d.join("applications").join(FILE_NAME))
