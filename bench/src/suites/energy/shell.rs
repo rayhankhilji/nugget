@@ -30,7 +30,7 @@
 //!
 //! Skipped (recorded in `config.params`, never failed) without [`SHELL_ENV`], without a display
 //! (`DISPLAY` on Linux), without the focus tools (`xdotool` and a Python with GTK 3 on Linux,
-//! `osascript` on macOS) or the fake server, or on another OS. Linux also needs a session bus
+//! `open` on macOS) or the fake server, or on another OS. Linux also needs a session bus
 //! with AT-SPI and a window manager, started by the caller: `bench/scripts/energy-linux.sh`.
 
 use std::io::{BufRead, BufReader, Write};
@@ -422,8 +422,8 @@ fn focus_tools() -> Result<(), String> {
     }
     #[cfg(target_os = "macos")]
     {
-        if !Path::new("/usr/bin/osascript").is_file() && on_path("osascript").is_none() {
-            return Err("osascript is missing (needed to switch TextEdit windows)".into());
+        if !Path::new("/usr/bin/open").is_file() {
+            return Err("/usr/bin/open is missing (needed to switch TextEdit windows)".into());
         }
         Ok(())
     }

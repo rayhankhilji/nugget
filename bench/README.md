@@ -416,8 +416,9 @@ seconds, quick about a minute, standard five minutes, full ten (the PLAN's idle 
   ("Quarterly report", "Team offsite", "Vendor contract"): on Linux three GTK 3 windows
   (`bench/scripts/energy-text-window.py`, embedded in the binary; a Python with PyGObject from
   `NUGGET_BENCH_PYTHON`, else `python3`, `python3.12`, ...) brought to the front with `xdotool
-  windowactivate --sync`; on macOS three TextEdit documents brought to the front with `osascript`
-  (`activate` + `set index of window`). A scripted window of 15 s at smoke, else 60 s, switching
+  windowactivate --sync`; on macOS three TextEdit documents brought to the front by reopening each with `open -a
+  TextEdit` (no AppleScript: Apple Events to TextEdit need an Automation grant a CI runner does
+  not have). A scripted window of 15 s at smoke, else 60 s, switching
   every 5 s in a fixed order (0, 1, 2, 0, ...). It runs twice, read-ahead **off** then **on**
   (`doubletap.json` rewritten, the shell restarted; daemon and server keep running).
   Per run, under `energy.shell_focus.read_ahead_{off,on}.`: `shell.*`, `daemon.*`, `server.*`
@@ -431,14 +432,13 @@ seconds, quick about a minute, standard five minutes, full ten (the PLAN's idle 
 
 The shell scenarios run only when listed, on Linux (X11) and macOS, and are skipped (recorded,
 not failed) when `NUGGET_BENCH_SHELL` is unset or not a file, without a display (`DISPLAY` unset
-on Linux), when `xdotool` or a Python with GTK 3 (Linux) or `osascript` (macOS) is missing
+on Linux), when `xdotool` or a Python with GTK 3 (Linux) is missing
 (`shell_focus`), or without the fake server (`shell_focus`). Linux also needs a window manager
 and a session bus with AT-SPI, which the caller provides: `bench/scripts/energy-linux.sh
 <command…>` runs a command inside Xvfb + openbox + `dbus-run-session` with
 `WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` and `GTK_MODULES=gail:atk-bridge` (as
 `apps/desktop/e2e-native/run-linux.sh`); `a11y_poll` finds a frontmost app only in such a session.
-macOS needs Accessibility for the shell and Automation of TextEdit for the process running the
-bench (GitHub's macOS runners grant Accessibility; Automation is not verified). Known gaps: on
+macOS needs Accessibility for the shell (GitHub's macOS runners grant it). Known gaps: on
 macOS the webview's WebKit processes are XPC services, not children of the shell, so they are
 not counted in `shell.*`; the debug shell is measured (for its probe), a release build is a
 little cheaper.
