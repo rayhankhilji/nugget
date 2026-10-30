@@ -106,3 +106,13 @@ Brief in `docs/waves/wave-cc/`.
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | CC1 | `cc/doubletap-fast` | session_01CTjRSs68FrQ6bjtvDEG7tf | small draft model for Double Tap, read-ahead on focus (local only), four-way latency measurement (merged) |
+
+## Wave DD (independent of AA3): cloud sessions from 40e1994
+Briefs in `docs/waves/wave-dd/`.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
+| DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) |
+| DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste |
+| DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence |
+| DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker |
