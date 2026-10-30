@@ -282,6 +282,20 @@ jobs:
               nomic-prefixes-off memory --backend real --local-models --memory-embed-prefixes off
               nomic memory --backend real --local-models --memory-rerank local
               nomic-rerank-unbounded memory --backend real --local-models --memory-rerank local --memory-rerank-timeout-ms 120000 --memory-queries 50 --memory-no-freshness
+          # The reranker never answers within the app's timeout on these runners (quick scale), so
+          # standard measures it without one, on a subset.
+          - scale: standard
+            runs: |
+              hash memory --backend real
+              nomic-prefixes-off memory --backend real --local-models --memory-embed-prefixes off
+              nomic memory --backend real --local-models
+              nomic-rerank-unbounded memory --backend real --local-models --memory-rerank local --memory-rerank-timeout-ms 120000 --memory-queries 50 --memory-no-freshness
+          # Full scale: embedding 20,000 files takes about 2 hours on these runners, so only the
+          # app's configuration against the hash embedder fits in one job.
+          - scale: full
+            runs: |
+              hash memory --backend real
+              nomic memory --backend real --local-models
     steps:
       - uses: actions/checkout@v5
         with:
