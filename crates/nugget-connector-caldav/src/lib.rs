@@ -111,6 +111,12 @@ fn transient_error(resp: &Response, hint: Option<Duration>) -> Error {
     }
 }
 
+/// A member's `getcontentlength`, if listed.
+fn content_length(r: &DavResponse) -> Option<u64> {
+    r.prop_text(DAV, "getcontentlength")
+        .and_then(|v| v.trim().parse().ok())
+}
+
 /// Whether `e` is the HTTP client's response-size cap.
 fn is_body_cap(e: &Error) -> bool {
     matches!(e, Error::Invalid(m) if m.starts_with("response body exceeds"))
@@ -130,7 +136,14 @@ fn href_bytes(path: &str) -> Vec<u8> {
                 (b[i + 2] as char).to_digit(16),
             )
         {
-            out.push((h * 16 + l) as u8);
+            let c = (h * 16 + l) as u8;
+            // An escaped `/` or `%` is not the same href as the literal one: keep it escaped
+            // (in one canonical case).
+            if c == b'/' || c == b'%' {
+                out.extend_from_slice(if c == b'/' { b"%2F" } else { b"%25" });
+            } else {
+                out.push(c);
+            }
             i += 3;
             continue;
         }
@@ -138,6 +151,17 @@ fn href_bytes(path: &str) -> Vec<u8> {
         i += 1;
     }
     out
+}
+
+/// The path part of a member href that could not be resolved (absolute URL or path), so a
+/// known item it may name is kept rather than deleted.
+fn raw_href_path(href: &str) -> Vec<u8> {
+    let h = href.trim();
+    let path = match h.split_once("://") {
+        Some((_, rest)) => rest.find('/').map_or("/", |i| &rest[i..]),
+        None => h,
+    };
+    href_bytes(path.split(['?', '#']).next().unwrap_or(path))
 }
 
 /// Drop inline binary attachments (`ATTACH;ENCODING=BASE64` / `VALUE=BINARY`, with their folded
@@ -320,6 +344,9 @@ struct CalCursor {
     sync_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ctag: Option<String>,
+    /// Objects skipped as too large (key → ETag): not requested again until the ETag changes.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    skipped: BTreeMap<String, Option<String>>,
 }
 
 impl Cursor {
@@ -399,6 +426,7 @@ const PROPFIND_ETAGS: &str = r#"<?xml version="1.0" encoding="utf-8"?>
   <D:prop>
     <D:resourcetype/>
     <D:getetag/>
+    <D:getcontentlength/>
   </D:prop>
 </D:propfind>"#;
 
@@ -411,6 +439,7 @@ fn sync_collection_body(token: &str) -> String {
   <D:limit><D:nresults>{SYNC_PAGE}</D:nresults></D:limit>
   <D:prop>
     <D:getetag/>
+    <D:getcontentlength/>
   </D:prop>
 </D:sync-collection>"#,
         xml::escape(token)
@@ -857,6 +886,9 @@ impl CalDavConnector {
         let mut full = token.is_empty();
         let mut reset = false;
         let mut seen: HashSet<String> = HashSet::new();
+        // Raw paths of member hrefs that could not be resolved: never deleted on their account.
+        let mut unresolved: HashSet<Vec<u8>> = HashSet::new();
+        let mut skipped = prev.skipped.clone();
         for _ in 0..MAX_SYNC_PAGES {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -897,6 +929,7 @@ impl CalDavConnector {
             let mut fetch = Vec::new();
             for r in &ms.responses {
                 let Some(url) = self.member_url(cal, &r.href) else {
+                    unresolved.insert(raw_href_path(&r.href));
                     continue;
                 };
                 let key = url.path().to_string();
@@ -912,6 +945,7 @@ impl CalDavConnector {
                         && !r.propstats.is_empty()
                         && r.propstats.iter().all(|(s, _)| *s == 404));
                 if deleted {
+                    skipped.remove(&key);
                     if known.remove(&key).is_some() {
                         sink.send(Change::Delete(ItemKey::new(key))).await?;
                     }
@@ -925,24 +959,27 @@ impl CalDavConnector {
                 if etag.is_some() && known.get(&key) == Some(&etag) {
                     continue;
                 }
-                fetch.push(key);
+                if self.skip_large(&key, &etag, content_length(r), &mut skipped) {
+                    continue;
+                }
+                fetch.push((key, etag));
             }
-            self.multiget(password, cal, &fetch, known, sink, cancel)
+            self.multiget_recording(password, cal, &fetch, known, &mut skipped, sink, cancel)
                 .await?;
             let next = ms.sync_token.clone().ok_or_else(|| {
                 Error::Network("sync-collection response without a sync-token".into())
             })?;
             if truncated && next == token {
-                // Asking again with the same token would return the same page forever.
-                return Err(Error::Network(
-                    "CalDAV server truncated sync-collection without advancing its sync-token"
-                        .into(),
-                ));
+                // Asking again with the same token would return the same page forever: list
+                // this calendar by ETag instead (other calendars carry on).
+                tracing::warn!(calendar = %cal.path, "server truncated sync-collection without advancing its sync-token; using ETags");
+                return Ok(SyncResult::Unsupported);
             }
             token = next;
             let entry = CalCursor {
                 sync_token: Some(token.clone()),
                 ctag: cal.ctag.clone(),
+                skipped: skipped.clone(),
             };
             if !full {
                 // Resumable: everything up to this token is applied once the checkpoint commits.
@@ -950,16 +987,18 @@ impl CalDavConnector {
                 sink.checkpoint(cursor.to_value()).await?;
             }
             if !truncated {
+                let mut entry = entry;
                 if full {
                     let stale: Vec<String> = known
                         .keys()
-                        .filter(|k| !seen.contains(*k))
+                        .filter(|k| !seen.contains(*k) && !unresolved.contains(&href_bytes(k)))
                         .cloned()
                         .collect();
                     for k in stale {
                         known.remove(&k);
                         sink.send(Change::Delete(ItemKey::new(k))).await?;
                     }
+                    entry.skipped.retain(|k, _| seen.contains(k));
                 }
                 return Ok(SyncResult::Done(entry));
             }
@@ -967,6 +1006,53 @@ impl CalDavConnector {
         Err(Error::Network(
             "CalDAV sync-collection never finished paging".into(),
         ))
+    }
+
+    /// Whether `key` is too large to download: already skipped at this ETag, or listed with a
+    /// `getcontentlength` over the response cap (then remembered).
+    fn skip_large(
+        &self,
+        key: &str,
+        etag: &Option<String>,
+        length: Option<u64>,
+        skipped: &mut BTreeMap<String, Option<String>>,
+    ) -> bool {
+        if etag.is_some() && skipped.get(key) == Some(etag) {
+            return true;
+        }
+        if length.is_some_and(|l| l > self.limits.max_body as u64) {
+            tracing::warn!(href = %key, size = length, "calendar object too large to download; skipping");
+            skipped.insert(key.to_string(), etag.clone());
+            return true;
+        }
+        skipped.remove(key);
+        false
+    }
+
+    /// [`multiget`](Self::multiget), remembering skipped objects by their listed ETag.
+    #[allow(clippy::too_many_arguments)]
+    async fn multiget_recording(
+        &self,
+        password: &str,
+        cal: &Calendar,
+        fetch: &[(String, Option<String>)],
+        known: &mut KnownMap,
+        skipped: &mut BTreeMap<String, Option<String>>,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<()> {
+        let keys: Vec<String> = fetch.iter().map(|(k, _)| k.clone()).collect();
+        let too_big = self
+            .multiget(password, cal, &keys, known, sink, cancel)
+            .await?;
+        for k in too_big {
+            let etag = fetch
+                .iter()
+                .find(|(f, _)| *f == k)
+                .and_then(|(_, e)| e.clone());
+            skipped.insert(k, etag);
+        }
+        Ok(())
     }
 
     /// Fallback without `sync-collection`: compare `getctag`, then list ETags.
@@ -985,9 +1071,11 @@ impl CalDavConnector {
         let ms = self
             .propfind(password, &cal.url, "1", PROPFIND_ETAGS, cancel)
             .await?;
-        let mut listing: HashMap<String, Option<String>> = HashMap::new();
+        let mut listing: HashMap<String, (Option<String>, Option<u64>)> = HashMap::new();
+        let mut unresolved: HashSet<Vec<u8>> = HashSet::new();
         for r in &ms.responses {
             let Some(url) = self.member_url(cal, &r.href) else {
+                unresolved.insert(raw_href_path(&r.href));
                 continue;
             };
             let key = url.path().to_string();
@@ -998,28 +1086,36 @@ impl CalDavConnector {
             {
                 continue;
             }
-            listing.insert(key, r.prop_text(DAV, "getetag"));
+            listing.insert(key, (r.prop_text(DAV, "getetag"), content_length(r)));
         }
         let gone: Vec<String> = known
             .keys()
-            .filter(|k| !listing.contains_key(*k))
+            .filter(|k| !listing.contains_key(*k) && !unresolved.contains(&href_bytes(k)))
             .cloned()
             .collect();
         for k in gone {
             known.remove(&k);
             sink.send(Change::Delete(ItemKey::new(k))).await?;
         }
-        let mut fetch: Vec<String> = listing
-            .iter()
-            .filter(|(k, etag)| etag.is_none() || known.get(*k) != Some(*etag))
-            .map(|(k, _)| k.clone())
-            .collect();
+        let mut skipped = prev.skipped.clone();
+        skipped.retain(|k, _| listing.contains_key(k));
+        let mut fetch: Vec<(String, Option<String>)> = Vec::new();
+        for (k, (etag, len)) in &listing {
+            if etag.is_some() && known.get(k) == Some(etag) {
+                continue;
+            }
+            if self.skip_large(k, etag, *len, &mut skipped) {
+                continue;
+            }
+            fetch.push((k.clone(), etag.clone()));
+        }
         fetch.sort();
-        self.multiget(password, cal, &fetch, known, sink, cancel)
+        self.multiget_recording(password, cal, &fetch, known, &mut skipped, sink, cancel)
             .await?;
         Ok(CalCursor {
             sync_token: None,
             ctag: cal.ctag.clone(),
+            skipped,
         })
     }
 
@@ -1043,7 +1139,8 @@ impl CalDavConnector {
         known: &mut KnownMap,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
-    ) -> Result<()> {
+    ) -> Result<Vec<String>> {
+        let mut too_big = Vec::new();
         // Batches, in order; a response over the size cap is split until the culprit stands
         // alone, and a single object too big to download is skipped.
         let mut pending: Vec<&[String]> = keys.chunks(MULTIGET_BATCH).rev().collect();
@@ -1070,6 +1167,7 @@ impl CalDavConnector {
                 }
                 Err(e) if is_body_cap(&e) => {
                     tracing::warn!(href = %chunk[0], limit = self.limits.max_body, "calendar object too large to download; skipping");
+                    too_big.push(chunk[0].clone());
                     continue;
                 }
                 r => r?.error_for_status()?,
@@ -1103,6 +1201,7 @@ impl CalDavConnector {
                 }
                 if data.len() > self.limits.max_event {
                     tracing::warn!(href = %key, size = data.len(), limit = self.limits.max_event, "calendar object too large; skipping");
+                    too_big.push(key);
                     continue;
                 }
                 let etag = r.prop_text(DAV, "getetag");
@@ -1123,7 +1222,7 @@ impl CalDavConnector {
                 known.insert(key, etag);
             }
         }
-        Ok(())
+        Ok(too_big)
     }
 }
 

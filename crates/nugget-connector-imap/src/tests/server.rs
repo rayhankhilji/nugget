@@ -88,6 +88,8 @@ pub struct State {
     pub broken: BTreeSet<u32>,
     /// Body FETCH commands answered.
     pub body_fetches: usize,
+    /// End every body FETCH with a tagged BAD.
+    pub bad_body_fetch: bool,
 }
 
 impl State {
@@ -110,6 +112,7 @@ impl State {
             bye_every_body_fetch: false,
             broken: BTreeSet::new(),
             body_fetches: 0,
+            bad_body_fetch: false,
         }
     }
 
@@ -626,6 +629,7 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                             BTreeSet::new()
                         };
                         let mut refused = false;
+                        let bad = wants_body && s.bad_body_fetch;
                         let condstore = s.condstore;
                         let s_lie = s.lie_literal;
                         let mut lie_out: Option<Vec<u8>> = None;
@@ -712,7 +716,9 @@ async fn session<S: AsyncRead + AsyncWrite + Unpin>(
                         if let Some(raw) = lie_out {
                             silent_after = Some(raw);
                         }
-                        if refused {
+                        if bad {
+                            put(&mut out, &format!("{tag} BAD command syntax error"));
+                        } else if refused {
                             put(
                                 &mut out,
                                 &format!("{tag} NO [SERVERBUG] Internal error occurred"),

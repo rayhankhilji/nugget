@@ -48,14 +48,16 @@ pub fn rel_key(rel: &Path) -> String {
 }
 
 /// Append one path component. Valid UTF-8 is copied as is; each invalid byte is written as
-/// `U+FFFD` plus its hex value (a lossy conversion would map different names to one key).
+/// `U+FFFD` plus its hex value (a lossy conversion would map different names to one key). A
+/// literal `U+FFFD` in a name is escaped the same way (as its three UTF-8 bytes), so every
+/// `U+FFFD` in a key is an escape and distinct names always get distinct keys.
 fn push_component(out: &mut String, s: &std::ffi::OsStr) {
     if let Some(s) = s.to_str() {
-        out.push_str(s);
+        push_valid(out, s);
         return;
     }
     for chunk in s.as_encoded_bytes().utf8_chunks() {
-        out.push_str(chunk.valid());
+        push_valid(out, chunk.valid());
         for b in chunk.invalid() {
             out.push('\u{fffd}');
             out.push_str(&format!("{b:02x}"));
@@ -63,12 +65,26 @@ fn push_component(out: &mut String, s: &std::ffi::OsStr) {
     }
 }
 
+/// Valid UTF-8 with any literal `U+FFFD` escaped.
+fn push_valid(out: &mut String, s: &str) {
+    if s.contains('\u{fffd}') {
+        out.push_str(&s.replace('\u{fffd}', "\u{fffd}ef\u{fffd}bf\u{fffd}bd"));
+    } else {
+        out.push_str(s);
+    }
+}
+
 /// [`item_key`] for a relative path given as a string in a known separator convention. Empty and
 /// `.` components are dropped, so `a\\b\\c.md` (Windows) and `a/b/c.md` give the same key.
 pub fn item_key_from_str(root_index: usize, rel: &str, style: PathStyle) -> String {
-    let parts: Vec<&str> = rel
+    let parts: Vec<String> = rel
         .split(|c| c == '/' || (style == PathStyle::Windows && c == '\\'))
         .filter(|p| !p.is_empty() && *p != ".")
+        .map(|p| {
+            let mut out = String::new();
+            push_valid(&mut out, p);
+            out
+        })
         .collect();
     format!("{root_index}:{}", parts.join("/"))
 }
@@ -154,6 +170,26 @@ mod tests {
         assert_ne!(k(b"a\xff.md"), k(b"a\xfe.md"));
         assert_ne!(k(b"a\xff.md"), k("a\u{fffd}.md".as_bytes()));
         assert_eq!(k(b"d\xc3/x.md"), "0:d\u{fffd}c3/x.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn regression_literal_replacement_char_cannot_collide_with_an_escape() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let k = |b: &[u8]| item_key(0, Path::new(OsStr::from_bytes(b)));
+        // A valid name spelling exactly what an escaped invalid byte looks like.
+        let lookalike = "a\u{fffd}ff.md";
+        assert_ne!(k(lookalike.as_bytes()), k(b"a\xff.md"));
+        assert_eq!(
+            k(lookalike.as_bytes()),
+            "0:a\u{fffd}ef\u{fffd}bf\u{fffd}bdff.md"
+        );
+        // The string form agrees with the path form.
+        assert_eq!(
+            item_key_from_str(0, lookalike, PathStyle::Posix),
+            k(lookalike.as_bytes())
+        );
     }
 
     #[test]

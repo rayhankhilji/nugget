@@ -296,14 +296,16 @@ async fn regression_transient_refresh_failure_keeps_unexpired_token() {
     let e = env().await;
     Mock::given(method("POST"))
         .respond_with(server_error(503, None))
-        .expect(3)
+        .expect(2)
         .mount(&e.server)
         .await;
-    // Inside the refresh margin but not yet expired: an outage must not fail the sync.
+    // Inside the refresh margin but not yet expired: an outage must not fail the sync, and the
+    // refresh is not retried on every call (backoff before the next try).
     seed(&*e.secrets, "at-still-good", Some("rt"), Some(now() + 90));
     let ts = source(&e);
-    assert_eq!(ts.access_token().await.unwrap(), "at-still-good");
-    assert_eq!(ts.access_token().await.unwrap(), "at-still-good");
+    for _ in 0..5 {
+        assert_eq!(ts.access_token().await.unwrap(), "at-still-good");
+    }
     // Once really expired, the outage is surfaced (as transient, not as "reconnect").
     seed(&*e.secrets, "at-dead", Some("rt"), Some(now() - 1));
     let ts = source(&e);
@@ -444,7 +446,6 @@ async fn regression_unsaved_tokens_are_written_back_on_next_use() {
         stored(&secrets.inner).refresh_token.as_deref(),
         Some("rt-1")
     );
-    ts.clear_cache().await; // must not drop the only good copy
     assert_eq!(ts.access_token().await.unwrap(), "at-2");
     assert_eq!(
         stored(&secrets.inner).refresh_token.as_deref(),
@@ -453,7 +454,7 @@ async fn regression_unsaved_tokens_are_written_back_on_next_use() {
 }
 
 #[tokio::test]
-async fn tokens_stay_in_the_secret_store_and_out_of_errors_logs_and_egress() {
+async fn tokens_stay_in_the_secret_store_and_out_of_errors_debug_and_egress() {
     let e = env().await;
     Mock::given(method("POST"))
         .and(body_string_contains("refresh_token=rt-live&"))
@@ -489,4 +490,105 @@ async fn tokens_stay_in_the_secret_store_and_out_of_errors_logs_and_egress() {
         assert!(ev.items.is_empty());
         assert!(ev.bytes_sent > 0);
     }
+}
+
+#[tokio::test]
+async fn regression_early_refresh_failure_honours_retry_after() {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .respond_with(too_many_requests(3600))
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    seed(&*e.secrets, "at-good", Some("rt"), Some(now() + 100));
+    let ts = source(&e);
+    for _ in 0..10 {
+        assert_eq!(ts.access_token().await.unwrap(), "at-good");
+    }
+}
+
+/// A refresh whose keychain write failed, then the user reconnects: the new grant wins.
+async fn unsaved_then_reconnect(clear: bool) {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .and(body_string_contains("refresh_token=rt-1&"))
+        .respond_with(ok("at-2", Some("rt-2"), 3600.into()))
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(body_string_contains("refresh_token=rt-2&"))
+        .respond_with(ok("stale", None, 3600.into()))
+        .expect(0)
+        .mount(&e.server)
+        .await;
+    let secrets = Arc::new(FlakySecrets::default());
+    seed(&secrets.inner, "at-1", Some("rt-1"), Some(now() - 1));
+    secrets.fail_writes.store(1, Ordering::SeqCst);
+    let ts = TokenSource::new(e.client.clone(), secrets.clone(), ACCOUNT);
+    assert_eq!(ts.access_token().await.unwrap(), "at-2");
+    // Reconnect: a fresh grant lands in the keychain.
+    seed(
+        &secrets.inner,
+        "at-grant",
+        Some("rt-grant"),
+        Some(now() + 3600),
+    );
+    if clear {
+        ts.clear_cache().await;
+    }
+    assert_eq!(ts.access_token().await.unwrap(), "at-grant");
+    assert_eq!(ts.force_refresh("at-2").await.unwrap(), "at-grant");
+    let t = stored(&secrets.inner);
+    assert_eq!(
+        (t.access_token.as_str(), t.refresh_token.as_deref()),
+        ("at-grant", Some("rt-grant"))
+    );
+}
+
+#[tokio::test]
+async fn regression_reconnect_after_failed_write_is_not_undone() {
+    unsaved_then_reconnect(false).await;
+}
+
+#[tokio::test]
+async fn regression_clear_cache_after_reconnect_drops_unsaved_tokens() {
+    unsaved_then_reconnect(true).await;
+}
+
+#[tokio::test]
+async fn regression_revoked_unsaved_tokens_are_dropped() {
+    let e = env().await;
+    Mock::given(method("POST"))
+        .and(body_string_contains("refresh_token=rt-1&"))
+        .respond_with(ok("at-2", Some("rt-2"), 1.into()))
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    Mock::given(method("POST"))
+        .and(body_string_contains("refresh_token=rt-2&"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(serde_json::json!({"error": "invalid_grant"})),
+        )
+        .expect(1)
+        .mount(&e.server)
+        .await;
+    let secrets = Arc::new(FlakySecrets::default());
+    seed(&secrets.inner, "at-1", Some("rt-1"), Some(now() - 1));
+    secrets.fail_writes.store(10, Ordering::SeqCst);
+    let ts = TokenSource::new(e.client.clone(), secrets.clone(), ACCOUNT);
+    assert_eq!(ts.access_token().await.unwrap(), "at-2");
+    // at-2 expires within the margin; refreshing with rt-2 is refused.
+    let err = ts.force_refresh("at-2").await.unwrap_err();
+    assert!(matches!(err, Error::Unauthorized(_)), "{err:?}");
+    // The revoked set is gone from memory; after a reconnect the keychain is used.
+    secrets.fail_writes.store(0, Ordering::SeqCst);
+    seed(
+        &secrets.inner,
+        "at-grant",
+        Some("rt-grant"),
+        Some(now() + 3600),
+    );
+    assert_eq!(ts.access_token().await.unwrap(), "at-grant");
+    assert_eq!(stored(&secrets.inner).access_token, "at-grant");
 }

@@ -485,12 +485,83 @@ async fn regression_one_undeliverable_message_never_stops_the_sync() {
     assert_eq!(replica.len(), 39);
     assert!(replica.get("INBOX/7/7").is_none());
     assert!(replica.get("INBOX/7/8").is_some() && replica.get("INBOX/7/40").is_some());
-    // The pass committed; new mail keeps flowing.
+    assert_eq!(cursor["folders"]["INBOX"]["retry"], json!([[7, 1]]));
+    // The server recovers: the next pass picks up message 7 (and new mail keeps flowing).
     env.server.with(|s| {
+        s.broken.clear();
         s.add("INBOX", &msg("later", "later"));
     });
-    env.pass(&replica, Some(cursor)).await;
+    let (cursor, _) = env.pass(&replica, Some(cursor)).await;
+    assert!(
+        replica.get("INBOX/7/7").is_some(),
+        "refused message retried"
+    );
     assert!(replica.get("INBOX/7/41").is_some());
+    assert!(
+        cursor["folders"]["INBOX"].get("retry").is_none(),
+        "{cursor}"
+    );
+}
+
+#[tokio::test]
+async fn regression_a_message_refused_on_every_pass_is_given_up_after_a_cap() {
+    let mut st = inbox_and_sent();
+    for i in 1..=3 {
+        st.add("INBOX", &msg(&format!("m{i}"), &format!("m{i}")));
+    }
+    st.broken.insert(2);
+    // No CONDSTORE: every pass looks at the mailbox.
+    st.condstore = false;
+    st.qresync = false;
+    let env = Env::new(st, json!({})).await;
+    let replica = Replica::new();
+    let mut cursor = None;
+    for pass in 1..=MAX_FETCH_ATTEMPTS {
+        let (c, _) = env.pass(&replica, cursor).await;
+        let retry = &c["folders"]["INBOX"]["retry"];
+        if pass < MAX_FETCH_ATTEMPTS {
+            assert_eq!(*retry, json!([[2, pass]]), "pass {pass}");
+        } else {
+            assert!(retry.is_null(), "given up after {pass} passes: {c}");
+        }
+        cursor = Some(c);
+    }
+    assert_eq!(replica.len(), 2);
+}
+
+#[tokio::test]
+async fn regression_a_server_refusing_every_message_fails_the_pass() {
+    let mut st = inbox_and_sent();
+    for i in 1..=5 {
+        st.add("INBOX", &msg(&format!("m{i}"), &format!("m{i}")));
+    }
+    st.broken.extend(1..=5);
+    let env = Env::new(st, json!({})).await;
+    let replica = Replica::new();
+    let conn = env.connector(replica.clone());
+    let sink = ReplicaSink::new(replica.clone());
+    let err = run_pass(&conn, None, &sink).await.unwrap_err();
+    assert!(matches!(err, Error::Provider(_)), "{err:?}");
+    assert!(
+        sink.committed().is_none(),
+        "no progress committed past them"
+    );
+}
+
+#[tokio::test]
+async fn regression_bad_on_a_body_fetch_is_an_error_not_a_skipped_message() {
+    let mut st = inbox_and_sent();
+    for i in 1..=3 {
+        st.add("INBOX", &msg(&format!("m{i}"), &format!("m{i}")));
+    }
+    st.bad_body_fetch = true;
+    let env = Env::new(st, json!({})).await;
+    let replica = Replica::new();
+    let conn = env.connector(replica.clone());
+    let sink = ReplicaSink::new(replica.clone());
+    let err = run_pass(&conn, None, &sink).await.unwrap_err();
+    assert!(matches!(err, Error::Network(_)), "{err:?}");
+    assert!(sink.committed().is_none());
 }
 
 // ---------------------------------------------------------------------------------------------

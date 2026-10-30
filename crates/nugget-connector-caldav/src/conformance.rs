@@ -39,6 +39,8 @@ struct Model {
     page: usize,
     /// How multiget responses spell hrefs (to mimic servers that encode differently).
     spell: fn(&str) -> String,
+    /// List `getcontentlength` with each member.
+    report_length: bool,
 }
 
 impl Default for Model {
@@ -51,6 +53,7 @@ impl Default for Model {
             expired_status: 403,
             page: 100,
             spell: |h| h.to_string(),
+            report_length: false,
         }
     }
 }
@@ -147,6 +150,13 @@ fn sync_response(m: &Model, body: &str) -> ResponseTemplate {
     let mut out: Vec<String> = hrefs[offset.min(end)..end]
         .iter()
         .map(|h| match m.events.get(h) {
+            Some((etag, data)) if m.report_length => resp(
+                h,
+                &format!(
+                    "<D:getetag>\"{etag}\"</D:getetag><D:getcontentlength>{}</D:getcontentlength>",
+                    data.len()
+                ),
+            ),
             Some((etag, _)) => resp(h, &format!("<D:getetag>\"{etag}\"</D:getetag>")),
             None => status_resp(h, 404),
         })
@@ -226,6 +236,31 @@ impl Env {
             .and(body_string_contains("calendar-multiget"))
             .respond_with(move |r: &Request| {
                 multiget_response(&m.lock().unwrap(), &String::from_utf8_lossy(&r.body))
+            })
+            .mount(&server)
+            .await;
+        let m = model.clone();
+        Mock::given(method("PROPFIND"))
+            .and(path(CAL))
+            .and(header("depth", "1"))
+            .respond_with(move |_: &Request| {
+                let m = m.lock().unwrap();
+                let mut out = vec![resp(
+                    CAL,
+                    "<D:resourcetype><D:collection/></D:resourcetype>",
+                )];
+                for (h, (etag, data)) in &m.events {
+                    let len = if m.report_length {
+                        format!("<D:getcontentlength>{}</D:getcontentlength>", data.len())
+                    } else {
+                        String::new()
+                    };
+                    out.push(resp(
+                        h,
+                        &format!("<D:resourcetype/><D:getetag>\"{etag}\"</D:getetag>{len}"),
+                    ));
+                }
+                ms(&out, None)
             })
             .mount(&server)
             .await;
@@ -754,25 +789,131 @@ async fn regression_bad_member_href_skips_the_item_not_the_sync() {
     }
 }
 
-#[tokio::test]
-async fn regression_truncated_paging_without_a_new_token_stops() {
-    let env = Env::new().await;
+/// The account root `/dav/cal/` holding the model-backed `work` calendar (sync-collection) and
+/// an ETag-only `zz` calendar with one event.
+async fn mount_home_with_two_calendars(env: &Env) {
+    Mock::given(method("PROPFIND"))
+        .and(path("/dav/cal/"))
+        .and(header("depth", "0"))
+        .respond_with(ms(
+            &[resp(
+                "/dav/cal/",
+                "<D:resourcetype><D:collection/></D:resourcetype>",
+            )],
+            None,
+        ))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PROPFIND"))
+        .and(path("/dav/cal/"))
+        .and(header("depth", "1"))
+        .respond_with(ms(
+            &[
+                resp(
+                    "/dav/cal/",
+                    "<D:resourcetype><D:collection/></D:resourcetype>",
+                ),
+                resp(
+                    CAL,
+                    "<D:resourcetype><D:collection/><C:calendar/></D:resourcetype>\
+                     <D:sync-token>any</D:sync-token>",
+                ),
+                resp(
+                    "/dav/cal/zz/",
+                    "<D:resourcetype><D:collection/><C:calendar/></D:resourcetype>",
+                ),
+            ],
+            None,
+        ))
+        .mount(&env.server)
+        .await;
+    Mock::given(method("PROPFIND"))
+        .and(path("/dav/cal/zz/"))
+        .and(header("depth", "1"))
+        .respond_with(ms(
+            &[
+                resp(
+                    "/dav/cal/zz/",
+                    "<D:resourcetype><D:collection/></D:resourcetype>",
+                ),
+                resp(
+                    "/dav/cal/zz/a.ics",
+                    "<D:resourcetype/><D:getetag>\"z1\"</D:getetag>",
+                ),
+            ],
+            None,
+        ))
+        .mount(&env.server)
+        .await;
     Mock::given(method("REPORT"))
-        .and(body_string_contains("sync-collection"))
-        .respond_with(ms(&[status_resp(CAL, 507)], Some("")))
+        .and(path("/dav/cal/zz/"))
+        .and(body_string_contains("calendar-multiget"))
+        .respond_with(ms(
+            &[resp(
+                "/dav/cal/zz/a.ics",
+                &format!(
+                    "<D:getetag>\"z1\"</D:getetag><C:calendar-data>{}</C:calendar-data>",
+                    xml::escape(&ics("z", "other calendar"))
+                ),
+            )],
+            None,
+        ))
+        .mount(&env.server)
+        .await;
+}
+
+impl Env {
+    fn home_connector(&self, replica: Arc<Replica>) -> CalDavConnector {
+        let ctx = context(
+            SOURCE,
+            Paths::rooted(std::env::temp_dir().join("nugget-caldav-conformance")),
+            self.egress.clone(),
+            self.secrets.clone(),
+            replica as Arc<dyn KnownItems>,
+        );
+        let settings = json!({"url": format!("{}/dav/cal/", self.server.uri()), "username": "me"});
+        CalDavConnector::new(CalDavSettings::parse(&settings).unwrap(), ctx)
+            .unwrap()
+            .with_retry(fast_retry())
+    }
+}
+
+#[tokio::test]
+async fn regression_truncated_paging_without_a_new_token_falls_back_to_etags() {
+    let env = Env::new().await;
+    mount_home_with_two_calendars(&env).await;
+    for i in 0..3 {
+        env.model
+            .lock()
+            .unwrap()
+            .put(&href(i), &ics(&format!("u{i}"), "x"));
+    }
+    let replica = Replica::new();
+    let conn = env.home_connector(replica.clone());
+    let sink = ReplicaSink::new(replica.clone());
+    let cursor = run_pass(&conn, None, &sink).await.unwrap();
+    assert_eq!(cursor["calendars"][CAL]["sync_token"], "v3-o0");
+    assert_eq!(replica.len(), 4);
+    // From now on the server truncates with the same token forever.
+    Mock::given(method("REPORT"))
+        .and(body_string_contains("<D:sync-token>v3-o0</D:sync-token>"))
+        .respond_with(ms(&[status_resp(CAL, 507)], Some("v3-o0")))
         .with_priority(1)
         .mount(&env.server)
         .await;
-    let replica = Replica::new();
-    let conn = env.connector(replica.clone());
-    let err = run_pass(&conn, None, &ReplicaSink::new(replica.clone()))
+    env.model.lock().unwrap().put(&href(9), &ics("u9", "new"));
+    env.model.lock().unwrap().delete(&href(0));
+    let sink = ReplicaSink::new(replica.clone());
+    run_pass(&conn, Some(cursor), &sink)
         .await
-        .unwrap_err();
-    assert!(
-        matches!(err, Error::Network(ref m) if m.contains("sync-token")),
-        "{err:?}"
+        .expect("the calendar is listed by ETag; the pass completes");
+    let mut keys = replica.keys();
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![href(1), href(2), href(9), "/dav/cal/zz/a.ics".to_string()]
     );
-    assert_eq!(env.requests("sync-collection").await, 1);
+    assert_eq!(env.requests("<D:sync-token>v3-o0").await, 1);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -818,4 +959,163 @@ async fn crash_at_every_send_and_checkpoint_resumes_to_the_same_index() {
     let report = assert_crash_resumable(&build, Some(cursor), replica.snapshot()).await;
     assert_eq!(report.sends, 9);
     assert!(report.checkpoints >= 3, "{report:?}");
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review regressions
+// ---------------------------------------------------------------------------------------------
+
+async fn multigets_naming(env: &Env, h: &str) -> usize {
+    env.server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| {
+            let b = String::from_utf8_lossy(&r.body);
+            b.contains("calendar-multiget") && b.contains(h)
+        })
+        .count()
+}
+
+fn small_limits() -> Limits {
+    Limits {
+        max_body: 100 * 1024,
+        max_event: 64 * 1024,
+    }
+}
+
+#[tokio::test]
+async fn regression_oversized_object_is_not_downloaded_again_until_it_changes() {
+    let env = Env::new().await;
+    {
+        let mut m = env.model.lock().unwrap();
+        m.page = 3;
+        for i in 0..6 {
+            m.put(&href(i), &ics(&format!("u{i}"), "small"));
+        }
+        m.put(&href(4), &ics("big", &"z".repeat(200_000)));
+    }
+    let replica = Replica::new();
+    let conn = env
+        .connector(replica.clone())
+        .with_limits(small_limits())
+        .unwrap();
+    let cursor = run_pass(&conn, None, &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(replica.len(), 5);
+    let first = multigets_naming(&env, &href(4)).await;
+    assert!(first >= 1);
+    assert!(
+        cursor["calendars"][CAL]["skipped"][href(4)].is_string(),
+        "{cursor}"
+    );
+    // The token expires: the full relisting does not download it again (same ETag).
+    {
+        let mut m = env.model.lock().unwrap();
+        m.expired_below = m.version + 1;
+    }
+    let cursor = run_pass(&conn, Some(cursor), &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(multigets_naming(&env, &href(4)).await, first);
+    // Once it changes (and fits), it is fetched and the skip is forgotten.
+    env.model
+        .lock()
+        .unwrap()
+        .put(&href(4), &ics("big", "now small"));
+    let cursor = run_pass(&conn, Some(cursor), &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert!(replica.get(&href(4)).unwrap().content.contains("now small"));
+    assert!(
+        cursor["calendars"][CAL].get("skipped").is_none(),
+        "{cursor}"
+    );
+}
+
+#[tokio::test]
+async fn regression_listed_content_length_avoids_the_oversized_download() {
+    let env = Env::new().await;
+    {
+        let mut m = env.model.lock().unwrap();
+        m.report_length = true;
+        m.put(&href(0), &ics("a", "small"));
+        m.put(&href(1), &ics("big", &"z".repeat(200_000)));
+    }
+    let replica = Replica::new();
+    let conn = env
+        .connector(replica.clone())
+        .with_limits(small_limits())
+        .unwrap();
+    let before = env.egress.events().len();
+    run_pass(&conn, None, &ReplicaSink::new(replica.clone()))
+        .await
+        .unwrap();
+    assert_eq!(replica.keys(), vec![href(0)]);
+    assert_eq!(multigets_naming(&env, &href(1)).await, 0);
+    let received: u64 = env.egress.events()[before..]
+        .iter()
+        .map(|e| e.bytes_received)
+        .sum();
+    assert!(received < 50_000, "{received}");
+}
+
+#[tokio::test]
+async fn regression_unresolvable_href_keeps_the_known_item() {
+    let env = Env::new().await;
+    for i in 0..3 {
+        env.model
+            .lock()
+            .unwrap()
+            .put(&href(i), &ics(&format!("u{i}"), "x"));
+    }
+    let replica = Replica::new();
+    let (cursor, _) = env.pass(&replica, None).await;
+    // The token expires and the full listing names item 1 by an href we cannot use.
+    {
+        let mut m = env.model.lock().unwrap();
+        m.expired_below = m.version + 1;
+    }
+    let etag = |i: usize| format!("<D:getetag>\"e{}\"</D:getetag>", i + 1);
+    Mock::given(method("REPORT"))
+        .and(body_string_contains("<D:sync-token></D:sync-token>"))
+        .respond_with(ms(
+            &[
+                resp(&href(0), &etag(0)),
+                resp(
+                    &format!("https://elsewhere.example.com{}", href(1)),
+                    &etag(1),
+                ),
+                resp(&href(2), &etag(2)),
+            ],
+            Some("v3-o0"),
+        ))
+        .with_priority(1)
+        .mount(&env.server)
+        .await;
+    let (_, sink) = env.pass(&replica, Some(cursor)).await;
+    assert_eq!(replica.keys(), vec![href(0), href(1), href(2)]);
+    assert!(
+        sink.summary().iter().all(|s| !s.starts_with('-')),
+        "{:?}",
+        sink.summary()
+    );
+}
+
+#[test]
+fn regression_href_comparison_keeps_escaped_slash_and_percent() {
+    assert_eq!(href_bytes("/c/a%40b.ics"), href_bytes("/c/a@b.ics"));
+    assert_eq!(
+        href_bytes("/c/caf%c3%a9.ics"),
+        href_bytes("/c/caf%C3%A9.ics")
+    );
+    assert_ne!(href_bytes("/c/a%2Fb.ics"), href_bytes("/c/a/b.ics"));
+    assert_eq!(href_bytes("/c/a%2fb.ics"), href_bytes("/c/a%2Fb.ics"));
+    assert_ne!(href_bytes("/c/a%2540.ics"), href_bytes("/c/a%40.ics"));
+    assert_eq!(
+        raw_href_path("https://h.example.com/c/x.ics?q#f"),
+        href_bytes("/c/x.ics")
+    );
 }

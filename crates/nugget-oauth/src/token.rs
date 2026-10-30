@@ -95,6 +95,23 @@ pub struct TokenSource {
 struct Cached {
     tokens: Option<TokenSet>,
     unsaved: bool,
+    /// With `unsaved`: the access token the keychain held when the refresh happened. If the
+    /// keychain holds anything else later, a new authorization was stored and it wins.
+    base: Option<String>,
+    /// After a failed early refresh: do not try again before this (the current token is used).
+    retry_at: Option<tokio::time::Instant>,
+}
+
+/// Wait before retrying a failed early refresh when the provider gave no hint.
+const EARLY_REFRESH_BACKOFF: Duration = Duration::from_secs(30);
+
+impl Cached {
+    fn forget(&mut self) {
+        self.tokens = None;
+        self.unsaved = false;
+        self.base = None;
+        self.retry_at = None;
+    }
 }
 
 impl std::fmt::Debug for TokenSource {
@@ -142,17 +159,34 @@ impl TokenSource {
             Some(t) => t,
             None => self.load().await?,
         };
-        if !current.expires_within(self.skew) {
+        let backing_off = cache
+            .retry_at
+            .is_some_and(|at| tokio::time::Instant::now() < at);
+        if !current.expires_within(self.skew) || (backing_off && !current.expired()) {
             let token = current.access_token.clone();
             cache.tokens = Some(current);
             return Ok(token);
         }
         match self.refresh_from(&current, &mut cache).await {
             Ok(token) => Ok(token),
+            // A rejected refresh: these tokens are dead. Never keep them (a reconnect must not
+            // be undone by writing them back).
+            Err(e @ Error::Unauthorized(_)) => {
+                cache.forget();
+                Err(e)
+            }
             // Refreshing early (inside the skew) failed for a transient reason: the current token
-            // still works, so keep using it rather than failing the sync.
-            Err(e) if !matches!(e, Error::Unauthorized(_)) && !current.expired() => {
-                tracing::warn!(account = %self.account, error = %e, "early OAuth refresh failed; using the current token");
+            // still works, so keep using it, and do not ask again before the server's hint (or
+            // a short backoff) has passed.
+            Err(e) if !current.expired() => {
+                let wait = match &e {
+                    Error::RateLimited {
+                        retry_after_ms: Some(ms),
+                    } => Duration::from_millis(*ms),
+                    _ => EARLY_REFRESH_BACKOFF,
+                };
+                tracing::warn!(account = %self.account, error = %e, ?wait, "early OAuth refresh failed; using the current token");
+                cache.retry_at = Some(tokio::time::Instant::now() + wait);
                 let token = current.access_token.clone();
                 cache.tokens = Some(current);
                 Ok(token)
@@ -180,15 +214,17 @@ impl TokenSource {
             cache.tokens = Some(stored);
             return Ok(token);
         }
-        self.refresh_from(&stored, &mut cache).await
+        let r = self.refresh_from(&stored, &mut cache).await;
+        if matches!(r, Err(Error::Unauthorized(_))) {
+            cache.forget();
+        }
+        r
     }
 
     /// Forget cached tokens (e.g. after a new authorization stored fresh ones).
     pub async fn clear_cache(&self) {
-        let mut cache = self.cache.lock().await;
-        if !cache.unsaved {
-            cache.tokens = None;
-        }
+        // A new authorization always wins over tokens a failed write left in memory.
+        self.cache.lock().await.forget();
     }
 
     /// Whether tokens are stored for this account.
@@ -209,10 +245,20 @@ impl TokenSource {
             })
     }
 
-    /// Write back tokens a previous refresh could not store.
+    /// Write back tokens a previous refresh could not store, unless the keychain changed since
+    /// (the user reconnected: the new grant wins and the in-memory set is dropped).
     async fn retry_unsaved(&self, cache: &mut Cached) {
         if !cache.unsaved {
             return;
+        }
+        match load_tokens(self.secrets.clone(), self.account.clone()).await {
+            Ok(stored) if stored.as_ref().map(|t| &t.access_token) != cache.base.as_ref() => {
+                tracing::info!(account = %self.account, "keychain holds new OAuth tokens; dropping unsaved ones");
+                cache.forget();
+                return;
+            }
+            Ok(_) => {}
+            Err(_) => return, // keychain unreadable: keep the in-memory set
         }
         if let Some(t) = &cache.tokens
             && store_tokens(self.secrets.clone(), self.account.clone(), t)
@@ -220,6 +266,7 @@ impl TokenSource {
                 .is_ok()
         {
             cache.unsaved = false;
+            cache.base = None;
         }
     }
 
@@ -241,8 +288,16 @@ impl TokenSource {
         // The provider may have rotated the refresh token, invalidating the stored one: keep the
         // new set in memory even if the keychain write fails, and retry the write later.
         let stored = store_tokens(self.secrets.clone(), self.account.clone(), &fresh).await;
+        if stored.is_err() && !cache.unsaved {
+            // What the keychain still holds (unless an earlier failed write already set it).
+            cache.base = Some(current.access_token.clone());
+        }
+        if stored.is_ok() {
+            cache.base = None;
+        }
         cache.tokens = Some(fresh);
         cache.unsaved = stored.is_err();
+        cache.retry_at = None;
         if let Err(e) = stored {
             tracing::warn!(account = %self.account, error = %e, "could not store refreshed OAuth tokens; will retry");
         }

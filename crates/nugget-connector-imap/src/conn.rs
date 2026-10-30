@@ -849,10 +849,12 @@ impl Imap {
             Done::Ok => Ok(out),
             // The server could not deliver (some of) these messages, e.g. Dovecot's
             // `NO [SERVERBUG]` for one corrupt message: the session is still usable.
-            Done::No(m) | Done::Bad(m) => Err(Error::Provider(format!(
+            Done::No(m) => Err(Error::Provider(format!(
                 "IMAP server refused to fetch messages {}: {m}",
                 clip(set, 64)
             ))),
+            // BAD is a protocol error (our command or the session), not a broken message.
+            Done::Bad(m) => Err(net(format!("IMAP UID FETCH failed: {m}"))),
         }
     }
 
