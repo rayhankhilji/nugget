@@ -6,7 +6,7 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
-It runs five scenarios:
+It runs eight scenarios:
 
 - **pages**: a home with the corpus already indexed; every page is opened and checked.
 - **i18n**: on the same indexed home (indexed once, shared with pages), every page is opened in
@@ -32,6 +32,14 @@ It runs five scenarios:
   `prefs-forced-*`); at 200% zoom (a 680×430 viewport at device scale 2) neither the window nor
   `main` scrolls sideways and i18n.mjs's `measure` finds no label overflowing
   (`zoom200-<page>.png`, `prefs-zoom-offenders.json`).
+- **keyboard**: its own empty home (`nuggetd-e2e`, the test model installed through
+  `models.install` first) and only `page.keyboard`: onboarding to Done with the corpus folder,
+  Search and Open on a hit, a cited Chat answer and its `[n]`, a Today card's action through
+  Approve and Confirm (a Safety rule set over RPC makes drafts ask; the card is the corpus's
+  unanswered thread, computed with `proactive.refresh`), Stop all agents and Resume on Safety, the
+  command palette (Ctrl+K / ⌘K, arrows, Enter) and Sources → Add source. Every Tab stop must show
+  a focus ring, focus is never lost to `<body>` or trapped outside a dialog, stays inside an open
+  one, and Escape closes it and returns focus to its opener (`NN-keyboard-*.png`).
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -62,7 +70,7 @@ built, plus about 60 s for the i18n scenario. Linux and macOS only, because the 
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard` | Which scenarios to run, comma-separated. |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
 | `E2E_FIRST_RUN_BUDGET_MS` | 120000 | First run: the most app start to a cited answer may take. |
 | `E2E_AI_BUDGET_MS` | 180000 | ai-setup: the most app start to a cited model answer may take. |

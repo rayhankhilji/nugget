@@ -72,7 +72,9 @@ daemon and the real interface in Chromium and has three accessibility scenarios:
   tree: landmarks, headings, and names for every control and image.
 - **keyboard** completes the core flows with the keyboard alone: first-run setup to Done, adding a
   folder, searching and opening a result, asking in Chat and following a citation, accepting a Today
-  card's action through its confirmation, stopping all agents from Safety, and the command palette.
+  card's action through its confirmation (the test adds a Safety rule so the action asks first),
+  stopping all agents from Safety (the kill switch acts at once, without a confirmation), and the
+  command palette.
   It fails if a focused control has no visible focus, if focus is trapped, or if Escape doesn't close
   a dialog and return focus.
 - **prefs** checks reduced motion (nothing animates, the graph stays still), more contrast and
@@ -91,6 +93,8 @@ and check that announcements happen only at the start and end of a reply or an i
   and how a particular screen reader reads a page still need people. The app has been checked with
   the accessibility tree Chromium exposes, not yet with every screen reader on every platform.
 - The browser's own animation of an indeterminate progress bar can't be turned off by the app.
+- The keyboard scenario doesn't yet open the Merge and Split dialogs or the shortcuts list; they
+  use the same dialog focus handling as the dialogs it does open.
 - The Double Tap overlay follows the same focus and contrast styles but isn't covered by the
   automated scenarios.
 
