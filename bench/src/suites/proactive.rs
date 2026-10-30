@@ -266,6 +266,27 @@ fn metrics(
             "Accepted cards that match a gold label / accepted cards (the rest are user noise)",
         ),
         Metric::new(
+            "feedback.dismissed.not_relevant",
+            get(ours, "dismissed.not_relevant"),
+            "cards",
+            Info,
+            "Dismissals the simulated user gave as not relevant (gold cards dismissed by noise, unlabelled cards), per run",
+        ),
+        Metric::new(
+            "feedback.dismissed.already_handled",
+            get(ours, "dismissed.already_handled"),
+            "cards",
+            Info,
+            "Dismissals given as already handled (answered threads, completed commitments, cancelled meetings), per run",
+        ),
+        Metric::new(
+            "feedback.dismissed.not_important",
+            get(ours, "dismissed.not_important"),
+            "cards",
+            Info,
+            "Dismissals given as not important (newsletters, notifications, bulk mail, spam renewals), per run",
+        ),
+        Metric::new(
             "cards.duplicate_shows",
             get(ours, "duplicate_shows"),
             "cards",

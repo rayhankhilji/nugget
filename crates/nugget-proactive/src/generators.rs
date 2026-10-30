@@ -213,6 +213,8 @@ pub fn unanswered_threads(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 question: f64::from(u8::from(question)),
                 kind: Some(CandidateKind::UnansweredThread),
                 sender: Some(from.email.clone()),
+                thread: Some(crate::candidate::thread_key(&last.thread)),
+                activity_at: Some(last.date),
             },
             actions,
             sensitive: last.sensitive,
@@ -491,6 +493,8 @@ fn commitment_candidate(
             question: 0.0,
             kind: Some(CandidateKind::Commitment),
             sender: None,
+            thread: None,
+            activity_at: None,
         },
         actions,
         sensitive,
@@ -594,6 +598,8 @@ pub fn meetings(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 question: 0.0,
                 kind: Some(CandidateKind::MeetingPrep),
                 sender: None,
+                thread: None,
+                activity_at: None,
             },
             actions: vec![Action::ResearchNote(ResearchNote {
                 title: format!("Prep: {}", ev.title),
@@ -895,6 +901,8 @@ pub fn renewals(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 question: 0.0,
                 kind: Some(CandidateKind::Renewal),
                 sender: None,
+                thread: None,
+                activity_at: None,
             },
             actions: vec![Action::Reminder(Reminder {
                 text: format!(
@@ -1006,6 +1014,8 @@ pub fn follow_ups(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 question: 0.0,
                 kind: Some(CandidateKind::FollowUp),
                 sender: None,
+                thread: Some(crate::candidate::thread_key(&m.thread)),
+                activity_at: Some(m.date),
             },
             actions,
             sensitive: m.sensitive,
@@ -1069,6 +1079,8 @@ pub fn awaiting_replies(ctx: &GenContext<'_>) -> Vec<Candidate> {
                 question: 1.0,
                 kind: Some(CandidateKind::FollowUp),
                 sender: Some(first.email.clone()),
+                thread: Some(crate::candidate::thread_key(&last.thread)),
+                activity_at: Some(last.date),
             },
             actions: vec![
                 Action::DraftReply(DraftReply {
@@ -1186,6 +1198,8 @@ fn todo_candidate(
             question: 0.0,
             kind: Some(CandidateKind::Commitment),
             sender: None,
+            thread: None,
+            activity_at: None,
         },
         actions: vec![
             Action::Reminder(Reminder {

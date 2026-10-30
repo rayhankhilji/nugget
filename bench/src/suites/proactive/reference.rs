@@ -461,11 +461,8 @@ impl ProactiveEngine for ReferenceEngine {
         let Some(issued) = self.issued.get(card_id) else {
             return;
         };
-        let y = if feedback == Feedback::Accepted {
-            1.0
-        } else {
-            0.0
-        };
+        // The reference engine ignores dismiss reasons.
+        let y = if feedback.is_accepted() { 1.0 } else { 0.0 };
         let p = 1.0 / (1.0 + (-issued.card.score).exp());
         for f in issued.features.clone() {
             *self.weights.entry(f.clone()).or_insert(0.0) += Self::learning_rate(&f) * (y - p);

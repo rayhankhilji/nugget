@@ -89,6 +89,8 @@ fn main() {
             commands::brief_get,
             commands::proactive_metrics,
             commands::proactive_refresh,
+            commands::proactive_learning,
+            commands::proactive_reset_learning,
             commands::reminders_list,
             commands::notify,
             commands::open_mailto,

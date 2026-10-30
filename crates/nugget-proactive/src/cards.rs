@@ -23,6 +23,7 @@ use time::{Duration, OffsetDateTime};
 
 use crate::actions::Action;
 use crate::candidate::{Candidate, CandidateKind, EvidenceRef, Features};
+use crate::feedback::Learned;
 use crate::judge::Enrichment;
 use crate::score::{Factor, Feedback, ScoringModel};
 
@@ -128,6 +129,9 @@ pub struct Card {
     #[serde(default)]
     pub was_accepted: bool,
     pub history: Vec<Transition>,
+    /// How the user's feedback changed this card's ranking, strongest first.
+    #[serde(default)]
+    pub learned: Vec<crate::feedback::Effect>,
 }
 
 pub(crate) fn card_id(dedup_key: &str) -> String {
@@ -163,6 +167,7 @@ impl Card {
             dismiss_reason: None,
             was_accepted: false,
             history: Vec::new(),
+            learned: Vec::new(),
         }
     }
 
@@ -180,9 +185,27 @@ impl Card {
         self.last_generated_at = now;
     }
 
-    pub(crate) fn rescore(&mut self, model: &ScoringModel) {
-        self.score = model.score(&self.features);
-        self.factors = model.explain(&self.features).into_iter().take(3).collect();
+    /// Score with the model and the learned layer at `now`: `score` is
+    /// `sigmoid(model log-odds + learned effects)`, `factors` the top three model factors with
+    /// the learned layer's total as one `learned` factor, and `learned` the effects behind it.
+    pub(crate) fn rescore(&mut self, model: &ScoringModel, learned: &Learned, now: OffsetDateTime) {
+        let (score, _, effects) =
+            crate::score::learned_score(model, learned, self.kind, &self.features, now);
+        self.score = score;
+        let mut factors = model.explain(&self.features);
+        let adj: f64 = effects.iter().map(|e| e.contribution).sum();
+        if adj != 0.0 {
+            factors.push(Factor {
+                name: "learned".to_owned(),
+                value: 1.0,
+                weight: adj,
+                contribution: adj,
+            });
+            factors.sort_by(|a, b| b.contribution.abs().total_cmp(&a.contribution.abs()));
+        }
+        factors.truncate(3);
+        self.factors = factors;
+        self.learned = effects;
         self.rank = match &self.enrichment {
             Some(e) => 0.8 * self.score + 0.2 * e.confidence,
             None => self.score,
@@ -279,7 +302,7 @@ impl Card {
     }
 }
 
-/// Everything the engine persists: cards (by id) and the scoring model.
+/// Everything the engine persists: cards (by id), the scoring model and what feedback taught.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProactiveState {
     pub version: u32,
@@ -288,6 +311,9 @@ pub struct ProactiveState {
     /// Feedback events applied to the model (for audit/bench).
     #[serde(default)]
     pub feedback_log: Vec<FeedbackEvent>,
+    /// Per sender, domain, kind and thread learning from feedback (decays).
+    #[serde(default)]
+    pub learned: Learned,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub last_refresh: Option<OffsetDateTime>,
 }
@@ -297,6 +323,9 @@ pub struct FeedbackEvent {
     pub card_id: String,
     pub kind: CandidateKind,
     pub feedback: Feedback,
+    /// The dismiss reason (`DismissReason::as_str`), for dismissals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     #[serde(with = "time::serde::rfc3339")]
     pub at: OffsetDateTime,
 }
@@ -323,6 +352,27 @@ impl ProactiveState {
         if self.feedback_log.len() > MAX_FEEDBACK_LOG {
             let cut = self.feedback_log.len() - MAX_FEEDBACK_LOG;
             self.feedback_log.drain(..cut);
+        }
+    }
+
+    /// Move per-sender weights an older scoring model learned into the learned layer (once;
+    /// they then decay from `now` like any other feedback).
+    pub(crate) fn migrate(&mut self, now: OffsetDateTime) {
+        for (sender, w) in self.model.take_legacy_senders() {
+            self.learned.import_sender_weight(&sender, w, now);
+        }
+    }
+
+    /// Rescore every card that is not terminal with the model and the learned layer at `now`.
+    pub(crate) fn rescore_open(&mut self, now: OffsetDateTime) {
+        let Self {
+            cards,
+            model,
+            learned,
+            ..
+        } = self;
+        for c in cards.values_mut().filter(|c| !c.state.is_terminal()) {
+            c.rescore(model, learned, now);
         }
     }
 
