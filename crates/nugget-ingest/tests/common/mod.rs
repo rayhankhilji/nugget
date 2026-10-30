@@ -286,6 +286,8 @@ pub struct FakeProvider {
     pub dim: usize,
     /// Return NaN vectors.
     pub nan: AtomicBool,
+    /// The task prefixes it reports as `(query, document)` (none by default).
+    pub prefixes: Mutex<(String, String)>,
 }
 
 impl FakeProvider {
@@ -299,6 +301,7 @@ impl FakeProvider {
             open: tokio::sync::watch::channel(true).0,
             dim: 4,
             nan: AtomicBool::new(false),
+            prefixes: Mutex::new((String::new(), String::new())),
         })
     }
 
@@ -366,6 +369,10 @@ impl Provider for FakeProvider {
                 output_tokens: None,
             }),
         ])))
+    }
+
+    fn embed_prefixes(&self) -> (String, String) {
+        self.prefixes.lock().unwrap().clone()
     }
 
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {

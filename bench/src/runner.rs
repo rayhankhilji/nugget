@@ -84,6 +84,8 @@ pub struct RunConfig {
     pub doubletap: suites::doubletap::DoubletapOptions,
     /// `energy` suite options (which scenarios run).
     pub energy: suites::energy::EnergyOptions,
+    /// `memory` suite options (real embedder prefixes, reranker, query count).
+    pub memory: suites::memory::MemoryOptions,
 }
 
 impl Default for RunConfig {
@@ -99,6 +101,7 @@ impl Default for RunConfig {
             knowledge: suites::knowledge::KnowledgeOptions::default(),
             doubletap: suites::doubletap::DoubletapOptions::default(),
             energy: suites::energy::EnergyOptions::default(),
+            memory: suites::memory::MemoryOptions::default(),
         }
     }
 }

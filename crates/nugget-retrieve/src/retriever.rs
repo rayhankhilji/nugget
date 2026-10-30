@@ -12,14 +12,15 @@ use nugget_infer::{ChatRequest, ChatResponse, Message, Provider, Router};
 use nugget_store::{Chunk, ChunkId, Item, Store};
 use time::{OffsetDateTime, UtcOffset};
 
-use crate::config::RetrieveConfig;
+use crate::config::{Fusion, RetrieveConfig};
 use crate::dates::{DateRange, parse_date_query};
 use crate::embed::{embed_first, embedding_candidates, validate_vectors};
 use crate::pack::{PackItem, PackOptions, pack};
 use crate::rank::{
-    Candidate, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query, token_set,
+    Candidate, convex_fuse, cosine, group_by_item, jaccard, mmr_select, recency_factor, text_query,
+    token_set,
 };
-use crate::rerank::{Reranker, normalise_scores};
+use crate::rerank::{RerankGovernor, RerankStatus, Reranker, normalise_scores};
 use crate::rewrite::{
     FEATURE_REWRITE, QueryRewrite, RewriteMethod, clean_reply, heuristic_rewrite,
     looks_like_followup, system_prompt, user_prompt,
@@ -46,6 +47,8 @@ pub struct Retriever {
     config: RetrieveConfig,
     now: Option<OffsetDateTime>,
     reranker: Option<Arc<dyn Reranker>>,
+    /// Keeps reranking within its budget; shared by clones.
+    rerank_gov: Arc<RerankGovernor>,
 }
 
 impl std::fmt::Debug for Retriever {
@@ -92,7 +95,16 @@ impl Retriever {
             config,
             now: None,
             reranker: None,
+            rerank_gov: Arc::default(),
         }
+    }
+
+    /// The adaptive reranker's state (see [`RetrieveConfig::rerank_adaptive`]); `None` without a
+    /// reranker.
+    pub fn rerank_status(&self) -> Option<RerankStatus> {
+        self.reranker
+            .as_ref()
+            .map(|_| self.rerank_gov.status(&self.config))
     }
 
     /// Rerank the top candidates with `reranker` (see [`crate::rerank`]).
@@ -442,10 +454,18 @@ impl Retriever {
                 )
             }
             (_, Ok((p, v))) => {
-                match self
-                    .store
-                    .search_hybrid_with_depth(&fts, Some(&v), n, fusion_depth)
-                {
+                let fused = match self.config.fusion {
+                    Fusion::Rrf => {
+                        self.store
+                            .search_hybrid_with_depth(&fts, Some(&v), n, fusion_depth)
+                    }
+                    Fusion::Convex => self.store.search_text(&fts, fusion_depth).and_then(|t| {
+                        // sqlite-vec caps kNN at 4096.
+                        let v = self.store.search_vector(&v, fusion_depth.min(4096))?;
+                        Ok(convex_fuse(t, v, self.config.fusion_text_weight, n))
+                    }),
+                };
+                match fused {
                     Ok(hits) => (
                         RetrievalMode::Hybrid {
                             provider: p.id().clone(),
@@ -553,10 +573,13 @@ impl Retriever {
         }
 
         // 6. Rerank the head of the list.
-        let reranked = match &self.reranker {
-            Some(reranker) if rerank_len > 0 && !pool.is_empty() => {
-                self.rerank(reranker.as_ref(), query, &mut pool, rerank_len)
-                    .await?
+        let plan = match &self.reranker {
+            Some(_) if rerank_len > 0 && !pool.is_empty() => self.rerank_gov.plan(&self.config),
+            _ => None,
+        };
+        let reranked = match (&self.reranker, plan) {
+            (Some(reranker), Some(n)) if n > 0 => {
+                self.rerank(reranker.as_ref(), query, &mut pool, n).await?
             }
             _ => false,
         };
@@ -592,10 +615,18 @@ impl Retriever {
         n: usize,
     ) -> Result<bool> {
         let n = n.min(pool.len());
-        let ids: Vec<ChunkId> = pool[..n].iter().map(|r| r.cand.chunk_id).collect();
+        // Sensitive items never go to a cloud reranker (as for cloud embeddings and contexts):
+        // only the others are sent, and a withheld item keeps its first-stage relevance.
+        let cloud = reranker.locality() == Locality::Cloud;
+        let sent: Vec<usize> = (0..n).filter(|&i| !(cloud && pool[i].sensitive)).collect();
+        if sent.is_empty() {
+            return Ok(false);
+        }
+        let ids: Vec<ChunkId> = sent.iter().map(|&i| pool[i].cand.chunk_id).collect();
         let chunks = self.chunks_by_id(&ids)?;
-        let passages: Vec<String> = pool[..n]
+        let passages: Vec<String> = sent
             .iter()
+            .map(|&i| &pool[i])
             .map(|r| {
                 let text = chunks
                     .get(&r.cand.chunk_id)
@@ -606,16 +637,21 @@ impl Retriever {
                 }
             })
             .collect();
-        let items: Vec<_> = pool[..n].iter().map(|r| r.cand.item.clone()).collect();
+        let items: Vec<_> = sent.iter().map(|&i| pool[i].cand.item.clone()).collect();
         let timeout = Duration::from_millis(self.config.rerank_timeout_ms.max(1));
         let call = reranker.rerank_items(query, &passages, &items);
+        let started = tokio::time::Instant::now();
         let scores = match tokio::time::timeout(timeout, call).await {
-            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => s,
+            Ok(Ok(s)) if s.len() == sent.len() && s.iter().all(|x| x.is_finite()) => {
+                self.rerank_gov
+                    .completed(&self.config, sent.len(), started.elapsed());
+                s
+            }
             Ok(Ok(s)) => {
                 tracing::warn!(
                     reranker = reranker.name(),
                     got = s.len(),
-                    expected = n,
+                    expected = sent.len(),
                     "bad rerank scores; keeping first-stage order"
                 );
                 return Ok(false);
@@ -629,6 +665,7 @@ impl Retriever {
                     reranker = reranker.name(),
                     "reranking timed out; keeping first-stage order"
                 );
+                self.rerank_gov.timed_out(&self.config, sent.len());
                 return Ok(false);
             }
         };
@@ -638,8 +675,17 @@ impl Retriever {
             1.0
         };
         let scores = normalise_scores(&scores);
+        let mut by_pos: Vec<Option<f32>> = vec![None; pool.len()];
+        for (&i, &s) in sent.iter().zip(&scores) {
+            by_pos[i] = Some(s);
+        }
         for (i, r) in pool.iter_mut().enumerate() {
-            let s = scores.get(i).copied().unwrap_or(0.0);
+            let s = match by_pos[i] {
+                Some(s) => s,
+                // Withheld from a cloud reranker: neither promoted nor demoted.
+                None if i < n => r.cand.rel,
+                None => 0.0,
+            };
             r.cand.rel = w * s + (1.0 - w) * r.cand.rel;
         }
         pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
@@ -652,7 +698,9 @@ impl Retriever {
         Ok(true)
     }
 
-    /// Embed the query with an eligible `Embedding`-tier provider.
+    /// Embed the query with an eligible `Embedding`-tier provider, with the query task prefix of
+    /// the index's scheme ([`Store::embedding_prefixes`]): none for an index built without
+    /// prefixes, whatever the provider's model would take.
     async fn embed_query(
         &self,
         query: &str,
@@ -675,7 +723,14 @@ impl Retriever {
             Ok(None) => return Err(TextOnlyReason::NoVectorsIndexed),
             Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
         };
-        let (p, mut vectors) = embed_first(router, &providers, &[query.to_owned()])
+        let text = match self.store.embedding_prefixes() {
+            Ok(Some((prefix, _))) if !prefix.is_empty() => {
+                nugget_infer::with_prefix(&prefix, &[query.to_owned()])
+            }
+            Ok(_) => vec![query.to_owned()],
+            Err(e) => return Err(TextOnlyReason::EmbeddingFailed(e.to_string())),
+        };
+        let (p, mut vectors) = embed_first(router, &providers, &text)
             .await
             .map_err(TextOnlyReason::EmbeddingFailed)?;
         let v = vectors.pop().unwrap_or_default();
@@ -739,6 +794,12 @@ impl Retriever {
         let mut vectors: Vec<Option<Vec<f32>>> = ids.iter().map(|id| stored.remove(id)).collect();
         let missing: Vec<usize> = (0..ids.len()).filter(|&i| vectors[i].is_none()).collect();
         if !missing.is_empty() {
+            // Documents of this index, so its document prefix (if any).
+            let prefix = self
+                .store
+                .embedding_prefixes()?
+                .map(|(_, d)| d)
+                .unwrap_or_default();
             let inputs: Vec<String> = missing
                 .iter()
                 .map(|&i| {
@@ -748,6 +809,7 @@ impl Retriever {
                         .collect()
                 })
                 .collect();
+            let inputs = nugget_infer::with_prefix(&prefix, &inputs);
             match p.embed(&inputs).await {
                 Ok(fresh) if validate_vectors(&fresh, inputs.len()).is_ok() => {
                     for (i, v) in missing.into_iter().zip(fresh) {

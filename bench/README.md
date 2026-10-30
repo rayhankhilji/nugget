@@ -2344,6 +2344,150 @@ hours on this CPU (was ~15).
 changed from now on go through the new LLM path, but an existing vault is not re-extracted, since
 that would cost one local-model request per item (26–33 s each here) without the user asking.
 
+### Memory recall with a real embedding model (DD4)
+
+`memory --backend real --local-models` runs the M1 memory benchmark (the real store, ingest
+pipeline, files watcher and retriever, see [`memory --backend real`](#memory---backend-real)) with
+the manifest's embedding model served by `nugget-runtime`'s `llama-server`, as the app runs it:
+**`nomic-embed-text-v1.5-q8`** (nomic-embed-text v1.5, **Q8_0** GGUF, 146 MB, 768 dimensions,
+CPU). `--memory-rerank local` also starts the manifest's reranker, **`bge-reranker-v2-m3-q4km`**
+(Q4_K_M, 438 MB), and measures the reranked search (`hybrid_rerank`, `hybrid_mmr_rerank`) on the
+same index as the plain one. Every arm of a scale runs one after the other on one runner (the
+`memory` job of [`evals.yml`](../.github/workflows/evals.yml)), against the in-process hash
+embedder (`hash`) as the M1 runs used it. Seed 42, release build, `RetrieveConfig::default()`.
+
+| Option | Meaning |
+|---|---|
+| `--memory-rerank off\|local` | Rerank with the manifest's reranker (`--local-rerank-model ID` picks another), measured as extra modes on the same index: `hybrid_rerank` and `hybrid_mmr_rerank` (adaptive, the app's default) and `hybrid_mmr_rerank_fixed` (every search waits for it) |
+| `--memory-rerank-timeout-ms MS`, `--memory-rerank-pool N` | Override the app's reranker timeout (2.5 s) and pool (30) |
+| `--memory-embed-prefixes auto\|off` | The model's task prefixes (`search_query: ` / `search_document: ` for nomic), or none |
+| `--memory-queries N`, `--memory-no-freshness` | Ask only the first N known-item queries; skip the freshness phase |
+| `NUGGET_BENCH_DUMP_MISSES=FILE` | Write the target's rank per query and arm, and the hybrid top 10 of every query whose outcome differs from the fake index |
+
+**Task prefixes.** nomic-embed-text was trained with `search_query: ` on queries and
+`search_document: ` on documents. Providers now report a model's prefixes
+(`Provider::embed_prefixes`), and an index records the scheme it was built with
+(`Store::embedding_prefixes`): a new index adopts the embedder's prefixes on its first vector,
+ingest prefixes documents and the retriever prefixes queries with the recorded scheme, and an index
+that already held vectors before this change counts as built without prefixes, so existing users
+keep matching query and document embeddings (re-indexing picks the prefixes up).
+
+#### Quick scale
+
+Run [41015993297](https://github.com/rayhankhilji/nugget/actions/runs/41015993297) at `885a865`
+(2026-10-30), reports in [`results/real-models/run-41015993297/`](results/real-models/run-41015993297/).
+One runner: **AMD EPYC 9V45**, 4 vCPUs, 15.6 GiB, `llama-server` b11940 with its default threads.
+2,000 files (one chunk each, ~906 characters), 200 known-item queries; the eval set is 57 Markdown
+notes and 42 labelled queries.
+
+| | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
+|---|---|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index** | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | **0.970** vs 0.930 pass | 0.980 vs 0.940 pass |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.455 / 0.830 / 0.607 / 0.694 | 0.145 / 0.870 / 0.405 / 0.543 | 0.175 / 0.890 / 0.425 / 0.558 | 0.260 / – / 0.496 / 0.615 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.885 / 0.579 | 0.975 / 0.417 | 0.970 / 0.425 | 0.980 / 0.496 |
+| reranked: R@1 / R@10 / MRR@10 / nDCG@10 | | | (never reranked, see below) | **0.740** / 0.980 / **0.832** / **0.869** |
+| bm25 R@10 / MRR@10 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.932 | 0.980 / 0.970 |
+| vector R@10 / MRR@10 | 0.425 / 0.248 | 0.060 / 0.023 | 0.045 / 0.018 | 0.060 / 0.027 |
+| Eval set: hybrid R@1 / R@10 / MRR@10 / nDCG@10 (text-only 0.595 / 0.905 / 0.768 / 0.798) | 0.714 / 1.000 / 0.895 / 0.917 | 0.798 / 1.000 / **0.943** / **0.954** | 0.774 / 1.000 / 0.931 / 0.946 | reranked: 0.984 MRR, 0.988 nDCG |
+| Eval set: hybrid + MMR R@10 / MRR@10 | 0.976 / 0.877 | 0.976 / 0.921 | **1.000** / 0.913 | |
+| Query latency, default search p50 / p95 | 3 / 5 ms | 27 / 29 ms | 29 / 32 ms | reranked: 14.5 / 15.1 **s** |
+| Query embedding p50 / p95 | <0.01 ms | 21 / 22 ms | 25 / 45 ms | |
+| Initial ingest | 2.0 s (998 files/s) | 655 s (3.05 files/s) | 654 s (3.06 files/s) | 645 s |
+| Embedding time per 1k items (= chunks here) | 0.02 s | **326 s** | **325 s** | 321 s |
+| Freshness p50 / p95 / max (target p95 ≤ 60 s); propagation | 0.48 / 0.61 / 0.62 s; all 1.0 | 0.90 / 1.89 / 2.46 s; all 1.0 | 0.92 / 1.65 / 2.47 s; all 1.0 | skipped |
+| Peak RSS: bench process / embedding server / reranker server | 50 MiB / – / – | 82 / 194 MiB / – | 81 / 194 / 735 MiB | 74 / 194 / 732 MiB |
+| DB per 1k items after ingest | 6.3 MB | 8.3 MB | 8.3 MB | 8.3 MB |
+
+#### Standard scale: the recall gate
+
+Run [41027473994](https://github.com/rayhankhilji/nugget/actions/runs/41027473994) at `a4aada5`
+(2026-10-30), reports in [`results/real-models/run-41027473994/`](results/real-models/run-41027473994/).
+One runner: **AMD EPYC 9V45**, 4 vCPUs. 5,000 files, 500 known-item queries.
+
+| | hash | nomic, prefixes off | **nomic** (app default) | nomic + reranker, no timeout (first 50 queries) |
+|---|---|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index (0.938)** | 0.936 **MISSED** (−0.002) | 0.936 **MISSED** (−0.002) | **0.938 met** (tie) | 0.880 vs 0.940 (subset; reranked 0.960) |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.426 / 0.808 / 0.580 / 0.666 | 0.186 / 0.870 / 0.455 / 0.574 | 0.196 / 0.872 / 0.458 / 0.576 | 0.140 / 0.800 / 0.401 / 0.519 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.854 / 0.544 | 0.938 / 0.457 | **0.948** / 0.463 | 0.900 / 0.402 |
+| reranked R@1 / R@10 / MRR@10 / nDCG@10 | | | | **0.600** / 0.960 / **0.717** / **0.777** |
+| bm25 R@10 / MRR@10 | 0.968 / 0.888 | same | same | 0.960 / 0.870 |
+| vector R@10 / MRR@10 | 0.338 / 0.169 | 0.016 / 0.008 | 0.018 / 0.008 | 0.000 / 0.000 |
+| Eval set hybrid R@1 / MRR@10 / nDCG@10 (R@10 1.000 everywhere) | 0.714 / 0.895 / 0.917 | 0.798 / 0.943 / 0.954 | 0.774 / 0.931 / 0.946 | reranked 0.869 / 0.984 / 0.988 |
+| Query latency, default search p50 / p95 | 5 / 7 ms | 29 / 33 ms | 31 / 33 ms | reranked 15.1 / 15.7 **s** |
+| Initial ingest; embedding per 1k items | 5 s (991 files/s); 0.02 s | 1,598 s (3.13 files/s); 318 s | 1,601 s (3.12 files/s); 318 s | 1,623 s; 323 s |
+| Freshness p95 (target ≤ 60 s); propagation | 0.60 s; all 1.0 | 1.66 s; all 1.0 | 1.67 s; all 1.0 | skipped |
+| Peak RSS: bench / embedding server / reranker | 85 MiB / – / – | 150 / 194 MiB / – | 132 / 194 MiB / – | 120 / 195 / 732 MiB |
+
+**Why the gate is a tie.** The per-query dumps (`ranks.tsv` in each report folder) show the same
+mechanism as the hash runs: of 500 queries, the real stack's hybrid top 10 and the fake index's
+differ on 24 (nomic: 12 each way; hash: 7 and 8). In every one, reciprocal-rank fusion decides:
+the target is full-text rank 1 and missing from the vector list (e.g. q119, target bm25 1 / vector
+–, fused at 9; q28 at 3), and chunks that both lists hold in their middle outrank it. nomic's
+vector leg has no signal on this corpus (vector R@10 0.018), which is expected: the synthetic
+documents are strings of made-up syllable words (`solyfolo bagipami rufosomi`), which a semantic
+model cannot relate. On the English eval set, where it has signal, nomic beats the hash embedder
+on every ranking metric (hybrid MRR 0.895 → 0.931, nDCG 0.917 → 0.946, R@1 0.714 → 0.774) and
+the default search (hybrid + MMR) keeps R@10 at 1.000. Task prefixes are worth the gate's one
+query on the synthetic corpus (0.936 → 0.938) and cost 1 of 42 eval queries at R@1 (0.798 →
+0.774, MRR 0.943 → 0.931) while lifting eval hybrid + MMR R@10 0.976 → 1.000: within noise
+either way, so the app follows the model card and sends them.
+
+#### Score-aware fusion (`RetrieveConfig::fusion = "convex"`), measured, not the default
+
+Plain RRF ranks any chunk that both lists hold above one list's clear best match. `Fusion::Convex`
+(`nugget_retrieve::rank::convex_fuse`) fuses scores instead: bm25 / best and (cosine + 1) / (best +
+1), so a list whose scores barely differ moves little, with a chunk missing from a list counted at
+that list's lowest score and the two lists weighted 0.5 / 0.5. Run
+[41029284336](https://github.com/rayhankhilji/nugget/actions/runs/41029284336) at `01b08c9`
+measured it on the same index as RRF (one runner per scale, **AMD EPYC 9V74**; reports in
+[`results/real-models/run-41029284336/`](results/real-models/run-41029284336/)):
+
+| nomic, same index | RRF (default) | convex |
+|---|---|---|
+| **Eval set (English)**: hybrid R@1 / R@10 / MRR@10 / nDCG@10 | **0.774 / 1.000 / 0.931 / 0.946** | 0.702 / 1.000 / 0.885 / 0.911 |
+| Eval set: hybrid + MMR R@10 / MRR@10 | **1.000 / 0.913** | 0.964 / 0.861 |
+| Synthetic, standard: hybrid R@1 / R@10 / MRR@10 | 0.196 / 0.938 / 0.458 | **0.844 / 0.966 / 0.887** |
+| Synthetic, standard: hybrid + MMR R@10 / MRR@10 | 0.948 / 0.463 | **0.968 / 0.885** |
+| Synthetic, quick: hybrid R@10 / MRR@10 | 0.970 / 0.425 | **0.980 / 0.930** |
+| Query latency p50 / p95 (standard) | 49 / 54 ms | 49 / 53 ms |
+
+Convex fusion fixes the synthetic corpus (it simply follows bm25 when the vector list is flat) but
+loses on the English eval set, the only set here with real semantics: 3 more of 42 queries miss
+rank 1, and hybrid + MMR recall@10 falls from 1.000 to 0.964. **RRF stays the default**; convex is
+available as an option, and the synthetic corpus is not a reason to switch (it rewards ignoring
+the embedder). With the hash embedder, convex costs the eval set one query at R@10 (1.000 → 0.988).
+
+#### Adaptive reranker (`RetrieveConfig::rerank_adaptive`, on by default)
+
+On these runners the manifest's reranker needs about 0.5 s per passage (15 s for the default pool
+of 30; 38 s on the slower EPYC 7763), so with the app's 2.5 s timeout it never answered: every
+search waited 2.5 s and kept its first-stage order. The retriever now keeps the reranker within its
+budget: after a rerank it sizes the pool to what fits in 80% of the timeout at the measured time per
+passage, it halves the pool after a timeout, and when fewer than `rerank_min_pool` (8) passages fit
+it pauses reranking for `rerank_cooldown_ms` (10 min, doubling on consecutive pauses up to 8×) and
+then probes once with the minimum pool. `Retriever::rerank_status` reports the pool, the time per
+passage and why it paused. Same index, same runner (quick, EPYC 9V74, 200 queries):
+
+| Search (hybrid + MMR) | p50 / p95 latency | R@10 / MRR@10 | reranked |
+|---|---|---|---|
+| no reranker | 37 / 40 ms | 0.970 / 0.425 | – |
+| reranker, before (every search waits) | **2,564 / 2,571 ms** | 0.970 / 0.425 | 0 of 200 |
+| reranker, adaptive | **37 / 40 ms** | 0.970 / 0.425 | 0 of 200 (paused after the 2nd query: "reranking 15 passages timed out after 2500 ms") |
+
+What the reranker can do when it is given the time (no timeout): MRR@10 0.50 → 0.83–0.86 (quick)
+and 0.40 → 0.72 (standard), eval set MRR 0.931 → 0.984. On a machine where it answers within
+budget (a GPU, Apple Silicon or a faster CPU), the adaptive pool keeps that gain: the pool shrinks
+only as far as the time per passage requires.
+
+#### Full scale
+
+**Running** ([41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865), hash and
+nomic on one runner, 20,000 files and 1,000 queries). The first attempt (run 41027473994) stopped at
+the bench's one-hour limit on the initial ingest with 7,713 of 20,000 files embedded (2.1 files/s on
+an EPYC 9V74); the limit is now five hours for local embedders. Its hash arm finished: hybrid R@10
+0.877 vs the fake index's 0.874 (met), freshness p95 0.69 s.
+
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).
