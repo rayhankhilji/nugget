@@ -33,7 +33,209 @@
    "ok": false
   },
   "truth": [],
-  "ready_meetings": []
+  "cited_bad": [],
+  "more_ready": [],
+  "ready": {
+   "date": "2026-11-04",
+   "generated_at": "2026-11-04T13:00:01.0665365Z",
+   "meetings": [],
+   "open_cards": 7,
+   "overdue": [],
+   "renewals": [
+    {
+     "actions": [
+      "reminder"
+     ],
+     "card_id": "1767d32fce21dbb4",
+     "due": "2026-11-03T09:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 3.0,
+       "name": "urgency",
+       "value": 1.2,
+       "weight": 2.5
+      },
+      {
+       "contribution": 1.2000000000000002,
+       "name": "importance",
+       "value": 0.8,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "renewal",
+     "rank": 0.9720737529812226,
+     "summary": "Keep it, or cancel before the charge.",
+     "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+    }
+   ],
+   "top": [
+    {
+     "actions": [
+      "reminder"
+     ],
+     "card_id": "1767d32fce21dbb4",
+     "due": "2026-11-03T09:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 3.0,
+       "name": "urgency",
+       "value": 1.2,
+       "weight": 2.5
+      },
+      {
+       "contribution": 1.2000000000000002,
+       "name": "importance",
+       "value": 0.8,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "renewal",
+     "rank": 0.9720737529812226,
+     "summary": "Keep it, or cancel before the charge.",
+     "title": "Pixelboard renews 2026-11-03 \u2014 $144.00"
+    },
+    {
+     "actions": [
+      "reminder",
+      "create_event"
+     ],
+     "card_id": "1ecee7d6844a481a",
+     "due": "2026-11-04T17:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 1.8181981412010255,
+       "name": "urgency",
+       "value": 0.7272792564804103,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.75,
+       "name": "importance",
+       "value": 0.5,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "commitment",
+     "rank": 0.905831302489892,
+     "summary": "From your note \"todo\".",
+     "title": "Due 2026-11-04: Send Jonah the final brochure files by Nov 4"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "reminder"
+     ],
+     "card_id": "ce342e3370f55c11",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.6872353649869893,
+       "name": "importance",
+       "value": 0.45815690999132624,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.626489417828001,
+       "name": "urgency",
+       "value": 0.2505957671312004,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "follow_up",
+     "rank": 0.8116417912152768,
+     "summary": "You asked 5 days ago and haven't heard back.",
+     "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "a5e07a71cb0d04b3",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.8348227511613343,
+       "name": "urgency",
+       "value": 0.3339291004645337,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.742368939072335,
+       "name": "importance",
+       "value": 0.49491262604822334,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.8084583070097161,
+     "summary": "Kelsey Vance wrote 7 days ago and hasn't heard back.",
+     "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "6259962415126191",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.7031263225899058,
+       "name": "urgency",
+       "value": 0.2812505290359623,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7586485715907345,
+     "summary": "Ngozi Okafor wrote 6 days ago and hasn't heard back.",
+     "title": "Reply to Ngozi Okafor: Thanksgiving"
+    }
+   ]
+  }
  },
  {
   "day": 11,
@@ -98,19 +300,229 @@
     ]
    }
   ],
-  "ready_meetings": [
+  "cited_bad": [
    {
-    "all_day": false,
-    "attendees": [],
-    "end": "2026-11-05T16:00:00-05:00",
-    "external": [],
-    "location": null,
-    "prep": [],
-    "prep_card": null,
-    "start": "2026-11-05T10:00:00-05:00",
-    "title": "Foundry service design workshop"
+    "sec": "meetings",
+    "title": "Foundry service design workshop",
+    "why": "no item ref/uid/url on BriefMeetingView"
    }
-  ]
+  ],
+  "more_ready": [],
+  "ready": {
+   "date": "2026-11-05",
+   "generated_at": "2026-11-05T13:00:00.064525876Z",
+   "meetings": [
+    {
+     "all_day": false,
+     "attendees": [],
+     "end": "2026-11-05T16:00:00-05:00",
+     "external": [],
+     "location": null,
+     "prep": [],
+     "prep_card": null,
+     "start": "2026-11-05T10:00:00-05:00",
+     "title": "Foundry service design workshop"
+    }
+   ],
+   "open_cards": 6,
+   "overdue": [
+    {
+     "actions": [
+      "reminder",
+      "create_event"
+     ],
+     "card_id": "1ecee7d6844a481a",
+     "due": "2026-11-04T17:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 3.0,
+       "name": "urgency",
+       "value": 1.2,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.75,
+       "name": "importance",
+       "value": 0.5,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "commitment",
+     "rank": 0.967482186357453,
+     "summary": "From your note \"todo\".",
+     "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+    }
+   ],
+   "renewals": [],
+   "top": [
+    {
+     "actions": [
+      "draft_reply",
+      "reminder"
+     ],
+     "card_id": "ce342e3370f55c11",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.7336310323981596,
+       "name": "urgency",
+       "value": 0.29345241295926383,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6872353649869893,
+       "name": "importance",
+       "value": 0.45815690999132624,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "follow_up",
+     "rank": 0.8207833556343367,
+     "summary": "You asked 6 days ago and haven't heard back.",
+     "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "a5e07a71cb0d04b3",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.941964365731493,
+       "name": "urgency",
+       "value": 0.3767857462925972,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.742368939072335,
+       "name": "importance",
+       "value": 0.49491262604822334,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.8193835936116064,
+     "summary": "Kelsey Vance wrote 8 days ago and hasn't heard back.",
+     "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "6259962415126191",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.8102679371600645,
+       "name": "urgency",
+       "value": 0.3241071748640258,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7704266068215815,
+     "summary": "Ngozi Okafor wrote 7 days ago and hasn't heard back.",
+     "title": "Reply to Ngozi Okafor: Thanksgiving"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "50f5c5ab860ee558",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.6116072228743503,
+       "name": "urgency",
+       "value": 0.2446428891497401,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7492139426250678,
+     "summary": "Larkspur People Team wrote 5 days ago and hasn't heard back.",
+     "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "fe849b0d156bed9f",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.5221862470654961,
+       "name": "freshness",
+       "value": 0.6527328088318701,
+       "weight": 0.8
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7253189945614993,
+     "summary": "Rebecca Moss wrote 2 days ago and hasn't heard back.",
+     "title": "Reply to Rebecca Moss: Thursday session"
+    }
+   ]
+  }
  },
  {
   "day": 12,
@@ -210,41 +622,229 @@
     ]
    }
   ],
-  "ready_meetings": [
+  "cited_bad": [
    {
-    "all_day": false,
-    "attendees": [],
-    "end": "2026-11-06T09:30:00-05:00",
-    "external": [],
-    "location": null,
-    "prep": [],
-    "prep_card": null,
-    "start": "2026-11-06T09:00:00-05:00",
-    "title": "Coffee with Kelsey (TalentBridge)"
+    "sec": "meetings",
+    "title": "Coffee with Kelsey (TalentBridge)",
+    "why": "no item ref/uid/url on BriefMeetingView"
    },
    {
-    "all_day": false,
-    "attendees": [],
-    "end": "2026-11-06T09:30:00-05:00",
-    "external": [],
-    "location": null,
-    "prep": [],
-    "prep_card": null,
-    "start": "2026-11-06T09:00:00-05:00",
-    "title": "Coffee with Kelsey (TalentBridge)"
+    "sec": "meetings",
+    "title": "Coffee with Kelsey (TalentBridge)",
+    "why": "no item ref/uid/url on BriefMeetingView"
    },
    {
-    "all_day": false,
-    "attendees": [],
-    "end": "2026-11-06T17:00:00-05:00",
-    "external": [],
-    "location": null,
-    "prep": [],
-    "prep_card": null,
-    "start": "2026-11-06T16:00:00-05:00",
-    "title": "Studio retro"
+    "sec": "meetings",
+    "title": "Studio retro",
+    "why": "no item ref/uid/url on BriefMeetingView"
    }
-  ]
+  ],
+  "more_ready": [],
+  "ready": {
+   "date": "2026-11-06",
+   "generated_at": "2026-11-06T13:00:01.056531001Z",
+   "meetings": [
+    {
+     "all_day": false,
+     "attendees": [],
+     "end": "2026-11-06T09:30:00-05:00",
+     "external": [],
+     "location": null,
+     "prep": [],
+     "prep_card": null,
+     "start": "2026-11-06T09:00:00-05:00",
+     "title": "Coffee with Kelsey (TalentBridge)"
+    },
+    {
+     "all_day": false,
+     "attendees": [],
+     "end": "2026-11-06T09:30:00-05:00",
+     "external": [],
+     "location": null,
+     "prep": [],
+     "prep_card": null,
+     "start": "2026-11-06T09:00:00-05:00",
+     "title": "Coffee with Kelsey (TalentBridge)"
+    },
+    {
+     "all_day": false,
+     "attendees": [],
+     "end": "2026-11-06T17:00:00-05:00",
+     "external": [],
+     "location": null,
+     "prep": [],
+     "prep_card": null,
+     "start": "2026-11-06T16:00:00-05:00",
+     "title": "Studio retro"
+    }
+   ],
+   "open_cards": 5,
+   "overdue": [
+    {
+     "actions": [
+      "reminder",
+      "create_event"
+     ],
+     "card_id": "1ecee7d6844a481a",
+     "due": "2026-11-04T17:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 3.0,
+       "name": "urgency",
+       "value": 1.2,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.75,
+       "name": "importance",
+       "value": 0.5,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "commitment",
+     "rank": 0.9660149869168336,
+     "summary": "From your note \"todo\".",
+     "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+    }
+   ],
+   "renewals": [],
+   "top": [
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "a5e07a71cb0d04b3",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 1.049108453039436,
+       "name": "urgency",
+       "value": 0.4196433812157743,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.742368939072335,
+       "name": "importance",
+       "value": 0.49491262604822334,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.8304739011106558,
+     "summary": "Kelsey Vance wrote 9 days ago and hasn't heard back.",
+     "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "reminder"
+     ],
+     "card_id": "ce342e3370f55c11",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.8407751197061024,
+       "name": "urgency",
+       "value": 0.33631004788244095,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6872353649869893,
+       "name": "importance",
+       "value": 0.45815690999132624,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "follow_up",
+     "rank": 0.8304422331027858,
+     "summary": "You asked 7 days ago and haven't heard back.",
+     "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "50f5c5ab860ee558",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.7187513101822929,
+       "name": "urgency",
+       "value": 0.28750052407291715,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7603228498814127,
+     "summary": "Larkspur People Team wrote 6 days ago and hasn't heard back.",
+     "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "fe849b0d156bed9f",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.5,
+       "name": "question",
+       "value": 1.0,
+       "weight": 0.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7327519370520802,
+     "summary": "Rebecca Moss wrote 3 days ago and hasn't heard back.",
+     "title": "Reply to Rebecca Moss: Thursday session"
+    }
+   ]
+  }
  },
  {
   "day": 13,
@@ -265,6 +865,178 @@
    "ok": true
   },
   "truth": [],
-  "ready_meetings": []
+  "cited_bad": [],
+  "more_ready": [],
+  "ready": {
+   "date": "2026-11-07",
+   "generated_at": "2026-11-07T13:00:00.064120793Z",
+   "meetings": [],
+   "open_cards": 5,
+   "overdue": [
+    {
+     "actions": [
+      "reminder",
+      "create_event"
+     ],
+     "card_id": "1ecee7d6844a481a",
+     "due": "2026-11-04T17:00:00-05:00",
+     "factors": [
+      {
+       "contribution": 3.0,
+       "name": "urgency",
+       "value": 1.2,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.75,
+       "name": "importance",
+       "value": 0.5,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "commitment",
+     "rank": 0.964691624847791,
+     "summary": "From your note \"todo\".",
+     "title": "Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4"
+    }
+   ],
+   "renewals": [],
+   "top": [
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "a5e07a71cb0d04b3",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 1.1562500795148725,
+       "name": "urgency",
+       "value": 0.46250003180594895,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.742368939072335,
+       "name": "importance",
+       "value": 0.49491262604822334,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.8415542582468415,
+     "summary": "Kelsey Vance wrote 10 days ago and hasn't heard back.",
+     "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "reminder"
+     ],
+     "card_id": "ce342e3370f55c11",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.947916746181539,
+       "name": "urgency",
+       "value": 0.3791666984726156,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6872353649869893,
+       "name": "importance",
+       "value": 0.45815690999132624,
+       "weight": 1.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      }
+     ],
+     "kind": "follow_up",
+     "rank": 0.8403982910649828,
+     "summary": "You asked 8 days ago and haven't heard back.",
+     "title": "No answer from Sofia Alvarez: Re: drinks friday?"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "50f5c5ab860ee558",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.8258929366577293,
+       "name": "urgency",
+       "value": 0.3303571746630917,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7721950243070831,
+     "summary": "Larkspur People Team wrote 7 days ago and hasn't heard back.",
+     "title": "Reply to Larkspur People Team: Confidential: your 2027 compensation"
+    },
+    {
+     "actions": [
+      "draft_reply",
+      "archive_thread"
+     ],
+     "card_id": "fe849b0d156bed9f",
+     "due": null,
+     "factors": [
+      {
+       "contribution": 0.6,
+       "name": "direct",
+       "value": 1.0,
+       "weight": 0.6
+      },
+      {
+       "contribution": 0.5342262699910628,
+       "name": "urgency",
+       "value": 0.2136905079964251,
+       "weight": 2.5
+      },
+      {
+       "contribution": 0.5288743031666463,
+       "name": "importance",
+       "value": 0.3525828687777642,
+       "weight": 1.5
+      }
+     ],
+     "kind": "unanswered_thread",
+     "rank": 0.7418318878104999,
+     "summary": "Rebecca Moss wrote 4 days ago and hasn't heard back.",
+     "title": "Reply to Rebecca Moss: Thursday session"
+    }
+   ]
+  }
  }
 ]

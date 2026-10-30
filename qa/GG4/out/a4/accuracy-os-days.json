@@ -3,7 +3,8 @@
   "day": 1,
   "date": "2026-10-26",
   "tz": "America/New_York",
-  "start": "2026-10-26T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-26 08:00:00 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -11,6 +12,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [],
    "missing": [
     {
@@ -86,7 +88,8 @@
   "day": 2,
   "date": "2026-10-27",
   "tz": "America/New_York",
-  "start": "2026-10-27T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-27 08:00:01 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -94,6 +97,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [],
    "missing": [
     {
@@ -158,7 +162,8 @@
   "day": 3,
   "date": "2026-10-28",
   "tz": "America/New_York",
-  "start": "2026-10-28T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-28 08:00:00 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -170,6 +175,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Northwind checkout review",
@@ -402,7 +408,8 @@
   "day": 4,
   "date": "2026-10-29",
   "tz": "America/New_York",
-  "start": "2026-10-29T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-29 08:00:00 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -410,6 +417,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [],
    "missing": [
     {
@@ -633,7 +641,8 @@
   "day": 5,
   "date": "2026-10-30",
   "tz": "America/New_York",
-  "start": "2026-10-30T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-30 08:00:00 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -645,6 +654,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Northwind design QA",
@@ -954,7 +964,8 @@
   "day": 6,
   "date": "2026-10-31",
   "tz": "America/New_York",
-  "start": "2026-10-31T07:59:45-04:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-10-31 08:00:00 EDT",
   "cmp_real": {
    "expected": [
     [
@@ -962,6 +973,7 @@
      "all-day"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Mom's birthday",
@@ -1260,9 +1272,11 @@
   "day": 7,
   "date": "2026-11-01",
   "tz": "America/New_York",
-  "start": "2026-11-01T07:59:45-05:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-11-01 08:00:00 EST",
   "cmp_real": {
-   "expected": [
+   "expected": [],
+   "optional": [
     [
      "Studio server maintenance",
      "01:30"
@@ -1568,7 +1582,8 @@
   "day": 8,
   "date": "2026-11-02",
   "tz": "America/New_York",
-  "start": "2026-11-02T07:59:45-05:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-11-02 08:00:00 EST",
   "cmp_real": {
    "expected": [
     [
@@ -1576,12 +1591,14 @@
      "10:00"
     ],
     [
-     "Run club",
-     "07:00"
-    ],
-    [
      "Design standup",
      "09:30"
+    ]
+   ],
+   "optional": [
+    [
+     "Run club",
+     "07:00"
     ]
    ],
    "got": [
@@ -1928,7 +1945,8 @@
   "day": 9,
   "date": "2026-11-03",
   "tz": "America/New_York",
-  "start": "2026-11-03T07:59:45-05:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-11-03 08:00:01 EST",
   "cmp_real": {
    "expected": [
     [
@@ -1940,6 +1958,7 @@
      "09:30"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Flight BA178 JFK to LHR",
@@ -2204,24 +2223,23 @@
   "day": 10,
   "date": "2026-11-04",
   "tz": "Europe/London",
-  "start": "2026-11-04T07:59:45+00:00",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-04 08:00:01 GMT",
   "cmp_real": {
    "expected": [
-    [
-     "Flight BA178 JFK to LHR",
-     "00:00"
-    ],
     [
      "Design standup",
      "14:30"
     ]
    ],
+   "optional": [
+    [
+     "Flight BA178 JFK to LHR",
+     "00:00"
+    ]
+   ],
    "got": [],
    "missing": [
-    {
-     "title": "Flight BA178 JFK to LHR",
-     "want": "00:00"
-    },
     {
      "title": "Design standup",
      "want": "14:30"
@@ -2443,7 +2461,8 @@
   "day": 11,
   "date": "2026-11-05",
   "tz": "Europe/London",
-  "start": "2026-11-05T07:59:45+00:00",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-05 08:00:00 GMT",
   "cmp_real": {
    "expected": [
     [
@@ -2455,6 +2474,7 @@
      "14:30"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Foundry service design workshop",
@@ -2721,7 +2741,8 @@
   "day": 12,
   "date": "2026-11-06",
   "tz": "Europe/London",
-  "start": "2026-11-06T07:59:45+00:00",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-06 08:00:00 GMT",
   "cmp_real": {
    "expected": [
     [
@@ -2733,6 +2754,7 @@
      "14:30"
     ]
    ],
+   "optional": [],
    "got": [
     [
      "Coffee with Kelsey (TalentBridge)",
@@ -3048,9 +3070,11 @@
   "day": 13,
   "date": "2026-11-07",
   "tz": "Europe/London",
-  "start": "2026-11-07T07:59:45+00:00",
+  "real_tz": "Europe/London",
+  "fired_local_real_tz": "2026-11-07 08:00:00 GMT",
   "cmp_real": {
    "expected": [],
+   "optional": [],
    "got": [],
    "missing": [],
    "wrong_time": [],
@@ -3239,9 +3263,11 @@
   "day": 14,
   "date": "2026-11-08",
   "tz": "America/New_York",
-  "start": "2026-11-08T07:59:45-05:00",
+  "real_tz": "America/New_York",
+  "fired_local_real_tz": "2026-11-08 08:00:00 EST",
   "cmp_real": {
    "expected": [],
+   "optional": [],
    "got": [],
    "missing": [],
    "wrong_time": [],
