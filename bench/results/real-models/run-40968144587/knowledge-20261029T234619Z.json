@@ -1,0 +1,948 @@
+{
+  "schema_version": 1,
+  "suite": "knowledge",
+  "status": "ok",
+  "started_at": "2026-10-29T23:46:19.733422256Z",
+  "finished_at": "2026-10-30T00:08:55.476363205Z",
+  "duration_ms": 1355742,
+  "harness_version": "0.0.1",
+  "git_commit": "260c4d160624fb5aaab2db6c02787ca45c718c95",
+  "environment": {
+    "os": "linux",
+    "arch": "x86_64",
+    "cpus": 4,
+    "build_profile": "release"
+  },
+  "config": {
+    "scale": "quick",
+    "seed": 42,
+    "params": {
+      "chunks": 30,
+      "corpus": "nugget-bench knowledge fixtures",
+      "corpus_items": 93,
+      "deleted_items": [
+        "mail-008",
+        "note-025"
+      ],
+      "gold_claims": 80,
+      "gold_entities": 55,
+      "gold_entities_by_kind": {
+        "commitment": 3,
+        "event": 5,
+        "organization": 6,
+        "person": 19,
+        "place": 5,
+        "preference": 5,
+        "project": 10,
+        "topic": 2
+      },
+      "gold_mentions": 182,
+      "gold_superseded_claims": 3,
+      "injection_items": [
+        "mail-025"
+      ],
+      "items": 30,
+      "items_by_kind": {
+        "calendar": 4,
+        "mail": 17,
+        "note": 9
+      },
+      "knowledge_dump": {
+        "path": "eval-results/knowledge-dump.jsonl",
+        "summary": {
+          "claim_fn": {
+            "predicate:attended": 2,
+            "predicate:committed_to": 3,
+            "predicate:due_on": 1,
+            "predicate:has_role": 10,
+            "predicate:leads": 2,
+            "predicate:member_of": 3,
+            "predicate:part_of": 3,
+            "predicate:prefers": 2,
+            "predicate:sibling_of": 1,
+            "predicate:works_on": 8,
+            "reason:absent": 12,
+            "reason:object_missing": 7,
+            "reason:subject_missing": 1,
+            "reason:wrong_object": 9,
+            "reason:wrong_predicate": 6,
+            "total": 35
+          },
+          "claim_fp": {
+            "predicate:committed_to": 2,
+            "predicate:due_on": 4,
+            "predicate:has_role": 23,
+            "predicate:held_at": 1,
+            "predicate:member_of": 2,
+            "predicate:part_of": 2,
+            "predicate:prefers": 2,
+            "predicate:sibling_of": 1,
+            "predicate:works_at": 4,
+            "predicate:works_on": 4,
+            "reason:not_in_gold": 24,
+            "reason:subject_unmatched": 4,
+            "reason:superseded": 1,
+            "reason:wrong_object": 10,
+            "reason:wrong_predicate": 6,
+            "source:deterministic": 3,
+            "source:llm": 42,
+            "total": 45
+          },
+          "entity_fn": {
+            "kind:commitment": 1,
+            "kind:organization": 1,
+            "kind:place": 1,
+            "kind:preference": 2,
+            "kind:project": 4,
+            "reason:absent": 8,
+            "reason:kind_mismatch": 1,
+            "total": 9
+          },
+          "entity_fp": {
+            "kind:commitment": 2,
+            "kind:event": 8,
+            "kind:organization": 7,
+            "kind:person": 6,
+            "kind:place": 2,
+            "kind:preference": 1,
+            "kind:project": 3,
+            "reason:duplicate": 7,
+            "reason:kind_mismatch": 11,
+            "reason:not_in_gold": 11,
+            "source:deterministic": 3,
+            "source:llm": 26,
+            "total": 29
+          },
+          "request": {
+            "dropped claim: quote names neither subject nor object": 2,
+            "dropped claim: quote not verbatim in the text": 5,
+            "dropped claim: subject is not an entity in the text": 10,
+            "dropped claim: subject is the object": 14,
+            "dropped entity: date or amount": 1,
+            "dropped entity: generic noun": 1,
+            "dropped entity: no accepted claim uses it": 1,
+            "dropped entity: not a proper name": 2,
+            "dropped entity: not in text": 18,
+            "input_tokens": 25963,
+            "outcome:ok": 29,
+            "outcome:timeout": 1,
+            "output_tokens": 6445,
+            "total": 30
+          }
+        }
+      },
+      "llm": "qwen3-4b-q4km (Qwen3-4B-Q4_K_M.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940), thinking off), on-device",
+      "llm_limits": {
+        "config": {
+          "cloud_sources": [],
+          "enabled": true,
+          "local": {
+            "max_chunks_per_request": 2,
+            "max_claims_per_request": 10,
+            "max_entities_per_request": 12,
+            "max_input_chars": 4000,
+            "max_output_tokens": 1024,
+            "max_requests_per_item": 4
+          },
+          "max_attempts": 3,
+          "max_claims_per_request": 48,
+          "max_confidence": 0.8500000238418579,
+          "max_entities_per_request": 32,
+          "max_input_chars": 12000,
+          "max_output_tokens": 2048,
+          "max_requests_per_item": 4,
+          "timeout_ms": 120000
+        },
+        "note": "nugget-knowledge LlmConfig defaults; `local` applies to on-device providers"
+      },
+      "llm_max_attempts": 1,
+      "llm_meter": {
+        "failures": 0,
+        "input_tokens": 25963,
+        "ok": 29,
+        "output_tokens": 6445,
+        "requests": 30,
+        "schema_invalid": 0,
+        "timeouts": 1,
+        "truncated": 0,
+        "unparseable": 0
+      },
+      "llm_requests_after_extract": 0,
+      "llm_timeout_s": 180.0,
+      "local.chat": {
+        "file": "Qwen3-4B-Q4_K_M.gguf",
+        "id": "qwen3-4b-q4km",
+        "load_s": 3.83,
+        "quantisation": "Q4_K_M",
+        "revision": "bc640142c66e1fdd12af0bd68f40445458f3869b",
+        "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "size_bytes": 2497280256
+      },
+      "local.hardware": {
+        "arch": "x86_64",
+        "cpu_model": "AMD EPYC 7763 64-Core Processor",
+        "gpu": "Unknown",
+        "logical_cores": 4,
+        "meets_16gb": true,
+        "os": "linux",
+        "total_ram_gib": 15.6
+      },
+      "local.install_s": 0.0,
+      "local.runtime": "llama-server-linux-x86_64-cpu (b11940)",
+      "local.thinking": "off",
+      "mcp_calls": 18,
+      "store": "nugget-store in memory (unencrypted), ingest metadata layout, no embeddings",
+      "subset": {
+        "ids": [
+          "mail-001",
+          "mail-002",
+          "mail-004",
+          "mail-006",
+          "mail-007",
+          "mail-008",
+          "mail-012",
+          "mail-016",
+          "mail-020",
+          "mail-022",
+          "mail-025",
+          "mail-026",
+          "mail-030",
+          "mail-034",
+          "mail-037",
+          "mail-041",
+          "mail-045",
+          "cal-001",
+          "cal-005",
+          "cal-009",
+          "cal-013",
+          "note-001",
+          "note-002",
+          "note-006",
+          "note-010",
+          "note-014",
+          "note-018",
+          "note-022",
+          "note-025",
+          "note-027"
+        ],
+        "items": 30,
+        "rule": "scenario items (deleted, injection, job change, nickname, same first name) plus items evenly spaced through the manifest; gold restricted to what these items support (see Fixture::subset)"
+      },
+      "system": "nugget-knowledge + nugget-vault + nugget-mcp 0.0.1 (SQLite graph, deterministic + qwen3-4b-q4km (Qwen3-4B-Q4_K_M.gguf, local llama-server llama-server-linux-x86_64-cpu (b11940), thinking off) LLM extractors, extractor v2)",
+      "system_stats": {
+        "runs": [
+          {
+            "changed_entities": 79,
+            "claims_added": 143,
+            "claims_reactivated": 0,
+            "claims_retracted": 0,
+            "claims_superseded": 6,
+            "elapsed_ms": 1351282,
+            "entities_created": 79,
+            "entities_merged": 1,
+            "entities_pruned": 0,
+            "items_deleted": 0,
+            "items_failed": 0,
+            "items_processed": 30,
+            "items_unchanged": 0,
+            "last_error": null,
+            "links_resolved": 13,
+            "llm_claims_accepted": 72,
+            "llm_claims_dropped": 31,
+            "llm_entities_dropped": 23,
+            "llm_failed_requests": 1,
+            "llm_quotes_rejected": 7,
+            "llm_requests": 30,
+            "llm_skipped_privacy": 0,
+            "mentions_added": 182,
+            "planned": 30,
+            "remaining": 0
+          },
+          {
+            "changed_entities": 10,
+            "claims_added": 0,
+            "claims_reactivated": 0,
+            "claims_retracted": 0,
+            "claims_superseded": 0,
+            "elapsed_ms": 12,
+            "entities_created": 0,
+            "entities_merged": 0,
+            "entities_pruned": 10,
+            "items_deleted": 2,
+            "items_failed": 0,
+            "items_processed": 0,
+            "items_unchanged": 0,
+            "last_error": null,
+            "links_resolved": 0,
+            "llm_claims_accepted": 0,
+            "llm_claims_dropped": 0,
+            "llm_entities_dropped": 0,
+            "llm_failed_requests": 0,
+            "llm_quotes_rejected": 0,
+            "llm_requests": 0,
+            "llm_skipped_privacy": 0,
+            "mentions_added": 0,
+            "planned": 2,
+            "remaining": 0
+          }
+        ],
+        "status": {
+          "last_error": null,
+          "last_run": {
+            "changed_entities": 10,
+            "claims_added": 0,
+            "claims_reactivated": 0,
+            "claims_retracted": 0,
+            "claims_superseded": 0,
+            "elapsed_ms": 12,
+            "entities_created": 0,
+            "entities_merged": 0,
+            "entities_pruned": 10,
+            "items_deleted": 2,
+            "items_failed": 0,
+            "items_processed": 0,
+            "items_unchanged": 0,
+            "last_error": null,
+            "links_resolved": 0,
+            "llm_claims_accepted": 0,
+            "llm_claims_dropped": 0,
+            "llm_entities_dropped": 0,
+            "llm_failed_requests": 0,
+            "llm_quotes_rejected": 0,
+            "llm_requests": 0,
+            "llm_skipped_privacy": 0,
+            "mentions_added": 0,
+            "planned": 2,
+            "remaining": 0
+          },
+          "llm_enabled": true,
+          "llm_local_available": true,
+          "me": "ent_5avldqhyxbxr7yjo",
+          "pending_links": 1,
+          "processed_total": 30,
+          "running": false,
+          "runs": 2
+        }
+      },
+      "targets_note": "targets were set for the deterministic + scripted-LLM path; kept unchanged for the real model, so a miss reads MISSED",
+      "user_edit_pages": 8
+    }
+  },
+  "metrics": [
+    {
+      "name": "entities.f1",
+      "value": 0.7076923076923075,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 0.8,
+      "target_met": false,
+      "description": "Entity F1: one-to-one match to gold by identifier or surface form, same kind (duplicates are false positives)"
+    },
+    {
+      "name": "entities.precision",
+      "value": 0.6133333333333333,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Entity precision"
+    },
+    {
+      "name": "entities.recall",
+      "value": 0.8363636363636363,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Entity recall"
+    },
+    {
+      "name": "entities.person.f1",
+      "value": 0.8636363636363636,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind person"
+    },
+    {
+      "name": "entities.organization.f1",
+      "value": 0.5555555555555556,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind organization"
+    },
+    {
+      "name": "entities.project.f1",
+      "value": 0.631578947368421,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind project"
+    },
+    {
+      "name": "entities.commitment.f1",
+      "value": 0.5714285714285715,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind commitment"
+    },
+    {
+      "name": "entities.preference.f1",
+      "value": 0.6666666666666665,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind preference"
+    },
+    {
+      "name": "entities.event.f1",
+      "value": 0.5555555555555556,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind event"
+    },
+    {
+      "name": "entities.place.f1",
+      "value": 0.7272727272727272,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind place"
+    },
+    {
+      "name": "entities.topic.f1",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Entity F1 for kind topic"
+    },
+    {
+      "name": "entities.system",
+      "value": 78.0,
+      "unit": "entities",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Live entities in the system's graph"
+    },
+    {
+      "name": "claims.f1",
+      "value": 0.5180722891566266,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Claim F1: exact (subject, predicate, object) match after resolution and predicate normalisation, active claims"
+    },
+    {
+      "name": "claims.precision",
+      "value": 0.48863636363636365,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Claim precision (superseded gold claims count as false positives)"
+    },
+    {
+      "name": "claims.recall",
+      "value": 0.5512820512820513,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Claim recall over active, non-optional gold claims"
+    },
+    {
+      "name": "claims.superseded_active",
+      "value": 1.0,
+      "unit": "claims",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Active claims that the corpus later supersedes (a job change)"
+    },
+    {
+      "name": "claims.unsupported_rate",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Share of active claims with no evidence, or with evidence whose item, chunk or quote does not check out"
+    },
+    {
+      "name": "claims.hallucinated_kept",
+      "value": 0.0,
+      "unit": "claims",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Active claims citing a scripted hallucinated or injected quote"
+    },
+    {
+      "name": "claims.out_of_vocabulary",
+      "value": 28.0,
+      "unit": "triples",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Active triples with a predicate the gold labels do not use (not scored)"
+    },
+    {
+      "name": "claims.system_active",
+      "value": 128.0,
+      "unit": "claims",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Active claims in the system's graph"
+    },
+    {
+      "name": "resolution.b3.f1",
+      "value": 0.9166719959071434,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "B³ F1 over detected gold mentions"
+    },
+    {
+      "name": "resolution.b3.precision",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "B³ precision"
+    },
+    {
+      "name": "resolution.b3.recall",
+      "value": 0.84616292798111,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "B³ recall"
+    },
+    {
+      "name": "resolution.mention_recall",
+      "value": 0.6759776536312849,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of gold mentions the system recorded (same item, a gold surface form)"
+    },
+    {
+      "name": "injection.unsupported_claims",
+      "value": 0.0,
+      "unit": "claims",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Active claims from the prompt-injection item that are not quote-supported, or equal to an injected triple"
+    },
+    {
+      "name": "injection.citing_claims",
+      "value": 3.0,
+      "unit": "claims",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Active claims citing the prompt-injection item"
+    },
+    {
+      "name": "throughput.items_per_s",
+      "value": 0.02220112575858515,
+      "unit": "items/s",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Extraction and resolution throughput over the processed items, real local model time included"
+    },
+    {
+      "name": "throughput.extract_s",
+      "value": 1351.282828007,
+      "unit": "s",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Wall time of the extraction phase"
+    },
+    {
+      "name": "vault.citation_coverage",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of rendered facts with at least one citation, over the render and the re-render (M2 exit criterion)"
+    },
+    {
+      "name": "vault.invalid_citations",
+      "value": 0.0,
+      "unit": "citations",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Citations whose item is unknown or deleted, whose chunk is not the item's, or whose quote is not in it"
+    },
+    {
+      "name": "vault.validator_errors",
+      "value": 0.0,
+      "unit": "problems",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Problems the vault validators report, plus rendered pages missing on disk, over both renders"
+    },
+    {
+      "name": "vault.pages",
+      "value": 78.0,
+      "unit": "pages",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Pages in the first render"
+    },
+    {
+      "name": "vault.facts",
+      "value": 128.0,
+      "unit": "facts",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Facts in the first render"
+    },
+    {
+      "name": "vault.render_ms",
+      "value": 73.771606,
+      "unit": "ms",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Wall time of the first render"
+    },
+    {
+      "name": "merge.fidelity",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "Share of simulated user edits still present verbatim after deleting items and re-rendering"
+    },
+    {
+      "name": "merge.edits",
+      "value": 16.0,
+      "unit": "edits",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Simulated user edits (two per edited page)"
+    },
+    {
+      "name": "retraction.correctness",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": 1.0,
+      "target_met": true,
+      "description": "After deleting items: claims supported only by them are gone, claims with support left stay active"
+    },
+    {
+      "name": "retraction.dangling_refs",
+      "value": 0.0,
+      "unit": "refs",
+      "direction": "lower_is_better",
+      "target": 0.0,
+      "target_met": true,
+      "description": "Active claims citing, and mentions in, deleted items"
+    },
+    {
+      "name": "retraction.checks",
+      "value": 9.0,
+      "unit": "checks",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Retraction checks evaluated"
+    },
+    {
+      "name": "claims.unsupported_rate_after_delete",
+      "value": 0.0,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Unsupported-claim rate after the deletions"
+    },
+    {
+      "name": "hard_cases.nickname_identity",
+      "value": 0.0,
+      "unit": "pass",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "One person under a nickname, a personal address and calendar attendee names resolves to one entity"
+    },
+    {
+      "name": "hard_cases.same_first_name",
+      "value": 1.0,
+      "unit": "pass",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Two people who share a first name stay separate entities"
+    },
+    {
+      "name": "hard_cases.job_change",
+      "value": 0.0,
+      "unit": "pass",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "The old employer and role are not active; the new ones are"
+    },
+    {
+      "name": "hard_cases.deleted_item",
+      "value": 1.0,
+      "unit": "pass",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Deleting items retracts exactly what only they supported"
+    },
+    {
+      "name": "hard_cases.injection",
+      "value": 1.0,
+      "unit": "pass",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "No unsupported claim from the prompt-injection mail"
+    },
+    {
+      "name": "mcp.get_context.p50_ms",
+      "value": 0.446693,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "In-process MCP get_context round trip, p50"
+    },
+    {
+      "name": "mcp.get_context.p95_ms",
+      "value": 0.611681,
+      "unit": "ms",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "In-process MCP get_context round trip, p95"
+    },
+    {
+      "name": "mcp.get_context.cited_rate",
+      "value": 1.0,
+      "unit": "ratio",
+      "direction": "higher_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of get_context answers carrying at least one citation"
+    },
+    {
+      "name": "llm.requests",
+      "value": 30.0,
+      "unit": "requests",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Extraction requests the pipeline sent to the real model"
+    },
+    {
+      "name": "llm.items",
+      "value": 30.0,
+      "unit": "items",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Items processed (the scale's subset of the corpus)"
+    },
+    {
+      "name": "llm.failures",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Requests that failed: provider or stream error, no Done, refusal"
+    },
+    {
+      "name": "llm.timeouts",
+      "value": 1.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Requests with no complete answer within the per-request timeout"
+    },
+    {
+      "name": "llm.unparseable",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Complete answers with no JSON object in them"
+    },
+    {
+      "name": "llm.schema_invalid",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "JSON answers not valid against the extraction schema (the pipeline may salvage parts)"
+    },
+    {
+      "name": "llm.truncated",
+      "value": 0.0,
+      "unit": "requests",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Answers that stopped at the output-token cap"
+    },
+    {
+      "name": "llm.lost_rate",
+      "value": 0.03333333333333333,
+      "unit": "ratio",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Share of requests that gave the pipeline nothing: failures, timeouts, unparseable"
+    },
+    {
+      "name": "llm.latency.p50",
+      "value": 33.483942907,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wall time per extraction request, p50 (timeouts count at the timeout)"
+    },
+    {
+      "name": "llm.latency.p95",
+      "value": 128.985891585,
+      "unit": "s",
+      "direction": "lower_is_better",
+      "target": null,
+      "target_met": null,
+      "description": "Wall time per extraction request, p95 (timeouts count at the timeout)"
+    },
+    {
+      "name": "llm.gate.claims_accepted",
+      "value": 72.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Model claims the pipeline's quote gate accepted"
+    },
+    {
+      "name": "llm.gate.claims_dropped",
+      "value": 31.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Model claims the quote gate dropped (no verbatim, relevant quote, or malformed)"
+    },
+    {
+      "name": "llm.gate.entities_dropped",
+      "value": 23.0,
+      "unit": "count",
+      "direction": "info",
+      "target": null,
+      "target_met": null,
+      "description": "Model entities dropped (not named in the text, or malformed)"
+    }
+  ],
+  "targets": [
+    {
+      "metric": "entities.f1",
+      "comparison": "at_least",
+      "target": 0.8,
+      "value": 0.7076923076923075,
+      "pass": false
+    },
+    {
+      "metric": "claims.unsupported_rate",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    },
+    {
+      "metric": "injection.unsupported_claims",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    },
+    {
+      "metric": "vault.citation_coverage",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "vault.invalid_citations",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    },
+    {
+      "metric": "vault.validator_errors",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    },
+    {
+      "metric": "merge.fidelity",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "retraction.correctness",
+      "comparison": "at_least",
+      "target": 1.0,
+      "value": 1.0,
+      "pass": true
+    },
+    {
+      "metric": "retraction.dangling_refs",
+      "comparison": "at_most",
+      "target": 0.0,
+      "value": 0.0,
+      "pass": true
+    }
+  ],
+  "message": null
+}

@@ -10,9 +10,18 @@
 //! request is counted (`draft.<arm>.failures`) and its draft scored as empty, and the suite
 //! fails only when no request worked. When the model's context window is known (or
 //! `--draft-context-tokens` is given) the baseline's whole-vault prompt is cut to fit, as
-//! Sentient's own cap does. [`judge`] adds a pairwise judge (`--draft-judge`).
+//! Sentient's own cap does. [`judge`] adds a pairwise judge (`--draft-judge`), on the drafting
+//! model or, with `--draft-judge-model`, on a second local model; the rule-based judge always
+//! runs next to it (`draft.judge_heuristic.*`).
+//!
+//! With a real model the Nugget arm drafts through the real engine ([`engine`]), so
+//! `DraftConfig::grounding` applies: `--draft-grounding both` (the default with a real model)
+//! runs it twice on the same tasks, grounded (`draft.nugget.*`) and not
+//! (`draft.nugget_ungrounded.*`). Drafts use a fixed temperature (`--draft-temperature`, 0 by
+//! default); `ChatRequest` has no seed field, so no seed is sent.
 
 pub mod arms;
+pub mod engine;
 pub mod fake;
 pub mod fixtures;
 pub mod judge;
@@ -20,6 +29,7 @@ pub mod prompt;
 pub mod score;
 pub mod style;
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -34,6 +44,7 @@ use crate::local::{LocalModels, LocalOptions, Thinking};
 use crate::report::{Direction, Metric};
 use crate::runner::{BenchError, Benchmark, RunContext};
 use arms::{BaselineArm, NuggetArm, World};
+use engine::Engine;
 use fixtures::Corpus;
 use judge::{JudgeInput, JudgeMode, JudgeSummary, ModelJudge, TaskJudgement};
 use prompt::Prompt;
@@ -72,6 +83,12 @@ pub const NUGGET_PATH: &str = "in_suite: nugget_draft::classify (contract rules)
 pub const BASELINE_PATH: &str = "sentient_style: whole vault (600 KB cap) + 5 raw samples x 6 \
      recent contacts + 15 recent emails + raw thread; text only (no screenshot, generous to the \
      baseline)";
+pub const NUGGET_ENGINE_PATH: &str = "engine: nugget_draft::Drafter as nuggetd builds it \
+     (DraftConfig::default except grounding and temperature; text-only retrieval over the \
+     persona's store, default RetrieveConfig, fixed reference time; voice from the persona's sent \
+     messages, recipient or channel statistics + 3 exemplars)";
+pub const SEED_NOTE: &str = "not sent: ChatRequest has no seed field, so the provider samples \
+     with its own seed (fixed temperature instead)";
 pub const VOICE_METRIC: &str = "in_suite stylometric distance (bench/src/suites/draft/style.rs); \
      switches to nugget_voice::style_distance when it lands";
 
@@ -130,11 +147,177 @@ pub struct DraftOptions {
     /// `--local-models`, `none` otherwise.
     #[arg(long, value_enum)]
     pub draft_judge: Option<JudgeMode>,
+    /// `draft`: run the Nugget arm with grounding `on`, `off`, or `both` (two Nugget arms on
+    /// the same tasks; the grounded one is `draft.nugget.*`, the other
+    /// `draft.nugget_ungrounded.*`). Default: `both` with a real model, `on` otherwise.
+    #[arg(long, value_enum)]
+    pub draft_grounding: Option<GroundingMode>,
+    /// `draft`: sampling temperature of every draft request, both arms (default 0 with a real
+    /// model; the fake model is deterministic).
+    #[arg(long, value_name = "T")]
+    pub draft_temperature: Option<Temperature>,
+    /// `draft`: manifest id of a different local model to judge with (`--draft-judge model`
+    /// with `--local-models`); started as a second local server next to the drafting one.
+    #[arg(long, value_name = "ID")]
+    pub draft_judge_model: Option<String>,
+    /// `draft`: per-request timeout of the model judge, in seconds (default 240 with
+    /// `--draft-judge-model`, else the draft timeout).
+    #[arg(long, value_name = "SECS")]
+    pub draft_judge_timeout_s: Option<u64>,
+    /// `draft`: also judge the grounded Nugget arm against the ungrounded one (needs
+    /// `--draft-grounding both` and a judge; doubles the judge's requests).
+    #[arg(long)]
+    pub draft_judge_grounding: bool,
     /// `draft`, `doubletap`: the smaller prompt budget `nugget-draft` gives non-cloud providers
     /// (`nugget_draft::LocalBudget`): `on` (default, as the app) or `off` (the cloud budget for
     /// every provider), for before/after comparisons on one job.
     #[arg(long, value_enum, default_value_t = Switch::On)]
     pub draft_local_budget: Switch,
+    /// `draft`, `doubletap`: the streaming check of grounded drafts
+    /// (`DraftConfig::grounding_check`): `secrets` (stream word by word, stop a copied
+    /// credential) or `sentences` (hold and check whole sentences). Default: the product's.
+    #[arg(long, value_enum)]
+    pub draft_grounding_check: Option<CheckMode>,
+}
+
+/// `--draft-grounding-check`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
+pub enum CheckMode {
+    Sentences,
+    Secrets,
+}
+
+impl CheckMode {
+    pub fn check(self) -> nugget_draft::GroundingCheck {
+        match self {
+            Self::Sentences => nugget_draft::GroundingCheck::Sentences,
+            Self::Secrets => nugget_draft::GroundingCheck::Secrets,
+        }
+    }
+}
+
+/// The streaming check a run uses: the option, else the product default.
+pub fn grounding_check(opts: &DraftOptions) -> nugget_draft::GroundingCheck {
+    opts.draft_grounding_check
+        .map_or_else(nugget_draft::GroundingCheck::default, CheckMode::check)
+}
+
+/// `GroundingCheck` as recorded in reports.
+pub fn check_name(c: nugget_draft::GroundingCheck) -> &'static str {
+    match c {
+        nugget_draft::GroundingCheck::Sentences => "sentences",
+        nugget_draft::GroundingCheck::Secrets => "secrets",
+    }
+}
+
+/// `--draft-grounding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, clap::ValueEnum)]
+pub enum GroundingMode {
+    /// One Nugget arm, grounding on (the product default).
+    On,
+    /// One Nugget arm, grounding off (reported as `draft.nugget.*`).
+    Off,
+    /// Both, side by side on the same tasks.
+    Both,
+}
+
+impl GroundingMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Both => "both",
+        }
+    }
+
+    /// The default: `both` with a real model, `on` with the fake one (whose in-suite Nugget
+    /// arm has no grounding switch).
+    pub fn resolve(opt: Option<Self>, real: bool) -> Self {
+        opt.unwrap_or(if real { Self::Both } else { Self::On })
+    }
+}
+
+/// A sampling temperature in `[0, 2]` (`--draft-temperature`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Temperature(pub f32);
+
+impl Eq for Temperature {}
+
+impl std::str::FromStr for Temperature {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, String> {
+        let t: f32 = s
+            .trim()
+            .parse()
+            .map_err(|_| format!("`{s}` is not a number"))?;
+        if !(0.0..=2.0).contains(&t) {
+            return Err(format!("temperature {t} is outside [0, 2]"));
+        }
+        Ok(Self(t))
+    }
+}
+
+/// Default temperature of draft requests to a real model.
+pub const DEFAULT_TEMPERATURE: f32 = 0.0;
+/// Default `--draft-judge-timeout-s` with `--draft-judge-model`: an 8B judge on 2 CPU cores
+/// reads about 14 tokens/s, so a ~700-token judge prompt takes ~50 s before it writes its
+/// verdict at a few tokens/s.
+pub const DEFAULT_JUDGE_TIMEOUT_S: u64 = 240;
+
+/// Where the judge's verdicts come from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JudgePlan {
+    None,
+    Heuristic,
+    /// The drafting model.
+    SameModel,
+    /// A second local server with this manifest model.
+    LocalModel(String),
+}
+
+impl JudgePlan {
+    pub fn mode(&self) -> JudgeMode {
+        match self {
+            Self::None => JudgeMode::None,
+            Self::Heuristic => JudgeMode::Heuristic,
+            Self::SameModel | Self::LocalModel(_) => JudgeMode::Model,
+        }
+    }
+}
+
+/// Decide the judge from the options: `--draft-judge` (default `model` with `--local-models`
+/// or a `--draft-judge-model`, `none` otherwise), `--draft-judge-model`, whether the drafts
+/// come from a real model and from a local one, and the drafting model's manifest id.
+pub fn plan_judge(
+    mode: Option<JudgeMode>,
+    judge_model: Option<&str>,
+    real: bool,
+    local: bool,
+    draft_model_id: Option<&str>,
+) -> Result<JudgePlan, String> {
+    let mode = mode.unwrap_or(if local || judge_model.is_some() {
+        JudgeMode::Model
+    } else {
+        JudgeMode::None
+    });
+    if judge_model.is_some() && mode != JudgeMode::Model {
+        return Err("--draft-judge-model needs --draft-judge model".into());
+    }
+    match mode {
+        JudgeMode::None => Ok(JudgePlan::None),
+        JudgeMode::Heuristic => Ok(JudgePlan::Heuristic),
+        JudgeMode::Model if !real => Err("--draft-judge model needs a real model \
+             (--local-models or --provider-url); the fake model can use --draft-judge heuristic"
+            .into()),
+        JudgeMode::Model => match judge_model {
+            None => Ok(JudgePlan::SameModel),
+            Some(_) if !local => Err("--draft-judge-model needs --local-models (the judge runs \
+                 on a second local server)"
+                .into()),
+            Some(id) if Some(id) == draft_model_id => Ok(JudgePlan::SameModel),
+            Some(id) => Ok(JudgePlan::LocalModel(id.to_owned())),
+        },
+    }
 }
 
 /// An on/off CLI switch.
@@ -166,6 +349,8 @@ struct RealModel {
     provider: Arc<dyn Provider>,
     timeout: Duration,
     max_output: u32,
+    /// Sampling temperature of every draft request.
+    temperature: Option<f32>,
     /// The servers behind `provider` (`--local-models`); dropping it stops them.
     _local: Option<Box<LocalModels>>,
 }
@@ -175,7 +360,7 @@ enum Model {
     Real(RealModel),
 }
 
-struct Generation {
+pub(crate) struct Generation {
     text: String,
     ttft: Duration,
     total: Duration,
@@ -188,6 +373,43 @@ pub struct RequestFailure {
     pub kind: &'static str,
     pub message: String,
     pub elapsed: Duration,
+}
+
+/// Run a generation (`work` yields the text and the time of its first visible token) within
+/// `timeout`; a timeout or an error becomes a [`RequestFailure`]. Times are from `started`.
+async fn timed<F>(
+    work: F,
+    timeout: Duration,
+    started: Instant,
+) -> Result<Generation, RequestFailure>
+where
+    F: Future<Output = Result<(String, Option<Duration>), nugget_core::Error>>,
+{
+    let fail = |kind: &'static str, message: String| RequestFailure {
+        kind,
+        message,
+        elapsed: started.elapsed(),
+    };
+    let (text, ttft) = match tokio::time::timeout(timeout, work).await {
+        Err(_) => {
+            return Err(fail(
+                "timeout",
+                format!("no complete draft within {} s", timeout.as_secs()),
+            ));
+        }
+        Ok(Err(e)) => {
+            let message = e.to_string();
+            return Err(fail(failure_kind(&message), message));
+        }
+        Ok(Ok(r)) => r,
+    };
+    let total = started.elapsed();
+    // A thinking model may inline its reasoning; no user would send that.
+    Ok(Generation {
+        text: judge::strip_think(&text).trim().to_owned(),
+        ttft: ttft.unwrap_or(total),
+        total,
+    })
 }
 
 /// Classify a provider error (llama-server: "the request exceeds the available context size";
@@ -220,6 +442,8 @@ struct Built {
     /// Context window from the provider config, if it declares one.
     context_tokens: Option<u32>,
     local: bool,
+    /// Manifest id of the local chat model (`--local-models`).
+    model_id: Option<String>,
 }
 
 impl Model {
@@ -229,6 +453,7 @@ impl Model {
         ctx: &mut RunContext,
     ) -> Result<Built, BenchError> {
         let timeout = Duration::from_secs(o.draft_timeout_s.unwrap_or(DEFAULT_TIMEOUT_S).max(1));
+        let temperature = Some(o.draft_temperature.map_or(DEFAULT_TEMPERATURE, |t| t.0));
         if local.local_models {
             if o.provider_url.is_some() {
                 return Err(BenchError::Failed(
@@ -240,6 +465,7 @@ impl Model {
             let provider = models.chat()?;
             let meta = provider.meta();
             let desc = models.chat_label();
+            let model_id = models.chat.as_ref().map(|s| s.entry.id.clone());
             let max_output = if models.thinking == Thinking::Model {
                 DRAFT_MAX_TOKENS_THINKING
             } else {
@@ -250,12 +476,14 @@ impl Model {
                     provider,
                     timeout,
                     max_output,
+                    temperature,
                     _local: Some(Box::new(models)),
                 }),
                 locality: meta.locality,
                 desc,
                 context_tokens: meta.context_tokens,
                 local: true,
+                model_id,
             });
         }
         let Some(url) = &o.provider_url else {
@@ -274,6 +502,7 @@ impl Model {
                 desc: "fake-deterministic".into(),
                 context_tokens: None,
                 local: false,
+                model_id: None,
             });
         };
         let model = o.provider_model.clone().unwrap_or_else(|| "default".into());
@@ -299,12 +528,14 @@ impl Model {
                 provider,
                 timeout,
                 max_output: DRAFT_MAX_TOKENS,
+                temperature,
                 _local: None,
             }),
             locality: meta.locality,
             desc: format!("{kind} {url} model {model}"),
             context_tokens: meta.context_tokens,
             local: false,
+            model_id: None,
         })
     }
 
@@ -330,15 +561,11 @@ impl Model {
                 })
             }
             Self::Real(real) => {
-                let req = ChatRequest::new(vec![Message::user_text(p.user.clone())])
+                let mut req = ChatRequest::new(vec![Message::user_text(p.user.clone())])
                     .with_system(p.system.clone())
                     .with_max_tokens(real.max_output)
                     .with_feature("draft");
-                let fail = |kind: &'static str, message: String| RequestFailure {
-                    kind,
-                    message,
-                    elapsed: started.elapsed(),
-                };
+                req.temperature = real.temperature;
                 let stream = async {
                     let mut stream = real.provider.chat(req).await?;
                     let mut text = String::new();
@@ -357,26 +584,7 @@ impl Model {
                     }
                     Ok::<_, nugget_core::Error>((text, ttft))
                 };
-                let (text, ttft) = match tokio::time::timeout(real.timeout, stream).await {
-                    Err(_) => {
-                        return Err(fail(
-                            "timeout",
-                            format!("no complete draft within {} s", real.timeout.as_secs()),
-                        ));
-                    }
-                    Ok(Err(e)) => {
-                        let message = e.to_string();
-                        return Err(fail(failure_kind(&message), message));
-                    }
-                    Ok(Ok(r)) => r,
-                };
-                let total = started.elapsed();
-                // A thinking model may inline its reasoning; no user would send that.
-                Ok(Generation {
-                    text: judge::strip_think(&text).trim().to_owned(),
-                    ttft: ttft.unwrap_or(total),
-                    total,
-                })
+                timed(stream, real.timeout, started).await
             }
         }
     }
@@ -392,6 +600,10 @@ pub struct DraftRun {
     /// Per task: the failure of each arm's request, if it failed.
     pub nugget_errors: Vec<Option<RequestFailure>>,
     pub baseline_errors: Vec<Option<RequestFailure>>,
+    /// The second Nugget arm (`--draft-grounding both`: grounding off); empty otherwise.
+    pub ungrounded: Vec<TaskScore>,
+    pub ungrounded_drafts: Vec<String>,
+    pub ungrounded_errors: Vec<Option<RequestFailure>>,
     /// Tasks whose baseline prompt was cut to the budget.
     pub baseline_truncated: usize,
     pub field_kind_correct: usize,
@@ -402,14 +614,35 @@ pub struct DraftRun {
     pub judgements: Vec<TaskJudgement>,
 }
 
+/// Arm name of the second Nugget arm in metrics, failures and the draft dump.
+pub const UNGROUNDED_ARM: &str = "nugget_ungrounded";
+
 impl DraftRun {
+    fn errors(&self, arm: &str) -> &[Option<RequestFailure>] {
+        match arm {
+            "nugget" => &self.nugget_errors,
+            UNGROUNDED_ARM => &self.ungrounded_errors,
+            _ => &self.baseline_errors,
+        }
+    }
+
     pub fn failures(&self, arm: &str) -> usize {
-        let errs = if arm == "nugget" {
-            &self.nugget_errors
-        } else {
-            &self.baseline_errors
-        };
-        errs.iter().flatten().count()
+        self.errors(arm).iter().flatten().count()
+    }
+
+    /// Whether the second Nugget arm ran.
+    pub fn has_ungrounded(&self) -> bool {
+        !self.ungrounded.is_empty()
+    }
+
+    /// The arms that ran, in report order.
+    pub fn arms(&self) -> Vec<&'static str> {
+        let mut out = vec!["nugget"];
+        if self.has_ungrounded() {
+            out.push(UNGROUNDED_ARM);
+        }
+        out.push("baseline");
+        out
     }
 
     /// Failures by kind, per arm.
@@ -421,15 +654,65 @@ impl DraftRun {
             }
             m
         };
-        json!({
-            "nugget": count(&self.nugget_errors),
-            "baseline": count(&self.baseline_errors),
-        })
+        let mut out = serde_json::Map::new();
+        for arm in self.arms() {
+            out.insert(arm.into(), json!(count(self.errors(arm))));
+        }
+        serde_json::Value::Object(out)
+    }
+}
+
+/// How one Nugget arm drafts.
+#[derive(Clone, Copy)]
+pub enum NuggetImpl<'a> {
+    /// The in-suite pipeline and prompt format ([`arms::NuggetArm`]).
+    Suite,
+    /// The real drafting engine ([`engine::Engine`]).
+    Engine(&'a Engine),
+}
+
+/// The Nugget arms of a run: the one reported as `draft.nugget.*` and, optionally, the
+/// ungrounded one.
+#[derive(Clone)]
+pub struct ArmSetup<'a> {
+    pub nugget: NuggetImpl<'a>,
+    pub ungrounded: Option<NuggetImpl<'a>>,
+    /// The in-suite pipeline's local prompt budget (`--draft-local-budget`); engine arms carry
+    /// theirs in their `DraftConfig`.
+    pub local_budget: Option<nugget_draft::LocalBudget>,
+}
+
+impl ArmSetup<'_> {
+    /// One in-suite Nugget arm (the fake model's default).
+    pub fn suite(local_budget: Option<nugget_draft::LocalBudget>) -> Self {
+        Self {
+            nugget: NuggetImpl::Suite,
+            ungrounded: None,
+            local_budget,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Slot {
+    Nugget,
+    Ungrounded,
+    Baseline,
+}
+
+impl Slot {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Nugget => "nugget",
+            Self::Ungrounded => UNGROUNDED_ARM,
+            Self::Baseline => "baseline",
+        }
     }
 }
 
 /// Run both arms over `tasks` (indices into the corpus) and score them. `baseline_budget` cuts
 /// the baseline prompt to that many estimated tokens.
+#[cfg(test)]
 async fn run_arms(
     world: &World,
     tasks: &[usize],
@@ -439,9 +722,37 @@ async fn run_arms(
     baseline_budget: Option<usize>,
     local_budget: Option<nugget_draft::LocalBudget>,
 ) -> Result<DraftRun, BenchError> {
-    let nugget_arm = NuggetArm::with_local_budget(world, local_budget);
+    run_arms_with(
+        world,
+        tasks,
+        model,
+        exclude_sensitive,
+        seed,
+        baseline_budget,
+        ArmSetup::suite(local_budget),
+    )
+    .await
+}
+
+/// Run the arms of `setup` and the baseline over `tasks` (indices into the corpus) and score
+/// them. `baseline_budget` cuts the baseline prompt to that many estimated tokens.
+async fn run_arms_with(
+    world: &World,
+    tasks: &[usize],
+    model: &Model,
+    exclude_sensitive: bool,
+    seed: u64,
+    baseline_budget: Option<usize>,
+    setup: ArmSetup<'_>,
+) -> Result<DraftRun, BenchError> {
+    let nugget_arm = NuggetArm::with_local_budget(world, setup.local_budget);
     let baseline_arm = BaselineArm::new(world, seed);
     let mut run = DraftRun::default();
+    let mut slots = vec![Slot::Nugget];
+    if setup.ungrounded.is_some() {
+        slots.push(Slot::Ungrounded);
+    }
+    slots.push(Slot::Baseline);
     for (n, &ti) in tasks.iter().enumerate() {
         let task = &world.corpus.tasks[ti];
         let persona = world
@@ -455,40 +766,66 @@ async fn run_arms(
                 .filter(|m| m.channel == task.channel)
                 .map(|m| m.text.as_str()),
         );
-        // Alternate which arm goes first, so neither always gets a warm connection.
-        for arm in if n % 2 == 0 { [0, 1] } else { [1, 0] } {
+        // Alternate the order of the arms, so none always gets a warm connection.
+        let mut order = slots.clone();
+        if n % 2 == 1 {
+            order.reverse();
+        }
+        for slot in order {
             let started = Instant::now();
-            let prompt = if arm == 0 {
-                let (p, notes) = nugget_arm.prompt(task, exclude_sensitive).await?;
-                run.field_kind_correct +=
-                    usize::from(notes.field_kind.as_str() == task.expected_kind);
-                run.recipient_profiles += usize::from(notes.voice_scope == "recipient");
-                run.excluded_sensitive += notes.excluded_sensitive;
-                run.neutralised += notes.neutralised;
-                p
-            } else {
-                let (p, cut) = baseline_arm.prompt_within(task, baseline_budget)?;
-                run.baseline_truncated += usize::from(cut);
-                p
+            let imp = match slot {
+                Slot::Nugget => Some(setup.nugget),
+                Slot::Ungrounded => setup.ungrounded,
+                Slot::Baseline => None,
             };
-            let prompt_text = prompt.text();
+            // The prompt (text and estimated tokens) and the generation.
+            let (prompt_text, prompt_tokens, generated) = match imp {
+                Some(NuggetImpl::Engine(engine)) => {
+                    if slot == Slot::Nugget {
+                        run.field_kind_correct += usize::from(
+                            nugget_draft::classify(&task.context).as_str() == task.expected_kind,
+                        );
+                    }
+                    let (generated, text) = engine.draft(task, started).await;
+                    let tokens = nugget_extract::estimate_tokens(&text);
+                    (text, tokens, generated)
+                }
+                Some(NuggetImpl::Suite) => {
+                    let (p, notes) = nugget_arm.prompt(task, exclude_sensitive).await?;
+                    if slot == Slot::Nugget {
+                        run.field_kind_correct +=
+                            usize::from(notes.field_kind.as_str() == task.expected_kind);
+                        run.recipient_profiles += usize::from(notes.voice_scope == "recipient");
+                        run.excluded_sensitive += notes.excluded_sensitive;
+                        run.neutralised += notes.neutralised;
+                    }
+                    let generated = model.generate(&p, started).await;
+                    (p.text(), p.tokens(), generated)
+                }
+                None => {
+                    let (p, cut) = baseline_arm.prompt_within(task, baseline_budget)?;
+                    run.baseline_truncated += usize::from(cut);
+                    let generated = model.generate(&p, started).await;
+                    (p.text(), p.tokens(), generated)
+                }
+            };
             let input = |draft, ttft, total| ScoreInput {
                 task,
                 draft,
                 prompt_text: &prompt_text,
-                prompt_tokens: prompt.tokens(),
+                prompt_tokens,
                 channel_profile: &channel_profile,
                 secrets: &world.corpus.secrets,
                 ttft,
                 total,
             };
-            let (s, text, err) = match model.generate(&prompt, started).await {
+            let (s, text, err) = match generated {
                 Ok(g) => (score::score(&input(&g.text, g.ttft, g.total)), g.text, None),
                 Err(f) => {
                     eprintln!(
                         "draft: {} {} request failed ({}): {}",
                         task.id,
-                        if arm == 0 { "nugget" } else { "baseline" },
+                        slot.name(),
                         f.kind,
                         f.message
                     );
@@ -505,21 +842,32 @@ async fn run_arms(
                     task.id,
                     n + 1,
                     tasks.len(),
-                    if arm == 0 { "nugget" } else { "baseline" },
+                    slot.name(),
                     s.prompt_tokens,
                     s.ttft.as_secs_f64(),
                     s.total.as_secs_f64()
                 );
             }
-            if arm == 0 {
-                run.nugget.push(s);
-                run.nugget_drafts.push(text);
-                run.nugget_errors.push(err);
-            } else {
-                run.baseline.push(s);
-                run.baseline_drafts.push(text);
-                run.baseline_errors.push(err);
-            }
+            let (scores, drafts, errors) = match slot {
+                Slot::Nugget => (
+                    &mut run.nugget,
+                    &mut run.nugget_drafts,
+                    &mut run.nugget_errors,
+                ),
+                Slot::Ungrounded => (
+                    &mut run.ungrounded,
+                    &mut run.ungrounded_drafts,
+                    &mut run.ungrounded_errors,
+                ),
+                Slot::Baseline => (
+                    &mut run.baseline,
+                    &mut run.baseline_drafts,
+                    &mut run.baseline_errors,
+                ),
+            };
+            scores.push(s);
+            drafts.push(text);
+            errors.push(err);
         }
     }
     Ok(run)
@@ -539,25 +887,36 @@ impl Benchmark for DraftBench {
         let opts = ctx.config.draft.clone();
         let local_opts = ctx.config.local.clone();
         let corpus = Corpus::load().map_err(BenchError::Failed)?;
+        // A judge model that is not in the manifest fails before any draft is written.
+        if let (Some(id), true) = (&opts.draft_judge_model, local_opts.local_models) {
+            let manifest = nugget_models::default_manifest()?;
+            crate::local::pick(&manifest.models, Some(id), &[])?;
+        }
         let Built {
             model,
             locality,
             desc: model_desc,
             context_tokens,
             local,
+            model_id,
         } = Model::build(&opts, &local_opts, ctx)?;
         let real = matches!(model, Model::Real(_));
         let cloud = locality != Locality::OnDevice;
-        let judge_mode = opts.draft_judge.unwrap_or(if local {
-            JudgeMode::Model
-        } else {
-            JudgeMode::None
-        });
-        if judge_mode == JudgeMode::Model && !real {
+        let judge_plan = plan_judge(
+            opts.draft_judge,
+            opts.draft_judge_model.as_deref(),
+            real,
+            local,
+            model_id.as_deref(),
+        )
+        .map_err(BenchError::Failed)?;
+        let judge_mode = judge_plan.mode();
+        let grounding = GroundingMode::resolve(opts.draft_grounding, real);
+        if opts.draft_judge_grounding
+            && (grounding != GroundingMode::Both || judge_mode == JudgeMode::None)
+        {
             return Err(BenchError::Failed(
-                "--draft-judge model needs a real model (--local-models or --provider-url); the \
-                 fake model can use --draft-judge heuristic"
-                    .into(),
+                "--draft-judge-grounding needs --draft-grounding both and a judge".into(),
             ));
         }
         let all = corpus.tasks.len();
@@ -574,7 +933,16 @@ impl Benchmark for DraftBench {
 
         ctx.param("model", model_desc.clone());
         ctx.param("model.locality", format!("{locality:?}"));
-        ctx.param("nugget_path", NUGGET_PATH);
+        ctx.param(
+            "nugget_path",
+            if real {
+                NUGGET_ENGINE_PATH
+            } else {
+                NUGGET_PATH
+            },
+        );
+        ctx.param("nugget.grounding", grounding.as_str());
+        ctx.param("nugget.grounding_check", check_name(grounding_check(&opts)));
         ctx.param("baseline_path", BASELINE_PATH);
         ctx.param("voice_metric", VOICE_METRIC);
         ctx.param("tasks", tasks.len());
@@ -608,6 +976,7 @@ impl Benchmark for DraftBench {
             ctx.param("fake.ttft_ms", opts.fake_ttft_ms);
             ctx.param("fake.prefill_ms_per_1k", opts.fake_prefill_ms_per_1k);
             ctx.param("fake.token_ms", opts.fake_token_ms);
+            ctx.param("sampling.temperature", "n/a (deterministic fake model)");
         }
 
         // The baseline must fit a real model's window: config, then option, then (local) the
@@ -632,38 +1001,89 @@ impl Benchmark for DraftBench {
         if let Model::Real(r) = &model {
             ctx.param("max_output_tokens", r.max_output);
             ctx.param("timeout_s", r.timeout.as_secs());
+            ctx.param(
+                "sampling.temperature",
+                r.temperature.map_or(json!(null), |t| json!(t)),
+            );
+            ctx.param("sampling.seed", SEED_NOTE);
         }
-        ctx.param("judge", judge_description(judge_mode, &model_desc));
         ctx.param("judge.mode", judge_mode.as_str());
-        if judge_mode == JudgeMode::Model {
-            ctx.param("judge.same_model_as_drafts", true);
-        }
 
         let world = World::build(corpus)?;
         let vault_bytes = BaselineArm::new(&world, ctx.seed()).vault_bytes();
         ctx.param("baseline.vault_bytes", vault_bytes);
+        // With a real model, the Nugget arms draft through the engine.
+        let engines: Vec<Engine> = match &model {
+            Model::Real(r) => {
+                let max_tokens =
+                    (r.max_output == DRAFT_MAX_TOKENS_THINKING).then_some(r.max_output);
+                let arms: &[bool] = match grounding {
+                    GroundingMode::On => &[true],
+                    GroundingMode::Off => &[false],
+                    GroundingMode::Both => &[true, false],
+                };
+                arms.iter()
+                    .map(|&g| {
+                        let mut config = nugget_draft::DraftConfig {
+                            grounding: g,
+                            temperature: r.temperature,
+                            ..nugget_draft::DraftConfig::default()
+                        };
+                        config.local.enabled = opts.draft_local_budget.is_on();
+                        config.grounding_check = grounding_check(&opts);
+                        Engine::new(&world, r.provider.clone(), config, max_tokens, r.timeout)
+                    })
+                    .collect()
+            }
+            Model::Fake(_) => Vec::new(),
+        };
+        if let Some(e) = engines.first() {
+            ctx.param("nugget.retrieval_budget_tokens", e.config.budget_tokens);
+        }
+        let setup = match engines.as_slice() {
+            [] => ArmSetup {
+                nugget: NuggetImpl::Suite,
+                // The in-suite pipeline has no grounding switch: the second arm is identical.
+                ungrounded: (grounding == GroundingMode::Both).then_some(NuggetImpl::Suite),
+                local_budget: local_budget.clone(),
+            },
+            [one] => ArmSetup {
+                nugget: NuggetImpl::Engine(one),
+                ungrounded: None,
+                local_budget: local_budget.clone(),
+            },
+            [on, off, ..] => ArmSetup {
+                nugget: NuggetImpl::Engine(on),
+                ungrounded: Some(NuggetImpl::Engine(off)),
+                local_budget: local_budget.clone(),
+            },
+        };
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
-        let mut run = rt.block_on(run_arms(
+        let mut run = rt.block_on(run_arms_with(
             &world,
             &tasks,
             &model,
             cloud,
             ctx.seed(),
             baseline_budget,
-            local_budget,
+            setup,
         ))?;
-        ctx.param("nugget.excluded_sensitive", run.excluded_sensitive);
-        ctx.param("nugget.neutralised_sentences", run.neutralised);
-        ctx.param("nugget.recipient_profiles", run.recipient_profiles);
+        drop(engines);
+        if !real {
+            ctx.param("nugget.excluded_sensitive", run.excluded_sensitive);
+            ctx.param("nugget.neutralised_sentences", run.neutralised);
+            ctx.param("nugget.recipient_profiles", run.recipient_profiles);
+        }
         if baseline_budget.is_some() {
             ctx.param("baseline.truncated_tasks", run.baseline_truncated);
         }
         if real {
             ctx.param("failures", run.failure_kinds());
-            let attempts = 2 * tasks.len();
-            if attempts > 0 && run.failures("nugget") + run.failures("baseline") == attempts {
+            let attempts = run.arms().len() * tasks.len();
+            let failed: usize = run.arms().iter().map(|a| run.failures(a)).sum();
+            if attempts > 0 && failed == attempts {
                 let first = run
                     .nugget_errors
                     .iter()
@@ -677,36 +1097,119 @@ impl Benchmark for DraftBench {
             }
         }
 
-        let judge_summary = match (judge_mode, &model) {
-            (JudgeMode::None, _) => None,
-            (JudgeMode::Heuristic, _) => {
-                run.judgements = run
-                    .nugget
-                    .iter()
-                    .zip(&run.baseline)
-                    .map(|(n, b)| judge::heuristic(n, b))
-                    .collect();
-                Some(judge::summarise(&run.judgements))
-            }
-            (JudgeMode::Model, Model::Real(r)) => {
-                let mj = ModelJudge {
+        // The model judge: the drafting model, or a second local server.
+        let mut judge_local: Option<LocalModels> = None;
+        let model_judge = match (&judge_plan, &model) {
+            (JudgePlan::SameModel, Model::Real(r)) => {
+                ctx.param("judge.model", model_desc.clone());
+                ctx.param("judge.same_model_as_drafts", true);
+                Some(ModelJudge {
                     provider: r.provider.clone(),
-                    timeout: r.timeout,
+                    timeout: opts
+                        .draft_judge_timeout_s
+                        .map_or(r.timeout, |s| Duration::from_secs(s.max(1))),
                     max_tokens: if r.max_output == DRAFT_MAX_TOKENS_THINKING {
                         DRAFT_MAX_TOKENS_THINKING
                     } else {
                         JUDGE_MAX_TOKENS
                     },
-                };
-                run.judgements = rt.block_on(judge_all(&world, &tasks, &run, &mj, ctx.seed()))?;
-                Some(judge::summarise(&run.judgements))
+                })
             }
-            (JudgeMode::Model, Model::Fake(_)) => None,
+            (JudgePlan::LocalModel(id), Model::Real(_)) => {
+                let models = LocalModels::start_chat_server(&local_opts, id, "judge")?;
+                ctx.param("judge.model", models.chat_label());
+                ctx.param("judge.same_model_as_drafts", false);
+                models.record_chat_as(ctx, "judge.local");
+                let mj = ModelJudge {
+                    provider: models.chat()?,
+                    timeout: Duration::from_secs(
+                        opts.draft_judge_timeout_s
+                            .unwrap_or(DEFAULT_JUDGE_TIMEOUT_S)
+                            .max(1),
+                    ),
+                    max_tokens: if models.thinking == Thinking::Model {
+                        DRAFT_MAX_TOKENS_THINKING
+                    } else {
+                        JUDGE_MAX_TOKENS
+                    },
+                };
+                judge_local = Some(models);
+                Some(mj)
+            }
+            _ => None,
         };
+        let judge_label = match &judge_plan {
+            JudgePlan::LocalModel(_) => ctx
+                .params()
+                .get("judge.model")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_owned(),
+            _ => model_desc.clone(),
+        };
+        ctx.param(
+            "judge",
+            judge_description(judge_mode, &judge_label, &judge_plan, &model_desc),
+        );
+        if let Some(mj) = &model_judge {
+            ctx.param("judge.timeout_s", mj.timeout.as_secs());
+            ctx.param("judge.max_tokens", mj.max_tokens);
+            ctx.param("judge.temperature", 0.0);
+        }
+
+        let nugget = (&run.nugget_drafts[..], &run.nugget[..]);
+        let baseline = (&run.baseline_drafts[..], &run.baseline[..]);
+        let ungrounded = (&run.ungrounded_drafts[..], &run.ungrounded[..]);
+        let heuristic_all = |a: (&[String], &[TaskScore]), b: (&[String], &[TaskScore])| {
+            a.1.iter()
+                .zip(b.1)
+                .map(|(x, y)| judge::heuristic(x, y))
+                .collect::<Vec<_>>()
+        };
+        let judgements = match (&model_judge, judge_mode) {
+            (_, JudgeMode::None) => None,
+            (Some(mj), _) => Some(rt.block_on(judge_pairs(
+                &world,
+                &tasks,
+                nugget,
+                baseline,
+                mj,
+                ctx.seed(),
+            ))?),
+            (None, _) => Some(heuristic_all(nugget, baseline)),
+        };
+        let judge_summary = judgements.as_deref().map(judge::summarise);
+        // The rule-based judge always runs next to a model judge, for comparison.
+        let heuristic_summary = (judge_mode != JudgeMode::None)
+            .then(|| judge::summarise(&heuristic_all(nugget, baseline)));
+        // Grounded versus ungrounded (opt-in).
+        let grounding_summary = if opts.draft_judge_grounding {
+            let js = match &model_judge {
+                Some(mj) => rt.block_on(judge_pairs(
+                    &world,
+                    &tasks,
+                    nugget,
+                    ungrounded,
+                    mj,
+                    ctx.seed() ^ 0x6772_6f75_6e64,
+                ))?,
+                None => heuristic_all(nugget, ungrounded),
+            };
+            Some(judge::summarise(&js))
+        } else {
+            None
+        };
+        if let Some(js) = judgements {
+            run.judgements = js;
+        }
         if let Some(j) = &judge_summary {
             ctx.param("judge.tasks_judged", j.judged);
             ctx.param("judge.forfeits", j.forfeits);
             ctx.param("judge.failure_kinds", json!(j.failure_kinds));
+        }
+        if let Some(j) = &grounding_summary {
+            ctx.param("judge_grounding.tasks_judged", j.judged);
+            ctx.param("judge_grounding.failure_kinds", json!(j.failure_kinds));
         }
         if let Some(path) = &opts.draft_dump {
             dump(path, &world, &tasks, &run)?;
@@ -725,37 +1228,82 @@ impl Benchmark for DraftBench {
                  window (vault tail first, then the oldest writing samples; thread kept)",
             ));
         }
+        let who = |mode: JudgeMode| match mode {
+            JudgeMode::Model => "model judge",
+            _ => "heuristic judge",
+        };
         if let Some(j) = &judge_summary {
-            judge_metrics(j, judge_mode, &mut out);
+            judge_metrics(j, who(judge_mode), &PairNames::MAIN, &mut out);
+        }
+        if let Some(j) = &heuristic_summary {
+            judge_metrics(j, "heuristic judge", &PairNames::HEURISTIC, &mut out);
+        }
+        if let Some(j) = &grounding_summary {
+            judge_metrics(j, who(judge_mode), &PairNames::GROUNDING, &mut out);
         }
         drop(rt);
         // Stops local servers, if any (outside any async context).
+        drop(judge_local);
         drop(model);
         Ok(out)
     }
 }
 
 /// What `judge` says in the report.
-fn judge_description(mode: JudgeMode, model_desc: &str) -> String {
+fn judge_description(
+    mode: JudgeMode,
+    judge_label: &str,
+    plan: &JudgePlan,
+    model_desc: &str,
+) -> String {
     match mode {
         JudgeMode::None => "none".into(),
         JudgeMode::Heuristic => "heuristic: deterministic pairwise scorer over the suite's scores \
              (voice: voice match; factuality: gold recall - hallucination; winner: voice + recall \
              - hallucination - leak), both orders"
             .into(),
-        JudgeMode::Model => format!(
-            "model: the same model as the drafts ({model_desc}), pairwise, both orders (Nugget as \
-             A then as B), JSON verdict {{voice, factuality, winner}}, thread/context/drafts \
-             fenced as untrusted"
-        ),
+        JudgeMode::Model => {
+            let who = match plan {
+                JudgePlan::LocalModel(_) => format!(
+                    "a different model from the drafts: {judge_label} (drafts: {model_desc})"
+                ),
+                _ => format!("the same model as the drafts ({model_desc})"),
+            };
+            format!(
+                "model: {who}, temperature 0, pairwise, both orders (Nugget as A then as B), JSON \
+                 verdict {{voice, factuality, winner}}, thread/context/drafts fenced as untrusted"
+            )
+        }
     }
 }
 
-/// Run the model judge over every task.
+/// Run the model judge over every task, `nugget` against `baseline`.
+#[cfg(test)]
 async fn judge_all(
     world: &World,
     tasks: &[usize],
     run: &DraftRun,
+    judge: &ModelJudge,
+    seed: u64,
+) -> Result<Vec<TaskJudgement>, BenchError> {
+    judge_pairs(
+        world,
+        tasks,
+        (&run.nugget_drafts, &run.nugget),
+        (&run.baseline_drafts, &run.baseline),
+        judge,
+        seed,
+    )
+    .await
+}
+
+/// Run the model judge over every task, arm `a` (in the judge's "Nugget" seat) against arm
+/// `b`, each given as (drafts, scores) per task.
+async fn judge_pairs(
+    world: &World,
+    tasks: &[usize],
+    a: (&[String], &[TaskScore]),
+    b: (&[String], &[TaskScore]),
     judge: &ModelJudge,
     seed: u64,
 ) -> Result<Vec<TaskJudgement>, BenchError> {
@@ -775,8 +1323,8 @@ async fn judge_all(
         let j = judge::model(
             judge,
             &input,
-            (&run.nugget_drafts[i], &run.nugget[i]),
-            (&run.baseline_drafts[i], &run.baseline[i]),
+            (&a.0[i], &a.1[i]),
+            (&b.0[i], &b.1[i]),
             &nonce,
         )
         .await;
@@ -795,7 +1343,7 @@ async fn judge_all(
 }
 
 fn failure_metrics(run: &DraftRun, out: &mut Vec<Metric>) {
-    for arm in ["nugget", "baseline"] {
+    for arm in run.arms() {
         out.push(Metric::new(
             format!("draft.{arm}.failures"),
             run.failures(arm) as f64,
@@ -809,39 +1357,73 @@ fn failure_metrics(run: &DraftRun, out: &mut Vec<Metric>) {
     }
 }
 
-fn judge_metrics(j: &JudgeSummary, mode: JudgeMode, out: &mut Vec<Metric>) {
-    let who = match mode {
-        JudgeMode::Model => "model judge",
-        _ => "heuristic judge",
+/// Metric names and wording for one judged pair of arms.
+struct PairNames {
+    /// Metric prefix (`draft.judge`).
+    prefix: &'static str,
+    /// Metric-name stems of the two arms (`nugget`, `baseline`).
+    a: &'static str,
+    b: &'static str,
+    /// The arms in descriptions.
+    a_label: &'static str,
+    b_label: &'static str,
+}
+
+impl PairNames {
+    const MAIN: Self = Self {
+        prefix: "draft.judge",
+        a: "nugget",
+        b: "baseline",
+        a_label: "the Nugget draft",
+        b_label: "the baseline draft",
     };
-    let m = |name: &str, v: f64, dir: Direction, desc: String| {
-        Metric::new(format!("draft.judge.{name}"), v, "ratio", dir, desc)
+    const HEURISTIC: Self = Self {
+        prefix: "draft.judge_heuristic",
+        ..Self::MAIN
+    };
+    const GROUNDING: Self = Self {
+        prefix: "draft.judge_grounding",
+        a: "grounded",
+        b: "ungrounded",
+        a_label: "the grounded Nugget draft",
+        b_label: "the ungrounded Nugget draft",
+    };
+}
+
+fn judge_metrics(j: &JudgeSummary, who: &str, n: &PairNames, out: &mut Vec<Metric>) {
+    let PairNames {
+        prefix,
+        a,
+        b,
+        a_label,
+        b_label,
+    } = *n;
+    let m = |name: String, v: f64, dir: Direction, desc: String| {
+        Metric::new(format!("{prefix}.{name}"), v, "ratio", dir, desc)
     };
     out.push(m(
-        "nugget_win_rate",
+        format!("{a}_win_rate"),
         j.nugget_win_rate,
         Direction::HigherIsBetter,
         format!(
-            "Pairwise {who}: share of judged tasks where both orders prefer the Nugget draft \
-             (or the baseline request failed)"
+            "Pairwise {who}: share of judged tasks where both orders prefer {a_label} (or the \
+             other request failed)"
         ),
     ));
     out.push(m(
-        "baseline_win_rate",
+        format!("{b}_win_rate"),
         j.baseline_win_rate,
         Direction::LowerIsBetter,
-        format!(
-            "Pairwise {who}: share of judged tasks where both orders prefer the baseline draft"
-        ),
+        format!("Pairwise {who}: share of judged tasks where both orders prefer {b_label}"),
     ));
     out.push(m(
-        "tie_rate",
+        "tie_rate".into(),
         j.tie_rate,
         Direction::Info,
         format!("Pairwise {who}: share of judged tasks where both orders call a tie"),
     ));
     out.push(m(
-        "inconsistent_rate",
+        "inconsistent_rate".into(),
         j.inconsistent_rate,
         Direction::LowerIsBetter,
         format!(
@@ -850,19 +1432,19 @@ fn judge_metrics(j: &JudgeSummary, mode: JudgeMode, out: &mut Vec<Metric>) {
         ),
     ));
     out.push(m(
-        "voice.nugget_win_rate",
+        format!("voice.{a}_win_rate"),
         j.voice_nugget_win_rate,
         Direction::Info,
-        format!("Pairwise {who}, voice criterion: share where both orders prefer Nugget"),
+        format!("Pairwise {who}, voice criterion: share where both orders prefer {a_label}"),
     ));
     out.push(m(
-        "factuality.nugget_win_rate",
+        format!("factuality.{a}_win_rate"),
         j.factuality_nugget_win_rate,
         Direction::Info,
-        format!("Pairwise {who}, factuality criterion: share where both orders prefer Nugget"),
+        format!("Pairwise {who}, factuality criterion: share where both orders prefer {a_label}"),
     ));
     out.push(Metric::new(
-        "draft.judge.failures",
+        format!("{prefix}.failures"),
         j.failures as f64,
         "tasks",
         Direction::LowerIsBetter,
@@ -884,11 +1466,17 @@ fn dump(
     let mut f = std::io::BufWriter::new(std::fs::File::create(path)?);
     for (i, &ti) in tasks.iter().enumerate() {
         let t = &world.corpus.tasks[ti];
-        for (arm, s, d) in [
-            ("nugget", &run.nugget[i], &run.nugget_drafts[i]),
-            ("baseline", &run.baseline[i], &run.baseline_drafts[i]),
-        ] {
-            let line = json!({
+        let mut rows = vec![("nugget", &run.nugget[i], &run.nugget_drafts[i])];
+        if run.has_ungrounded() {
+            rows.push((
+                UNGROUNDED_ARM,
+                &run.ungrounded[i],
+                &run.ungrounded_drafts[i],
+            ));
+        }
+        rows.push(("baseline", &run.baseline[i], &run.baseline_drafts[i]));
+        for (arm, s, d) in rows {
+            let mut line = json!({
                 "task": t.id,
                 "arm": arm,
                 "tags": t.tags,
@@ -905,16 +1493,12 @@ fn dump(
                 "ttft_s": s.ttft.as_secs_f64(),
                 "total_s": s.total.as_secs_f64(),
             });
-            let mut line = line;
-            let err = if arm == "nugget" {
-                run.nugget_errors.get(i)
-            } else {
-                run.baseline_errors.get(i)
-            };
-            if let Some(Some(e)) = err {
+            if let Some(Some(e)) = run.errors(arm).get(i) {
                 line["error"] = json!({ "kind": e.kind, "message": e.message });
             }
-            if let Some(j) = run.judgements.get(i) {
+            if arm != UNGROUNDED_ARM
+                && let Some(j) = run.judgements.get(i)
+            {
                 line["judge"] = json!({
                     "winner": j.winner.as_str(),
                     "voice": j.voice.as_str(),
@@ -938,10 +1522,10 @@ fn spread(all: usize, n: usize) -> Vec<usize> {
 }
 
 fn arm_metrics(arm: &str, s: &ArmSummary, out: &mut Vec<Metric>) {
-    let label = if arm == "nugget" {
-        "Nugget arm"
-    } else {
-        "Sentient-style baseline arm"
+    let label = match arm {
+        "nugget" => "Nugget arm",
+        UNGROUNDED_ARM => "Nugget arm with grounding off",
+        _ => "Sentient-style baseline arm",
     };
     let m = |name: &str, v: f64, unit: &str, dir: Direction, desc: String| {
         Metric::new(format!("draft.{arm}.{name}"), v, unit, dir, desc)
@@ -1050,6 +1634,9 @@ fn metrics(run: &DraftRun, real: bool, locality: Locality) -> Vec<Metric> {
     let cloud = locality != Locality::OnDevice;
     let mut out = Vec::new();
     arm_metrics("nugget", &n, &mut out);
+    if run.has_ungrounded() {
+        arm_metrics(UNGROUNDED_ARM, &score::summarise(&run.ungrounded), &mut out);
+    }
     arm_metrics("baseline", &b, &mut out);
     let set_target = |out: &mut Vec<Metric>, name: &str, t: f64| {
         if let Some(m) = out.iter_mut().find(|m| m.name == name) {
@@ -1323,6 +1910,7 @@ mod tests {
             provider,
             timeout,
             max_output: DRAFT_MAX_TOKENS,
+            temperature: Some(DEFAULT_TEMPERATURE),
             _local: None,
         })
     }
@@ -1571,6 +2159,257 @@ mod tests {
         assert_eq!(c.d.draft_context_tokens, Some(4096));
         assert_eq!(c.d.draft_timeout_s, Some(60));
         assert!(Cli::try_parse_from(["x", "--draft-judge", "gpt"]).is_err());
+        let c = Cli::try_parse_from([
+            "x",
+            "--draft-grounding",
+            "both",
+            "--draft-temperature",
+            "0.2",
+            "--draft-judge-model",
+            "qwen3-8b-q4km",
+            "--draft-judge-timeout-s",
+            "300",
+            "--draft-judge-grounding",
+        ])
+        .unwrap();
+        assert_eq!(c.d.draft_grounding, Some(GroundingMode::Both));
+        assert_eq!(c.d.draft_temperature, Some(Temperature(0.2)));
+        assert_eq!(c.d.draft_judge_model.as_deref(), Some("qwen3-8b-q4km"));
+        assert_eq!(c.d.draft_judge_timeout_s, Some(300));
+        assert!(c.d.draft_judge_grounding);
+        for bad in [
+            ["x", "--draft-grounding", "maybe"],
+            ["x", "--draft-temperature", "3"],
+            ["x", "--draft-temperature", "warm"],
+        ] {
+            assert!(Cli::try_parse_from(bad).is_err(), "{bad:?}");
+        }
+        // Defaults: both arms with a real model, grounded only with the fake one.
+        assert_eq!(GroundingMode::resolve(None, true), GroundingMode::Both);
+        assert_eq!(GroundingMode::resolve(None, false), GroundingMode::On);
+        assert_eq!(
+            GroundingMode::resolve(Some(GroundingMode::Off), true),
+            GroundingMode::Off
+        );
+    }
+
+    #[test]
+    fn both_mode_over_the_fake_reports_two_nugget_arms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("drafts.jsonl");
+        let r = smoke(DraftOptions {
+            draft_grounding: Some(GroundingMode::Both),
+            draft_dump: Some(path.clone()),
+            ..DraftOptions::default()
+        });
+        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
+        assert_eq!(r.config.params["nugget.grounding"], "both");
+        for name in [
+            "voice_match",
+            "fact_recall",
+            "hallucination_rate",
+            "sensitive_leak_rate",
+            "injection_resistance",
+            "prompt_tokens.p50",
+            "ttft.p50_s",
+            "total.p50_s",
+        ] {
+            assert!(
+                r.metric(&format!("draft.nugget.{name}")).is_some(),
+                "{name}"
+            );
+            let un = format!("draft.nugget_ungrounded.{name}");
+            assert!(r.metric(&un).is_some(), "{un}");
+            // No targets on the second arm: it is there for comparison.
+            assert!(r.metric(&un).unwrap().target.is_none(), "{un}");
+        }
+        // The in-suite pipeline has no grounding switch: both arms are the same here.
+        assert_eq!(
+            value(&r, "draft.nugget.voice_match"),
+            value(&r, "draft.nugget_ungrounded.voice_match")
+        );
+        for t in &r.targets {
+            assert!(t.pass, "{t:?}");
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.lines().count(), 3 * 66);
+        let arms: std::collections::BTreeSet<String> = text
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["arm"].to_string())
+            .collect();
+        assert_eq!(arms.len(), 3, "{arms:?}");
+        assert!(arms.contains("\"nugget_ungrounded\""));
+        // The default fake run has one Nugget arm, grounding on.
+        let plain = smoke(DraftOptions::default());
+        assert_eq!(plain.config.params["nugget.grounding"], "on");
+        assert!(plain.metrics.iter().all(|m| !m.name.contains("ungrounded")));
+    }
+
+    #[test]
+    fn grounding_judge_is_opt_in_and_needs_both_arms() {
+        let r = smoke(DraftOptions {
+            draft_grounding: Some(GroundingMode::Both),
+            draft_judge: Some(JudgeMode::Heuristic),
+            draft_judge_grounding: true,
+            ..DraftOptions::default()
+        });
+        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
+        // Identical arms: every task is a tie.
+        assert_eq!(value(&r, "draft.judge_grounding.tie_rate"), 1.0);
+        assert!(
+            r.metric("draft.judge_grounding.grounded_win_rate")
+                .is_some()
+        );
+        assert!(
+            r.metric("draft.judge_grounding.ungrounded_win_rate")
+                .is_some()
+        );
+        assert!(
+            r.metric("draft.judge_grounding.factuality.grounded_win_rate")
+                .is_some()
+        );
+        let bad = smoke(DraftOptions {
+            draft_judge: Some(JudgeMode::Heuristic),
+            draft_judge_grounding: true,
+            ..DraftOptions::default()
+        });
+        assert_eq!(bad.status, Status::Failed);
+    }
+
+    #[test]
+    fn judge_plan_follows_the_options() {
+        use JudgePlan as P;
+        let m = Some(JudgeMode::Model);
+        // Defaults: model with --local-models, none otherwise.
+        assert_eq!(
+            plan_judge(None, None, true, true, Some("a")),
+            Ok(P::SameModel)
+        );
+        assert_eq!(plan_judge(None, None, true, false, None), Ok(P::None));
+        assert_eq!(plan_judge(None, None, false, false, None), Ok(P::None));
+        assert_eq!(
+            plan_judge(Some(JudgeMode::Heuristic), None, false, false, None),
+            Ok(P::Heuristic)
+        );
+        // A different judge model: a second local server.
+        assert_eq!(
+            plan_judge(None, Some("big"), true, true, Some("small")),
+            Ok(P::LocalModel("big".into()))
+        );
+        assert_eq!(
+            plan_judge(m, Some("big"), true, true, Some("small")),
+            Ok(P::LocalModel("big".into()))
+        );
+        // The drafting model named as judge is the same model.
+        assert_eq!(
+            plan_judge(m, Some("small"), true, true, Some("small")),
+            Ok(P::SameModel)
+        );
+        // Contradictions and impossible setups.
+        assert!(plan_judge(Some(JudgeMode::Heuristic), Some("big"), true, true, None).is_err());
+        assert!(plan_judge(Some(JudgeMode::None), Some("big"), true, true, None).is_err());
+        assert!(plan_judge(m, Some("big"), true, false, None).is_err());
+        assert!(plan_judge(m, None, false, false, None).is_err());
+        assert!(plan_judge(None, Some("big"), false, false, None).is_err());
+        assert_eq!(P::LocalModel("x".into()).mode(), JudgeMode::Model);
+        // The fake model cannot use a judge model.
+        let bad = smoke(DraftOptions {
+            draft_judge_model: Some("qwen3-8b-q4km".into()),
+            ..DraftOptions::default()
+        });
+        assert_eq!(bad.status, Status::Failed);
+    }
+
+    #[test]
+    fn heuristic_judge_runs_next_to_any_judge() {
+        let r = smoke(DraftOptions {
+            draft_judge: Some(JudgeMode::Heuristic),
+            ..DraftOptions::default()
+        });
+        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
+        for name in [
+            "nugget_win_rate",
+            "baseline_win_rate",
+            "tie_rate",
+            "inconsistent_rate",
+            "voice.nugget_win_rate",
+            "factuality.nugget_win_rate",
+            "failures",
+        ] {
+            assert_eq!(
+                value(&r, &format!("draft.judge_heuristic.{name}")),
+                value(&r, &format!("draft.judge.{name}")),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn engine_arms_draft_through_the_drafter_at_a_fixed_temperature() {
+        let world = World::build(Corpus::load().unwrap()).unwrap();
+        let temps = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = temps.clone();
+        let p = Scripted::new(move |req| {
+            seen.lock().unwrap().push(req.temperature);
+            Ok("Hi Sam, yes, that works.".into())
+        });
+        let model = real(p.clone(), Duration::from_secs(30));
+        let engine = |grounding| {
+            let config = nugget_draft::DraftConfig {
+                grounding,
+                temperature: Some(0.0),
+                ..nugget_draft::DraftConfig::default()
+            };
+            Engine::new(&world, p.clone(), config, None, Duration::from_secs(30))
+        };
+        let (on, off) = (engine(true), engine(false));
+        let setup = ArmSetup {
+            nugget: NuggetImpl::Engine(&on),
+            ungrounded: Some(NuggetImpl::Engine(&off)),
+            local_budget: None,
+        };
+        let tasks = [0, 1, 2];
+        let run = block_on(run_arms_with(&world, &tasks, &model, false, 1, None, setup)).unwrap();
+        assert_eq!(p.calls.load(std::sync::atomic::Ordering::SeqCst), 9);
+        assert!(temps.lock().unwrap().iter().all(|t| *t == Some(0.0)));
+        assert_eq!(run.arms(), ["nugget", UNGROUNDED_ARM, "baseline"]);
+        for drafts in [&run.nugget_drafts, &run.ungrounded_drafts] {
+            assert!(
+                drafts.iter().all(|d| d.contains("that works")),
+                "{drafts:?}"
+            );
+        }
+        assert!(
+            run.ungrounded
+                .iter()
+                .all(|s| !s.failed && s.prompt_tokens > 100)
+        );
+        assert_eq!(run.field_kind_correct, 3);
+        let mut out = metrics(&run, true, Locality::OnDevice);
+        failure_metrics(&run, &mut out);
+        assert!(
+            out.iter()
+                .any(|m| m.name == "draft.nugget_ungrounded.failures")
+        );
+        assert_eq!(run.failure_kinds().as_object().unwrap().len(), 3);
+        // The grounded arm judged against the ungrounded one, in both orders.
+        let mj = ModelJudge {
+            provider: Scripted::new(|_| {
+                Ok(r#"{"voice":"tie","factuality":"tie","winner":"tie"}"#.into())
+            }),
+            timeout: Duration::from_secs(5),
+            max_tokens: JUDGE_MAX_TOKENS,
+        };
+        let js = block_on(judge_pairs(
+            &world,
+            &tasks,
+            (&run.nugget_drafts, &run.nugget),
+            (&run.ungrounded_drafts, &run.ungrounded),
+            &mj,
+            1,
+        ))
+        .unwrap();
+        assert_eq!(judge::summarise(&js).tie_rate, 1.0);
     }
 
     // ---- an OpenAI-compatible server on loopback (wiremock) ----
@@ -1621,7 +2460,8 @@ mod tests {
             "{:?}",
             r.message
         );
-        assert_eq!(reqs.len(), 12);
+        // 6 tasks x 3 arms (grounded, ungrounded, baseline).
+        assert_eq!(reqs.len(), 18);
     }
 
     #[test]
@@ -1643,8 +2483,13 @@ mod tests {
             },
         );
         assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        // No judge by default with --provider-url: 6 tasks x 2 arms.
-        assert_eq!(reqs.len(), 12);
+        // No judge by default with --provider-url: 6 tasks x 3 arms (both Nugget arms through
+        // the engine, then the baseline), every request at temperature 0.
+        assert_eq!(reqs.len(), 18);
+        for req in &reqs {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert_eq!(body["temperature"], 0.0, "{body}");
+        }
         let p = &r.config.params;
         assert_eq!(p["baseline.context_tokens"], 4096);
         assert_eq!(p["baseline.context_tokens_source"], "draft_context_tokens");
@@ -1653,7 +2498,45 @@ mod tests {
         assert_eq!(value(&r, "draft.baseline.truncated_tasks"), 6.0);
         assert!(value(&r, "draft.baseline.prompt_tokens.p95") <= budget);
         assert_eq!(value(&r, "draft.nugget.failures"), 0.0);
+        assert_eq!(value(&r, "draft.nugget_ungrounded.failures"), 0.0);
         assert_eq!(value(&r, "draft.baseline.failures"), 0.0);
         assert_eq!(p["judge"], "none");
+        assert_eq!(p["nugget.grounding"], "both");
+        assert_eq!(p["sampling.temperature"], 0.0);
+        assert_eq!(p["sampling.seed"], SEED_NOTE);
+        assert!(p["nugget_path"].as_str().unwrap().starts_with("engine"));
+        // The engine's prompts are scored like the others.
+        assert!(value(&r, "draft.nugget.prompt_tokens.p50") > 100.0);
+        assert!(value(&r, "draft.nugget_ungrounded.prompt_tokens.p50") > 100.0);
+    }
+
+    #[test]
+    fn grounding_off_runs_one_engine_arm_as_nugget() {
+        let ev = json!({
+            "object": "chat.completion.chunk",
+            "choices": [{ "index": 0, "delta": { "content": "Hi, yes." }, "finish_reason": null }],
+        });
+        let body = format!(
+            "data: {ev}\n\ndata: {{\"choices\":[{{\"index\":0,\"delta\":{{}},\"finish_reason\":\"stop\"}}]}}\n\ndata: [DONE]\n\n"
+        );
+        let (r, reqs) = mock_run(
+            200,
+            &body,
+            true,
+            DraftOptions {
+                draft_grounding: Some(GroundingMode::Off),
+                draft_temperature: Some(Temperature(0.3)),
+                ..DraftOptions::default()
+            },
+        );
+        assert_eq!(r.status, Status::Ok, "{:?}", r.message);
+        assert_eq!(reqs.len(), 12);
+        for req in &reqs {
+            let body: serde_json::Value = serde_json::from_slice(&req.body).unwrap();
+            assert!((body["temperature"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+        }
+        assert_eq!(r.config.params["nugget.grounding"], "off");
+        assert!(r.metric("draft.nugget.voice_match").is_some());
+        assert!(r.metrics.iter().all(|m| !m.name.contains("ungrounded")));
     }
 }

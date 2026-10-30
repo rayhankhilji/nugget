@@ -98,6 +98,47 @@ pub struct LlmConfig {
     pub max_confidence: f32,
     /// Give up on an item after this many failed attempts (until it changes).
     pub max_attempts: u32,
+    /// Entities a provider may return per request (the schema's `maxItems`).
+    pub max_entities_per_request: usize,
+    /// Claims a provider may return per request (the schema's `maxItems`).
+    pub max_claims_per_request: usize,
+    /// Tighter limits for when the item's first-choice provider is local (`OnDevice` /
+    /// `LocalNetwork`): each applies as the smaller of it and the general limit above.
+    pub local: LocalLlmLimits,
+}
+
+/// Per-request limits for a local provider. A small model on a CPU generates a few tokens per
+/// second and reads a few tens, so requests are kept short: a chunk or two in, a capped number
+/// of entities and claims out. Each request then finishes well inside the timeout, and the
+/// per-item total stays bounded by `max_requests_per_item * max_input_chars`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalLlmLimits {
+    /// Characters of chunk text per request (≈ 4 characters per token).
+    pub max_input_chars: usize,
+    /// Chunks per request at most.
+    pub max_chunks_per_request: usize,
+    /// Requests per item at most; the rest of a long item is not sent.
+    pub max_requests_per_item: usize,
+    /// Output token cap per request.
+    pub max_output_tokens: u32,
+    /// Entities per request (the schema's `maxItems`).
+    pub max_entities_per_request: usize,
+    /// Claims per request (the schema's `maxItems`).
+    pub max_claims_per_request: usize,
+}
+
+impl Default for LocalLlmLimits {
+    fn default() -> Self {
+        Self {
+            max_input_chars: 4_000,
+            max_chunks_per_request: 2,
+            max_requests_per_item: 4,
+            max_output_tokens: 1_024,
+            max_entities_per_request: 12,
+            max_claims_per_request: 10,
+        }
+    }
 }
 
 impl Default for LlmConfig {
@@ -111,6 +152,9 @@ impl Default for LlmConfig {
             timeout_ms: 120_000,
             max_confidence: 0.85,
             max_attempts: 3,
+            max_entities_per_request: 32,
+            max_claims_per_request: 48,
+            local: LocalLlmLimits::default(),
         }
     }
 }

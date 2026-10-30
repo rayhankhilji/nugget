@@ -217,6 +217,14 @@ Sensitive items never go to a cloud model.
 | `timeout_ms` | integer | `120000` | Timeout of one request |
 | `max_confidence` | float, 0 to 1 | `0.85` | Upper bound on the confidence of an LLM-extracted fact |
 | `max_attempts` | integer | `3` | Give up on an item after this many failures, until it changes |
+| `max_entities_per_request` | integer | `32` | Entities a provider may return per request (the schema's `maxItems`) |
+| `max_claims_per_request` | integer | `48` | Claims a provider may return per request (the schema's `maxItems`) |
+| `local` | table | see below | Tighter per-request limits when the item's first-choice provider is local |
+
+`[knowledge.llm.local]` (each applies as the smaller of it and the general limit): `max_input_chars`
+(`4000`), `max_chunks_per_request` (`2`), `max_requests_per_item` (`4`), `max_output_tokens`
+(`1024`), `max_entities_per_request` (`12`), `max_claims_per_request` (`10`). A small model on a
+CPU writes a few tokens per second, so local requests stay short and finish inside the timeout.
 
 ### `[knowledge.resolution]`
 
@@ -347,6 +355,13 @@ e.g. `min_score` (`0.45`, cards ranked below it are kept but not offered), `max_
 Double Tap drafting. Only the CC1 keys are listed here; the rest of the section (provider per app,
 excluded apps, budgets, `[draft.voice]`) is described in the daemon's `features/draft.rs` and
 will get its own table when the keys settle.
+
+Grounding (AA3; see `bench/README.md`, "Grounded drafts"):
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `grounding` | bool | `true` | Retrieved context goes into the prompt as dated facts (a superseded draft or proposal marked, sensitive items marked private) and the streamed draft is checked as `grounding_check` says |
+| `grounding_check` | `"secrets"` or `"sentences"` | `"secrets"` | `secrets`: stream word by word and stop the draft before a credential copied from a sensitive item (next to no added latency). `sentences`: hold each sentence (and the greeting) until it ends and drop sentences whose numbers, amounts, dates or times no source supports, or that copy a credential; adds the first sentence's generation time before the first character |
 
 `[draft.local]` (on-device and local-network drafting):
 

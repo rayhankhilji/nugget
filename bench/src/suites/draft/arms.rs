@@ -167,6 +167,11 @@ impl World {
         Ok(Self { corpus, stores })
     }
 
+    /// The persona's store.
+    pub fn store(&self, persona: &str) -> Option<&Store> {
+        self.stores.get(persona)
+    }
+
     fn persona(&self, id: &str) -> Result<&Persona, BenchError> {
         self.corpus
             .persona(id)

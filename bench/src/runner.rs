@@ -78,6 +78,8 @@ pub struct RunConfig {
     pub draft: suites::draft::DraftOptions,
     /// `--local-models` options (real local models through `nugget-runtime`).
     pub local: crate::local::LocalOptions,
+    /// `knowledge` suite options (real-model item count, diagnostic dump).
+    pub knowledge: suites::knowledge::KnowledgeOptions,
     /// `doubletap` suite options (read-ahead).
     pub doubletap: suites::doubletap::DoubletapOptions,
 }
@@ -92,6 +94,7 @@ impl Default for RunConfig {
             embed_model: None,
             draft: suites::draft::DraftOptions::default(),
             local: crate::local::LocalOptions::default(),
+            knowledge: suites::knowledge::KnowledgeOptions::default(),
             doubletap: suites::doubletap::DoubletapOptions::default(),
         }
     }

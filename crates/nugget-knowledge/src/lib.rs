@@ -47,7 +47,9 @@ mod splits;
 mod state;
 mod text;
 
-pub use config::{KnowledgeConfig, LlmConfig, MeConfig, ResolutionConfig, RunBudget};
+pub use config::{
+    KnowledgeConfig, LlmConfig, LocalLlmLimits, MeConfig, ResolutionConfig, RunBudget,
+};
 pub use feed::ItemFeed;
 pub use knowledge::{Knowledge, KnowledgeStatus, RunStats};
 pub use session::SINGLE_VALUED as SINGLE_VALUED_PREDICATES;

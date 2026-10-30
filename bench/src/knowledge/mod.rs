@@ -2,6 +2,7 @@
 //! the adapter seam to the pipeline under test, and the scoring. The suite itself is
 //! [`crate::suites::knowledge`]; methodology is in `bench/README.md`.
 
+pub mod diagnose;
 pub mod eval;
 pub mod fake_llm;
 pub mod fixture;

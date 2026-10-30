@@ -33,6 +33,10 @@ use crate::feed::ItemFeed;
 /// - 1: M2.
 /// - 2: W7 resolution and Markdown fixes (trusted note identifiers, name-only twins folded,
 ///   organisations linked across name and mail domain, verbatim frontmatter quotes).
+///
+/// Deliberately not bumped for AA3's LLM extraction (compact schema, local limits, kind
+/// adoption): new and changed items use the new path, but re-extracting a whole vault costs one
+/// local-model request per item (26–33 s each on a 2-core CPU), too much to start silently.
 pub const EXTRACTOR_VERSION: u32 = 2;
 pub(crate) const STATE_KEY: &str = "knowledge";
 /// The pre-sharding notes index (read for migration, cleared once moved).

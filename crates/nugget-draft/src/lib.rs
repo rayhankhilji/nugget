@@ -22,6 +22,10 @@
 //!   and sign-offs, citation markers and (for chat and email) markdown are stripped; the draft
 //!   is cut to the voice's length band; nothing emitted is ever retracted and no trailing newline
 //!   is ever emitted.
+//! - **Grounding** (on by default, [`DraftConfig::grounding`]): the context goes in as dated
+//!   facts, newest first, with superseded facts marked ([`prompt_facts`]), and a streaming
+//!   post-check drops sentences whose numbers, amounts, dates or times no source supports
+//!   ([`grounding`]); [`DraftTimings::grounding`] reports what it dropped.
 //! - **Latency.** [`Drafter::prewarm`] starts provider warm-up, retrieval and the voice lookup on
 //!   trigger; for non-cloud providers it also warms the prompt cache with the exact system
 //!   prefix the draft will send ([`Warmer::warm_prefix`], llama-server `n_predict: 0`), and
@@ -42,8 +46,10 @@
 
 pub mod classify;
 mod engine;
+pub mod grounding;
 pub mod post;
 pub mod prompt;
+pub mod prompt_facts;
 mod voice;
 mod warm;
 
@@ -56,6 +62,7 @@ pub use engine::{
     LocalBudget, MAX_BUDGET_TOKENS, NoVoice, Prewarm, RetrievalRunner, VoiceQuery, VoiceSource,
     Warmer, post_options, retrieval_query,
 };
+pub use grounding::{Grounder, GroundingCheck, GroundingReport};
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
 pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};
 pub use warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};

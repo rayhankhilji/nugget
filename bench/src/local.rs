@@ -27,6 +27,10 @@
 //!   logical cores, total RAM, GPU kind, OS and architecture.
 //!
 //! The servers live on a runtime owned by [`LocalModels`]; dropping it stops them.
+//!
+//! [`LocalModels::start_chat_server`] starts one more chat server (e.g. a judge model) under a
+//! second supervisor: same model store and runtime builds, its own data directory, so it runs
+//! next to the main servers without touching them.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -326,19 +330,53 @@ pub fn pick<'a>(
 impl LocalModels {
     /// Install and start the requested roles (`Chat` and/or `Embedding`).
     pub fn start(opts: &LocalOptions, roles: &[RuntimeRole]) -> Result<Self, BenchError> {
+        Self::start_in(opts, roles, None)
+    }
+
+    /// Install and start a chat server for the manifest model `model_id` under a second
+    /// supervisor, next to any started with [`LocalModels::start`]: models and runtime builds
+    /// come from the same `--models-home`, while its data directory (`<home>/<name>`: sockets,
+    /// pid files, logs, orphan cleanup) is its own, so neither touches the other's server.
+    /// Threads and thinking follow `opts`.
+    pub fn start_chat_server(
+        opts: &LocalOptions,
+        model_id: &str,
+        name: &str,
+    ) -> Result<Self, BenchError> {
+        let opts = LocalOptions {
+            local_chat_model: Some(model_id.to_owned()),
+            ..opts.clone()
+        };
+        Self::start_in(&opts, &[RuntimeRole::Chat], Some(name))
+    }
+
+    /// The supervisor's data root: `home`, or `home/<name>` for a second supervisor.
+    pub fn data_root(home: &std::path::Path, name: Option<&str>) -> PathBuf {
+        match name {
+            Some(n) => home.join(n),
+            None => home.to_path_buf(),
+        }
+    }
+
+    fn start_in(
+        opts: &LocalOptions,
+        roles: &[RuntimeRole],
+        name: Option<&str>,
+    ) -> Result<Self, BenchError> {
         let home = opts
             .models_home
             .clone()
             .unwrap_or_else(|| PathBuf::from(DEFAULT_MODELS_HOME));
         std::fs::create_dir_all(&home)?;
-        let paths = Paths::rooted(home);
+        let shared = Paths::rooted(home.clone());
+        let paths = Paths::rooted(Self::data_root(&home, name));
         let manifest = default_manifest()?;
         let pending = load_pending(&opts.local_pending, &manifest.models)?;
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
         let egress: Arc<dyn EgressSink> = Arc::new(NullEgress);
-        let store = Arc::new(ModelStore::open(&paths, egress.clone())?);
+        let store = Arc::new(ModelStore::open(&shared, egress.clone())?);
         let mut runtime_opts = nugget_runtime::RuntimeOptions::default();
         runtime_opts.chat.threads = opts.local_threads;
         runtime_opts.embedding.threads = opts.local_threads;
@@ -491,6 +529,14 @@ impl LocalModels {
         }
     }
 
+    /// Record the chat model (id, file, quantisation, revision, size, load time) as the report
+    /// parameter `key`, e.g. for a judge server.
+    pub fn record_chat_as(&self, ctx: &mut RunContext, key: &str) {
+        if let Some(s) = &self.chat {
+            ctx.param(key, served_json(s));
+        }
+    }
+
     /// Record model, quantisation, runtime and hardware as report parameters (`local.*`).
     pub fn record(&self, ctx: &mut RunContext) {
         ctx.param("local.runtime", self.runtime_build.clone());
@@ -502,20 +548,7 @@ impl LocalModels {
             ("local.embedding", &self.embedding),
         ] {
             if let Some(s) = s {
-                ctx.param(
-                    key,
-                    json!({
-                        "id": s.entry.id,
-                        "file": s.entry.file_name,
-                        "quantisation": quantisation(&s.entry.file_name),
-                        "revision": s.entry.revision,
-                        "sha256": s.entry.sha256,
-                        "size_bytes": s.entry.size,
-                        "load_s": round2(s.load_s),
-                        "pending": s.pending.is_some(),
-                        "pending_file": s.pending.as_ref().map(|p| p.display().to_string()),
-                    }),
-                );
+                ctx.param(key, served_json(s));
             }
         }
     }
@@ -537,6 +570,21 @@ impl Drop for LocalModels {
         let runtime = self.runtime.clone();
         self.rt.block_on(runtime.shutdown());
     }
+}
+
+/// A served model as a report parameter.
+fn served_json(s: &Served) -> Value {
+    json!({
+        "id": s.entry.id,
+        "file": s.entry.file_name,
+        "quantisation": quantisation(&s.entry.file_name),
+        "revision": s.entry.revision,
+        "sha256": s.entry.sha256,
+        "size_bytes": s.entry.size,
+        "load_s": round2(s.load_s),
+        "pending": s.pending.is_some(),
+        "pending_file": s.pending.as_ref().map(|p| p.display().to_string()),
+    })
 }
 
 fn chat_config(cfg: &ProviderConfig, thinking: Thinking) -> ProviderConfig {
@@ -718,6 +766,21 @@ mod tests {
         assert_eq!(chat_config(&cfg, Thinking::Model), cfg);
         // The runtime's own config turns thinking off; `Model` takes that back out.
         assert_eq!(chat_config(&off, Thinking::Model), cfg);
+    }
+
+    #[test]
+    fn a_second_server_gets_its_own_data_root() {
+        let home = std::path::Path::new("models-home");
+        assert_eq!(LocalModels::data_root(home, None), home);
+        assert_eq!(
+            LocalModels::data_root(home, Some("judge")),
+            home.join("judge")
+        );
+        // The model store stays the shared one.
+        assert_eq!(
+            Paths::rooted(home.to_path_buf()).models_dir(),
+            home.join("data").join("models")
+        );
     }
 
     #[test]

@@ -139,12 +139,17 @@ pub struct DoubletapOptions {
     /// (`off`, the default).
     #[arg(long, value_enum, default_value_t = Switch::Off)]
     pub doubletap_read_ahead: Switch,
+    /// `doubletap`: grounding (`DraftConfig::grounding`; facts block and streaming check, see
+    /// `--draft-grounding-check`): `on` (the product default) or `off`.
+    #[arg(long, value_enum, default_value_t = Switch::On)]
+    pub doubletap_grounding: Switch,
 }
 
 impl Default for DoubletapOptions {
     fn default() -> Self {
         Self {
             doubletap_read_ahead: Switch::Off,
+            doubletap_grounding: Switch::On,
         }
     }
 }
@@ -1860,6 +1865,8 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
 
     let mut config = DraftConfig::default();
     config.local.enabled = local_budget.is_on();
+    config.grounding = ctx.config.doubletap.doubletap_grounding.is_on();
+    config.grounding_check = super::draft::grounding_check(&ctx.config.draft);
     if s.real {
         // Greedy sampling, so before/after runs differ only by what changed.
         config.temperature = Some(0.0);
@@ -1895,6 +1902,14 @@ fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Met
     );
     ctx.param("timeout_s", timeout.as_secs_f64());
     ctx.param("draft_local_budget", local_budget.as_str());
+    ctx.param(
+        "grounding",
+        ctx.config.doubletap.doubletap_grounding.as_str(),
+    );
+    ctx.param(
+        "grounding_check",
+        super::draft::check_name(config.grounding_check),
+    );
     ctx.param("draft_local_budget.applies", local_applies);
     ctx.param(
         "prompt_budget_tokens",
@@ -2617,6 +2632,7 @@ mod tests {
             },
             doubletap: DoubletapOptions {
                 doubletap_read_ahead: read_ahead,
+                ..DoubletapOptions::default()
             },
             ..smoke()
         };

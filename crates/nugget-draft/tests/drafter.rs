@@ -410,7 +410,8 @@ async fn post_processing_against_existing_field_text() {
 
 #[tokio::test]
 async fn cancellation_stops_the_stream() {
-    let words: Vec<String> = (0..200).map(|i| format!("word{i} ")).collect();
+    // Whole sentences, so the grounding check (on by default) releases them as they end.
+    let words: Vec<String> = (0..200).map(|i| format!("word{i}. ")).collect();
     let refs: Vec<&str> = words.iter().map(String::as_str).collect();
     let slow = Fake::slow("slow", &refs, Duration::from_millis(5));
     let s = setup(vec![slow], DraftConfig::default(), Arc::new(NoVoice));
@@ -860,6 +861,43 @@ async fn voice_drives_prompt_prefix_and_length_band() {
     assert_eq!(cloud.last().system.unwrap(), system);
 }
 
+fn add_dated(store: &Store, key: &str, title: &str, text: &str, date: time::Date) {
+    let item = NewItem::new("notes", key, content_hash(text))
+        .with_title(title)
+        .with_modified_at(date.midnight().assume_utc())
+        .with_metadata(serde_json::json!({ "sensitive": false }));
+    store.upsert_item(&item).unwrap();
+    store
+        .replace_chunks(&item.item, &[NewChunk::text(text)])
+        .unwrap();
+}
+
+fn budget_ctx() -> DraftContext {
+    DraftContext {
+        app: AppInfo {
+            id: Some("com.apple.mail".into()),
+            name: "Mail".into(),
+            window_title: Some("Re: Q4 marketing budget".into()),
+            ..Default::default()
+        },
+        field: FieldInfo {
+            role: "text_area".into(),
+            ..Default::default()
+        },
+        thread: vec![ThreadMessage {
+            author: Some("Ravi Menon <ravi.menon@northwind.example.com>".into()),
+            text: "Henrik, what is the approved Q4 marketing budget? I want to quote it at the \
+all hands."
+                .into(),
+            from_me: Some(false),
+            timestamp: Some("2026-10-27T09:15:00Z".into()),
+        }],
+        recipients: vec!["ravi.menon@northwind.example.com".into()],
+        subject: Some("Re: Q4 marketing budget".into()),
+        ..Default::default()
+    }
+}
+
 fn context_of(req: &ChatRequest) -> String {
     user_text(req)
         .split("<context>\n")
@@ -877,6 +915,75 @@ fn local_sensitive() -> DraftConfig {
             ..Default::default()
         },
         ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn grounding_drops_a_sentence_with_a_superseded_value() {
+    use time::{Date, Month};
+    let script = [
+        "Dear Ravi,\n\nThe board approved a Q4 marketing budget of $275,000. ",
+        "Our current planning assumes a budget of $310,",
+        "000. Travel is frozen except for customer visits.\n\n",
+        "Kind regards,\nHenrik",
+    ];
+    for grounding in [true, false] {
+        let local = Fake::new("local", Locality::OnDevice, &script);
+        let config = DraftConfig {
+            grounding,
+            grounding_check: nugget_draft::GroundingCheck::Sentences,
+            ..Default::default()
+        };
+        let s = setup(vec![local.clone()], config, Arc::new(NoVoice));
+        add_dated(
+            &s.store,
+            "k10",
+            "Q4 budget draft",
+            "Draft Q4 marketing budget of $310,000, including two trade shows and a paid \
+campaign for the Atlas launch.",
+            Date::from_calendar_date(2026, Month::August, 30).unwrap(),
+        );
+        add_dated(
+            &s.store,
+            "k11",
+            "Q4 budget approved",
+            "Decision: the board approved a Q4 marketing budget of $275,000. Travel is frozen \
+except for customer visits. One trade show was cut.",
+            Date::from_calendar_date(2026, Month::September, 25).unwrap(),
+        );
+        let (started, stream) = s.drafter.begin(request(budget_ctx())).await.unwrap();
+        let dates: Vec<(&str, Option<&str>)> = started
+            .citations
+            .iter()
+            .map(|c| (c.item.key.as_str(), c.date.as_deref()))
+            .collect();
+        assert!(dates.contains(&("k10", Some("2026-08-30"))), "{dates:?}");
+        assert!(dates.contains(&("k11", Some("2026-09-25"))), "{dates:?}");
+        let user = user_text(&local.last());
+        let (text, events) = collect(stream).await;
+        assert!(matches!(events.last(), Some(Ok(ChatEvent::Done { .. }))));
+        let timings = s.drafter.timings(&started.stream_id).unwrap();
+        if grounding {
+            assert!(
+                user.contains("\"Q4 budget draft\"; superseded by F"),
+                "{user}"
+            );
+            assert!(user.contains("Never state a value from a fact marked superseded"));
+            assert_eq!(
+                text,
+                "Dear Ravi,\n\nThe board approved a Q4 marketing budget of $275,000. Travel is \
+frozen except for customer visits.\n\nKind regards,\nHenrik"
+            );
+            let report = timings.grounding.expect("grounding report");
+            assert_eq!(report.sentences_dropped, 1);
+            assert_eq!(report.values_superseded, 1);
+            assert!(!report.fallback);
+        } else {
+            assert!(user.contains("] Q4 budget draft (notes)"), "{user}");
+            assert!(!user.contains("superseded"));
+            assert!(text.contains("assumes a budget of $310,000."), "{text}");
+            assert!(timings.grounding.is_none());
+        }
     }
 }
 
@@ -941,8 +1048,9 @@ async fn local_budget_keeps_the_best_snippets_and_matching_citations() {
     let items: Vec<&str> = req.items.iter().map(|i| i.key.as_str()).collect();
     assert_eq!(items, keys(&started));
     let ctx = context_of(&req);
-    assert!(ctx.starts_with("[1] "), "{ctx}");
-    assert!(!ctx.contains("[2] "), "{ctx}");
+    // Grounding (on by default) renders the passages as facts F1, F2, ...
+    assert!(ctx.starts_with("F1 ("), "{ctx}");
+    assert!(!ctx.contains("F2 ("), "{ctx}");
     assert!(user_text(&req).len() < user_text(&full.last()).len());
 }
 

@@ -1358,6 +1358,7 @@ mod tests {
                 title: Some("walk.md".into()),
                 url: None,
                 sensitive: false,
+                date: None,
             }],
             excluded_sensitive: 0,
         };

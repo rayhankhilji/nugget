@@ -28,6 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::FieldKind;
 use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
+use crate::grounding::{Grounder, GroundingCheck, GroundingReport};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
 use crate::prompt::{
     LengthBand, PromptInput, PromptLimits, SYSTEM_RULES, build_request, cache_key, channel_for,
@@ -180,6 +181,13 @@ pub struct DraftConfig {
     pub voice_timeout_ms: u64,
     /// How long a prewarmed retrieval stays usable.
     pub prewarm_ttl_ms: u64,
+    /// Grounding (AA3): the context goes in as a dated facts block (superseded facts marked,
+    /// sensitive ones marked private) and the streamed draft is checked ([`Self::grounding_check`]).
+    pub grounding: bool,
+    /// What the streaming check does when `grounding` is on: stop a copied credential while
+    /// streaming word by word (the default: it adds next to no latency), or hold and check
+    /// whole sentences, values included (see `bench/README.md`, "Grounded drafts").
+    pub grounding_check: GroundingCheck,
     #[serde(skip)]
     pub limits: PromptLimits,
     /// Smaller prompts for on-device and LAN providers ([`LocalBudget`]); cloud providers keep
@@ -244,6 +252,8 @@ impl Default for DraftConfig {
             retrieval_timeout_ms: 1_500,
             voice_timeout_ms: 500,
             prewarm_ttl_ms: 30_000,
+            grounding: true,
+            grounding_check: GroundingCheck::default(),
             limits: PromptLimits::default(),
             local: LocalBudget::default(),
             read_ahead: ReadAheadConfig::default(),
@@ -269,6 +279,9 @@ pub struct DraftTimings {
     pub total_ms: Option<u64>,
     /// Providers tried (more than one after a fallback).
     pub attempts: u32,
+    /// What the grounding check dropped (when grounding is on), set when the draft completes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grounding: Option<Box<GroundingReport>>,
     /// Prompt tokens of the request, cached or not (from the provider's stats).
     #[serde(default)]
     pub prompt_tokens: Option<u64>,
@@ -682,8 +695,13 @@ impl Drafter {
                         lock(&self.inner.last_full).insert(provider.id().clone(), fp);
                     }
                     timings.provider_open_ms = Some(ms(t0.elapsed()));
+                    // Values read off a screenshot can't be checked, so no post-check then.
+                    let ground = (config.grounding && !screenshot).then(|| {
+                        Grounder::for_draft(ctx, &context, req.instruction.as_deref(), &voice)
+                            .with_check(config.grounding_check)
+                    });
                     return Ok(self.start(
-                        provider, kind, ctx, context, screenshot, band, stream, t0, timings,
+                        provider, kind, ctx, context, screenshot, band, stream, t0, timings, ground,
                     ));
                 }
                 Err(e) if !explicit && is_fallback_error(&e) => {
@@ -739,6 +757,7 @@ impl Drafter {
             screenshot,
             band,
             limits: self.limits_for(cloud),
+            grounding: config.grounding,
         };
         let max_tokens = req
             .max_tokens
@@ -1298,6 +1317,7 @@ impl Drafter {
         stream: ChatStream,
         t0: Instant,
         timings: DraftTimings,
+        ground: Option<Grounder>,
     ) -> (DraftStarted, DraftStream) {
         let stream_id = uuid::Uuid::new_v4().to_string();
         let meta = provider.meta();
@@ -1365,6 +1385,7 @@ impl Drafter {
         let state = PumpState {
             upstream: Some(stream),
             post: PostProcessor::new(opts),
+            ground,
             pending: VecDeque::new(),
             cancel: cancel.clone(),
             timings: timings.clone(),
@@ -1602,6 +1623,8 @@ fn is_fallback_error(e: &Error) -> bool {
 struct PumpState {
     upstream: Option<ChatStream>,
     post: PostProcessor,
+    /// The grounding post-check on the post-processor's output.
+    ground: Option<Grounder>,
     pending: VecDeque<Result<ChatEvent>>,
     cancel: CancellationToken,
     timings: Arc<Mutex<DraftTimings>>,
@@ -1686,7 +1709,15 @@ impl PumpState {
         }
     }
 
-    fn emit(&mut self, e: Emit) {
+    fn emit(&mut self, mut e: Emit) {
+        if let Some(g) = self.ground.as_mut() {
+            let last = e.stop || self.post.is_finished();
+            e.text = g.feed(&e.text, last);
+            if last {
+                let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
+                t.grounding = Some(Box::new(g.report().clone()));
+            }
+        }
         if !e.text.is_empty() {
             {
                 let mut t = self.timings.lock().unwrap_or_else(|e| e.into_inner());
@@ -1802,6 +1833,7 @@ mod tests {
             title: title.map(str::to_owned),
             url: None,
             sensitive: false,
+            date: None,
         }
     }
 

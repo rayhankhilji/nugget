@@ -369,6 +369,8 @@ pub struct PromptInput<'a> {
     pub screenshot: bool,
     pub band: LengthBand,
     pub limits: PromptLimits,
+    /// Render the context as a grounded facts block (see `DraftConfig::grounding`).
+    pub grounding: bool,
 }
 
 /// The system prompt: fixed rules, then the voice.
@@ -428,7 +430,9 @@ pub fn user_text(input: &PromptInput<'_>) -> String {
     ));
 
     let passages = input.context.text.trim();
-    if !passages.is_empty() {
+    if input.grounding {
+        out.push_str(&crate::prompt_facts::facts_section(input.context));
+    } else if !passages.is_empty() {
         out.push_str(
             "\nBackground from the user's own notes, files, mail and calendar. Use it only where \
 relevant; never mention or cite it:\n<context>\n",
@@ -583,6 +587,7 @@ mod tests {
             screenshot: false,
             band: LengthBand::for_draft(FieldKind::ChatMessage, voice),
             limits: PromptLimits::default(),
+            grounding: false,
         }
     }
 

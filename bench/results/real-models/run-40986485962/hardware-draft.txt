@@ -1,0 +1,11 @@
+suite: draft
+runner: GitHub Actions 1000010019 (Linux X64)
+commit: a24eb0dc73cbb1e5b2941a9e36d9c4367828367f
+date: 2026-10-30T01:36:25Z
+CPU(s):                                  4
+Model name:                              AMD EPYC 7763 64-Core Processor
+Thread(s) per core:                      2
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext 
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           8           0           5          14
+Swap:              2           0           2

@@ -31,6 +31,8 @@ pub(crate) struct PackItem {
     pub url: Option<String>,
     /// The item is marked sensitive (see `Citation::sensitive`).
     pub sensitive: bool,
+    /// The item's date (`YYYY-MM-DD`), for `Citation::date`.
+    pub date: Option<String>,
     pub primary: Chunk,
     /// Chunks at `ord - 1` and `ord + 1` that exist.
     pub neighbours: Vec<Chunk>,
@@ -236,6 +238,7 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
                 title: it.title.clone(),
                 url: it.url.clone(),
                 sensitive: it.sensitive,
+                date: it.date.clone(),
             }
         })
         .collect();
@@ -286,6 +289,7 @@ mod tests {
             title: Some(key.to_uppercase()),
             url: None,
             sensitive: false,
+            date: None,
             primary,
             neighbours,
             secondary,

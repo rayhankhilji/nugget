@@ -74,6 +74,9 @@ struct Cli {
     local: nugget_bench::local::LocalOptions,
 
     #[command(flatten)]
+    knowledge: nugget_bench::suites::knowledge::KnowledgeOptions,
+
+    #[command(flatten)]
     doubletap: nugget_bench::suites::doubletap::DoubletapOptions,
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
@@ -243,6 +246,7 @@ fn main() -> ExitCode {
         embed_model: cli.embed_model.clone(),
         draft: cli.draft.clone(),
         local: cli.local.clone(),
+        knowledge: cli.knowledge.clone(),
         doubletap: cli.doubletap.clone(),
     };
     let mut failed = false;

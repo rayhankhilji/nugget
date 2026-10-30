@@ -240,6 +240,8 @@ export interface Citation {
   url?: string | null;
   /** The item is marked sensitive (PII or triage): it is never sent to cloud models. */
   sensitive?: boolean;
+  /** The item's date (`YYYY-MM-DD`): source modification time, else last update. */
+  date?: string;
 }
 
 export interface ContextResponse {
