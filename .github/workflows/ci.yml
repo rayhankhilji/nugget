@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ff/mcp-plugins] # TEMP-FF4
   pull_request:
   merge_group:
   workflow_dispatch:
