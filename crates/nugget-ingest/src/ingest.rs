@@ -449,7 +449,31 @@ fn info_of(slot: &Slot, counts: Option<&SourceCounts>) -> SourceInfo {
         last_sync: slot.status.last_sync,
         last_error: slot.status.last_error.clone(),
         settings: slot.entry.settings.clone(),
+        health: Some(health_of(slot)),
     }
+}
+
+/// Plain-language health from the slot's state, last error and item errors of the last day.
+fn health_of(slot: &Slot) -> nugget_core::ipc::SourceHealth {
+    let since = OffsetDateTime::now_utc() - time::Duration::days(1);
+    let recent: Vec<&ItemError> = slot
+        .status
+        .errors
+        .iter()
+        .filter(|e| e.key.is_some() && e.at >= since)
+        .collect();
+    let state = if slot.entry.enabled {
+        slot.status.state
+    } else {
+        SourceState::Disabled
+    };
+    nugget_connector::health::diagnose(
+        &slot.entry.kind,
+        state,
+        slot.status.last_error.as_deref(),
+        recent.len() as u64,
+        recent.last().map(|e| e.message.as_str()),
+    )
 }
 
 /// Builder for [`Ingest`] with injectable secrets and power policy (tests, headless runs).
