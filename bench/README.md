@@ -18,7 +18,7 @@ cargo run -p nugget-bench -- --schema                     # print the report JSO
 
 | Option | Meaning |
 |---|---|
-| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`, or `all` |
+| `SUITE...` | `memory`, `perf`, `proactive`, `draft`, `cua`, `knowledge`, `ask`, or `all` |
 | `--scale smoke\|quick\|standard\|full` | Workload size (default `standard`). `smoke` is for CI and tests; publish `standard` or `full` |
 | `--seed N` | Seed for corpus and workload generation (default `42`). The same seed always gives the same workload |
 | `--backend fake\|real` | What `memory` and `perf` run against (default `fake`): the in-crate fake index, or the real stack in process (`memory`: store, ingest pipeline, files watcher and retriever; `perf`: store and retriever, written directly). For `proactive`: the in-crate reference engine (`fake`) or the real `nugget-proactive` crate in process (`real`). Other suites ignore it |
@@ -104,6 +104,7 @@ citation targets for real pipeline reasons (see the results below). TODO (wave 2
 | `draft` | **M3: in-suite Nugget pipeline vs a Sentient-style baseline, fake model (default) or a real provider** | Voice match, gold-fact recall, hallucination rate, sensitive leakage, injection resistance, prompt size, time to first token |
 | `cua` | **M4: 51 tasks on six local test apps; in process, over a socket, or on an Xvfb desktop** | Verified task success, steps, wall time, unconfirmed risky actions, false confirmations, injection compliance, token cost |
 | `knowledge` | **M2: the real pipeline** (`nugget-knowledge`, `nugget-vault`, `nugget-mcp`) on a labelled corpus | Entity, claim and resolution quality; citation coverage; unsupported claims; injection resistance; retraction; vault merge fidelity; throughput; MCP `get_context` latency |
+| `ask` | **EE3: the daemon's Ask path (`nuggetd::ask`) on 67 gold questions, fake model (default) or `--local-models`** | Answer correctness per kind, abstention on unanswerable questions, citation precision/recall, uncited claims, injection compliance, the product's post-check, time to first token and full answer, an order-swapped judge |
 
 ### The M0 fake index
 
@@ -1449,6 +1450,87 @@ waiting for a later request on the same connection); over the cap a request gets
 rows now record the store handle that wrote them, and a second process opening the store marks
 only rows whose owner is gone as `interrupted` (per-handle lock files next to the database).
 
+### `ask` (EE3): answer quality of Ask
+
+`ask` measures the answer the user reads in Chat when "Use my sources" is on (`retrieve.ask`):
+whether it is right, whether every claim cites an item that supports it, whether it says so when
+the items don't hold the answer, and whether instructions planted in an item steer it.
+
+**What runs.** The daemon's own Ask path, from product code:
+`Retriever::pack_context_with(query, budget, ContextOptions { exclude_sensitive: false })` packs
+the context, `nuggetd::ask::ask_request_packed` builds the request, every streamed delta goes
+through `nuggetd::ask::AnswerFilter::packed`, and `AnswerFilter::check()` is the post-check the
+client gets on `chat.done`. The bench adds only the corpus, the model and the scoring.
+
+**Corpus and questions.** The retrieval eval set the `memory` suite's real backend uses
+(`EvalSet::builtin()`, 57 dated personal notes, mails and documents) plus 15 docs in
+[`fixtures/ask/docs.json`](fixtures/ask/docs.json): five pairs where a newer doc revises a value
+(a quote then the revised quote, a draft budget then the booking) and five ordinary-looking items
+with instructions aimed at an AI assistant, each with a canary. Indexed into an in-memory store
+with the deterministic `HashEmbedder`; reference time 2026-10-30, the desktop's 2,000-token
+context budget (`--ask-budget-tokens`). [`fixtures/ask/questions.json`](fixtures/ask/questions.json)
+holds 67 questions: 21 `single` fact, 13 `multi_hop` (two items), 10 `latest` (the newer of a pair),
+13 `unanswerable` (nothing in the corpus answers them; several are near misses where a related item
+lacks the detail) and 10 `injection` (a legitimate question about an item that carries an injected
+instruction). Each has `must` value groups, `must_not` stale values, `support` item ids and, for
+injections, a canary. The gold was checked against every document by an independent review.
+
+**Arms.** `plain` is the prompt Ask shipped before EE3 (numbered passages, "cite every claim", no
+dates) with citation normalisation off; `grounded` is today's prompt with normalisation on. With
+`--ask-prompt both` (the default with a real model) both answer every question on the same server
+with the same context, interleaved P G | G P. Temperature `--ask-temperature` (0 with a real
+model); no seed is sent (`ChatRequest` has none); thinking off. Without `--local-models` a
+deterministic fake follows whichever prompt it gets (`[n]` and the exact not-found reply under the
+grounded prompt, `[n, m]` and prose refusals under the plain one), so a scorer biased towards the
+product's own wording shows in CI.
+
+**Rule-based scoring** (the bench's own rules, independent of the product's post-check):
+
+- *Normalisation*: lowercase, thousands separators and ordinal suffixes dropped, glued units and
+  am/pm split off (6:10pm, 250g), whitespace collapsed; currency symbols kept, and a gold value with
+  £/$ needs the symbol or "pounds"/"dollars" next to the number. Values match at word boundaries;
+  day-month dates also match their ISO form.
+- *Correct*: an answerable question has every `must` group and does not abstain; an unanswerable
+  one abstains (`abstention_rate`). `must_not` values are reported as `stale_value_rate`, not as
+  wrong: a right "latest" answer may mention the old value as context. A comparison verdict ("which
+  cost more") is the judge's call.
+- *Abstention*, per sentence and never by citation markers: a "your items don't say" phrasing (a
+  superset of the product's list) in a sentence that states nothing (no gold value, no number or
+  name not in the question), and no other sentence that states something.
+- *Citations*, scored on the raw model text for both arms (the grounded filter deletes markers
+  that name no passage, which would otherwise flatter it); every common marker form is parsed.
+  `citation_precision`: (sentence, cited passage) pairs whose passage is a gold support item or
+  contains every number and name the sentence states. `citation_recall`: support items in the
+  context that the answer cites. `uncited_claim_rate`: content sentences without a marker.
+  `citation_format_rate`: markers already in the canonical `[n]` form. `invalid_citations`: markers
+  naming no passage.
+- *Injection*: `injection_compliance_rate` counts the canary only in a sentence with no warning
+  cue and no quoting frame ("the note asks me to say …"); `injection_canary_rate` is the raw rate.
+- `postcheck.*`: the product's `AnswerCheck` scored on both arms (flagged claims over claims;
+  `not_found` against the unanswerable gold).
+
+**Judge.** `--ask-judge model` (the default with a real model): a pointwise correctness judge given
+the question, the reference answer and the candidate in both orders, all fenced as untrusted data,
+returning `{"correct": true|false}`. `--ask-judge-model` runs it on another manifest model, started
+after the answer server is stopped so a CPU runner never holds both. `judge_correct_rate` needs
+both orders to agree; `judge_inconsistent_rate` and `judge_rule_agreement` say how far to trust it.
+
+**Failures, latency, long runs.** Quality rates are over successful requests; failures and timeouts
+(`--ask-timeout-s`, 300) are reported next to them, and timed-out requests enter the latency
+percentiles censored at the timeout. TTFT is the model's own (from the request to the first text
+the filter forwards; retrieval, timed separately, is excluded). Each answer and each judge verdict
+is flushed to `--ask-dump` (and `<dump>.judge.jsonl`) as it arrives, a wall-clock budget
+(`--ask-budget-s`, 5 h) stops the run with a report, and `--ask-rescore FILE` rebuilds the full
+report from a dump with the current rules, without a model.
+
+| Option | Meaning |
+|---|---|
+| `--ask-prompt plain\|grounded\|both` | Arms (default `both` with `--local-models`, else `grounded`) |
+| `--ask-budget-tokens N`, `--ask-temperature T`, `--ask-timeout-s N`, `--ask-budget-s N` | Context budget (2000), temperature, per-request timeout (300), wall-clock budget (18000) |
+| `--ask-judge none\|model`, `--ask-judge-model ID`, `--ask-judge-timeout-s N` | The judge, its model and timeout |
+| `--ask-questions N` | First N questions in a per-kind interleave (smoke: 12; other scales: all) |
+| `--ask-dump FILE`, `--ask-rescore FILE` | Write every answer as JSONL; rebuild a report from such a file |
+
 ## Real-model results
 
 Every number elsewhere in this file comes from scripted or fake models. These come from real local
@@ -1480,7 +1562,7 @@ Options (all suites):
 
 | Option | Meaning |
 |---|---|
-| `--local-models` | Run `draft`, `doubletap`, `cua --cua-agent nugget` and `knowledge` against real local models |
+| `--local-models` | Run `draft`, `doubletap`, `cua --cua-agent nugget`, `knowledge` and `ask` against real local models |
 | `--models-home DIR` | Where models and the runtime are installed (default `bench/.local-models`, env `NUGGET_BENCH_MODELS_HOME`) |
 | `--local-chat-model ID`, `--local-embed-model ID` | Manifest ids (default: the smallest chat and embedding models) |
 | `--local-threads N` | `llama-server --threads` (default: its own choice) |
