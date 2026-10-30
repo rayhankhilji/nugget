@@ -1,0 +1,107 @@
+name: QA GG7 (multilingual, real models)
+
+# GG7 (docs/waves/wave-gg/GG7.md): the shipped nuggetd, driven over IPC by qa/GG7/harness/gg7.py,
+# indexes the hand-written corpora in qa/GG7/corpus (nine UI languages and a mixed-language
+# mailbox) and answers search, Ask, Double Tap, knowledge and proactive calls with the signed
+# manifest's models served by llama-server on a CPU runner, as the app does. score.py turns the
+# transcripts into per-language verdicts. Reports and daemon logs are uploaded as artifacts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Comma-separated suites"
+        default: "search,ask,draft,knowledge,proactive"
+        type: string
+      langs:
+        description: "Comma-separated corpus folders"
+        default: "en,de,es,fr,hi,ja,pt-BR,zh-CN,ar,mixed"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The dev-signed bundled manifest, as evals.yml does (docs/release.md §4).
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  SUITES: ${{ inputs.suites || 'search,ask,draft,knowledge,proactive' }}
+  LANGS: ${{ inputs.langs || 'en,de,es,fr,hi,ja,pt-BR,zh-CN,ar,mixed' }}
+  # The models directory is shared with evals.yml's cache (same path, same key).
+  QA_HOME: ${{ github.workspace }}/bench/.local-models
+  RESULTS: ${{ github.workspace }}/gg7-results
+
+jobs:
+  gg7:
+    name: GG7 ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: 4b
+            chat_model: qwen3-4b-q4km
+          - label: 8b
+            chat_model: qwen3-8b-q4km
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg7
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build nuggetd
+        run: cargo build --release --locked -p nuggetd --bin nuggetd
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "label: ${{ matrix.label }} (${{ matrix.chat_model }})"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware.txt"
+
+      - name: Run GG7 scenarios
+        run: |
+          python3 qa/GG7/harness/gg7.py run --nuggetd target/release/nuggetd --home "$QA_HOME" \
+            --out "$RESULTS" --chat-model "${{ matrix.chat_model }}" \
+            --embed-model nomic-embed-text-v1.5-q8 --suites "$SUITES" --langs "$LANGS"
+
+      - name: Score
+        if: always()
+        run: python3 qa/GG7/harness/score.py "$RESULTS" | tee "$RESULTS/score.md"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gg7-${{ matrix.label }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90
