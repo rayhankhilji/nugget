@@ -7,17 +7,27 @@ name: Windows signing
 #  - `sign-script`: fast checks of sign.ps1 on a copied system exe, failure paths, the pinned
 #    Artifact Signing dlib download, and the Azure Trusted Signing command line (dry mode, plus one
 #    real signtool+dlib call against fake credentials that must fail without leaking the secret).
+#  - `azure-oidc` (manual runs only): sign.ps1 in Azure OIDC mode for real, with a fake app
+#    registration: the GitHub OIDC token is minted, Azure refuses it, nothing leaks.
 #  - `bundles`: builds the NSIS and MSI bundles with the sidecar as release.yml does, signing through
 #    sign.ps1 in thumbprint mode, then checks with signtool that verification fails while the
 #    throwaway root is untrusted and passes, timestamped, once it is trusted, for the setup exe, the
 #    MSI and the installed/extracted nugget-desktop.exe, nuggetd.exe and uninstall.exe.
 
 on:
+  # TEMPORARY while iterating: remove before the final push.
+  push:
+    branches: [ee/release-readiness]
+    paths: [".github/workflows/windows-signing.yml", "packaging/windows/**"]
   workflow_dispatch:
   pull_request:
     paths:
       - "packaging/windows/**"
       - ".github/workflows/windows-signing.yml"
+      - ".github/workflows/release.yml"
+      - "apps/desktop/package.json"
+      - "apps/desktop/pnpm-lock.yaml"
+      - "apps/desktop/src-tauri/tauri*.conf.json"
 
 permissions:
   contents: read
@@ -192,6 +202,66 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # A real signtool + dlib run in Azure OIDC mode with a fake app registration: the GitHub OIDC
+  # token must be minted and handed to Azure, which must refuse it. Manual runs only, so pull
+  # requests never get `id-token: write`.
+  azure-oidc:
+    name: sign.ps1 Azure OIDC (fake identity)
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push' # TEMPORARY: push
+    runs-on: windows-2022
+    permissions:
+      contents: read
+      id-token: write
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Sign with a fake Azure identity over OIDC
+        shell: pwsh
+        run: |
+          $sign = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
+          $work = Join-Path $env:RUNNER_TEMP 'oidc-check'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $dlib = & pwsh -NoLogo -NoProfile -File $sign -InstallDlib (Join-Path $work 'dlib') | Select-Object -Last 1
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          # A copy of a system exe, padded so the Windows catalog signature no longer applies.
+          $exe = Join-Path $work 'whoami-oidc.exe'
+          $bytes = [IO.File]::ReadAllBytes("$env:SystemRoot\System32\whoami.exe")
+          [IO.File]::WriteAllBytes($exe, $bytes + [byte[]]::new(16 - ($bytes.Length % 8)))
+
+          $env:AZURE_TRUSTED_SIGNING_ENDPOINT = 'https://eus.codesigning.azure.net'
+          $env:AZURE_TRUSTED_SIGNING_ACCOUNT = 'nugget-test-account'
+          $env:AZURE_TRUSTED_SIGNING_PROFILE = 'nugget-test-profile'
+          $env:AZURE_TRUSTED_SIGNING_DLIB = $dlib
+          $env:AZURE_CLIENT_ID = '11111111-1111-1111-1111-111111111111'
+          $env:AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222'
+          $summary = Join-Path $work 'summary.md'
+          $env:GITHUB_STEP_SUMMARY_SAVED = $env:GITHUB_STEP_SUMMARY
+          $env:GITHUB_STEP_SUMMARY = $summary
+          $out = & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $sign $exe 2>&1 | Out-String -Width 4096
+          $code = $LASTEXITCODE
+          $env:GITHUB_STEP_SUMMARY = $env:GITHUB_STEP_SUMMARY_SAVED
+          Write-Output $out
+
+          $fails = 0
+          function Check([string]$name, [bool]$ok) {
+            if ($ok) { Write-Output "ok   $name" } else { Write-Output "::error::FAIL $name"; $script:fails++ }
+          }
+          Check 'OIDC auth mode chosen' ($out -match 'auth: GitHub OIDC')
+          Check 'a GitHub OIDC token was minted' ($out -match 'minted a GitHub OIDC token')
+          Check 'Azure refused the fake identity (Entra error)' ($out -match 'AADSTS\d+')
+          Check 'sign.ps1 exits non-zero' ($code -ne 0)
+          Check 'the file stays unsigned' ((Get-AuthenticodeSignature -LiteralPath $exe).Status -eq 'NotSigned')
+          Check 'no JWT in the output' ($out -notmatch 'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}')
+          Check 'the OIDC request token is not in the output' (-not $out.Contains($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN))
+          $s = if (Test-Path $summary) { Get-Content -Raw $summary } else { '' }
+          Check 'the failure reaches the job summary' ($s -match 'Windows signing failed')
+          Check 'no JWT in the job summary' ($s -notmatch 'eyJ[A-Za-z0-9_-]{10,}\.eyJ')
+          if ($fails -gt 0) { exit 1 }
+          exit 0
+
   bundles:
     name: Signed bundles (throwaway certificate)
     runs-on: windows-2022
@@ -279,39 +349,22 @@ jobs:
         run: |
           $thumb = $env:NUGGET_TEST_CERT
           $logDir = Join-Path $env:RUNNER_TEMP 'signing-proof'
-          $script:failures = 0
-          $summary = @('## Windows signing proof', '', "Throwaway certificate ``$thumb``", '')
-          function Check([string]$name, [bool]$ok) {
-            if ($ok) { Write-Output "ok   $name" } else { Write-Output "::error::FAIL $name"; $script:failures++ }
-            $script:summary += "- $(if ($ok) { 'ok' } else { '**FAIL**' }): $name"
+          $bundle = "target\$env:TARGET\release\bundle"
+          if (Test-Path $env:NUGGET_SIGN_LOG) {
+            @('## Files Tauri passed to sign.ps1', '', '```') + (Get-Content $env:NUGGET_SIGN_LOG) + @('```', '') |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           }
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" |
             Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1 -ExpandProperty FullName
-          Write-Output "signtool: $signtool"
-          function Verify([string]$file, [string[]]$opts, [string]$tag) {
-            $out = & $signtool verify @opts $file 2>&1 | Out-String -Width 4096
-            $code = $LASTEXITCODE
-            $name = (Split-Path $file -Leaf) + ".$tag.txt"
-            "signtool verify $($opts -join ' ') $file`n(exit $code)`n$out" | Out-File -FilePath (Join-Path $logDir $name)
-            [pscustomobject]@{ Code = $code; Out = $out }
-          }
-
-          $bundle = "target\$env:TARGET\release\bundle"
-          $nsis = @(Get-ChildItem "$bundle\nsis\*-setup.exe")
-          $msi = @(Get-ChildItem "$bundle\msi\*.msi")
-          Check 'one NSIS installer and one MSI' ($nsis.Count -eq 1 -and $msi.Count -eq 1)
-          $nsis = $nsis[0].FullName; $msi = $msi[0].FullName
-
-          if (Test-Path $env:NUGGET_SIGN_LOG) {
-            $summary += '', 'Files Tauri passed to sign.ps1:', '```'
-            $summary += Get-Content $env:NUGGET_SIGN_LOG
-            $summary += '```', ''
-          }
 
           # (a) The throwaway root is not trusted yet, so policy verification must fail.
-          foreach ($f in $nsis, $msi) {
-            $r = Verify $f @('/pa', '/v') 'untrusted'
-            Check "$(Split-Path $f -Leaf) fails verification while the root is untrusted" ($r.Code -ne 0 -and $r.Out -match 'not trusted')
+          $bad = 0
+          foreach ($f in (Get-ChildItem "$bundle\nsis\*-setup.exe"), (Get-ChildItem "$bundle\msi\*.msi")) {
+            $out = & $signtool verify /pa /v $f.FullName 2>&1 | Out-String -Width 4096
+            $code = $LASTEXITCODE
+            "(exit $code)`n$out" | Out-File -FilePath (Join-Path $logDir "$($f.Name).untrusted.txt")
+            if ($code -ne 0 -and $out -match 'not trusted') { Write-Output "ok   $($f.Name) fails verification while the root is untrusted" }
+            else { Write-Output "::error::FAIL $($f.Name) verified (exit $code) although its root is untrusted"; $bad++ }
           }
 
           # (b) TEST ONLY: trust the throwaway certificate as a root, so the same signatures verify.
@@ -323,49 +376,9 @@ jobs:
           $root.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)) # public part only
           $root.Close()
 
-          # (c) Install the NSIS bundle and extract the MSI; the installed copies are what users run.
-          $inst = Join-Path $env:RUNNER_TEMP 'nsis-install'
-          $p = Start-Process -FilePath $nsis -ArgumentList '/S', "/D=$inst" -Wait -PassThru
-          Check 'NSIS silent install' ($p.ExitCode -eq 0)
-          $ext = Join-Path $env:RUNNER_TEMP 'msi-extract'
-          $p = Start-Process -FilePath msiexec.exe -ArgumentList '/a', "`"$msi`"", '/qn', "TARGETDIR=`"$ext`"" -Wait -PassThru
-          Check 'MSI administrative extract' ($p.ExitCode -eq 0)
-
-          $app = @(Get-ChildItem $inst -Filter *.exe | Where-Object { $_.Name -notin 'nuggetd.exe', 'uninstall.exe' })
-          $msiApp = @(Get-ChildItem $ext -Recurse -Filter *.exe | Where-Object { $_.Name -ne 'nuggetd.exe' })
-          $msiD = @(Get-ChildItem $ext -Recurse -Filter nuggetd.exe)
-          Check 'installed layout: one app exe, nuggetd.exe, uninstall.exe' ($app.Count -eq 1 -and
-            (Test-Path "$inst\nuggetd.exe") -and (Test-Path "$inst\uninstall.exe"))
-          Check 'MSI layout: one app exe, nuggetd.exe' ($msiApp.Count -eq 1 -and $msiD.Count -eq 1)
-
-          $targets = [ordered]@{
-            'NSIS setup' = $nsis
-            'MSI' = $msi
-            'NSIS-installed app' = $app[0].FullName
-            'NSIS-installed nuggetd.exe' = "$inst\nuggetd.exe"
-            'NSIS-installed uninstall.exe' = "$inst\uninstall.exe"
-            'MSI-extracted app' = $msiApp[0].FullName
-            'MSI-extracted nuggetd.exe' = $msiD[0].FullName
-          }
-          $summary += '', '| File | verify /pa /all | timestamped | signer |', '|---|---|---|---|'
-          foreach ($k in $targets.Keys) {
-            $f = $targets[$k]
-            $r = Verify $f @('/pa', '/all', '/v') ($k -replace '\W', '-')
-            $ok = $r.Code -eq 0 -and $r.Out -match 'Successfully verified'
-            $ts = $r.Out -match 'The signature is timestamped' -and $r.Out -notmatch 'is not timestamped'
-            $signer = $r.Out -match $thumb
-            Check "$k ($(Split-Path $f -Leaf)) verifies" $ok
-            Check "$k is timestamped" $ts
-            Check "$k is signed by the throwaway certificate" $signer
-            $summary += "| $k ``$(Split-Path $f -Leaf)`` | $(if ($ok) {'pass'} else {'FAIL'}) | $(if ($ts) {'yes'} else {'NO'}) | $(if ($signer) {'throwaway cert'} else {'OTHER'}) |"
-          }
-
-          $un = Start-Process -FilePath "$inst\uninstall.exe" -ArgumentList '/S', "_?=$inst" -Wait -PassThru
-          Write-Output "uninstall exit $($un.ExitCode)"
-
-          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          $summary | Out-File -FilePath (Join-Path $logDir 'summary.md') -Encoding utf8
-          if ($script:failures -gt 0) { Write-Output "::error::$($script:failures) check(s) failed"; exit 1 }
+          # (c) The same check release.yml runs on real releases, plus the expected signer.
+          ./packaging/windows/verify-signatures.ps1 -BundleDir $bundle -Thumbprint $thumb -LogDir $logDir
+          if ($LASTEXITCODE -ne 0 -or $bad -gt 0) { exit 1 }
           exit 0
 
       # (d) Leave nothing behind, pass or fail.

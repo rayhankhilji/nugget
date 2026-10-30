@@ -86,6 +86,11 @@ jobs:
       # every leg, dry runs included, may request a token; Azure accepts it only if the Entra
       # federated credential's subject matches, and that subject is
       # `repo:rayhankhilji/nugget:environment:release-build`, which only `v*` tags can deploy to.
+      # Known trade-off: on a real release every step of every leg (including the build scripts
+      # of every compiled crate) can mint such a token and so could use the Azure signing identity
+      # for as long as the job runs. On the Windows leg that equals the .pfx exposure (the key sits
+      # in the user store for the whole job). The proper fix is to split the compile (no id-token)
+      # from `tauri bundle` + signing (id-token, no third-party build scripts).
       id-token: write
     env:
       RELEASE: ${{ needs.mode.outputs.release }}
@@ -215,7 +220,7 @@ jobs:
       # Two ways to sign, both only on a real release:
       #  - Azure Trusted Signing (Artifact Signing): `release-build` environment variables
       #    AZURE_TRUSTED_SIGNING_ENDPOINT/_ACCOUNT/_PROFILE, AZURE_CLIENT_ID, AZURE_TENANT_ID; auth by
-      #    GitHub OIDC (federated credential), or the AZURE_CLIENT_SECRET secret if set. Tauri calls
+      #    GitHub OIDC only (federated credential, no client secret in CI). Tauri calls
       #    packaging/windows/sign.ps1 for every file through `bundle.windows.signCommand`.
       #  - an exportable .pfx (WINDOWS_CERTIFICATE/_PASSWORD), imported and used by thumbprint.
       # Trusted Signing wins if both are configured.
@@ -243,7 +248,7 @@ jobs:
             }
             $dlib = & ./packaging/windows/sign.ps1 -InstallDlib (Join-Path $env:RUNNER_TEMP 'artifact-signing') | Select-Object -Last 1
             if ($LASTEXITCODE -ne 0) { exit 1 }
-            # Identifiers only; the optional client secret goes to the build step alone.
+            # Identifiers only: sign.ps1 authenticates with the job's OIDC token.
             @(
               "AZURE_TRUSTED_SIGNING_ENDPOINT=$env:AZURE_TRUSTED_SIGNING_ENDPOINT"
               "AZURE_TRUSTED_SIGNING_ACCOUNT=$env:AZURE_TRUSTED_SIGNING_ACCOUNT"
@@ -251,6 +256,7 @@ jobs:
               "AZURE_TRUSTED_SIGNING_DLIB=$dlib"
               "AZURE_CLIENT_ID=$env:AZURE_CLIENT_ID"
               "AZURE_TENANT_ID=$env:AZURE_TENANT_ID"
+              "NUGGET_WINDOWS_SIGNED=1"
             ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             $script = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
             @{ bundle = @{ windows = @{ signCommand = @{
@@ -270,6 +276,7 @@ jobs:
           $pw = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
           $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
           Remove-Item $pfx
+          'NUGGET_WINDOWS_SIGNED=1' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           @{ bundle = @{ windows = @{ certificateThumbprint = $cert.Thumbprint } } } |
             ConvertTo-Json -Depth 4 | Out-File -FilePath $out -Encoding utf8NoBOM
 
@@ -285,11 +292,16 @@ jobs:
           # Public key only: the app verifies updates against it. Set as a repository variable.
           NUGGET_UPDATER_PUBKEY: ${{ env.RELEASE == 'true' && vars.NUGGET_UPDATER_PUBKEY || '' }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          # Optional fallback to OIDC for Azure Trusted Signing (sign.ps1); Windows leg only.
-          AZURE_CLIENT_SECRET: ${{ env.RELEASE == 'true' && runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
         run: |
           pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
             --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+
+      # NSIS signs the uninstaller in `!uninstfinalize` and ignores the sign command's exit status,
+      # so a signing failure there would not stop the build. Check every file users run.
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && env.NUGGET_WINDOWS_SIGNED == '1'
+        shell: pwsh
+        run: ./packaging/windows/verify-signatures.ps1 -BundleDir "target/${{ matrix.target }}/release/bundle"
 
       - name: Collect artifacts
         shell: bash

@@ -19,7 +19,9 @@
 #     AZURE_TRUSTED_SIGNING_PROFILE    the certificate profile name
 #     AZURE_TRUSTED_SIGNING_DLIB       path to bin\x64\Azure.CodeSigning.Dlib.dll (-InstallDlib)
 #     Authentication (the dlib uses Azure.Identity's DefaultAzureCredential), first match wins:
-#       AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_CLIENT_SECRET  app registration secret
+#       AZURE_CLIENT_ID + AZURE_TENANT_ID + AZURE_CLIENT_SECRET  app registration secret (for
+#         signing by hand or elsewhere; release.yml never passes one: a long-lived secret in the
+#         build step would be readable by every crate's build script)
 #       AZURE_CLIENT_ID + AZURE_TENANT_ID in a GitHub job with `id-token: write`: a fresh GitHub
 #         OIDC token is requested for every file and handed to WorkloadIdentityCredential, so no
 #         secret is stored and a long build never outlives the short-lived federated token
@@ -67,8 +69,13 @@ $DlibVersion = '1.0.146'
 $DlibSha256 = '7761e5d8f31e54b764da21d33cd8b0a2940e1b05526c7dfcb5e94b0431426f70'
 $TrustedSigningTimestamp = 'http://timestamp.acs.microsoft.com'
 
+# Tauri shows a sign command's output only with -v, so failures also go to the job summary.
+# Messages hold only paths and identifiers, never secrets.
 function Fail([string]$msg) {
     [Console]::Error.WriteLine("sign.ps1: error: $msg")
+    if ($env:GITHUB_STEP_SUMMARY) {
+        try { Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "- **Windows signing failed** (sign.ps1): $msg" } catch { }
+    }
     exit 1
 }
 function Log([string]$msg) { Write-Host "sign.ps1: $msg" }
@@ -217,11 +224,23 @@ try {
             # A fresh token per attempt: GitHub's OIDC tokens are short-lived, and a release build
             # signs its last file long after the job started.
             $req = $env:ACTIONS_ID_TOKEN_REQUEST_URL + '&audience=' + [Uri]::EscapeDataString('api://AzureADTokenExchange')
-            $resp = Invoke-RestMethod -Uri $req -Headers @{ Authorization = "bearer $($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)" }
-            if (-not $resp.value) { Fail 'the GitHub OIDC token request returned no token' }
+            $jwt = $null
+            try {
+                $resp = Invoke-RestMethod -Uri $req -Headers @{ Authorization = "bearer $($env:ACTIONS_ID_TOKEN_REQUEST_TOKEN)" }
+                $prop = if ($resp) { $resp.PSObject.Properties['value'] } else { $null }
+                if ($prop) { $jwt = [string]$prop.Value }
+            } catch {
+                Log "GitHub OIDC token request failed (attempt $attempt): $($_.Exception.Message)"
+            }
+            if (-not $jwt) {
+                $code = 1
+                if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt); continue }
+                Fail 'the GitHub OIDC token request returned no token (does the job have `id-token: write`?)'
+            }
             $tokenFile = Join-Path $tmp 'oidc-token'
-            Set-Content -LiteralPath $tokenFile -Value $resp.value -NoNewline -Encoding ascii
+            Set-Content -LiteralPath $tokenFile -Value $jwt -NoNewline -Encoding ascii
             $env:AZURE_FEDERATED_TOKEN_FILE = $tokenFile
+            Log 'minted a GitHub OIDC token for Azure (audience api://AzureADTokenExchange)'
         }
         Log "signing $File (attempt $attempt)"
         & $signtool @signArgs
