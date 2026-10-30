@@ -163,10 +163,14 @@ pub(crate) fn strip_html(s: &str, max: usize) -> String {
         match c {
             '<' => {
                 let mut tag = String::new();
+                // The last two characters before `>` (to find the end of a comment).
+                let mut tail = ['\0'; 2];
+                let comment = |tag: &str| tag.starts_with("!--");
                 for t in chars.by_ref() {
-                    if t == '>' {
+                    if t == '>' && (!comment(&tag) || (tag.len() >= 5 && tail == ['-', '-'])) {
                         break;
                     }
+                    tail = [tail[1], t];
                     if tag.len() < 16 {
                         tag.push(t.to_ascii_lowercase());
                     }
@@ -176,7 +180,10 @@ pub(crate) fn strip_html(s: &str, max: usize) -> String {
                     .split(|c: char| c.is_whitespace() || c == '/')
                     .next()
                     .unwrap_or("");
-                if matches!(name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3") {
+                if matches!(name, "script" | "style") && !tag.starts_with('/') {
+                    // Their content is code, never text: skip to the closing tag.
+                    skip_to_close(&mut chars, name);
+                } else if matches!(name, "br" | "p" | "div" | "li" | "tr" | "h1" | "h2" | "h3") {
                     out.push('\n');
                 }
             }
@@ -229,6 +236,27 @@ pub(crate) fn strip_html(s: &str, max: usize) -> String {
         cleaned.push('\n');
     }
     truncate_chars(cleaned.trim(), max)
+}
+
+/// Consume input up to and including `</name ...>` (ASCII case-insensitive), or to the end.
+fn skip_to_close(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, name: &str) {
+    let close: Vec<char> = format!("</{name}").chars().collect();
+    let mut matched = 0;
+    for c in chars.by_ref() {
+        if c.to_ascii_lowercase() == close[matched] {
+            matched += 1;
+            if matched == close.len() {
+                for t in chars.by_ref() {
+                    if t == '>' {
+                        break;
+                    }
+                }
+                return;
+            }
+        } else {
+            matched = usize::from(c == '<');
+        }
+    }
 }
 
 pub(crate) fn truncate_chars(s: &str, max: usize) -> String {
@@ -290,5 +318,18 @@ mod unit {
         assert_eq!(strip_html("plain", 3), "pla");
         let _ = strip_html("<a href='x", 10);
         let _ = strip_html("&#", 10);
+    }
+
+    #[test]
+    fn regression_strip_html_drops_script_style_and_comments() {
+        // Before the fix script and style bodies were kept as text, and a comment holding `>`
+        // leaked its rest.
+        let s = strip_html(
+            "<style>p{color:red}</style><SCRIPT type=x>if (a<b) alert('x')</ScRiPt >\
+             <!-- a > b hidden --><p>Kept &amp; shown</p><script>never closed",
+            1000,
+        );
+        assert_eq!(s, "Kept & shown");
+        assert_eq!(strip_html("a<!---->b", 100), "ab");
     }
 }

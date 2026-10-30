@@ -915,7 +915,8 @@ async fn a_fetched_message_must_be_the_one_asked_for() {
         .await;
     let conn = gmail(&h, fast_retry(0));
     let sink = RecSink::default();
+    // The spoofed answer is never indexed; it is one bad item, so the pass still completes.
     let r = run(&conn, None, &sink).await;
-    assert!(matches!(r, Err(Error::Invalid(_))), "{r:?}");
+    assert!(r.is_ok(), "{r:?}");
     assert!(sink.upserts().is_empty());
 }

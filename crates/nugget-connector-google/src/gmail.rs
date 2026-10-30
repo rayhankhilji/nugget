@@ -17,6 +17,16 @@
 //! (cheap: only unknown messages are fetched), so no message is wrongly taken as missing.
 //!
 //! Versions are `<historyId>@<internalDate ms>`, so the window test needs no extra request.
+//!
+//! One bad message never stops a pass: a malformed or mismatched `messages.get` answer is
+//! skipped, and a message whose fetch keeps failing (5xx or network after the in-pass
+//! retries) is carried in the cursor as `"refetch":["<id>",...]` (either phase, omitted when
+//! empty) and fetched again on the next pass. Only [`MAX_FAILURE_STREAK`] failures in a row
+//! (Google is down, not one message) end the pass with the error. Messages larger than
+//! [`MAX_MESSAGE_BYTES`] are skipped.
+//!
+//! Scopes: `gmail.readonly` (read messages and history; the default), or `gmail.modify` only
+//! when the source opts into `allow_modify` (archiving from Nugget). Nothing else is requested.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -64,6 +74,10 @@ const DRAFT: &str = "DRAFT";
 const HIDDEN: &[&str] = &["SPAM", "TRASH"];
 /// Label changes too frequent and low-value to justify re-fetching a message.
 const IGNORED_LABEL_CHANGES: &[&str] = &["UNREAD"];
+/// Largest `messages.get?format=raw` response downloaded; larger messages are skipped.
+const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+/// Consecutive per-message failures after which the pass gives up (an outage, not one item).
+const MAX_FAILURE_STREAK: u32 = 8;
 
 /// Gmail's `raw` is base64url; padding varies.
 const B64URL: GeneralPurpose = GeneralPurpose::new(
@@ -84,12 +98,18 @@ enum Cursor {
         /// Check every indexed message the listing misses, not only those inside the window.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         reconcile: bool,
+        /// Messages whose fetch failed, to fetch again.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refetch: Vec<String>,
     },
     Incremental {
         history_id: String,
         /// Unlisted messages still to be checked after a resync, most likely deleted first.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         verify: Vec<String>,
+        /// Messages whose fetch failed, to fetch again.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refetch: Vec<String>,
     },
 }
 
@@ -104,6 +124,8 @@ impl Cursor {
 pub struct GmailFactory {
     endpoints: GoogleEndpoints,
     retry: RetryPolicy,
+    /// Test override of [`MAX_MESSAGE_BYTES`].
+    max_message_bytes: Option<usize>,
 }
 
 impl GmailFactory {
@@ -118,6 +140,12 @@ impl GmailFactory {
 
     pub fn with_retry(mut self, retry: RetryPolicy) -> Self {
         self.retry = retry;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_max_message_bytes(mut self, max: usize) -> Self {
+        self.max_message_bytes = Some(max);
         self
     }
 }
@@ -179,6 +207,7 @@ impl GmailFactory {
             api,
             actions,
             base: self.endpoints.gmail_api.clone(),
+            max_message_bytes: self.max_message_bytes.unwrap_or(MAX_MESSAGE_BYTES),
             settings,
             ctx,
         })
@@ -191,6 +220,7 @@ pub struct GmailConnector {
     /// Same account, metered as [`ACTION_FEATURE`]; only with `allow_modify`.
     actions: Option<GoogleApi>,
     base: String,
+    max_message_bytes: usize,
     settings: GmailSettings,
     ctx: ConnectorContext,
 }
@@ -299,6 +329,44 @@ impl Plan {
     }
 }
 
+/// Per-message failures of one pass (see the module docs).
+#[derive(Default)]
+struct Failures {
+    /// Messages to fetch again (carried ones not yet retried, plus this pass's failures).
+    refetch: Vec<String>,
+    /// What the cursor carried in; fetched again at the end of this pass.
+    carried: Vec<String>,
+    /// Messages fetched in this pass (not fetched twice).
+    tried: HashSet<String>,
+    /// Failures in a row.
+    streak: u32,
+}
+
+impl Failures {
+    fn new(carried: Vec<String>) -> Self {
+        Self {
+            refetch: carried.clone(),
+            carried,
+            ..Default::default()
+        }
+    }
+
+    fn carry(&mut self, id: &str) {
+        if self.refetch.len() < MAX_CARRY && !self.refetch.iter().any(|r| r == id) {
+            self.refetch.push(id.to_string());
+        }
+    }
+}
+
+/// What became of one message fetch.
+enum Fetched {
+    Doc(Document),
+    /// Gone, or not indexed (draft, spam, trash, too large).
+    NotIndexed,
+    /// This message failed; the pass goes on.
+    Failed,
+}
+
 enum HistoryOutcome {
     /// Caught up; the history id to resume from.
     Done(String),
@@ -341,7 +409,9 @@ impl Connector for GmailConnector {
                 if reconcile {
                     tracing::info!(source = %self.ctx.source, "gmail cursor reset; reconciling resync");
                 }
-                let c = self.start_backfill(reconcile, reconcile, cancel).await?;
+                let c = self
+                    .start_backfill(reconcile, reconcile, Vec::new(), cancel)
+                    .await?;
                 sink.checkpoint(c.to_value()).await?;
                 c
             }
@@ -354,17 +424,32 @@ impl Connector for GmailConnector {
                 Cursor::Incremental {
                     ref history_id,
                     ref verify,
-                } => match self.history(history_id, verify, sink, cancel).await? {
-                    HistoryOutcome::Done(history_id) => {
-                        let verify = self.verify_carried(verify.clone(), sink, cancel).await?;
-                        return Ok(Cursor::Incremental { history_id, verify }.to_value());
+                    ref refetch,
+                } => {
+                    let mut fails = Failures::new(refetch.clone());
+                    match self
+                        .history(history_id, verify, &mut fails, sink, cancel)
+                        .await?
+                    {
+                        HistoryOutcome::Done(history_id) => {
+                            let verify = self.verify_carried(verify.clone(), sink, cancel).await?;
+                            let refetch = self.refetch(fails, sink, cancel).await?;
+                            return Ok(Cursor::Incremental {
+                                history_id,
+                                verify,
+                                refetch,
+                            }
+                            .to_value());
+                        }
+                        HistoryOutcome::Expired => {
+                            tracing::info!(source = %self.ctx.source, "gmail history id expired; resyncing");
+                            cur = self
+                                .start_backfill(true, false, fails.refetch, cancel)
+                                .await?;
+                            sink.checkpoint(cur.to_value()).await?;
+                        }
                     }
-                    HistoryOutcome::Expired => {
-                        tracing::info!(source = %self.ctx.source, "gmail history id expired; resyncing");
-                        cur = self.start_backfill(true, false, cancel).await?;
-                        sink.checkpoint(cur.to_value()).await?;
-                    }
-                },
+                }
             }
         }
     }
@@ -413,6 +498,7 @@ impl GmailConnector {
         &self,
         resync: bool,
         reconcile: bool,
+        refetch: Vec<String>,
         cancel: &CancellationToken,
     ) -> Result<Cursor> {
         let resp = self.api.get(&self.url(&["profile"], &[])?, cancel).await?;
@@ -428,6 +514,7 @@ impl GmailConnector {
             page_token: None,
             resync,
             reconcile,
+            refetch,
         })
     }
 
@@ -444,10 +531,12 @@ impl GmailConnector {
             mut page_token,
             resync,
             reconcile,
+            refetch,
         } = cur
         else {
             return Ok(cur);
         };
+        let mut fails = Failures::new(refetch);
         if resync && page_token.is_some() {
             // Pages listed before the interruption are not remembered: list again from the
             // start rather than take their messages for missing.
@@ -495,10 +584,13 @@ impl GmailConnector {
                 .cloned()
                 .collect();
             let mut fetched = futures::stream::iter(todo)
-                .map(|id: String| async move { self.fetch(&id, cancel).await })
+                .map(|id: String| async move {
+                    let r = self.fetch(&id, cancel).await;
+                    (id, r)
+                })
                 .buffered(FETCH_CONCURRENCY);
-            while let Some(doc) = fetched.next().await {
-                if let Some(doc) = doc? {
+            while let Some((id, r)) = fetched.next().await {
+                if let Fetched::Doc(doc) = self.settle(&id, r, &mut fails)? {
                     sink.send(Change::Upsert(doc)).await?;
                 }
             }
@@ -513,6 +605,7 @@ impl GmailConnector {
                         page_token: page_token.clone(),
                         resync,
                         reconcile,
+                        refetch: fails.refetch.clone(),
                     };
                     sink.checkpoint(c.to_value()).await?;
                 }
@@ -530,7 +623,80 @@ impl GmailConnector {
             }
             verify = self.verify_batch(missing.check, sink, cancel).await?;
         }
-        Ok(Cursor::Incremental { history_id, verify })
+        let refetch = self.refetch(fails, sink, cancel).await?;
+        Ok(Cursor::Incremental {
+            history_id,
+            verify,
+            refetch,
+        })
+    }
+
+    /// Sort one message's fetch result: errors that concern only this message are logged and
+    /// the pass goes on (transient ones carried for a later pass); rate limits, auth failures,
+    /// cancellation and a run of [`MAX_FAILURE_STREAK`] failures end the pass.
+    fn settle(
+        &self,
+        id: &str,
+        r: Result<Option<Document>>,
+        fails: &mut Failures,
+    ) -> Result<Fetched> {
+        fails.tried.insert(id.to_string());
+        fails.refetch.retain(|r| r != id);
+        let e = match r {
+            Ok(Some(doc)) => {
+                fails.streak = 0;
+                return Ok(Fetched::Doc(doc));
+            }
+            Ok(None) => {
+                fails.streak = 0;
+                return Ok(Fetched::NotIndexed);
+            }
+            Err(e) => e,
+        };
+        let transient = match &e {
+            Error::Network(_) => true,
+            Error::Invalid(_) | Error::Other(_) => false,
+            _ => return Err(e),
+        };
+        fails.streak += 1;
+        if fails.streak >= MAX_FAILURE_STREAK {
+            return Err(e);
+        }
+        if transient {
+            tracing::warn!(source = %self.ctx.source, message = id, "gmail: fetch failed, retrying next pass: {e}");
+            fails.carry(id);
+        } else {
+            tracing::warn!(source = %self.ctx.source, message = id, "gmail: skipping a bad message: {e}");
+        }
+        Ok(Fetched::Failed)
+    }
+
+    /// Fetch the messages carried from earlier failures; return those that failed again.
+    async fn refetch(
+        &self,
+        mut fails: Failures,
+        sink: &dyn ChangeSink,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>> {
+        // Only what earlier passes carried in: this pass's own failures wait for the next one.
+        let todo: Vec<String> = std::mem::take(&mut fails.carried)
+            .into_iter()
+            .filter(|id| valid_id(id) && !fails.tried.contains(id))
+            .collect();
+        let mut fetched = futures::stream::iter(todo)
+            .map(|id: String| async move {
+                let r = self.fetch(&id, cancel).await;
+                (id, r)
+            })
+            .buffered(FETCH_CONCURRENCY);
+        while let Some((id, r)) = fetched.next().await {
+            match self.settle(&id, r, &mut fails)? {
+                Fetched::Doc(doc) => sink.send(Change::Upsert(doc)).await?,
+                Fetched::NotIndexed => sink.send(Change::Delete(ItemKey::new(id))).await?,
+                Fetched::Failed => {}
+            }
+        }
+        Ok(fails.refetch)
     }
 
     /// Continue the checks a resync left in the cursor, skipping messages no longer indexed.
@@ -616,7 +782,11 @@ impl GmailConnector {
     /// (draft, spam, trash) or too large to download.
     async fn fetch(&self, id: &str, cancel: &CancellationToken) -> Result<Option<Document>> {
         let url = self.url(&["messages", id], &[("format", "raw")])?;
-        let resp = match self.api.get(&url, cancel).await {
+        let resp = match self
+            .api
+            .get_capped(&url, self.max_message_bytes, cancel)
+            .await
+        {
             Ok(r) => r,
             Err(Error::Invalid(m)) if m.contains("exceeds") => {
                 tracing::warn!(source = %self.ctx.source, message = id, "skipping oversized message");
@@ -695,6 +865,7 @@ impl GmailConnector {
         &self,
         start: &str,
         verify: &[String],
+        fails: &mut Failures,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<HistoryOutcome> {
@@ -730,7 +901,7 @@ impl GmailConnector {
             if let Some(r) = page.history.last() {
                 last_record = r.id.clone();
             }
-            self.apply(plan, sink, cancel).await?;
+            self.apply(plan, fails, sink, cancel).await?;
             match page.next_page_token.filter(|t| !t.is_empty()) {
                 Some(t) => {
                     pages.next(&t, "gmail history.list")?;
@@ -738,6 +909,7 @@ impl GmailConnector {
                     let c = Cursor::Incremental {
                         history_id: last_record.clone(),
                         verify: verify.to_vec(),
+                        refetch: fails.refetch.clone(),
                     };
                     sink.checkpoint(c.to_value()).await?;
                 }
@@ -792,6 +964,7 @@ impl GmailConnector {
     async fn apply(
         &self,
         plan: Plan,
+        fails: &mut Failures,
         sink: &dyn ChangeSink,
         cancel: &CancellationToken,
     ) -> Result<()> {
@@ -806,17 +979,20 @@ impl GmailConnector {
             .collect();
         let mut results = futures::stream::iter(steps)
             .map(|(id, action): (String, Action)| async move {
-                match action {
-                    Action::Delete => Ok((id, None)),
-                    Action::Fetch => self.fetch(&id, cancel).await.map(|d| (id, d)),
-                }
+                let r = match action {
+                    Action::Delete => Ok(None),
+                    Action::Fetch => self.fetch(&id, cancel).await,
+                };
+                (id, r)
             })
             .buffered(FETCH_CONCURRENCY);
-        while let Some(r) = results.next().await {
-            let change = match r? {
-                (_, Some(doc)) => Change::Upsert(doc),
+        while let Some((id, r)) = results.next().await {
+            let change = match self.settle(&id, r, fails)? {
+                Fetched::Doc(doc) => Change::Upsert(doc),
                 // Deleted, gone since, or moved to spam/trash/drafts: not in the index.
-                (id, None) => Change::Delete(ItemKey::new(id)),
+                Fetched::NotIndexed => Change::Delete(ItemKey::new(id)),
+                // Failed: the indexed version (if any) stays until the refetch.
+                Fetched::Failed => continue,
             };
             sink.send(change).await?;
         }
@@ -882,6 +1058,7 @@ mod unit {
             page_token: Some("p".into()),
             resync: false,
             reconcile: true,
+            refetch: Vec::new(),
         };
         let v = c.to_value();
         assert_eq!(v["phase"], "backfill");
@@ -889,6 +1066,7 @@ mod unit {
         let v = Cursor::Incremental {
             history_id: "10".into(),
             verify: Vec::new(),
+            refetch: Vec::new(),
         }
         .to_value();
         assert_eq!(v, json!({"phase": "incremental", "history_id": "10"}));

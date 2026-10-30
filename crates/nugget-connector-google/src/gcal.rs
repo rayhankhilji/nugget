@@ -17,6 +17,10 @@
 //! restarts its listing, so no event is wrongly taken as missing.
 //!
 //! Versions are `<etag>#<start>:<end>` (Unix seconds), so the window test needs no request.
+//!
+//! Events are parsed one by one: a malformed entry is skipped and never fails its page.
+//!
+//! Scopes: `calendar.readonly` only (list calendars and read events); nothing is ever written.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -196,8 +200,9 @@ struct EventList {
     summary: Option<String>,
     #[serde(default, rename = "timeZone")]
     time_zone: Option<String>,
+    /// Parsed one by one, so one malformed event does not fail the page.
     #[serde(default)]
-    items: Vec<Event>,
+    items: Vec<Value>,
     #[serde(rename = "nextPageToken")]
     next_page_token: Option<String>,
     #[serde(rename = "nextSyncToken")]
@@ -478,6 +483,13 @@ impl CalendarConnector {
                 info.time_zone = page.time_zone.clone();
             }
             for ev in page.items {
+                let ev = match serde_json::from_value::<Event>(ev) {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        tracing::warn!(source = %self.ctx.source, calendar = cal, "gcal: skipping a malformed event ({e})");
+                        continue;
+                    }
+                };
                 if !valid_event_id(&ev.id) {
                     continue;
                 }
