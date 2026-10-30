@@ -1,9 +1,11 @@
 # Benchmark reports are machine-specific; publish curated numbers in the README instead.
 # Exceptions: the nightly results the README table and the dashboard are generated from, and
-# the real-model reports behind the README's "Real-model results".
+# the real-model reports behind the README's "Real-model results", and the energy reports behind
+# its "Energy" section.
 /results/*
 !/results/latest.json
 !/results/history/
 !/results/real-models/
+!/results/energy/
 # `--local-models` downloads (models and llama-server builds).
 /.local-models/
