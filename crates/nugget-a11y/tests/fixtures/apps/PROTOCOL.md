@@ -39,6 +39,12 @@ title is `Nugget fixture: <editor name>`.
 - `contexts.<c>.messages` are oldest first; `text` is the message body as a reader sees it
   (whitespace collapsed, quoted history excluded). The page also renders decoys (a sidebar of
   other conversations with previews, a toolbar, a status line) that are **not** messages.
+- In `chat`, the user's own messages have `"author": "You"` and `from_me: true`; consecutive
+  messages of one author show the author name only on the first (like Slack), the rest carry
+  only their time. In `mail`, `subject` is the thread subject (the compose Subject field shows
+  `Re: <subject>`), `recipients` are the reply's To chips, and every message is rendered
+  expanded; the latest one also shows an `On … wrote:` quote of the previous message, which is
+  not part of its `text`.
 
 ## Editor text model (the oracle)
 
