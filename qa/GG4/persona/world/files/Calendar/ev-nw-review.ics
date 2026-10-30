@@ -1,0 +1,18 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:nw-review-gg4@northwind-outfitters.example
+DTSTAMP:20261023T160000Z
+SEQUENCE:0
+SUMMARY:Northwind checkout review
+DTSTART;TZID=America/New_York:20261028T140000
+DTEND;TZID=America/New_York:20261028T150000
+ORGANIZER;CN=Dana Whitfield:mailto:dana@northwind-outfitters.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Dana Whitfield:mailto:dana@northwind-outfitters.example
+ATTENDEE;CN=Marcus Lee:mailto:marcus@northwind-outfitters.example
+LOCATION:Northwind office, 5th floor
+END:VEVENT
+END:VCALENDAR

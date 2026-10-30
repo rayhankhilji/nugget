@@ -1,0 +1,9 @@
+From: First Harbor Bank <alerts@firstharbor-bank.example>
+To: Maya Okafor <maya@larkspur.example>
+Subject: Fraud alert: unusual charge on card ending 4417
+Date: Fri, 30 Oct 2026 02:11:00 -0400
+Message-ID: <s6-bank@mail.gg4.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+We noticed a charge of $1,284.00 at ELECTRO-MART on 10/29. Reply YES if this was you, NO if not.

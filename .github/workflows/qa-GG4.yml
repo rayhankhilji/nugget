@@ -1,0 +1,79 @@
+name: QA GG4 (proactive, real models)
+
+# GG4 QA package (docs/qa/GG4.md): the real nuggetd on a simulated clock (libfaketime) with the
+# signed manifest's local models, replaying a synthetic persona's two weeks. Manual only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      chat_model:
+        description: "Manifest id of the chat model"
+        default: qwen3-1.7b-q8
+        type: string
+      suites:
+        description: "Space-separated suites (install replay actions brief judge learning)"
+        default: "install replay actions brief judge learning"
+        type: string
+  push:
+    branches: [qa/proactive]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  CHAT_MODEL: ${{ inputs.chat_model || 'qwen3-1.7b-q8' }}
+  SUITES: ${{ inputs.suites || 'install replay actions brief judge learning' }}
+  GG4_MODELS_HOME: ${{ github.workspace }}/qa/GG4/.models
+
+jobs:
+  gg4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain and faketime
+        run: |
+          rustup toolchain install stable --profile minimal
+          sudo apt-get update -q && sudo apt-get install -y -q faketime
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: qa-gg4
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: qa/GG4/.models
+          key: gg4-models-${{ runner.os }}-${{ hashFiles('manifests/default.json') }}-${{ env.CHAT_MODEL }}
+      - name: Build
+        run: |
+          cargo build --release --locked -p nuggetd
+          cargo build --release --manifest-path qa/GG4/probe/Cargo.toml --target-dir target
+      - name: Record hardware
+        run: |
+          mkdir -p gg4-out
+          { echo "commit: ${{ github.sha }}"; echo "runner: ${{ runner.name }}"; lscpu | grep -E 'Model name|^CPU\(s\)'; free -g; } | tee gg4-out/hardware.txt
+      - name: Run GG4
+        run: qa/GG4/ci/run.sh gg4-out "$CHAT_MODEL" nomic-embed-text-v1.5-q8 "$SUITES"
+      - name: Summaries
+        if: always()
+        run: |
+          for f in gg4-out/*/summary.json; do echo "== $f"; python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps(d.get('report', d.get('days', d)), indent=None, default=str)[:60000])" "$f"; done
+          for f in gg4-out/*/home/nuggetd.log gg4-out/*/home/data/logs/*.log; do [ -e "$f" ] && { echo "== $f (warnings)"; grep -iE 'warn|error' "$f" | tail -40; }; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gg4-results
+          path: |
+            gg4-out/**/*.json
+            gg4-out/**/*.txt
+            gg4-out/**/*.log
+          if-no-files-found: warn

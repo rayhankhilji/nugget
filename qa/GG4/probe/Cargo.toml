@@ -1,0 +1,18 @@
+# GG4 QA probe: read a stopped daemon's store and print what nugget-proactive sees.
+# Standalone (not a workspace member): build with
+#   cargo build --manifest-path qa/GG4/probe/Cargo.toml --target-dir target
+[package]
+name = "gg4-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[workspace]
+
+[dependencies]
+nugget-proactive = { path = "../../../crates/nugget-proactive" }
+nugget-store = { path = "../../../crates/nugget-store" }
+nugget-core = { path = "../../../crates/nugget-core" }
+serde_json = "1"
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }

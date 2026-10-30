@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//GG4 QA//Persona//EN
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:kelsey-coffee-gg4@talentbridge.example
+DTSTAMP:20261030T140000Z
+SEQUENCE:1
+SUMMARY:Coffee with Kelsey (TalentBridge)
+DTSTART;TZID=America/New_York:20261106T090000
+DTEND;TZID=America/New_York:20261106T093000
+ORGANIZER;CN=Kelsey Vance:mailto:kelsey@talentbridge.example
+ATTENDEE;CN=Maya Okafor:mailto:maya@larkspur.example
+ATTENDEE;CN=Kelsey Vance:mailto:kelsey@talentbridge.example
+STATUS:CANCELLED
+END:VEVENT
+END:VCALENDAR
