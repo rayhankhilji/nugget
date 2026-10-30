@@ -28,6 +28,12 @@
 //!   [`Drafter::prewarm_idle`] caches the rules ahead of any trigger. Non-cloud draft requests
 //!   carry a `draft:<channel>` cache hint. [`DraftTimings`] records retrieval, provider open,
 //!   first token, total, and prompt and cached prompt tokens.
+//! - **Read-ahead** ([`Drafter::read_ahead`], [`ReadAheadConfig`]): while a reply field keeps
+//!   focus, the whole prompt `begin` would send is prefilled into a non-cloud provider's cache
+//!   (never for cloud providers, secure fields or excluded apps; rate-limited, cancelled on
+//!   blur), so the trigger reads only what changed. The trigger's prefix warm then stands aside.
+//! - **Small local model** ([`LocalBudget::provider`]): drafts routed by tier to a non-cloud
+//!   provider try this one first (a small Double Tap model), the tier's candidates after it.
 //! - **Cancellation** ([`Drafter::cancel`], [`DraftStream::cancel`]) and **feedback**
 //!   ([`Drafter::feedback`]: an audit event plus the texts to a [`FeedbackSink`]).
 //! - **Adapters** to `nugget-voice`: [`ProfileVoice`] (a profile as the engine's
@@ -51,8 +57,8 @@ pub use engine::{
     Warmer, post_options, retrieval_query,
 };
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
-pub use warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};
 pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};
+pub use warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FieldKind {
