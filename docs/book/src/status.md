@@ -11,18 +11,19 @@ This page is a plain summary of [`docs/PLAN.md`](https://github.com/rayhankhilji
 and its v1 checklist. Numbers come from the benchmark suites
 ([`bench/README.md`](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md)); where a
 number comes from a scripted or fake model rather than a real one, it says so. "Local model" means a
-4B-class model running on CPU or a laptop GPU unless stated otherwise.
+4B-class model on CI runners (a 2-core CPU, an EPYC CPU, or a virtual Apple-silicon Mac with Metal)
+unless stated otherwise.
 
 ## At a glance
 
 | Area | State |
 |---|---|
-| Memory and search | Works; targets met |
+| Memory and search | Works; targets met except the synthetic recall gate (1 query in 500); battery not measured |
 | Knowledge graph and MCP | Works; extraction quality with a local model below target |
 | Double Tap | Works; cloud latency not measured, local latency met only after read-ahead |
 | Agent and computer use | Works; targets met with the 4B local model, the 8B is limited by CPU speed |
 | Proactive cards | Works; targets met |
-| Platforms and installers | Installers build and pass smoke tests on all three OSes; unsigned; Wayland global shortcut does not fire |
+| Platforms and installers | Installers build on all three OSes; AppImage, dmg (Apple silicon) and NSIS pass a launch smoke test; MSI, deb and rpm are build-only; unsigned until keys exist; Wayland global shortcut does not fire |
 | Privacy and security | Works; security review reconciled; release keys not created |
 | Updates | Built and verified in tests; nothing to update to until a release exists |
 
@@ -107,11 +108,14 @@ number comes from a scripted or fake model rather than a real one, it says so. "
 - **macOS** (Apple Silicon and Intel, 11 or later), **Windows** 10 and 11 (x64) and **Linux** (x64
   and arm64, X11 and Wayland).
 - The release workflow's dry run builds every installer: `.dmg` on macOS, NSIS and MSI on Windows,
-  AppImage, `.deb` and `.rpm` on Linux. The AppImage, the `.dmg` and the NSIS installer are
-  installed, launched, connected to the daemon and quit in CI. See [Install](guide/install.md).
-- Accessibility, Double Tap insertion and computer use have run on real macOS and Windows machines
-  in CI (computer use through macOS accessibility: 16 of 16 tasks; through Windows UI Automation with a scripted model, success
-  1.00). Accessibility and Double Tap insertion have also run on Wayland (sway, KWin).
+  AppImage, `.deb` and `.rpm` on Linux (arm64 Linux is experimental). The AppImage, the Apple
+  silicon `.dmg` and the NSIS installer are installed, launched, connected to the daemon and quit in
+  CI; the MSI, `.deb` and `.rpm` are only built. See [Install](guide/install.md).
+- Accessibility, Double Tap insertion and computer use have run on GitHub's macOS and Windows
+  runners (computer use with a scripted model: 16 of 16 tasks through macOS accessibility, success
+  1.00 through Windows UI Automation). Accessibility and Double Tap insertion have also run on
+  Wayland (sway, KWin).
+- Start at login (the per-user service) is not yet exercised in CI on macOS or Windows.
 - **Until release keys exist, installers are unsigned:** macOS Gatekeeper and Windows SmartScreen
   warn when you open them ([how to get past that](guide/install.md#unsigned-builds)).
 - Linux packages are not GPG-signed and there is no apt or rpm repository.
@@ -127,7 +131,9 @@ number comes from a scripted or fake model rather than a real one, it says so. "
   [Security model](architecture/security.md) and the
   [review](https://github.com/rayhankhilji/nugget/blob/main/docs/reviews/security-m3-m6.md).
 - **Supply chain:** model downloads come from a signed, pinned manifest with rollback protection;
-  release builds record SBOMs, checksums and build provenance. `nuggetd` on x86_64 Linux rebuilds
+  the release workflow is set up to record SBOMs, checksums and build provenance (untested until the
+  first tagged release), and a release rehearsal with throwaway keys is being added
+  (`.github/workflows/release-rehearsal.yml`). `nuggetd` on x86_64 Linux rebuilds
   identically in code and data; the installers are not reproducible
   ([details](https://github.com/rayhankhilji/nugget/blob/main/docs/security/reproducible-builds.md)).
 - **Release keys have not been created:** the updater key, the model manifest release key, and the
@@ -144,11 +150,26 @@ number comes from a scripted or fake model rather than a real one, it says so. "
   your own builds) have no updater.
 - Update checks are made by the desktop app, so they are not in the daemon's egress ledger.
 
+## Also included
+
+- Search, Ask and Chat, with every answer citing its sources as `[n]`. See
+  [Search and Ask](guide/search-ask.md).
+- Models: local models run by a supervised `llama-server` from the signed manifest, any
+  OpenAI-compatible server (Ollama, LM Studio, vLLM), or Anthropic and OpenAI with your own key.
+  See [Models](guide/models.md).
+- WebAssembly plugins, installed from a signed package file, with permissions you approve. See
+  [Plugins](guide/plugins.md).
+- The desktop app in nine languages, including right-to-left Arabic. See
+  [Languages](guide/languages.md).
+
 ## Not built yet
 
+Notably:
+
 - The end-to-end-encrypted relay for remote access (optional in the plan).
-- Connectors that read local app data (Apple Notes, iMessage, Apple Mail, Contacts, WhatsApp,
-  Signal, Thunderbird), CardDAV, and MCP servers as sources.
+- Connectors that read local app data (Apple Notes, iMessage, Apple Mail, macOS Calendar and
+  Contacts, WhatsApp, Signal, Thunderbird), Logseq, Maildir, CardDAV, and MCP servers as sources.
+- A community plugin registry: plugins are installed from a file.
 - An OSWorld-style subset of the computer-use benchmark.
 
 The [benchmark dashboard](benchmarks/dashboard.md) charts the nightly results over time.

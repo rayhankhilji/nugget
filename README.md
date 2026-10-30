@@ -147,10 +147,10 @@ flowchart LR
 |---|---|
 | macOS 11+ (Apple Silicon, Intel) | `.dmg` |
 | Windows 10 and 11 (x64) | NSIS `-setup.exe` (per user, no admin rights) or `.msi` (Program Files) |
-| Linux x64 and arm64 | AppImage, `.deb`, `.rpm` |
+| Linux x64 and arm64 (arm64 experimental; may be missing from a release) | AppImage, `.deb`, `.rpm` |
 
-plus `SHA256SUMS`, SBOMs and build provenance you can check with
-`gh attestation verify <file> -R rayhankhilji/nugget`. Updates come through the in-app updater:
+plus `SHA256SUMS`, SBOMs and build provenance you can check (after `gh auth login`) with
+`gh attestation verify <file> -R rayhankhilji/nugget --signer-workflow rayhankhilji/nugget/.github/workflows/release.yml`. Updates come through the in-app updater:
 you pick the channel, and by default it only notifies you.
 
 Until then, use the unsigned installers from a release dry run (expect Gatekeeper and SmartScreen

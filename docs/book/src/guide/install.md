@@ -1,7 +1,7 @@
 # Install
 
 > **No release has been published yet.** The release pipeline is built (see
-> [Releases](https://github.com/rayhankhilji/nugget/blob/main/docs/release.md)), but no version has
+> [release process](https://github.com/rayhankhilji/nugget/blob/main/docs/release.md)), but no version has
 > been released and the signing keys don't exist yet. Until then you can:
 >
 > - [build from source](#build-from-source), the same steps CI runs on every change; or
@@ -24,7 +24,7 @@ next to each other. `<v>` is the version, for example `1.0.0`. Sizes are from th
 | Linux x64 | `Nugget_<v>_amd64.AppImage` | 105.4 MiB | Wherever you keep the file; carries its own libraries |
 | Linux x64 | `Nugget_<v>_amd64.deb` (Debian, Ubuntu) | 34.1 MiB | `/usr/bin/nugget-desktop`, `/usr/bin/nuggetd` |
 | Linux x64 | `Nugget-<v>-1.x86_64.rpm` (Fedora, openSUSE) | 34.1 MiB | Same as the `.deb` |
-| Linux arm64 | `Nugget_<v>_aarch64.AppImage`, `Nugget_<v>_arm64.deb`, `Nugget-<v>-1.aarch64.rpm` | 102.6 / 33.2 / 33.2 MiB | As for x64 |
+| Linux arm64 | `Nugget_<v>_aarch64.AppImage`, `Nugget_<v>_arm64.deb`, `Nugget-<v>-1.aarch64.rpm` | 102.6 / 33.2 / 33.2 MiB | As for x64. Experimental: the arm64 build may fail without stopping a release, so a release can lack these files |
 
 The Linux packages are built on Ubuntu 22.04 and need glibc 2.35 or later, WebKitGTK 4.1, GTK 3
 and libayatana-appindicator (the `.deb` and `.rpm` pull these in). They work on X11 and Wayland;
@@ -41,8 +41,8 @@ A release also attaches files you don't install:
 | `SHA256SUMS` | SHA-256 checksums of every other file in the release |
 | `nuggetd.cdx.json`, `nugget-desktop.cdx.json`, `nugget-desktop-frontend.cdx.json` | Software bills of materials (CycloneDX) |
 
-Each file also has a build provenance attestation on GitHub, which proves it was built by the
-project's release workflow from the tagged commit.
+Every file except `SHA256SUMS` also has a build provenance attestation on GitHub, which proves it
+was built by the project's release workflow from the tagged commit.
 
 ## Verify a download
 
@@ -72,7 +72,9 @@ download. To check where the file came from, verify its provenance with the
 [GitHub CLI](https://cli.github.com/):
 
 ```sh
-gh attestation verify Nugget_<v>_aarch64.dmg -R rayhankhilji/nugget
+gh auth login    # once; gh needs a GitHub login to fetch attestations
+gh attestation verify Nugget_<v>_aarch64.dmg -R rayhankhilji/nugget \
+  --signer-workflow rayhankhilji/nugget/.github/workflows/release.yml
 ```
 
 It succeeds only if the file was built by this repository's release workflow.
@@ -92,7 +94,8 @@ the setup's Permissions step explains why.
 
 Run `Nugget_<v>_x64-setup.exe`. It installs for your user only and needs no administrator rights.
 Use the `.msi` instead if you want a machine-wide install in Program Files (for example, deployed
-by an administrator). Windows 10 and 11 already include WebView2, which the app needs.
+by an administrator). The app needs WebView2, which Windows 11 and most Windows 10 installs
+already have; if it is missing, the installer downloads it.
 
 ### Linux
 
@@ -121,10 +124,11 @@ The first launch opens a short setup; see [First run](first-run.md).
 Until the project has its signing certificates, every installer is unsigned (the macOS app is
 ad-hoc signed and not notarised). The operating system warns before opening it:
 
-- **macOS:** *"Nugget" can't be opened because it is from an unidentified developer*, or *is
-  damaged* for a downloaded copy. Control-click the app → **Open** → **Open**. On macOS 15 and later,
-  try to open it once, then go to **System Settings → Privacy & Security** and click **Open Anyway**.
-  Or clear the download flag:
+- **macOS:** *"Nugget" can't be opened because it is from an unidentified developer*: Control-click
+  the app → **Open** → **Open**. On macOS 15 and later that route is gone: try to open it once, then
+  go to **System Settings → Privacy & Security** and click **Open Anyway**. If macOS instead says the
+  app *is damaged* (a downloaded copy), Control-click doesn't help; use **Open Anyway** on macOS 15
+  and later, or clear the download flag:
 
   ```sh
   xattr -dr com.apple.quarantine /Applications/Nugget.app
@@ -145,7 +149,8 @@ Each run of the release workflow's dry run uploads unsigned installers as workfl
 open [Actions → Release](https://github.com/rayhankhilji/nugget/actions/workflows/release.yml), pick
 a recent successful run, and download `bundle-<target>` from its **Artifacts**, for example
 `bundle-aarch64-apple-darwin` or `bundle-x86_64-pc-windows-msvc`. You need to be signed in to
-GitHub, and artifacts are kept for 14 days. With the GitHub CLI:
+GitHub, and artifacts are kept for 14 days. Each downloads as a `.zip`; extract it to get the
+installers. With the GitHub CLI, which extracts it for you:
 
 ```sh
 gh run download <run-id> -R rayhankhilji/nugget -n bundle-x86_64-unknown-linux-gnu
@@ -165,6 +170,8 @@ Two separate settings, both on the **Status** page:
   It isn't available for an AppImage or for an app run from the disk image, because their paths
   change on every run; install the `.deb` or `.rpm`, or move the app to Applications.
 - **Open Nugget in the tray when I log in** starts the desktop app hidden in the tray or menu bar.
+
+Installing the service on macOS and Windows is not yet exercised in CI.
 
 From a terminal, `nuggetd install-service` and `nuggetd uninstall-service` do the same as the first
 setting (on macOS, the binary is `/Applications/Nugget.app/Contents/MacOS/nuggetd`). See
@@ -198,11 +205,19 @@ update signing key* and can't update itself.
    - **macOS:** drag `/Applications/Nugget.app` to the Trash.
    - **Windows:** **Settings → Apps → Installed apps → Nugget → Uninstall**. Uninstalling the NSIS
      install also removes the login task.
-   - **Linux:** `sudo apt remove nugget` or `sudo dnf remove nugget`; for an AppImage, delete the
-     file.
-3. Your data stays until you delete it: the [data, config and cache directories](../reference/data-dir.md)
-   and the vault (`~/Nugget Vault` by default). The store's encryption key is in your OS keychain
-   under the service `dev.nugget.Nugget`; delete that entry too if you want nothing left behind.
+   - **Linux:** `sudo apt remove nugget`, `sudo dnf remove nugget` or `sudo zypper remove nugget`;
+     for an AppImage, delete the file.
+3. Your data stays until you delete it:
+   - the daemon's [data, config and cache directories](../reference/data-dir.md) and the vault
+     (`~/Nugget Vault` by default);
+   - the desktop app's own directory, `dev.nugget.desktop` (its settings, history and window
+     state): `~/.config/dev.nugget.desktop` and `~/.local/share/dev.nugget.desktop` on Linux,
+     `~/Library/Application Support/dev.nugget.desktop` on macOS, `%APPDATA%\dev.nugget.desktop` on
+     Windows. The webview keeps its data in directories of the same name (for example
+     `%LOCALAPPDATA%\dev.nugget.desktop` on Windows, `~/Library/WebKit/dev.nugget.desktop` and
+     `~/Library/Caches/dev.nugget.desktop` on macOS);
+   - your OS keychain: delete every entry under the service `dev.nugget.Nugget`. That holds the
+     store's encryption key, your API keys and your account tokens.
 
 ## Build from source
 
