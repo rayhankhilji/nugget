@@ -22,6 +22,7 @@ mod audit;
 mod changes;
 mod egress;
 mod error;
+mod export;
 mod fts;
 mod graph;
 mod items;
@@ -38,6 +39,7 @@ mod vector;
 
 pub use audit::AuditAnchor;
 pub use egress::{EgressRow, EgressState};
+pub use export::{ExportItem, GRAPH_EXPORT_FORMAT, GraphExportCounts};
 pub use graph::{ENTITY_ID_PREFIX, MAX_MERGE_DEPTH, MAX_NEIGHBOURHOOD_NODES, SqliteGraph};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
