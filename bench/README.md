@@ -502,7 +502,18 @@ and injection items and the original case of each hard-case kind are always kept
 so `smoke`'s 8 items are unchanged); each further hard case is then added whole (every item
 mentioning its people or supporting its claims, and its unattributed names) while it fits, so the
 `quick` 30 hold all 13 EE1 items and 9 evenly spread ones (22 before), so quick-subset numbers
-from before EE1 are not comparable with later ones. `--knowledge-items all`
+from before EE1 are not comparable with later ones.
+
+**`--knowledge-corpus original|all`** (default `all`): `original` is the corpus as it was before
+EE1, for before/after runs against a pre-EE1 bench binary. Everything EE1 added is marked
+`"added": "ee1"` (items in `manifest.json`, entities in `gold/entities.json`, hard cases in
+`scenario.json`); `original` drops those, the mentions, scripted answers and claim support of the
+dropped items, and the claims left without support. The result equals the pre-EE1 fixture
+(93 items, 85 gold entities, 166 scored claims, 515 mentions, 144 scripted claims, one case per
+hard-case kind), so every `--knowledge-items N` selects the same items and scores the same gold as
+the pre-EE1 bench (a test pins the `smoke` 8, `quick` 30 and 40-item lists taken from the pre-EE1
+selection), and the scripted run reproduces the 93-item column above exactly. The choice is
+recorded as `params.knowledge_corpus`. `--knowledge-items all`
 (or any number at or above the corpus size) runs every item.
 
 **EE1 hard cases, scripted path** (`knowledge --scale smoke`, the corpus before and after the 13

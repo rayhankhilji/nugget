@@ -22,10 +22,12 @@
             "item": "note-031",
             "surface": "Kate"
           }
-        ]
+        ],
+        "added": "ee1"
       },
       {
-        "entity": "p-rob"
+        "entity": "p-rob",
+        "added": "ee1"
       }
     ],
     "same_first_name": [
@@ -45,7 +47,8 @@
             "item": "note-033",
             "surface": "Tamsin"
           }
-        ]
+        ],
+        "added": "ee1"
       }
     ],
     "job_change": [
@@ -67,7 +70,8 @@
         "current": [
           "p-delphine works_at o-glimmerfen",
           "p-delphine has_role 'Legal Counsel'"
-        ]
+        ],
+        "added": "ee1"
       }
     ]
   },

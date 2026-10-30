@@ -467,7 +467,8 @@
       }
     ],
     "optional": false,
-    "note": "hard case: nickname (Kate), a display-name variant (Kate S) and initials (K. Selkirk), always with her address or a thread to corroborate; note-031's Kate is not her"
+    "note": "hard case: nickname (Kate), a display-name variant (Kate S) and initials (K. Selkirk), always with her address or a thread to corroborate; note-031's Kate is not her",
+    "added": "ee1"
   },
   {
     "id": "p-rob",
@@ -486,7 +487,8 @@
       }
     ],
     "optional": false,
-    "note": "hard case: diminutives Rob (a prefix of the user's name) and Bob (not a prefix of Robert), each in a mail whose headers name him"
+    "note": "hard case: diminutives Rob (a prefix of the user's name) and Bob (not a prefix of Robert), each in a mail whose headers name him",
+    "added": "ee1"
   },
   {
     "id": "p-delphine",
@@ -509,7 +511,8 @@
       }
     ],
     "optional": false,
-    "note": "hard case: changes job (Vellum & Thistle -> Glimmerfen Labs) and address; the old-employer mail is delivered after the new one"
+    "note": "hard case: changes job (Vellum & Thistle -> Glimmerfen Labs) and address; the old-employer mail is delivered after the new one",
+    "added": "ee1"
   },
   {
     "id": "p-tamsinr",
@@ -527,7 +530,8 @@
       }
     ],
     "optional": false,
-    "note": "hard case: shares a first name with Tamsin Galloway; note-032's bare Tamsin is her (Quillfeather, Quarry Bridge keys)"
+    "note": "hard case: shares a first name with Tamsin Galloway; note-032's bare Tamsin is her (Quillfeather, Quarry Bridge keys)",
+    "added": "ee1"
   },
   {
     "id": "p-tamsing",
@@ -545,7 +549,8 @@
       }
     ],
     "optional": false,
-    "note": "hard case: shares a first name with Tamsin Rook"
+    "note": "hard case: shares a first name with Tamsin Rook",
+    "added": "ee1"
   },
   {
     "id": "p-mallory",
@@ -585,7 +590,8 @@
     ],
     "identifiers": [],
     "optional": true,
-    "note": "the Kate of note-031 (book club): nothing in the item identifies her, so she is not labelled as Katherine Selkirk; optional, and she must not be attributed to Katherine"
+    "note": "the Kate of note-031 (book club): nothing in the item identifies her, so she is not labelled as Katherine Selkirk; optional, and she must not be attributed to Katherine",
+    "added": "ee1"
   },
   {
     "id": "p-tamsin-unknown",
@@ -596,7 +602,8 @@
     ],
     "identifiers": [],
     "optional": true,
-    "note": "the Tamsin of note-033 (errands): nothing says which Tamsin, if either; optional, and she must not be attributed to either known Tamsin"
+    "note": "the Tamsin of note-033 (errands): nothing says which Tamsin, if either; optional, and she must not be attributed to either known Tamsin",
+    "added": "ee1"
   },
   {
     "id": "o-glimmerfen",
@@ -1162,7 +1169,8 @@
       "Harbourline PO sign-off"
     ],
     "identifiers": [],
-    "optional": false
+    "optional": false,
+    "added": "ee1"
   },
   {
     "id": "k-deposit",

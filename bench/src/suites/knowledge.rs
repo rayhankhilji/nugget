@@ -53,7 +53,7 @@ use crate::knowledge::eval::{
     score_resolution, score_retraction, score_support, score_vault, system_triples, unattributed,
 };
 use crate::knowledge::fake_llm::ScriptedLlm;
-use crate::knowledge::fixture::{self, Fixture, Ingested};
+use crate::knowledge::fixture::{self, Corpus, Fixture, Ingested};
 use crate::knowledge::metered::{Meter, MeteredProvider};
 use crate::knowledge::system::{KnowledgeSystem, LlmSettings, SystemContext};
 use crate::knowledge::wired::{self, Wiring};
@@ -87,6 +87,10 @@ pub struct KnowledgeOptions {
     /// `all`, or a number at or above the corpus size, runs everything.
     #[arg(long, value_name = "N|all", value_parser = parse_item_count)]
     pub knowledge_items: Option<usize>,
+    /// `knowledge`: `all` items and hard cases (default), or the `original` pre-EE1 corpus (93
+    /// items; same item selection and scored gold as the pre-EE1 bench, for before/after runs).
+    #[arg(long, value_enum, default_value_t = Corpus::All)]
+    pub knowledge_corpus: Corpus,
     /// `knowledge`: write the false-positive / false-negative entities and claims, and (with a
     /// real model) every extraction request with its answer and the quote gate's verdicts, to
     /// this JSONL file.
@@ -134,7 +138,7 @@ impl Benchmark for KnowledgeBench {
     }
 
     fn run(&self, ctx: &mut RunContext) -> Result<Vec<Metric>, BenchError> {
-        let fx = Fixture::builtin()?;
+        let fx = Fixture::builtin()?.corpus(ctx.config.knowledge.knowledge_corpus);
         if ctx.config.local.local_models {
             return run_local(ctx, &fx);
         }
@@ -321,6 +325,10 @@ fn prepare_corpus(
 ) -> Result<Ingested, BenchError> {
     let s = fx.stats();
     ctx.param("corpus", fx.name.clone());
+    ctx.param(
+        "knowledge_corpus",
+        ctx.config.knowledge.knowledge_corpus.as_str(),
+    );
     ctx.param("items", s.items);
     ctx.param(
         "items_by_kind",
@@ -1434,6 +1442,29 @@ mod tests {
         assert!(scope.kinds().contains(&"job_change"));
     }
 
+    /// `--knowledge-corpus original`: the pre-EE1 corpus, its three original hard cases, and the
+    /// choice recorded in the parameters.
+    #[cfg(feature = "pipeline")]
+    #[test]
+    fn the_original_corpus_option_runs_the_pre_ee1_corpus() {
+        let mut ctx = RunContext::new(RunConfig {
+            scale: Scale::Smoke,
+            knowledge: KnowledgeOptions {
+                knowledge_corpus: Corpus::Original,
+                ..KnowledgeOptions::default()
+            },
+            ..RunConfig::default()
+        });
+        let ms = KnowledgeBench.run(&mut ctx).unwrap();
+        let p = ctx.params();
+        assert_eq!(p["knowledge_corpus"], "original");
+        assert_eq!(p["items"], 93);
+        assert_eq!(p["gold_claims"], 166);
+        assert_eq!(p["hard_case_details"].as_array().unwrap().len(), 3);
+        assert_eq!(get(&ms, "llm.calls"), 93.0);
+        assert_eq!(get(&ms, "llm.unmatched"), 0.0);
+    }
+
     /// Per-case hard-case results: on the whole corpus every case is decided, and the oracle
     /// passes each one.
     #[test]
@@ -1739,6 +1770,7 @@ mod noisy_model_tests {
             knowledge: KnowledgeOptions {
                 knowledge_dump: Some(path.clone()),
                 knowledge_items: Some(40),
+                ..KnowledgeOptions::default()
             },
             ..RunConfig::default()
         });

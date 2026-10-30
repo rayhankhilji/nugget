@@ -978,7 +978,8 @@
         ],
         "message_id": "<mail-049.kb@ostrander-freight.test>",
         "size": 589
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-050",
@@ -998,7 +999,8 @@
         ],
         "message_id": "<mail-050.kb@ostrander-freight.test>",
         "size": 557
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-051",
@@ -1018,7 +1020,8 @@
         ],
         "message_id": "<mail-051.kb@glimmerfen.test>",
         "size": 514
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-052",
@@ -1038,7 +1041,8 @@
         ],
         "message_id": "<mail-052.kb@glimmerfen.test>",
         "size": 528
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-053",
@@ -1058,7 +1062,8 @@
         ],
         "message_id": "<mail-053.kb@glimmerfen.test>",
         "size": 550
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-054",
@@ -1078,7 +1083,8 @@
         ],
         "message_id": "<mail-054.kb@vellumthistle.test>",
         "size": 660
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-055",
@@ -1098,7 +1104,8 @@
         ],
         "message_id": "<mail-055.kb@vellumthistle.test>",
         "size": 623
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-056",
@@ -1118,7 +1125,8 @@
         ],
         "message_id": "<mail-056.kb@quillfeather.test>",
         "size": 565
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "mail-057",
@@ -1138,7 +1146,8 @@
         ],
         "message_id": "<mail-057.kb@mail.test>",
         "size": 469
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "cal-001",
@@ -1426,7 +1435,8 @@
         "calendar_href": "/calendars/robin/work/",
         "href": "/calendars/robin/work/harbourline-po-signoff-20261103.ics",
         "etag": "\"etag-16\""
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "note-001",
@@ -1953,7 +1963,8 @@
         "path": "journal/Book club.md",
         "size": 111,
         "vault": "Robin's notes"
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "note-032",
@@ -1970,7 +1981,8 @@
         "path": "journal/2026-10-29 Quarry Bridge standup.md",
         "size": 150,
         "vault": "Robin's notes"
-      }
+      },
+      "added": "ee1"
     },
     {
       "id": "note-033",
@@ -1987,7 +1999,8 @@
         "path": "journal/Errands.md",
         "size": 101,
         "vault": "Robin's notes"
-      }
+      },
+      "added": "ee1"
     }
   ]
 }

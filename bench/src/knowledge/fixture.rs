@@ -57,6 +57,9 @@ pub struct ItemSpec {
     pub version: String,
     /// Connector metadata, stored under `metadata.source` like ingest does.
     pub metadata: Value,
+    /// The work package that added it (`ee1`); absent for the original M2 corpus.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 impl ItemSpec {
@@ -90,6 +93,9 @@ pub struct GoldEntity {
     pub optional: bool,
     #[serde(default)]
     pub note: Option<String>,
+    /// The work package that added it (`ee1`); absent for the original M2 corpus.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -185,6 +191,9 @@ pub struct ScriptEntry {
 pub struct JobChange {
     pub superseded: Vec<String>,
     pub current: Vec<String>,
+    /// The work package that added the case (`ee1`); absent for the original M2 cases.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 /// A name in an item that nothing in the item ties to a known person (a bare first name or
@@ -206,6 +215,8 @@ pub struct NicknameCase {
     /// The same nickname used for somebody the corpus cannot identify.
     #[serde(default)]
     pub unattributed: Vec<Unattributed>,
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 /// People who share a first name.
@@ -216,6 +227,8 @@ pub struct SameFirstNameCase {
     /// The bare first name where nothing says which of them (if either) is meant.
     #[serde(default)]
     pub unattributed: Vec<Unattributed>,
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 /// The resolution and time-awareness hard cases. Each metric (`hard_cases.<kind>`) passes when
@@ -279,6 +292,26 @@ pub struct Fixture {
     pub scenario: Scenario,
 }
 
+/// Which corpus a run uses (`--knowledge-corpus`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Corpus {
+    /// Every item and hard case.
+    #[default]
+    All,
+    /// The corpus as it was before EE1 (93 items): everything marked `added` is left out, so
+    /// item selection and the scored gold equal the pre-EE1 bench's, for before/after runs.
+    Original,
+}
+
+impl Corpus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Corpus::All => "all",
+            Corpus::Original => "original",
+        }
+    }
+}
+
 /// Counts recorded in the report's `params`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureStats {
@@ -305,6 +338,35 @@ impl Fixture {
     /// The corpus shipped in `bench/fixtures/knowledge/`.
     pub fn builtin() -> Result<Self, BenchError> {
         Self::load(Path::new(FIXTURE_DIR))
+    }
+
+    /// The corpus restricted to `corpus`. `Original` drops the items, entities and hard cases
+    /// marked `added`, the mentions and scripted answers of dropped items, their support on
+    /// the remaining claims, and the claims left with no support (which only they stated).
+    pub fn corpus(&self, corpus: Corpus) -> Fixture {
+        let mut fx = self.clone();
+        if corpus == Corpus::All {
+            return fx;
+        }
+        let dropped: HashSet<String> = fx
+            .items
+            .iter()
+            .filter(|i| i.added.is_some())
+            .map(|i| i.id.clone())
+            .collect();
+        fx.items.retain(|i| i.added.is_none());
+        fx.entities.retain(|e| e.added.is_none());
+        fx.mentions.retain(|m| !dropped.contains(&m.item));
+        fx.script.retain(|s| !dropped.contains(&s.item));
+        for c in &mut fx.claims {
+            c.support.retain(|s| !dropped.contains(&s.item));
+        }
+        fx.claims.retain(|c| !c.support.is_empty());
+        let hc = &mut fx.scenario.hard_cases;
+        hc.nickname_identity.retain(|c| c.added.is_none());
+        hc.same_first_name.retain(|c| c.added.is_none());
+        hc.job_change.retain(|c| c.added.is_none());
+        fx
     }
 
     pub fn load(dir: &Path) -> Result<Self, BenchError> {
@@ -1065,6 +1127,73 @@ mod tests {
             .map(|id| fx.items.iter().position(|i| &i.id == id).unwrap())
             .collect();
         assert!(pos.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    /// `--knowledge-corpus original` is the pre-EE1 corpus (d643a5a): the same counts, and the
+    /// same real-model item selection for every size. The lists were computed with the pre-EE1
+    /// `select_items` on the pre-EE1 fixture.
+    #[test]
+    fn the_original_corpus_reproduces_the_pre_ee1_selection() {
+        let fx = Fixture::builtin().unwrap().corpus(Corpus::Original);
+        fx.validate().unwrap();
+        let s = fx.stats();
+        assert_eq!(s.items, 93);
+        assert_eq!(
+            (s.items_by_kind["mail"], s.items_by_kind["calendar"]),
+            (48, 15)
+        );
+        assert_eq!(s.items_by_kind["note"], 30);
+        assert_eq!(s.entities, 85);
+        assert_eq!(s.entities_by_kind["person"], 25);
+        assert_eq!(fx.entities.len(), 88);
+        assert_eq!(s.claims, 166);
+        assert_eq!(fx.claims.len(), 181);
+        assert_eq!(s.superseded_claims, 3);
+        assert_eq!(s.mentions, 515);
+        let scripted: usize = fx.script.iter().map(|e| e.claims.len()).sum();
+        assert_eq!(scripted, 144);
+        assert_eq!((s.hallucinated_quotes, s.injected_claims), (4, 4));
+        let hc = &fx.scenario.hard_cases;
+        assert_eq!(hc.nickname_identity.len(), 1);
+        assert_eq!(hc.same_first_name.len(), 1);
+        assert_eq!(hc.job_change.len(), 1);
+        assert!(fx.items.iter().all(|i| i.added.is_none()));
+        assert!(
+            fx.claims
+                .iter()
+                .flat_map(|c| &c.support)
+                .all(|s| fx.item(&s.item).is_some())
+        );
+
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let smoke = ids(&[
+            "mail-002", "mail-004", "mail-006", "mail-008", "mail-022", "mail-025", "note-002",
+            "note-025",
+        ]);
+        let quick = ids(&[
+            "mail-001", "mail-002", "mail-004", "mail-006", "mail-007", "mail-008", "mail-012",
+            "mail-016", "mail-020", "mail-022", "mail-025", "mail-026", "mail-030", "mail-034",
+            "mail-037", "mail-041", "mail-045", "cal-001", "cal-005", "cal-009", "cal-013",
+            "note-001", "note-002", "note-006", "note-010", "note-014", "note-018", "note-022",
+            "note-025", "note-027",
+        ]);
+        let forty = ids(&[
+            "mail-001", "mail-002", "mail-004", "mail-005", "mail-006", "mail-008", "mail-010",
+            "mail-012", "mail-015", "mail-018", "mail-020", "mail-022", "mail-024", "mail-025",
+            "mail-028", "mail-030", "mail-033", "mail-036", "mail-038", "mail-041", "mail-044",
+            "mail-046", "cal-001", "cal-004", "cal-006", "cal-009", "cal-012", "cal-014",
+            "note-002", "note-003", "note-006", "note-008", "note-011", "note-014", "note-016",
+            "note-019", "note-022", "note-024", "note-025", "note-028",
+        ]);
+        assert_eq!(fx.select_items(8), smoke);
+        assert_eq!(fx.select_items(30), quick);
+        assert_eq!(fx.select_items(40), forty);
+        assert_eq!(fx.select_items(93).len(), 93);
+        assert_eq!(fx.select_items(usize::MAX).len(), 93);
+        // The default corpus keeps everything.
+        let all = Fixture::builtin().unwrap();
+        assert_eq!(all.corpus(Corpus::All).items.len(), all.items.len());
+        assert!(all.items.len() > 93);
     }
 
     /// Scoring a subset: only what the kept items support counts.
