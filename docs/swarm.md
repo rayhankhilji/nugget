@@ -96,6 +96,6 @@ Briefs in `docs/waves/wave-bb/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| BB1 | `bb/google-drive` | session_01CTjRStcm2Tq4cK6HdhtSor | Google Drive, Docs, Sheets and Slides connector |
+| BB1 | `bb/google-drive` | session_01CTjRStcm2Tq4cK6HdhtSor | Google Drive, Docs, Sheets and Slides connector (merged) |
 | BB2 | `bb/proactive-learning` | session_01CTjRSt2zXMhX5puD2vRYrP | cards learn from Accept/Dismiss feedback, explainable and resettable |
-| BB3 | `bb/a11y-audit` | session_01CTjRSuD9VRtjRwVksuYKcZ | axe audit on every page and dialog, keyboard-only core flows, screen readers |
+| BB3 | `bb/a11y-audit` | session_01CTjRSuD9VRtjRwVksuYKcZ | axe audit on every page and dialog, keyboard-only core flows, screen readers (merged) |
