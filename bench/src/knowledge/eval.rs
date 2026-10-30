@@ -26,7 +26,7 @@ use nugget_graph::{
 };
 
 use super::fixture::{
-    Fixture, GoldClaim, GoldMention, GoldStatus, Ingested, normalize_quote, quote_in,
+    Fixture, GoldClaim, GoldMention, GoldStatus, Ingested, Unattributed, normalize_quote, quote_in,
 };
 use super::system::{RenderedPage, RenderedVault};
 use crate::corpus::Rng;
@@ -962,6 +962,34 @@ pub fn distinct_identities(gold: &GoldIndex<'_>, res: &ResolutionScores, ids: &[
             .iter()
             .enumerate()
             .all(|(i, a)| sets[i + 1..].iter().all(|b| a.is_disjoint(b)))
+}
+
+/// Hard case: a name nothing identifies (a bare nickname or first name) is not attributed to
+/// any of `people`. Fails when the system records, in that item and under that surface, a
+/// mention of an entity that `people`'s gold mentions resolve to. Optional gold mentions are not
+/// in [`ResolutionScores`], so this reads the system's mentions directly.
+pub fn unattributed(
+    gold: &GoldIndex<'_>,
+    res: &ResolutionScores,
+    snap: &Snapshot,
+    ing: &Ingested,
+    people: &[String],
+    cases: &[Unattributed],
+) -> bool {
+    let theirs: BTreeSet<EntityId> = people
+        .iter()
+        .flat_map(|p| assigned_entities(gold, res, p))
+        .collect();
+    cases.iter().all(|u| {
+        let surface = normalize_name(&u.surface);
+        !snap.mentions.iter().any(|m| {
+            ing.by_ref(&m.item).is_some_and(|i| i.id == u.item)
+                && normalize_name(&m.surface) == surface
+                && snap
+                    .entity(&m.entity)
+                    .is_some_and(|e| theirs.contains(&e.id))
+        })
+    })
 }
 
 // =============================================================================================
