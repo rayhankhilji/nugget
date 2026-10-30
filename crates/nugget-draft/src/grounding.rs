@@ -596,6 +596,12 @@ fn day_of_week(y: i32, m: u32, d: u32) -> u32 {
     if dow == 0 { 7 } else { dow }
 }
 
+/// A word that may be a month name: capitalised, or lowercase unless it is also a common
+/// verb ("may", "march"). Chat drafts often write "nov 8" in lowercase.
+fn month_word(w: &str) -> bool {
+    capitalised(w) || !matches!(w, "may" | "march")
+}
+
 fn capitalised(w: &str) -> bool {
     w.chars().next().is_some_and(char::is_uppercase)
 }
@@ -666,7 +672,7 @@ pub(crate) fn values(text: &str) -> Vec<Value> {
             Tok::Word(w) => {
                 let lower = w.to_lowercase();
                 // Month name + day ("November 14", "Nov. 14th").
-                if capitalised(w)
+                if month_word(w)
                     && let Some(m) = month(&lower)
                 {
                     let mut j = i + 1;
@@ -876,7 +882,7 @@ pub(crate) fn values(text: &str) -> Vec<Value> {
                     if word(j).is_some_and(|w| w.eq_ignore_ascii_case("of")) {
                         j += 1;
                     }
-                    if let Some(w) = word(j).filter(|w| capitalised(w))
+                    if let Some(w) = word(j).filter(|w| month_word(w))
                         && let Some(m) = month(&w.to_lowercase())
                         && let Some(key) = date_key(m, d)
                     {
@@ -1241,6 +1247,18 @@ mod tests {
         assert_eq!(out, draft);
         assert_eq!(g.report().weekdays_flagged, 1);
         assert_eq!(g.report().sentences_dropped, 0);
+    }
+
+    #[test]
+    fn lowercase_month_dates_are_checked() {
+        let mut g = grounder();
+        let (out, _) = run(
+            &mut g,
+            &["the budget is $275,000. it lands nov 3. we spoke oct 27. you may 2 x it"],
+        );
+        assert_eq!(out, "the budget is $275,000. we spoke oct 27.");
+        // "may 2" is not read as a date (only the bare number is unsupported).
+        assert_eq!(g.report().unsupported, ["nov 3", "2"]);
     }
 
     #[test]
