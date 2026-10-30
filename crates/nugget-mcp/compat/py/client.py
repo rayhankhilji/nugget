@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import tempfile
 import traceback
 import warnings
 from collections.abc import Awaitable, Callable
@@ -24,6 +25,7 @@ import anyio
 import httpx2
 import mcp_types as types
 from mcp import Client, StdioServerParameters
+from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.exceptions import MCPDeprecationWarning, MCPError
 from mcp_types.version import HANDSHAKE_PROTOCOL_VERSIONS, MODERN_PROTOCOL_VERSIONS
@@ -348,16 +350,44 @@ async def body(kind: str, c: Client, revision: str) -> None:
 # ---- access errors ----
 
 
-async def refused(kind: str, server: Any, revision: str) -> None:
+#: What `nuggetd mcp` prints when the daemon refuses the client.
+BRIDGE_REFUSAL = "unknown or revoked MCP client, or wrong token"
+
+
+async def refused(kind: str, conn: dict[str, Any], revision: str, override: dict[str, str]) -> None:
+    errlog = tempfile.TemporaryFile("w+", encoding="utf-8")
+    if kind == "stdio":
+        server: Any = stdio_client(stdio(conn, override), errlog=errlog)
+    else:
+        server = http(conn, override or None)
     try:
         async with Client(server, mode=mode_for(revision), read_timeout_seconds=15) as c:
             await c.list_tools()
-    except BaseException as e:  # noqa: BLE001 - the refusal may surface as any error (or a group)
+    except Exception as e:  # noqa: BLE001 - the refusal may surface as any error (or a group)
         text = repr(e)
         if kind == "http":
             expect("bearer token" in text and "401" in text, f"want HTTP 401 with the reason, got {text[:300]}")
+        else:
+            # The bridge itself must refuse (not crash, not hang): its stderr names the reason.
+            errlog.seek(0)
+            err = errlog.read()
+            expect(BRIDGE_REFUSAL in err, f"bridge stderr {err!r}")
         return
+    finally:
+        errlog.close()
     raise AssertionError("connected")
+
+
+async def bridge_exits_nonzero(conn: dict[str, Any], override: dict[str, str]) -> None:
+    # Launched directly: a refused bridge exits nonzero with the reason on stderr, stdout empty.
+    s = conn["stdio"]
+    r = await anyio.run_process(
+        [s["command"], *s["args"]], input=b"", check=False, env={**os.environ, **s["env"], **override}
+    )
+    expect(r.returncode != 0, f"exit status {r.returncode}")
+    err = r.stderr.decode(errors="replace")
+    expect(BRIDGE_REFUSAL in err, f"stderr {err!r}")
+    expect(r.stdout == b"", f"stdout carries only MCP messages: {r.stdout!r}")
 
 
 async def access(kind: str) -> None:
@@ -365,14 +395,12 @@ async def access(kind: str) -> None:
     section = f"[py {kind} access]"
     conn = take()
     rev = REVISIONS[-1]
-    revoked = stdio(FX["revoked"]) if kind == "stdio" else http(FX["revoked"])
-    await check("revoked client is refused", lambda: refused(kind, revoked, rev))
-    wrong = (
-        stdio(conn, {"NUGGET_MCP_TOKEN": "ngt_wrong"})
-        if kind == "stdio"
-        else http(conn, {"Authorization": "Bearer ngt_wrong"})
-    )
-    await check("wrong token is refused", lambda: refused(kind, wrong, rev))
+    wrong = {"NUGGET_MCP_TOKEN": "ngt_wrong"} if kind == "stdio" else {"Authorization": "Bearer ngt_wrong"}
+    await check("revoked client is refused", lambda: refused(kind, FX["revoked"], rev, {}))
+    await check("wrong token is refused", lambda: refused(kind, conn, rev, wrong))
+    if kind == "stdio":
+        await check("bridge exits nonzero for a revoked client", lambda: bridge_exits_nonzero(FX["revoked"], {}))
+        await check("bridge exits nonzero for a wrong token", lambda: bridge_exits_nonzero(conn, wrong))
 
     async def limited() -> None:
         async with client(kind, FX["limited"], rev) as c:

@@ -273,7 +273,14 @@ impl Gate {
         let (mut parts, body) = req.into_parts();
         let client = match self.admit(&parts) {
             Ok(c) => c,
-            Err(refusal) => return self.refused(body, *refusal).await,
+            Err(refusal) => {
+                let expects_continue = parts
+                    .headers
+                    .get(header::EXPECT)
+                    .and_then(|v| v.to_str().ok())
+                    .is_some_and(|v| v.eq_ignore_ascii_case("100-continue"));
+                return self.refused(expects_continue, body, *refusal).await;
+            }
         };
         // Read the whole body under a deadline and a size cap, so a slow sender cannot hold a
         // connection slot.
@@ -307,16 +314,26 @@ impl Gate {
         resp
     }
 
-    /// Finish a refused request: read (and discard) a small body first. Closing a connection with
+    /// Finish a refused request: read (and discard) a small body first, unless the client asked
+    /// for `100 Continue` and so has not sent it. Closing a connection with
     /// unread request bytes makes the OS reset it, and the client then loses the refusal (an SDK
     /// reports "server disconnected" instead of "rate limited"). A body that is large or slow is
     /// not waited for; the connection is closed instead.
-    async fn refused(&self, body: Incoming, mut refusal: Response<Body>) -> Response<Body> {
-        let wait = self
-            .body_timeout
-            .min(Duration::from_millis(DRAIN_TIMEOUT_MS));
-        let drain = http_body_util::Limited::new(body, DRAIN_BYTES).collect();
-        let drained = matches!(tokio::time::timeout(wait, drain).await, Ok(Ok(_)));
+    async fn refused(
+        &self,
+        expects_continue: bool,
+        body: Incoming,
+        mut refusal: Response<Body>,
+    ) -> Response<Body> {
+        // A client waiting for `100 Continue` has not sent its body: reading it would invite the
+        // upload. Close instead.
+        let drained = !expects_continue && {
+            let wait = self
+                .body_timeout
+                .min(Duration::from_millis(DRAIN_TIMEOUT_MS));
+            let drain = http_body_util::Limited::new(body, DRAIN_BYTES).collect();
+            matches!(tokio::time::timeout(wait, drain).await, Ok(Ok(_)))
+        };
         if !drained {
             refusal
                 .headers_mut()
@@ -388,6 +405,15 @@ impl Gate {
             }
         };
         if let Err(retry) = self.server.limiter().check(&client.id) {
+            // The method is in the body, which is not read for a refused request: audited as a
+            // gate refusal, coalesced per client.
+            self.server.record_refusal(
+                &client,
+                crate::audit::Transport::LoopbackHttp,
+                crate::audit::ACTION_REFUSED,
+                "http",
+                crate::audit::Outcome::RateLimited,
+            );
             let secs = retry.as_secs().max(1);
             let mut r = refuse(
                 StatusCode::TOO_MANY_REQUESTS,

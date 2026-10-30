@@ -99,7 +99,11 @@ function connection(created) {
   };
 }
 
-/** On failure: where the logs are, and their last lines (CI keeps nothing else). */
+/**
+ * On failure: where the logs are, and their last lines (CI keeps nothing else). A failed local run
+ * keeps its temp dir, including fixture.json with the clients' live tokens (they work only against
+ * that throwaway daemon home, which is stopped); delete it when done.
+ */
 function printLogs(work, daemon) {
   const tail = (file, n = 60) => {
     try {
@@ -173,7 +177,10 @@ async function main() {
       limited,
     };
     const file = json ? path.resolve(json) : path.join(work, "fixture.json");
+    // It holds live tokens. `mode` only applies when the file is created, so a file reused via
+    // --json is narrowed too.
     fs.writeFileSync(file, JSON.stringify(fixture, null, 2), { mode: 0o600 });
+    fs.chmodSync(file, 0o600);
     console.error(`fixture: ${ks.entities} entities, ${clients.length} clients; running ${command.join(" ")}`);
     const child = spawn(command[0], command.slice(1), {
       stdio: "inherit",

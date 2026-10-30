@@ -26,6 +26,7 @@ pub struct FakeBackend {
     details: Mutex<Vec<(EntityId, DetailOrigins)>>,
     ignore_filter: bool,
     calls: Mutex<Vec<String>>,
+    delay: Mutex<std::time::Duration>,
 }
 
 impl FakeBackend {
@@ -38,6 +39,18 @@ impl FakeBackend {
         Self {
             ignore_filter: true,
             ..Self::default()
+        }
+    }
+
+    /// Make `search` and `context` take `delay` (to test cancellation of calls in flight).
+    pub fn set_delay(&self, delay: std::time::Duration) {
+        *lock(&self.delay) = delay;
+    }
+
+    async fn pause(&self) {
+        let d = *lock(&self.delay);
+        if !d.is_zero() {
+            tokio::time::sleep(d).await;
         }
     }
 
@@ -133,6 +146,7 @@ impl KnowledgeBackend for FakeBackend {
         f: &ScopeFilter,
     ) -> Result<Vec<SearchRecord>> {
         self.log("search");
+        self.pause().await;
         Ok(self
             .ranked(query, f)
             .into_iter()
@@ -156,6 +170,7 @@ impl KnowledgeBackend for FakeBackend {
         f: &ScopeFilter,
     ) -> Result<ContextPack> {
         self.log("context");
+        self.pause().await;
         let mut excluded = 0;
         if !self.ignore_filter && !f.include_sensitive {
             let all = ScopeFilter {

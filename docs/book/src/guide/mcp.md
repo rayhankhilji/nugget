@@ -36,9 +36,14 @@ No tool can change your data, send anything or act on your computer. See
 - **Local only.** Apps connect through `nuggetd mcp` over stdio, or to a listener on `127.0.0.1`. There
   is no remote access.
 - **Revocable, audited, rate-limited.** Revoking a client on **Connected AI apps** cuts it off on its
-  next request. Every tool call and resource read is in the audit log (arguments summarised, item
-  references, never content; cancelled calls too), and each client is limited to bursts of 60
-  requests and 120 per minute.
+  next request. Every tool call and resource read that runs is in the audit log (arguments
+  summarised, item references, never content; cancelled calls too), and each client is limited to
+  bursts of 60 requests and 120 per minute. Calls refused for the rate limit or a revoked client are
+  audited too, but coalesced so a runaway app cannot flood the log: at most one entry per client and
+  kind of refusal per minute, counting the refusals since the previous one. Over HTTP a rate-limited
+  request is refused before its body is read, so its entry records a refused HTTP request rather
+  than naming the tool; a request with a missing, wrong or revoked token names no client and is answered
+  401 without an audit entry.
 
 ## Stdio or HTTP?
 
@@ -106,15 +111,17 @@ nuggetd mcp install --client claude-code
 ```
 
 This creates the client and prints the command that adds Nugget to Claude Code; it does not run it.
-The command contains the token, so run it yourself and do not paste it anywhere else. It looks like
-this:
+The command contains the token, so run it yourself and do not paste it anywhere else; it also lands
+in your shell history. It looks like this:
 
 ```sh
 claude mcp add --transport stdio --scope user --env NUGGET_MCP_TOKEN=ngt_YOUR_TOKEN nugget -- nuggetd mcp --client mcp_YOUR_CLIENT_ID
 ```
 
 `--scope user` makes Nugget available in every project. Check it with `claude mcp list`. Over HTTP
-instead (see [Stdio or HTTP?](#stdio-or-http)):
+instead (see [Stdio or HTTP?](#stdio-or-http)); this command contains the token too, so it ends up
+in your shell history like the one above: run it yourself, and clear it from the history if others
+can read it:
 
 ```sh
 claude mcp add --transport http --scope user nugget http://127.0.0.1:7319/mcp --header "Authorization: Bearer ngt_YOUR_TOKEN"
@@ -173,16 +180,24 @@ in VS Code's secret storage instead of the file:
 }
 ```
 
-Over HTTP, the server entry is:
+Over HTTP (see [Stdio or HTTP?](#stdio-or-http)), with the token again kept out of the file:
 
 ```json
 {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "nugget-token",
+      "description": "Nugget MCP token (ngt_...)",
+      "password": true
+    }
+  ],
   "servers": {
     "nugget": {
       "type": "http",
       "url": "http://127.0.0.1:7319/mcp",
       "headers": {
-        "Authorization": "Bearer ngt_YOUR_TOKEN"
+        "Authorization": "Bearer ${input:nugget-token}"
       }
     }
   }

@@ -1,8 +1,14 @@
 //! Fixes found by running the official TypeScript and Python SDK clients against Nugget
-//! (`crates/nugget-mcp/compat`): every tool call and resource read is audited exactly once
-//! (unknown tools and cancelled requests too), `resources/list` refuses cursors it never handed
-//! out, cancelled requests stop, and HTTP refusals carry a JSON-RPC error body that SDK clients
-//! can show.
+//! (`crates/nugget-mcp/compat`): every tool call and resource read that runs is audited exactly
+//! once (unknown tools and cancelled requests too, including a cancellation racing completion),
+//! `resources/list` refuses cursors it never handed out, cancelled requests stop, and HTTP
+//! refusals carry a JSON-RPC error body that SDK clients can show.
+//!
+//! Refused calls (rate limited, revoked) are audited coalesced: at most one entry per client and
+//! outcome per `REFUSAL_AUDIT_WINDOW`, counting the refusals in between. On stdio the entry names
+//! the refused tool or resource. Over HTTP a rate-limited request is refused before its body is
+//! read, so its entry is `mcp.request_refused` with target `http`; a request with a missing,
+//! wrong or revoked token names no client and is not audited (it gets 401).
 
 mod common;
 
@@ -288,4 +294,231 @@ async fn http_refusals_are_json_rpc_errors_sdk_clients_can_show() {
         assert!(text.starts_with("HTTP/1.1 401"), "{text}");
     }
     handle.shutdown().await;
+}
+
+fn outcomes(log: &AuditLog) -> Vec<(String, String, String)> {
+    log.entries()
+        .iter()
+        .map(|e| {
+            (
+                e.action.clone(),
+                e.target.clone(),
+                e.detail["outcome"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Wait (bounded) until the log holds `n` entries.
+async fn wait_for_entries(log: &AuditLog, n: usize) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while log.entries().len() < n {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "expected {n} audit entries, have {:?}",
+            outcomes(log)
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+#[tokio::test]
+async fn refused_stdio_calls_are_audited_coalesced() {
+    let log = AuditLog::default();
+    let (reg, _) = registry();
+    let (info, _token) = reg.create("Runaway", all_scopes()).unwrap();
+    let server = McpServer::builder(backend(false))
+        .registry(reg.clone())
+        .audit(log.sink())
+        .config(McpConfig {
+            rate_limit: RateLimit {
+                burst: 2,
+                per_minute: 1,
+            },
+        })
+        .build();
+    let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+    let (r, w) = tokio::io::split(server_io);
+    let s = server.clone();
+    tokio::spawn(async move { s.serve_io(info, Transport::Stdio, r, w).await });
+    let c: Client = ().serve(client_io).await.unwrap();
+    let search =
+        || CallToolRequestParams::new("search").with_arguments(obj(json!({"query": "apollo"})));
+    for _ in 0..2 {
+        c.call_tool(search()).await.unwrap();
+    }
+    // A burst over the limit: refused, one coalesced entry for all of it.
+    for _ in 0..10 {
+        let e = mcp_error(c.call_tool(search()).await.unwrap_err());
+        assert!(e.message.contains("rate limited"), "{e:?}");
+    }
+    let read = c
+        .read_resource(ReadResourceRequestParams::new("nugget://entity/ent_sam"))
+        .await;
+    assert!(read.is_err(), "reads share the limit");
+    let entries = log.entries();
+    assert_eq!(
+        outcomes(&log),
+        [
+            ("mcp.tool_call", "search", "ok"),
+            ("mcp.tool_call", "search", "ok"),
+            ("mcp.tool_call", "search", "rate_limited"),
+        ]
+        .map(|(a, t, o)| (a.to_owned(), t.to_owned(), o.to_owned()))
+    );
+    assert_eq!(entries[2].detail["refused_since_last_entry"], 0);
+    assert_eq!(entries[2].detail["transport"], "stdio");
+
+    // Revoked: the next call is refused and audited once as denied, then coalesced.
+    let id = reg.list().unwrap()[0].id.clone();
+    assert!(reg.revoke(&id).unwrap());
+    for _ in 0..3 {
+        let e = mcp_error(c.call_tool(search()).await.unwrap_err());
+        assert!(e.message.contains("revoked"), "{e:?}");
+    }
+    let last = outcomes(&log).pop().unwrap();
+    assert_eq!(log.entries().len(), 4);
+    assert_eq!(
+        last,
+        ("mcp.tool_call".into(), "search".into(), "denied".into())
+    );
+    c.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn http_rate_limit_refusals_are_audited_coalesced() {
+    let log = AuditLog::default();
+    let (reg, _) = registry();
+    let server = McpServer::builder(backend(false))
+        .registry(reg.clone())
+        .audit(log.sink())
+        .config(McpConfig {
+            rate_limit: RateLimit {
+                burst: 1,
+                per_minute: 1,
+            },
+        })
+        .build();
+    let handle = server
+        .serve_http(HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        })
+        .await
+        .unwrap();
+    let url = handle.url();
+    let (_, token) = reg.create("A", all_scopes()).unwrap();
+    assert_eq!(post(&url, Some(token.expose())).await.status(), 200);
+    for _ in 0..5 {
+        assert_eq!(post(&url, Some(token.expose())).await.status(), 429);
+    }
+    // Unattributable: a wrong token names no client.
+    assert_eq!(post(&url, Some("ngt_wrong")).await.status(), 401);
+    let entries = log.entries();
+    assert_eq!(
+        outcomes(&log),
+        [(
+            "mcp.request_refused".into(),
+            "http".into(),
+            "rate_limited".into()
+        )]
+    );
+    assert_eq!(entries[0].detail["transport"], "loopback_http");
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_refused_request_expecting_100_continue_is_not_drained() {
+    let (reg, _) = registry();
+    let server = McpServer::builder(backend(false))
+        .registry(reg.clone())
+        .build();
+    let handle = server
+        .serve_http(HttpConfig {
+            port: 0,
+            ..HttpConfig::default()
+        })
+        .await
+        .unwrap();
+    let mut s = tokio::net::TcpStream::connect(handle.local_addr())
+        .await
+        .unwrap();
+    let head = format!(
+        "POST /mcp HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+         Authorization: Bearer ngt_wrong\r\nExpect: 100-continue\r\nContent-Length: 500000\r\n\r\n",
+        handle.local_addr()
+    );
+    s.write_all(head.as_bytes()).await.unwrap();
+    let mut buf = vec![0u8; 4096];
+    let n = tokio::time::timeout(std::time::Duration::from_secs(5), s.read(&mut buf))
+        .await
+        .expect("answered without waiting for the body")
+        .unwrap();
+    let text = String::from_utf8_lossy(&buf[..n]).to_ascii_lowercase();
+    assert!(text.starts_with("http/1.1 401"), "{text}");
+    assert!(!text.contains("100 continue"), "no upload invited: {text}");
+    assert!(text.contains("connection: close"), "{text}");
+    handle.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_cancelled_call_in_flight_stops_and_is_audited_once() {
+    let log = AuditLog::default();
+    let b = backend(false);
+    b.set_delay(std::time::Duration::from_secs(30));
+    let server = McpServer::builder(b).audit(log.sink()).build();
+    let client = stdio_client(&server).await;
+    // Dropping the call sends notifications/cancelled for it (rmcp's cancel-on-drop).
+    let call = client.call_tool(
+        CallToolRequestParams::new("get_context").with_arguments(obj(json!({"query": "apollo"}))),
+    );
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(300), call)
+            .await
+            .is_err(),
+        "the slow call is still running"
+    );
+    wait_for_entries(&log, 1).await;
+    assert_eq!(
+        outcomes(&log),
+        [(
+            "mcp.tool_call".into(),
+            "get_context".into(),
+            "cancelled".into()
+        )]
+    );
+    // The session is healthy and nothing else was recorded.
+    client.list_all_tools().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(log.entries().len(), 1);
+    client.cancel().await.unwrap();
+}
+
+#[tokio::test]
+async fn cancel_racing_completion_is_audited_exactly_once() {
+    let log = AuditLog::default();
+    let b = backend(false);
+    b.set_delay(std::time::Duration::from_millis(20));
+    let server = McpServer::builder(b).audit(log.sink()).build();
+    let client = stdio_client(&server).await;
+    const CALLS: usize = 40;
+    for i in 0..CALLS {
+        // Cancel anywhere from before to well after the 20 ms the call takes (never so early
+        // that the request might not have been sent yet).
+        let wait = std::time::Duration::from_millis(10 + (i as u64 * 7) % 41);
+        let call = client.call_tool(
+            CallToolRequestParams::new("search").with_arguments(obj(json!({"query": "apollo"}))),
+        );
+        let _ = tokio::time::timeout(wait, call).await;
+    }
+    wait_for_entries(&log, CALLS).await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let all = outcomes(&log);
+    assert_eq!(all.len(), CALLS, "one entry per call: {all:?}");
+    assert!(
+        all.iter().all(|(_, _, o)| o == "ok" || o == "cancelled"),
+        "{all:?}"
+    );
+    assert!(all.iter().any(|(_, _, o)| o == "cancelled"), "{all:?}");
+    client.cancel().await.unwrap();
 }

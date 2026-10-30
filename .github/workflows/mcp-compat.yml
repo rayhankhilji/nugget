@@ -55,6 +55,7 @@ jobs:
     timeout-minutes: 45
     # Linux is required. macOS and Windows run the same legs (the stdio bridge goes over the
     # local IPC socket / named pipe) but do not fail the workflow until they have a green record.
+    # Once they have passed on a few PRs in a row, set `experimental: false` for them below.
     continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
@@ -83,6 +84,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build nuggetd
+        id: build
         run: cargo build --locked -p nuggetd --bin nuggetd
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -100,6 +102,7 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Install the Python SDK client
+        id: pyinstall
         working-directory: crates/nugget-mcp/compat/py
         run: |
           python -m venv .venv
@@ -116,7 +119,8 @@ jobs:
         run: node ../fixture.mjs -- node client.mjs
 
       - name: Python SDK against nuggetd (stdio bridge + loopback HTTP)
-        if: success() || failure()
+        # Also after a TypeScript failure, but only on a built daemon and installed client.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.pyinstall.outcome == 'success' }}
         working-directory: crates/nugget-mcp/compat/py
         env:
           NUGGETD: ${{ github.workspace }}/target/debug/nuggetd${{ runner.os == 'Windows' && '.exe' || '' }}

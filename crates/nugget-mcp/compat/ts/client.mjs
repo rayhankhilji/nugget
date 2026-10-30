@@ -7,6 +7,7 @@
 // Run through the fixture, which starts the daemon and writes the connection details:
 //   node ../fixture.mjs -- node client.mjs
 // Prints one line per check and a summary; exits nonzero when any check fails.
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -36,6 +37,8 @@ const REVISIONS = SUPPORTED_PROTOCOL_VERSIONS.filter((v) => NUGGET_HANDSHAKE.inc
   .reverse()
   .slice(0, 2);
 
+/** What `nuggetd mcp` prints when the daemon refuses the client. */
+const BRIDGE_REFUSAL = "unknown or revoked MCP client, or wrong token";
 const TOOLS = ["search", "get_context", "find_entities", "get_entity", "get_neighbourhood", "get_item", "recent_changes"];
 const CALL_TIMEOUT = { timeout: 30_000 };
 
@@ -325,6 +328,8 @@ async function access(kind) {
   const conn = fx.clients[nextClient++];
   const expectRefused = async (what, transport) => {
     const client = new Client({ name: "nugget-compat-ts", version: "1.0.0" });
+    let stderr = "";
+    transport.stderr?.on("data", (d) => (stderr += d));
     let err;
     try {
       await client.connect(transport, { timeout: 15_000 });
@@ -333,9 +338,34 @@ async function access(kind) {
     }
     await client.close().catch(() => {});
     assert(err, `${what}: connected`);
-    if (kind === "http") assert(/401/.test(String(err?.message)) || err?.code === 401, `${what}: want HTTP 401, got ${err?.message}`);
+    if (kind === "http") {
+      assert(err?.code === 401, `${what}: want HTTP 401, got ${err?.code}: ${err?.message}`);
+      assert(/bearer token/.test(String(err?.message)), `${what}: the refusal says why: ${err?.message}`);
+    } else {
+      // The bridge itself must refuse (not crash, not hang): its stderr names the reason.
+      assert(stderr.includes(BRIDGE_REFUSAL), `${what}: bridge stderr ${JSON.stringify(stderr)}`);
+    }
     return err;
   };
+  if (kind === "stdio") {
+    // Launched directly: a refused bridge exits nonzero with the reason on stderr, stdout empty.
+    for (const [what, c, env] of [
+      ["revoked", fx.revoked, {}],
+      ["wrong token", conn, { NUGGET_MCP_TOKEN: "ngt_wrong" }],
+    ]) {
+      await check(`bridge exits nonzero for a ${what} client`, async () => {
+        const r = spawnSync(c.stdio.command, c.stdio.args, {
+          env: { ...process.env, ...c.stdio.env, ...env },
+          input: "",
+          encoding: "utf8",
+          timeout: 30_000,
+        });
+        assert(r.status !== 0 && r.status !== null, `exit status ${r.status} (${r.error?.message ?? r.signal})`);
+        assert(r.stderr.includes(BRIDGE_REFUSAL), `stderr ${JSON.stringify(r.stderr)}`);
+        assert(r.stdout === "", `stdout carries only MCP messages: ${JSON.stringify(r.stdout)}`);
+      });
+    }
+  }
   await check("revoked client is refused", () =>
     expectRefused("revoked", kind === "stdio" ? stdioTransport(fx.revoked) : httpTransport(fx.revoked)),
   );

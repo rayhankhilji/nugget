@@ -266,7 +266,7 @@ impl ToolFailure {
     pub(crate) fn cancelled() -> Self {
         Self {
             outcome: Outcome::Cancelled,
-            message: "request cancelled by the client".into(),
+            message: "request cancelled".into(),
         }
     }
 

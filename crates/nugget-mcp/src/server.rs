@@ -1,5 +1,6 @@
 //! The MCP server core and its `rmcp` handler.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use nugget_core::egress::EgressSink;
@@ -43,6 +44,59 @@ struct Inner {
     audit: Option<AuditSink>,
     egress: Option<Arc<dyn EgressSink>>,
     limiter: RateLimiter,
+    refusals: RefusalLog,
+}
+
+/// How long refusals of one kind for one client are coalesced into one audit entry.
+pub const REFUSAL_AUDIT_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Coalesces audit entries for refused requests (rate limited, revoked), so a runaway client
+/// cannot flood the audit log: per client and outcome, at most one entry per
+/// [`REFUSAL_AUDIT_WINDOW`]. The entry that opens a window carries `refused_since_last_entry`,
+/// the number of refusals of that kind that were coalesced (not written) since the previous one.
+#[derive(Default)]
+struct RefusalLog {
+    windows: std::sync::Mutex<HashMap<(String, Outcome), RefusalWindow>>,
+}
+
+struct RefusalWindow {
+    opened: std::time::Instant,
+    coalesced: u64,
+}
+
+impl RefusalLog {
+    /// `Some(coalesced since the last entry)` when this refusal should be written.
+    fn admit(&self, client: &str, outcome: Outcome) -> Option<u64> {
+        let now = std::time::Instant::now();
+        let mut w = self.windows.lock().unwrap_or_else(|p| p.into_inner());
+        if w.len() > 10_000 {
+            w.retain(|_, v| now.duration_since(v.opened) < REFUSAL_AUDIT_WINDOW);
+        }
+        match w.get_mut(&(client.to_owned(), outcome)) {
+            Some(win) if now.duration_since(win.opened) < REFUSAL_AUDIT_WINDOW => {
+                win.coalesced += 1;
+                None
+            }
+            Some(win) => {
+                let n = win.coalesced;
+                *win = RefusalWindow {
+                    opened: now,
+                    coalesced: 0,
+                };
+                Some(n)
+            }
+            None => {
+                w.insert(
+                    (client.to_owned(), outcome),
+                    RefusalWindow {
+                        opened: now,
+                        coalesced: 0,
+                    },
+                );
+                Some(0)
+            }
+        }
+    }
 }
 
 /// Nugget's MCP server. Cheap to clone; one instance serves every client and transport.
@@ -99,6 +153,7 @@ impl McpServerBuilder {
                 audit: self.audit,
                 egress: self.egress,
                 limiter: RateLimiter::new(self.config.rate_limit),
+                refusals: RefusalLog::default(),
             }),
         }
     }
@@ -192,6 +247,45 @@ impl McpServer {
                 items: rec.items.to_vec(),
             });
         }
+    }
+
+    /// Audit a request refused before it ran (rate limited or revoked), coalesced per client and
+    /// outcome (see [`REFUSAL_AUDIT_WINDOW`]). `action` and `target` name the refused call; HTTP
+    /// refusals at the gate, before the method is known, use [`crate::audit::ACTION_REFUSED`] and `"http"`.
+    pub(crate) fn record_refusal(
+        &self,
+        client: &McpClientInfo,
+        transport: Transport,
+        action: &'static str,
+        target: &str,
+        outcome: Outcome,
+    ) {
+        let Some(sink) = &self.inner.audit else {
+            return;
+        };
+        let Some(coalesced) = self.inner.refusals.admit(&client.id, outcome) else {
+            return;
+        };
+        let mut entry = CallRecord {
+            client_id: &client.id,
+            client_name: &client.name,
+            transport,
+            action,
+            target,
+            args: None,
+            outcome,
+            results: 0,
+            items: &[],
+        }
+        .to_entry();
+        if let serde_json::Value::Object(d) = &mut entry.detail {
+            d.insert("refused_since_last_entry".into(), coalesced.into());
+            d.insert(
+                "coalesce_window_secs".into(),
+                REFUSAL_AUDIT_WINDOW.as_secs().into(),
+            );
+        }
+        sink(entry);
     }
 
     /// Run one tool for a client: scope check, execution, audit. Transport-independent.
@@ -403,17 +497,31 @@ pub struct McpHandler {
 pub(crate) struct AuthenticatedClient(pub McpClientInfo);
 
 impl McpHandler {
-    /// The calling client and transport, after revocation and rate checks.
+    /// The calling client and transport, after revocation and rate checks. `audited` names the
+    /// call (action and target) when it is one the audit log records: a refused tool call or
+    /// resource read is then audited too (coalesced, see [`REFUSAL_AUDIT_WINDOW`]).
     fn client(
         &self,
         ctx: &RequestContext<RoleServer>,
         count: bool,
+        audited: Option<(&'static str, &str)>,
     ) -> Result<(McpClientInfo, Transport), ErrorData> {
         match &self.binding {
             Binding::Fixed { client, transport } => {
-                let c = self.server.refresh(client).map_err(access_error)?;
+                let refused = |e: AccessError| {
+                    if let Some((action, target)) = audited {
+                        let outcome = match e {
+                            AccessError::Revoked => Outcome::Denied,
+                            AccessError::RateLimited { .. } => Outcome::RateLimited,
+                        };
+                        self.server
+                            .record_refusal(client, *transport, action, target, outcome);
+                    }
+                    access_error(e)
+                };
+                let c = self.server.refresh(client).map_err(refused)?;
                 if count {
-                    self.server.rate_check(&c).map_err(access_error)?;
+                    self.server.rate_check(&c).map_err(refused)?;
                 }
                 Ok((c, *transport))
             }
@@ -440,20 +548,27 @@ fn access_error(e: AccessError) -> ErrorData {
     }
 }
 
-/// Answer to a request the client cancelled. The client has stopped waiting for it (rmcp still
-/// writes a response, which clients drop for a cancelled id).
+/// Answer to a request whose work was stopped: the client sent `notifications/cancelled`, or
+/// the session ended (end of input, disconnect, shutdown). Rarely seen by anyone: rmcp 3.8.0
+/// drops the response to a request it cancelled, and an ended session has no one to read it.
 fn cancelled_error() -> ErrorData {
-    ErrorData::invalid_request("request cancelled by the client", None)
+    ErrorData::invalid_request("request cancelled", None)
 }
 
 /// A `resources/list` cursor: the decimal offset of the next page, as this server hands out in
 /// `nextCursor`. Clients treat it as opaque; anything else is refused rather than silently
 /// restarting the listing (which would loop a client forever).
 fn parse_cursor(cursor: &str) -> Option<usize> {
-    if cursor.is_empty() || !cursor.bytes().all(|b| b.is_ascii_digit()) {
+    let canonical = !cursor.is_empty()
+        && cursor.bytes().all(|b| b.is_ascii_digit())
+        && (cursor == "0" || !cursor.starts_with('0'));
+    if !canonical {
         return None;
     }
-    cursor.parse().ok()
+    cursor
+        .parse::<usize>()
+        .ok()
+        .filter(|offset| offset % RESOURCE_PAGE == 0)
 }
 
 fn instructions() -> String {
@@ -485,7 +600,7 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParams>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let (client, _) = self.client(&ctx, false)?;
+        let (client, _) = self.client(&ctx, false, None)?;
         let scope = Scope::new(&client.scopes);
         Ok(ListToolsResult::with_all_items(
             tools::definitions()
@@ -500,7 +615,7 @@ impl ServerHandler for McpHandler {
         request: CallToolRequestParams,
         ctx: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let (client, transport) = self.client(&ctx, true)?;
+        let (client, transport) = self.client(&ctx, true, Some((ACTION_TOOL, &request.name)))?;
         let args = request.arguments.unwrap_or_default();
         // Unknown tools are audited too (outcome `rejected`), then answered with the protocol
         // error the spec asks for (-32602) instead of a tool result.
@@ -528,7 +643,7 @@ impl ServerHandler for McpHandler {
         request: Option<PaginatedRequestParams>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let (client, _) = self.client(&ctx, true)?;
+        let (client, _) = self.client(&ctx, true, None)?;
         let scope = Scope::new(&client.scopes);
         let offset = match request.and_then(|r| r.cursor) {
             None => 0,
@@ -553,7 +668,7 @@ impl ServerHandler for McpHandler {
         _request: Option<PaginatedRequestParams>,
         ctx: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let (client, _) = self.client(&ctx, false)?;
+        let (client, _) = self.client(&ctx, false, None)?;
         let scope = Scope::new(&client.scopes);
         let mut templates = Vec::new();
         if scope.allows_tool(tools::GET_ENTITY) {
@@ -589,7 +704,7 @@ impl ServerHandler for McpHandler {
         request: ReadResourceRequestParams,
         ctx: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        let (client, transport) = self.client(&ctx, true)?;
+        let (client, transport) = self.client(&ctx, true, Some((ACTION_RESOURCE, &request.uri)))?;
         match self
             .server
             .read_resource_until(&client, transport, &request.uri, &ctx.ct)
