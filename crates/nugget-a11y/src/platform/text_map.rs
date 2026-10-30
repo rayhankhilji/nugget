@@ -166,22 +166,25 @@ impl Flat {
         self.embeds.binary_search_by_key(&i, |s| s.source).ok()
     }
 
+    /// Nesting followed by [`descend`](Self::descend).
+    pub const MAX_DEPTH: usize = 16;
+
     /// Find the innermost object holding an offset (a caret or a selection endpoint) and the
     /// offset in its own text, for [`offset_at`](Self::offset_at).
     ///
     /// `own` is the offset this object reports, `None` when it reports none (the offset is in
     /// one of its embedded objects, or nowhere). `inner(path)` asks the embedded object at
     /// `path` for its own offset, `None` when the offset is not inside it. An object reports
-    /// an offset inside a child as the child's U+FFFC (or the one after it), so the descent
-    /// tries the embedded object at the offset and the one just before it (`prefer_before`
-    /// tries that one first, for the end of a selection).
+    /// an offset inside a child as the child's U+FFFC (Chromium) or the offset just after it
+    /// (Gecko, for the end of a selection or a caret at the end of a child), so the descent
+    /// tries the embedded object at the offset first and then the one just before it. When
+    /// both hold part of a selection (Chromium's end inside the second child), the one at the
+    /// offset is the right one.
     pub fn descend(
         &self,
         own: Option<u32>,
-        prefer_before: bool,
         inner: &mut dyn FnMut(&[usize]) -> Option<u32>,
     ) -> Option<(Vec<usize>, u32)> {
-        const MAX_DEPTH: usize = 16;
         let mut path = Vec::new();
         let mut flat = self;
         let mut offset = match own {
@@ -196,13 +199,8 @@ impl Flat {
                 o
             }
         };
-        'down: while path.len() < MAX_DEPTH {
-            let candidates = if prefer_before {
-                [offset.checked_sub(1), Some(offset)]
-            } else {
-                [Some(offset), offset.checked_sub(1)]
-            };
-            for i in candidates.into_iter().flatten() {
+        'down: while path.len() < Self::MAX_DEPTH {
+            for i in [Some(offset), offset.checked_sub(1)].into_iter().flatten() {
                 let Some(k) = flat.embed_at(i) else { continue };
                 let Some(child) = flat.embeds[k].flat.as_ref() else {
                     continue;
@@ -224,10 +222,9 @@ impl Flat {
     pub fn resolve(
         &self,
         own: Option<u32>,
-        prefer_before: bool,
         inner: &mut dyn FnMut(&[usize]) -> Option<u32>,
     ) -> Option<u32> {
-        let (path, offset) = self.descend(own, prefer_before, inner)?;
+        let (path, offset) = self.descend(own, inner)?;
         self.offset_at(&path, offset)
     }
 }
@@ -273,6 +270,7 @@ pub fn flatten_embedded(source: &str, embeds: Vec<Option<Embedded>>) -> Flat {
                     if after_block {
                         push(&mut text, &mut n, '\n');
                         after_block = false;
+                        at_line_start = true;
                     }
                     map.push(n);
                     let start = n;
@@ -510,18 +508,18 @@ mod tests {
             vec![block("Draft: hi"), block("second")],
         );
         let mut inner = |p: &[usize]| (p == [1]).then_some(3);
-        assert_eq!(f.descend(Some(1), false, &mut inner), Some((vec![1], 3)));
-        assert_eq!(f.resolve(Some(1), false, &mut inner), Some(13));
+        assert_eq!(f.descend(Some(1), &mut inner), Some((vec![1], 3)));
+        assert_eq!(f.resolve(Some(1), &mut inner), Some(13));
         // Gecko-style "after the embed" offset for the end of a selection in the first one.
         let mut inner = |p: &[usize]| (p == [0]).then_some(5);
-        assert_eq!(f.resolve(Some(1), true, &mut inner), Some(5));
+        assert_eq!(f.resolve(Some(1), &mut inner), Some(5));
         // The root reports nothing; a child does.
         let mut inner = |p: &[usize]| (p == [1]).then_some(6);
-        assert_eq!(f.resolve(None, false, &mut inner), Some(16));
+        assert_eq!(f.resolve(None, &mut inner), Some(16));
         // Nobody reports anything.
-        assert_eq!(f.resolve(None, false, &mut |_| None), None);
+        assert_eq!(f.resolve(None, &mut |_| None), None);
         // No child claims the offset: the root's own offset is mapped.
-        assert_eq!(f.resolve(Some(2), false, &mut |_| None), Some(16));
+        assert_eq!(f.resolve(Some(2), &mut |_| None), Some(16));
     }
 
     #[test]
@@ -543,11 +541,78 @@ mod tests {
             [1, 1] => Some(2),
             _ => None,
         };
-        assert_eq!(
-            doc.descend(Some(1), false, &mut inner),
-            Some((vec![1, 1], 2))
+        assert_eq!(doc.descend(Some(1), &mut inner), Some((vec![1, 1], 2)));
+        assert_eq!(doc.resolve(Some(1), &mut inner), Some(12));
+    }
+
+    #[test]
+    fn chromium_selection_end_prefers_the_child_at_the_offset() {
+        // "hello" / "world"; the selection runs from inside "hello" to "wor". Chromium reports
+        // the root end as 1 (the embed of "world"); both children hold part of the selection.
+        let f = flatten_embedded("\u{FFFC}\u{FFFC}", vec![block("hello"), block("world")]);
+        let mut end = |p: &[usize]| match p {
+            [0] => Some(5),
+            [1] => Some(3),
+            _ => None,
+        };
+        assert_eq!(f.resolve(Some(1), &mut end), Some(9));
+        // Gecko reports 2 (after the embed): only the child before it answers.
+        assert_eq!(f.resolve(Some(2), &mut end), Some(9));
+        // Offset 0: there is no object before it.
+        let mut start = |p: &[usize]| (p == [0]).then_some(2);
+        assert_eq!(f.descend(Some(0), &mut start), Some((vec![0], 2)));
+        assert_eq!(f.descend(Some(0), &mut |_| None), Some((vec![], 0)));
+    }
+
+    #[test]
+    fn descent_stops_at_the_depth_cap() {
+        let mut flat = Flat::leaf("x");
+        for _ in 0..Flat::MAX_DEPTH + 4 {
+            flat = flatten_embedded(
+                "\u{FFFC}",
+                vec![Some(Embedded {
+                    text: flat,
+                    block: true,
+                })],
+            );
+        }
+        let (path, off) = flat.descend(Some(0), &mut |_| Some(0)).unwrap();
+        assert_eq!(path.len(), Flat::MAX_DEPTH);
+        assert_eq!(off, 0);
+    }
+
+    #[test]
+    fn empty_and_newline_inlines_between_blocks() {
+        let f = flatten_embedded(
+            "\u{FFFC}\u{FFFC}\u{FFFC}",
+            vec![block("a"), inline(""), block("b")],
         );
-        assert_eq!(doc.resolve(Some(1), false, &mut inner), Some(12));
+        assert_eq!(f.text(), "a\nb");
+        // An inline ending in a line break before a block: no extra separator.
+        let f = flatten_embedded("\u{FFFC}\u{FFFC}", vec![inline("x\n"), block("b")]);
+        assert_eq!(f.text(), "x\nb");
+        // A block ending in two breaks keeps one (its last `<br>` is the placeholder).
+        let f = flatten_embedded("\u{FFFC}\u{FFFC}", vec![block("a\n\n"), block("b")]);
+        assert_eq!(f.text(), "a\n\nb");
+        // An offset inside an inline maps back to its embed character.
+        let f = flatten_embedded("Hi \u{FFFC}!", vec![inline("Maya")]);
+        assert_eq!(f.text(), "Hi Maya!");
+        assert_eq!(f.map.to_source(5), 3);
+        assert_eq!(f.map.to_source(7), 4);
+    }
+
+    #[test]
+    fn newline_edge_cases() {
+        let m = normalize_newlines("a\r\r\nb");
+        assert_eq!(m.text, "a\n\nb");
+        assert_eq!(m.to_text(2), 2);
+        assert_eq!(m.to_text(4), 3);
+        let m = normalize_newlines("end\r");
+        assert_eq!(m.text, "end\n");
+        assert_eq!(m.to_text(4), 4);
+        let m = normalize_newlines("a\u{2028}b");
+        assert_eq!(m.text, "a\nb");
+        assert_eq!(m.len(), 3);
     }
 
     #[test]

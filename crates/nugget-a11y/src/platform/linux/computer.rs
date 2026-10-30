@@ -136,7 +136,7 @@ fn refused(what: &str) -> Error {
 
 impl AtspiEl {
     /// A proxy for one of this object's interfaces; building one makes no D-Bus call.
-    fn proxy<T>(&self) -> Option<T>
+    pub(super) fn proxy<T>(&self) -> Option<T>
     where
         T: zbus::proxy::Defaults + From<zbus::Proxy<'static>>,
     {
@@ -518,8 +518,16 @@ impl AtspiPlatform {
                         && ifaces.contains(Interface::EditableText)
                     {
                         let before = Self::read_state(&t.element, 1 << 20, false);
-                        if self.insert_text(&t.element, &text, &before).is_ok() {
-                            return Ok(());
+                        match self.insert_text(&t.element, &text, &before) {
+                            Ok(()) => return Ok(()),
+                            // Typed, a line break is Return, which sends a chat message: paste
+                            // text with line breaks (clipboard saved and restored), never type
+                            // it.
+                            Err(e) if text.contains('\n') => {
+                                tracing::debug!(error = %e, "insertion refused; pasting");
+                                return self.paste_into(&t.element, &text, &before);
+                            }
+                            Err(_) => {}
                         }
                     }
                 }
@@ -527,6 +535,31 @@ impl AtspiPlatform {
             }
             KeyInput::Keys(chords) => self.synth_chords(chords),
         }
+    }
+
+    /// Paste `text` into the focused field with the clipboard saved and restored. Errors out
+    /// rather than falling back to typing (a typed line break is Return).
+    fn paste_into(
+        &self,
+        el: &AtspiEl,
+        text: &str,
+        before: &crate::verify::FieldState,
+    ) -> Result<()> {
+        let mut cb = self.clipboard()?;
+        let r = crate::clipboard::paste_with_restore(
+            cb.as_mut(),
+            text,
+            &mut || self.paste(el),
+            &mut || {
+                let after = Self::read_state(el, 1 << 20, false);
+                Ok(crate::verify::verify_insert(before, text, &after))
+            },
+            crate::clipboard::PasteTiming::default(),
+        )?;
+        if !r.verified {
+            tracing::debug!("pasted text with line breaks could not be verified");
+        }
+        Ok(())
     }
 
     fn x11_session() -> bool {

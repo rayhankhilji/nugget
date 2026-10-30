@@ -235,7 +235,51 @@ mod tests {
     }
 
     #[test]
+    fn hint_boundaries() {
+        // Prefix ids need a separator after them unless the prefix ends in a dot.
+        assert!(!macos_needs_manual_accessibility("com.google.Chromex"));
+        assert!(!macos_needs_manual_accessibility("com.google.Chrom"));
+        assert!(macos_needs_manual_accessibility("com.brave.Browser-beta"));
+        assert!(macos_needs_manual_accessibility("com.electron.myapp"));
+        assert!(macos_needs_manual_accessibility(
+            "com.todesktop.230313mzl4w4u92"
+        ));
+        assert!(!macos_needs_manual_accessibility("com.electron"));
+        // Every framework path counts on its own.
+        for fw in [
+            "Electron Framework",
+            "Chromium Embedded Framework",
+            "Google Chrome Framework",
+            "Microsoft Edge Framework",
+            "Brave Browser Framework",
+        ] {
+            let want = format!("Contents/Frameworks/{fw}.framework");
+            assert!(macos_bundle_embeds_chromium(|p| p == want), "{fw}");
+        }
+        // Native secure and spin entries without an ARIA role, and blank `xml-roles`.
+        assert!(!atspi_web_rich_editable(true, "password text", None, None));
+        assert!(!atspi_web_rich_editable(
+            true,
+            "spin button",
+            None,
+            Some("  ")
+        ));
+        assert!(!atspi_web_rich_editable(true, "entry", None, Some("")));
+        assert!(atspi_web_rich_editable(
+            true,
+            "password text",
+            None,
+            Some("textbox")
+        ));
+        assert!(atspi_web_document_role("document frame"));
+        assert!(atspi_web_document_role("document email"));
+    }
+
+    #[test]
     fn office_paragraphs() {
+        assert!(atspi_office_paragraph("heading", "document text"));
+        assert!(atspi_office_paragraph("list item", "document text"));
+        assert!(!atspi_office_paragraph("paragraph", "document web"));
         assert!(atspi_office_paragraph("paragraph", "document text"));
         assert!(!atspi_office_paragraph("paragraph", "section"));
         assert!(!atspi_office_paragraph("push button", "document text"));

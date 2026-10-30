@@ -233,8 +233,13 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
 - On Windows, accessibility insertion is limited to single-line plain edit controls.
   Multi-line edits (Notepad), rich edits, documents and web content use the clipboard.
 - On Linux, LibreOffice exposes only the paragraphs it has laid out as children of the
-  document, so a long document may read in part (reported as truncated). Rich web text is
-  flattened within a budget (400 objects, 500 ms).
+  document, so a long document may read in part. The read is marked truncated when a scroll
+  bar next to the document has a range or a read budget runs out; a document without such a
+  scroll bar is assumed to be exposed in full (not checked on a real LibreOffice yet). Rich web
+  text is flattened within a budget (400 objects, 500 ms) and only for editable elements in a
+  web document.
+- On macOS and Windows, computer-use text input still types `\n` as Return when insertion is
+  refused; on Linux it pastes text with line breaks instead (clipboard saved and restored).
 - Computer use on macOS and Windows is compile-checked only. In particular, unverified on real
   machines:
   - macOS: scroll wheel events are posted at a location without moving the pointer, and their

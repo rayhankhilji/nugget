@@ -565,7 +565,12 @@ impl AtspiPlatform {
         let count = t.character_count().unwrap_or(0).max(0);
         let end = text_end(count, max_chars);
         let raw = t.get_text(0, end).unwrap_or_default();
-        if let Some(r) = rich::flatten(el, &raw, max_value_bytes) {
+        // Embedded objects are flattened only for web editors; a native toolkit's text (a GTK
+        // text view with a child anchor) keeps its own offsets.
+        if raw.contains(text_map::EMBED)
+            && rich::is_web_editable(el)
+            && let Some(r) = rich::flatten(el, &raw, max_value_bytes)
+        {
             let text = r.flat.text();
             let value = sanitize::clean_value(text, max_value_bytes);
             return FieldState {
@@ -597,20 +602,20 @@ impl AtspiPlatform {
     }
 
     /// The element and the offsets in its own text that `state` (in field offsets) refers to:
-    /// the focused paragraph for an office document, the paragraph holding the caret for
-    /// flattened rich text.
+    /// the focused paragraph's live selection for an office document, the paragraph holding
+    /// the caret for flattened web rich text, else `state`'s own selection.
     fn own_range(el: &AtspiEl, state: &FieldState) -> Option<(AtspiEl, u32, u32)> {
         let (start, end) = state.selection?;
         let (start, end) = (start.min(end), start.max(end));
-        if let Some(doc) = rich::office_document(el, MAX_RICH_CHARS) {
-            // Offsets into a document read in part may not line up with this read.
-            if state.truncated || doc.truncated {
-                return None;
-            }
-            return Some((el.clone(), doc.to_own(start)?, doc.to_own(end)?));
+        if rich::is_office_paragraph(el) {
+            let (s, e) = el.live_selection()?;
+            return Some((el.clone(), s, e));
         }
-        let (raw, _) = el.text_contents(i32::try_from(MAX_RICH_CHARS).unwrap_or(i32::MAX))?;
-        let Some(r) = rich::flatten(el, &raw, MAX_RICH_CHARS) else {
+        if !rich::is_web_editable(el) {
+            return Some((el.clone(), start, end));
+        }
+        let raw = Self::text_if_embedded(el)?;
+        let Some(r) = raw.and_then(|raw| rich::flatten(el, &raw, MAX_RICH_CHARS)) else {
             return Some((el.clone(), start, end));
         };
         if start == end {
@@ -619,6 +624,26 @@ impl AtspiPlatform {
         }
         let (s, e) = r.root_selection()?;
         Some((el.clone(), s, e))
+    }
+
+    /// `el`'s text when it holds embedded objects (`Some(None)` when it holds none). Cheap
+    /// first: an element without embedded objects next to its caret and with a short text is
+    /// read once; a long text is read in full only when the window around the caret has one.
+    fn text_if_embedded(el: &AtspiEl) -> Option<Option<String>> {
+        let t = el.text()?;
+        let count = t.character_count().ok()?.max(0);
+        let cap = i32::try_from(MAX_RICH_CHARS).unwrap_or(i32::MAX);
+        if count > 4096 {
+            let caret = t.caret_offset().unwrap_or(0).clamp(0, count);
+            let near = t
+                .get_text((caret - 64).max(0), (caret + 64).min(count))
+                .unwrap_or_default();
+            if !near.contains(text_map::EMBED) {
+                return Some(None);
+            }
+        }
+        let raw = t.get_text(0, text_end(count, cap)).ok()?;
+        Some(raw.contains(text_map::EMBED).then_some(raw))
     }
 
     /// `DeleteText` over `start..end` and `InsertText` at `start` in `el`'s own offsets, then
@@ -729,7 +754,7 @@ impl Platform for AtspiPlatform {
 
     fn insert_text(&self, el: &AtspiEl, text: &str, before: &FieldState) -> Result<()> {
         let multiline_text = text.contains('\n');
-        if rich::office_document(el, 1).is_some() {
+        if rich::is_office_paragraph(el) {
             // `InsertText` with line breaks in a Writer paragraph does not split it into
             // paragraphs the way typing or pasting does.
             if multiline_text {
@@ -737,30 +762,33 @@ impl Platform for AtspiPlatform {
                     "line breaks into an office document are pasted".into(),
                 ));
             }
-            let (el, start, end) = Self::own_range(el, before)
-                .ok_or_else(|| Error::Unsupported("selection outside the paragraph".into()))?;
-            return Self::insert_at(&el, start, end, text);
+            // The paragraph's live selection: offsets read from the document earlier may have
+            // moved with the layout.
+            let (start, end) = el
+                .live_selection()
+                .ok_or_else(|| Error::Unsupported("no caret in the paragraph".into()))?;
+            return Self::insert_at(el, start, end, text);
         }
-        let (node, _, attrs) = el.read_node(false);
-        if multiline_text
-            && hints::atspi_web_rich_editable(
-                rich::in_web_document(el),
+        let in_web = rich::in_web_document(el);
+        if in_web && multiline_text {
+            let (node, _, attrs) = el.read_node(false);
+            if hints::atspi_web_rich_editable(
+                true,
                 &node.raw_role,
                 attrs.get("tag").map(String::as_str),
                 attrs.get("xml-roles").map(String::as_str),
-            )
-        {
-            // Firefox and Chromium turn `\n` from `InsertText` into `<br>`s or split
-            // paragraphs inconsistently; a paste goes through the editor's own handling.
-            return Err(Error::Unsupported(
-                "line breaks into a web contenteditable are pasted".into(),
-            ));
+            ) {
+                // Firefox and Chromium turn `\n` from `InsertText` into `<br>`s or split
+                // paragraphs inconsistently; a paste goes through the editor's own handling.
+                return Err(Error::Unsupported(
+                    "line breaks into a web contenteditable are pasted".into(),
+                ));
+            }
         }
-        let raw = el
-            .text_contents(i32::try_from(MAX_RICH_CHARS).unwrap_or(i32::MAX))
-            .map(|(s, _)| s)
-            .unwrap_or_default();
-        if raw.contains(text_map::EMBED) {
+        if in_web
+            && rich::is_web_editable(el)
+            && let Some(Some(_)) = Self::text_if_embedded(el)
+        {
             // Flattened rich text: insert into the paragraph holding the caret. A selection
             // across objects is replaced by the paste fallback instead.
             if before.selection.is_some_and(|(s, e)| s != e) {

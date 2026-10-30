@@ -93,39 +93,93 @@ const WEB_AREA_DEPTH: usize = 40;
 /// Cap on text read through text markers (bytes).
 const MARKER_MAX_BYTES: usize = 1 << 20;
 
-/// Pids whose web accessibility was handled: when, and whether the app embeds Chromium.
-static MANUAL_AX: Mutex<BTreeMap<i32, (Instant, bool)>> = Mutex::new(BTreeMap::new());
+/// Attempts at setting `AXManualAccessibility` on one pid, spaced by a doubling back-off.
+const MANUAL_AX_ATTEMPTS: u32 = 4;
+const MANUAL_AX_BACKOFF: Duration = Duration::from_millis(500);
 
-/// Turn on a Chromium/Electron app's web accessibility (once per pid). Returns whether that
-/// happened recently enough that its tree may still be building.
+/// What was done about one pid's web accessibility.
+struct ManualAx {
+    /// The app embeds Chromium.
+    chromium: bool,
+    /// When `AXManualAccessibility` was set successfully.
+    enabled_at: Option<Instant>,
+    attempts: u32,
+    last_attempt: Option<Instant>,
+    /// The one placeholder-focus retry for this pid was used.
+    retried: bool,
+}
+
+static MANUAL_AX: Mutex<BTreeMap<i32, ManualAx>> = Mutex::new(BTreeMap::new());
+
+/// Turn on a Chromium/Electron app's web accessibility. Classified once per pid; the attribute
+/// is set until it succeeds (a few attempts with back-off). Returns whether it was enabled
+/// recently enough that its tree may still be building and the one retry is still unused.
 fn ensure_web_accessibility(app: &AxEl, pid: i32, running: Option<&NSRunningApplication>) -> bool {
     let mut seen = MANUAL_AX.lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(&(since, chromium)) = seen.get(&pid) {
-        return chromium && since.elapsed() < MANUAL_AX_FRESH;
+    if !seen.contains_key(&pid) {
+        let id = running
+            .and_then(|r| r.bundleIdentifier())
+            .map(|s| s.to_string());
+        let chromium = id
+            .as_deref()
+            .is_some_and(hints::macos_needs_manual_accessibility)
+            || running
+                .and_then(|r| r.bundleURL())
+                .and_then(|u| u.path())
+                .is_some_and(|p| {
+                    let root = std::path::PathBuf::from(p.to_string());
+                    hints::macos_bundle_embeds_chromium(|rel| root.join(rel).exists())
+                });
+        // Pids are reused; forget old entries rather than grow without bound.
+        if seen.len() >= 512 {
+            seen.clear();
+        }
+        seen.insert(
+            pid,
+            ManualAx {
+                chromium,
+                enabled_at: None,
+                attempts: 0,
+                last_attempt: None,
+                retried: false,
+            },
+        );
     }
-    let id = running
-        .and_then(|r| r.bundleIdentifier())
-        .map(|s| s.to_string());
-    let chromium = id
-        .as_deref()
-        .is_some_and(hints::macos_needs_manual_accessibility)
-        || running
-            .and_then(|r| r.bundleURL())
-            .and_then(|u| u.path())
-            .is_some_and(|p| {
-                let root = std::path::PathBuf::from(p.to_string());
-                hints::macos_bundle_embeds_chromium(|rel| root.join(rel).exists())
-            });
-    if chromium {
+    let Some(st) = seen.get_mut(&pid) else {
+        return false;
+    };
+    if !st.chromium {
+        return false;
+    }
+    let due = st
+        .last_attempt
+        .is_none_or(|t| t.elapsed() >= MANUAL_AX_BACKOFF * 2u32.pow(st.attempts.saturating_sub(1)));
+    if st.enabled_at.is_none() && st.attempts < MANUAL_AX_ATTEMPTS && due {
+        st.attempts += 1;
+        st.last_attempt = Some(Instant::now());
         let r = ax::set_attr(&app.0, "AXManualAccessibility", CFBoolean::new(true));
-        tracing::debug!(pid, ok = r.is_ok(), "set AXManualAccessibility");
+        tracing::debug!(
+            pid,
+            ok = r.is_ok(),
+            attempt = st.attempts,
+            "set AXManualAccessibility"
+        );
+        if r.is_ok() {
+            st.enabled_at = Some(Instant::now());
+        }
     }
-    // Pids are reused; forget old entries rather than grow without bound.
-    if seen.len() >= 512 {
-        seen.clear();
+    !st.retried && st.enabled_at.is_some_and(|t| t.elapsed() < MANUAL_AX_FRESH)
+}
+
+/// Use up the one placeholder-focus retry of `pid`.
+fn take_focus_retry(pid: i32) {
+    if let Some(st) = MANUAL_AX
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get_mut(&pid)
+    {
+        st.retried = true;
     }
-    seen.insert(pid, (Instant::now(), chromium));
-    chromium
 }
 
 const BASE_ATTRS: &[&str] = &[
@@ -143,6 +197,10 @@ const BASE_ATTRS: &[&str] = &[
     "AXExpanded",
     "AXDisclosing",
     "AXTitleUIElement",
+    // Set on the elements inside a contenteditable (WebKit, Chromium): text runs and
+    // paragraphs are part of the editor, so the engine can climb to its root.
+    "AXEditableAncestor",
+    "AXHighestEditableAncestor",
 ];
 
 /// How deep [`AxEl::label_text`] looks for a label's text.
@@ -251,6 +309,14 @@ impl AxEl {
         }
         if let Some(id) = get("AXIdentifier").and_then(cf_string) {
             node.attrs.insert("identifier".into(), id);
+        }
+        // Inside a contenteditable: the element has an editable ancestor (itself for the root).
+        if !node.states.editable
+            && !secure
+            && enabled
+            && (get("AXEditableAncestor").is_some() || get("AXHighestEditableAncestor").is_some())
+        {
+            node.states.editable = true;
         }
         // Rich editors (Mail's compose web view, contenteditable regions) are editable web
         // areas or groups; AX says so by making the value settable.
@@ -453,7 +519,11 @@ impl Platform for AxPlatform {
         // Chromium and Electron expose web content only once asked; before the focus is read.
         let fresh = pid.is_some_and(|p| ensure_web_accessibility(&app, p, running.as_deref()));
         let mut focused = app.get("AXFocusedUIElement").and_then(AxEl::element);
-        if fresh && focused.as_ref().is_none_or(AxEl::is_placeholder_focus) {
+        if fresh
+            && let Some(p) = pid
+            && focused.as_ref().is_none_or(AxEl::is_placeholder_focus)
+        {
+            take_focus_retry(p);
             std::thread::sleep(FOCUS_RETRY_WAIT);
             if let Some(again) = app.get("AXFocusedUIElement").and_then(AxEl::element) {
                 focused = Some(again);
@@ -555,17 +625,24 @@ impl Platform for AxPlatform {
         {
             return Some(r);
         }
+        // Ranges are in the live `AXValue`'s UTF-16 units; the read value had its line endings
+        // normalised, so offsets from it are mapped back through the live value.
+        let live = el
+            .get("AXValue")
+            .and_then(|t| cf_string(&t))
+            .unwrap_or_else(|| state.value.clone());
+        let map = text_map::normalize_newlines(&live);
         let (s, e) = el.selection_utf16().or_else(|| {
             let (s, e) = state.selection?;
             Some((
-                chars_to_utf16(&state.value, s),
-                chars_to_utf16(&state.value, e),
+                chars_to_utf16(&live, map.to_source(s)),
+                chars_to_utf16(&live, map.to_source(e)),
             ))
         })?;
         if e > s {
             return el.bounds_for_range(s, e - s);
         }
-        let len: usize = state.value.encode_utf16().count();
+        let len: usize = live.encode_utf16().count();
         if s < len
             && let Some(r) = el.bounds_for_range(s, 1)
         {

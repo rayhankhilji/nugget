@@ -61,18 +61,25 @@ const FRESH_FOREGROUND: Duration = Duration::from_secs(3);
 /// The wait before reading the focus again.
 const FOCUS_RETRY_WAIT: Duration = Duration::from_millis(200);
 
-/// The last foreground window seen, and when it was first seen.
-static LAST_FOREGROUND: Mutex<Option<(isize, Instant)>> = Mutex::new(None);
+/// The last foreground window seen: its handle, when it was first seen, and whether its one
+/// focus retry was used.
+static LAST_FOREGROUND: Mutex<Option<(isize, Instant, bool)>> = Mutex::new(None);
 
-/// Whether `hwnd` came to the foreground recently (or is seen for the first time).
-fn recently_foregrounded(hwnd: isize) -> bool {
+/// Track the foreground window (every call), and decide whether a placeholder focus is read
+/// again: once per window, within [`FRESH_FOREGROUND`] of it coming to the foreground.
+fn take_focus_retry(hwnd: isize, placeholder: bool) -> bool {
     let mut last = LAST_FOREGROUND.lock().unwrap_or_else(|p| p.into_inner());
-    match *last {
-        Some((h, since)) if h == hwnd => since.elapsed() < FRESH_FOREGROUND,
-        _ => {
-            *last = Some((hwnd, Instant::now()));
+    if last.is_none_or(|(h, _, _)| h != hwnd) {
+        *last = Some((hwnd, Instant::now(), false));
+    }
+    match last.as_mut() {
+        Some((_, since, retried))
+            if placeholder && !*retried && since.elapsed() < FRESH_FOREGROUND =>
+        {
+            *retried = true;
             true
         }
+        _ => false,
     }
 }
 
@@ -96,6 +103,8 @@ impl UiaEl {
             ct::EDIT => Some(
                 info.aria_properties.contains("multiline=true")
                     || info.class_name.to_ascii_lowercase().contains("richedit")
+                    // Windowless edits (web inputs) have no style to read: a box taller than
+                    // one line is taken as multi-line, so a tall single-line input pastes.
                     || bounds.is_some_and(|b| b.height > 40.0),
             ),
             ct::DOCUMENT => Some(true),
@@ -148,8 +157,13 @@ impl UiaEl {
                     } else if !value.is_empty() {
                         node.value = Some(value);
                     }
+                    // A writable value on a group or custom control: a contenteditable
+                    // region (or a part of one) in Chromium and Firefox.
                     node.states.editable = !read_only
-                        && matches!(info.control_type, ct::EDIT | ct::COMBO_BOX | ct::DOCUMENT);
+                        && matches!(
+                            info.control_type,
+                            ct::EDIT | ct::COMBO_BOX | ct::DOCUMENT | ct::GROUP | ct::CUSTOM
+                        );
                 }
                 None => {
                     if matches!(info.control_type, ct::EDIT | ct::DOCUMENT) {
@@ -217,9 +231,9 @@ impl Platform for UiaPlatform {
         };
         // Chromium and Firefox build their UIA web tree when a client first asks; until then the
         // focus is the document or a pane without a text pattern. One bounded retry.
-        if recently_foregrounded(fg.hwnd)
-            && hints::uia_focus_is_placeholder(el.info().control_type, el.has_text_pattern())
-        {
+        let placeholder =
+            hints::uia_focus_is_placeholder(el.info().control_type, el.has_text_pattern());
+        if take_focus_retry(fg.hwnd, placeholder) {
             std::thread::sleep(FOCUS_RETRY_WAIT);
             if let Ok(Some(again)) = UiaEl::focused() {
                 el = again;
@@ -260,7 +274,8 @@ impl Platform for UiaPlatform {
             let max_chars = i32::try_from(max_value_bytes).unwrap_or(i32::MAX);
             let (raw, capped) = match el.document_text(max_value_bytes) {
                 Some(t) => {
-                    let capped = t.chars().count() >= max_chars as usize;
+                    // `GetText(max)` counts UTF-16 units.
+                    let capped = t.encode_utf16().count() >= max_chars as usize;
                     (t, capped)
                 }
                 None => (
