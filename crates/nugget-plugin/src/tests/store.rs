@@ -459,3 +459,78 @@ fn the_approval_key_is_per_store() {
     own.load_trusted(ID, &trusted).unwrap();
     assert!(!dir.path().join("p/approval.key").exists());
 }
+
+fn connector_pkg(version: &str, caps: &str) -> crate::PluginPackage {
+    package(
+        &manifest_toml(ID, version, "[\"connector\"]", caps),
+        EMPTY_COMPONENT,
+        &key(1),
+    )
+}
+
+#[test]
+fn file_roots_are_approved_persisted_and_sealed() {
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    let mut asked = None;
+    store
+        .install(
+            &connector_pkg("1.0.0", "file_roots = [\"vault\"]"),
+            &trusted,
+            &mut |r| {
+                asked = Some(r.manifest.capabilities.file_roots.clone());
+                true
+            },
+        )
+        .unwrap();
+    assert_eq!(asked.unwrap(), ["vault"]);
+    assert_eq!(
+        store.get(ID).unwrap().unwrap().approved.file_roots,
+        ["vault"]
+    );
+    store.load_trusted(ID, &trusted).unwrap();
+
+    // Widening the approved roots by editing the index breaks the seal.
+    edit_record(&store, |rec| {
+        rec["approved"]["file_roots"] = serde_json::json!(["vault", "home"]);
+    });
+    integrity(store.load_trusted(ID, &trusted));
+    edit_record(&store, |rec| {
+        rec["approved"]["file_roots"] = serde_json::json!(["vault"]);
+    });
+    store.load_trusted(ID, &trusted).unwrap();
+
+    // Same roots: no prompt. A new root: asked again.
+    store
+        .update(
+            &connector_pkg("1.1.0", "file_roots = [\"vault\"]"),
+            &trusted,
+            &mut |_| panic!("should not ask"),
+        )
+        .unwrap();
+    let wider = connector_pkg("1.2.0", "file_roots = [\"vault\", \"inbox\"]");
+    assert!(store.update(&wider, &trusted, &mut |_| false).is_err());
+    let preview = store.preview(&wider, &trusted).unwrap();
+    assert!(preview.needs_approval);
+    store.update(&wider, &trusted, &mut yes).unwrap();
+    assert_eq!(
+        store.get(ID).unwrap().unwrap().approved.file_roots,
+        ["vault", "inbox"]
+    );
+}
+
+#[test]
+fn records_without_file_roots_still_load() {
+    // A record written before `file_roots` existed has no such key; it must load unchanged
+    // (and its seal must still verify, since an empty list is not serialized).
+    let (_d, store) = temp_store();
+    let trusted = [key(1).verifying_key()];
+    store
+        .install(&pkg("1.0.0", "hosts = [\"a.com\"]", 1), &trusted, &mut yes)
+        .unwrap();
+    edit_record(&store, |rec| {
+        assert!(rec["approved"].get("file_roots").is_none());
+    });
+    let got = store.load_trusted(ID, &trusted).unwrap();
+    assert!(got.installed.approved.file_roots.is_empty());
+}

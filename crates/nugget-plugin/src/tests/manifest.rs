@@ -99,10 +99,110 @@ fn capability_subsets() {
         hosts: hosts.iter().map(|s| s.to_string()).collect(),
         secrets: secrets.iter().map(|s| s.to_string()).collect(),
         kv_max_bytes: kv,
+        file_roots: Vec::new(),
     };
     let approved = caps(&["example.com", "*.cdn.net"], &["token"], 100);
     assert!(caps(&["https://example.com"], &[], 50).is_subset_of(&approved));
     assert!(!caps(&["other.com"], &[], 0).is_subset_of(&approved));
     assert!(!caps(&[], &["password"], 0).is_subset_of(&approved));
     assert!(!caps(&[], &[], 101).is_subset_of(&approved));
+}
+
+fn connector_manifest(caps: &str, schema: &str) -> String {
+    format!(
+        "{}settings_schema = {schema}\n",
+        manifest_toml("dev.nugget.test", "1.0.0", "[\"connector\"]", caps)
+    )
+}
+
+#[test]
+fn file_roots_are_validated() {
+    let schema = r#"{ type = "object", properties = { vault = { type = "string" }, export_file = { type = "string" } } }"#;
+    let m = parse(&connector_manifest(
+        "file_roots = [\"vault\", \"export_file\"]",
+        schema,
+    ))
+    .unwrap();
+    assert_eq!(m.capabilities.file_roots, ["vault", "export_file"]);
+    // Without `properties` in the schema (or without a schema), any valid name is accepted.
+    parse(&connector_manifest(
+        "file_roots = [\"folder\"]",
+        "{ type = \"object\" }",
+    ))
+    .unwrap();
+    parse(&manifest_toml(
+        "dev.nugget.test",
+        "1.0.0",
+        "[\"connector\", \"tool\"]",
+        "file_roots = [\"folder\"]",
+    ))
+    .unwrap();
+
+    let nine: Vec<String> = (0..9).map(|i| format!("\"r{i}\"")).collect();
+    let nine = format!("file_roots = [{}]", nine.join(", "));
+    let long = format!("file_roots = [\"{}\"]", "a".repeat(65));
+    for bad in [
+        "file_roots = [\"\"]",
+        "file_roots = [\"Vault\"]",
+        "file_roots = [\"my-vault\"]",
+        "file_roots = [\"../etc\"]",
+        "file_roots = [\"/home\"]",
+        "file_roots = [\"vault\", \"vault\"]",
+        "file_roots = \"vault\"",
+        long.as_str(),
+        nine.as_str(),
+    ] {
+        assert!(
+            parse(&connector_manifest(bad, "{ type = \"object\" }")).is_err(),
+            "accepted: {bad}"
+        );
+    }
+    // Every root must be a settings property when the schema lists properties.
+    assert!(parse(&connector_manifest("file_roots = [\"other\"]", schema)).is_err());
+    // A tool-only plugin cannot declare file roots.
+    assert!(
+        parse(&manifest_toml(
+            "dev.nugget.test",
+            "1.0.0",
+            "[\"tool\"]",
+            "file_roots = [\"vault\"]"
+        ))
+        .is_err()
+    );
+}
+
+#[test]
+fn file_roots_take_part_in_subsets() {
+    let caps = |roots: &[&str]| Capabilities {
+        file_roots: roots.iter().map(|s| s.to_string()).collect(),
+        ..Capabilities::default()
+    };
+    assert!(caps(&[]).is_subset_of(&caps(&["vault"])));
+    assert!(caps(&["vault"]).is_subset_of(&caps(&["vault", "inbox"])));
+    assert!(!caps(&["vault"]).is_subset_of(&caps(&[])));
+    assert!(!caps(&["vault", "other"]).is_subset_of(&caps(&["vault"])));
+}
+
+#[test]
+fn empty_file_roots_keep_the_serialized_form() {
+    // Approval seals hash this JSON: a plugin without file roots must serialize exactly as
+    // before the field existed, and records without the field must still load.
+    let c = Capabilities {
+        hosts: vec!["example.com".into()],
+        ..Capabilities::default()
+    };
+    let json = serde_json::to_string(&c).unwrap();
+    assert_eq!(
+        json,
+        r#"{"hosts":["example.com"],"secrets":[],"kv_max_bytes":0}"#
+    );
+    let back: Capabilities = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, c);
+    let with = Capabilities {
+        file_roots: vec!["vault".into()],
+        ..c
+    };
+    let json = serde_json::to_string(&with).unwrap();
+    assert!(json.ends_with(r#""file_roots":["vault"]}"#), "{json}");
+    assert_eq!(serde_json::from_str::<Capabilities>(&json).unwrap(), with);
 }
