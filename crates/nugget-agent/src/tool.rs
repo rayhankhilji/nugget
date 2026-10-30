@@ -38,13 +38,19 @@ pub enum Control {
     AskUser { question: String },
 }
 
-/// What the model says happened when it calls `finish`.
+/// What the model says happened when it calls `finish`. The schema's `done` is
+/// [`Claim::Success`] and `cannot` is [`Claim::Failure`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Claim {
+    /// `done`: the task is complete.
     Success,
+    /// `partial`: some of it was done.
     Partial,
+    /// `cannot`: it could not be done, or the user declined a needed step.
     Failure,
+    /// `refused`: the model will not do it (harmful, deceptive, or not for an agent).
+    Refused,
 }
 
 /// The outcome of one call.
@@ -236,6 +242,19 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
+    /// Drop a tool, built-ins included (e.g. `note`, to keep a small model's tool list short).
+    /// Returns the removed tool. Removing `finish` or `ask_user` leaves the model without a way
+    /// to end or pause the run, so callers should not.
+    pub fn remove(&mut self, name: &str) -> Option<Arc<dyn Tool>> {
+        self.tools.remove(name)
+    }
+
+    /// [`remove`](Self::remove), builder style.
+    pub fn without(mut self, name: &str) -> Self {
+        self.remove(name);
+        self
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.tools.keys().map(String::as_str)
     }
@@ -261,7 +280,27 @@ pub const ASK_USER: &str = "ask_user";
 pub const NOTE: &str = "note";
 
 /// `finish(summary, outcome)`: end the task. The claim is checked against verification.
+///
+/// `outcome` is one of `done`, `partial`, `cannot`, `refused`. The older spellings `success`
+/// and `failure` are still accepted (see [`normalize_finish_args`]) but not advertised.
 pub struct FinishTool;
+
+/// The `finish` outcomes the schema offers.
+pub const FINISH_OUTCOMES: [&str; 4] = ["done", "partial", "cannot", "refused"];
+
+/// Rewrite the legacy `finish` outcomes `success` and `failure` to `done` and `cannot`, so
+/// arguments from older callers pass the schema. The loop applies it to `finish` calls before
+/// validation; anything else is left alone.
+pub fn normalize_finish_args(args: &mut Value) {
+    if let Some(outcome) = args.get_mut("outcome") {
+        let mapped = match outcome.as_str() {
+            Some("success") => "done",
+            Some("failure") => "cannot",
+            _ => return,
+        };
+        *outcome = Value::String(mapped.into());
+    }
+}
 
 #[async_trait]
 impl Tool for FinishTool {
@@ -269,15 +308,17 @@ impl Tool for FinishTool {
         FINISH
     }
     fn description(&self) -> &str {
-        "End the task. `outcome` is success, partial or failure; `summary` says what was done \
-         and what was observed. Success is only reported if every change was verified."
+        "End the task. `summary`: what you did and saw. `outcome`: done (the task is complete), \
+         partial (only part of it is done), cannot (you could not do it, or the user declined a \
+         needed step), refused (only when the task itself is harmful or deceptive; if you tried and \
+         failed, that is cannot)."
     }
     fn schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "summary": {"type": "string"},
-                "outcome": {"type": "string", "enum": ["success", "partial", "failure"]}
+                "outcome": {"type": "string", "enum": FINISH_OUTCOMES}
             },
             "required": ["summary", "outcome"],
             "additionalProperties": false
@@ -286,11 +327,13 @@ impl Tool for FinishTool {
     fn declared_risk(&self) -> RiskClass {
         RiskClass::Observe
     }
-    async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
+    async fn call(&self, mut args: Value, _ctx: &ToolCtx) -> ToolResult {
+        normalize_finish_args(&mut args);
         let summary = args["summary"].as_str().unwrap_or_default().to_string();
         let claim = match args["outcome"].as_str() {
-            Some("success") => Claim::Success,
+            Some("done") => Claim::Success,
             Some("partial") => Claim::Partial,
+            Some("refused") => Claim::Refused,
             _ => Claim::Failure,
         };
         ToolResult::ok("finished").with_control(Control::Finish { summary, claim })
@@ -306,8 +349,9 @@ impl Tool for AskUserTool {
         ASK_USER
     }
     fn description(&self) -> &str {
-        "Ask the user a question when the task is ambiguous or needs information only they have. \
-         The task pauses until they answer."
+        "Ask the user one question, before acting, when the request is ambiguous (it could mean \
+         two different people or items) or needs something only the user knows. The task pauses \
+         until they answer."
     }
     fn schema(&self) -> Value {
         json!({
@@ -440,5 +484,39 @@ mod tests {
         let r = ToolRegistry::new();
         let names: Vec<_> = r.specs().into_iter().map(|s| s.name).collect();
         assert_eq!(names, vec!["ask_user", "finish", "note"]);
+    }
+
+    #[test]
+    fn registry_can_drop_a_builtin() {
+        let mut r = ToolRegistry::new();
+        assert!(r.remove(NOTE).is_some());
+        assert!(r.remove(NOTE).is_none());
+        let names: Vec<_> = r.names().collect();
+        assert_eq!(names, vec!["ask_user", "finish"]);
+        let lean = ToolRegistry::new().without(NOTE);
+        assert!(lean.get(NOTE).is_none() && lean.get(FINISH).is_some());
+    }
+
+    #[test]
+    fn finish_schema_offers_the_four_outcomes_and_aliases_normalize() {
+        let schema = FinishTool.schema();
+        assert_eq!(
+            schema["properties"]["outcome"]["enum"],
+            json!(["done", "partial", "cannot", "refused"])
+        );
+        for (given, want) in [
+            ("success", "done"),
+            ("failure", "cannot"),
+            ("done", "done"),
+            ("refused", "refused"),
+            ("bogus", "bogus"),
+        ] {
+            let mut args = json!({"summary": "s", "outcome": given});
+            normalize_finish_args(&mut args);
+            assert_eq!(args["outcome"], want);
+        }
+        let mut odd = json!({"summary": "s"});
+        normalize_finish_args(&mut odd);
+        assert_eq!(odd, json!({"summary": "s"}));
     }
 }

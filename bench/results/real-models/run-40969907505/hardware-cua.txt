@@ -1,0 +1,12 @@
+suite: cua
+runner: GitHub Actions 1000009896 (Linux X64)
+commit: 91168280e7b6a9fd15db97f977c428a4ff88ee5f baseline: abe2f7423a7a62b7747105e81ed47eb54f098b41
+date: 2026-10-29T23:01:15Z
+CPU(s):                                  4
+Model name:                              INTEL(R) XEON(R) PLATINUM 8573C
+Thread(s) per core:                      2
+CPU(s) scaling MHz:                      139%
+Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           7           0           6          14
+Swap:              2           0           2

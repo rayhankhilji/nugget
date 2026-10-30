@@ -6,6 +6,9 @@
 //!   are used only when images are present.
 //! - Tool calls are assembled from `delta.tool_calls` fragments by index and emitted when the
 //!   choice finishes. `usage` is requested via `stream_options.include_usage` (configurable).
+//!   A call without an `id` (llama-server sometimes omits it) gets `call_<nonce>_<index>`, where
+//!   the nonce is per response (process-wide counter mixed with the clock); a server id repeated
+//!   for another index in the same response gets a `_<index>` suffix. Other ids are kept as sent.
 //! - Mid-stream `{"error": ...}` payloads (OpenRouter, vLLM, llama-server) end the stream with an
 //!   error.
 //! - Prompt caching: `usage.prompt_tokens_details.cached_tokens` (OpenAI, llama-server) or
@@ -16,14 +19,20 @@
 //!   completion parameters): `cache_prompt: true` on every chat request; with `slot_affinity`
 //!   and a [`crate::CacheHint`] key, `id_slot` = a stable hash of the key (the server takes it
 //!   modulo its slot count; a busy pinned slot defers the request rather than using another).
+//!   A request with tools and no `json_schema` also gets `tool_choice: "required"` and
+//!   `parallel_tool_calls: false`: with `--jinja` the server compiles a grammar from the tool
+//!   schemas, so the model can only emit one well-formed call (`extra_body` can override both).
 //! - [`Provider::prewarm`] is `GET {base}/models`. With `llama_cpp`, [`Provider::prewarm_prefix`]
 //!   sends the stable prefix to `chat/completions` with `n_predict: 0` (the server evaluates the
 //!   prompt into the slot's KV cache and generates at most one token), `cache_prompt: true`,
 //!   `stream: false` and the output cap set to 1 for servers that ignore `n_predict`. Otherwise it
-//!   only prewarms the connection.
+//!   only prewarms the connection. The warm-up carries the same `tool_choice` fields as the real
+//!   request (they change the sampling grammar, not the prompt; harmless with `n_predict: 0`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use nugget_core::egress::EgressSink;
@@ -103,7 +112,8 @@ pub(crate) fn build_prewarm_body(
     let Some(prefix) = req.cache_prefix() else {
         return Ok(None);
     };
-    let mut body = build_body(cfg, ext, &prefix)?;
+    // The prefix drops `json_schema`, so decide the tool constraint from the real request.
+    let mut body = body_with(cfg, ext, &prefix, requires_tool(ext, req))?;
     let obj = body
         .as_object_mut()
         .ok_or_else(|| Error::Other("chat body is not an object".into()))?;
@@ -126,7 +136,21 @@ pub(crate) fn build_prewarm_body(
     Ok(Some(body))
 }
 
+/// Whether llama-server should be held to exactly one schema-valid tool call for `req`.
+fn requires_tool(ext: LlamaExt, req: &ChatRequest) -> bool {
+    ext.cache_prompt && !req.tools.is_empty() && req.json_schema.is_none()
+}
+
 pub(crate) fn build_body(cfg: &ProviderConfig, ext: LlamaExt, req: &ChatRequest) -> Result<Value> {
+    body_with(cfg, ext, req, requires_tool(ext, req))
+}
+
+fn body_with(
+    cfg: &ProviderConfig,
+    ext: LlamaExt,
+    req: &ChatRequest,
+    require_tool: bool,
+) -> Result<Value> {
     let mut body = Map::new();
     body.insert("model".into(), json!(cfg.model));
     body.insert("stream".into(), json!(true));
@@ -152,6 +176,10 @@ pub(crate) fn build_body(cfg: &ProviderConfig, ext: LlamaExt, req: &ChatRequest)
             })
             .collect();
         body.insert("tools".into(), Value::Array(tools));
+        if require_tool {
+            body.insert("tool_choice".into(), json!("required"));
+            body.insert("parallel_tool_calls".into(), json!(false));
+        }
     }
     if let Some(schema) = &req.json_schema {
         body.insert(
@@ -296,8 +324,24 @@ struct PartialCall {
     object: Option<Value>,
 }
 
+/// Per-response nonce for generated tool-call ids: a process-wide counter mixed with the clock,
+/// so ids differ across responses of one run and are unlikely to repeat across runs.
+fn call_nonce() -> u64 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let t = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    // splitmix64 finaliser over the mix.
+    let mut z = t ^ n.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 pub(crate) struct Decoder {
     provider: ProviderId,
+    nonce: u64,
     calls: BTreeMap<u64, PartialCall>,
     finish_reason: Option<String>,
     input_tokens: Option<u32>,
@@ -311,6 +355,7 @@ impl Decoder {
     pub(crate) fn new(provider: ProviderId) -> Self {
         Self {
             provider,
+            nonce: call_nonce(),
             calls: BTreeMap::new(),
             finish_reason: None,
             input_tokens: None,
@@ -328,7 +373,14 @@ impl Decoder {
         }
         self.flushed = true;
         let truncated = self.finish_reason.as_deref() == Some("length");
-        for (_, c) in std::mem::take(&mut self.calls) {
+        let mut seen = HashSet::new();
+        for (idx, mut c) in std::mem::take(&mut self.calls) {
+            if c.id.is_empty() {
+                c.id = format!("call_{:016x}_{idx}", self.nonce);
+            }
+            while !seen.insert(c.id.clone()) {
+                c.id = format!("{}_{idx}", c.id);
+            }
             let arguments = match c.object {
                 Some(obj) => obj,
                 None => parse_tool_arguments(&self.provider, &c.name, &c.arguments),
@@ -698,6 +750,92 @@ mod tests {
                     output_tokens: Some(22)
                 },
             ]
+        );
+    }
+
+    fn call_ids(out: &[ChatEvent]) -> Vec<String> {
+        out.iter()
+            .filter_map(|e| match e {
+                ChatEvent::ToolCall { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    const TWO_IDLESS: [&str; 3] = [
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"a","arguments":"{}"}}]}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"","function":{"name":"b","arguments":"{}"}}]}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+    ];
+
+    #[test]
+    fn generates_ids_for_idless_tool_calls() {
+        let first = call_ids(&decode(&TWO_IDLESS).unwrap());
+        assert_eq!(first.len(), 2);
+        assert!(first.iter().all(|id| id.starts_with("call_")));
+        assert_ne!(first[0], first[1]);
+        // A second response of the same run gets different ids.
+        let second = call_ids(&decode(&TWO_IDLESS).unwrap());
+        assert!(
+            second.iter().all(|id| !first.contains(id)),
+            "{first:?} {second:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_server_ids_and_dedups_repeats() {
+        let ids = call_ids(
+            &decode(&[
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"x","function":{"name":"a","arguments":"{}"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"x","function":{"name":"b","arguments":"{}"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":2,"id":"y","function":{"name":"c","arguments":"{}"}}]}}]}"#,
+                r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#,
+            ])
+            .unwrap(),
+        );
+        assert_eq!(ids, ["x", "x_1", "y"]);
+    }
+
+    #[test]
+    fn llama_ext_requires_one_tool_call() {
+        let tools = vec![ToolSpec {
+            name: "f".into(),
+            description: "d".into(),
+            input_schema: json!({"type": "object"}),
+        }];
+        let llama = LlamaExt::for_config(&cfg(), Locality::OnDevice);
+        let with_tools = ChatRequest::new(vec![Message::user_text("hi")]).with_tools(tools.clone());
+        let b = build_body(&cfg(), llama, &with_tools).unwrap();
+        assert_eq!(b["tool_choice"], "required");
+        assert_eq!(b["parallel_tool_calls"], false);
+
+        let constrained =
+            |b: &Value| b.get("tool_choice").is_some() || b.get("parallel_tool_calls").is_some();
+        let no_tools = ChatRequest::new(vec![Message::user_text("hi")]);
+        assert!(!constrained(&build_body(&cfg(), llama, &no_tools).unwrap()));
+        let schema = with_tools
+            .clone()
+            .with_json_schema(json!({"type": "object"}));
+        assert!(!constrained(&build_body(&cfg(), llama, &schema).unwrap()));
+        assert!(!constrained(
+            &build_body(&cfg(), LlamaExt::default(), &with_tools).unwrap()
+        ));
+
+        // The warm-up mirrors the real request, including for a `json_schema` request whose
+        // prefix has dropped the schema.
+        let pw = build_prewarm_body(&cfg(), llama, &with_tools)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pw["tool_choice"], "required");
+        let pw = build_prewarm_body(&cfg(), llama, &schema).unwrap().unwrap();
+        assert!(!constrained(&pw));
+
+        // `extra_body` still wins.
+        let mut c = cfg();
+        c.extra_body = Some(json!({"tool_choice": "auto"}));
+        assert_eq!(
+            build_body(&c, llama, &with_tools).unwrap()["tool_choice"],
+            "auto"
         );
     }
 
