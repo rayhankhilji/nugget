@@ -143,7 +143,7 @@ describe("Today page", () => {
     expect(container.textContent).toContain("Could you send <script>x</script> the numbers?");
     expect(container.querySelectorAll(".evidence button").length).toBe(1);
     // Unsupported action is not actionable and explains why.
-    const archive = byText(container, "button", "Archive the thread");
+    const archive = byText(container, "button", "Archive thread");
     expect(archive?.getAttribute("aria-disabled")).toBe("true");
     expect(archive?.getAttribute("title")).toContain("Not available");
     // New card marked seen exactly once.
@@ -163,7 +163,7 @@ describe("Today page", () => {
   it("previews, approves, confirms and shows the draft", async () => {
     const { executes, calls } = setup({ open_mailto: null });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft a reply to Ana"));
+    await click(byText(container, "button", "Draft reply"));
     await flush();
     const dialog = document.querySelector("dialog")!;
     expect(dialog.textContent).toContain("This is a preview");
@@ -187,7 +187,7 @@ describe("Today page", () => {
   it("shows the reason when the policy denies", async () => {
     setup({ cards_execute: { outcome: "denied", detail: "sending is blocked" } });
     const { container } = await render(<TodayPage />);
-    await click(byText(container, "button", "Draft a reply to Ana"));
+    await click(byText(container, "button", "Draft reply"));
     await flush();
     await click(byText(document.querySelector("dialog")!, "button", "Approve"));
     expect(document.querySelector("dialog")?.textContent).toContain("Not allowed: sending is blocked");

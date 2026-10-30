@@ -8,10 +8,10 @@ export function SidebarSettings({ onSetup }: { onSetup: () => void }) {
   const t = useT();
   return (
     <div className="sidebar-settings">
-      <LanguagePicker />
+      <LanguagePicker className="sidebar-language" />
       <button
         type="button"
-        className="btn btn-ghost btn-small"
+        className="btn btn-ghost btn-small sidebar-setup"
         onClick={() => {
           restartOnboarding();
           onSetup();

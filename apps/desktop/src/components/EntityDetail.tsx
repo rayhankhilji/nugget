@@ -30,6 +30,13 @@ import {
   type FactActionPlan,
 } from "../knowledge";
 import type { MessageKey } from "../i18n";
+import { itemFileName, plainSnippet } from "./Provenance";
+import { sourceKindLabel } from "../format";
+
+/** The source's friendly name; its kind ("Folder") when the list doesn't know it, never its id. */
+function sourceName(id: string, names: ReadonlyMap<string, string>, kinds?: ReadonlyMap<string, string>): string {
+  return names.get(id) ?? sourceKindLabel(sourceKindOf(id, kinds));
+}
 import { claimTime, evidenceTime, groupClaimsByRecency, hasClaimTimes, sourceKindOf } from "../recency";
 import { MergeDialog } from "./MergeDialog";
 import { RelativeTime } from "./RelativeTime";
@@ -38,6 +45,22 @@ import { SplitDialog } from "./SplitDialog";
 import { Badge, ErrorNote, Spinner } from "./ui";
 
 const MENTIONS_SHOWN = 20;
+
+/** Attribute and identifier names Nugget knows how to say; others are shown as sent. */
+const ATTR_KEYS = new Set(["email", "role", "phone", "title", "organization", "company", "location", "website", "url", "timezone", "team", "username", "handle", "address", "birthday"]);
+
+function attrLabel(t: ReturnType<typeof useT>, key: string): string {
+  const k = key.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ATTR_KEYS.has(k) ? t(`entity.attr.${k}` as MessageKey) : key;
+}
+
+function ArrowIcon() {
+  return (
+    <svg className="flip-rtl entity-goto-arrow" width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+      <path d="M2 6h7.5M6.5 2.5 10 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 /**
  * One entity: name, kind, aliases, facts grouped by recency (or by predicate when the daemon
@@ -161,12 +184,15 @@ export function EntityDetailPanel({
                 {t("entity.showInGraph")}
               </button>
             )}
-            <button type="button" className="btn btn-small" onClick={() => setMerging(true)}>
-              {t("entity.merge")}
-            </button>
-            <button type="button" className="btn btn-small" onClick={() => setSplitting(true)} disabled={d.claims.length === 0}>
-              {t("entity.split")}
-            </button>
+            {/* Maintenance, set apart from navigation. */}
+            <span className="entity-actions-end" role="group" aria-label={t("entity.fixLabel")}>
+              <button type="button" className="btn btn-small btn-ghost" onClick={() => setMerging(true)}>
+                {t("entity.merge")}
+              </button>
+              <button type="button" className="btn btn-small btn-ghost" onClick={() => setSplitting(true)} disabled={d.claims.length === 0}>
+                {t("entity.split")}
+              </button>
+            </span>
           </div>
           <div aria-live="polite" className="entity-live">
             {opener.status && (
@@ -208,7 +234,7 @@ export function EntityDetailPanel({
             onOpen={opener.open}
             onAct={(c, plan, prev) => void act(c, plan, prev)}
           />
-          <Mentions mentions={d.mentions} sourceNames={sourceNames} sourceKinds={sourceKinds} onOpen={opener.open} />
+          <Mentions mentions={d.mentions} name={d.name} sourceNames={sourceNames} sourceKinds={sourceKinds} onOpen={opener.open} />
           {merging && (
             <MergeDialog
               target={d}
@@ -253,7 +279,16 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headingId: string; onClose?: () => void }) {
   const t = useT();
   const aliases = d.aliases.filter((a) => a !== d.name);
-  const attrs = attributeRows(d.attributes);
+  // Raw keys, so known names can be translated (`attributeRows` humanizes them for display).
+  const rawKeys =
+    typeof d.attributes === "object" && d.attributes !== null && !Array.isArray(d.attributes)
+      ? Object.entries(d.attributes as Record<string, unknown>).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k]) => k)
+      : [];
+  const attrs = attributeRows(d.attributes).map(([k, v], i) => {
+    const raw = rawKeys[i];
+    const known = raw !== undefined ? attrLabel(t, raw) : raw;
+    return [known !== undefined && known !== raw ? known : k, v] as const;
+  });
   return (
     <>
       <div className="entity-detail-head">
@@ -262,7 +297,7 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
             {d.name}
           </h2>
           <p className="entity-sub">
-            <Badge tone="accent">{kindLabel(d.kind)}</Badge> <code className="muted small">{d.id}</code>
+            <Badge tone="accent">{kindLabel(d.kind)}</Badge>
           </p>
         </div>
         {onClose && <CloseButton onClose={onClose} />}
@@ -272,12 +307,19 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           {aliases.length > 0 && (
             <div>
               <dt>{t("entity.aliases")}</dt>
-              <dd dir="auto">{aliases.join(t("common.listSeparator"))}</dd>
+              <dd>
+                {aliases.map((a, i) => (
+                  <span key={a}>
+                    {i > 0 && t("common.listSeparator")}
+                    <bdi>{a}</bdi>
+                  </span>
+                ))}
+              </dd>
             </div>
           )}
           {d.identifiers.map(([scheme, value]) => (
             <div key={`${scheme}\u0000${value}`}>
-              <dt>{scheme}</dt>
+              <dt>{attrLabel(t, scheme)}</dt>
               <dd>
                 <code>{value}</code>
               </dd>
@@ -286,7 +328,9 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           {attrs.map(([k, v]) => (
             <div key={k}>
               <dt>{k}</dt>
-              <dd dir="auto">{v}</dd>
+              <dd>
+                <bdi>{v}</bdi>
+              </dd>
             </div>
           ))}
         </dl>
@@ -432,8 +476,8 @@ function Fact({
   const seen = claimTime(c);
   return (
     <li className={`fact${retracted ? " fact-retracted" : ""}${c.status === "superseded" ? " fact-superseded" : ""}`}>
-      <p className="fact-text" dir="auto">
-        {retracted ? <s>{text}</s> : text}
+      <p className="fact-text">
+        <bdi>{retracted ? <s>{text}</s> : text}</bdi>
         {c.status === "user_asserted" && (
           <span className="fact-you" title={t("entity.youTitle")}>
             {" "}
@@ -442,10 +486,15 @@ function Fact({
         )}
       </p>
       <div className="fact-meta">
-        <Badge tone={confidenceTone(c.confidence)}>
-          <span className="visually-hidden">{t("entity.confidence")} </span>
-          {formatConfidence(c.confidence)}
-        </Badge>
+        {/* Only doubtful facts carry a confidence: a wall of "95%" pills says nothing. */}
+        {!(c.confidence >= 0.8) && (
+          <span title={t("entity.confidenceTitle")}>
+            <Badge tone={confidenceTone(c.confidence)}>
+              <span className="visually-hidden">{t("entity.confidence")} </span>
+              {formatConfidence(c.confidence)}
+            </Badge>
+          </span>
+        )}
         {!isCurrentStatus(c.status) && (
           <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
         )}
@@ -456,20 +505,21 @@ function Fact({
           </span>
         )}
         {other && (
-          <button type="button" className="btn btn-ghost btn-small" onClick={() => onSelect(other.id)}>
-            {t("entity.goTo", { name: other.name })}
+          <button type="button" className="btn btn-ghost btn-small entity-goto" onClick={() => onSelect(other.id)} aria-label={t("entity.goTo", { name: other.name })}>
+            <bdi>{other.name}</bdi>
+            <ArrowIcon />
           </button>
         )}
         {c.evidence.length > 0 ? (
           <button type="button" className="btn btn-ghost btn-small" aria-expanded={open} aria-controls={evidenceId} onClick={() => setOpen((o) => !o)}>
-            {t("entity.why")} <span className="muted">{evidenceSummary(c.evidence)}</span>
+            {t("entity.why")} {evidenceSummary(c.evidence)}
           </button>
         ) : (
           <span className="muted small">{c.status === "user_asserted" ? t("entity.fromVaultEdit") : evidenceSummary([])}</span>
         )}
         <button
           type="button"
-          className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost"}
+          className={retracted ? "btn btn-small" : "btn btn-small btn-danger-ghost fact-reject"}
           disabled={busy}
           aria-label={aria}
           onClick={() => onAct(c, plan, original)}
@@ -482,12 +532,14 @@ function Fact({
           <ul className="evidence">
             {c.evidence.map((ev, i) => {
               const e = formatEvidence(ev, sourceNames);
+              e.source = sourceName(ev.item.source, sourceNames, sourceKinds);
+              if (!ev.title?.trim()) e.title = itemFileName(ev.item.key);
               const at = evidenceTime(ev);
               return (
                 <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${ev.chunk_id ?? i}`}>
                   {e.quote ? (
                     <blockquote className="evidence-quote" dir="auto" title={e.truncated ? ev.quote ?? undefined : undefined}>
-                      {e.quote}
+                      {plainSnippet(e.quote)}
                     </blockquote>
                   ) : (
                     <p className="muted small">{t("entity.noQuote")}</p>
@@ -497,7 +549,9 @@ function Fact({
                     <span className="evidence-title" dir="auto">
                       {e.title}
                     </span>
-                    <span className="muted small">{e.source}</span>
+                    <span className="muted small">
+                      <bdi>{e.source}</bdi>
+                    </span>
                     {at && <RelativeTime ts={at} now={now} className="muted small" />}
                     {e.openUrl && (
                       <button type="button" className="btn btn-small" onClick={() => void onOpen(e.openUrl!, e.title)}>
@@ -517,17 +571,21 @@ function Fact({
 
 function Mentions({
   mentions,
+  name,
   sourceNames,
   sourceKinds,
   onOpen,
 }: {
   mentions: MentionView[];
+  /** The entity's name: a mention that just repeats it isn't quoted. */
+  name: string;
   sourceNames: ReadonlyMap<string, string>;
   sourceKinds?: ReadonlyMap<string, string>;
   onOpen: (url: string, label: string) => Promise<void>;
 }) {
   const t = useT();
   const [all, setAll] = useState(false);
+  const self = name.trim().toLocaleLowerCase();
   const headingId = useId();
   const shown = all ? mentions : mentions.slice(0, MENTIONS_SHOWN);
   return (
@@ -543,16 +601,24 @@ function Mentions({
       <ul className="mentions">
         {shown.map((m, i) => {
           const e = formatEvidence({ item: m.item, chunk_id: m.chunk_id, title: m.title, url: m.url, quote: null }, sourceNames);
+          e.source = sourceName(m.item.source, sourceNames, sourceKinds);
+          if (!m.title?.trim()) e.title = itemFileName(m.item.key);
           return (
             <li key={`${m.item.source}\u0000${m.item.key}\u0000${m.chunk_id ?? ""}\u0000${i}`}>
               <SourceIcon kind={sourceKindOf(m.item.source, sourceKinds)} size={14} />
-              <span className="mention-surface">{t("entity.mentionSurface", { surface: m.surface })}</span>
+              {m.surface.trim().toLocaleLowerCase() !== self && (
+                <span className="mention-surface">
+                  <bdi>{t("entity.mentionSurface", { surface: m.surface })}</bdi>
+                </span>
+              )}
               <span className="mention-title" dir="auto">
                 {e.title}
               </span>
-              <span className="muted small">{e.source}</span>
+              <span className="muted small">
+                <bdi>{e.source}</bdi>
+              </span>
               {e.openUrl && (
-                <button type="button" className="btn btn-small btn-ghost" onClick={() => void onOpen(e.openUrl!, e.title)}>
+                <button type="button" className="btn btn-small btn-ghost mention-open" onClick={() => void onOpen(e.openUrl!, e.title)}>
                   {t("entity.open")}
                 </button>
               )}

@@ -51,7 +51,8 @@ export function wrapTab(e: KeyboardEvent<HTMLElement>, root: HTMLElement): void 
  * Modal dialog on the native `<dialog>` element (inert background and Escape come from the
  * platform; Tab wraps at the ends, see `wrapTab`). Mount it to open, unmount to close. On open,
  * focus goes to the element marked `data-autofocus` (else the first focusable one); on close it
- * returns to whatever had focus before.
+ * returns to whatever had focus before. The title bar is fixed and the body scrolls; give the
+ * buttons a `.dialog-actions` wrapper and they stay visible at the bottom.
  */
 export function Dialog({
   title,
@@ -113,12 +114,16 @@ export function Dialog({
           </svg>
         </button>
       </div>
-      {description && (
-        <p id={descId} className="muted dialog-desc">
-          {description}
-        </p>
-      )}
-      {children}
+      {/* The title bar stays put; this scrolls, and a `.dialog-actions` footer inside it sticks
+          to the bottom so the dialog's buttons are always in view. */}
+      <div className="dialog-body">
+        {description && (
+          <p id={descId} className="muted dialog-desc">
+            {description}
+          </p>
+        )}
+        {children}
+      </div>
     </dialog>
   );
 }

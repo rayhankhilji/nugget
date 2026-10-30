@@ -2,9 +2,7 @@ import { useId, useState, type FormEvent } from "react";
 import { ENTITY_KINDS, knowledgeSplit, type EntityDetail, type EntityKind } from "../api";
 import { useT } from "../i18n";
 import { claimText, kindLabel, splitProblem, splitRequest } from "../knowledge";
-import { claimTime } from "../recency";
 import { Dialog } from "./Dialog";
-import { RelativeTime } from "./RelativeTime";
 import { ErrorNote, Spinner } from "./ui";
 
 /**
@@ -84,24 +82,12 @@ export function SplitDialog({
         <fieldset className="field">
           <legend>{t("split.facts")}</legend>
           {target.claims.length === 0 && <p className="muted small">{t("entity.noFacts", { name: target.name })}</p>}
-          {target.claims.map((c) => {
-            const seen = claimTime(c);
-            return (
-              <label key={c.id} className="check">
-                <input type="checkbox" checked={claims.includes(c.id)} onChange={() => setClaims((l) => toggle(l, c.id))} />
-                <span>
-                  {claimText(c)}
-                  {/* When each fact was seen helps tell two conflated things apart. */}
-                  {seen && (
-                    <>
-                      {" "}
-                      <RelativeTime ts={seen} className="muted small" />
-                    </>
-                  )}
-                </span>
-              </label>
-            );
-          })}
+          {target.claims.map((c) => (
+            <label key={c.id} className="check split-fact">
+              <input type="checkbox" checked={claims.includes(c.id)} onChange={() => setClaims((l) => toggle(l, c.id))} />
+              <bdi>{claimText(c)}</bdi>
+            </label>
+          ))}
         </fieldset>
         {(otherAliases.length > 0 || target.identifiers.length > 0) && (
           <fieldset className="field">
@@ -109,7 +95,7 @@ export function SplitDialog({
             {otherAliases.map((a) => (
               <label key={`a\u0000${a}`} className="check">
                 <input type="checkbox" checked={aliases.includes(a)} onChange={() => setAliases((l) => toggle(l, a))} />
-                <span>{a}</span>
+                <bdi>{a}</bdi>
               </label>
             ))}
             {target.identifiers.map((i) => (
@@ -136,7 +122,7 @@ export function SplitDialog({
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
             {t("common.cancel")}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={busy}>
+          <button type="submit" className="btn btn-danger" disabled={busy}>
             {busy ? <Spinner label={t("split.splitting")} /> : t("split.split")}
           </button>
         </div>

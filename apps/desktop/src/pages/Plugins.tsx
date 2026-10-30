@@ -103,7 +103,7 @@ export function PluginsPage() {
         description={t("plugins.description")}
         actions={
           !unavailable && (
-            <button type="button" className="btn btn-primary" onClick={() => void installFromFile()} disabled={installing}>
+            <button type="button" className="btn btn-primary" onClick={() => void installFromFile()} disabled={installing || (loaded.loading && !plugins)}>
               {installing ? <Spinner label={t("plugins.installing")} /> : t("plugins.install")}
             </button>
           )
@@ -126,6 +126,7 @@ export function PluginsPage() {
           <ErrorNote error={loaded.error} onRetry={loaded.reload} />
           {loaded.loading && !plugins && <Loading label={t("plugins.loading")} />}
           {plugins && list.length === 0 && <EmptyState title={t("plugins.emptyTitle")}>{t("plugins.emptyBody")}</EmptyState>}
+          {/* Nothing installed yet: how plugins work is the next thing to read. */}
           {list.length > 0 && (
             <ul className="source-list" aria-label={t("plugins.listLabel")}>
               {list.map((p) => (
@@ -140,7 +141,7 @@ export function PluginsPage() {
               ))}
             </ul>
           )}
-          <details className="help">
+          <details className="help" open={plugins !== null && list.length === 0}>
             <summary>{t("plugins.help.summary")}</summary>
             <ul>
               <li>{t("plugins.help.sandbox")}</li>

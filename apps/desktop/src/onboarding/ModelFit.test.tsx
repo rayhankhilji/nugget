@@ -111,6 +111,7 @@ describe("model fit in onboarding", () => {
     mockDaemon({ models_fit: report([fit({ id: "qwen3-4b-q4", recommended: true, reasons: ["ram_fits_largest", "gpu_accelerated"] })]) });
     const { container } = await render(<ModelsPage />);
     expect(container.textContent).toContain("This computer: 16 GB memory, NVIDIA graphics.");
-    expect(card(container, "qwen3-4b-q4")!.textContent).toContain("Needs 8 GB of memory");
+    // The Models page titles cards with a readable name; the id is on the card as data.
+    expect(container.querySelector('li.card[data-model-id="qwen3-4b-q4"]')!.textContent).toContain("Needs 8 GB of memory");
   });
 });

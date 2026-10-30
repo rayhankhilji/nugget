@@ -12,7 +12,8 @@ body.overlay-body {
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  /* The window is frameless and often sits over white: a plain --border nearly vanishes. */
+  border: 1px solid color-mix(in srgb, var(--control-border) 55%, var(--border));
   border-radius: var(--radius);
   background: var(--surface);
 }
@@ -25,9 +26,42 @@ body.overlay-body {
 }
 
 .overlay-phase {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-weight: 600;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--muted);
+}
+
+.overlay-phase .spinner {
+  width: 12px;
+  height: 12px;
+}
+
+/* Error and refused are the states that need attention: full-strength text plus a status glyph. */
+.overlay-error .overlay-phase,
+.overlay-refused .overlay-phase {
+  color: var(--text);
+}
+
+.overlay-error .overlay-phase::before,
+.overlay-refused .overlay-phase::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  inline-size: 16px;
+  block-size: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--surface);
+  background: var(--warn);
+}
+
+.overlay-error .overlay-phase::before {
+  background: var(--bad);
 }
 
 .overlay-badges {
@@ -43,6 +77,9 @@ body.overlay-body {
   overflow-y: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* The draft follows the target field's language, not the UI's: lay out each paragraph by its own text. */
+  unicode-bidi: plaintext;
+  text-align: start;
 }
 
 .overlay-editor {
@@ -65,6 +102,11 @@ body.overlay-body {
 
 .overlay-msg {
   margin: 0;
+  unicode-bidi: plaintext;
+}
+
+.overlay-hint {
+  margin: 0;
 }
 
 .overlay-msg-error {
@@ -82,15 +124,24 @@ body.overlay-body {
   flex-wrap: wrap;
 }
 
+/* Pinned to the bottom in every phase, so the buttons (and Esc) never move around. */
 .overlay-foot {
   display: flex;
   gap: 6px;
   justify-content: flex-end;
+  margin-block-start: auto;
+  padding-block-start: 4px;
 }
 
 .overlay-foot kbd {
   font-family: var(--mono);
   font-size: 11px;
   margin-inline-start: 6px;
-  opacity: 0.75;
+}
+
+/* On the amber button a pale chip with muted text is barely legible: outline it in the label colour. */
+.overlay-foot .btn-primary kbd {
+  background: transparent;
+  border-color: currentColor;
+  color: inherit;
 }

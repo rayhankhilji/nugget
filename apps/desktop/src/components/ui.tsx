@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ApiError, errorMessage } from "../api";
+import { ApiError } from "../api";
 import { useT } from "../i18n";
 import "../styles-pages.css";
 
@@ -19,20 +19,59 @@ export function Badge({ tone = "neutral", children }: { tone?: "neutral" | "acce
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
-/** Inline error. Offline errors are handled app-wide, so they render as a quiet hint here. */
+/** What an error means to the user: a translated headline, and the raw text for "Details". */
+function describeError(e: ApiError, t: ReturnType<typeof useT>): { headline: string; detail: string | null } {
+  const raw = e.message.trim();
+  const code = e.kind === "rpc" && e.code !== null ? t("common.errorCode", { code: String(e.code) }) : "";
+  const detail = [raw, code].filter(Boolean).join(" ") || null;
+  if (e.kind === "rpc" || e.kind === "protocol" || e.kind === "spawn") {
+    if (e.isBusy || /\b(locked|busy)\b/i.test(raw)) return { headline: t("common.error.busy"), detail };
+    if (/timed? ?out|timeout|deadline/i.test(raw)) return { headline: t("common.error.timeout"), detail };
+    if (e.kind === "protocol") return { headline: t("common.error.protocol"), detail };
+    return { headline: t("common.error.generic"), detail };
+  }
+  // Errors raised by the app itself ("other") already read as sentences: show them as they are.
+  return { headline: raw || t("common.error.generic"), detail: null };
+}
+
+/**
+ * Inline error: a short, translated headline (busy, timed out, or "Something went wrong"), an
+ * optional Retry, and the technical text behind "Details". Offline errors are handled app-wide,
+ * so they render as a quiet hint here.
+ */
 export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const t = useT();
   if (!error) return null;
   const e = ApiError.from(error);
   if (e.isMethodNotFound) return <NotAvailable />;
+  if (e.isOffline) {
+    return (
+      <div className="note" role="alert">
+        <span>{t("common.offlineHint")}</span>
+        {onRetry && (
+          <button type="button" className="btn btn-small" onClick={onRetry}>
+            {t("common.retry")}
+          </button>
+        )}
+      </div>
+    );
+  }
+  const { headline, detail } = describeError(e, t);
   return (
-    <div className={e.isOffline ? "note" : "note note-error"} role="alert">
-      <span>{e.isOffline ? t("common.offlineHint") : errorMessage(e)}</span>
-      {e.kind === "rpc" && e.code !== null && <span className="muted small"> {t("common.errorCode", { code: e.code })}</span>}
+    <div className="note note-error" role="alert">
+      <span className="note-text" dir="auto">
+        {headline}
+      </span>
       {onRetry && (
-        <button type="button" className="btn btn-ghost btn-small" onClick={onRetry}>
+        <button type="button" className="btn btn-small" onClick={onRetry}>
           {t("common.retry")}
         </button>
+      )}
+      {detail && (
+        <details className="note-details">
+          <summary>{t("common.details")}</summary>
+          <p dir="auto">{detail}</p>
+        </details>
       )}
     </div>
   );

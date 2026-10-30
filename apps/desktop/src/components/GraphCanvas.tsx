@@ -71,6 +71,15 @@ const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
  * Run `sim` to rest without drawing: until its alpha runs out, its nodes stop moving or
  * `MAX_SETTLE_TICKS` (counted, not timed, so the result is deterministic). Then stop it.
  */
+/**
+ * What "Fit" frames: the connected entities when they are nearly all of them, so one or two
+ * isolated nodes drifting to the edges don't shrink the main cluster to a corner.
+ */
+function fitNodes(nodes: readonly SimNode[]): readonly SimNode[] {
+  const linked = nodes.filter((n) => n.degree > 0);
+  return linked.length >= 3 && linked.length >= nodes.length * 0.85 ? linked : nodes;
+}
+
 function settleNow(sim: Simulation<SimNode, SimLink>, nodes: readonly SimNode[]) {
   for (let i = 0; i < MAX_SETTLE_TICKS && sim.alpha() > sim.alphaMin(); i++) {
     sim.tick();
@@ -173,6 +182,8 @@ export function GraphCanvas({
   const graphRef = useRef(graph);
   graphRef.current = graph;
 
+  // Open where there's room; a closed legend doesn't cover the canvas on small windows.
+  const [legendOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 1200);
   const legend = useMemo(() => {
     const known = ENTITY_KINDS.filter((k) => index.byKind.has(k)).map((k) => ({ kind: k, count: index.byKind.get(k)!.length }));
     const extra = [...index.byKind.keys()]
@@ -335,7 +346,7 @@ export function GraphCanvas({
   const fitNow = () => {
     const { w, h } = sizeRef.current;
     userMoved.current = false;
-    tRef.current = fitTransform(graphRef.current.nodes, w, h);
+    tRef.current = fitTransform(fitNodes(graphRef.current.nodes), w, h);
   };
 
   const frame = () => {
@@ -352,7 +363,7 @@ export function GraphCanvas({
       // Keep the whole graph in view while it settles, until the user pans or zooms.
       if (!userMoved.current && gestureRef.current === null) {
         const { w, h } = sizeRef.current;
-        const target = fitTransform(graph.nodes, w, h);
+        const target = fitTransform(fitNodes(graph.nodes), w, h);
         const cur = tRef.current;
         const f = !again ? 1 : 0.2;
         tRef.current = { k: cur.k + (target.k - cur.k) * f, x: cur.x + (target.x - cur.x) * f, y: cur.y + (target.y - cur.y) * f };
@@ -699,7 +710,7 @@ export function GraphCanvas({
           </button>
         </div>
         {legend.length > 0 && (
-          <details className="graph-legend" open>
+          <details className="graph-legend" open={legendOpen}>
             <summary>{t("graph.legend")}</summary>
             <ul>
               {legend.map(({ kind, count }) => (
@@ -713,9 +724,15 @@ export function GraphCanvas({
           </details>
         )}
       </div>
-      <p id={helpId} className="muted small graph-help">
-        {t("graph.help")}
-      </p>
+      <div className="graph-help">
+        <span className="muted small">{t("graph.hint")}</span>
+        <details className="graph-keys">
+          <summary className="small">{t("graph.keysTitle")}</summary>
+          <p id={helpId} className="muted small">
+            {t("graph.help")}
+          </p>
+        </details>
+      </div>
       <div className="visually-hidden" aria-live="polite">
         {announce}
       </div>

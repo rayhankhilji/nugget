@@ -176,7 +176,7 @@ describe("Double Tap settings page", () => {
     const { calls, sent } = setup();
     await render(<App />);
     await flush(10);
-    await change(document.querySelector('input[placeholder^="e.g. com.tinyspeck"]'), "slack");
+    await change(document.querySelector('input[placeholder^="e.g. mail.google"]'), "slack");
     await click(byText(document, "button", "Add"));
     await click(byText(document, "button", "Save"));
     expect((sent[0] as DoubleTapSettings).app_providers).toEqual({ "mail.google.com": "anthropic", slack: "local-chat" });

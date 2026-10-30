@@ -19,7 +19,22 @@ import {
   type Step,
 } from "./state";
 
-const LOCALITY_TONE = { on_device: "good", local_network: "accent", cloud: "warn" } as const;
+const LOCALITY_TONE: Record<string, "good" | "accent" | "warn"> = { on_device: "good", local_network: "accent", cloud: "warn" };
+
+/**
+ * One pill for where the draft is written: the translated locality ("On device"), plus the
+ * provider's id when it says more than that ("Cloud · anthropic"). An unknown locality (a newer
+ * shell) is left out rather than shown raw; a generic provider id ("local") is left out too.
+ */
+function sourceBadge(provider: string | null, locality: string | null): { tone: string; locality: string | null; provider: string | null } | null {
+  const known = locality != null && locality in LOCALITY_TONE;
+  const loc = known ? localityLabel(locality) : null;
+  const norm = (v: string) => v.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  const generic = (p: string) => norm(p) === "local" || (locality != null && norm(p) === norm(locality)) || (loc != null && norm(p) === norm(loc));
+  const prov = provider && provider.trim() && !generic(provider) ? provider.trim() : null;
+  if (!loc && !prov) return null;
+  return { tone: (known && LOCALITY_TONE[locality]) || "neutral", locality: loc, provider: prov };
+}
 
 export function Overlay() {
   const t = useT();
@@ -97,25 +112,32 @@ export function Overlay() {
   const { view } = state;
   const phaseKey = `doubletap.overlay.phase.${view.phase}` as MessageKey;
   const acceptable = canAccept(state);
+  const streaming = view.phase === "streaming";
+  const badge = sourceBadge(view.provider, view.locality);
 
   return (
     <main className={`overlay overlay-${view.phase}`} aria-label={t("doubletap.title")}>
       <div className="overlay-head">
         <span className="overlay-phase" role="status">
+          {(view.phase === "reading" || view.phase === "inserting") && <span className="spinner" aria-hidden="true" />}
           {t(phaseKey)}
         </span>
-        <span className="overlay-badges">
-          {view.provider && <span className="badge badge-neutral">{view.provider}</span>}
-          {view.locality && (
-            <span className={`badge badge-${LOCALITY_TONE[view.locality] ?? "neutral"}`}>{localityLabel(view.locality)}</span>
-          )}
-        </span>
+        {badge && (
+          <span className="overlay-badges">
+            <span className={`badge badge-${badge.tone}`}>
+              {badge.locality}
+              {badge.locality && badge.provider && " · "}
+              {badge.provider && <bdi>{badge.provider}</bdi>}
+            </span>
+          </span>
+        )}
       </div>
 
       {editing ? (
         <textarea
           ref={editor}
           className="overlay-editor"
+          dir="auto"
           aria-label={t("doubletap.overlay.editLabel")}
           value={state.draft}
           onChange={(e) => update(setDraft(ref.current, e.target.value))}
@@ -123,7 +145,7 @@ export function Overlay() {
         />
       ) : (
         view.text && (
-          <div className="overlay-text" aria-live="off">
+          <div className="overlay-text" dir="auto" aria-live="off">
             {view.text}
             {view.phase === "streaming" && <span className="caret" aria-hidden="true" />}
           </div>
@@ -131,10 +153,12 @@ export function Overlay() {
       )}
 
       {view.message && (view.phase === "refused" || view.phase === "error") && (
-        <p className={view.phase === "error" ? "overlay-msg overlay-msg-error" : "overlay-msg"} role="alert">
+        <p className={view.phase === "error" ? "overlay-msg overlay-msg-error" : "overlay-msg"} dir="auto" role="alert">
           {keyOrText(view.message)}
         </p>
       )}
+
+      {view.phase === "error" && <p className="overlay-hint muted small">{t("doubletap.overlay.retryHint")}</p>}
 
       {view.phase === "inserted" && (
         <p className="overlay-msg overlay-msg-good" role="status">
@@ -154,7 +178,7 @@ export function Overlay() {
       )}
 
       {failure && (
-        <p className="overlay-msg overlay-msg-error" role="alert">
+        <p className="overlay-msg overlay-msg-error" dir="auto" role="alert">
           {failure}
         </p>
       )}
@@ -162,8 +186,14 @@ export function Overlay() {
       <div className="overlay-foot">
         {acceptable || editing ? (
           <>
-            <button type="button" className="btn btn-primary btn-small" disabled={!acceptable} onClick={() => apply(accept(ref.current))}>
-              {t("doubletap.overlay.accept")}
+            <button
+              type="button"
+              className={`btn btn-small${streaming && !editing ? "" : " btn-primary"}`}
+              disabled={!acceptable}
+              title={streaming && !editing ? t("doubletap.overlay.acceptSoFarHint") : undefined}
+              onClick={() => apply(accept(ref.current))}
+            >
+              {streaming && !editing ? t("doubletap.overlay.acceptSoFar") : t("doubletap.overlay.accept")}
               <kbd>{editing ? (mac ? "⌘↩" : "Ctrl+↩") : "↩"}</kbd>
             </button>
             {!editing && (

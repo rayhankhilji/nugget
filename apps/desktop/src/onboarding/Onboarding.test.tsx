@@ -65,7 +65,7 @@ describe("Onboarding", () => {
     expect(document.querySelector("dialog")).toBeNull();
 
     await click(button(container, "Continue"));
-    expect(heading(container)).toBe("Permissions, explained");
+    expect(heading(container)).toBe("What Double Tap needs");
     await click(button(container, "Continue"));
     expect(heading(container)).toBe("Choose your Double Tap trigger");
     await click(container.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!);
@@ -150,7 +150,7 @@ describe("Onboarding", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, step: "permissions", completed: ["welcome"], skipped: [], ai: "byok", finished: false }));
     const onExit = vi.fn();
     const { container } = await render(<Onboarding connected onExit={onExit} />);
-    expect(heading(container)).toBe("Permissions, explained");
+    expect(heading(container)).toBe("What Double Tap needs");
     await click(button(container, "Skip setup"));
     expect(onExit).toHaveBeenCalled();
     expect(loadState()).toMatchObject({ finished: true, skipped: ["ai", "source", "permissions", "trigger"] });

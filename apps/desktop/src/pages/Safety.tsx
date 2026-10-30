@@ -29,9 +29,65 @@ import {
 import { useAsync, useEvent } from "../hooks";
 import { Dialog } from "../components/Dialog";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader } from "../components/ui";
-import { formatNumber, useT } from "../i18n";
+import { formatNumber, useT, type MessageKey, type TFunction } from "../i18n";
 
 const EFFECT_TONE = { allow: "good", confirm: "warn", deny: "bad" } as const;
+
+/** Plain, translatable names for the daemon's built-in rules; unknown ids fall back to its description. */
+const DEFAULT_RULE_NAMES: Record<string, MessageKey> = {
+  "default:deny-password-managers": "safety.defaults.name.passwordManagers",
+  "default:deny-financial": "safety.defaults.name.financial",
+  "default:deny-os-security": "safety.defaults.name.osSecurity",
+  "default:deny-security-panes": "safety.defaults.name.securityPanes",
+  "default:confirm-risky": "safety.defaults.name.confirmRisky",
+  "default:allow-observe-edit": "safety.defaults.name.allowObserveEdit",
+};
+
+/** A built-in rule's display name: translated when known, else the daemon's description, else its id. */
+export function defaultRuleName(rule: PolicyRule, t: TFunction): string {
+  const key = DEFAULT_RULE_NAMES[rule.id];
+  if (key) return t(key);
+  const d = rule.description?.trim();
+  return d ? d.charAt(0).toLocaleUpperCase() + d.slice(1) : rule.id;
+}
+
+/** How many patterns a list shows before the rest go behind "Show all". */
+const PATTERN_PREVIEW = 4;
+
+/**
+ * App ids, hosts and globs: always left-to-right and bidi-isolated (so `*` and commas stay put in
+ * RTL). Long lists show a few and a count; the rest open in a scrollable list.
+ */
+function PatternList({ items }: { items: string[] }) {
+  const t = useT();
+  if (items.length <= PATTERN_PREVIEW) {
+    return (
+      <bdi dir="ltr" className="pattern-inline">
+        {items.join(", ")}
+      </bdi>
+    );
+  }
+  return (
+    <span className="pattern-summary">
+      <span>
+        <bdi dir="ltr" className="pattern-inline">
+          {items.slice(0, PATTERN_PREVIEW).join(", ")}
+        </bdi>{" "}
+        <span className="muted">{t("safety.defaults.more", { n: items.length - PATTERN_PREVIEW })}</span>
+      </span>
+      <details className="pattern-details">
+        <summary>{t("safety.defaults.showAll", { n: items.length })}</summary>
+        <ul className="pattern-list" dir="ltr">
+          {items.map((p) => (
+            <li key={p}>
+              <code>{p}</code>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </span>
+  );
+}
 
 /** What the agent may do: rules per app and site, limits, approvals, the kill switch, the log. */
 export function SafetyPage() {
@@ -113,13 +169,19 @@ export function SafetyPage() {
               busy={saving}
               onRemove={(id) => void save(removeRule(config, id), t("safety.announce.removed", { id }))}
             />
-            <h3>{t("safety.defaults.title")}</h3>
+          </section>
+
+          <section className="safety-section" aria-labelledby="safety-defaults-title">
+            <h2 id="safety-defaults-title">{t("safety.defaults.title")}</h2>
             <p className="muted small">{t("safety.defaults.description")}</p>
             <DefaultRules
               state={state}
               busy={saving}
-              onToggle={(id, enabled) =>
-                void save(setDefaultEnabled(config, id, enabled), t(enabled ? "safety.announce.enabled" : "safety.announce.disabled", { id }))
+              onToggle={(rule, enabled) =>
+                void save(
+                  setDefaultEnabled(config, rule.id, enabled),
+                  t(enabled ? "safety.announce.enabled" : "safety.announce.disabled", { id: defaultRuleName(rule, t) }),
+                )
               }
             />
           </section>
@@ -208,7 +270,8 @@ function Approvals() {
       <h2 id="safety-approvals-title">{t("safety.approvals.title")}</h2>
       <ErrorNote error={approvals.error ?? error} onRetry={reload} />
       {approvals.loading && !data && <Loading label={t("safety.approvals.loading")} lines={1} />}
-      {data && (
+      {data && data.pending.length === 0 && data.task.length === 0 && <p className="muted small">{t("safety.approvals.none")}</p>}
+      {data && (data.pending.length > 0 || data.task.length > 0) && (
         <>
           <h3>{t("safety.approvals.pending")}</h3>
           {data.pending.length === 0 ? (
@@ -219,7 +282,7 @@ function Approvals() {
                 <li key={p.request_id} className="card">
                   <div className="card-head">
                     <span className="card-title">
-                      <code>{p.tool}</code> {p.action.target_app}
+                      <code>{p.tool}</code> <bdi dir="ltr">{p.action.target_app}</bdi>
                     </span>
                     <Badge tone={riskTone(p.action.declared_risk)}>{riskLabel(p.action.declared_risk)}</Badge>
                   </div>
@@ -243,9 +306,10 @@ function Approvals() {
             <ul className="safety-list-plain">
               {data.task.map((a, i) => (
                 <li key={`${a.task_id}-${a.risk}-${i}`}>
-                  <Badge tone={riskTone(a.risk)}>{riskLabel(a.risk)}</Badge> {a.target ?? t("safety.anyTarget")}{" "}
-                  <span className="muted small">
-                    <code>{a.task_id}</code>
+                  <Badge tone={riskTone(a.risk)}>{riskLabel(a.risk)}</Badge>{" "}
+                  {a.target ? <bdi dir="ltr">{a.target}</bdi> : t("safety.anyTarget")}{" "}
+                  <span className="muted small" title={a.task_id}>
+                    {t("safety.approvals.taskRef", { id: a.task_id.slice(0, 8) })}
                   </span>
                 </li>
               ))}
@@ -260,10 +324,10 @@ function Approvals() {
 function RuleConditions({ rule }: { rule: PolicyRule }) {
   const t = useT();
   return (
-    <span className="small">
+    <span className="small rule-conds">
       {rule.verbs?.length ? (
         <span className="rule-cond">
-          <span className="muted">{t("safety.rule.verbs")}</span> {rule.verbs.join(", ")}
+          <span className="muted">{t("safety.rule.verbs")}</span> <PatternList items={rule.verbs} />
         </span>
       ) : null}
       {rule.risks?.length ? (
@@ -273,7 +337,7 @@ function RuleConditions({ rule }: { rule: PolicyRule }) {
       ) : null}
       {rule.labels?.length ? (
         <span className="rule-cond">
-          <span className="muted">{t("safety.rule.labels")}</span> {rule.labels.join(", ")}
+          <span className="muted">{t("safety.rule.labels")}</span> <PatternList items={rule.labels} />
         </span>
       ) : null}
       {!rule.verbs?.length && !rule.risks?.length && !rule.labels?.length && <span className="muted">{t("safety.rule.anyAction")}</span>}
@@ -288,13 +352,26 @@ function UserRules({ rules, busy, onRemove }: { rules: PolicyRule[]; busy: boole
     <div className="rule-groups">
       {rulesByTarget(rules).map(([target, list]) => (
         <section key={target} className="card" aria-label={target === ANY_TARGET ? t("safety.anyTarget") : target}>
-          <h3 className="card-title">{target === ANY_TARGET ? t("safety.anyTarget") : <code>{target}</code>}</h3>
+          <h3 className="card-title">
+            {target === ANY_TARGET ? (
+              t("safety.anyTarget")
+            ) : (
+              <bdi dir="ltr">
+                <code>{target}</code>
+              </bdi>
+            )}
+          </h3>
           <ul className="safety-list-plain">
             {list.map((r) => (
               <li key={r.id} className="rule-row">
                 <Badge tone={EFFECT_TONE[r.effect] ?? "neutral"}>{effectLabel(r.effect)}</Badge>
                 <span className="rule-main">
-                  <code>{r.id}</code> {r.description && <span>{r.description}</span>}
+                  <span>
+                    <bdi dir="ltr">
+                      <code>{r.id}</code>
+                    </bdi>{" "}
+                    {r.description && <bdi>{r.description}</bdi>}
+                  </span>
                   <RuleConditions rule={r} />
                 </span>
                 <button
@@ -315,51 +392,61 @@ function UserRules({ rules, busy, onRemove }: { rules: PolicyRule[]; busy: boole
   );
 }
 
-function DefaultRules({ state, busy, onToggle }: { state: PolicyState; busy: boolean; onToggle: (id: string, enabled: boolean) => void }) {
+function DefaultRules({ state, busy, onToggle }: { state: PolicyState; busy: boolean; onToggle: (rule: PolicyRule, enabled: boolean) => void }) {
   const t = useT();
   if (!state.defaults.length) return <p className="muted small">{t("safety.defaults.none")}</p>;
   return (
-    <div className="table-wrap" tabIndex={0} role="region" aria-label={t("safety.defaults.title")}>
-      <table>
+    // The section around this is the "Built-in rules" region; the scrollable wrapper is a named group.
+    <div className="table-wrap" tabIndex={0} role="group" aria-labelledby="safety-defaults-title">
+      <table className="rules-table">
         <thead>
           <tr>
-            <th scope="col">{t("safety.defaults.col.rule")}</th>
+            <th scope="col" className="rules-col-name">
+              {t("safety.defaults.col.rule")}
+            </th>
             <th scope="col">{t("safety.defaults.col.applies")}</th>
-            <th scope="col">{t("safety.defaults.col.effect")}</th>
-            <th scope="col">{t("safety.defaults.col.enabled")}</th>
+            <th scope="col" className="rules-col-fit">
+              {t("safety.defaults.col.effect")}
+            </th>
+            <th scope="col" className="rules-col-fit">
+              {t("safety.defaults.col.enabled")}
+            </th>
           </tr>
         </thead>
         <tbody>
-          {state.defaults.map(({ rule, enabled }) => (
-            <tr key={rule.id}>
-              <th scope="row">
-                {rule.description ?? rule.id}
-                <div className="muted small">
-                  <code>{rule.id}</code>
-                </div>
-              </th>
-              <td>
-                <span className="small">{rule.targets?.length ? rule.targets.join(", ") : t("safety.anyTarget")}</span>{" "}
-                <RuleConditions rule={rule} />
-              </td>
-              <td>
-                <Badge tone={EFFECT_TONE[rule.effect] ?? "neutral"}>{effectLabel(rule.effect)}</Badge>
-              </td>
-              <td>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={enabled}
-                    disabled={busy}
-                    onChange={(e) => onToggle(rule.id, e.target.checked)}
-                    aria-label={t("safety.defaults.toggleLabel", { id: rule.id })}
-                  />
-                  <span className="switch-track" aria-hidden="true" />
-                </label>
-              </td>
-            </tr>
-          ))}
+          {state.defaults.map(({ rule, enabled }) => {
+            const name = defaultRuleName(rule, t);
+            return (
+              <tr key={rule.id}>
+                <th scope="row" title={rule.id}>
+                  {name}
+                </th>
+                <td>
+                  <div className="rule-applies small">
+                    {rule.targets?.length ? <PatternList items={rule.targets} /> : <span>{t("safety.anyTarget")}</span>}
+                    {/* "Any action" is implied when the rule names apps and nothing else. */}
+                    {(rule.verbs?.length || rule.risks?.length || rule.labels?.length || !rule.targets?.length) && <RuleConditions rule={rule} />}
+                  </div>
+                </td>
+                <td className="rules-col-fit">
+                  <Badge tone={EFFECT_TONE[rule.effect] ?? "neutral"}>{effectLabel(rule.effect)}</Badge>
+                </td>
+                <td className="rules-col-fit">
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      checked={enabled}
+                      disabled={busy}
+                      onChange={(e) => onToggle(rule, e.target.checked)}
+                      aria-label={t("safety.defaults.toggleLabel", { id: name })}
+                    />
+                    <span className="switch-track" aria-hidden="true" />
+                  </label>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -533,6 +620,7 @@ function Limits({ config, busy, onSave }: { config: PolicyConfig; busy: boolean;
           <label htmlFor={timeoutId}>{t("safety.limits.timeout")}</label>
           <input
             id={timeoutId}
+            className="input-narrow"
             type="number"
             min={5}
             max={3600}
@@ -644,13 +732,16 @@ function Browser() {
       {s && (
         <div className="card">
           <div className="card-head">
-            <span className="card-title">{s.connected ? t("safety.browser.connected") : t("safety.browser.disconnected")}</span>
+            <span className="card-title">{t("safety.browser.extension")}</span>
             <Badge tone={s.connected ? "good" : "neutral"}>{s.connected ? t("safety.browser.on") : t("safety.browser.off")}</Badge>
           </div>
           {!s.connected && <p className="muted small">{t("safety.browser.help")}</p>}
           {s.origin && (
             <p className="small">
-              <span className="muted">{t("safety.browser.origin")}</span> <code>{s.origin}</code>
+              <span className="muted">{t("safety.browser.origin")}</span>{" "}
+              <bdi dir="ltr">
+                <code>{s.origin}</code>
+              </bdi>
             </p>
           )}
           {s.host_version && (
@@ -658,13 +749,22 @@ function Browser() {
               <span className="muted">{t("safety.browser.version")}</span> {s.host_version}
             </p>
           )}
-          <p className="small">
-            <span className="muted">{t("safety.browser.tools")}</span>{" "}
-            {s.tools.length ? s.tools.map((tool) => <code key={tool} className="tl-call">{tool}</code>) : t("safety.browser.noTools")}
-          </p>
+          {s.tools.length > 0 && (
+            <details className="tech-details small">
+              <summary>{t("safety.browser.details")}</summary>
+              <p className="tech-details-body">
+                <span className="muted">{t("safety.browser.tools")}</span>{" "}
+                {s.tools.map((tool) => (
+                  <code key={tool} className="tl-call">
+                    {tool}
+                  </code>
+                ))}
+              </p>
+            </details>
+          )}
           <div className="card-actions">
-            <button type="button" className="btn btn-ghost btn-small" onClick={status.reload}>
-              {t("common.refresh")}
+            <button type="button" className="btn btn-small" onClick={status.reload} disabled={status.loading}>
+              {t("safety.browser.check")}
             </button>
           </div>
         </div>

@@ -33,6 +33,7 @@ import { useAsync, useEvent, useNow } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { Dialog } from "../components/Dialog";
 import { GoToPage } from "../components/GoToPage";
+import { isMac } from "../hooks.shortcuts";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT, type MessageKey } from "../i18n";
 
@@ -186,12 +187,12 @@ export function AgentPage() {
       ) : (
         <>
           {noModel && (
-            <p className="note" role="note">
+            <div className="note note-warn agent-no-model" role="note">
               <span>
                 <strong>{t("agent.noModel.title")}</strong> {t("agent.noModel.body")}
-              </span>{" "}
-              <GoToPage page="models" className="btn btn-ghost btn-small" />
-            </p>
+              </span>
+              <GoToPage page="models" className="btn" />
+            </div>
           )}
           <RunForm halted={halted} onStarted={started} />
         </>
@@ -251,7 +252,9 @@ function RunForm({ halted, onStarted }: { halted: boolean; onStarted: (taskId: s
           }}
         />
         <p id={ids.hint} className="field-hint muted small">
-          {t("agent.form.goalHint")}
+          {t("agent.form.goalHint", {
+            keys: isMac() ? `⌘${t("shortcuts.key.enter")}` : `${t("shortcuts.key.ctrl")}+${t("shortcuts.key.enter")}`,
+          })}
         </p>
       </div>
       <details className="help">

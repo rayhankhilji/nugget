@@ -1,15 +1,15 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api, errorMessage, events, type FitReport, type ModelInfo, type ModelProgress } from "../api";
 import { useAsync, useEvent } from "../hooks";
 import { formatBytes, percent } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
-import { CopyButton } from "../components/CopyButton";
 import { Badge, ErrorNote, Spinner } from "../components/ui";
 import type { AiChoice } from "./machine";
+import type { ModelFit } from "../api";
 import { ByokForm } from "./ByokForm";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { detectOs, type Os } from "./platform";
-import { OfflineNote, StepHeading, type StepProps } from "./steps";
+import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
 
 const CHOICES: { id: AiChoice; label: MessageKey; blurb: MessageKey }[] = [
   { id: "local", label: "onboarding.ai.local", blurb: "onboarding.ai.localBlurb" },
@@ -21,6 +21,14 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
   const t = useT();
   const name = useId();
   const choice = state.ai;
+  // Picking a choice reveals its section below the cards: bring that section's heading into view.
+  const picked = useRef(false);
+  useEffect(() => {
+    if (!picked.current) return;
+    const h = document.getElementById(choice === "local" ? "ob-models" : choice === "byok" ? "ob-byok" : "");
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    h?.scrollIntoView?.({ block: "nearest", behavior: reduce ? "auto" : "smooth" });
+  }, [choice]);
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.ai.heading")}</StepHeading>
@@ -35,7 +43,10 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
                 name={name}
                 value={c.id}
                 checked={choice === c.id}
-                onChange={() => dispatch({ type: "chooseAi", ai: c.id })}
+                onChange={() => {
+                  picked.current = true;
+                  dispatch({ type: "chooseAi", ai: c.id });
+                }}
               />
               <span>
                 <span className="kind-label">
@@ -47,8 +58,9 @@ export function AiStep({ headingRef, state, dispatch, connected }: StepProps) {
           ))}
         </div>
       </fieldset>
-      {choice === "local" && (connected ? <LocalModels /> : <OfflineNote />)}
-      {choice === "byok" && <ByokGuide />}
+      {choice === "local" &&
+        (connected ? <LocalModels onReady={(what) => dispatch({ type: "aiSetUp", ai: "local", what })} /> : <OfflineNote />)}
+      {choice === "byok" && <ByokGuide onSaved={(what) => dispatch({ type: "aiSetUp", ai: "byok", what })} />}
       {choice === "later" && <p className="muted">{t("onboarding.ai.laterDetail")}</p>}
     </>
   );
@@ -70,7 +82,26 @@ export function sortModels(list: readonly ModelInfo[]): ModelInfo[] {
   );
 }
 
-function LocalModels() {
+const SEARCH_TIERS = new Set(["embedding", "rerank"]);
+
+/** A model that only serves search (embeddings, reranking), not chat and drafting. */
+export function isSearchModel(m: Pick<ModelInfo, "id" | "tiers">, fit?: Pick<ModelFit, "tiers"> | null): boolean {
+  const tiers = m.tiers?.length ? m.tiers : fit?.tiers ?? [];
+  if (tiers.length) return tiers.every((t) => SEARCH_TIERS.has(t));
+  return /(^|[-_])(embed|rerank)/i.test(m.id);
+}
+
+/**
+ * The one chat model to suggest: the daemon's own pick for this machine (the largest that fits
+ * memory) when `models.fit` says so, else the first recommended one.
+ */
+export function bestModel(chat: readonly ModelInfo[], fits: readonly ModelFit[] | undefined): ModelInfo | undefined {
+  const rec = chat.filter((m) => m.recommended);
+  const largest = rec.find((m) => fits?.find((f) => f.id === m.id)?.reasons.includes("ram_fits_largest"));
+  return largest ?? rec[0];
+}
+
+function LocalModels({ onReady }: { onReady: (model: string) => void }) {
   const t = useT();
   const models = useAsync(api.modelsList);
   // Why each model is recommended; `null` on an older daemon (then nothing is explained).
@@ -99,9 +130,37 @@ function LocalModels() {
     }
   };
 
+  const fitOf = (m: ModelInfo) => fit.data?.models.find((f) => f.id === m.id);
   const sorted = sortModels(models.data ?? []);
+  const chat = sorted.filter((m) => !isSearchModel(m, fitOf(m)));
+  const search = sorted.filter((m) => isSearchModel(m, fitOf(m)));
   const recommended = sorted.filter((m) => m.recommended);
-  const shown = all || recommended.length === 0 ? sorted : recommended;
+  const visible = (list: ModelInfo[]) => (all || recommended.length === 0 ? list : list.filter((m) => m.recommended));
+  const best = bestModel(chat, fit.data?.models);
+
+  // A chat model installed, or installing, sets up this path (Continue then marks the step done).
+  const ready = chat.find((m) => {
+    const phase = progress[m.id]?.phase;
+    return m.installed || phase === "downloading" || phase === "verifying" || phase === "installed";
+  });
+  useEffect(() => {
+    if (ready) onReady(ready.id);
+  }, [ready?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rows = (list: ModelInfo[]) =>
+    list.map((m) => (
+      <ModelRow
+        key={m.id}
+        model={m}
+        best={m === best}
+        progress={progress[m.id]}
+        error={requestError[m.id]}
+        fit={fit.data}
+        onInstall={() => void install(m.id)}
+      />
+    ));
+  const shownChat = visible(chat);
+  const shownSearch = visible(search);
 
   return (
     <section className="ob-section" aria-labelledby="ob-models">
@@ -111,18 +170,19 @@ function LocalModels() {
       <ErrorNote error={models.error} onRetry={models.reload} />
       {models.loading && !models.data && <Spinner />}
       {models.data && recommended.length === 0 && <p className="note">{t("onboarding.models.none")}</p>}
-      <ul className="cards">
-        {shown.map((m) => (
-          <ModelRow
-            key={m.id}
-            model={m}
-            progress={progress[m.id]}
-            error={requestError[m.id]}
-            fit={fit.data}
-            onInstall={() => void install(m.id)}
-          />
-        ))}
-      </ul>
+      {shownChat.length > 0 && (
+        <>
+          {shownSearch.length > 0 && <h3 className="ob-models-group">{t("onboarding.models.chatGroup")}</h3>}
+          <ul className="cards ob-models">{rows(shownChat)}</ul>
+        </>
+      )}
+      {shownSearch.length > 0 && (
+        <>
+          <h3 className="ob-models-group">{t("onboarding.models.searchGroup")}</h3>
+          <p className="muted small">{t("onboarding.models.searchLead")}</p>
+          <ul className="cards ob-models ob-models-search">{rows(shownSearch)}</ul>
+        </>
+      )}
       {recommended.length > 0 && sorted.length > recommended.length && (
         <button type="button" className="btn btn-ghost btn-small" aria-expanded={all} onClick={() => setAll((v) => !v)}>
           {all ? t("onboarding.models.showRecommended") : t("onboarding.models.showAll", { count: sorted.length })}
@@ -137,12 +197,15 @@ function LocalModels() {
 
 function ModelRow({
   model,
+  best = false,
   progress,
   error,
   fit,
   onInstall,
 }: {
   model: ModelInfo;
+  /** The one model to suggest: badged, explained, and its Install is the primary button. */
+  best?: boolean;
   progress?: ModelProgress;
   error?: string;
   fit?: FitReport | null;
@@ -159,21 +222,22 @@ function ModelRow({
   const modelFit = fit?.models.find((f) => f.id === model.id);
 
   return (
-    <li className="card" aria-labelledby={labelId}>
+    <li className={best ? "card ob-model-best" : "card"} aria-labelledby={labelId}>
       <div className="card-head">
-        <span id={labelId} className="card-title">
+        <bdi id={labelId} className="card-title">
           {model.id}
-        </span>
+        </bdi>
         <span className="badges">
-          {model.recommended && <Badge tone="accent">{t("onboarding.ai.localBadge")}</Badge>}
+          {best && <Badge tone="accent">{t("onboarding.ai.localBadge")}</Badge>}
           {installed && <Badge tone="good">{t("onboarding.models.installed")}</Badge>}
         </span>
       </div>
       <p className="muted small">
         {t("onboarding.models.size", { size: formatBytes(model.size_bytes) })}
-        {model.license && <> · {t("onboarding.models.license", { license: model.license })}</>}
+        {/* FSI…PDI: the license id keeps its own direction inside right-to-left text. */}
+        {model.license && <> · {t("onboarding.models.license", { license: `\u2068${model.license}\u2069` })}</>}
       </p>
-      {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} />}
+      {modelFit && <FitNotes fit={modelFit} freeDisk={fit?.free_disk_bytes ?? null} installed={installed} why={best} />}
       {busy && progress && (
         <div className="progress">
           <progress
@@ -199,7 +263,7 @@ function ModelRow({
       )}
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className="btn" onClick={onInstall}>
+          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
             {failed || error ? t("onboarding.models.retry") : t("onboarding.models.install")}
           </button>
         </div>
@@ -283,7 +347,7 @@ export function envCommand(os: Os, env: string): string {
 }
 // i18n-ignore-end
 
-function ByokGuide() {
+function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
   const t = useT();
   const os = detectOs();
   const selectId = useId();
@@ -294,7 +358,7 @@ function ByokGuide() {
     <section className="ob-section" aria-labelledby="ob-byok">
       <h2 id="ob-byok">{t("onboarding.byok.heading")}</h2>
       <p className="note">{t("onboarding.byok.never")}</p>
-      <div className="field-inline">
+      <div className="field ob-field">
         <label htmlFor={selectId}>{t("onboarding.byok.provider")}</label>
         <select id={selectId} value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)}>
           {(Object.keys(PROVIDER_GUIDES) as ProviderKind[]).map((k) => (
@@ -304,7 +368,7 @@ function ByokGuide() {
           ))}
         </select>
       </div>
-      <ByokForm kind={kind} />
+      <ByokForm kind={kind} onSaved={onSaved} />
       <details className="ob-manual">
         <summary>{t("onboarding.byok.manual")}</summary>
         <ol className="ob-guide">
@@ -348,13 +412,4 @@ function ByokGuide() {
   );
 }
 
-function Snippet({ text, what }: { text: string; what: string }) {
-  return (
-    <div className="ob-snippet">
-      <pre tabIndex={0} aria-label={what} dir="ltr">
-        {text}
-      </pre>
-      <CopyButton text={text} what={what} />
-    </div>
-  );
-}
+const Snippet = CommandSnippet;

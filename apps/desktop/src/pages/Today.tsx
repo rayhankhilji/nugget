@@ -6,7 +6,7 @@
  * Everything a card shows comes from indexed mail, calendars and notes: it is rendered as plain
  * text, and links are offered only for `https:` (opened by the OS, never in the webview).
  */
-import { useEffect, useId, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   api,
   DISMISS_REASONS,
@@ -23,12 +23,14 @@ import {
   type CardView,
   type DismissReason,
   type ResetLearningRequest,
+  type SourceInfo,
 } from "../api";
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { GoToPage } from "../components/GoToPage";
+import { plainSnippet, SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
-import { formatList, formatNumber, useT } from "../i18n";
+import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
 import { LearnedLines, LearningPanel, type Forget } from "./today/Learning";
 import {
@@ -43,6 +45,18 @@ import {
   type SnoozeChoice,
 } from "./today/model";
 import "./today/today.css";
+
+/** Source id → source, for evidence badges (empty while unknown). */
+const SourcesContext = createContext<ReadonlyMap<string, SourceInfo>>(new Map());
+
+/** Short verb labels for known action kinds; the daemon's full label stays in the tooltip. */
+const ACTION_LABEL: Record<string, MessageKey> = {
+  draft_reply: "today.actionKind.draft_reply",
+  create_event: "today.actionKind.create_event",
+  reminder: "today.actionKind.reminder",
+  archive_thread: "today.actionKind.archive_thread",
+  research_note: "today.actionKind.research_note",
+};
 
 export function TodayPage() {
   const t = useT();
@@ -132,8 +146,11 @@ export function TodayPage() {
   const list = cards.data;
   const visible = (list?.cards ?? []).filter((c) => !hidden.has(c.id));
   const disabled = list !== undefined && !list.enabled;
+  const listed = useMemo(() => new Set(visible.map((c) => c.id)), [visible]);
+  const sourceMap = useMemo(() => new Map((sources.data ?? []).map((s) => [s.id, s])), [sources.data]);
 
   return (
+    <SourcesContext.Provider value={sourceMap}>
     <div className="page">
       <PageHeader
         title={t("today.title")}
@@ -153,27 +170,14 @@ export function TodayPage() {
         <EmptyState title={t("today.disabledTitle")}>{t("today.disabledBody")}</EmptyState>
       ) : (
         <>
-          <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} />
+          <BriefSection brief={brief.data} error={brief.error} loading={brief.loading} onRetry={brief.reload} listed={listed} />
 
           <h2 id="today-inbox" ref={inboxRef} tabIndex={-1}>
             {t("today.inbox")}
             {list && visible.length > 0 && <span className="muted"> · {formatNumber(visible.length)}</span>}
           </h2>
-          {metrics.data &&
-            // A rate means something only once a card has been accepted or dismissed.
-            (metrics.data.precision != null && metrics.data.accepted + metrics.data.dismissed > 0 ? (
-              <p className="muted small today-metrics">
-                {t("today.metrics", {
-                  precision: formatNumber(metrics.data.precision, { style: "percent", maximumFractionDigits: 0 }),
-                  accepted: metrics.data.accepted,
-                  shown: metrics.data.shown,
-                })}
-              </p>
-            ) : metrics.data.shown > 0 ? (
-              <p className="muted small today-metrics">{t("today.noFeedback")}</p>
-            ) : null)}
           <ErrorNote error={cards.error} onRetry={cards.reload} />
-          {cards.loading && !list && <Loading label={t("today.loading")} />}
+          {cards.loading && !list && <Loading label={t("today.loading")} lines={3} />}
           {list && visible.length === 0 &&
             (sources.data?.length === 0 ? (
               <EmptyState title={t("today.noSourcesTitle")} action={<GoToPage page="sources" />}>
@@ -202,6 +206,19 @@ export function TodayPage() {
               ))}
             </ul>
           )}
+          {metrics.data &&
+            // A rate means something only once a card has been accepted or dismissed.
+            (metrics.data.precision != null && metrics.data.accepted + metrics.data.dismissed > 0 ? (
+              <p className="muted small today-metrics">
+                {t("today.metrics", {
+                  precision: formatNumber(metrics.data.precision, { style: "percent", maximumFractionDigits: 0 }),
+                  accepted: metrics.data.accepted,
+                  shown: metrics.data.shown,
+                })}
+              </p>
+            ) : metrics.data.shown > 0 ? (
+              <p className="muted small today-metrics">{t("today.noFeedback")}</p>
+            ) : null)}
           <LearningPanel
             learning={learning.data}
             error={learning.error}
@@ -224,12 +241,26 @@ export function TodayPage() {
         />
       )}
     </div>
+    </SourcesContext.Provider>
   );
 }
 
 // ---- morning brief ----
 
-function BriefSection({ brief, error, loading, onRetry }: { brief: BriefView | undefined; error: unknown; loading: boolean; onRetry: () => void }) {
+function BriefSection({
+  brief,
+  error,
+  loading,
+  onRetry,
+  listed,
+}: {
+  brief: BriefView | undefined;
+  error: unknown;
+  loading: boolean;
+  onRetry: () => void;
+  /** Cards shown under "Needs you": not repeated in the brief. */
+  listed: ReadonlySet<string>;
+}) {
   const t = useT();
   const headingId = useId();
   if (!brief) {
@@ -241,16 +272,16 @@ function BriefSection({ brief, error, loading, onRetry }: { brief: BriefView | u
       </section>
     );
   }
-  const empty = brief.top.length + brief.meetings.length + brief.overdue.length + brief.renewals.length === 0;
+  const top = brief.top.filter((c) => !listed.has(c.card_id));
+  const empty = top.length + brief.meetings.length + brief.overdue.length + brief.renewals.length === 0;
   return (
     <section aria-labelledby={headingId} className="today-brief">
       <h2 id={headingId}>{t("today.brief.titleDate", { date: formatBriefDate(brief.date) })}</h2>
-      <p className="muted small">{t("today.brief.openCards", { n: brief.open_cards })}</p>
       {empty ? (
-        <p className="muted">{t("today.brief.empty")}</p>
+        <p className="muted">{listed.size > 0 ? t("today.brief.nothingElse") : t("today.brief.empty")}</p>
       ) : (
         <div className="today-brief-grid">
-          <BriefList title={t("today.brief.top")} items={brief.top} />
+          <BriefList title={t("today.brief.top")} items={top} />
           {brief.meetings.length > 0 && (
             <div className="today-brief-block">
               <h3>{t("today.brief.meetings")}</h3>
@@ -282,7 +313,11 @@ function BriefList({ title, items }: { title: string; items: BriefCardView[] }) 
             <span className="today-brief-title" dir="auto">
               {c.title}
             </span>
-            {c.summary && <span className="muted small block">{c.summary}</span>}
+            {c.summary && (
+              <span className="muted small block" dir="auto">
+                {c.summary}
+              </span>
+            )}
             {c.due && (
               <span className="muted small" title={formatTime(c.due)}>
                 {t("today.due", { when: formatRelative(c.due, now) })}
@@ -310,11 +345,16 @@ function MeetingItem({ meeting: m }: { meeting: BriefMeetingView }) {
       </span>
       <span className="muted small block">
         {when}
-        {m.location ? ` · ${m.location}` : ""}
+        {m.location && (
+          <>
+            {" · "}
+            <bdi>{m.location}</bdi>
+          </>
+        )}
       </span>
       {m.external.length > 0 && (
         <span className="small block">
-          <Badge tone="accent">{t("today.brief.external")}</Badge> {formatList(m.external)}
+          <Badge tone="accent">{t("today.brief.external")}</Badge> <bdi>{formatList(m.external)}</bdi>
         </span>
       )}
       {m.prep.length > 0 && <EvidenceList evidence={m.prep} label={t("today.brief.prepLabel", { title: m.title })} />}
@@ -371,13 +411,23 @@ function CardItem({
           {card.sensitive && <Badge tone="warn">{t("today.sensitive")}</Badge>}
         </span>
       </div>
-      {summary && <p className="today-card-summary">{summary}</p>}
-      {card.detail && card.detail !== summary && <p className="muted today-card-detail">{card.detail}</p>}
+      {summary && (
+        <p className="today-card-summary" dir="auto">
+          {summary}
+        </p>
+      )}
+      {card.detail && card.detail !== summary && (
+        <p className="muted today-card-detail" dir="auto">
+          {card.detail}
+        </p>
+      )}
       <p className="muted small today-card-meta">
         {card.due && (
           <span title={formatTime(card.due)}>{t("today.due", { when: formatRelative(card.due, now) })}</span>
         )}
-        {people.length > 0 && <span>{t("today.people", { people: formatList(people) })}</span>}
+        {people.length > 0 && (
+          <span>{t("today.people", { people: formatList(people) })}</span>
+        )}
       </p>
 
       {why.length > 0 && (
@@ -411,58 +461,62 @@ function CardItem({
         </div>
       )}
 
-      {card.actions.length > 0 && (
-        <div className="row today-row-start" role="group" aria-label={t("today.actionsLabel", { title: card.title })}>
-          {card.actions.map((a) =>
-            a.supported ? (
-              <button key={a.index} type="button" className="btn btn-small" onClick={() => onAction(a)}>
-                {a.label}
-              </button>
-            ) : (
-              <button
-                key={a.index}
-                type="button"
-                className="btn btn-small"
-                aria-disabled="true"
-                aria-describedby={unsupportedId}
-                title={t("today.unsupported")}
-                onClick={(e) => e.preventDefault()}
-              >
-                {a.label}
-              </button>
-            ),
-          )}
-          {card.actions.some((a) => !a.supported) && (
-            <span id={unsupportedId} className="visually-hidden">
-              {t("today.unsupported")}
-            </span>
-          )}
-        </div>
-      )}
-
-      <div className="row today-row-start card-actions">
+      <div className="today-card-footer">
+        {card.actions.length > 0 && (
+          <div className="today-proposed" role="group" aria-label={t("today.actionsLabel", { title: card.title })}>
+            {card.actions.map((a) => {
+              const short = ACTION_LABEL[a.kind];
+              const label = short ? t(short) : a.label;
+              const full = short && a.label !== label ? a.label : undefined;
+              return a.supported ? (
+                <button key={a.index} type="button" className="btn btn-small" title={full} onClick={() => onAction(a)}>
+                  {label}
+                </button>
+              ) : (
+                <button
+                  key={a.index}
+                  type="button"
+                  className="btn btn-small"
+                  aria-disabled="true"
+                  aria-describedby={unsupportedId}
+                  title={full ? `${full}. ${t("today.unsupported")}` : t("today.unsupported")}
+                  onClick={(e) => e.preventDefault()}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
         <button type="button" className="btn btn-small btn-primary" onClick={onAccept} aria-label={t("today.acceptLabel", { title: card.title })}>
           {t("today.accept")}
         </button>
-        <button
-          type="button"
-          className="btn btn-small"
-          aria-expanded={panel === "snooze"}
-          onClick={() => setPanel((p) => (p === "snooze" ? "none" : "snooze"))}
-          aria-label={t("today.snoozeLabel", { title: card.title })}
-        >
-          {t("today.snooze")}
-        </button>
-        <button
-          type="button"
-          className="btn btn-small btn-danger-ghost"
-          aria-expanded={panel === "dismiss"}
-          onClick={() => setPanel((p) => (p === "dismiss" ? "none" : "dismiss"))}
-          aria-label={t("today.dismissLabel", { title: card.title })}
-        >
-          {t("today.dismiss")}
-        </button>
+        <span className="today-card-footer-end">
+          <button
+            type="button"
+            className="btn btn-small btn-ghost"
+            aria-expanded={panel === "snooze"}
+            onClick={() => setPanel((p) => (p === "snooze" ? "none" : "snooze"))}
+            aria-label={t("today.snoozeLabel", { title: card.title })}
+          >
+            {t("today.snooze")}
+          </button>
+          <button
+            type="button"
+            className="btn btn-small btn-danger-ghost"
+            aria-expanded={panel === "dismiss"}
+            onClick={() => setPanel((p) => (p === "dismiss" ? "none" : "dismiss"))}
+            aria-label={t("today.dismissLabel", { title: card.title })}
+          >
+            {t("today.dismiss")}
+          </button>
+        </span>
       </div>
+      {card.actions.some((a) => !a.supported) && (
+        <p id={unsupportedId} className="muted small today-unsupported">
+          {t("today.unsupported")}
+        </p>
+      )}
 
       {panel === "snooze" && (
         <div className="row today-row-start" role="group" aria-label={t("today.snoozeUntil")}>
@@ -531,24 +585,29 @@ function DismissForm({ onCancel, onDismiss }: { onCancel: () => void; onDismiss:
 function EvidenceList({ evidence, label }: { evidence: CardEvidence[]; label: string }) {
   const t = useT();
   const opener = useOpener();
+  const sources = useContext(SourcesContext);
   return (
     <>
       <ul className="evidence" aria-label={label}>
         {evidence.map((ev, i) => {
           const e = evidenceLine(ev);
+          const source = sources.get(ev.item.source);
+          const quote = e.quote ? plainSnippet(e.quote) : "";
           return (
             <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${i}`}>
-              {e.quote ? (
-                <blockquote className="evidence-quote" title={e.truncated ? ev.quote ?? undefined : undefined}>
-                  {e.quote}
+              {quote ? (
+                <blockquote className="evidence-quote" dir="auto" title={e.truncated ? ev.quote ?? undefined : undefined}>
+                  {quote}
                 </blockquote>
               ) : (
                 <p className="muted small">{t("today.noQuote")}</p>
               )}
               <div className="evidence-source">
-                <cite className="muted small">{e.source}</cite>
+                <cite className="muted small">
+                  <SourceBadge sourceId={ev.item.source} name={source?.name} kind={source?.kind} itemKey={ev.item.key} />
+                </cite>
                 {e.openUrl && (
-                  <button type="button" className="btn btn-small" onClick={() => void opener.open(e.openUrl!, e.source)}>
+                  <button type="button" className="btn btn-small" onClick={() => void opener.open(e.openUrl!, source?.name ?? e.source)}>
                     {t("today.openSource")}
                   </button>
                 )}
