@@ -377,8 +377,8 @@ maintainer login) and check:
   base64 -d latest.json.sig > latest.minisig && minisign -V -p updater.pub -m latest.json -x latest.minisig
   ```
 
-  This also proves that the private key in `release` matches the public key built into the apps;
-  nothing else checks that before users update.
+  The `sign` job already runs the same check (`packaging/scripts/check_release_keys.py`) on
+  `latest.json` and every payload before it drafts; this repeats it on the files you downloaded.
 - [ ] **macOS** (both architectures), after installing from the dmg:
 
   ```sh
@@ -451,7 +451,7 @@ None is needed for a dry run, the rehearsal or the Windows signing proof; those 
 | `TAURI_SIGNING_PRIVATE_KEY` | secret, env `release` | `sign` | Updater minisign private key (Step 4) | The draft has no `.sig` files or `latest.json` (warning); `channels` leaves the feeds unchanged, so installed apps never see the release. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | secret, env `release` | `sign` | The password chosen at `signer generate` | With the key set, `tauri signer sign` fails and the job stops. |
 | `NUGGET_UPDATER_PUBKEY` | repository variable | `build` (real releases only), `sign` | Text of `nugget-updater.key.pub` (Step 4) | `build`: app compiled without an updater ("this build can't update itself"). `sign`: treated like a missing key. |
-| `NUGGET_MANIFEST_RELEASE_PUBKEY` | repository variable | `build` (sidecar step) | 64-hex ed25519 public key of the manifest release key (Step 5) | Real release: `nuggetd` trusts no manifest key and offers no model downloads. **No warning**; the build succeeds. A malformed value fails the build. |
+| `NUGGET_MANIFEST_RELEASE_PUBKEY` | repository variable | `build` (sidecar step) | 64-hex ed25519 public key of the manifest release key (Step 5) | Real release: the `mode` job fails before anything is built, as it does when no line of `manifests/default.json.sig` verifies with this key (`check_release_keys.py manifest`). A malformed value fails the build. |
 | `GITHUB_TOKEN` | automatic | `sign`, `channels` | Scoped by each job's `permissions` | n/a |
 
 Set by the workflow, not by you: `NUGGET_TRUST_DEV_MANIFEST_KEY=1` (dry runs only),
@@ -1015,10 +1015,6 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
 - **Prerelease versions and the MSI.** A non-numeric prerelease (`-rc.1`, `-beta.1`) fails the MSI
   build unless `bundle.windows.wix.version` is set by hand (Step 7); nothing derives it
   automatically yet.
-- **No check that the keys match.** The `sign` job doesn't check that `TAURI_SIGNING_PRIVATE_KEY`
-  belongs to `NUGGET_UPDATER_PUBKEY`, and a real release doesn't warn when
-  `NUGGET_MANIFEST_RELEASE_PUBKEY` is missing or when `default.json.sig` lacks a release
-  signature. Step 8 checks both by hand.
 - `actionlint` (1.7.7) passes on `windows-signing.yml` and `release-rehearsal.yml`; on
   `release.yml` its only complaint is the `macos-15-intel` runner label, which it doesn't know
   yet. It was run without `shellcheck`, so the `run:` scripts weren't linted.

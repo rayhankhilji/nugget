@@ -46,7 +46,8 @@ jobs:
     name: Release or dry run
     if: github.event_name != 'release'
     runs-on: ubuntu-22.04
-    permissions: {}
+    permissions:
+      contents: read # the manifest key check reads the repository
     timeout-minutes: 5
     outputs:
       release: ${{ steps.mode.outputs.release }}
@@ -72,6 +73,25 @@ jobs:
           else
             echo "Dry run of $GITHUB_REF_NAME: unsigned installers as workflow artifacts; nothing is signed or published." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      # A real release whose bundled model manifest has no signature from the release key would
+      # build fine and then offer no model downloads. Stop before anything is built.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        if: steps.mode.outputs.release == 'true'
+        with:
+          persist-credentials: false
+      - name: Check the manifest release key
+        if: steps.mode.outputs.release == 'true'
+        shell: bash
+        env:
+          NUGGET_MANIFEST_RELEASE_PUBKEY: ${{ vars.NUGGET_MANIFEST_RELEASE_PUBKEY }}
+        run: |
+          if [ -z "$NUGGET_MANIFEST_RELEASE_PUBKEY" ]; then
+            echo "::error::NUGGET_MANIFEST_RELEASE_PUBKEY is not set: a release build would trust no model manifest key (docs/release.md, Step 5)."
+            exit 1
+          fi
+          python3 -I packaging/scripts/check_release_keys.py manifest \
+            manifests/default.json manifests/default.json.sig "$NUGGET_MANIFEST_RELEASE_PUBKEY"
 
   build:
     name: Build (${{ matrix.target }})
@@ -513,6 +533,23 @@ jobs:
           fi
           pnpm exec tauri signer sign "$feed"
           test -s "$feed.sig"
+
+      # The private key must belong to the public key compiled into the apps, or every installed
+      # app refuses this release. Check the feed and every payload signature before drafting.
+      - name: Check signatures against NUGGET_UPDATER_PUBKEY
+        env:
+          NUGGET_UPDATER_PUBKEY: ${{ vars.NUGGET_UPDATER_PUBKEY }}
+        run: |
+          set -euo pipefail
+          dist="$RUNNER_TEMP/dist"
+          if [ ! -f "$dist/latest.json.sig" ]; then
+            echo "No latest.json.sig (no updater key): nothing to check."
+            exit 0
+          fi
+          check="packaging/scripts/check_release_keys.py"
+          python3 -I "$check" updater "$dist/latest.json" "$dist/latest.json.sig" "$NUGGET_UPDATER_PUBKEY"
+          python3 packaging/scripts/updater_manifest.py payloads "$dist" |
+            while read -r f; do python3 -I "$check" updater "$f" "$f.sig" "$NUGGET_UPDATER_PUBKEY"; done
 
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
