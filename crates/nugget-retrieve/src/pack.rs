@@ -87,16 +87,23 @@ fn render(blocks: &[Block], items: &[PackItem]) -> String {
         }
         out.push_str(&header(b.n, &items[b.idx]));
         out.push('\n');
-        let mut prev: Option<u32> = None;
-        for (ord, piece) in &b.pieces {
-            match prev {
-                None => {}
-                Some(p) if p + 1 == *ord => out.push('\n'),
-                Some(_) => out.push_str(GAP),
-            }
-            out.push_str(&piece.text);
-            prev = Some(*ord);
+        out.push_str(&body(b));
+    }
+    out
+}
+
+/// A block's text below its header: its chunks in document order, gaps shown as [`GAP`].
+fn body(b: &Block) -> String {
+    let mut out = String::new();
+    let mut prev: Option<u32> = None;
+    for (ord, piece) in &b.pieces {
+        match prev {
+            None => {}
+            Some(p) if p + 1 == *ord => out.push('\n'),
+            Some(_) => out.push_str(GAP),
         }
+        out.push_str(&piece.text);
+        prev = Some(*ord);
     }
     out
 }
@@ -249,6 +256,7 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
             item: items[b.idx].item.clone(),
             chunk_ids: b.pieces.values().map(|p| p.id).collect(),
             truncated: b.truncated,
+            text: body(b),
         })
         .collect();
     (
@@ -316,6 +324,7 @@ mod tests {
         let (resp, passages) = pack(&items, opts(1000));
         assert_eq!(resp.text, "[1] A (notes)\nfirst\nmiddle\nthird\n…\nfifth");
         assert_eq!(passages[0].chunk_ids, vec![10, 11, 12, 14]);
+        assert_eq!(passages[0].text, "first\nmiddle\nthird\n…\nfifth");
         assert_eq!(resp.citations.len(), 1);
         assert_eq!(resp.citations[0].chunk_id, 11);
     }

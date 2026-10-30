@@ -39,6 +39,11 @@ const SPLIT_MARKERS_REPLY: &[&str] = &[
     "].",
 ];
 
+/// A question whose answer stops mid-marker: the stream ends without finishing.
+const CUT_SHORT_QUESTION: &str = "Did the heron by the river stop early?";
+/// A question whose answer the provider filters.
+const FILTERED_QUESTION: &str = "Was the heron by the river filtered?";
+
 /// Streams a short answer for any chat request ([`REWRITTEN`] for a query rewrite).
 struct Answer;
 
@@ -52,13 +57,28 @@ impl Respond for Answer {
         } else {
             &["Herons [1]"]
         };
+        let cut_short = body.contains(CUT_SHORT_QUESTION);
+        let reply: &[&str] = if cut_short || body.contains(FILTERED_QUESTION) {
+            &["The heron fished [", "1"]
+        } else {
+            reply
+        };
         let mut chunks: Vec<Value> = reply
             .iter()
             .map(|r| json!({"choices": [{"index": 0, "delta": {"content": r}}]}))
             .collect();
-        chunks.push(json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}));
+        let finish = if body.contains(FILTERED_QUESTION) {
+            "content_filter"
+        } else {
+            "stop"
+        };
+        if !cut_short {
+            chunks.push(json!({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}));
+        }
         let mut body: String = chunks.iter().map(|c| format!("data: {c}\n\n")).collect();
-        body.push_str("data: [DONE]\n\n");
+        if !cut_short {
+            body.push_str("data: [DONE]\n\n");
+        }
         ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")
             .set_body_string(body)
@@ -623,5 +643,58 @@ async fn ask_normalises_markers_and_checks_the_answer() {
     assert!(bodies.contains("<passages>"), "{bodies}");
     assert!(bodies.contains(nuggetd::ask::NOT_FOUND_REPLY));
     assert!(bodies.contains("Today is "));
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_flushes_held_text_and_skips_the_check_on_failed_answers() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    for (question, error) in [
+        (CUT_SHORT_QUESTION, "stream ended"),
+        (FILTERED_QUESTION, "filtered"),
+    ] {
+        let started: AskStarted = h
+            .call(
+                method::RETRIEVE_ASK,
+                json!({"query": question, "budget_tokens": 2000}),
+            )
+            .await;
+        assert!(!started.general, "{started:?}");
+        let (text, done) = collect(&mut notes, &started.stream_id).await;
+        // The open `[1` the filter held is sent before `chat.done`.
+        assert_eq!(text, "The heron fished [1", "{question}");
+        let e = done.error.expect("an error");
+        assert!(e.contains(error), "{question}: {e}");
+        assert_eq!(done.check, None, "{question}");
+    }
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_dates_today_at_the_clients_offset() {
+    let mut h = start(LOCAL).await;
+    let mut notes = h.client.notifications();
+    for minutes in [14 * 60, -12 * 60] {
+        let started: AskStarted = h
+            .call(
+                method::RETRIEVE_ASK,
+                json!({"query": "heron fishing river", "budget_tokens": 2000,
+                       "utc_offset_minutes": minutes}),
+            )
+            .await;
+        collect(&mut notes, &started.stream_id).await;
+        let offset = time::UtcOffset::from_whole_seconds(minutes * 60).unwrap();
+        let today = time::OffsetDateTime::now_utc().to_offset(offset).date();
+        let line = format!(
+            "Today is {:04}-{:02}-{:02}.",
+            today.year(),
+            u8::from(today.month()),
+            today.day()
+        );
+        let requests = h.requests().await;
+        let last = requests.last().unwrap().to_string();
+        assert!(last.contains(&line), "{line} not in {last}");
+    }
     h.stop().await;
 }

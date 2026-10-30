@@ -522,6 +522,10 @@ pub struct AskRequest {
     /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
+    /// The client's current UTC offset, in minutes (clamped to ±18 hours): the daemon dates
+    /// "today" in the answer prompt with it. Without it, the daemon's configured offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_minutes: Option<i32>,
 }
 
 fn default_ask_tier() -> Tier {

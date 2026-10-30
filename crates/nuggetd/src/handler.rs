@@ -22,12 +22,12 @@ use nugget_infer::{
 };
 use nugget_ipc::{Handler, Notifier, RpcError, code, parse_params, to_result};
 use nugget_models::{InstalledModel, ModelEntry, recommend};
-use nugget_retrieve::ContextOptions;
+use nugget_retrieve::{ContextOptions, PackedContext};
 use nugget_store::AuditEntry;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use crate::ask::{AnswerFilter, AskOptions, AskPrompt, ask_request};
+use crate::ask::{AnswerFilter, AskOptions, AskPrompt, ask_request_packed};
 use crate::config::tier_name;
 use crate::daemon::{InFlightGuard, State, blocking, spawn_refresh};
 use crate::sources::{client_secret_account, reconcile_settings};
@@ -415,7 +415,7 @@ impl RpcHandler {
         let history = ask_history(req.history);
         let opts = AskOptions {
             prompt: AskPrompt::Grounded,
-            today: Some(self.local_today()),
+            today: Some(self.local_today(req.utc_offset_minutes)),
         };
         let search_query = if history.is_empty() {
             query.clone()
@@ -431,13 +431,15 @@ impl RpcHandler {
         let rewritten = search_query != query;
 
         // Contexts by "excludes sensitive items", packed at most once each.
-        let mut contexts: [Option<ContextResponse>; 2] = [None, None];
+        // The packer's passage blocks go with the context: the prompt and the answer check
+        // read each passage's own text (see `crate::ask`).
+        let mut contexts: [Option<PackedContext>; 2] = [None, None];
         let start = async {
             let mut last_err = None;
             for p in candidates {
                 let cloud = p.meta().locality == Locality::Cloud;
                 let slot = &mut contexts[usize::from(cloud)];
-                let ctx = match slot {
+                let packed = match slot {
                     Some(c) => c.clone(),
                     None => {
                         let retriever = self.state.retriever.clone();
@@ -446,22 +448,28 @@ impl RpcHandler {
                             exclude_sensitive: cloud,
                         };
                         let c = on_blocking_thread(async move {
-                            retriever.build_context_with(&q, budget, opts).await
+                            retriever.pack_context_with(&q, budget as usize, opts).await
                         })
                         .await?;
                         slot.insert(c).clone()
                     }
                 };
+                let PackedContext {
+                    response: ctx,
+                    passages,
+                    ..
+                } = packed;
                 // Belt and braces: nothing marked sensitive is ever sent to a cloud model.
                 if cloud && ctx.citations.iter().any(|c| c.sensitive) {
                     return Err(RpcError::from(Error::Integrity(
                         "refusing to send sensitive passages to a cloud provider".into(),
                     )));
                 }
-                match open_stream(p.as_ref(), ask_request(&history, &query, &ctx, &opts)).await {
+                let ask = ask_request_packed(&history, &query, &ctx, &passages, &opts);
+                match open_stream(p.as_ref(), ask).await {
                     Ok(stream) => {
                         router.report_success(p.id());
-                        return Ok((p, stream, ctx));
+                        return Ok((p, stream, ctx, passages));
                     }
                     Err(e) if !explicit && is_fallback_error(&e) => {
                         tracing::warn!(provider = %p.id(), error = %e, "ask: provider failed; trying next");
@@ -480,7 +488,7 @@ impl RpcHandler {
                 Error::NotFound("no provider could answer".into())
             })))
         };
-        let (provider, stream, ctx) = tokio::select! {
+        let (provider, stream, ctx, passages) = tokio::select! {
             r = start => r?,
             () = self.state.shutdown.cancelled() => return Err(shutting_down()),
         };
@@ -516,7 +524,7 @@ impl RpcHandler {
         )
         .await;
         // Sourced answers get their markers normalised and are checked at the end.
-        let filter = (!general).then(|| AnswerFilter::new(&ctx, true));
+        let filter = (!general).then(|| AnswerFilter::packed(&ctx, &passages, opts.today, true));
         let started = AskStarted {
             stream_id: stream_id.clone(),
             provider: provider.id().clone(),
@@ -530,14 +538,12 @@ impl RpcHandler {
         to_result(started)
     }
 
-    /// The user's date today, with days starting at the retriever's configured UTC offset (the
-    /// one date phrases in queries use; the daemon has no other notion of the user's zone).
-    fn local_today(&self) -> time::Date {
-        let minutes = self
-            .state
-            .retriever
-            .config()
-            .date_utc_offset_minutes
+    /// The user's date today: at the client's UTC offset when it sent one, else at the
+    /// retriever's configured offset (the one date phrases in queries use; the daemon has no
+    /// other notion of the user's zone). Clamped to ±18 hours.
+    fn local_today(&self, client_offset_minutes: Option<i32>) -> time::Date {
+        let minutes = client_offset_minutes
+            .unwrap_or(self.state.retriever.config().date_utc_offset_minutes)
             .clamp(-18 * 60, 18 * 60);
         let offset =
             time::UtcOffset::from_whole_seconds(minutes * 60).unwrap_or(time::UtcOffset::UTC);
@@ -1049,12 +1055,15 @@ async fn run_chat(
             state.router.report_success(provider.id());
             done.input_tokens = input_tokens;
             done.output_tokens = output_tokens;
-            done.check = filter.as_ref().map(AnswerFilter::check);
             done.error = match stop_reason {
                 StopReason::Refusal => Some("the model declined to answer".into()),
                 StopReason::ContentFilter => Some("the provider filtered the output".into()),
                 _ => None,
             };
+            // An answer cut short by the provider is not checked.
+            if done.error.is_none() {
+                done.check = filter.as_ref().map(AnswerFilter::check);
+            }
             tracing::info!(stream = %stream_id, ?input_tokens, ?output_tokens, "chat finished");
         }
         ChatEnd::Failed(e) => {
@@ -1063,6 +1072,20 @@ async fn run_chat(
             }
             tracing::warn!(stream = %stream_id, provider = %provider.id(), error = %e, "chat failed");
             done.error = Some(e.to_string());
+            // What the filter still holds was received: the client gets it before the error.
+            let rest = filter
+                .as_mut()
+                .map(AnswerFilter::finish)
+                .unwrap_or_default();
+            if !rest.is_empty() {
+                let delta = ChatDelta {
+                    stream_id: stream_id.clone(),
+                    text: rest,
+                };
+                if notify.send(notification::CHAT_DELTA, &delta).await.is_err() {
+                    return;
+                }
+            }
         }
         ChatEnd::Cancelled => {
             tracing::info!(stream = %stream_id, "chat cancelled");

@@ -1128,25 +1128,102 @@ pub(crate) fn values(text: &str) -> Vec<Value> {
     out
 }
 
-/// The numbers, amounts, percentages, dates and times stated in `text` (not bare weekday
-/// names), for checks outside this crate: each as written, with its alternative normalised
-/// keys. A value is stated by a source when one of its keys is among the source's
-/// [`supported_value_keys`].
-pub fn value_keys(text: &str) -> Vec<(String, Vec<String>)> {
+/// A number, amount, percentage, date or time stated in text (not a bare weekday name), for
+/// checks outside this crate: see [`stated_values`] and [`ValueSupport`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatedValue {
+    /// As written.
+    pub raw: String,
+    kind: ValueKind,
+    keys: Vec<String>,
+}
+
+/// The values stated in `text`, in order (bare weekday names are left out).
+pub fn stated_values(text: &str) -> Vec<StatedValue> {
     values(text)
         .into_iter()
         .filter(|v| v.kind != ValueKind::Weekday)
-        .map(|v| (v.raw, v.keys))
+        .map(|v| StatedValue {
+            raw: v.raw,
+            kind: v.kind,
+            keys: v.keys,
+        })
         .collect()
 }
 
-/// Every value key a source `text` supports (see [`value_keys`]): its values' keys, plus a
-/// date's day number, year and weekday.
-pub fn supported_value_keys(text: &str) -> HashSet<String> {
-    values(text)
-        .into_iter()
-        .flat_map(|v| v.keys.into_iter().chain(v.extra))
-        .collect()
+/// Number words a source may write instead of digits ("a two-year term").
+const NUMBER_WORDS: &[&str] = &[
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven",
+    "twelve",
+];
+
+/// The values some source texts state, by kind: an amount is supported only by an amount or a
+/// number, a percentage only by a percentage, a date by a date. A source date's day number and
+/// year (which [`Corpus`] counts as plain numbers) support only an ordinal ("the 30th") or a
+/// year ("in 2026"), so a note dated the 30th supports neither `$30` nor `30 pages`. Small
+/// number words ("two-year") support the number.
+#[derive(Debug, Clone, Default)]
+pub struct ValueSupport {
+    /// `{kind class}|{key}`.
+    keys: HashSet<String>,
+    /// Day numbers and years of source dates.
+    date_parts: HashSet<String>,
+}
+
+impl ValueSupport {
+    /// Add a source text.
+    pub fn add(&mut self, text: &str) {
+        for v in values(text) {
+            let class = kind_class(v.kind);
+            self.keys
+                .extend(v.keys.iter().map(|k| format!("{class}|{k}")));
+            for k in v.extra {
+                if k.starts_with("wd:") {
+                    self.keys
+                        .insert(format!("{}|{k}", kind_class(ValueKind::Weekday)));
+                } else {
+                    self.date_parts.insert(k);
+                }
+            }
+        }
+        for w in text.split(|c: char| !c.is_alphanumeric()) {
+            let w = w.to_lowercase();
+            if let Some(i) = NUMBER_WORDS.iter().position(|n| *n == w) {
+                let key = num_key((i + 1) as f64);
+                self.keys
+                    .insert(format!("{}|{key}", kind_class(ValueKind::Number)));
+            }
+        }
+    }
+
+    /// Whether a source added states `v`.
+    pub fn supports(&self, v: &StatedValue) -> bool {
+        let class = kind_class(v.kind);
+        if v.keys
+            .iter()
+            .any(|k| self.keys.contains(&format!("{class}|{k}")))
+        {
+            return true;
+        }
+        let raw = v.raw.to_ascii_lowercase();
+        let ordinal = raw.starts_with(|c: char| c.is_ascii_digit())
+            && ["st", "nd", "rd", "th"].iter().any(|s| raw.ends_with(s));
+        let year = raw.len() == 4 && raw.chars().all(|c| c.is_ascii_digit());
+        v.kind == ValueKind::Number
+            && (ordinal || year)
+            && v.keys.iter().any(|k| self.date_parts.contains(k))
+    }
+}
+
+/// Kinds that support each other share a class: money and plain numbers.
+fn kind_class(kind: ValueKind) -> char {
+    match kind {
+        ValueKind::Number | ValueKind::Money => 'n',
+        ValueKind::Percent => 'p',
+        ValueKind::Date => 'd',
+        ValueKind::Time => 't',
+        ValueKind::Weekday => 'w',
+    }
 }
 
 /// Keys a date in the corpus also supports: its day number and year.
@@ -1211,23 +1288,25 @@ mod tests {
     }
 
     #[test]
-    fn public_value_keys_match_supported_keys() {
-        let stated = value_keys("It costs £1,250.50 on Nov 14 at 2pm, 12% off, see you Friday.");
-        let raws: Vec<&str> = stated.iter().map(|(r, _)| r.as_str()).collect();
+    fn value_support_is_typed() {
+        let stated = stated_values("It costs £1,250.50 on Nov 14 at 2pm, 12% off, see you Friday.");
+        let raws: Vec<&str> = stated.iter().map(|v| v.raw.as_str()).collect();
         assert_eq!(raws, ["£1,250.50", "Nov 14", "2pm", "12%"], "{stated:?}");
-        let source = supported_value_keys("Price 1250.50 GBP, due 2026-11-14 14:00, 12 percent.");
-        assert!(
-            stated
-                .iter()
-                .all(|(_, keys)| keys.iter().any(|k| source.contains(k))),
-            "{stated:?} vs {source:?}"
-        );
-        assert!(
-            !value_keys("It is 612 pounds.")[0]
-                .1
-                .iter()
-                .any(|k| source.contains(k))
-        );
+        let mut source = ValueSupport::default();
+        source.add("Price 1250.50 GBP, due 2026-11-14 14:00, 12 percent.");
+        assert!(stated.iter().all(|v| source.supports(v)), "{stated:?}");
+        let one = |t: &str| stated_values(t).remove(0);
+        assert!(!source.supports(&one("It is 612 pounds.")));
+
+        // A note dated the 30th supports the date, its ordinal and its year, nothing else.
+        let mut dated = ValueSupport::default();
+        dated.add("2026-09-30 Renewal: a two-year term, 20 seats.");
+        for yes in ["September 30", "the 30th", "in 2026", "2 years", "20 seats"] {
+            assert!(dated.supports(&one(yes)), "{yes}");
+        }
+        for no in ["$30", "30 pages", "$2,026", "20%", "3 years"] {
+            assert!(!dated.supports(&one(no)), "{no}");
+        }
     }
 
     #[test]
