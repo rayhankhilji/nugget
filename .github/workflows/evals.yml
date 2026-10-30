@@ -22,9 +22,6 @@ on:
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
-  # TEMPORARY (AA1 measurements): remove before merging.
-  push:
-    branches: [aa/doubletap-latency]
 
 # Least privilege: the job only reads the repository.
 permissions:
@@ -52,8 +49,6 @@ env:
 jobs:
   eval:
     name: ${{ matrix.suite }} (real model)
-    # TEMPORARY (AA1 measurements): only the doubletap job runs on push.
-    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 330
     strategy:
