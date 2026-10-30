@@ -70,19 +70,19 @@
     }
   },
   "gg3-slow-settings": {
-    "note": "Each action takes 3 s and the first observation (and the next one after each action) shows only 'Loading\u2026'.",
+    "note": "Each action takes 3 s and the window shows only 'Loading\u2026' for 4 s at the start and after each action (actions fail meanwhile).",
     "perturb": {
       "kind": "slow",
       "delay_ms": 3000,
-      "loading_observes": 1
+      "loading_ms": 4000
     }
   },
   "gg3-slow-files-move": {
-    "note": "Slow file manager: 2 s per action, two 'Loading\u2026' observations after each action.",
+    "note": "Slow file manager: 2 s per action, then 6 s of 'Loading\u2026' (actions fail meanwhile).",
     "perturb": {
       "kind": "slow",
       "delay_ms": 2000,
-      "loading_observes": 2
+      "loading_ms": 6000
     }
   },
   "gg3-modal-calendar": {

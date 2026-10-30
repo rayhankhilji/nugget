@@ -130,11 +130,11 @@ S("gg3-relayout-form", "Relayout after the second action (mid-step 1).", {"kind"
 T("settings", id="gg3-slow-settings", instruction="Turn on Bluetooth and dark mode.", apps=["settings"], difficulty="easy",
   expect={"outcome": "done", "state": [{"path": "/settings/toggles", "op": "any_like", "value": {"key": "bluetooth", "on": True}}, {"path": "/settings/toggles", "op": "any_like", "value": {"key": "dark_mode", "on": True}}]},
   reference=[{"click": "settings.bluetooth"}, {"click": "settings.dark_mode"}, {"finish": "done"}])
-S("gg3-slow-settings", "Each action takes 3 s and the first observation (and the next one after each action) shows only 'Loading…'.", {"kind": "slow", "delay_ms": 3000, "loading_observes": 1})
+S("gg3-slow-settings", "Each action takes 3 s and the window shows only 'Loading…' for 4 s at the start and after each action (actions fail meanwhile).", {"kind": "slow", "delay_ms": 3000, "loading_ms": 4000})
 T("files", id="gg3-slow-files-move", instruction="Move beach.jpg from Downloads to Pictures.", apps=["files"],
   expect={"outcome": "done", "state": [{"path": "/files/entries", "op": "any_like", "value": {"path": "/Pictures/beach.jpg"}}, {"path": "/files/trash", "op": "len", "value": 0}]},
   reference=[{"click": "files.item.downloads"}, {"click": "files.open"}, {"click": "files.item.beach_jpg"}, {"type": ["files.dest", "/Pictures"]}, {"click": "files.move"}, {"finish": "done"}])
-S("gg3-slow-files-move", "Slow file manager: 2 s per action, two 'Loading…' observations after each action.", {"kind": "slow", "delay_ms": 2000, "loading_observes": 2})
+S("gg3-slow-files-move", "Slow file manager: 2 s per action, then 6 s of 'Loading…' (actions fail meanwhile).", {"kind": "slow", "delay_ms": 2000, "loading_ms": 6000})
 
 # --- modal dialog
 T("calendar", id="gg3-modal-calendar", instruction="Add \"Dentist\" on Tuesday at 15:00, just for me.", apps=["calendar"],
