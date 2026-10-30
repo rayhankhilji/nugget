@@ -1575,6 +1575,131 @@ factuality, which 8 tasks cannot settle. Double Tap reproduced within 1 s: first
 character p50 40.6 → 29.7 s (EPYC 7763) and 14.1 → 9.3 s (virtual M2 Pro); a repeat draft 0.15 s
 and 0.23 s.
 
+#### A small Double Tap model and read-ahead (wave CC, CC1)
+
+CC1 added the two remaining levers. **Read-ahead**: while a reply field keeps focus (about 1.5 s,
+local providers only), the desktop shell sends the context it would send at the trigger to
+`draft.read_ahead`, and the daemon prefills the draft's *whole* prompt into `llama-server`'s cache
+(`n_predict: 0`; nothing generated, nothing stored); at the trigger only what changed is read.
+**A small model**: `[draft.local] model` runs a smaller model in its own server (runtime role
+`draft`, provider `local-draft`) that local drafts go to first, falling back to the chat model;
+Chat and cloud drafting are unchanged. Two candidates are proposed, unsigned, in
+[`manifests/pending/doubletap-small.json`](../manifests/pending/): Qwen3-1.7B Q8_0 (1.8 GB) and
+Qwen3-0.6B Q8_0 (0.6 GB), both Apache-2.0. The bench evaluates pending entries with
+`--local-pending FILE` (SHA-256 verified on install; `nuggetd` never reads that directory) and
+read-ahead with `--doubletap-read-ahead on`: before each trigger it calls `Drafter::read_ahead`
+with the request the trigger will send and waits for it, then runs the trigger flow as before.
+
+Run [40993886654](https://github.com/rayhankhilji/nugget/actions/runs/40993886654) at `096586a`
+(2026-10-30), reports in [`results/real-models/run-40993886654/`](results/real-models/run-40993886654/).
+Each runner ran all six configurations one after the other, so every row of a runner shares one
+machine; same 12 tasks, temperature 0, seed 42, local prompt budget on (809 prompt tokens p50).
+The Linux job landed on a newer and much faster CPU than AA1's (Intel Xeon Platinum 8573C, 4
+vCPUs / 2 cores; the 4B reads ~45 prompt tokens/s here against 22 on the EPYC 7763), so compare
+within a runner, not with the AA1 table. Times are from the trigger.
+
+| Runner | Model | Read-ahead | First inserted char p50 / p95 | Prompt tokens evaluated at the trigger p50 | Full draft p50 | Target (p50 ≤ 3 s) |
+|---|---|---|---|---|---|---|
+| Linux, Xeon 8573C, 2 cores, CPU | qwen3-4b-q4km (today) | off | 11.5 / 13.6 s | 494 | 16.8 s | **MISSED** |
+| Linux, Xeon 8573C | qwen3-1.7b-q8 | off | 6.0 / 7.0 s | 494 | 9.3 s | **MISSED** |
+| Linux, Xeon 8573C | qwen3-4b-q4km | **on** | **0.18** / 0.20 s | 1 | 5.4 s | met |
+| Linux, Xeon 8573C | qwen3-1.7b-q8 | **on** | **0.09** / 0.12 s | 1 | 3.8 s | met |
+| Linux, Xeon 8573C | qwen3-0.6b-q8 | off | 2.7 / 3.3 s | 494 | 3.6 s | met |
+| Linux, Xeon 8573C | qwen3-0.6b-q8 | on | 0.05 / 0.06 s | 1 | 0.9 s | met |
+| macOS, M2 Pro (virtual), Metal | qwen3-4b-q4km (today) | off | 9.9 / 12.0 s | 494 | 18.7 s | **MISSED** |
+| macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | off | 3.2 / 4.6 s | 494 | 7.5 s | **MISSED** (by 0.2 s) |
+| macOS, M2 Pro (virtual) | qwen3-4b-q4km | **on** | **0.18** / 0.30 s | 1 | 5.9 s | met |
+| macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | **on** | **0.14** / 0.43 s | 1 | 6.2 s | met |
+| macOS, M2 Pro (virtual) | qwen3-0.6b-q8 | off | 2.0 / 3.6 s | 494 | 5.2 s | met |
+| macOS, M2 Pro (virtual) | qwen3-0.6b-q8 | on | 0.12 / 0.53 s | 1 | 3.0 s | met |
+
+With read-ahead every read-ahead completed (12 of 12 per row, none skipped) and the trigger found
+808 of 809 prompt tokens in the cache: the trigger's own prefix prewarm no longer cuts the slot back.
+
+**Verdict.** *With read-ahead finished before the trigger, the 3 s target is met on both runners
+with today's 4B model (0.18 s p50) and with the 1.7B (0.09–0.14 s).* Without read-ahead only the
+0.6B meets it (2.0–2.7 s), and its drafts are not good enough (below); the 1.7B alone halves the
+4B's time but misses (6.0 s CPU, 3.2 s virtual Mac). The condition matters: read-ahead itself
+takes as long as the old cold prompt read (p50 **8.0 s** for the 4B on Linux, 6.5 s on the virtual
+Mac; 4.2 / 2.5 s for the 1.7B; 1.9 / 1.5 s for the 0.6B). A trigger pressed sooner after focusing
+the field waits for the rest of the prefill (the draft queues behind it on the server's one slot
+and reuses what was read), so it gets roughly *read-ahead time minus time already spent focused*
+plus ~0.2 s; that partial case is not benchmarked. On the slower EPYC 7763 of the AA1 runs the 4B
+read-ahead would take about twice as long (~20 s), so there the 1.7B is what makes the window
+before a typical trigger long enough.
+
+**What read-ahead costs** (`doubletap.read_ahead.server_cpu_s`, `llama-server`'s own CPU time per
+read-ahead of a new field; battery cannot be metered on these runners, so this is the proxy):
+
+| Runner | Model | CPU-seconds per read-ahead (mean) | Draft CPU-s, read-ahead off → on | % of one core at 1 / 2 / 4 new fields per minute |
+|---|---|---|---|---|
+| Linux, Xeon 8573C | qwen3-4b-q4km | 15.1 | 36.8 → 15.8 | 25 / 50 / 101 |
+| Linux, Xeon 8573C | qwen3-1.7b-q8 | 7.9 | 16.7 → 6.7 | 13 / 26 / 53 |
+| Linux, Xeon 8573C | qwen3-0.6b-q8 | 3.5 | 6.7 → 1.8 | 6 / 12 / 24 |
+| macOS, M2 Pro (virtual) | qwen3-4b-q4km | 28.6 | 86.0 → 37.1 | 48 / 95 / 191 |
+| macOS, M2 Pro (virtual) | qwen3-1.7b-q8 | 11.6 | 40.4 → 25.4 | 19 / 39 / 77 |
+| macOS, M2 Pro (virtual) | qwen3-0.6b-q8 | 7.1 | 23.1 → 14.9 | 12 / 24 / 47 |
+
+A read-ahead does the prompt reading the draft would otherwise do at the trigger, so when the user
+then drafts it costs nothing extra (the draft's own CPU drops by about the same amount); it is
+wasted only for fields that get focus but no draft. The shell sends one only after 1.5 s of focus,
+again only when the field, thread or window changed (re-reads back off from 10 s to 60 s), and at
+most 4 per minute; the daemon adds a 5 s minimum interval. So the "per minute" columns are an upper
+bound that needs the user to land in a *new* reply field that often, and the realistic cost is one
+read-ahead per conversation opened: about 15 CPU-seconds with the 4B on this CPU, 8 with the 1.7B.
+The desktop's own cost (a frontmost-app check each second, one accessibility read of the field
+after the dwell) runs only on a real desktop and was not measured here. Read-ahead stays **on by
+default** (Double Tap settings, `[draft.read_ahead] enabled`), since its work is mostly work the
+draft would have done anyway; with a weak CPU and frequent field changes, turning it off or using
+the 1.7B lowers the cost.
+
+**Drafting quality, 4B / 1.7B / 0.6B** (`draft --local-models --draft-judge model`, 8 tasks, all
+three on one AMD EPYC 9V74 runner; each model judges its own drafts, so the judge rows are weak):
+
+| Metric | qwen3-4b-q4km | qwen3-1.7b-q8 | qwen3-0.6b-q8 |
+|---|---|---|---|
+| Voice match (style stats) | **0.92** | 0.85 | 0.77 |
+| Fact recall (target ≥ 0.8) | 0.70 | **0.80** | 0.40 |
+| Hallucination rate (target 0) | 0.33 | **0.0** | 0.0 |
+| Sensitive leak rate (must stay 0) | 0 | 0 | 0 |
+| Injection resistance | 1.0 | 1.0 | 1.0 |
+| Rule-based win rate vs baseline | 0.625 | 0.875 | 0.875 |
+| Judge: Nugget wins / inconsistent | 0.50 / 0.50 | 0.125 / 0.875 | 0.125 / 0.625 |
+| Time to first token p50 | 11.3 s | 6.0 s | 2.3 s |
+
+**Confirmation run** [40998964453](https://github.com/rayhankhilji/nugget/actions/runs/40998964453)
+at `3a48cab` (same code; reports in
+[`results/real-models/run-40998964453/`](results/real-models/run-40998964453/)) landed on the slow
+CPU of the AA1 runs and on a smaller virtual Mac, which shows the other end of the range:
+
+| Runner | Model | First inserted char p50 / p95, read-ahead off | ... on | Read-ahead time p50 | CPU-s per read-ahead |
+|---|---|---|---|---|---|
+| Linux, EPYC 7763, 2 cores, CPU | qwen3-4b-q4km | 30.1 / 34.6 s (**MISSED**) | **0.14** / 0.14 s | 21.3 s | 39.4 |
+| Linux, EPYC 7763 | qwen3-1.7b-q8 | 14.6 / 17.2 s (**MISSED**) | **0.08** / 0.15 s | 10.6 s | 19.6 |
+| Linux, EPYC 7763 | qwen3-0.6b-q8 | 5.6 / 6.9 s (**MISSED**) | 0.04 / 0.04 s | 4.2 s | 7.7 |
+| macOS, M1 (virtual, 3 cores), Metal | qwen3-4b-q4km | 16.6 / 23.7 s (**MISSED**) | **0.58** / 1.95 s | 15.1 s | 40.2 |
+| macOS, M1 (virtual) | qwen3-1.7b-q8 | 6.8 / 12.2 s (**MISSED**) | **0.20** / 0.37 s | 4.5 s | 11.2 |
+| macOS, M1 (virtual) | qwen3-0.6b-q8 | 3.2 / 3.9 s (**MISSED**) | 0.17 / 0.36 s | 2.5 s | 6.1 |
+
+Again 12 of 12 read-aheads completed per row, none skipped, 1 prompt token evaluated at the trigger.
+On the EPYC 7763 the 4B without read-ahead reproduces AA1's 30.2 s to the tenth. With read-ahead
+every configuration meets 3 s once the read-ahead has finished, but on these slower machines the
+4B's read-ahead needs 15–21 s of focus first, and the 1.7B's 4.5–11 s: here the small model is what
+makes read-ahead finish before a typical trigger. Without read-ahead nothing meets 3 s on these
+two runners, not even the 0.6B. Drafting quality (Xeon 8573C runner this time), 4B / 1.7B / 0.6B:
+voice match 0.93 / 0.88 / 0.82, fact recall 0.70 / 0.80 / 0.50, hallucination rate 0.33 / 0.0 /
+0.0, sensitive leak rate 0 / 0 / 0, injection resistance 1.0 for all, rule-based win rate 0.50 /
+1.0 / 0.875: the same picture as the first run (the 1.7B a little behind on voice, ahead on
+facts; the 0.6B behind on both).
+
+**Recommendation.** The 0.6B does not hold quality (fact recall 0.40, voice 0.77) and is not
+recommended. The 1.7B holds on facts (recall 0.80, no hallucinations, no leaks on this run) but
+loses 0.07 of voice match, and 8 tasks cannot settle a difference of that size. Read-ahead, not the
+smaller model, is what brings the 4B under 3 s, so the default stays as it is: Double Tap drafts
+with the synthesis-tier model, read-ahead on, and `[draft.local] model = "qwen3-1.7b-q8"` is
+offered (once signed) for slower machines, where it halves both the read-ahead time and its CPU
+cost (on the EPYC 7763: 10.6 s of focus instead of 21.3 s before the trigger is instant).
+
 ### Drafting quality
 
 `draft --local-models --draft-judge model`, 8 tasks, both arms on the same model. The baseline's

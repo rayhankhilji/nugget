@@ -34,6 +34,9 @@ pub const EMBEDDING_PROVIDER_ID: &str = "local-embedding";
 /// Provider id of the local reranker (`local-rerank`). Not a router provider: retrieval calls
 /// the reranker directly.
 pub const RERANK_PROVIDER_ID: &str = "local-rerank";
+/// Provider id of the local Double Tap model (`local-draft`). A router provider without tiers:
+/// only the draft feature asks for it, by this id.
+pub const DRAFT_PROVIDER_ID: &str = "local-draft";
 
 /// Provider id the router knows a role's server by.
 pub fn provider_id(role: RuntimeRole) -> ProviderId {
@@ -41,6 +44,7 @@ pub fn provider_id(role: RuntimeRole) -> ProviderId {
         RuntimeRole::Chat => CHAT_PROVIDER_ID,
         RuntimeRole::Embedding => EMBEDDING_PROVIDER_ID,
         RuntimeRole::Rerank => RERANK_PROVIDER_ID,
+        RuntimeRole::Draft => DRAFT_PROVIDER_ID,
     })
 }
 
@@ -49,13 +53,15 @@ fn role_name(role: RuntimeRole) -> &'static str {
         RuntimeRole::Chat => "chat",
         RuntimeRole::Embedding => "embedding",
         RuntimeRole::Rerank => "rerank",
+        RuntimeRole::Draft => "draft",
     }
 }
 
-const ROLES: [RuntimeRole; 3] = [
+const ROLES: [RuntimeRole; 4] = [
     RuntimeRole::Chat,
     RuntimeRole::Embedding,
     RuntimeRole::Rerank,
+    RuntimeRole::Draft,
 ];
 
 fn idx(role: RuntimeRole) -> usize {
@@ -63,6 +69,7 @@ fn idx(role: RuntimeRole) -> usize {
         RuntimeRole::Chat => 0,
         RuntimeRole::Embedding => 1,
         RuntimeRole::Rerank => 2,
+        RuntimeRole::Draft => 3,
     }
 }
 
@@ -102,6 +109,7 @@ pub struct RuntimeOptions {
     pub chat: Tuning,
     pub embedding: Tuning,
     pub rerank: Tuning,
+    pub draft: Tuning,
 }
 
 impl Default for RuntimeOptions {
@@ -123,6 +131,7 @@ impl Default for RuntimeOptions {
             chat: Tuning::default(),
             embedding: Tuning::default(),
             rerank: Tuning::default(),
+            draft: Tuning::default(),
         }
     }
 }
@@ -133,6 +142,7 @@ impl RuntimeOptions {
             RuntimeRole::Chat => &self.chat,
             RuntimeRole::Embedding => &self.embedding,
             RuntimeRole::Rerank => &self.rerank,
+            RuntimeRole::Draft => &self.draft,
         }
     }
 
@@ -205,7 +215,7 @@ struct State {
     install: Arc<tokio::sync::Mutex<()>>,
     secrets: RuntimeSecrets,
     client: reqwest::Client,
-    roles: [Arc<RoleState>; 3],
+    roles: [Arc<RoleState>; 4],
 }
 
 impl Drop for State {
@@ -470,7 +480,8 @@ impl Runtime {
         if killed > 0 {
             tracing::warn!(killed, "cleaned up orphaned local runtime servers");
         }
-        let secrets = RuntimeSecrets::new(random_key()?, random_key()?, random_key()?);
+        let secrets =
+            RuntimeSecrets::new(random_key()?, random_key()?, random_key()?, random_key()?);
         let mk = |role: RuntimeRole| {
             Arc::new(RoleState {
                 role,
@@ -510,6 +521,7 @@ impl Runtime {
                     mk(RuntimeRole::Chat),
                     mk(RuntimeRole::Embedding),
                     mk(RuntimeRole::Rerank),
+                    mk(RuntimeRole::Draft),
                 ],
             }),
         })
@@ -1045,11 +1057,11 @@ fn check_role(role: RuntimeRole, model: &ModelEntry) -> Result<()> {
     };
     match role {
         // A reranker is a cross-encoder: it neither embeds nor generates.
-        RuntimeRole::Embedding | RuntimeRole::Chat if reranks => {
+        RuntimeRole::Embedding | RuntimeRole::Chat | RuntimeRole::Draft if reranks => {
             fail("is a reranker; it serves only the rerank role")
         }
         RuntimeRole::Embedding if !embeds => fail("does not serve the embedding tier"),
-        RuntimeRole::Chat if !chats => fail("serves no chat tier"),
+        RuntimeRole::Chat | RuntimeRole::Draft if !chats => fail("serves no chat tier"),
         RuntimeRole::Rerank if !reranks => fail("is not a reranker (no rerank tier)"),
         _ => Ok(()),
     }
@@ -1064,8 +1076,8 @@ pub(crate) fn provider_config(
 ) -> Result<ProviderConfig> {
     let tiers: Vec<Tier> = match role {
         RuntimeRole::Embedding => vec![Tier::Embedding],
-        // Never routed for a tier.
-        RuntimeRole::Rerank => Vec::new(),
+        // Never routed for a tier (the draft feature asks for `local-draft` by id).
+        RuntimeRole::Rerank | RuntimeRole::Draft => Vec::new(),
         RuntimeRole::Chat => model
             .tiers
             .iter()
@@ -1095,7 +1107,7 @@ pub(crate) fn provider_config(
     // `reasoning_content`, which no feature shows: on a CPU it costs tens of seconds per
     // request and can use up the whole output budget, leaving drafts empty. Templates that do
     // not know the flag ignore it.
-    if role == RuntimeRole::Chat {
+    if matches!(role, RuntimeRole::Chat | RuntimeRole::Draft) {
         v["extra_body"] =
             serde_json::json!({ "chat_template_kwargs": { "enable_thinking": false } });
     }
@@ -1421,7 +1433,11 @@ mod tests {
     fn check_role_runs_a_reranker_only_for_the_rerank_role() {
         let rerank = entry(vec![Tier::Rerank]);
         assert!(check_role(RuntimeRole::Rerank, &rerank).is_ok());
-        for role in [RuntimeRole::Chat, RuntimeRole::Embedding] {
+        for role in [
+            RuntimeRole::Chat,
+            RuntimeRole::Embedding,
+            RuntimeRole::Draft,
+        ] {
             let err = check_role(role, &rerank).unwrap_err();
             assert!(matches!(err, Error::Invalid(_)), "{role:?}: {err}");
         }
@@ -1438,5 +1454,9 @@ mod tests {
         assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Embedding])).is_ok());
         assert!(check_role(RuntimeRole::Chat, &entry(vec![Tier::Embedding])).is_err());
         assert!(check_role(RuntimeRole::Embedding, &entry(vec![Tier::Light])).is_err());
+        // The draft role takes any chat model, and nothing else.
+        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Light])).is_ok());
+        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Synthesis])).is_ok());
+        assert!(check_role(RuntimeRole::Draft, &entry(vec![Tier::Embedding])).is_err());
     }
 }

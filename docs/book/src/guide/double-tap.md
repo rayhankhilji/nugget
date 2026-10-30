@@ -18,7 +18,9 @@ inserted.
 2. **Reading the field.** The desktop app reads the focused field of the frontmost app through the
    OS accessibility API (macOS Accessibility, Windows UI Automation, Linux AT-SPI): the field's text,
    its role and label, and the conversation around it (the messages of a chat or the thread of an
-   email, with subject and recipients). Only the focused window of the frontmost app is read.
+   email, with subject and recipients). Only the focused window of the frontmost app is read. With
+   [read-ahead](#read-ahead) on and a local model, this can happen a moment before the trigger,
+   while the field has focus.
 3. **Deciding what kind of field it is.** Fixed rules, not the model, decide whether the field is an
    email body, a chat composer, a comment, a document, a search box or a form field. Search boxes and
    other non-draftable fields are refused.
@@ -56,11 +58,64 @@ On the **Double Tap** settings page:
 | Trigger | The modifier to double-tap, or a chord |
 | Provider per app | Which model to use in a given app or site, for example a local model in your work mail and a cloud model in a chat app. Otherwise the `synthesis` tier is used, like Ask |
 | Excluded apps | Apps and sites where Double Tap never reads or drafts |
+| Read ahead while you reply | Read a reply field early so a local model can start on it before the trigger. On by default; see [Read-ahead](#read-ahead) |
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../images/screenshots/double-tap-dark.png">
   <img src="../images/screenshots/double-tap-light.png" alt="The Double Tap settings page: the on switch, the trigger (a double-tapped key or a key combination), the provider per app and the excluded apps" loading="lazy">
 </picture>
+
+## Read-ahead
+
+A local model spends most of its time before the first word reading the prompt: the drafting rules,
+your voice examples, the retrieved passages and the thread you are replying to. Read-ahead does that
+reading while you are still looking at the thread, so after the trigger only what changed since (for
+example the text you typed) is left to read, and the first character arrives much sooner.
+
+**When it happens.** Double Tap is on, a text field keeps focus for about 1.5 seconds, the app is not
+excluded and is not a terminal, and the field is not a password or other secure field. The desktop
+app then reads the same context it would read at the trigger (the field's text, the visible thread,
+recipients and subject) and asks the daemon (`draft.read_ahead`) to prepare the draft's prompt and
+have the **local** model server read it into its cache. No text is generated and nothing is inserted.
+While the field keeps focus it is read again at most every 10 seconds or so, and only if something
+changed; the daemon also rate-limits read-aheads (one every 5 seconds by default). When focus leaves
+the field, the pending read-ahead is cancelled (`draft.read_ahead_cancel`).
+
+**Where it goes.** Only to the model server on your machine (or a local-network server you
+configured as the provider, which the egress ledger records), and only when that is the provider the draft would use. If the draft
+would go to a cloud provider, nothing is read ahead and nothing is sent until you press the trigger.
+The prepared prompt lives only in that server's in-memory cache (and briefly in the daemon's
+in-memory retrieval cache); nothing is written to disk or to your store.
+
+**What it costs.** Some CPU (and battery on a laptop) while focus moves between text fields: each
+read-ahead makes the local model read a prompt of several hundred tokens. Measured on a 2-core
+cloud CPU, that is about 15 CPU-seconds per newly focused reply field with the 4B model, 8 with
+the 1.7B. When you then draft, the draft skips that same reading, so it mostly moves work rather
+than adding it; it is wasted only for fields you focus and don't draft in. See [Latency](#latency).
+
+**Turning it off.** Switch off **Read ahead while you reply** on the Double Tap page. To turn it off
+for every client of the daemon, set `enabled = false` under `[draft.read_ahead]` in `config.toml`
+(see [Configuration](../reference/config.md#draft)).
+
+## A smaller model for Double Tap
+
+Double Tap normally drafts with the same model as Ask (the `synthesis` tier). A smaller model reads
+prompts several times faster on a CPU. To use one for local Double Tap drafts only, name it in
+`config.toml`:
+
+```text
+[draft.local]
+model = "<model id from the manifest>"
+```
+
+The daemon then runs that model in a separate local server, shown on the Status page with the role
+**Double Tap drafts**. Drafts that go to a local model by default (not through a provider you
+chose for an app) try it first and fall back to the chat model if it is not available; Ask, chat
+and drafts with a cloud provider are unchanged.
+
+The small models proposed for this (currently `qwen3-1.7b-q8` and `qwen3-0.6b-q8`) are pending in
+`manifests/pending/` and cannot be installed by the app until they are signed into the model
+manifest. Until then, this setting accepts only models already in the manifest.
 
 ## What it will not do
 
@@ -72,6 +127,8 @@ On the **Double Tap** settings page:
   and sites, and system settings. In an excluded app no thread, recipients, subject or field text is
   read, and nothing is inserted. You can add more.
 - **It does not send by itself.** It inserts text into the field; you press Send.
+- **It does not read ahead for cloud models.** [Read-ahead](#read-ahead) only ever goes to a local
+  model server, never in excluded apps, terminals or secure fields, and stores nothing.
 - **It does not record keystrokes.** For a double tap only modifier presses are observed; for every
   other key the listener learns only that *some* key was pressed (which cancels a tap that was part of
   a shortcut). A chord is registered with the OS, which reports only that chord. No key, key code or
@@ -82,7 +139,8 @@ On the **Double Tap** settings page:
 What leaves the device depends on the provider used for the draft:
 
 - **Local or local-network model:** nothing leaves your machine (a local-network request is still
-  recorded in the [egress ledger](privacy.md)).
+  recorded in the [egress ledger](privacy.md)). With read-ahead on, the field's context is read and
+  sent to that local server a moment before the trigger; see [Read-ahead](#read-ahead).
 - **Cloud model:** the field text, the thread read around it, the subject and recipients, the
   retrieved passages and your voice examples are sent to that provider. **Sensitive items are never
   included**: they are left out of the passages and the examples, and the engine refuses outright if
@@ -106,6 +164,14 @@ draft is audited without its content.
 
 The targets are a first inserted token in under 1.2 s (median) with a cloud provider and under 3 s
 with a local 4B-class model on a 16 GB machine. To get there, Nugget starts warming the provider,
-retrieval and the voice lookup as soon as the trigger fires. These targets are measured by the
+retrieval and the voice lookup as soon as the trigger fires, and with a local model it can
+[read ahead](#read-ahead) before the trigger and draft with a [smaller model](#a-smaller-model-for-double-tap). These targets are measured by the
 `draft` benchmark suite (see [Benchmarks](../architecture/benchmarks.md)); they are not yet measured
 in the shipped app.
+
+Measured with real local models on GitHub's runners (a 2-core cloud CPU and a virtual Apple M2 Pro),
+from the trigger to the first inserted character, median: with the 4B model about 10–12 s without
+read-ahead and **0.2 s with read-ahead** once the read-ahead has finished (it takes about 6–8 s
+after you focus the field on those machines); with the 1.7B, 3–6 s without and about 0.1 s with.
+A trigger pressed before the read-ahead finishes waits for the rest of it. The details are in the
+benchmark results (`bench/README.md`, "Real-model results").

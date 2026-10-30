@@ -6,6 +6,8 @@
 //! - [`errors`]: daemon and accessibility errors to i18n keys.
 //! - [`permissions`]: per-OS onboarding and the status the settings page shows.
 //! - [`flow`]: the runtime glue (listener lifecycle, the draft flow, effects, focus restore).
+//! - [`readahead`]: read-ahead, prefilling the local model's cache while a reply field keeps
+//!   focus (with its privacy rules).
 //! - [`commands`]: the Tauri commands.
 //! - `probe`: debug builds only, a step log for the native overlay runs (`apps/desktop/e2e-native`).
 
@@ -16,6 +18,7 @@ pub mod overlay;
 pub mod permissions;
 pub mod placement;
 mod probe;
+pub mod readahead;
 pub mod settings;
 
 use std::path::PathBuf;
@@ -47,6 +50,7 @@ pub struct DoubleTap {
     pub(crate) machine: Mutex<Machine>,
     pub(crate) target: Mutex<Option<Target>>,
     pub(crate) a11y: Arc<A11y>,
+    pub(crate) read_ahead: readahead::Runner,
 }
 
 /// Lock, recovering from a poisoned mutex (the data is plain state).
@@ -76,11 +80,13 @@ pub fn setup(app: &App) {
         machine: Mutex::new(Machine::new()),
         target: Mutex::new(None),
         a11y: Arc::new(A11y::new()),
+        read_ahead: readahead::Runner::default(),
     });
     if let Err(e) = create_overlay(app) {
         tracing::warn!(error = %e, "cannot create the Double Tap overlay window");
     }
     flow::follow_streams(handle);
+    readahead::restart(handle);
     // macOS: install on the main thread so errors are reported synchronously. Elsewhere start
     // off the main thread (the Wayland portal can take seconds to answer).
     #[cfg(target_os = "macos")]

@@ -1,5 +1,6 @@
 //! Double Tap drafting: `draft.begin` / `draft.cancel` / `draft.feedback` / `draft.prewarm` /
-//! `voice.status`, over [`nugget_draft::Drafter`] and the user's [`nugget_voice`] profile.
+//! `draft.read_ahead` / `draft.read_ahead_cancel` / `voice.status`, over
+//! [`nugget_draft::Drafter`] and the user's [`nugget_voice`] profile.
 //!
 //! - **Streaming.** `draft.begin` answers [`DraftStarted`], then sends the post-processed draft
 //!   as `chat.delta` notifications and one `chat.done` (same shapes as `retrieve.ask`) on the
@@ -19,6 +20,18 @@
 //!   non-cloud provider at start ([`Drafter::prewarm_idle`]); off by default, since it sends a
 //!   request at startup and may start the on-device chat server. `draft.end` audits prompt and
 //!   cached prompt tokens.
+//! - **Read-ahead.** While a reply field keeps focus, the desktop sends `draft.read_ahead` with
+//!   the context it would send at the trigger; the engine prefills that whole prompt into a
+//!   non-cloud provider's cache, generating nothing ([`Drafter::read_ahead`]). The call answers
+//!   within ~100 ms: `{"started": false, "skipped": <reason>}` when it did nothing (`"disabled"`,
+//!   `"refused"`, `"cloud"`, `"rate_limited"`, `"unchanged"`, `"unavailable"`, `"cancelled"`),
+//!   `{"started": true, "done": true}` when it already finished, else `{"started": true}` (it
+//!   keeps running in the background). `draft.read_ahead_cancel` (focus left the field) answers
+//!   `{"cancelled": bool}`. Nothing about a read-ahead is audited or stored; the outcome is
+//!   logged at debug level without content.
+//! - **Small local model.** `[draft.local] model` names a manifest chat model that the local
+//!   runtime serves in its own `llama-server` (role `draft`, provider `local-draft`, no tiers);
+//!   drafts routed by tier to a non-cloud provider go to it first ([`LocalBudget::provider`]).
 //! - **Audit.** Every refusal, start (by the engine), cancel, end and feedback is audited with
 //!   lengths, kinds, provider, locality and app id only: never field text, thread or draft.
 //!
@@ -46,6 +59,13 @@
 //! budget_tokens = 300             # retrieval budget for them
 //! max_snippets = 3                # best retrieved passages kept
 //! include_sensitive = false       # let passages marked sensitive into local prompts
+//! model = "qwen3-1.7b-q8"         # a manifest chat model served for Double Tap alone (unset:
+//!                                 # local drafts use the tier's chat server); qwen3-1.7b-q8 is
+//!                                 # pending in manifests/pending/ until signed
+//!
+//! [draft.read_ahead]              # prefill the prompt while a reply field keeps focus
+//! enabled = true                  # false: draft.read_ahead skips ("disabled")
+//! min_interval_ms = 5000          # minimum time between two read-aheads that do work
 //!
 //! [draft.voice]
 //! emails = ["me@example.com"]     # who "me" is (completed from sent mail when infer_me)
@@ -68,6 +88,7 @@ use futures::StreamExt;
 use futures::future::BoxFuture;
 use nugget_core::capability::Tier;
 use nugget_core::ids::ProviderId;
+use nugget_core::ipc::RuntimeRole;
 use nugget_core::ipc::{
     ChatCancel, ChatDelta, ChatDone, DraftContext, DraftFeedback, DraftRequest, method,
     notification,
@@ -75,7 +96,7 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_draft::{
     DEFAULT_EXCLUDED_APPS, DraftConfig, DraftStream, Drafter, LocalBudget, MAX_BUDGET_TOKENS,
-    ProfileVoice, Refusal, RetrievalRunner, VoiceFeedback, Warmer, gate_with,
+    ProfileVoice, ReadAheadConfig, Refusal, RetrievalRunner, VoiceFeedback, Warmer, gate_with,
 };
 use nugget_infer::{ChatEvent, ChatRequest, Provider, StopReason};
 use nugget_ipc::{Notifier, RpcError, code, parse_params, to_result};
@@ -97,7 +118,13 @@ const METHODS: &[&str] = &[
     method::DRAFT_FEEDBACK,
     method::VOICE_STATUS,
     DRAFT_PREWARM,
+    method::DRAFT_READ_AHEAD,
+    method::DRAFT_READ_AHEAD_CANCEL,
 ];
+
+/// How long `draft.read_ahead` waits for the read-ahead before answering `{"started": true}`
+/// (quick skips, the common case, are answered with their reason).
+const READ_AHEAD_ANSWER_WAIT: Duration = Duration::from_millis(100);
 
 /// `[draft]` in `config.toml`.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -121,6 +148,7 @@ struct DraftSection {
     voice_load_delay_ms: u64,
     voice: VoiceSection,
     local: LocalSection,
+    read_ahead: ReadAheadSection,
     /// Warm the default local provider's prompt cache with the drafting rules at start.
     prewarm_on_start: bool,
 }
@@ -133,6 +161,9 @@ struct LocalSection {
     budget_tokens: u32,
     max_snippets: usize,
     include_sensitive: bool,
+    /// Manifest id of the small chat model local Double Tap drafts with, served in its own
+    /// `llama-server` (runtime role `draft`, provider `local-draft`). Unset: none.
+    model: Option<String>,
 }
 
 impl Default for LocalSection {
@@ -143,6 +174,36 @@ impl Default for LocalSection {
             budget_tokens: d.budget_tokens,
             max_snippets: d.max_snippets,
             include_sensitive: d.include_sensitive,
+            model: None,
+        }
+    }
+}
+
+impl LocalSection {
+    /// `model`, trimmed; `None` when unset or blank.
+    fn model(&self) -> Option<&str> {
+        self.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+    }
+}
+
+/// `[draft.read_ahead]`: prefill the prompt while a reply field keeps focus
+/// ([`ReadAheadConfig`]).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct ReadAheadSection {
+    enabled: bool,
+    min_interval_ms: u64,
+}
+
+impl Default for ReadAheadSection {
+    fn default() -> Self {
+        let d = ReadAheadConfig::default();
+        Self {
+            enabled: d.enabled,
+            min_interval_ms: d.min_interval_ms,
         }
     }
 }
@@ -167,6 +228,7 @@ impl Default for DraftSection {
             voice_load_delay_ms: 5_000,
             voice: VoiceSection::default(),
             local: LocalSection::default(),
+            read_ahead: ReadAheadSection::default(),
             prewarm_on_start: false,
         }
     }
@@ -232,7 +294,16 @@ impl DraftSection {
                 budget_tokens: self.local.budget_tokens.min(MAX_BUDGET_TOKENS),
                 max_snippets: self.local.max_snippets,
                 include_sensitive: self.local.include_sensitive,
+                // The small model's server, when one is configured (see `crate::local`).
+                provider: self
+                    .local
+                    .model()
+                    .map(|_| nugget_runtime::provider_id(RuntimeRole::Draft)),
                 ..LocalBudget::default()
+            },
+            read_ahead: ReadAheadConfig {
+                enabled: self.read_ahead.enabled,
+                min_interval_ms: self.read_ahead.min_interval_ms,
             },
             ..DraftConfig::default()
         }
@@ -261,6 +332,13 @@ impl DraftSection {
 /// invalid table is an error, as for the draft feature).
 pub(crate) fn draft_config_from_table(table: &toml::Table) -> Result<DraftConfig> {
     Ok(section::<DraftSection>("draft", table)?.draft_config())
+}
+
+/// The manifest id of `[draft.local] model` in the `[draft]` table `table`: trimmed, `None` when
+/// unset, blank or when the table does not parse (the draft feature reports that error).
+pub(crate) fn local_draft_model(table: &toml::Table) -> Option<String> {
+    let s = section::<DraftSection>("draft", table).ok()?;
+    s.local.model().map(str::to_owned)
 }
 
 /// Opens the provider's connection (and starts a stopped local server) on trigger, and warms a
@@ -378,6 +456,8 @@ impl Feature for DraftFeature {
             method::DRAFT_FEEDBACK => self.feedback(parse_params(params)?).await,
             method::VOICE_STATUS => self.voice_status().await,
             DRAFT_PREWARM => self.prewarm(parse_params(params)?),
+            method::DRAFT_READ_AHEAD => self.read_ahead(parse_params(params)?).await,
+            method::DRAFT_READ_AHEAD_CANCEL => Ok(self.read_ahead_cancel()),
             other => Err(RpcError::method_not_found(other)),
         }
     }
@@ -511,6 +591,54 @@ impl DraftFeature {
             })),
             None => Ok(Value::Null),
         }
+    }
+
+    /// Start a read-ahead in the background and answer within [`READ_AHEAD_ANSWER_WAIT`]: with
+    /// the skip reason or completion if it finished by then, else `{"started": true}`. Nothing
+    /// is audited or stored, and nothing about the field is logged.
+    async fn read_ahead(&self, req: DraftRequest) -> Result<Value, RpcError> {
+        if !self.enabled {
+            return Ok(json!({ "started": false, "skipped": "disabled" }));
+        }
+        if self.state.shutdown.is_cancelled() {
+            return Err(shutting_down());
+        }
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let drafter = self.drafter.clone();
+        let shutdown = self.state.shutdown.clone();
+        self.state.tasks.spawn(async move {
+            let r = tokio::select! {
+                r = drafter.read_ahead(req) => r,
+                // A read-ahead in flight at shutdown is dropped (its request with it).
+                () = shutdown.cancelled() => Err(nugget_draft::ReadAheadSkip::Cancelled),
+            };
+            match &r {
+                Ok(o) => tracing::debug!(
+                    provider = %o.provider,
+                    prompt_chars = o.prompt_chars,
+                    prepare_ms = o.prepare_ms,
+                    warm_ms = o.warm_ms,
+                    "draft: read-ahead done"
+                ),
+                Err(skip) => tracing::debug!(skipped = skip.as_str(), "draft: read-ahead skipped"),
+            }
+            let _ = tx.send(r);
+        });
+        Ok(
+            match tokio::time::timeout(READ_AHEAD_ANSWER_WAIT, rx).await {
+                Ok(Ok(Ok(_))) => json!({ "started": true, "done": true }),
+                Ok(Ok(Err(skip))) => json!({ "started": false, "skipped": skip.as_str() }),
+                // The task was dropped (shutdown) before it answered.
+                Ok(Err(_)) => json!({ "started": false, "skipped": "cancelled" }),
+                Err(_) => json!({ "started": true }),
+            },
+        )
+    }
+
+    fn read_ahead_cancel(&self) -> Value {
+        let cancelled = self.drafter.cancel_read_ahead();
+        tracing::debug!(cancelled, "draft: read-ahead cancel");
+        json!({ "cancelled": cancelled })
     }
 
     async fn audit_refusal(&self, reason: &str, app: Option<&str>, field_kind: Option<&str>) {
@@ -779,6 +907,60 @@ mod tests {
         assert!(parse("[local]\nnope = 1").is_err());
         assert!(!parse("").unwrap().prewarm_on_start);
         assert!(parse("prewarm_on_start = true").unwrap().prewarm_on_start);
+    }
+
+    #[test]
+    fn local_model_routes_local_drafts_to_the_draft_server() {
+        let c = parse("").unwrap().draft_config();
+        assert_eq!(c.local.provider, None);
+        let t: toml::Table = toml::from_str("").unwrap();
+        assert_eq!(local_draft_model(&t), None);
+
+        let src = "[local]\nmodel = \"  qwen3-4b-q4km \"\nmax_snippets = 2";
+        let c = parse(src).unwrap().draft_config();
+        assert_eq!(
+            c.local.provider.as_ref().map(ProviderId::as_str),
+            Some("local-draft")
+        );
+        assert_eq!(c.local.max_snippets, 2);
+        let t: toml::Table = toml::from_str(src).unwrap();
+        assert_eq!(local_draft_model(&t).as_deref(), Some("qwen3-4b-q4km"));
+
+        // A blank model is no model.
+        let src = "[local]\nmodel = \" \"";
+        assert_eq!(parse(src).unwrap().draft_config().local.provider, None);
+        assert_eq!(local_draft_model(&toml::from_str(src).unwrap()), None);
+        // An invalid table names no model (the feature reports the error).
+        let src = "[local]\nmodel = \"m\"\nnope = 1";
+        assert!(parse(src).is_err());
+        assert_eq!(local_draft_model(&toml::from_str(src).unwrap()), None);
+        assert_eq!(
+            local_draft_model(&toml::from_str("[local]\nmodel = 3").unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn read_ahead_subsection_maps_to_the_engine() {
+        let c = parse("").unwrap().draft_config();
+        assert_eq!(c.read_ahead, ReadAheadConfig::default());
+        assert!(c.read_ahead.enabled);
+        assert_eq!(c.read_ahead.min_interval_ms, 5_000);
+        let c = parse("[read_ahead]\nenabled = false\nmin_interval_ms = 250")
+            .unwrap()
+            .draft_config();
+        assert_eq!(
+            c.read_ahead,
+            ReadAheadConfig {
+                enabled: false,
+                min_interval_ms: 250,
+            }
+        );
+        // Other settings keep their defaults.
+        assert_eq!(c.local, LocalBudget::default());
+        let err = parse("[read_ahead]\nnope = 1").unwrap_err().to_string();
+        assert!(err.contains("[draft]"), "{err}");
+        assert!(parse("read_ahead = true").is_err());
     }
 
     /// On a single-threaded runtime, a retrieval job that blocks its thread until another task

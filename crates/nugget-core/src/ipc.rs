@@ -87,6 +87,12 @@ pub mod method {
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
     /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
     pub const DRAFT_PREWARM: &str = "draft.prewarm";
+    /// Sent while a reply field keeps focus (Double Tap read-ahead, local providers only):
+    /// prefill the coming draft's whole prompt into the local server's cache, generating
+    /// nothing. Params: `DraftRequest`; result `{ "started": bool, "skipped": reason? }`.
+    pub const DRAFT_READ_AHEAD: &str = "draft.read_ahead";
+    /// Cancel a read-ahead in progress (the field lost focus). Result `{ "cancelled": bool }`.
+    pub const DRAFT_READ_AHEAD_CANCEL: &str = "draft.read_ahead_cancel";
     pub const VOICE_STATUS: &str = "voice.status";
 }
 
@@ -510,6 +516,10 @@ pub enum RuntimeRole {
     /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
     /// routed for a model tier.
     Rerank,
+    /// The small model local Double Tap drafts with, opt-in via `[draft.local] model`: its own
+    /// server, so drafting never waits behind (or evicts the prompt cache of) Chat. Never routed
+    /// for a model tier; only the draft feature calls it, by provider id (`local-draft`).
+    Draft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

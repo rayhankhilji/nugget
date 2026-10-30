@@ -27,7 +27,7 @@ use crate::daemon::State;
 mod agent;
 mod ai_keys;
 mod browser;
-mod draft;
+pub(crate) mod draft;
 mod model_fit;
 pub(crate) mod plugins;
 mod policy;

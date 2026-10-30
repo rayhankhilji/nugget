@@ -78,6 +78,8 @@ pub struct RunConfig {
     pub draft: suites::draft::DraftOptions,
     /// `--local-models` options (real local models through `nugget-runtime`).
     pub local: crate::local::LocalOptions,
+    /// `doubletap` suite options (read-ahead).
+    pub doubletap: suites::doubletap::DoubletapOptions,
 }
 
 impl Default for RunConfig {
@@ -90,6 +92,7 @@ impl Default for RunConfig {
             embed_model: None,
             draft: suites::draft::DraftOptions::default(),
             local: crate::local::LocalOptions::default(),
+            doubletap: suites::doubletap::DoubletapOptions::default(),
         }
     }
 }

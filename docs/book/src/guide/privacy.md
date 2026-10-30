@@ -94,7 +94,7 @@ treated as sensitive. Sensitive items:
 |---|---|---|
 | Ask and chat | Nothing | The question and the selected, non-sensitive passages |
 | Knowledge extraction | Nothing | Text of non-sensitive items, only from sources you listed |
-| [Double Tap](double-tap.md) | Nothing | The field text, the thread read around it, subject and recipients, non-sensitive passages and your voice examples. Screenshots only if you allow cloud screenshots |
+| [Double Tap](double-tap.md) | Nothing (read-ahead only reaches the local model server) | The field text, the thread read around it, subject and recipients, non-sensitive passages and your voice examples. Screenshots only if you allow cloud screenshots |
 | [Agent](agent.md) | Nothing | The goal, observations of the apps and pages it works in, and any context from your data |
 | [Today](today.md) | Nothing; cards are generated and ranked on your device | Card evidence for the judge, only if you allowed a cloud judge, never sensitive evidence |
 | [Plugins](plugins.md) | Requests to the hosts you approved for the plugin, whichever model you use | The same |
@@ -104,6 +104,27 @@ recorded in the ledger. Every cloud request is recorded with the feature named a
 
 Double Tap never reads password or secure fields, nor anything in password managers, banking apps or
 system settings. The agent's [safety policy](safety.md) denies acting in those by default.
+
+### Double Tap read-ahead
+
+Double Tap normally reads nothing until you press the trigger. With **read-ahead** on (the default,
+switched off on the Double Tap page) and a local model, it reads a little earlier:
+
+- **What:** the same things it reads at the trigger: the focused field's text, the visible thread,
+  recipients and subject.
+- **When:** after a text field has kept focus for about 1.5 seconds, again at most every 10 seconds
+  or so while it keeps focus, and only if Double Tap is on. Never in excluded apps (password
+  managers, banking, system settings and your own list), never in terminals unless you allowed
+  Double Tap there, never in password or other secure fields.
+- **Where it goes:** to the daemon, which builds the draft's prompt and has the **local** model
+  server read it (on your machine, or a local-network server you configured, which the ledger
+  records). If the draft would use a cloud provider, nothing is read ahead and nothing is sent
+  anywhere before you press the trigger.
+- **What is kept:** nothing on disk. The prompt stays only in the local model server's memory (its
+  prompt cache) and briefly in the daemon's in-memory retrieval cache, and is dropped as other
+  prompts replace it or when the server stops. No draft is generated and nothing is inserted.
+
+See [Double Tap: Read-ahead](double-tap.md#read-ahead).
 
 ## What never leaves your device
 
