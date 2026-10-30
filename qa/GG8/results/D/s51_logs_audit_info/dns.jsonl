@@ -1,0 +1,8 @@
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.202"], "t": 1793389893.7837431}
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389893.7840822}
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.202"], "t": 1793389895.2658994}
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389895.2661967}
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "A", "answers": ["203.0.113.202"], "t": 1793389895.3249981}
+{"from": "203.0.113.194", "qname": "api.anthropic.com", "qtype": "AAAA", "answers": [], "t": 1793389895.325238}
+{"from": "203.0.113.194", "qname": "dav.example.test", "qtype": "A", "answers": ["203.0.113.202"], "t": 1793389895.3613179}
+{"from": "203.0.113.194", "qname": "dav.example.test", "qtype": "AAAA", "answers": [], "t": 1793389895.3615294}

@@ -44,6 +44,8 @@ NUGGETD = os.environ.get("GG8_NUGGETD") or next(
                  os.path.join(REPO, "target/debug/nuggetd")] if os.path.exists(p)),
     "nuggetd")
 FIXTURES = os.path.join(QA, "fixtures")
+# Daemon listener ports: packets from these are answers to probes, not egress.
+LISTEN_PORTS = {"7319"}
 # Canary strings planted in fixtures. Each must appear only where the scenario allows it.
 CANARY_PREFIX = "GG8CANARY"
 
@@ -270,10 +272,15 @@ class Lab:
             except ValueError:
                 continue
             iface = parts[1] if len(parts) > 2 else "?"
+            direction = parts[i - 1] if i >= 1 else "?"
             src, dst = parts[i + 1], parts[i + 3].rstrip(":")
             proto = parts[i + 4] if len(parts) > i + 4 else "?"
-            if iface == "lo":
+            if iface == "lo" or src.startswith("127.") or src.startswith("::1."):
                 continue
+            if direction == "In":
+                continue  # packets arriving in the namespace (answers, probes from the host)
+            if src.rsplit(".", 1)[-1] in LISTEN_PORTS:
+                continue  # answers from a daemon listener to a probe from outside
             key = (src.rsplit(".", 1)[0], dst.rsplit(".", 1)[0], dst.rsplit(".", 1)[-1],
                    proto.rstrip(","))
             if key[0] in (SINK_IP, LAN_IP):
@@ -336,7 +343,10 @@ class Lab:
                 o["paths"].add(r["method"] + " " + r["path"].split("?")[0])
         ledger_hosts = {}
         for row in ledger:
-            lh = ledger_hosts.setdefault(row["host"], {"rows": 0, "bytes_sent": 0, "features": set()})
+            host = row["host"]
+            if host.count(":") == 1:
+                host = host.split(":")[0]  # the ledger keeps a non-default port
+            lh = ledger_hosts.setdefault(host, {"rows": 0, "bytes_sent": 0, "features": set()})
             lh["rows"] += 1
             lh["bytes_sent"] += row.get("bytes_sent", 0)
             lh["features"].add(row.get("feature"))

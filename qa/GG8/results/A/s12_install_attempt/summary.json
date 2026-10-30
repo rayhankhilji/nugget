@@ -1,0 +1,126 @@
+{
+ "scenario": "s12_install_attempt",
+ "mode": "sinkhole",
+ "dns_names": [
+  "huggingface.co"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 12
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 2
+  }
+ ],
+ "observed_hosts": {
+  "huggingface.co": {
+   "requests": 2,
+   "bytes_in": 0,
+   "paths": [
+    "GET /Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+    "GET /Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf"
+   ]
+  }
+ },
+ "ledger_hosts": {
+  "huggingface.co": {
+   "rows": 2,
+   "bytes_sent": 542,
+   "features": [
+    "model_download"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [],
+ "checks": [
+  {
+   "id": "install.contacted",
+   "ok": true,
+   "detail": [
+    [
+     "huggingface.co",
+     "/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+     404
+    ],
+    [
+     "huggingface.co",
+     "/Qwen/Qwen3-8B-GGUF/resolve/7c41481f57cb95916b40956ab2f0b139b296d974/Qwen3-8B-Q4_K_M.gguf",
+     404
+    ]
+   ],
+   "severity": null,
+   "t": 1793389832.5410192
+  },
+  {
+   "id": "install.attempts_in_ledger",
+   "ok": true,
+   "detail": {
+    "hosts": [
+     "huggingface.co"
+    ],
+    "ledger": [
+     [
+      "huggingface.co",
+      "model_download",
+      271,
+      0
+     ],
+     [
+      "huggingface.co",
+      "model_download",
+      271,
+      0
+     ]
+    ]
+   },
+   "severity": null,
+   "t": 1793389832.54108
+  },
+  {
+   "id": "install.dns_only_documented_hosts",
+   "ok": true,
+   "detail": [
+    "huggingface.co"
+   ],
+   "severity": null,
+   "t": 1793389832.5412118
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793389826.6287715,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793389827.1327884,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793389827.135002,
+   "note": "installing ['qwen3-4b-q4km', 'qwen3-8b-q4km']"
+  },
+  {
+   "t": 1793389827.5331466,
+   "note": "progress qwen3-4b-q4km: {'params': {'id': 'qwen3-4b-q4km', 'downloaded': 0, 'total': 2497280256, 'phase': 'failed', 'error': 'download failed: HTTP 404 Not Found from huggingface.co'}, 'jsonrpc': '2.0', 'method': 'models.progress'}"
+  },
+  {
+   "t": 1793389827.5378296,
+   "note": "progress qwen3-8b-q4km: {'params': {'id': 'qwen3-8b-q4km', 'downloaded': 0, 'total': 5027783488, 'phase': 'failed', 'error': 'download failed: HTTP 404 Not Found from huggingface.co'}, 'jsonrpc': '2.0', 'method': 'models.progress'}"
+  },
+  {
+   "t": 1793389832.5438066,
+   "label": "daemon.stop"
+  }
+ ]
+}
