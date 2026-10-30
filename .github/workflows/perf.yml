@@ -4,6 +4,12 @@ name: Perf
 # items, launches the release `nuggetd` and measures startup, search, knowledge extraction, the
 # vault render, idle CPU and wakeups, RSS and ingest (see bench/README.md). Too slow for every
 # push: run it by hand, and weekly to catch drift.
+#
+# `energy` and `energy-prefill`: what Nugget costs in energy and battery (`nugget-bench energy`,
+# bench/README.md "energy (DD2)"), on Linux and macOS: the idle daemon, indexing, the shell's
+# frontmost-app poll, the desktop shell idle and during scripted focus changes with read-ahead
+# on and off (optionally also for the shell built at `before_ref`, on the same runner), and the
+# read-ahead prefill of the real local models.
 on:
   workflow_dispatch:
     inputs:
@@ -13,9 +19,18 @@ on:
         default: full
         type: choice
         options: [smoke, quick, standard, full]
+      before_ref:
+        description: "energy: also measure the desktop shell built at this ref, on the same runner (empty: skip)"
+        required: false
+        default: ""
+        type: string
   schedule:
     # Mondays 04:17 UTC.
     - cron: "17 4 * * 1"
+  # TEMPORARY (DD2): remove before merge. On push the energy, energy-prefill and windows-check
+  # jobs run at `quick` with the shell of 40e1994 as the "before"; perf does not run.
+  push:
+    branches: [dd/energy]
 
 permissions:
   contents: read
@@ -38,6 +53,8 @@ env:
 jobs:
   perf:
     name: Perf, real backend (Linux)
+    # TEMPORARY (DD2): remove before merge (with the push trigger).
+    if: github.event_name != 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -78,3 +95,335 @@ jobs:
           path: ${{ runner.temp }}/bench-results/
           retention-days: 90
           if-no-files-found: error
+
+  # The energy suite on a real desktop session (Xvfb + openbox + a private session bus with
+  # AT-SPI on Linux, via bench/scripts/energy-linux.sh; the runner's own session on macOS, where
+  # `powermetrics` runs through passwordless sudo). The shell is the debug build (its probe
+  # counts read-aheads; a release build would be a little cheaper). With `before_ref`, the shell
+  # scenarios run a second time against the shell built at that ref, on the same runner:
+  # reports in energy-results/after/ and energy-results/before/.
+  energy:
+    name: Energy (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      SCALE: ${{ inputs.scale || (github.event_name == 'push' && 'quick') || 'full' }}
+      BEFORE_REF: ${{ inputs.before_ref || (github.event_name == 'push' && '40e1994') || '' }}
+      RESULTS: ${{ github.workspace }}/energy-results
+      # Every scenario but `prefill` (the energy-prefill job).
+      SCENARIOS: daemon_idle,index_1k,a11y_poll,shell_idle,shell_focus
+      NUGGET_BENCH_NUGGETD: ${{ github.workspace }}/target/release/nuggetd
+      NUGGET_BENCH_FAKE_LLAMA_SERVER: ${{ github.workspace }}/target/debug/nuggetd-fake-llama-server
+      NUGGET_BENCH_SHELL: ${{ github.workspace }}/target/debug/nugget-desktop
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # The whole history when an older shell is built too (`git worktree add <ref>`).
+          fetch-depth: ${{ env.BEFORE_REF != '' && '0' || '1' }}
+
+      - name: Install the Tauri build dependencies and the X11 desktop
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential file libayatana-appindicator3-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libssl-dev libwebkit2gtk-4.1-dev libxdo-dev \
+            xvfb openbox xdotool xautomation x11-utils imagemagick dbus-x11 at-spi2-core \
+            python3-gi gir1.2-gtk-3.0
+          # `perf`, for looking into a run by hand; optional (not every runner kernel has it).
+          sudo apt-get install -y --no-install-recommends linux-tools-common "linux-tools-$(uname -r)" \
+            || echo "linux-tools for $(uname -r) unavailable; continuing without perf"
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-energy
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      # The daemon and the bench in release, as the perf job (the bench finds `nuggetd` next to
+      # itself; NUGGET_BENCH_NUGGETD says so explicitly). The fake llama-server in debug, so the
+      # release nuggetd is built without the `fake-runtime` feature.
+      - name: Build nuggetd and the bench (release)
+        run: cargo build --locked --release -p nuggetd -p nugget-bench
+
+      - name: Build the fake llama-server (debug)
+        run: cargo build --locked -p nuggetd --features fake-runtime --bin nuggetd-fake-llama-server
+
+      # A debug build with the frontend embedded (custom-protocol), as real-os.yml's overlay job.
+      - name: Build nugget-desktop (debug)
+        working-directory: apps/desktop
+        shell: bash
+        run: pnpm tauri build --ci --debug --no-bundle
+
+      - name: Build nugget-desktop at ${{ env.BEFORE_REF }} (debug)
+        if: env.BEFORE_REF != ''
+        shell: bash
+        run: |
+          src="$RUNNER_TEMP/before-src"
+          git worktree add --detach "$src" "$BEFORE_REF"
+          git -C "$src" log -1 --format='%H %s'
+          cd "$src/apps/desktop"
+          pnpm install --frozen-lockfile
+          CARGO_TARGET_DIR="$RUNNER_TEMP/before-target" pnpm tauri build --ci --debug --no-bundle
+          test -x "$RUNNER_TEMP/before-target/debug/nugget-desktop"
+
+      - name: Record hardware
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "before_ref: ${BEFORE_REF:-none}"
+            echo "scale: $SCALE"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if [ "$RUNNER_OS" = macOS ]; then
+              sysctl -n machdep.cpu.brand_string hw.ncpu hw.perflevel0.physicalcpu hw.memsize
+              system_profiler SPDisplaysDataType | grep -E 'Chipset|Cores|Metal' || true
+              pmset -g batt || true
+            else
+              lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+              free -g
+              ls /sys/class/powercap 2>/dev/null || echo "no /sys/class/powercap (no RAPL)"
+            fi
+          } | tee "$RESULTS/hardware.txt"
+
+      - name: Bench energy
+        shell: bash
+        run: |
+          run=(target/release/nugget-bench energy --energy-scenarios "$SCENARIOS" --scale "$SCALE"
+            --out-dir "$RESULTS/after")
+          if [ "$RUNNER_OS" = Linux ]; then
+            bench/scripts/energy-linux.sh "${run[@]}"
+          else
+            "${run[@]}"
+          fi
+
+      - name: Bench energy, shell at ${{ env.BEFORE_REF }}
+        if: env.BEFORE_REF != ''
+        shell: bash
+        env:
+          NUGGET_BENCH_SHELL: ${{ runner.temp }}/before-target/debug/nugget-desktop
+        run: |
+          run=(target/release/nugget-bench energy --energy-scenarios "shell_idle,shell_focus"
+            --scale "$SCALE" --out-dir "$RESULTS/before")
+          if [ "$RUNNER_OS" = Linux ]; then
+            bench/scripts/energy-linux.sh "${run[@]}"
+          else
+            "${run[@]}"
+          fi
+
+      - name: Validate bench reports against the schema
+        shell: bash
+        run: |
+          find "$RESULTS" -name '*.json' -print0 \
+            | xargs -0 pipx run check-jsonschema --schemafile bench/schema/report.schema.json
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Energy (${{ matrix.os }}, $SCALE${BEFORE_REF:+, before = $BEFORE_REF})"
+            echo
+            echo "| run | metric | value | unit |"
+            echo "|---|---|---:|---|"
+            for f in $(find "$RESULTS" -name '*.json' | sort); do
+              run="$(basename "$(dirname "$f")")"
+              jq -r --arg run "$run" '.metrics[]
+                | select(.name | test("(cpu_percent|wakeups_per_s|attributable_w|attributable_j|energy_impact|package_w|cpu_s_per_1k_items|read_ahead_(sends|started|cancels)|switch_errors)$"))
+                | "| \($run) | `\(.name)` | \(.value * 1000 | round / 1000) | \(.unit) |"' "$f"
+            done
+            echo
+            echo "Energy sources: $(find "$RESULTS" -name '*.json' -exec jq -r '.config.params.energy_source' {} + | sort -u | tr '\n' ' ')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload energy reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-energy-${{ matrix.os }}-${{ env.SCALE }}
+          path: ${{ env.RESULTS }}/
+          retention-days: 90
+          if-no-files-found: error
+
+  # Read-ahead prefill with the real local models (`--local-models`), metered on llama-server:
+  # the signed manifest's default chat model and the small one Double Tap can use.
+  energy-prefill:
+    name: Energy, read-ahead prefill (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      RESULTS: ${{ github.workspace }}/energy-results
+      NUGGET_BENCH_MODELS_HOME: ${{ github.workspace }}/bench/.local-models
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # Models and llama-server builds, keyed by the signed manifest that pins them (as
+      # evals.yml). The store re-verifies SHA-256 on install.
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        shell: bash
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            if [ "$RUNNER_OS" = macOS ]; then
+              sysctl -n machdep.cpu.brand_string hw.ncpu hw.perflevel0.physicalcpu hw.memsize
+              system_profiler SPDisplaysDataType | grep -E 'Chipset|Cores|Metal' || true
+            else
+              lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+              free -g
+            fi
+          } | tee "$RESULTS/hardware.txt"
+
+      # One run per model, each into its own folder; one that fails does not stop the other,
+      # but fails the step at the end.
+      - name: Bench energy prefill
+        shell: bash
+        run: |
+          failed=0
+          for model in qwen3-4b-q4km qwen3-1.7b-q8; do
+            target/release/nugget-bench energy --energy-scenarios prefill --local-models \
+              --local-chat-model "$model" --scale quick --out-dir "$RESULTS/prefill-$model" \
+              || failed=1
+          done
+          exit "$failed"
+
+      - name: Validate bench reports against the schema
+        shell: bash
+        run: |
+          find "$RESULTS" -name '*.json' -print0 \
+            | xargs -0 pipx run check-jsonschema --schemafile bench/schema/report.schema.json
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Energy, read-ahead prefill (${{ matrix.os }})"
+            echo
+            echo "| run | metric | value | unit |"
+            echo "|---|---|---:|---|"
+            for f in $(find "$RESULTS" -name '*.json' | sort); do
+              run="$(basename "$(dirname "$f")")"
+              jq -r --arg run "$run" '.metrics[]
+                | "| \($run) | `\(.name)` | \(.value * 1000 | round / 1000) | \(.unit) |"' "$f"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload prefill reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-energy-prefill-${{ matrix.os }}
+          path: ${{ env.RESULTS }}/
+          retention-days: 90
+          if-no-files-found: error
+
+  # TEMPORARY (DD2): remove before merge. The shell's per-OS code (focus notifications, power
+  # state) checked on Windows and macOS while the branch is open; ci.yml's desktop job covers it
+  # for good after the merge.
+  windows-check:
+    name: nugget-desktop check (${{ matrix.os }}, TEMPORARY)
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            test: true
+          - os: macos-latest
+            test: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      # nugget-desktop embeds the built frontend.
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: cargo clippy (desktop)
+        run: cargo clippy --locked -p nugget-desktop --all-targets -- -D warnings
+
+      # The energy suite's per-OS code (meter, shell scenarios).
+      - name: cargo clippy (bench)
+        run: cargo clippy --locked -p nugget-bench --all-targets -- -D warnings
+
+      - name: cargo test (desktop)
+        if: matrix.test
+        run: cargo test --locked -p nugget-desktop

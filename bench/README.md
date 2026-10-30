@@ -389,10 +389,80 @@ seconds, quick about a minute, standard five minutes, full ten (the PLAN's idle 
   `wakeups_per_read_ahead`; with an energy source `package_j_per_read_ahead`,
   `attributable_j_per_read_ahead` (baseline: the server loaded and idle), `package_w`,
   `baseline_w`, `attributable_w`.
-- `shell_idle`, `shell_focus`: reserved for the desktop shell (`nugget-desktop --minimized`
-  against a daemon, from `NUGGET_BENCH_SHELL`: ten idle minutes with the window hidden, and a
-  scripted minute of focus changes with read-ahead on and off). Until `energy/shell.rs` lands
-  they are recorded as skipped; they run only when listed.
+- `shell_idle` (`energy/shell.rs`): the desktop shell, `$NUGGET_BENCH_SHELL --minimized` (hidden
+  in the tray), connected to the real `nuggetd` on an empty temporary `NUGGET_HOME` (no providers,
+  `[runtime]`, `[mcp]` and vault off), with nothing in front but the desktop. The shell gets the
+  daemon's `NUGGET_HOME` (so it finds that daemon's socket and starts none of its own) and an
+  isolated app config directory: Tauri's `app_config_dir` is `$XDG_CONFIG_HOME/dev.nugget.desktop`
+  on Linux (the bench also moves `XDG_DATA_HOME` and `XDG_CACHE_HOME`) and `$HOME/Library/Application
+  Support/dev.nugget.desktop` on macOS (the bench moves `HOME`). There it writes `doubletap.json`
+  (Double Tap on, read-ahead on, on battery too) and `settings.json` (update channel `off`: no
+  network). Settling: a debug build honours `NUGGET_E2E_PROBE` and writes a `read_ahead_loop` line
+  once Double Tap is set up; the bench waits for it (at most 30 s), then 3 / 15 / 20 / 20 s. A
+  release build writes no probe: the 30 s are the settle period and no read-ahead counts are
+  reported (`params.<scenario>.probe` says which). Then one window of `idle_s` (2 s / 60 s / 5 min /
+  10 min), the shell metered with its descendants (the WebKitGTK web and network processes on
+  Linux) and the daemon separately: `shell.cpu_percent`, `shell.wakeups_per_s`, `daemon.*` likewise,
+  `*.window_s`, macOS `*.energy_impact`; with an energy source `package_w`, `baseline_w` (an equal
+  window before anything starts), `attributable_w`; with the probe `read_ahead_sends`, `_started`,
+  `_skipped`, `_failed`, `_cancels` (zero when nothing is focused).
+- `shell_focus` (`energy/shell.rs`): the same shell setup, but the daemon's only provider is the
+  fake `llama-server` (`nuggetd-fake-llama-server`, from `NUGGET_BENCH_FAKE_LLAMA_SERVER`, else
+  next to `nugget-bench` or `nuggetd`) started by the bench on a loopback port and configured as
+  an `openai_compatible` provider on `127.0.0.1`: on-device, so the daemon accepts read-ahead and
+  sends llama.cpp's `cache_prompt` prefill, which the fake answers at once. That isolates the
+  shell's focus handling, its polling and the daemon's request handling from a real model's
+  prefill (`prefill` measures that). Three text-field windows with distinct titles and texts
+  ("Quarterly report", "Team offsite", "Vendor contract"): on Linux three GTK 3 windows
+  (`bench/scripts/energy-text-window.py`, embedded in the binary; a Python with PyGObject from
+  `NUGGET_BENCH_PYTHON`, else `python3`, `python3.12`, ...) brought to the front with `xdotool
+  windowactivate --sync`; on macOS three TextEdit documents brought to the front with `osascript`
+  (`activate` + `set index of window`). A scripted window of 15 s at smoke, else 60 s, switching
+  every 5 s in a fixed order (0, 1, 2, 0, ...). It runs twice, read-ahead **off** then **on**
+  (`doubletap.json` rewritten, the shell restarted; daemon and server keep running).
+  Per run, under `energy.shell_focus.read_ahead_{off,on}.`: `shell.*`, `daemon.*`, `server.*`
+  (`cpu_percent`, `wakeups_per_s`, `window_s`, macOS `energy_impact`), `switches`,
+  `switch_errors` (`params…switch_error` has the first), with the probe `read_ahead_sends`,
+  `_started`, `_skipped`, `_failed`, `_cancels`; with an energy source `package_w`, and
+  `baseline_w`/`attributable_w` against the same focus script run with the windows open and
+  nothing of Nugget running. `energy.shell_focus.read_ahead_added.cpu_percent` and
+  `.wakeups_per_s`: shell + daemon + server, on minus off. On macOS, window switches inside one
+  app are not reported by focus notifications, so the shell sees them on its 5 s fallback check.
+
+The shell scenarios run only when listed, on Linux (X11) and macOS, and are skipped (recorded,
+not failed) when `NUGGET_BENCH_SHELL` is unset or not a file, without a display (`DISPLAY` unset
+on Linux), when `xdotool` or a Python with GTK 3 (Linux) or `osascript` (macOS) is missing
+(`shell_focus`), or without the fake server (`shell_focus`). Linux also needs a window manager
+and a session bus with AT-SPI, which the caller provides: `bench/scripts/energy-linux.sh
+<command…>` runs a command inside Xvfb + openbox + `dbus-run-session` with
+`WEBKIT_DISABLE_COMPOSITING_MODE=1 LIBGL_ALWAYS_SOFTWARE=1` and `GTK_MODULES=gail:atk-bridge` (as
+`apps/desktop/e2e-native/run-linux.sh`); `a11y_poll` finds a frontmost app only in such a session.
+macOS needs Accessibility for the shell and Automation of TextEdit for the process running the
+bench (GitHub's macOS runners grant Accessibility; Automation is not verified). Known gaps: on
+macOS the webview's WebKit processes are XPC services, not children of the shell, so they are
+not counted in `shell.*`; the debug shell is measured (for its probe), a release build is a
+little cheaper.
+
+```sh
+cargo build --release -p nuggetd -p nugget-bench
+cargo build -p nuggetd --features fake-runtime --bin nuggetd-fake-llama-server
+(cd apps/desktop && pnpm install --frozen-lockfile && pnpm tauri build --debug --no-bundle)
+NUGGET_BENCH_SHELL=target/debug/nugget-desktop \
+NUGGET_BENCH_FAKE_LLAMA_SERVER=target/debug/nuggetd-fake-llama-server \
+  bench/scripts/energy-linux.sh target/release/nugget-bench energy \
+  --energy-scenarios shell_idle,shell_focus --scale quick
+```
+
+**CI** (`.github/workflows/perf.yml`, weekly and on demand): the `energy` job (ubuntu-latest and
+macos-latest) builds the release `nuggetd` and bench, the debug fake server and the debug shell
+(`pnpm tauri build --ci --debug --no-bundle`), records the hardware, and runs every scenario but
+`prefill` (Linux through `energy-linux.sh`; macOS directly, `powermetrics` through `sudo -n`).
+With the `before_ref` input it also builds the shell at that ref (`git worktree add`, its own
+`CARGO_TARGET_DIR`) and runs `shell_idle,shell_focus` against it on the same runner: reports in
+`energy-results/after/` and `energy-results/before/`. The `energy-prefill` job runs `prefill`
+with `--local-models` at `quick` for `qwen3-4b-q4km` and `qwen3-1.7b-q8` (models cached as in
+`evals.yml`). Both validate the reports against the schema, upload them, and put a table of the
+main figures in the job summary.
 
 Daemon scenarios are skipped (`config.params.<scenario> = "skipped: …"`, not failed) without a
 `nuggetd` binary. Pick scenarios with `--energy-scenarios` or `NUGGET_BENCH_ENERGY_SCENARIOS`

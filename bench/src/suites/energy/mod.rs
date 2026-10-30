@@ -20,8 +20,13 @@
 //! - `prefill` (`prefill.rs`, `--local-models` only): read-aheads of Double Tap fixture tasks
 //!   through [`nugget_draft::Drafter::read_ahead`] against the real local chat server, metering
 //!   `llama-server`.
-//! - `shell_idle`, `shell_focus`: placeholders for the desktop shell scenarios (see
-//!   `shell_hook`); they record a skip until `energy/shell.rs` lands.
+//! - `shell_idle` (`shell.rs`): the desktop shell from [`SHELL_ENV`], started hidden in the tray
+//!   against a daemon, idle for the window; shell (with its webview processes) and daemon
+//!   metered separately.
+//! - `shell_focus` (`shell.rs`): a scripted window of focus changes among three text-field
+//!   windows, read-ahead off then on, with the fake llama-server as the daemon's local
+//!   provider; shell, daemon and server metered separately. Both need a desktop session
+//!   (`bench/scripts/energy-linux.sh` on Linux) and run only when listed.
 //!
 //! The daemon scenarios reuse `perf_daemon`'s binary lookup (`$NUGGET_BENCH_NUGGETD`, else
 //! `nuggetd` next to `nugget-bench`), seeding and config, and are skipped (recorded in
@@ -32,6 +37,7 @@ pub(crate) mod daemon;
 pub(crate) mod meter;
 pub(crate) mod poll;
 pub(crate) mod prefill;
+pub(crate) mod shell;
 
 use crate::report::{Direction, Metric};
 use crate::runner::{BenchError, Benchmark, RunContext, Scale};
@@ -58,9 +64,9 @@ pub enum Scenario {
     Index1k,
     A11yPoll,
     Prefill,
-    /// The desktop shell, minimized, idle with its window hidden (see `shell_hook`).
+    /// The desktop shell, minimized, idle with its window hidden (`shell.rs`).
     ShellIdle,
-    /// A scripted minute of focus changes with read-ahead on vs off (see `shell_hook`).
+    /// A scripted minute of focus changes with read-ahead on vs off (`shell.rs`).
     ShellFocus,
 }
 
@@ -156,6 +162,13 @@ pub struct EnergyParams {
     pub prefill_runs: usize,
     /// Upper bound on each wait for the daemon.
     pub timeout_s: f64,
+    /// Shell scenarios: quiet time after the shell is set up (its probe says so), before the
+    /// window (`shell_idle`'s window is `idle_s`).
+    pub shell_settle_s: f64,
+    /// `shell_focus`: length of the scripted window of focus changes (each run).
+    pub focus_s: f64,
+    /// `shell_focus`: seconds between focus changes.
+    pub focus_every_s: f64,
 }
 
 impl EnergyParams {
@@ -170,6 +183,9 @@ impl EnergyParams {
             poll_s: scale.pick(2.0, 60.0, 300.0, 600.0),
             prefill_runs: scale.pick(2, 4, 8, 12),
             timeout_s: scale.pick(180.0, 300.0, 1_200.0, 3_600.0),
+            shell_settle_s: scale.pick(3.0, 15.0, 20.0, 20.0),
+            focus_s: scale.pick(15.0, 60.0, 60.0, 60.0),
+            focus_every_s: 5.0,
         }
     }
 }
@@ -239,7 +255,9 @@ pub fn run_with(
             },
             Scenario::A11yPoll => out.extend(poll::a11y_poll(ctx, p)?),
             Scenario::Prefill => out.extend(prefill::prefill(ctx, p, source)?),
-            Scenario::ShellIdle | Scenario::ShellFocus => out.extend(shell_hook(ctx, s)?),
+            Scenario::ShellIdle | Scenario::ShellFocus => {
+                out.extend(shell_hook(ctx, p, s, source)?)
+            }
         }
     }
     Ok(out)
@@ -251,25 +269,23 @@ fn skip(ctx: &mut RunContext, s: Scenario, why: &str) {
     ctx.param(s.as_str(), format!("skipped: {why}"));
 }
 
-/// Hook for the desktop shell scenarios, which a later change adds in `energy/shell.rs`:
-/// launch `nugget-desktop --minimized` against a daemon from [`SHELL_ENV`], meter the shell
-/// and its webview children with `meter::Meter` (its pid; descendants are included), then
-/// - `shell_idle`: ten minutes (at `full`) idle with the window hidden;
-/// - `shell_focus`: a scripted minute of focus changes, once with read-ahead on and once off.
-///
-/// To add one: implement it in `shell.rs` returning `energy.<scenario>.*` metrics (use
-/// [`window_metrics`] and [`energy_metrics`] so names match the other scenarios), and call it
-/// here instead of the skip.
-fn shell_hook(ctx: &mut RunContext, s: Scenario) -> Result<Vec<Metric>, BenchError> {
-    skip(
-        ctx,
-        s,
-        &format!("the desktop shell scenarios are not built yet (energy/shell.rs, {SHELL_ENV})"),
-    );
-    Ok(Vec::new())
+/// The desktop shell scenarios (`shell.rs`): `nugget-desktop --minimized` from [`SHELL_ENV`]
+/// against a daemon, the shell metered with its webview children; skipped (recorded) when the
+/// shell, a display or the focus tools are missing.
+fn shell_hook(
+    ctx: &mut RunContext,
+    p: &EnergyParams,
+    s: Scenario,
+    source: EnergySource,
+) -> Result<Vec<Metric>, BenchError> {
+    if s == Scenario::ShellIdle {
+        shell::shell_idle(ctx, p, source)
+    } else {
+        shell::shell_focus(ctx, p, source)
+    }
 }
 
-/// Environment variable the shell scenarios will read (the desktop shell binary to launch).
+/// Environment variable naming the desktop shell binary the shell scenarios launch.
 pub const SHELL_ENV: &str = "NUGGET_BENCH_SHELL";
 
 /// Record where a reading's figures came from (`<scenario>.energy_source`, `.process_source`,
@@ -428,8 +444,13 @@ mod tests {
         assert_eq!(EnergyParams::for_scale(Scale::Quick).index_items, 1_000);
     }
 
+    /// Without `NUGGET_BENCH_SHELL` (unit tests never launch a desktop).
     #[test]
     fn shell_scenarios_are_recorded_as_skipped() {
+        if std::env::var_os(SHELL_ENV).is_some() {
+            eprintln!("skipping: {SHELL_ENV} is set");
+            return;
+        }
         let r: Report = run_benchmark(
             &Only(
                 EnergyParams::for_scale(Scale::Smoke),
@@ -444,7 +465,9 @@ mod tests {
         assert!(r.metrics.is_empty());
         let p = &r.config.params;
         assert!(p["shell_idle"].as_str().unwrap().starts_with("skipped"));
-        assert!(p["shell_focus"].as_str().unwrap().contains(SHELL_ENV));
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert!(p["shell_focus"].as_str().unwrap().contains(SHELL_ENV));
+        }
         assert_eq!(
             p["scenarios"],
             serde_json::json!(["shell_idle", "shell_focus"])

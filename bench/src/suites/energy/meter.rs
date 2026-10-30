@@ -9,6 +9,9 @@
 //! let joules = reading.attributable_j(&base);
 //! ```
 //!
+//! Several groups at once (`Meter::start_groups(&[&[shell], &[daemon]])` … `stop_groups()`, one
+//! reading per group) share one sampler and, on macOS, one `powermetrics`.
+//!
 //! - **Processes.** Each pid passed to [`Meter::start`] counts with every descendant (found by
 //!   walking the parent pids of all processes on each sample: the desktop shell's webview runs
 //!   in child processes). A background thread samples every [`SAMPLE_INTERVAL`] and keeps the
@@ -170,9 +173,21 @@ impl Meter {
     /// Start metering `pids` (and their descendants) and system energy. An empty slice meters
     /// system energy alone.
     pub(crate) fn start(pids: &[u32]) -> Meter {
+        Self::start_groups(&[pids])
+    }
+
+    /// Start metering several groups of processes at once, each pid with its descendants, read
+    /// back separately by [`stop_groups`](Self::stop_groups) (one reading per group, all with
+    /// the same system energy). One sampler and, on macOS, one `powermetrics` serve them all.
+    pub(crate) fn start_groups(groups: &[&[u32]]) -> Meter {
         let mut state = State {
-            roots: pids.to_vec(),
-            counters: Counters::default(),
+            groups: groups
+                .iter()
+                .map(|g| Group {
+                    roots: g.to_vec(),
+                    counters: Counters::default(),
+                })
+                .collect(),
             rapl: None,
             energy_note: None,
         };
@@ -216,45 +231,63 @@ impl Meter {
     }
 
     /// Stop and read the window.
-    pub(crate) fn stop(mut self) -> Reading {
+    pub(crate) fn stop(self) -> Reading {
+        self.stop_groups().swap_remove(0)
+    }
+
+    /// Stop and read the window of every group, in the order given to
+    /// [`start_groups`](Self::start_groups).
+    pub(crate) fn stop_groups(mut self) -> Vec<Reading> {
         let wall_s = self.started.elapsed().as_secs_f64().max(1e-9);
         self.halt();
         let mut state = lock(&self.state);
         state.tick(false);
-        let mut r = Reading {
-            wall_s,
-            processes: state.counters.pids.len(),
-            energy_note: state.energy_note.clone(),
-            process_source: "none",
-            ..Reading::default()
-        };
-        if state.counters.seen {
-            let (cpu, switches) = state.counters.totals();
-            r.cpu_s = Some(cpu);
-            r.wakeups = switches.map(|s| s as f64);
-            r.process_source = if cfg!(target_os = "linux") {
-                "proc"
-            } else {
-                "ps"
-            };
-        }
-        if let Some(rapl) = &state.rapl {
-            let j = rapl.total_uj as f64 / 1e6;
-            r.package_j = Some(j);
-            r.package_w = Some(j / wall_s);
-            r.energy_source = EnergySource::Rapl;
-        }
         #[cfg(target_os = "macos")]
-        if let Some(p) = self.powermetrics.take() {
-            let samples = p.finish();
-            let pids = if state.counters.pids.is_empty() {
-                state.roots.iter().copied().collect()
-            } else {
-                state.counters.pids.clone()
+        let samples = self.powermetrics.take().map(|p| p.finish());
+        let mut out = Vec::new();
+        for g in &state.groups {
+            let mut r = Reading {
+                wall_s,
+                processes: g.counters.pids.len(),
+                energy_note: state.energy_note.clone(),
+                process_source: "none",
+                ..Reading::default()
             };
-            pm::apply(&mut r, &samples, &pids, !state.roots.is_empty());
+            if g.counters.seen {
+                let (cpu, switches) = g.counters.totals();
+                r.cpu_s = Some(cpu);
+                r.wakeups = switches.map(|s| s as f64);
+                r.process_source = if cfg!(target_os = "linux") {
+                    "proc"
+                } else {
+                    "ps"
+                };
+            }
+            if let Some(rapl) = &state.rapl {
+                let j = rapl.total_uj as f64 / 1e6;
+                r.package_j = Some(j);
+                r.package_w = Some(j / wall_s);
+                r.energy_source = EnergySource::Rapl;
+            }
+            #[cfg(target_os = "macos")]
+            if let Some(samples) = &samples {
+                let pids = if g.counters.pids.is_empty() {
+                    g.roots.iter().copied().collect()
+                } else {
+                    g.counters.pids.clone()
+                };
+                pm::apply(&mut r, samples, &pids, !g.roots.is_empty());
+            }
+            out.push(r);
         }
-        r
+        if out.is_empty() {
+            out.push(Reading {
+                wall_s,
+                process_source: "none",
+                ..Reading::default()
+            });
+        }
+        out
     }
 
     fn halt(&mut self) {
@@ -283,17 +316,22 @@ fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
 
 /// What the sampler thread updates.
 struct State {
-    roots: Vec<u32>,
-    counters: Counters,
+    groups: Vec<Group>,
     rapl: Option<Rapl>,
     energy_note: Option<String>,
 }
 
+/// One group of metered processes.
+struct Group {
+    roots: Vec<u32>,
+    counters: Counters,
+}
+
 impl State {
     fn tick(&mut self, initial: bool) {
-        if !self.roots.is_empty() {
-            let obs = sample_procs(&self.roots);
-            self.counters.observe(&obs, initial);
+        for g in self.groups.iter_mut().filter(|g| !g.roots.is_empty()) {
+            let obs = sample_procs(&g.roots);
+            g.counters.observe(&obs, initial);
         }
         if let Some(r) = self.rapl.as_mut() {
             r.tick();
@@ -1337,6 +1375,37 @@ mod tests {
         assert_eq!(source == EnergySource::None, note.is_some());
         if cfg!(target_os = "linux") {
             assert_eq!(r.energy_source, source);
+        }
+    }
+
+    #[test]
+    fn groups_are_read_separately() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let me = std::process::id();
+        let m = Meter::start_groups(&[&[me], &[child.id()], &[]]);
+        let t = Instant::now();
+        let mut x = 0u64;
+        while t.elapsed() < Duration::from_millis(300) {
+            x = x.wrapping_add(std::hint::black_box(1));
+        }
+        let r = m.stop_groups();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(x > 0);
+        assert_eq!(r.len(), 3);
+        assert!(r.iter().all(|r| r.wall_s >= 0.3));
+        assert_eq!(r[2].processes, 0);
+        assert_eq!(r[2].cpu_s, None);
+        if cfg!(target_os = "linux") {
+            // The bench process (with its child) and the sleeping child alone.
+            assert!(r[0].processes >= 2, "{:?}", r[0]);
+            assert_eq!(r[1].processes, 1, "{:?}", r[1]);
+            assert!(r[0].cpu_s.unwrap() > 0.1, "{:?}", r[0]);
+            assert!(r[1].cpu_s.unwrap() < r[0].cpu_s.unwrap());
+            assert_eq!(r[0].package_w, r[1].package_w, "one system energy figure");
         }
     }
 }

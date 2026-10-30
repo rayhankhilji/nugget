@@ -29,7 +29,7 @@ const POLL: Duration = Duration::from_millis(250);
 const WORDS_PER_DOC: usize = 120;
 const DIM: usize = 384;
 
-fn env_for(exe: &Path, work: &Path, timeout_s: f64) -> Env {
+pub(super) fn env_for(exe: &Path, work: &Path, timeout_s: f64) -> Env {
     let home = work.join("home");
     Env {
         exe: exe.to_path_buf(),
@@ -40,7 +40,7 @@ fn env_for(exe: &Path, work: &Path, timeout_s: f64) -> Env {
     }
 }
 
-fn runtime() -> Result<tokio::runtime::Runtime, BenchError> {
+pub(super) fn runtime() -> Result<tokio::runtime::Runtime, BenchError> {
     Ok(tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?)
