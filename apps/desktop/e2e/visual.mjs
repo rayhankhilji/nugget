@@ -167,7 +167,7 @@ function pinRuntime(value, home) {
 }
 
 /**
- * Answers `cards_list`/`brief_get` with the stubs, pins `models_fit` to a fixed machine and every
+ * Answers `cards_list`/`brief_get` with the stubs (and `proactive_metrics`/`proactive_learning` with a fresh home's), pins `models_fit` to a fixed machine and every
  * other answer's runtime timestamps and paths (`pinRuntime`).
  */
 async function routeFixtures(ctx, seen, home) {
@@ -180,6 +180,10 @@ async function routeFixtures(ctx, seen, home) {
     const json = (ok) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok }) });
     if (cmd === "cards_list") return json({ cards: [STUB_CARD], last_refresh: "2026-10-30T07:00:00Z", enabled: true });
     if (cmd === "brief_get") return json(STUB_BRIEF);
+    // Other scenarios share the indexed home and leave card feedback behind: pin a fresh home's.
+    if (cmd === "proactive_metrics")
+      return json({ total: 1, by_state: { new: 1 }, shown: 0, accepted: 0, dismissed: 0, snoozed: 0, precision: null, by_kind: {}, dismiss_reasons: {}, model_updates: 0 });
+    if (cmd === "proactive_learning") return json({ entries: [] });
     if (cmd === "models_fit") {
       const res = await route.fetch();
       const body = await res.json();
