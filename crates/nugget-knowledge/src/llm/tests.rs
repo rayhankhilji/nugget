@@ -692,6 +692,38 @@ fn the_senders_first_person_is_not_the_user_by_display_name_missing_from_or_voca
     assert_eq!(v.extraction.claims[0].subject, ERef::Me);
 }
 
+/// A document the user does not own (a Drive file shared with them) is someone else's
+/// writing: its "I" is the author, as in mail. The user's own document keeps "I" as the user.
+#[test]
+fn the_first_person_of_a_shared_document_is_not_the_user() {
+    let answer = json!({
+        "entities": [{"name": "morning meetings", "kind": "preference"}],
+        "claims": [{"subject": "I", "predicate": "prefers", "object": "morning meetings",
+                    "quote": "I much prefer morning meetings"}]
+    });
+    let doc = |owned_by_me: bool| {
+        let (mut it, chunks) = item("I much prefer morning meetings.");
+        it.mime = Some("text/plain".into());
+        it.metadata = json!({
+            "source": {"file_id": "f1", "owned_by_me": owned_by_me},
+            "mime": "text/plain",
+            "sensitive": false,
+        });
+        let v = validate_capped(
+            &answer,
+            &it,
+            &chunks,
+            &LlmConfig::default(),
+            Some("Robin Ashgrove"),
+            false,
+            (32, 48),
+        );
+        v.extraction.claims.iter().any(|c| c.subject == ERef::Me)
+    };
+    assert!(!doc(false), "a shared document's I became the user");
+    assert!(doc(true), "the user's own document's I is the user");
+}
+
 /// KN-3: the title (and a header name) stays one line of the prompt whatever line break it
 /// carries, so it cannot add a header line such as "From: ... (the user)".
 #[test]

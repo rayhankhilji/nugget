@@ -1127,7 +1127,8 @@ struct Ctx {
     /// Whether "I" is the user: a document that is not mail, or mail the user sent. In mail
     /// from someone else "I" is the sender, and "you" the user.
     first_person_is_me: bool,
-    /// The item is mail: a fact about the user needs a quote that refers to them.
+    /// The item is mail or someone else's document: a fact about the user needs a quote that
+    /// refers to them.
     in_mail: bool,
 }
 
@@ -1220,11 +1221,17 @@ fn is_mail(item: &Item) -> bool {
             .any(|k| extracted.and_then(|e| e.get(k)).is_some())
 }
 
-/// Whether "I" in this item is the user: it is not mail (a note or document of the user's), or
-/// the caller knows the sender's address as the user's (`sender_is_me`). Never by display
-/// name: anyone can send mail as "Robin Ashgrove" <someone@else>.
+/// Whether someone other than the user may have written the item: mail, or a document the
+/// source says the user does not own (a Drive file shared with them, `ownedByMe: false`).
+fn by_others(item: &Item) -> bool {
+    is_mail(item) || item.metadata.pointer("/source/owned_by_me") == Some(&Value::Bool(false))
+}
+
+/// Whether "I" in this item is the user: a note or document of the user's, or mail whose
+/// sender address the caller knows as the user's (`sender_is_me`). Never by display name:
+/// anyone can send mail as "Robin Ashgrove" <someone@else>.
 fn first_person_is_me(item: &Item, sender_is_me: bool) -> bool {
-    !is_mail(item) || (sender_is_me && sender(item).is_some())
+    !by_others(item) || (sender_is_me && sender(item).is_some())
 }
 
 /// A cleaned entity, before it is added to the extraction.
@@ -1477,7 +1484,7 @@ fn validate_capped(
     let cx = Ctx {
         all_lower,
         first_person_is_me: first_person_is_me(item, sender_is_me),
-        in_mail: is_mail(item),
+        in_mail: by_others(item),
         me,
         me_first,
         item_date: crate::extract::item_date(item),
