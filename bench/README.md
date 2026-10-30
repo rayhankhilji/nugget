@@ -324,23 +324,54 @@ Glimmerfen Labs, and the people around them.
 
 | | |
 |---|---|
-| Items | 93: 48 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 15 calendar events (iCalendar, with CalDAV metadata), 30 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
-| Gold entities | 85: 25 people, 8 organisations, 10 projects, 15 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 3 `optional` ones) |
-| Gold claims | 166 scored triples (15 more `optional` event start dates), 3 of them `superseded` |
-| Gold mentions | 515 (item, entity, surface forms) |
-| Scripted LLM | 144 claims: 136 quote-supported, 4 with hallucinated quotes, 4 injected |
+| Items | 106: 57 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 16 calendar events (iCalendar, with CalDAV metadata), 33 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
+| Gold entities | 91: 30 people, 8 organisations, 10 projects, 16 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 5 `optional` ones) |
+| Gold claims | 185 scored triples (16 more `optional` event start dates), 5 of them `superseded` |
+| Gold mentions | 578 (item, entity, surface forms) |
+| Scripted LLM | 168 claims: 160 quote-supported, 4 with hallucinated quotes, 4 injected |
 
-The hard cases are deliberate:
+The hard cases are deliberate. `scenario.json` lists them by kind; each kind's metric passes only
+when every case of that kind is handled (the first case of each kind is the original M2 one; the
+others were added in EE1, items `mail-049`–`mail-057`, `cal-016`, `note-031`–`note-033`):
 
 - **One person, many names.** Margaret Thistlewood is "Margaret" at work
   (`margaret.thistlewood@cindergate.test`), "Maggie T" from a personal address
   (`maggie.t@mail.test`), and "M. Thistlewood" or "Maggie Thistlewood" as a calendar attendee.
   Her person note lists both addresses and the aliases.
+- **Nicknames, display-name variants and initials** (EE1), each with corroboration in the item:
+  Katherine Selkirk (Ostrander Freight, Head of Procurement) writes as "Katherine Selkirk" and
+  signs "Kate" (`mail-049`, Sam Okafor in Cc), replies in the same thread as "Kate S" from the same
+  address (`mail-050`), and is the attendee "K. Selkirk" of a sign-off with her address
+  (`cal-016`). Robert Ferrand (Glimmerfen Labs, Driftwood API) signs "Rob" under his own headers
+  (`mail-051`; "Rob" is also a prefix of the user's name, Robin), and the user's reply, addressed
+  to him alone in that thread, says "Thanks, Bob" (`mail-052`). The scripted model gets "Kate"
+  right and returns "Kate S", "Rob" and "Bob" as names of their own (realistic mistakes the
+  pipeline must cope with).
+- **The same nickname with nothing to corroborate it** (EE1). `note-031` ("Book club at Kate's on
+  Thursday") names no surname, address, organisation or thread: nothing says this Kate is
+  Katherine Selkirk, a procurement contact. Her gold mention belongs to an `optional` person
+  "Kate" (neither a hit nor a miss), and the case requires that the system does not give that
+  mention to Katherine Selkirk's entity.
 - **Two people, one first name.** Sam Okafor (Ostrander Freight) and Sam Whitlock (Marrowbank
   Rowing Club) both sign "Sam"; two notes mention a bare "Sam" whom only context identifies.
+  EE1 adds Tamsin Rook (Quillfeather Systems, Engineering Manager on Quarry Bridge, `mail-056`) and
+  Tamsin Galloway (a reading-mentor volunteer writing from webmail, `mail-057`), both signing
+  "Tamsin"; a standup note says only "Priya and Tamsin from Quillfeather ... sandbox API keys for
+  [[Quarry Bridge]]" (`note-032`: context says Tamsin Rook, and the gold says so); an errands note
+  says "Drop the spare bike lights round to Tamsin" (`note-033`: nothing says which Tamsin, if
+  either, so its mention is an `optional` person "Tamsin" and must be given to neither).
 - **A job change.** Priya Castellane leaves Cindergate Analytics (Senior Data Scientist) and joins
   Quillfeather Systems (Head of Data) from a new address. The old employer, role and project are
   `superseded` in the gold labels.
+- **A second job change, delivered out of order** (EE1). Delphine Corrigan, an Associate at
+  Vellum & Thistle LLP (`mail-055`, 24 September, from `delphine.corrigan@vellumthistle.test`),
+  is announced as leaving ("Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle
+  LLP", `mail-054`, 16 October) and writes from `delphine.corrigan@glimmerfen.test` that she has
+  joined Glimmerfen Labs as Legal Counsel and that her old address no longer works (`mail-053`,
+  28 October). The manifest delivers them newest first: `mail-055` comes from an `Archive`
+  folder synced after the inbox, so the oldest fact arrives last. Her Vellum & Thistle
+  employment and role are `superseded`; the announcement is a second source of the old employer
+  (true until 23 October), and the scripted model extracts it from there too.
 - **A deletion.** `mail-008` is the only source of a commitment (the venue deposit) and is deleted
   after the first render; `note-025` is one of two sources of another commitment and is deleted
   too. The first commitment's claims must be retracted, the second's must survive.
@@ -367,13 +398,17 @@ The hard cases are deliberate:
   a fingerprint line for requests that carry no item reference. `hallucinated` and `injected`
   flags mark the claims whose quotes are not in the item (the flags are never sent).
 - `scenario.json`: the user (`me`), webmail domains, items to delete, the injection item, the
-  hard cases, the number of pages to edit and the MCP queries.
+  hard cases, the number of pages to edit and the MCP queries. Hard cases are lists:
+  `nickname_identity` `[{entity, unattributed?}]`, `same_first_name` `[{entities,
+  unattributed?}]` and `job_change` `[{superseded, current}]` (claim ids); `unattributed` is
+  `[{item, surface}]`, a name in an item that must not be given to the case's people.
 - `manifest.json`: per item its file, MIME type, store source and key, title, time, version and
   the connector metadata.
 
 The fixtures are static files. A test (`labels_agree_with_ingested_text`) ingests them and checks
 that every gold and scripted quote is in its item's stored chunks, that every hallucinated or
-injected quote is not, that every gold surface form is in its item, and that the labels are
+injected quote is not, that every gold surface form is in its item, that every unattributed name
+is in its item and labelled (if at all) only as an `optional` entity, and that the labels are
 referentially intact; edit them only with that test passing.
 
 **Pipeline under test** (`src/knowledge/wired.rs`, cargo feature `pipeline`, on by default;
@@ -438,7 +473,7 @@ without it the suite reports `not_implemented`):
 | `merge.fidelity` | Share of the 16 user edits still verbatim in their page after the deletions and the re-render. **Target 1.0** |
 | `retraction.correctness` | After the deletions: gold claims supported only by deleted items are gone, and those with support left that were active are still active. **Target 1.0** |
 | `retraction.dangling_refs` | Active claims citing, and mentions in, deleted items. **Target 0** |
-| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when the case is handled: all of Maggie's mentions resolve to one entity holding nobody else's; the two Sams resolve apart; the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives |
+| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when every case of the kind is handled: each nickname person's mentions (Maggie, Kate, Rob) resolve to one entity holding nobody else's, and the unattributed "Kate" is not on it; each same-first-name pair (the Sams, the Tamsins) resolves apart, and the unattributed "Tamsin" is on neither; for each job change (Priya, Delphine) the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives. On a subset, a kind is scored over its cases in scope (a nickname case needs two mentions, a pair a mention of each, a job change all its claims); `params.hard_case_details` gives each case's result (`not_in_subset` when out of scope; for pairs also `one_entity_each`, whether each person's mentions, context-resolved first names included, end up on a single entity) |
 | `throughput.items_per_s`, `throughput.extract_s` | The extraction run |
 | `mcp.get_context.{p50,p95}_ms`, `mcp.get_context.cited_rate` | In-process round trips, and answers with at least one citation |
 | `llm.calls`, `llm.unmatched`, `vault.pages`, `vault.facts`, `vault.render_ms`, `retraction.checks`, `merge.edits` | Context (`info`) |
@@ -461,6 +496,36 @@ items once more with an LLM that answers nothing, so every false positive says w
 deterministic extractors already produce it (`source: deterministic`) or only the LLM run does
 (`llm`), and every miss whether the deterministic run found it (`in_baseline`). Metric names and
 values are unchanged; `params.knowledge_dump` holds the path and the summary.
+
+**Real-model subsets** (`--local-models`, `src/knowledge/fixture.rs` `select_items`): the deleted
+and injection items and the original case of each hard-case kind are always kept (as before EE1,
+so `smoke`'s 8 items are unchanged); each further hard case is then added whole (every item
+mentioning its people or supporting its claims, and its unattributed names) while it fits, so the
+`quick` 30 hold all 13 EE1 items and 9 evenly spread ones (22 before), so quick-subset numbers
+from before EE1 are not comparable with later ones. `--knowledge-items all`
+(or any number at or above the corpus size) runs every item.
+
+**EE1 hard cases, scripted path** (`knowledge --scale smoke`, the corpus before and after the 13
+items; same pipeline, `ee/entity-resolution` at `d643a5a`):
+
+| Metric | 93 items | 106 items |
+|---|---|---|
+| Entity P / R / F1 | 0.934 / 1.0 / 0.966 | 0.867 / 1.0 / 0.929 |
+| Person F1 | 0.980 | 0.870 |
+| Claim P / R / F1 | 0.975 / 0.951 / 0.963 | 0.956 / 0.956 / 0.956 |
+| Resolution B³ F1 / mention recall | 0.988 / 0.791 | 0.979 / 0.784 |
+| `claims.superseded_active` | 1 | 3 |
+| Hard cases: nickname / same first name / job change | pass / pass / pass | **fail** (Rob) / pass / **fail** (Delphine) |
+
+Per case (`--knowledge-dump`): Kate passes (the "Kate S" reply and "K. Selkirk" join her, the
+book-club "Kate" stays apart); **Rob fails**: "Rob" and "Bob" stay people of their own although the
+mails' headers name Robert Ferrand; the Tamsins stay apart and the errands "Tamsin" is given to
+neither, but the standup note's "Tamsin" (and "Priya") also stays a person of its own instead of
+resolving by context, so its two claims miss (`one_entity_each` is false for both pairs: the
+rowing log's "Sam" has the same problem); **Delphine fails**: she ends up as three entities (the
+new address, the old address, and the name in the announcement), so nothing supersedes the
+Vellum & Thistle employment and role. Bare "Felix" and "Yusuf" in the new mails also stay
+separate people. Every other target still holds.
 
 Not covered yet: embedding-based resolution, the daemon's change-feed path (wave 2), the
 encrypted on-disk store, and graded or partial claim matching.

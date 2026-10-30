@@ -11,21 +11,65 @@
     "mail-025"
   ],
   "hard_cases": {
-    "nickname_identity": "p-maggie",
-    "same_first_name": [
-      "p-samo",
-      "p-samw"
+    "nickname_identity": [
+      {
+        "entity": "p-maggie"
+      },
+      {
+        "entity": "p-kate",
+        "unattributed": [
+          {
+            "item": "note-031",
+            "surface": "Kate"
+          }
+        ]
+      },
+      {
+        "entity": "p-rob"
+      }
     ],
-    "job_change": {
-      "superseded": [
-        "p-priya works_at o-cindergate",
-        "p-priya has_role 'Senior Data Scientist'"
-      ],
-      "current": [
-        "p-priya works_at o-quillfeather",
-        "p-priya has_role 'Head of Data'"
-      ]
-    }
+    "same_first_name": [
+      {
+        "entities": [
+          "p-samo",
+          "p-samw"
+        ]
+      },
+      {
+        "entities": [
+          "p-tamsinr",
+          "p-tamsing"
+        ],
+        "unattributed": [
+          {
+            "item": "note-033",
+            "surface": "Tamsin"
+          }
+        ]
+      }
+    ],
+    "job_change": [
+      {
+        "superseded": [
+          "p-priya works_at o-cindergate",
+          "p-priya has_role 'Senior Data Scientist'"
+        ],
+        "current": [
+          "p-priya works_at o-quillfeather",
+          "p-priya has_role 'Head of Data'"
+        ]
+      },
+      {
+        "superseded": [
+          "p-delphine works_at o-vellum",
+          "p-delphine has_role 'Associate'"
+        ],
+        "current": [
+          "p-delphine works_at o-glimmerfen",
+          "p-delphine has_role 'Legal Counsel'"
+        ]
+      }
+    ]
   },
   "user_edit_pages": 8,
   "mcp_queries": [

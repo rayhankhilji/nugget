@@ -961,6 +961,186 @@
       }
     },
     {
+      "id": "mail-049",
+      "kind": "mail",
+      "path": "items/mail/mail-049.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/149",
+      "title": "Harbourline purchase order",
+      "modified": "2026-10-19T08:40:00Z",
+      "version": "modseq:1049",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-049.kb@ostrander-freight.test>",
+        "size": 589
+      }
+    },
+    {
+      "id": "mail-050",
+      "kind": "mail",
+      "path": "items/mail/mail-050.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/150",
+      "title": "Re: Harbourline purchase order",
+      "modified": "2026-10-21T15:05:00Z",
+      "version": "modseq:1050",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-050.kb@ostrander-freight.test>",
+        "size": 557
+      }
+    },
+    {
+      "id": "mail-051",
+      "kind": "mail",
+      "path": "items/mail/mail-051.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/151",
+      "title": "Driftwood API on-call",
+      "modified": "2026-10-14T09:10:00Z",
+      "version": "modseq:1051",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-051.kb@glimmerfen.test>",
+        "size": 514
+      }
+    },
+    {
+      "id": "mail-052",
+      "kind": "mail",
+      "path": "items/mail/mail-052.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Sent/7/152",
+      "title": "Re: Driftwood API on-call",
+      "modified": "2026-10-15T08:20:00Z",
+      "version": "modseq:1052",
+      "metadata": {
+        "folder": "Sent",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-052.kb@glimmerfen.test>",
+        "size": 528
+      }
+    },
+    {
+      "id": "mail-053",
+      "kind": "mail",
+      "path": "items/mail/mail-053.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/153",
+      "title": "Hello from the inside",
+      "modified": "2026-10-28T09:05:00Z",
+      "version": "modseq:1053",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-053.kb@glimmerfen.test>",
+        "size": 550
+      }
+    },
+    {
+      "id": "mail-054",
+      "kind": "mail",
+      "path": "items/mail/mail-054.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/154",
+      "title": "Team news",
+      "modified": "2026-10-16T14:30:00Z",
+      "version": "modseq:1054",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-054.kb@vellumthistle.test>",
+        "size": 660
+      }
+    },
+    {
+      "id": "mail-055",
+      "kind": "mail",
+      "path": "items/mail/mail-055.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "Archive/9/301",
+      "title": "Tidewater engagement letter",
+      "modified": "2026-09-24T10:00:00Z",
+      "version": "modseq:1055",
+      "metadata": {
+        "folder": "Archive",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-055.kb@vellumthistle.test>",
+        "size": 623
+      }
+    },
+    {
+      "id": "mail-056",
+      "kind": "mail",
+      "path": "items/mail/mail-056.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/156",
+      "title": "Quarry Bridge API keys",
+      "modified": "2026-10-22T13:15:00Z",
+      "version": "modseq:1056",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-056.kb@quillfeather.test>",
+        "size": 565
+      }
+    },
+    {
+      "id": "mail-057",
+      "kind": "mail",
+      "path": "items/mail/mail-057.eml",
+      "mime": "message/rfc822",
+      "source": "bench:knowledge:mail",
+      "connector": "imap",
+      "key": "INBOX/7/157",
+      "title": "Mentor rota",
+      "modified": "2026-10-24T17:40:00Z",
+      "version": "modseq:1057",
+      "metadata": {
+        "folder": "INBOX",
+        "flags": [
+          "\\Seen"
+        ],
+        "message_id": "<mail-057.kb@mail.test>",
+        "size": 469
+      }
+    },
+    {
       "id": "cal-001",
       "kind": "calendar",
       "path": "items/calendar/cal-001.ics",
@@ -1228,6 +1408,24 @@
         "calendar_href": "/calendars/robin/personal/",
         "href": "/calendars/robin/personal/fundraiser-planning-20261108.ics",
         "etag": "\"etag-15\""
+      }
+    },
+    {
+      "id": "cal-016",
+      "kind": "calendar",
+      "path": "items/calendar/cal-016.ics",
+      "mime": "text/calendar",
+      "source": "bench:knowledge:calendar",
+      "connector": "caldav",
+      "key": "/calendars/robin/work/harbourline-po-signoff-20261103.ics",
+      "title": "Harbourline PO sign-off",
+      "modified": "2026-10-21T16:00:00Z",
+      "version": "\"etag-16\"",
+      "metadata": {
+        "calendar": "Work",
+        "calendar_href": "/calendars/robin/work/",
+        "href": "/calendars/robin/work/harbourline-po-signoff-20261103.ics",
+        "etag": "\"etag-16\""
       }
     },
     {
@@ -1737,6 +1935,57 @@
       "metadata": {
         "path": "journal/Q4 budget.md",
         "size": 124,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-031",
+      "kind": "note",
+      "path": "items/notes/journal/Book club.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Book club.md",
+      "title": "Book club",
+      "modified": "2026-10-26T21:00:00Z",
+      "version": "mtime:31",
+      "metadata": {
+        "path": "journal/Book club.md",
+        "size": 111,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-032",
+      "kind": "note",
+      "path": "items/notes/journal/2026-10-29 Quarry Bridge standup.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/2026-10-29 Quarry Bridge standup.md",
+      "title": "2026-10-29 Quarry Bridge standup",
+      "modified": "2026-10-29T10:30:00Z",
+      "version": "mtime:32",
+      "metadata": {
+        "path": "journal/2026-10-29 Quarry Bridge standup.md",
+        "size": 150,
+        "vault": "Robin's notes"
+      }
+    },
+    {
+      "id": "note-033",
+      "kind": "note",
+      "path": "items/notes/journal/Errands.md",
+      "mime": "text/markdown",
+      "source": "bench:knowledge:notes",
+      "connector": "files",
+      "key": "journal/Errands.md",
+      "title": "Errands",
+      "modified": "2026-10-29T18:00:00Z",
+      "version": "mtime:33",
+      "metadata": {
+        "path": "journal/Errands.md",
+        "size": 101,
         "vault": "Robin's notes"
       }
     }
