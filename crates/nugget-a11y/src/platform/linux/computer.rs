@@ -552,7 +552,14 @@ impl AtspiPlatform {
             &mut || self.paste(el),
             &mut || {
                 let after = Self::read_state(el, 1 << 20, false);
-                Ok(crate::verify::verify_insert(before, text, &after))
+                use crate::clipboard::PasteCheck;
+                Ok(if crate::verify::verify_insert(before, text, &after) {
+                    PasteCheck::Verified
+                } else if crate::verify::changed(before, &after) {
+                    PasteCheck::Changed
+                } else {
+                    PasteCheck::Unchanged
+                })
             },
             crate::clipboard::PasteTiming::default(),
         )?;
