@@ -1468,6 +1468,66 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_body_counts_only_when_it_attributes_the_name_to_the_organisation() {
+        let store = nugget_store::Store::open_in_memory().unwrap();
+        let note = |key: &str, text: &str| {
+            store
+                .upsert_item_with_chunks(
+                    &nugget_store::NewItem::new("notes", key, format!("h{key}"))
+                        .with_mime("text/markdown"),
+                    &[nugget_store::NewChunk::text(text)],
+                )
+                .unwrap();
+            ItemRef {
+                source: nugget_core::ids::SourceId::new("notes"),
+                key: nugget_core::ids::ItemKey::new(key),
+            }
+        };
+        let g = nugget_graph::MemGraph::new();
+        let rook = person(&g, "Tamsin Rook", Some("tamsin.rook@quillfeather.test"));
+        person(&g, "Tamsin Galloway", Some("tamsin.g@gmail.com"));
+        let mut org = NewEntity::new(EntityKind::Organization, "Quillfeather Systems");
+        org.identifiers = vec![Identifier::new("domain", "quillfeather.test")];
+        g.create_entity(&org).unwrap();
+        let short_on = |item: &ItemRef| {
+            let s = g
+                .create_entity(&NewEntity::new(EntityKind::Person, "Tamsin"))
+                .unwrap();
+            g.add_mention(&nugget_graph::Mention {
+                entity: s.clone(),
+                item: item.clone(),
+                chunk_id: None,
+                surface: "Tamsin".into(),
+                confidence: 0.6,
+            })
+            .unwrap();
+            s
+        };
+        // Merely named in the same text: nothing.
+        let named = note(
+            "a",
+            "Tamsin says Quillfeather Systems has the sandbox keys.",
+        );
+        let s1 = short_on(&named);
+        assert!(settle(&g, &store, std::slice::from_ref(&s1), None).is_empty());
+        // Attributed: "Tamsin from Quillfeather".
+        let said = note(
+            "b",
+            "Standup with Priya and Tamsin from Quillfeather today.",
+        );
+        let s2 = short_on(&said);
+        let merges = settle(&g, &store, std::slice::from_ref(&s2), None);
+        assert_eq!(merges, vec![(rook.clone(), s2.clone())]);
+        let log = nugget_graph::merge_log(&g.get_entity(&rook).unwrap().unwrap());
+        assert_eq!(log[0].reasons, ["first_name", "same_org"]);
+        assert_eq!(log[0].item.as_ref(), Some(&said));
+        // A substring is not the name ("Tamsinette from Quillfeather").
+        let other = note("c", "Lunch with Tamsinette from Quillfeather.");
+        let s3 = short_on(&other);
+        assert!(settle(&g, &store, std::slice::from_ref(&s3), None).is_empty());
+    }
+
+    #[tokio::test]
     async fn too_many_namesakes_are_ambiguous() {
         let store = nugget_store::Store::open_in_memory().unwrap();
         let g = nugget_graph::MemGraph::new();

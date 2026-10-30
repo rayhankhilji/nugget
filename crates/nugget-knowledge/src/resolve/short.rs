@@ -26,7 +26,8 @@
 //! - `same_org`: the short side's own address, or a header participant (From/To/Cc/Bcc) of one
 //!   of its items, is at one of the person's mail domains, and no other name-compatible person
 //!   is known at that domain. Webmail domains and the user's own domains (their addresses and
-//!   employers) never count, and organisations merely named in a body never count.
+//!   employers) never count. In a body, an organisation counts only when the text attributes
+//!   the short name to it ("Tamsin from Quillfeather", "at", "of"); merely named, it never does.
 //!
 //! **Order.** Both directions apply the same decision ([`Resolver::full_for`]): a short-form
 //! occurrence joins when it is resolved (forward), and a full-name person absorbs existing short
@@ -76,6 +77,8 @@ pub(crate) const CAND_MAX: usize = 2_000;
 const MENTION_SCAN: usize = 1_000;
 /// Items per side whose headers are read (newest first).
 const ITEM_SCAN: usize = 50;
+/// Items of a short side whose text is read for an organisation attribution.
+const ATTR_SCAN: usize = 10;
 /// A full-name person's newest items whose thread headers are read.
 const THREAD_SCAN: usize = 20;
 /// State key of the short-form people not placed yet ([`Resolver::settle_pending`]).
@@ -612,6 +615,18 @@ impl Resolver<'_> {
                 }
             }
         }
+        // Same organisation, from the text: an item of the short side attributes the name to
+        // one of `f`'s organisations ("Tamsin from Quillfeather").
+        if c.org.is_empty() && !short.names.is_empty() {
+            'attr: for d in &f_domains {
+                for i in s_items.iter().rev().take(ATTR_SCAN) {
+                    if self.attributes_to_org(i, &short.names, d)? {
+                        c.org.push((d.clone(), Some(i.clone())));
+                        break 'attr;
+                    }
+                }
+            }
+        }
         Ok(c)
     }
 
@@ -1034,6 +1049,79 @@ impl Resolver<'_> {
         Ok(merges)
     }
 
+    /// How text may name the organisation of a mail domain, squashed ([`squash`]): the
+    /// domain's label, and the names of the organisation holding the domain (legal suffix
+    /// dropped too). Too-short forms are left out.
+    fn org_needles(&self, domain: &str) -> Result<BTreeSet<String>> {
+        let mut needles: BTreeSet<String> = BTreeSet::new();
+        needles.insert(squash(&super::domain_label(domain)));
+        if let Some(oid) = self
+            .graph
+            .find_by_identifier(&Identifier::new("domain", domain))?
+            && let Some(o) = self.canonical(&oid)?
+        {
+            for n in std::iter::once(&o.name).chain(&o.aliases) {
+                let words: Vec<&str> = n.split_whitespace().collect();
+                needles.insert(squash(n));
+                if let Some((last, rest)) = words.split_last()
+                    && !rest.is_empty()
+                    && matches!(
+                        squash(last).as_str(),
+                        "llp" | "ltd" | "inc" | "llc" | "plc" | "gmbh" | "co" | "corp"
+                    )
+                {
+                    needles.insert(squash(&rest.join(" ")));
+                }
+            }
+        }
+        needles.retain(|n| n.len() >= MIN_ORG_CHARS);
+        Ok(needles)
+    }
+
+    /// Whether an item's text attributes the short name to the organisation of `domain`
+    /// with "NAME from ORG", "NAME at ORG" or "NAME of ORG" ("Tamsin from Quillfeather"). A
+    /// statement about the person, not an organisation merely named somewhere in the body.
+    fn attributes_to_org(&self, item: &ItemRef, names: &[String], domain: &str) -> Result<bool> {
+        let Some(feed) = self.feed else {
+            return Ok(false);
+        };
+        let needles = self.org_needles(domain)?;
+        if needles.is_empty() {
+            return Ok(false);
+        }
+        let given: Vec<String> = names
+            .iter()
+            .filter_map(|n| PersonName::parse(n))
+            .filter_map(|p| p.given_full().map(str::to_owned))
+            .collect();
+        if given.is_empty() {
+            return Ok(false);
+        }
+        for chunk in feed.chunks(item, 16)? {
+            let text = chunk.text.to_lowercase();
+            for g in &given {
+                for (at, _) in text.match_indices(g.as_str()) {
+                    let before_ok = text[..at]
+                        .chars()
+                        .next_back()
+                        .is_none_or(|c| !c.is_alphanumeric());
+                    let rest = &text[at + g.len()..];
+                    let Some(after) = [" from ", " at ", " of "]
+                        .iter()
+                        .find_map(|sep| rest.strip_prefix(sep))
+                    else {
+                        continue;
+                    };
+                    let head: String = squash(&after.chars().take(80).collect::<String>());
+                    if before_ok && needles.iter().any(|n| head.starts_with(n.as_str())) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// An item sent from one of `a`'s addresses that names the organisation of one of `b`'s
     /// addresses (its domain label, or a name of the organisation holding the domain).
     fn states_other_employer(&self, a: &Entity, b: &Entity) -> Result<Option<ItemRef>> {
@@ -1051,28 +1139,8 @@ impl Resolver<'_> {
             if a_domains.contains(&d) {
                 continue; // same organisation: nothing changed
             }
-            needles.insert(squash(&super::domain_label(&d)));
-            if let Some(oid) = self
-                .graph
-                .find_by_identifier(&Identifier::new("domain", d.as_str()))?
-                && let Some(o) = self.canonical(&oid)?
-            {
-                for n in std::iter::once(&o.name).chain(&o.aliases) {
-                    let words: Vec<&str> = n.split_whitespace().collect();
-                    needles.insert(squash(n));
-                    if let Some((last, rest)) = words.split_last()
-                        && !rest.is_empty()
-                        && matches!(
-                            squash(last).as_str(),
-                            "llp" | "ltd" | "inc" | "llc" | "plc" | "gmbh" | "co" | "corp"
-                        )
-                    {
-                        needles.insert(squash(&rest.join(" ")));
-                    }
-                }
-            }
+            needles.extend(self.org_needles(&d)?);
         }
-        needles.retain(|n| n.len() >= MIN_ORG_CHARS);
         if needles.is_empty() {
             return Ok(None);
         }
