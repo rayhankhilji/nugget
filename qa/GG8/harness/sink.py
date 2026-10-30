@@ -35,8 +35,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mocks  # noqa: E402
 
-SINK_IP = "203.0.113.10"
-LAN_IP = "192.168.88.1"
+LAB = int(os.environ.get("GG8_LAB", "0"))
+SINK_IP = f"203.0.113.{64 * LAB + 10}"
+LAN_IP = f"192.168.{88 + LAB}.1"
 LOCK = threading.Lock()
 OUT = None
 MODE = "sinkhole"

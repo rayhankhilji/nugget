@@ -6,17 +6,21 @@
 #   netlab.sh up internet   # NAT to the real internet; DNS is a logging forwarder
 #   netlab.sh down
 #
-# Addresses: the host side of the veth is 203.0.113.10 (TEST-NET-3, which Nugget classifies as
+# Addresses (lab 0): the host side of the veth is 203.0.113.10 (TEST-NET-3, which Nugget classifies as
 # `cloud`) and 192.168.88.1 (a private address, classified `local_network`); the namespace side
 # is 203.0.113.2. Inside the namespace, /etc/resolv.conf points at 203.0.113.10 and
 # /etc/nsswitch.conf resolves through files and DNS only (no systemd-resolved over D-Bus).
 set -euo pipefail
-NS=${GG8_NS:-gg8}
-HOST_IF=gg8h
-NS_IF=gg8n
-SINK_IP=203.0.113.10
-LAN_IP=192.168.88.1
-NS_IP=203.0.113.2
+# GG8_LAB=k (0-3) runs lab k beside the others: namespace gg8-k, 203.0.113.(64k+10)/26 and
+# 192.168.(88+k).0/24. Without it: lab 0, namespace gg8.
+LAB=${GG8_LAB:-0}
+NS=gg8; [ "$LAB" != 0 ] && NS=gg8-$LAB
+HOST_IF=gg8h$LAB
+NS_IF=gg8n$LAB
+SINK_IP=203.0.113.$((64*LAB+10))
+LAN_IP=192.168.$((88+LAB)).1
+NS_IP=203.0.113.$((64*LAB+2))
+NS_LAN=192.168.$((88+LAB)).2
 
 down() {
   ip netns del "$NS" 2>/dev/null || true
@@ -33,11 +37,11 @@ up() {
   ip netns add "$NS"
   ip link add "$HOST_IF" type veth peer name "$NS_IF"
   ip link set "$NS_IF" netns "$NS"
-  ip addr add "$SINK_IP/24" dev "$HOST_IF"
+  ip addr add "$SINK_IP/26" dev "$HOST_IF"
   ip addr add "$LAN_IP/24" dev "$HOST_IF"
   ip link set "$HOST_IF" up
-  ip netns exec "$NS" ip addr add "$NS_IP/24" dev "$NS_IF"
-  ip netns exec "$NS" ip addr add 192.168.88.2/24 dev "$NS_IF"
+  ip netns exec "$NS" ip addr add "$NS_IP/26" dev "$NS_IF"
+  ip netns exec "$NS" ip addr add "$NS_LAN/24" dev "$NS_IF"
   ip netns exec "$NS" ip link set lo up
   ip netns exec "$NS" ip link set "$NS_IF" up
   ip netns exec "$NS" ip route add default via "$SINK_IP"

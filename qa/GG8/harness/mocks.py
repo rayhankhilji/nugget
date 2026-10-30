@@ -157,6 +157,6 @@ def respond(host, method, path, headers, body, server):
             return m.respond(host, method, path, headers, body, server)
     if host == "api.anthropic.com":
         return anthropic(method, path, headers, req)
-    if host in ("api.openai.com", "api.cloudllm.test", "192.168.88.1"):
+    if host in ("api.openai.com", "api.cloudllm.test") or host.startswith("192.168."):
         return openai_compat(method, path, headers, req)
     return j(404, {"gg8": "unknown host", "host": host, "path": path})

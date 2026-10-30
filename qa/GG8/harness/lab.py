@@ -34,8 +34,10 @@ REPO = os.path.dirname(os.path.dirname(QA))
 sys.path.insert(0, HERE)
 import ipc  # noqa: E402
 
-NS = os.environ.get("GG8_NS", "gg8")
-SINK_IP = "203.0.113.10"
+LAB = int(os.environ.get("GG8_LAB", "0"))
+NS = "gg8" if LAB == 0 else f"gg8-{LAB}"
+SINK_IP = f"203.0.113.{64 * LAB + 10}"
+LAN_IP = f"192.168.{88 + LAB}.1"
 CA_DIR = os.environ.get("GG8_CA_DIR", "/tmp/gg8-ca")
 NUGGETD = os.environ.get("GG8_NUGGETD") or next(
     (p for p in [os.path.join(REPO, "target/release/nuggetd"),
@@ -123,7 +125,8 @@ class Lab:
 
     # -- the daemon ---------------------------------------------------------------------------
     def fmt(self, s):
-        return (s.replace("{fixtures}", FIXTURES).replace("{home}", self.home)
+        return (s.replace("{fixtures}", FIXTURES).replace("{sink_ip}", SINK_IP)
+                 .replace("{lan_ip}", LAN_IP).replace("{home}", self.home)
                  .replace("{data}", self.data).replace("{out}", self.out))
 
     def start_daemon(self, extra_env=None, log_level=None):
@@ -273,7 +276,7 @@ class Lab:
                 continue
             key = (src.rsplit(".", 1)[0], dst.rsplit(".", 1)[0], dst.rsplit(".", 1)[-1],
                    proto.rstrip(","))
-            if key[0].startswith("203.0.113.10") or key[0].startswith("192.168.88.1"):
+            if key[0] in (SINK_IP, LAN_IP):
                 continue  # replies
             flows[key] = flows.get(key, 0) + 1
         return [{"src": k[0], "dst": k[1], "dport": k[2], "proto": k[3], "packets": v}
@@ -304,7 +307,8 @@ class Lab:
         for root, _, files in os.walk(self.home):
             for fn in files:
                 p = os.path.join(root, fn)
-                if "/logs/" in p or fn.startswith("nugget.db") or "/models/" in p:
+                if ("/logs/" in p or fn.startswith("nugget.db") or "/models/" in p
+                        or p.startswith(os.path.join(self.home, "Documents") + os.sep)):
                     continue
                 try:
                     with open(p, "rb") as fh:
@@ -324,7 +328,7 @@ class Lab:
         reqs = [r for r in self.requests() if "method" in r]
         observed = {}
         for r in reqs:
-            if r["listen"].startswith("203.0.113.10") or r["listen"].startswith("192.168.88.1"):
+            if r["listen"].startswith(SINK_IP + ":") or r["listen"].startswith(LAN_IP + ":"):
                 h = r.get("host") or r.get("sni") or r["listen"]
                 o = observed.setdefault(h, {"requests": 0, "bytes_in": 0, "paths": set()})
                 o["requests"] += 1
