@@ -68,6 +68,23 @@ pub struct Features {
     /// unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// The mail thread the card is about, as an opaque stable key: feedback on one card of a
+    /// thread (dismissed as already handled) applies to the thread. Not a model input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<String>,
+    /// The latest message that triggered the card: a thread marked already handled surfaces
+    /// again only for activity after that. Not a model input.
+    #[serde(
+        default,
+        with = "time::serde::rfc3339::option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub activity_at: Option<OffsetDateTime>,
+}
+
+/// The [`Features::thread`] key of a mail thread id.
+pub fn thread_key(thread: &str) -> String {
+    crate::text::stable_hash(&["thread", thread])
 }
 
 /// Feature names in model order.

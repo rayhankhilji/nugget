@@ -12,7 +12,46 @@ use super::world::{CardKind, Item};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feedback {
     Accepted,
-    Dismissed,
+    /// Dismissed, with the reason the user picked (the Today page asks for one).
+    Dismissed(DismissReason),
+}
+
+impl Feedback {
+    pub fn is_accepted(self) -> bool {
+        self == Feedback::Accepted
+    }
+}
+
+/// Why the user dismissed a card: the reasons the Today page offers. The simulated user picks one
+/// from the gold labels ([`super::sim`]); engines may learn from it or ignore it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DismissReason {
+    /// Not something the user cares about (also the reason for a good card dismissed by noise).
+    NotRelevant,
+    /// Already answered, delivered or cancelled.
+    AlreadyHandled,
+    /// Bulk mail, notifications and the like: real, but not worth a card.
+    NotImportant,
+    /// The card got its facts wrong.
+    WrongInfo,
+}
+
+impl DismissReason {
+    pub const ALL: [DismissReason; 4] = [
+        DismissReason::NotRelevant,
+        DismissReason::AlreadyHandled,
+        DismissReason::NotImportant,
+        DismissReason::WrongInfo,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DismissReason::NotRelevant => "not_relevant",
+            DismissReason::AlreadyHandled => "already_handled",
+            DismissReason::NotImportant => "not_important",
+            DismissReason::WrongInfo => "wrong_info",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

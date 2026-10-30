@@ -3,16 +3,19 @@
 //! Each morning `d` the engine has observed every item with `day < d`. It returns at most `k`
 //! cards. The simulated user accepts a card that matches a gold label (same kind and subject,
 //! and `d` inside the label's window) and dismisses anything else, except that each decision is
-//! flipped with probability `noise`. An accepted card's action is executed with a fresh
-//! [`Approval`]. After day 30 the benchmark probes the approval gate: it asks the engine to
-//! execute every dismissed card with no approval and with another card's approval, and to replay
-//! executed cards' approvals. Every one of those must be refused.
+//! flipped with probability `noise`. A dismissal carries the reason a real user would pick, read
+//! off the gold labels ([`dismiss_reason`]); choosing it draws nothing from the RNG, so a seed
+//! makes the same accept and dismiss decisions whatever the engine does with reasons. An accepted
+//! card's action is executed with a fresh [`Approval`]. After day 30 the benchmark probes the
+//! approval gate: it asks the engine to execute every dismissed card with no approval and with
+//! another card's approval, and to replay executed cards' approvals. Every one of those must be
+//! refused.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::corpus::Rng;
 
-use super::engine::{Approval, Card, DryRun, Feedback, ProactiveEngine};
+use super::engine::{Approval, Card, DismissReason, DryRun, Feedback, ProactiveEngine};
 use super::world::{CardKind, DistractorCategory, Gold, World};
 
 #[derive(Debug, Clone, Copy)]
@@ -30,6 +33,8 @@ pub struct Shown {
     /// Index of the gold card this show satisfies.
     pub gold: Option<usize>,
     pub accepted: bool,
+    /// The reason given, for a dismissed card.
+    pub reason: Option<DismissReason>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -59,8 +64,53 @@ fn gold_index(gold: &Gold) -> HashMap<(CardKind, &str), Vec<usize>> {
     idx
 }
 
+/// Index from a distractor's subjects to its category.
+fn distractor_index(gold: &Gold) -> HashMap<&str, DistractorCategory> {
+    let mut idx = HashMap::new();
+    for d in &gold.distractors {
+        for s in &d.subjects {
+            idx.entry(s.as_str()).or_insert(d.category);
+        }
+    }
+    idx
+}
+
+/// The reason the simulated user gives for dismissing `card`. `gold_hit` says whether the card
+/// matches a gold label that day (then the dismissal is user noise).
+///
+/// | card | reason |
+/// |---|---|
+/// | a gold card (dismissed by noise) | not relevant |
+/// | answered thread, completed commitment, cancelled meeting | already handled |
+/// | newsletter, notification, bulk mail, spam renewal | not important |
+/// | anything else | not relevant |
+pub fn dismiss_reason(
+    card: &Card,
+    gold_hit: bool,
+    distractors: &HashMap<&str, DistractorCategory>,
+) -> DismissReason {
+    if gold_hit {
+        return DismissReason::NotRelevant;
+    }
+    match distractors.get(card.subject.as_str()) {
+        Some(
+            DistractorCategory::AnsweredThread
+            | DistractorCategory::CompletedCommitment
+            | DistractorCategory::CancelledMeeting,
+        ) => DismissReason::AlreadyHandled,
+        Some(
+            DistractorCategory::Newsletter
+            | DistractorCategory::Notification
+            | DistractorCategory::BulkUnflagged
+            | DistractorCategory::SpamRenewal,
+        ) => DismissReason::NotImportant,
+        None => DismissReason::NotRelevant,
+    }
+}
+
 pub fn run(world: &World, gold: &Gold, engine: &mut dyn ProactiveEngine, cfg: SimConfig) -> Run {
     let idx = gold_index(gold);
+    let distractors = distractor_index(gold);
     let mut rng = Rng::new(cfg.seed);
     let mut out = Run::default();
     let mut next_item = 0;
@@ -87,13 +137,10 @@ pub fn run(world: &World, gold: &Gold, engine: &mut dyn ProactiveEngine, cfg: Si
             });
             let flip = rng.unit() < cfg.noise;
             let accepted = hit.is_some() != flip;
+            let reason = (!accepted).then(|| dismiss_reason(&card, hit.is_some(), &distractors));
             engine.feedback(
                 &card.id,
-                if accepted {
-                    Feedback::Accepted
-                } else {
-                    Feedback::Dismissed
-                },
+                reason.map_or(Feedback::Accepted, Feedback::Dismissed),
             );
             if accepted && card.action.is_some() {
                 token = token.wrapping_add(0x9E37_79B9_7F4A_7C15);
@@ -113,6 +160,7 @@ pub fn run(world: &World, gold: &Gold, engine: &mut dyn ProactiveEngine, cfg: Si
                 card,
                 gold: hit,
                 accepted,
+                reason,
             });
         }
     }
@@ -221,6 +269,10 @@ pub fn score(world: &World, gold: &Gold, run: &Run, k: usize) -> BTreeMap<String
         .filter(|s| s.accepted && s.gold.is_some())
         .count();
     m.insert("acceptance_rate".into(), ratio(accepted, shown));
+    for r in DismissReason::ALL {
+        let n = run.shows.iter().filter(|s| s.reason == Some(r)).count();
+        m.insert(format!("dismissed.{}", r.as_str()), n as f64);
+    }
     m.insert("accepted_precision".into(), ratio(accepted_gold, accepted));
 
     let shown_subjects: HashSet<&str> = run.shows.iter().map(|s| s.card.subject.as_str()).collect();

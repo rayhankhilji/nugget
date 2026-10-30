@@ -1,5 +1,5 @@
 /** Display helpers for the Today page: factor names, kinds, snooze times, risk tones. */
-import type { CardEvidence, CardFactor } from "../../api";
+import type { CardEvidence, CardFactor, CardLearned, LearnedView } from "../../api";
 import { isSafeEvidenceUrl } from "../../api";
 import { formatDate, t, type MessageKey } from "../../i18n";
 import { truncateText } from "../../knowledge";
@@ -125,4 +125,61 @@ export function diffMarker(op: string): string {
   if (op === "add") return "+";
   if (op === "remove") return "-";
   return " ";
+}
+
+// ---- BB2: what feedback taught the ranking ----
+
+const LEARNING_SCOPES = new Set(["sender", "domain", "kind", "thread"]);
+const LEARNED_REASONS = new Set(["not_relevant", "already_handled", "wrong_info", "not_important"]);
+
+/** `sender` → "Sender"; an unknown (newer) scope humanized. */
+export function learningScopeLabel(scope: string): string {
+  return known(`today.learning.scope.${scope}`, humanize(scope));
+}
+
+/** `less` → "Shown less often"; an unknown (newer) direction humanized. */
+export function learnedDirectionLabel(direction: string): string {
+  return known(`today.learning.direction.${direction}`, humanize(direction));
+}
+
+/** What an entry is about, as plain text: the sender/domain, the kind's label, a thread's title. */
+export function learnedName(scope: string, key: string, label?: string | null): string {
+  if (scope === "kind") return cardKindLabel(key);
+  const l = label?.replace(/\s+/g, " ").trim();
+  if (l) return truncateText(l, 120).text;
+  if (scope === "thread") return t("today.learning.unnamedThread");
+  return key;
+}
+
+/** Direction of a `proactive.learning` entry. */
+export function learnedViewDirection(e: LearnedView): "less" | "more" | "hidden" {
+  if (e.suppresses) return "hidden";
+  return e.adjustment < 0 ? "less" : "more";
+}
+
+/**
+ * One line saying how feedback moved a card ("Shown less often: you dismissed 3 similar cards
+ * from this sender"), or `null` for a direction this app does not know.
+ */
+export function learnedLine(l: CardLearned): string | null {
+  if (l.direction !== "less" && l.direction !== "more" && l.direction !== "hidden") return null;
+  const effect = learnedDirectionLabel(l.direction);
+  return t("today.learned.line", { effect, cause: learnedCause(l) });
+}
+
+function learnedCause(l: CardLearned): string {
+  if (l.scope === "thread" && l.direction === "hidden" && l.reason === "already_handled") {
+    return t("today.learned.cause.threadHandled");
+  }
+  if (!LEARNING_SCOPES.has(l.scope)) return t("today.learned.cause.generic");
+  const more = l.direction === "more";
+  const n = Math.round(Math.max(0, more ? l.accepted : l.dismissed));
+  if (!Number.isFinite(n) || n === 0) return t("today.learned.cause.generic");
+  const kind = l.scope === "kind" ? cardKindLabel(l.key) : undefined;
+  if (more) return t(`today.learned.cause.accepted.${l.scope}` as MessageKey, { n, kind });
+  if (l.reason && LEARNED_REASONS.has(l.reason)) {
+    const reason = t(`today.learned.reason.${l.reason}` as MessageKey);
+    return t(`today.learned.cause.marked.${l.scope}` as MessageKey, { n, kind, reason });
+  }
+  return t(`today.learned.cause.dismissed.${l.scope}` as MessageKey, { n, kind });
 }

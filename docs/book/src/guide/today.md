@@ -2,7 +2,8 @@
 
 > **Status:** the **Today** page shows the brief and your cards, and every action below can be
 > previewed and run from it. The daemon serves `cards.list`, `cards.feedback`, `cards.preview`,
-> `cards.execute`, `brief.get`, `proactive.metrics` and `proactive.refresh`.
+> `cards.execute`, `brief.get`, `proactive.metrics`, `proactive.refresh`, `proactive.learning` and
+> `proactive.reset_learning`.
 
 Nugget reads your indexed mail, calendar and knowledge graph and suggests what needs your attention
 as **cards**. Each card says why it is there and offers an action you can preview before anything

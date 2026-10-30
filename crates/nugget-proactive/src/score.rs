@@ -1,26 +1,51 @@
 //! Feedback-learned scoring: an online logistic model over [`Features`], updated from accept,
 //! dismiss and snooze events, persisted with the cards and explainable per card.
+//!
+//! The model holds the shared weights (urgency, importance, freshness, kind, ...). What feedback
+//! teaches about one sender, domain, kind or thread lives in the decaying
+//! [`Learned`](crate::feedback::Learned) layer, added in log-odds by [`learned_score`].
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
 
-use crate::candidate::{FEATURE_NAMES, Features};
+use crate::candidate::{CandidateKind, FEATURE_NAMES, Features};
 use crate::cards::Card;
 use crate::config::ProactiveConfig;
+use crate::feedback::{Direction, Effect, Learned};
 
-/// Whether a card ranks high enough to be offered (inbox and brief). Cards below the threshold
-/// stay in the card set, so feedback learned later can lift them back.
+/// Whether a card ranks high enough to be offered (inbox and brief) and is not suppressed by
+/// feedback (a thread marked already handled). Cards below the threshold or suppressed stay in
+/// the card set, so feedback learned (or forgotten) later can bring them back.
 pub(crate) fn shown(card: &Card, cfg: &ProactiveConfig) -> bool {
-    card.rank >= cfg.min_score
+    card.rank >= cfg.min_score && !hidden(&card.learned)
 }
 
-/// Weight-map prefix of the per-sender weights.
+/// Any effect suppresses the card.
+pub(crate) fn hidden(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| e.direction == Direction::Hidden)
+}
+
+/// Weight-map prefix of the per-sender weights models before the learned layer kept. They are
+/// no longer read or updated: [`ScoringModel::take_legacy_senders`] moves them into
+/// [`Learned`].
 const SENDER_PREFIX: &str = "sender:";
-/// Per-sender weights stay within this many log-odds of zero.
-const SENDER_CAP: f64 = 3.0;
-/// At most this many senders are remembered (the weakest are forgotten first).
-const MAX_SENDERS: usize = 2000;
+
+/// The score of a card at `now`: the model's log-odds plus the learned layer's effects. Returns
+/// `(probability, model log-odds, effects)`.
+pub fn learned_score(
+    model: &ScoringModel,
+    learned: &Learned,
+    kind: CandidateKind,
+    f: &Features,
+    now: OffsetDateTime,
+) -> (f64, f64, Vec<Effect>) {
+    let z = model.log_odds(f);
+    let effects = learned.effects(kind, f, now);
+    let adj: f64 = effects.iter().map(|e| e.contribution).sum();
+    (sigmoid(z + adj), z, effects)
+}
 
 /// User feedback on a card, as a training label.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,9 +83,6 @@ pub struct ScoringModel {
     /// Feature name → weight (by name, so new features can be added without a migration).
     pub weights: BTreeMap<String, f64>,
     pub learning_rate: f64,
-    /// Learning rate of the per-sender weights: one decision about a sender should move the next
-    /// card from them noticeably, unlike the shared weights.
-    pub sender_learning_rate: f64,
     /// L2 pull of non-bias weights towards their priors.
     pub l2: f64,
     pub updates: u64,
@@ -71,14 +93,13 @@ impl Default for ScoringModel {
         Self {
             weights: Self::prior(),
             learning_rate: 0.3,
-            sender_learning_rate: 2.0,
             l2: 0.01,
             updates: 0,
         }
     }
 }
 
-fn sigmoid(z: f64) -> f64 {
+pub(crate) fn sigmoid(z: f64) -> f64 {
     1.0 / (1.0 + (-z).exp())
 }
 
@@ -108,24 +129,16 @@ impl ScoringModel {
         w
     }
 
-    fn sender_key(f: &Features) -> Option<String> {
-        f.sender
-            .as_deref()
-            .map(|s| format!("{SENDER_PREFIX}{}", s.trim().to_lowercase()))
-    }
-
-    /// The learned weight of the card's sender (0 when unknown).
-    fn sender_weight(&self, f: &Features) -> f64 {
-        Self::sender_key(f)
-            .and_then(|k| self.weights.get(&k).copied())
-            .unwrap_or(0.0)
-    }
-
-    /// Probability that the user acts on a card with these features.
-    pub fn score(&self, f: &Features) -> f64 {
+    /// The model's log-odds for these features (no learned layer).
+    pub fn log_odds(&self, f: &Features) -> f64 {
         let w = self.weight_vec();
-        let z: f64 = f.vector().iter().zip(w).map(|(x, w)| x * w).sum();
-        sigmoid(z + self.sender_weight(f))
+        f.vector().iter().zip(w).map(|(x, w)| x * w).sum()
+    }
+
+    /// Probability that the user acts on a card with these features (no learned layer; see
+    /// [`learned_score`]).
+    pub fn score(&self, f: &Features) -> f64 {
+        sigmoid(self.log_odds(f))
     }
 
     /// The features' contributions, largest magnitude first (bias and zero terms left out).
@@ -145,25 +158,23 @@ impl ScoringModel {
             })
             .filter(|f| f.contribution != 0.0)
             .collect();
-        let sw = self.sender_weight(f);
-        if sw != 0.0 {
-            out.push(Factor {
-                name: "sender".to_owned(),
-                value: 1.0,
-                weight: sw,
-                contribution: sw,
-            });
-        }
         out.sort_by(|a, b| b.contribution.abs().total_cmp(&a.contribution.abs()));
         out
     }
 
     /// One SGD step of logistic regression towards `feedback.label()`.
     pub fn update(&mut self, f: &Features, feedback: Feedback) {
+        self.update_weighted(f, feedback, 1.0);
+    }
+
+    /// An SGD step scaled by `weight` in `[0, 1]` (how much this feedback says about the card's
+    /// features rather than about the one card: a dismissal as "wrong info" says little).
+    pub fn update_weighted(&mut self, f: &Features, feedback: Feedback, weight: f64) {
         let x = f.vector();
         let p = self.score(f);
         let err = feedback.label() - p;
         let prior = Self::prior();
+        let lr = self.learning_rate * weight.clamp(0.0, 1.0);
         let mut w = self.weight_vec();
         for i in 0..w.len() {
             let reg = if i == 0 {
@@ -171,41 +182,42 @@ impl ScoringModel {
             } else {
                 self.l2 * (w[i] - prior[FEATURE_NAMES[i]])
             };
-            w[i] += self.learning_rate * (err * x[i] - reg);
+            w[i] += lr * (err * x[i] - reg);
         }
         for (n, v) in FEATURE_NAMES.iter().zip(w) {
             self.weights.insert((*n).to_owned(), v);
         }
-        if let Some(k) = Self::sender_key(f) {
-            let v = self.weights.get(&k).copied().unwrap_or(0.0) + self.sender_learning_rate * err;
-            self.weights.insert(k, v.clamp(-SENDER_CAP, SENDER_CAP));
-            self.forget_senders();
-        }
         self.updates += 1;
     }
-}
 
-impl ScoringModel {
-    /// Keep the per-sender weights bounded: drop the ones closest to zero.
-    fn forget_senders(&mut self) {
-        let n = self
+    /// Remove the per-sender weights older models learned, returning `(address, weight)`.
+    pub fn take_legacy_senders(&mut self) -> Vec<(String, f64)> {
+        let keys: Vec<String> = self
             .weights
             .keys()
             .filter(|k| k.starts_with(SENDER_PREFIX))
-            .count();
-        if n <= MAX_SENDERS {
-            return;
-        }
-        let mut senders: Vec<(String, f64)> = self
-            .weights
-            .iter()
-            .filter(|(k, _)| k.starts_with(SENDER_PREFIX))
-            .map(|(k, v)| (k.clone(), v.abs()))
+            .cloned()
             .collect();
-        senders.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-        for (k, _) in senders.into_iter().take(n - MAX_SENDERS) {
-            self.weights.remove(&k);
-        }
+        keys.into_iter()
+            .filter_map(|k| {
+                let w = self.weights.remove(&k)?;
+                Some((k[SENDER_PREFIX.len()..].to_owned(), w))
+            })
+            .collect()
+    }
+
+    /// Forget everything learned: weights back to the prior, update count to zero.
+    pub fn reset_learned(&mut self) {
+        self.weights = Self::prior();
+        self.updates = 0;
+    }
+
+    /// Put one kind's weight back to its prior; returns whether it had moved.
+    pub fn reset_kind(&mut self, kind: CandidateKind) -> bool {
+        let name = format!("kind_{}", kind.as_str());
+        let prior = Self::prior()[&name];
+        let old = self.weights.insert(name, prior);
+        old.is_some_and(|o| o != prior)
     }
 }
 
@@ -247,22 +259,32 @@ mod tests {
     }
 
     #[test]
-    fn one_dismissal_mutes_a_sender_not_others() {
+    fn legacy_senders_are_taken_out_and_resets() {
         let mut m = ScoringModel::default();
-        let from = |s: &str| Features {
-            freshness: 0.8,
-            direct: 1.0,
-            question: 1.0,
-            kind: Some(CandidateKind::UnansweredThread),
-            sender: Some(s.to_owned()),
+        m.weights.insert("sender:pitch@vendor.test".into(), -1.2);
+        let f = Features {
+            urgency: 0.5,
+            kind: Some(CandidateKind::Renewal),
+            sender: Some("pitch@vendor.test".into()),
             ..Default::default()
         };
-        let (cold, friend) = (from("Pitch@Vendor.test"), from("ana@acme.io"));
-        let (c0, f0) = (m.score(&cold), m.score(&friend));
-        m.update(&from("pitch@vendor.test"), Feedback::Dismissed);
-        // Both lose the shared (kind, bias) part; the dismissed sender loses much more.
-        let (dc, df) = (c0 - m.score(&cold), f0 - m.score(&friend));
-        assert!(dc > df + 0.2, "{dc} vs {df}");
-        assert!(m.explain(&cold).iter().any(|f| f.name == "sender"));
+        // Legacy weights are no longer read.
+        assert_eq!(m.score(&f), ScoringModel::default().score(&f));
+        assert_eq!(
+            m.take_legacy_senders(),
+            vec![("pitch@vendor.test".to_owned(), -1.2)]
+        );
+        assert_eq!(m.weights, ScoringModel::prior());
+        m.update(&f, Feedback::Dismissed);
+        assert!(m.reset_kind(CandidateKind::Renewal));
+        assert!(!m.reset_kind(CandidateKind::Renewal));
+        m.reset_learned();
+        assert_eq!(m, ScoringModel::default());
+        // A weighted step moves less.
+        let (mut a, mut b) = (ScoringModel::default(), ScoringModel::default());
+        a.update(&f, Feedback::Dismissed);
+        b.update_weighted(&f, Feedback::Dismissed, 0.25);
+        assert!(a.weights["kind_renewal"] < b.weights["kind_renewal"]);
+        assert!(b.weights["kind_renewal"] < 0.0);
     }
 }

@@ -1368,6 +1368,8 @@ pub struct BrowserStatus {
 // | `proactive.metrics` | `{}` | [`ProactiveMetrics`] |
 // | `proactive.refresh` | `{}` | [`CardsChanged`] (runs a refresh now) |
 // | `reminders.list` | `{}` | `Vec<`[`ReminderView`]`>` (pending, soonest first) |
+// | `proactive.learning` | `{}` | [`ProactiveLearning`] (what feedback taught the ranking) |
+// | `proactive.reset_learning` | [`ResetLearningRequest`] | [`ResetLearningResult`] (audited) |
 
 pub mod proactive_method {
     pub const CARDS_LIST: &str = "cards.list";
@@ -1378,6 +1380,8 @@ pub mod proactive_method {
     pub const PROACTIVE_METRICS: &str = "proactive.metrics";
     pub const PROACTIVE_REFRESH: &str = "proactive.refresh";
     pub const REMINDERS_LIST: &str = "reminders.list";
+    pub const PROACTIVE_LEARNING: &str = "proactive.learning";
+    pub const PROACTIVE_RESET_LEARNING: &str = "proactive.reset_learning";
 }
 
 pub mod proactive_notification {
@@ -1470,6 +1474,74 @@ pub struct CardView {
     pub created_at: time::OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub snoozed_until: Option<time::OffsetDateTime>,
+    /// How the user's own feedback changed this card's ranking, strongest first (empty when it
+    /// did not).
+    #[serde(default)]
+    pub learned: Vec<CardLearned>,
+}
+
+/// One way feedback changed a card's ranking, e.g. "shown less often: you dismissed 3 similar
+/// cards from this sender". Structured so the app can phrase it in the user's language.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardLearned {
+    /// `sender`, `domain`, `kind`, `thread`.
+    pub scope: String,
+    /// The sender address, domain or card kind (`thread`: an opaque thread key).
+    pub key: String,
+    /// `less` (ranked lower), `more` (ranked higher), `hidden` (suppressed: a thread the user
+    /// marked already handled).
+    pub direction: String,
+    /// Accepts and dismissals behind it (decayed, rounded).
+    pub accepted: u32,
+    pub dismissed: u32,
+    /// The most common dismiss reason behind it, when dismissals dominate.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Change in log-odds of the score.
+    pub contribution: f64,
+}
+
+/// `proactive.learning`: what Nugget learned from the user's feedback.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProactiveLearning {
+    /// Strongest adjustment first.
+    pub entries: Vec<LearnedView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LearnedView {
+    /// `sender`, `domain`, `kind`, `thread`.
+    pub scope: String,
+    pub key: String,
+    /// A human label (a thread's card title), when the key is opaque. Untrusted source text.
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Decayed counts.
+    pub accepted: f64,
+    pub dismissed: f64,
+    /// Current adjustment in log-odds (negative ranks lower).
+    pub adjustment: f64,
+    /// The entry suppresses matching cards (a thread marked already handled).
+    #[serde(default)]
+    pub suppresses: bool,
+    #[serde(with = "time::serde::rfc3339")]
+    pub last_at: time::OffsetDateTime,
+}
+
+/// `proactive.reset_learning`: forget what feedback taught the ranking.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetLearningRequest {
+    /// `all`, `sender`, `domain`, `kind`, `thread`.
+    pub scope: String,
+    /// Required unless `scope` is `all`.
+    #[serde(default)]
+    pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResetLearningResult {
+    /// Learned entries forgotten.
+    pub cleared: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1635,7 +1707,7 @@ pub struct ProactiveMetrics {
 /// `cards.list`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CardsChanged {
-    /// `refresh`, `feedback`, `execute`.
+    /// `refresh`, `feedback`, `execute`, `reset_learning`.
     pub reason: String,
     pub open: u32,
     pub created: u32,

@@ -84,7 +84,10 @@ function shellCommands(socket, { pickFolders = [] } = {}) {
 }
 
 /** Commands whose shell proxy sends `{}` rather than `null` when there are no params. */
-const EMPTY_OBJECT_PARAMS = new Set(["brief_get", "proactive_metrics", "proactive_refresh", "reminders_list"]);
+const EMPTY_OBJECT_PARAMS = new Set(["brief_get", "proactive_metrics", "proactive_refresh", "proactive_learning", "reminders_list"]);
+
+/** Commands whose daemon method keeps an underscore (`proactive_method` in nugget_core::ipc). */
+const METHOD_FOR = { proactive_reset_learning: "proactive.reset_learning" };
 
 const snake = (k) => k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
@@ -261,7 +264,7 @@ export function startBridge({ socket, dist = DIST, port = 0, shim = false, pickF
       calls.push({ cmd, via: "shell", ok: true });
       return { ok: v ?? null };
     }
-    const method = cmd.replaceAll("_", ".");
+    const method = METHOD_FOR[cmd] ?? cmd.replaceAll("_", ".");
     let msg;
     try {
       msg = await daemon.call(method, paramsFor(cmd, args));

@@ -11,10 +11,17 @@
 //!   daylight-saving change while running moves the brief and "today" (also in the engine).
 //!   Every minute, due reminders are broadcast as `reminder.due`.
 //! - **Methods**: `cards.list`, `cards.feedback`, `cards.preview`, `cards.execute`, `brief.get`,
-//!   `proactive.metrics`, `proactive.refresh`, `reminders.list` (see the
+//!   `proactive.metrics`, `proactive.refresh`, `reminders.list`, `proactive.learning`,
+//!   `proactive.reset_learning` (see the
 //!   `---- Proactive (M5) ----` block of `nugget_core::ipc`). Executing an action needs the digest
 //!   of a preview made in this daemon less than an hour ago, for the same card and action, and
 //!   goes through `ActionRunner` (approval bound to the digest, then the policy gate).
+//!
+//! - **Learning** (BB2): `proactive.learning` lists what feedback taught the ranking;
+//!   `proactive.reset_learning` forgets it (all, or one sender, domain, kind or thread), writes a
+//!   `proactive.reset_learning` audit entry (actor `user`, target `all` or `<scope>:<key>`, detail
+//!   `{"cleared": n}`) and broadcasts `cards.changed` with reason `reset_learning`. Both answer
+//!   whether or not `[proactive] enabled` (forgetting must always be possible).
 //!
 //! When `enabled = false` the methods still answer (`cards.list` is empty with `enabled: false`)
 //! but nothing runs in the background.
@@ -34,7 +41,8 @@ use nugget_core::ids::SourceId;
 use nugget_core::ipc::{
     self, ActionArtifact, BriefView, CardExecuteRequest, CardExecuteResult, CardFeedbackRequest,
     CardPreview, CardPreviewRequest, CardView, CardsChanged, CardsList, CardsListRequest,
-    ProactiveMetrics, ReminderView, proactive_method, proactive_notification,
+    ProactiveLearning, ProactiveMetrics, ReminderView, ResetLearningRequest, ResetLearningResult,
+    proactive_method, proactive_notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{Provider, Router};
@@ -45,7 +53,7 @@ use nugget_proactive::{
     APPROVAL_KEY_LEN, Action, ActionRunner, CardState, Enrichment, ExecOutcome, Judge, JudgeInput,
     LlmJudge, PreparedAction, Proactive, RefreshReport, new_approval_key,
 };
-use nugget_store::Store;
+use nugget_store::{AuditEntry, Store};
 use serde_json::{Value, json};
 use time::{Date, OffsetDateTime, UtcOffset};
 use tokio::sync::{broadcast, mpsc};
@@ -80,6 +88,8 @@ const METHODS: &[&str] = &[
     proactive_method::PROACTIVE_METRICS,
     proactive_method::PROACTIVE_REFRESH,
     proactive_method::REMINDERS_LIST,
+    proactive_method::PROACTIVE_LEARNING,
+    proactive_method::PROACTIVE_RESET_LEARNING,
 ];
 
 pub(crate) async fn start(
@@ -627,6 +637,48 @@ impl Core {
         Ok(convert::metrics(blocking(move || engine.metrics()).await?))
     }
 
+    async fn learning(&self, now: OffsetDateTime) -> Result<ProactiveLearning> {
+        let engine = self.engine.clone();
+        let entries = blocking(move || engine.learned(now)).await?;
+        Ok(ProactiveLearning {
+            entries: entries.iter().map(convert::learned_view).collect(),
+        })
+    }
+
+    /// Forget learned feedback, audit it, and announce `cards.changed` (`reset_learning`).
+    ///
+    /// The audit entry is written after the reset and its failure fails the call: the reset has
+    /// happened by then (it is not rolled back), but the caller learns that it went unrecorded.
+    async fn reset_learning(
+        &self,
+        req: ResetLearningRequest,
+        now: OffsetDateTime,
+    ) -> Result<ResetLearningResult> {
+        let scope = convert::reset_scope(&req)?;
+        let engine = self.engine.clone();
+        let store = self.store.clone();
+        let (cleared, open) = blocking(move || {
+            let cleared = engine.reset_learning(&scope, now)?;
+            let open = engine.inbox()?.len();
+            let entry = AuditEntry {
+                actor: "user".into(),
+                action: proactive_method::PROACTIVE_RESET_LEARNING.into(),
+                target: convert::reset_target(&scope),
+                detail: json!({ "cleared": cleared }),
+            };
+            if let Err(e) = store.append_audit(&entry) {
+                tracing::warn!(error = %e, "cannot audit a learning reset");
+                return Err(e);
+            }
+            Ok((cleared, open))
+        })
+        .await?;
+        self.announce(&self.changed("reset_learning", open, 0, 0));
+        Ok(ResetLearningResult {
+            cleared: u32::try_from(cleared).unwrap_or(u32::MAX),
+        })
+    }
+
     async fn reminders(&self) -> Result<Vec<ReminderView>> {
         let exec = self.exec.clone();
         let mut v = blocking(move || exec.pending_reminders()).await?;
@@ -913,6 +965,10 @@ impl Core {
                 to_result(self.refresh(now).await?)
             }
             proactive_method::REMINDERS_LIST => to_result(self.reminders().await?),
+            proactive_method::PROACTIVE_LEARNING => to_result(self.learning(now).await?),
+            proactive_method::PROACTIVE_RESET_LEARNING => {
+                to_result(self.reset_learning(parse_params(params)?, now).await?)
+            }
             other => Err(RpcError::method_not_found(other)),
         }
     }
@@ -1049,6 +1105,7 @@ mod tests {
             // inbox once feedback rescored it.
             features: Features {
                 urgency: 1.0,
+                sender: Some("ana@example.com".into()),
                 ..Features::default()
             },
             score: 0.5,
@@ -1072,6 +1129,7 @@ mod tests {
             dismiss_reason: None,
             was_accepted: false,
             history: Vec::new(),
+            learned: Vec::new(),
         }
     }
 
@@ -1663,5 +1721,211 @@ mod tests {
         assert!(!matches!(gate.evaluate(&d), Decision::Deny(_)));
         safety.kill.halt();
         assert!(gate.halted());
+    }
+
+    #[test]
+    fn learning_conversions() {
+        use nugget_proactive::{Direction, Effect, LearnedEntry, ResetScope, Scope};
+        let mut c = card("a");
+        c.learned = vec![Effect {
+            scope: Scope::Sender,
+            key: "ana@example.com".into(),
+            direction: Direction::Less,
+            accepted: 0,
+            dismissed: 3,
+            reason: Some("not_important".into()),
+            contribution: -0.8,
+        }];
+        let v = convert::card_view(&c, &|_| false);
+        let l = &v.learned[0];
+        assert_eq!(
+            (l.scope.as_str(), l.key.as_str(), l.direction.as_str()),
+            ("sender", "ana@example.com", "less")
+        );
+        assert_eq!((l.accepted, l.dismissed), (0, 3));
+        assert_eq!(l.reason.as_deref(), Some("not_important"));
+        assert!((l.contribution + 0.8).abs() < 1e-12);
+
+        let e = LearnedEntry {
+            scope: Scope::Thread,
+            key: "t1".into(),
+            label: Some("Card a".into()),
+            accepted: 0.0,
+            dismissed: 1.0,
+            adjustment: -2.0,
+            suppresses: true,
+            last_at: t0(),
+        };
+        let v = convert::learned_view(&e);
+        assert_eq!((v.scope.as_str(), v.key.as_str()), ("thread", "t1"));
+        assert!(v.suppresses);
+        assert_eq!(v.last_at, t0());
+
+        let req = |scope: &str, key: Option<&str>| ResetLearningRequest {
+            scope: scope.into(),
+            key: key.map(Into::into),
+        };
+        assert_eq!(
+            convert::reset_scope(&req("all", None)).unwrap(),
+            ResetScope::All
+        );
+        assert_eq!(
+            convert::reset_scope(&req("sender", Some(" Ana@Example.COM "))).unwrap(),
+            ResetScope::One(Scope::Sender, "ana@example.com".into())
+        );
+        assert_eq!(
+            convert::reset_scope(&req("kind", Some("renewal"))).unwrap(),
+            ResetScope::One(Scope::Kind, "renewal".into())
+        );
+        assert_eq!(
+            convert::reset_target(&ResetScope::One(Scope::Domain, "example.com".into())),
+            "domain:example.com"
+        );
+        assert_eq!(convert::reset_target(&ResetScope::All), "all");
+        for (scope, key) in [
+            ("everything", Some("x")),
+            ("sender", None),
+            ("domain", Some("  ")),
+            ("kind", Some("newsletter")),
+        ] {
+            assert!(
+                matches!(
+                    convert::reset_scope(&req(scope, key)),
+                    Err(Error::Invalid(_))
+                ),
+                "{scope} {key:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_learning_resets_are_rejected() {
+        let f = fixture("", &["a"]);
+        for params in [
+            json!({"scope": "everything"}),
+            json!({"scope": "sender"}),
+            json!({"scope": "thread", "key": ""}),
+            json!({"scope": "kind", "key": "newsletter"}),
+            json!({}),
+        ] {
+            let r = f
+                .core
+                .call(
+                    proactive_method::PROACTIVE_RESET_LEARNING,
+                    params.clone(),
+                    t0(),
+                )
+                .await;
+            assert_eq!(code(r), nugget_ipc::code::INVALID_PARAMS, "{params}");
+        }
+        // Nothing was reset, audited or announced.
+        assert!(f.out.take(proactive_notification::CARDS_CHANGED).is_empty());
+        assert!(
+            f.core
+                .store
+                .recent_audit(10)
+                .unwrap()
+                .iter()
+                .all(|r| r.action != proactive_method::PROACTIVE_RESET_LEARNING)
+        );
+    }
+
+    async fn learning(f: &Fixture) -> ProactiveLearning {
+        serde_json::from_value(
+            f.core
+                .call(proactive_method::PROACTIVE_LEARNING, Value::Null, t0())
+                .await
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn learning_lists_and_resets_a_dismissed_sender() {
+        let f = fixture("", &["a", "b"]);
+        // Nothing learned yet.
+        assert!(learning(&f).await.entries.is_empty());
+
+        let mut req = feedback("a", "dismiss");
+        req.reason = Some("not_important".into());
+        f.core
+            .call(
+                proactive_method::CARDS_FEEDBACK,
+                serde_json::to_value(&req).unwrap(),
+                t0(),
+            )
+            .await
+            .unwrap();
+        f.out.take(proactive_notification::CARDS_CHANGED);
+
+        let learned = learning(&f).await;
+        let sender = learned
+            .entries
+            .iter()
+            .find(|e| e.scope == "sender" && e.key == "ana@example.com")
+            .expect("the dismissed card's sender is learned");
+        assert!(sender.dismissed > 0.0, "{sender:?}");
+        assert!(sender.adjustment < 0.0, "{sender:?}");
+
+        let res: ResetLearningResult = serde_json::from_value(
+            f.core
+                .call(
+                    proactive_method::PROACTIVE_RESET_LEARNING,
+                    json!({"scope": "sender", "key": "Ana@Example.com"}),
+                    t0(),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(res.cleared >= 1);
+        assert!(
+            !learning(&f)
+                .await
+                .entries
+                .iter()
+                .any(|e| e.scope == "sender" && e.key == "ana@example.com")
+        );
+
+        let audit = f.core.store.recent_audit(10).unwrap();
+        let rec = audit
+            .iter()
+            .find(|r| r.action == "proactive.reset_learning")
+            .expect("the reset is audited");
+        assert_eq!(
+            (rec.actor.as_str(), rec.target.as_str()),
+            ("user", "sender:ana@example.com")
+        );
+        assert_eq!(rec.detail["cleared"], json!(res.cleared));
+
+        let changed = f.out.take(proactive_notification::CARDS_CHANGED);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0]["reason"], "reset_learning");
+    }
+
+    #[tokio::test]
+    async fn learning_answers_and_resets_when_disabled() {
+        let f = fixture("enabled = false", &["a"]);
+        assert!(learning(&f).await.entries.is_empty());
+        let res: ResetLearningResult = serde_json::from_value(
+            f.core
+                .call(
+                    proactive_method::PROACTIVE_RESET_LEARNING,
+                    json!({"scope": "all"}),
+                    t0(),
+                )
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(res.cleared, 0);
+        let audit = f.core.store.recent_audit(10).unwrap();
+        assert!(
+            audit
+                .iter()
+                .any(|r| r.action == "proactive.reset_learning" && r.target == "all")
+        );
+        let changed = f.out.take(proactive_notification::CARDS_CHANGED);
+        assert_eq!(changed[0]["reason"], "reset_learning");
     }
 }
