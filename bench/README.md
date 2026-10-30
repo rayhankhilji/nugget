@@ -1872,6 +1872,31 @@ numbers and dates are no longer dropped while streaming; the planted-fact halluc
 with and without the value check in every real-model run above, and the dated, superseded-marked
 facts block stays on.
 
+#### Why grounded drafts miss facts (EE2)
+
+Breakdown of the misses in the grounded `secrets` arm of run
+[41007073954](https://github.com/rayhankhilji/nugget/actions/runs/41007073954) (recall 0.62 = 13 of
+21 gold facts), from `draft-secrets/drafts.jsonl` and from the prompt each task gets on the same
+code (the engine run offline over the fixtures with a scripted model, which records the prompt but
+not a real draft):
+
+| Cause | Facts | Tasks |
+|---|---|---|
+| Not retrieved at all | 0 | none: with the cloud budget (1,500 tokens, no snippet cap) 88 of the corpus's 89 gold facts reach the prompt |
+| **Cut by the local budget** (`[draft.local]` 300 tokens, 3 snippets) | 3 | `maya-t17` (the fix date ranks 4th), `henrik-t07` (both facts: the expense policy ranks 10th for "expense dinners at the porto offsite", behind every offsite note) |
+| **In the facts block, not used** | 3 | `jules-t18` (the recap with "60 people came" is F3, after a note about the September pizza budget; the draft says "we need a bigger room next time!"), `jules-t14` (travel portal is F1; the draft echoes the question back), `maya-t13` (SSO metadata is F3; the draft invents an attachment instead) |
+| Stated, but in words the scorer did not accept | 2 | `maya-t09` ("2:00 PM" for 14:00), `henrik-t12` ("we haven't made a decision yet" for "no decision") |
+| Dropped by post-processing or the grounding check | 0 | the `secrets` check drops nothing here, and no draft hit the length band's hard cut |
+
+Over all 66 tasks of the corpus, 81 of 89 gold facts reach the local prompt and 88 of 89 the cloud
+one: the local budget alone loses 8 facts in 6 tasks (`maya-t06`, `maya-t17`, `henrik-t05`,
+`henrik-t07`, `jules-t13`, `jules-t21`). So the causes are, in order: the packer's rank decides
+which 3 passages a local prompt keeps, and it ranks by the whole thread rather than by what the
+thread asks; the facts block is ordered by date, so the passage that answers the question can be
+last; and nothing tells the model which points the reply has to answer. The invented artefact in
+`maya-t13` ("the VPN password is included in the attached file") has no value or credential in it,
+so neither check sees it.
+
 ### Computer use with a real model
 
 `cua --cua-agent nugget --local-models`: the real agent loop, computer-use tools and policy gate,
