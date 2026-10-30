@@ -105,4 +105,4 @@ Brief in `docs/waves/wave-cc/`.
 
 | WP | Branch | Session | Scope |
 |---|---|---|---|
-| CC1 | `cc/doubletap-fast` | session_01CTjRSs68FrQ6bjtvDEG7tf | small draft model for Double Tap, read-ahead on focus (local only), four-way latency measurement |
+| CC1 | `cc/doubletap-fast` | session_01CTjRSs68FrQ6bjtvDEG7tf | small draft model for Double Tap, read-ahead on focus (local only), four-way latency measurement (merged) |

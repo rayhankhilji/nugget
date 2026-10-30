@@ -754,7 +754,6 @@ mod tests {
             assert!(p.entry.tiers.iter().any(|t| t.is_chat()), "{}", p.entry.id);
         }
         let ids: Vec<&str> = pending.iter().map(|p| p.entry.id.as_str()).collect();
-        assert!(ids.contains(&"qwen3-1.7b-q8"), "{ids:?}");
         assert!(ids.contains(&"qwen3-0.6b-q8"), "{ids:?}");
     }
 

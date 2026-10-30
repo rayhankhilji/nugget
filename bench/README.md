@@ -1697,7 +1697,7 @@ recommended. The 1.7B holds on facts (recall 0.80, no hallucinations, no leaks o
 loses 0.07 of voice match, and 8 tasks cannot settle a difference of that size. Read-ahead, not the
 smaller model, is what brings the 4B under 3 s, so the default stays as it is: Double Tap drafts
 with the synthesis-tier model, read-ahead on, and `[draft.local] model = "qwen3-1.7b-q8"` is
-offered (once signed) for slower machines, where it halves both the read-ahead time and its CPU
+offered for slower machines (signed into the manifest when CC1 merged), where it halves both the read-ahead time and its CPU
 cost (on the EPYC 7763: 10.6 s of focus instead of 21.3 s before the trigger is instant).
 
 ### Drafting quality

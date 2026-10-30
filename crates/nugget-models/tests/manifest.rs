@@ -157,7 +157,7 @@ fn rejects_signed_but_invalid_entries() {
 #[test]
 fn shipped_manifest_verifies_with_embedded_dev_key() {
     let m = default_manifest().unwrap();
-    assert_eq!(m.models.len(), 4);
+    assert_eq!(m.models.len(), 5);
     for e in &m.models {
         assert_eq!(e.revision.len(), 40, "{}", e.id);
         assert!(e.url.contains(&e.revision), "{}", e.id);

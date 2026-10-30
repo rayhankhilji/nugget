@@ -113,9 +113,12 @@ The daemon then runs that model in a separate local server, shown on the Status 
 chose for an app) try it first and fall back to the chat model if it is not available; Ask, chat
 and drafts with a cloud provider are unchanged.
 
-The small models proposed for this (currently `qwen3-1.7b-q8` and `qwen3-0.6b-q8`) are pending in
-`manifests/pending/` and cannot be installed by the app until they are signed into the model
-manifest. Until then, this setting accepts only models already in the manifest.
+The manifest has a small model for this, `qwen3-1.7b-q8`: on slower computers it starts drafting
+two to three times as fast as the default 4B model. In the drafting test its voice match was a
+little weaker and its facts were at least as accurate (see the
+[benchmarks](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md)). The setting
+accepts any chat model in the manifest. An even smaller model, `qwen3-0.6b-q8`, was measured and
+is not offered: its drafts recalled too few of the facts they needed.
 
 ## What it will not do
 
@@ -169,9 +172,10 @@ retrieval and the voice lookup as soon as the trigger fires, and with a local mo
 `draft` benchmark suite (see [Benchmarks](../architecture/benchmarks.md)); they are not yet measured
 in the shipped app.
 
-Measured with real local models on GitHub's runners (a 2-core cloud CPU and a virtual Apple M2 Pro),
-from the trigger to the first inserted character, median: with the 4B model about 10–12 s without
-read-ahead and **0.2 s with read-ahead** once the read-ahead has finished (it takes about 6–8 s
-after you focus the field on those machines); with the 1.7B, 3–6 s without and about 0.1 s with.
-A trigger pressed before the read-ahead finishes waits for the rest of it. The details are in the
+Measured with real local models on GitHub's runners (2-core cloud CPUs and virtual Apple M1 and M2
+Pro machines), from the trigger to the first inserted character, median: with the 4B model 10–30 s
+without read-ahead and **0.1–0.6 s with read-ahead** once the read-ahead has finished; with the 1.7B,
+3–15 s without and 0.1–0.2 s with. The read-ahead itself needs the field to keep focus for a while
+first: 6–21 s with the 4B, 4.5–11 s with the 1.7B, depending on the machine. A trigger pressed
+before the read-ahead finishes waits for the rest of it; that case has not been measured yet. The details are in the
 benchmark results (`bench/README.md`, "Real-model results").

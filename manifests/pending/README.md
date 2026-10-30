@@ -33,11 +33,15 @@ recall; sensitive leaks must stay 0). See `bench/README.md`, "Real-model results
 
 ## `doubletap-small.json`
 
-Two small instruct models proposed for local Double Tap (`[draft.local] model`), not for Chat.
+Small instruct models proposed for local Double Tap (`[draft.local] model`), not for Chat. CC1
+proposed two; `qwen3-1.7b-q8` has since been signed into `default.json` (its size and SHA-256
+re-checked against the Hugging Face API at signing). `qwen3-0.6b-q8` stays here, not recommended:
+its drafts recalled 0.40–0.50 of the needed facts against 0.70–0.80 for the larger models
+(`bench/README.md`, "A small Double Tap model and read-ahead").
 
 | id | Upstream | Revision | File | Size (bytes) | SHA-256 | Licence |
 |---|---|---|---|---|---|---|
-| `qwen3-1.7b-q8` | [Qwen/Qwen3-1.7B-GGUF](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) | `90862c4b9d2787eaed51d12237eafdfe7c5f6077` | `Qwen3-1.7B-Q8_0.gguf` | 1,834,426,016 | `061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a` | Apache-2.0 |
+| `qwen3-1.7b-q8` (signed) | [Qwen/Qwen3-1.7B-GGUF](https://huggingface.co/Qwen/Qwen3-1.7B-GGUF) | `90862c4b9d2787eaed51d12237eafdfe7c5f6077` | `Qwen3-1.7B-Q8_0.gguf` | 1,834,426,016 | `061b54daade076b5d3362dac252678d17da8c68f07560be70818cace6590cb1a` | Apache-2.0 |
 | `qwen3-0.6b-q8` | [Qwen/Qwen3-0.6B-GGUF](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF) | `23749fefcc72300e3a2ad315e1317431b06b590a` | `Qwen3-0.6B-Q8_0.gguf` | 639,446,688 | `9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031` | Apache-2.0 |
 
 Sizes and SHA-256 come from the Hugging Face API for the pinned revisions (the LFS object of
