@@ -21,6 +21,10 @@ use tokio::sync::oneshot;
 use crate::chord::Chord;
 use crate::engine::Fire;
 
+/// The desktop app's id (the Tauri `identifier`, which names its `.desktop` file): the name the
+/// portal shows the user and keys its permissions by.
+const APP_ID: &str = "dev.nugget.desktop";
+
 /// How long [`start_chord`] waits for the portal to answer before giving up.
 const PORTAL_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -95,11 +99,36 @@ async fn run(
     mut stop: oneshot::Receiver<()>,
 ) {
     let setup = async {
-        let portal = GlobalShortcuts::new().await.map_err(portal_err)?;
+        // A connection of this listener's own. `GlobalShortcuts::new()` would reuse ashpd's
+        // process-wide one, whose I/O task lives on the runtime that first created it: once
+        // that listener is dropped (its runtime with it), every later listener in the process
+        // would wait on a dead connection and time out.
+        let conn = ashpd::zbus::Connection::session()
+            .await
+            .map_err(portal_err)?;
+        // xdg-desktop-portal 1.19+ refuses GlobalShortcuts to an unsandboxed app it cannot
+        // name ("An app id is required"). A host app names itself through the host Registry,
+        // first thing on its connection. Older portals lack it, and a sandbox (Flatpak) or a
+        // systemd scope already gives the app id: failure here is not an error.
+        let registered = match APP_ID.parse::<ashpd::AppID>() {
+            Ok(app_id) => ashpd::register_host_app_with_connection(conn.clone(), app_id)
+                .await
+                .map_err(|e| e.to_string()),
+            Err(e) => Err(e.to_string()),
+        };
+        if let Err(e) = &registered {
+            tracing::debug!(error = %e, "nugget-hotkey: host portal registration failed");
+        }
+        let portal = GlobalShortcuts::with_connection(conn)
+            .await
+            .map_err(portal_err)?;
         let session = portal
             .create_session(CreateSessionOptions::default())
             .await
-            .map_err(portal_err)?;
+            .map_err(|e| match &registered {
+                Err(r) => portal_err(format!("{e}; registering the app id failed: {r}")),
+                Ok(()) => portal_err(e),
+            })?;
         let activated = portal.receive_activated().await.map_err(portal_err)?;
         Ok::<_, Error>((portal, session, activated))
     };
@@ -123,13 +152,24 @@ async fn run(
             .bind_shortcuts(&session, &[shortcut], None, BindShortcutsOptions::default())
             .await?
             .response()
-            .map(|_| ())
     };
     tokio::select! {
-        r = bind => if let Err(e) = r {
-            tracing::warn!(error = %e, "nugget-hotkey: the portal did not bind the shortcut");
-            let _ = session.close().await;
-            return;
+        r = bind => match r {
+            // A desktop may answer without binding anything and leave the keys to the user
+            // (Plasma 5.27 opens System Settings' shortcuts page instead). The session stays
+            // open, so the shortcut fires once the user assigns it there.
+            Ok(bound) if !bound.shortcuts().iter().any(|s| s.id() == id) => {
+                tracing::warn!(
+                    "nugget-hotkey: the desktop did not bind the shortcut yet; assign it in the \
+                     desktop's keyboard shortcut settings"
+                );
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "nugget-hotkey: the portal did not bind the shortcut");
+                let _ = session.close().await;
+                return;
+            }
         },
         _ = &mut stop => {
             let _ = session.close().await;

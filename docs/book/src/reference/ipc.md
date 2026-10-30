@@ -104,8 +104,8 @@ then go to the model before the question (`system` entries are ignored, and the 
 `SourceInfo` is `{id, kind, name, enabled, state, items, chunks, last_sync, last_error, settings}`, with
 `state` one of `idle`, `syncing`, `watching`, `needs_auth`, `disabled`, `error`. Settings never
 contain secrets: `sources.add` and `sources.update` refuse a `client_secret` key. Use
-`sources.secret.set`: for `imap` and `caldav` it stores the password, for `gmail` and `gcal` the
-OAuth client secret (then rebuilds the source). It is write-only, at most 4096 bytes. See
+`sources.secret.set`: for `imap` and `caldav` it stores the password, for `gmail`, `gcal` and `gdrive`
+the OAuth client secret (then rebuilds the source). It is write-only, at most 4096 bytes. See
 [Connector settings](connectors.md) for each kind's `settings`.
 
 ### Knowledge graph

@@ -151,7 +151,7 @@ impl AtspiEl {
     }
 
     fn role_name(&self) -> String {
-        self.acc().get_role_name().unwrap_or_default()
+        super::role_name(&self.acc())
     }
 
     /// Lowercased action names (empty without the `Action` interface).

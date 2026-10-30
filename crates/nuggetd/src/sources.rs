@@ -3,7 +3,7 @@
 //! **Secrets.** `sources.secret.set` stores, by the kind's [`AuthKind`]:
 //! - `Password` (imap, caldav, slack, notion, github, linear): the password or pasted API token
 //!   under `password:<id>` ([`Ingest::set_password`]);
-//! - `OAuth` (gmail, gcal, outlook, outlook-calendar, onedrive): the OAuth **client secret**
+//! - `OAuth` (gmail, gcal, gdrive, outlook, outlook-calendar, onedrive): the OAuth **client secret**
 //!   under `oauth_client_secret:<id>`. It is never persisted in `sources.toml`:
 //!   [`client_secret_resolver`] adds it to the settings handed to `ConnectorFactory::build` as
 //!   `client_secret`, and the source is rebuilt ([`Ingest::reload`]) after it changes. Google
@@ -51,8 +51,8 @@ const FORM_NORMALISED_KINDS: &[&str] = &[
     nugget_connector_saas::LINEAR_KIND,
 ];
 
-/// Every connector kind shipped: files, obsidian, gmail, gcal, imap, caldav (M1); outlook,
-/// outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS).
+/// Every connector kind shipped: files, obsidian, gmail, gcal, imap, caldav (M1); gdrive (Google
+/// Drive); outlook, outlook-calendar, onedrive (Microsoft 365); slack, notion, github, linear (SaaS).
 pub(crate) fn registry() -> Registry {
     let mut r = Registry::new();
     nugget_connector_files::register(&mut r);
@@ -173,6 +173,7 @@ mod tests {
                 "caldav",
                 "files",
                 "gcal",
+                "gdrive",
                 "github",
                 "gmail",
                 "imap",
@@ -190,7 +191,14 @@ mod tests {
         oauth.sort();
         assert_eq!(
             oauth,
-            ["gcal", "gmail", "onedrive", "outlook", "outlook-calendar"]
+            [
+                "gcal",
+                "gdrive",
+                "gmail",
+                "onedrive",
+                "outlook",
+                "outlook-calendar"
+            ]
         );
         for kind in FORM_NORMALISED_KINDS {
             assert!(r.get(kind).is_ok(), "{kind}");
@@ -229,6 +237,14 @@ mod tests {
             (
                 "gcal",
                 json!({"client_id": "123-abc.apps.googleusercontent.com"}),
+            ),
+            (
+                "gdrive",
+                json!({"client_id": "123-abc.apps.googleusercontent.com"}),
+            ),
+            (
+                "gdrive",
+                json!({"client_id": "123-abc.apps.googleusercontent.com", "include_shared_with_me": true, "include_shared_drives": true, "max_file_mb": 50}),
             ),
             (
                 "imap",

@@ -50,7 +50,7 @@ yet.
 | Computer use (Sidekick) | Ships, built on OpenAI's closed computer-use helper driven through `codex exec`; no step cap, allow-list, confirmations or kill switch | **Being wired in (wave W).** Own agent loop and policy engine built and tested: risk classes, confirmations, budgets, a kill switch and a hash-chained action log. Accessibility-driven tools still in progress |
 | Proactive cards and morning brief | Ships: up to 5 prepared actions a day, ranked by LLM order | **Being wired in (wave W).** Deterministic generators with evidence, explainable scoring, actions only after approval and the policy gate |
 | Local Apple sources (Notes, Messages, Apple Mail, WhatsApp) | Ships, by reading private databases | **Not built** |
-| Slack, Notion, Drive, Outlook | Through hosted MCP connectors | **Being wired in (wave W):** Outlook, Microsoft calendar and OneDrive over Microsoft Graph; Slack, Notion, GitHub and Linear over their own APIs. No Google Drive connector |
+| Slack, Notion, Drive, Outlook | Through hosted MCP connectors | **Being wired in (wave W):** Outlook, Microsoft calendar and OneDrive over Microsoft Graph; Slack, Notion, GitHub and Linear over their own APIs. Google Drive (Docs, Sheets, Slides, PDFs and Office files) with your own Google OAuth client, so far tested only against a mock server |
 | Packaged, signed, auto-updating app | Ships (forced, silent updates every 3 h, one signing key) | **Not built** (M6; planned with user-chosen channels and opt-in updates) |
 
 ## Ideas Nugget took from Sentient

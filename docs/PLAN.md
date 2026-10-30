@@ -26,6 +26,7 @@ Also open, outside wave Y:
 - Double Tap p50 against a cloud model (target under 1.2 s) has never been measured; it needs a provider key.
 - The [M3–M6 security review](reviews/security-m3-m6.md) is reconciled (Z4): 13 findings Fixed with their commits and regression tests, PM-4 Mitigated (an HTTP MCP client can still send its token to a port squatter while nuggetd is down; the stdio bridge avoids it).
 - The `memory --backend real` recall gate misses at standard scale by 0.002 (1 query of 500) with the hash embedder; it waits on a re-run with a real embedding model.
+- Wayland: the Double Tap global shortcut does not fire through the GlobalShortcuts portal yet. xdg-desktop-portal 1.19+ resolves an unsandboxed app's id from an installed desktop file named after it (`dev.nugget.desktop.desktop`), but the Linux bundles ship `Nugget.desktop`, and even with the right file installed KWin answered "App info not found" on CI; sway has no GlobalShortcuts portal and GNOME needs a consent dialog. Until fixed and verified on a real desktop, Wayland users start Double Tap from the tray or the app (Z1).
 - Battery cost per 1k items is not measured yet (idle overhead is, in X5: `perf.yml`).
 - The book's [What works today](book/src/status.md) page still describes wave W.
 
@@ -57,7 +58,7 @@ Also open, outside wave Y:
 | Target: no secrets sent to cloud models in drafts | `draft`: `sensitive_prompt_exposure_rate` and `sensitive_leak_rate` 0 (fake model, cloud-marked) | done |
 | Target: proactive precision@5 ≥ 0.7, recall ≥ 0.8 | `proactive --backend real`: 0.849 and 0.997 | done |
 | Target: RAM, CPU and idle overhead | `perf --backend real` (W12, 100k items); daemon CPU/RSS/startup in X5; battery not measured; X5 at 100k items: idle CPU 0.03%, 0 idle wakeups in the bench window, startup 74 ms, first search 83 ms, RSS after idle 1472 MiB, of which the draft voice profile (~980 MiB) is now cut to ~106 MiB (`nugget-voice` example `voice_memory`), [perf.yml](../.github/workflows/perf.yml) | done (battery not measured) |
-| Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in [Y1](waves/wave-y/Y1.md); installers, accessibility, Double Tap and computer use exercised on real macOS and Windows runners in [real-os.yml](../.github/workflows/real-os.yml) | done |
+| Target: Linux, macOS and Windows | [ci.yml](../.github/workflows/ci.yml); real desktop runs in [Y1](waves/wave-y/Y1.md); installers, accessibility, Double Tap and computer use exercised on real macOS and Windows runners in [real-os.yml](../.github/workflows/real-os.yml); Z1: Wayland (sway, KWin) accessibility and Double Tap insert, the Double Tap overlay fired by real key presses on Linux, Windows and macOS, computer use over macOS AX (16/16) | done (Wayland global shortcut: see open items) |
 | Target: nightly eval dashboards | [nightly.yml](../.github/workflows/nightly.yml) (knowledge; memory and proactive with the real backend; cua inproc and xvfb, draft with the fake provider, perf with the real backend; history on the `bench-results` branch); [dashboard](book/src/benchmarks/dashboard.md) | done (Y5) |
 
 ---

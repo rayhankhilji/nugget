@@ -24,6 +24,7 @@ import { localityLabel, tierLabel } from "../format";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, ErrorNote, PageHeader } from "../components/ui";
 import { CopyButton } from "../components/CopyButton";
+import { Announce, useAnnouncer } from "../components/Announce";
 import { Markdown, type CitationLinks } from "../components/Markdown";
 import { citedNumbers, groupSources, stripCitationMarkers, withheldNotice, type SourceEntry } from "../citations";
 import { Trans, useT } from "../i18n";
@@ -142,7 +143,7 @@ export function ChatPage() {
   const [useSources, setUseSources] = useState(readUseSources);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
-  const [announce, setAnnounce] = useState("");
+  const [announcement, announce] = useAnnouncer();
   const early = useRef(new Map<string, Early>());
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -271,6 +272,20 @@ export function ChatPage() {
     }
   });
 
+  // A reply that streamed here is announced once it is complete, never per delta. A failed one
+  // announces itself through its alert; a stopped one through `stop`.
+  const streamed = useRef(new Set<number>());
+  useEffect(() => {
+    for (const x of turns) {
+      if (isActive(x)) streamed.current.add(x.id);
+      else if (streamed.current.delete(x.id) && x.state === "done") {
+        const citations = x.citations ?? [];
+        const cited = citedNumbers(x.text, new Set(citations.map((c) => c.n)));
+        announce(t("announce.answerReady", { count: groupSources(citations, cited).cited.length }));
+      }
+    }
+  }, [turns, announce, t]);
+
   // Keep the newest output in view while streaming.
   useEffect(() => {
     const el = logRef.current;
@@ -291,7 +306,7 @@ export function ChatPage() {
     const reply: Turn = { id: nextTurnId++, role: "assistant", text: "", state: "pending" };
     setTurns((ts) => [...ts, userTurn, reply]);
     setInput("");
-    setAnnounce("");
+    announce(t("announce.answering"));
 
     awaiting.current++;
     try {
@@ -353,7 +368,7 @@ export function ChatPage() {
     // Detach first so deltas still in flight don't land after "Stopped".
     attached.current.delete(streamId);
     setTurns((ts) => ts.map((x) => (x.id === active.id && x.state !== "done" ? { ...x, state: "cancelled" } : x)));
-    setAnnounce(t("chat.stoppedAnnounce"));
+    announce(t("chat.stoppedAnnounce"));
     try {
       await api.chatCancel(streamId);
     } catch {
@@ -400,7 +415,7 @@ export function ChatPage() {
       setConvs([]);
       setHistoryError(null);
       startNew();
-      setAnnounce(t("chat.history.cleared"));
+      announce(t("chat.history.cleared"));
     } catch (err) {
       if (historyUnavailable(err)) setHistoryOn(false);
       else setHistoryError(errorMessage(err));
@@ -550,8 +565,13 @@ export function ChatPage() {
         )}
 
         <div className="chat-pane">
-          {/* The log region wraps the list: role="log" on the <ol> itself would hide its list semantics. */}
-          <div className="chat-log" ref={logRef} role="log" aria-label={t("chat.conversation")} aria-busy={!!active}>
+          <h2 id="chat-log-title" className="visually-hidden">
+            {t("chat.conversation")}
+          </h2>
+          {/* The log region wraps the list: role="log" on the <ol> itself would hide its list semantics.
+              It is not live (a reply would be read token by token): the status below announces a
+              reply's start and end instead. */}
+          <div className="chat-log" ref={logRef} role="log" aria-labelledby="chat-log-title" aria-live="off" aria-busy={!!active}>
             <ol className="chat-list">
               {turns.length === 0 && (
                 <li className="chat-empty muted">
@@ -577,9 +597,7 @@ export function ChatPage() {
               {opener.status.text}
             </p>
           )}
-          <p className="visually-hidden" role="status">
-            {announce}
-          </p>
+          <Announce message={announcement} />
 
           <form className="composer" onSubmit={send}>
             <label htmlFor="chat-input" className="visually-hidden">

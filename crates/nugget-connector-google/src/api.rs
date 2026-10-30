@@ -35,14 +35,36 @@ pub(crate) struct GoogleApi {
     login_hint: Option<String>,
 }
 
-enum Outcome {
-    /// 2xx, 404 and 410: the caller decides.
-    Done(Response),
+enum Outcome<T = Response> {
+    /// 2xx, 404 and 410 (and, for [`GoogleApi::get_media`], per-file refusals): the caller
+    /// decides.
+    Done(T),
     /// 401: refresh the token once and retry.
     Refresh,
     /// Worth retrying after a backoff.
     Retry(Error),
     Fatal(Error),
+}
+
+/// The result of [`GoogleApi::get_media`].
+#[derive(Debug)]
+pub(crate) enum Media {
+    /// A 2xx, 404 or 410 response: check `status`.
+    Body(Response),
+    /// The body was larger than the per-call cap.
+    TooLarge,
+    /// Google refused this one request for a reason that does not affect others: a 400, or a
+    /// 403 that is neither a rate limit nor a quota (e.g. `cannotExportFile`,
+    /// `exportSizeLimitExceeded`, `fileNotDownloadable`, `cannotDownloadAbusiveFile`, or
+    /// `accessNotConfigured` / `SERVICE_DISABLED` when an API is not enabled for the client).
+    Refused {
+        status: u16,
+        /// The first Google error reason (`errors[].reason`, then `details[].reason`), bounded
+        /// to letters, digits and `_`; may be empty.
+        reason: String,
+        /// Google's error message, at most 300 characters. For logs, not for users.
+        message: String,
+    },
 }
 
 #[derive(Deserialize, Default)]
@@ -159,6 +181,39 @@ impl GoogleApi {
         self.call(Method::POST, url, Some(body), cancel).await
     }
 
+    /// GET `url` for raw content (exports, downloads, or JSON whose errors must not fail a whole
+    /// sync), with the same token refresh, retries and backoff as [`get`](Self::get), the given
+    /// `Accept` header and a per-call body cap. 2xx, 404 and 410 are [`Media::Body`]; a body
+    /// over `max_body` is [`Media::TooLarge`]; 400s and 403s other than rate limits and quota
+    /// are [`Media::Refused`]. Rate limits, quota, 5xx, network failures and 401 after a
+    /// refresh are errors exactly as in [`get`](Self::get).
+    pub(crate) async fn get_media(
+        &self,
+        url: &Url,
+        accept: &str,
+        max_body: usize,
+        cancel: &CancellationToken,
+    ) -> Result<Media> {
+        let http = self.http.clone().with_max_body(max_body);
+        self.run(
+            &http,
+            Method::GET,
+            url,
+            None,
+            accept,
+            cancel,
+            |sent| match sent {
+                Ok(resp) => classify_media(resp),
+                Err(Error::Invalid(m)) if m.starts_with("response body exceeds") => {
+                    Outcome::Done(Media::TooLarge)
+                }
+                Err(e @ Error::Network(_)) => Outcome::Retry(e),
+                Err(e) => Outcome::Fatal(e),
+            },
+        )
+        .await
+    }
+
     async fn call(
         &self,
         method: Method,
@@ -166,6 +221,35 @@ impl GoogleApi {
         body: Option<&serde_json::Value>,
         cancel: &CancellationToken,
     ) -> Result<Response> {
+        self.run(
+            &self.http,
+            method,
+            url,
+            body,
+            "application/json",
+            cancel,
+            |sent| match sent {
+                Ok(resp) => classify(resp),
+                Err(e @ Error::Network(_)) => Outcome::Retry(e),
+                Err(e) => Outcome::Fatal(e),
+            },
+        )
+        .await
+    }
+
+    /// The request loop shared by every call: token, send, classify, refresh once on 401,
+    /// retry with backoff.
+    #[allow(clippy::too_many_arguments)]
+    async fn run<T>(
+        &self,
+        http: &MeteredHttp,
+        method: Method,
+        url: &Url,
+        body: Option<&serde_json::Value>,
+        accept: &str,
+        cancel: &CancellationToken,
+        classify: impl Fn(Result<Response>) -> Outcome<T>,
+    ) -> Result<T> {
         let mut attempt = 0u32;
         let mut refreshed = false;
         loop {
@@ -173,21 +257,16 @@ impl GoogleApi {
                 return Err(Error::Cancelled);
             }
             let token = self.tokens.access_token().await?;
-            let mut req = self
-                .http
+            let mut req = http
                 .request(method.clone(), url.as_str())
                 .bearer_auth(&token)
-                .header(ACCEPT, "application/json");
+                .header(ACCEPT, accept);
             if let Some(b) = body {
                 req = req
                     .header(reqwest::header::CONTENT_TYPE, "application/json")
                     .body(serde_json::to_vec(b)?);
             }
-            let outcome = match self.http.send(req, &[]).await {
-                Ok(resp) => classify(resp),
-                Err(e @ Error::Network(_)) => Outcome::Retry(e),
-                Err(e) => Outcome::Fatal(e),
-            };
+            let outcome = classify(http.send(req, &[]).await);
             match outcome {
                 Outcome::Done(resp) => return Ok(resp),
                 Outcome::Refresh if !refreshed => {
@@ -235,6 +314,48 @@ impl GoogleApi {
     pub(crate) fn json<T: for<'de> Deserialize<'de>>(resp: &Response, what: &str) -> Result<T> {
         serde_json::from_slice(&resp.body)
             .map_err(|e| Error::Invalid(format!("malformed {what} response: {e}")))
+    }
+}
+
+/// [`classify`] for [`GoogleApi::get_media`]: per-request refusals become
+/// [`Media::Refused`] instead of errors.
+fn classify_media(resp: Response) -> Outcome<Media> {
+    let status = resp.status.as_u16();
+    if status == 400 || status == 403 {
+        let body: GoogleError = serde_json::from_slice(&resp.body).unwrap_or_default();
+        let reasons: Vec<&str> = body
+            .error
+            .errors
+            .iter()
+            .map(|e| e.reason.as_str())
+            .chain(body.error.details.iter().map(|d| d.reason.as_str()))
+            .collect();
+        let limited = reasons
+            .iter()
+            .any(|r| RATE_REASONS.contains(r) || QUOTA_REASONS.contains(r));
+        if status == 400 || !limited {
+            let reason = reasons
+                .iter()
+                .find(|r| !r.is_empty())
+                .map(|r| {
+                    r.chars()
+                        .filter(|c| c.is_ascii_alphanumeric() || *c == '_')
+                        .take(64)
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Outcome::Done(Media::Refused {
+                status,
+                reason,
+                message: body.error.message.chars().take(300).collect(),
+            });
+        }
+    }
+    match classify(resp) {
+        Outcome::Done(resp) => Outcome::Done(Media::Body(resp)),
+        Outcome::Refresh => Outcome::Refresh,
+        Outcome::Retry(e) => Outcome::Retry(e),
+        Outcome::Fatal(e) => Outcome::Fatal(e),
     }
 }
 
