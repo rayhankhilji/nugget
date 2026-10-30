@@ -7,6 +7,7 @@ import { Badge, ErrorNote, Spinner } from "../components/ui";
 import type { AiChoice } from "./machine";
 import type { ModelFit } from "../api";
 import { ByokForm } from "./ByokForm";
+import { detectAiSetup, isSearchModel, sortModels } from "./detect";
 import { FitNotes, loadFit, MachineLine } from "./ModelFit";
 import { detectOs, type Os } from "./platform";
 import { CommandSnippet, OfflineNote, StepHeading, type StepProps } from "./steps";
@@ -75,21 +76,7 @@ const PHASE: Record<ModelProgress["phase"], MessageKey> = {
   failed: "onboarding.models.phase.failed",
 };
 
-/** Recommended first, then by size (smallest first), then by id. */
-export function sortModels(list: readonly ModelInfo[]): ModelInfo[] {
-  return [...list].sort(
-    (a, b) => Number(b.recommended) - Number(a.recommended) || a.size_bytes - b.size_bytes || a.id.localeCompare(b.id),
-  );
-}
-
-const SEARCH_TIERS = new Set(["embedding", "rerank"]);
-
-/** A model that only serves search (embeddings, reranking), not chat and drafting. */
-export function isSearchModel(m: Pick<ModelInfo, "id" | "tiers">, fit?: Pick<ModelFit, "tiers"> | null): boolean {
-  const tiers = m.tiers?.length ? m.tiers : fit?.tiers ?? [];
-  if (tiers.length) return tiers.every((t) => SEARCH_TIERS.has(t));
-  return /(^|[-_])(embed|rerank)/i.test(m.id);
-}
+export { isSearchModel, sortModels };
 
 /**
  * The one chat model to suggest: the daemon's own pick for this machine (the largest that fits
@@ -351,6 +338,14 @@ function ByokGuide({ onSaved }: { onSaved: (provider: string) => void }) {
   const selectId = useId();
   const [kind, setKind] = useState<ProviderKind>("anthropic");
   const guide = PROVIDER_GUIDES[kind];
+  // A key saved before (running setup again) sets up this path too.
+  useEffect(() => {
+    let alive = true;
+    void detectAiSetup("byok").then((id) => alive && id && onSaved(id));
+    return () => {
+      alive = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <section className="ob-section" aria-labelledby="ob-byok">

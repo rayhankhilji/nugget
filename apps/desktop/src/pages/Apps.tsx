@@ -93,10 +93,19 @@ export function AppsPage() {
                 <tbody>
                   {list.map((c) => {
                     const sum = summarizeScopes(c.scopes, sources.data);
+                    // Two connections with the same name: tell them apart by a short id, on screen and to screen readers.
+                    const shortId = list.some((o) => o.id !== c.id && o.name === c.name) ? c.id.slice(0, 8) : null;
                     return (
                       <tr key={c.id}>
                         <th scope="row" title={c.id}>
                           <bdi>{c.name}</bdi>
+                          {shortId && (
+                            <div className="muted small">
+                              <bdi dir="ltr">
+                                <code>{shortId}</code>
+                              </bdi>
+                            </div>
+                          )}
                         </th>
                         <td>
                           {sum.sources}
@@ -112,7 +121,7 @@ export function AppsPage() {
                           {c.last_used ? formatRelative(c.last_used, now) : <span className="muted">{t("apps.neverUsed")}</span>}
                         </td>
                         <td>
-                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={t("apps.revokeLabel", { name: c.name })}>
+                          <button type="button" className="btn btn-small btn-danger-ghost" onClick={() => setRevoking(c)} aria-label={shortId ? t("apps.revokeLabelId", { name: c.name, id: shortId }) : t("apps.revokeLabel", { name: c.name })}>
                             {t("apps.revoke")}
                           </button>
                         </td>

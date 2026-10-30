@@ -160,14 +160,20 @@ function useContentUnder(main: RefObject<HTMLElement | null>, foot: RefObject<HT
       if (!m || !f) return;
       // The main area's padding is breathing room, not content.
       const pad = parseFloat(getComputedStyle(m).paddingBlockEnd) || 0;
-      setUnder(m.getBoundingClientRect().bottom - pad > f.getBoundingClientRect().top + 1);
+      const footer = f.getBoundingClientRect();
+      setUnder(m.getBoundingClientRect().bottom - pad > footer.top + 1);
+      // Focus scrolling (Tab) keeps the focused control clear of the sticky footer.
+      document.documentElement.style.scrollPaddingBlockEnd = `${Math.ceil(footer.height) + 12}px`;
     };
     check();
     window.addEventListener("scroll", check, { passive: true, capture: true });
     window.addEventListener("resize", check);
     const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(check);
     if (main.current) ro?.observe(main.current);
+    // The footer grows when the hint appears or it wraps.
+    if (foot.current) ro?.observe(foot.current);
     return () => {
+      document.documentElement.style.scrollPaddingBlockEnd = "";
       window.removeEventListener("scroll", check, { capture: true });
       window.removeEventListener("resize", check);
       ro?.disconnect();

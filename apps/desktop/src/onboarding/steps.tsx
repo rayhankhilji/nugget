@@ -5,10 +5,11 @@ import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { CopyButton } from "../components/CopyButton";
-import { pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
+import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
 import { TriggerKeys } from "./TriggerStep";
-import { loadTrigger } from "./trigger";
+import { loadTrigger, readTrigger } from "./trigger";
+import { detectAiSetup } from "./detect";
 
 export interface StepProps {
   state: OnboardingState;
@@ -324,42 +325,91 @@ export const STEP_TITLE: Record<StepId, MessageKey> = {
   done: "onboarding.step.done",
 };
 
-export function DoneStep({ headingRef, state, dispatch, searchable = 0 }: StepProps & { searchable?: number }) {
+export function DoneStep({ headingRef, state, dispatch, connected, searchable = 0 }: StepProps & { searchable?: number }) {
   const t = useT();
   const pending = pendingSteps(state);
   const withAi = state.ai === "local" || state.ai === "byok";
-  const aiReady = withAi && state.aiSetup?.ai === state.ai ? state.aiSetup : null;
   const os = detectOs();
+  // The shell's trigger is what Double Tap runs with; the local copy is only a first-render cache.
+  const [trigger, setTrigger] = useState(() => loadTrigger(os));
+  useEffect(() => {
+    let alive = true;
+    readTrigger(os)
+      .then((p) => alive && setTrigger(p))
+      .catch(() => {
+        /* keep the cached copy */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [os]);
+
+  // The summary follows what is really there (a key saved or a model installed before, sources
+  // added earlier), not only what this run of setup recorded.
+  const { ai: choice, aiSetup } = state;
+  const knownSources = (state.sources?.length ?? 0) > 0;
+  useEffect(() => {
+    if (!connected) return;
+    let alive = true;
+    if ((choice === "local" || choice === "byok") && aiSetup?.ai !== choice) {
+      void detectAiSetup(choice).then((what) => alive && what && dispatch({ type: "aiSetUp", ai: choice, what }));
+    }
+    if (!knownSources) {
+      api
+        .sourcesList()
+        .then((list) => alive && list.length > 0 && dispatch({ type: "sourcesFound", names: list.map((s) => s.name) }))
+        .catch(() => {});
+    }
+    return () => {
+      alive = false;
+    };
+  }, [connected, choice, aiSetup?.ai, knownSources, dispatch]);
+
+  const aiReady = withAi && aiSetup?.ai === state.ai ? aiSetup : null;
+  // Progress saved before setups were recorded: the step was completed, so it was set up.
+  const aiLegacy = withAi && !aiReady && legacyDone(state, "ai");
   const sources = state.sources ?? [];
+  const sourcesLegacy = sources.length === 0 && legacyDone(state, "source");
   const ai = aiReady
     ? aiReady.ai === "local"
       ? t("onboarding.done.summary.aiLocal", { model: aiReady.what })
       : t("onboarding.done.summary.aiByok", { provider: aiReady.what })
-    : withAi
-      ? t("onboarding.done.summary.aiNotSetUp")
-      : t("onboarding.done.summary.aiLater");
+    : aiLegacy
+      ? t(state.ai === "local" ? "onboarding.done.summary.aiLocalPlain" : "onboarding.done.summary.aiByokPlain")
+      : withAi
+        ? t("onboarding.done.summary.aiNotSetUp")
+        : t("onboarding.done.summary.aiLater");
+  const aiSet = aiReady !== null || aiLegacy;
   return (
     <>
       <StepHeading headingRef={headingRef}>{t("onboarding.done.heading")}</StepHeading>
-      <p className="ob-lead">{t(aiReady ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
+      <p className="ob-lead">{t(aiSet ? "onboarding.done.lead" : "onboarding.done.leadNoAi")}</p>
       {searchable > 0 && (
         <p className="note ob-index-ready" role="status">
           {t("onboarding.done.searchable", { count: searchable })}
         </p>
       )}
       <dl className="ob-summary">
-        <div className={aiReady ? "ob-summary-set" : "ob-summary-unset"}>
+        <div className={aiSet ? "ob-summary-set" : "ob-summary-unset"}>
           <dt>{t("onboarding.done.summary.ai")}</dt>
           <dd>{ai}</dd>
         </div>
-        <div className={sources.length ? "ob-summary-set" : "ob-summary-unset"}>
+        <div className={sources.length || sourcesLegacy ? "ob-summary-set" : "ob-summary-unset"}>
           <dt>{t("onboarding.done.summary.sources")}</dt>
-          <dd>{sources.length ? <bdi>{formatList(sources)}</bdi> : t("onboarding.done.summary.sourcesNone")}</dd>
+          <dd>
+            {sources.length ? (
+              <bdi>{formatList(sources)}</bdi>
+            ) : sourcesLegacy ? (
+              t("onboarding.done.summary.sourcesAdded")
+            ) : (
+              t("onboarding.done.summary.sourcesNone")
+            )}
+          </dd>
         </div>
         <div className="ob-summary-set">
           <dt>{t("onboarding.done.summary.trigger")}</dt>
           <dd>
-            <TriggerKeys pref={loadTrigger(os)} os={os} />
+            <TriggerKeys pref={trigger} os={os} />
           </dd>
         </div>
       </dl>

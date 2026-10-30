@@ -763,7 +763,15 @@ function Browser() {
             </details>
           )}
           <div className="card-actions">
-            <button type="button" className="btn btn-small" onClick={status.reload} disabled={status.loading}>
+            {/* aria-disabled, not disabled: pressing it must not drop keyboard focus to the page body. */}
+            <button
+              type="button"
+              className="btn btn-small"
+              onClick={() => {
+                if (!status.loading) status.reload();
+              }}
+              aria-disabled={status.loading || undefined}
+            >
               {t("safety.browser.check")}
             </button>
           </div>

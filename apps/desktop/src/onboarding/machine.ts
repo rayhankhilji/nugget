@@ -73,9 +73,18 @@ function advance(step: StepId): StepId {
  * steps are done once seen.
  */
 export function stepGoalMet(state: OnboardingState, step: StepId = state.step): boolean {
-  if (step === "ai") return (state.ai === "local" || state.ai === "byok") && state.aiSetup?.ai === state.ai;
-  if (step === "source") return (state.sources?.length ?? 0) > 0;
+  if (step === "ai") return (state.ai === "local" || state.ai === "byok") && (state.aiSetup?.ai === state.ai || legacyDone(state, "ai"));
+  if (step === "source") return (state.sources?.length ?? 0) > 0 || legacyDone(state, "source");
   return true;
+}
+
+/**
+ * Progress saved before setups were recorded (no `aiSetup` / `sources`): a step completed then
+ * was done, so it still counts.
+ */
+export function legacyDone(state: OnboardingState, step: "ai" | "source"): boolean {
+  const recorded = step === "ai" ? state.aiSetup !== undefined : state.sources !== undefined;
+  return !recorded && state.completed.includes(step);
 }
 
 export function reduce(state: OnboardingState, action: Action): OnboardingState {

@@ -45,8 +45,8 @@ body.overlay-body {
   color: var(--text);
 }
 
-.overlay-error .overlay-phase::before,
-.overlay-refused .overlay-phase::before {
+/* The glyph is on an aria-hidden span, so it isn't read out with the status. */
+.overlay-icon::before {
   content: "!";
   display: inline-grid;
   place-items: center;
@@ -60,7 +60,7 @@ body.overlay-body {
   background: var(--warn);
 }
 
-.overlay-error .overlay-phase::before {
+.overlay-error .overlay-icon::before {
   background: var(--bad);
 }
 

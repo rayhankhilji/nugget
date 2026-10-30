@@ -23,8 +23,9 @@ export function modelRole(m: Pick<ModelInfo, "id" | "tiers">, fit?: Pick<ModelFi
     if (tiers.every((x) => x === "embedding" || x === "rerank")) return "embedding";
     return "chat";
   }
+  // No tier data (older daemon): known search families and name patterns.
   if (/(^|[-_])rerank/i.test(m.id)) return "rerank";
-  if (/(^|[-_])embed/i.test(m.id)) return "embedding";
+  if (/(^|[-_])embed/i.test(m.id) || /(^|[-_])(bge|e5|gte|minilm|mpnet)([-_.]|$)/i.test(m.id)) return "embedding";
   return "chat";
 }
 
@@ -43,6 +44,35 @@ const QUANT = /^(q\d.*|f16|f32|bf16|gguf|iq\d.*)$/i;
  * `qwen3-4b-q4km` → "Qwen3 4B", `bge-reranker-v2-m3-q4km` → "BGE Reranker v2 M3".
  */
 export function modelName(id: string): string {
+  return baseName(id);
+}
+
+/** The quantisation suffix as people write it (`q4km` → "Q4_K_M", `q8` → "Q8"), or null. */
+export function quantLabel(id: string): string | null {
+  const m = /[-_](i?q\d\w*|f16|bf16|f32)$/i.exec(id);
+  if (!m) return null;
+  const q = m[1]!.toUpperCase();
+  return /^I?Q\d[A-Z]+$/.test(q) ? q.replace(/^(I?Q\d)([A-Z])([A-Z])?$/, (_, a: string, b: string, c?: string) => [a, b, c].filter(Boolean).join("_")) : q;
+}
+
+/**
+ * Readable names for a list of ids: the base name, plus the quantisation when two ids would
+ * otherwise read the same (`qwen3-4b-q4km`, `qwen3-4b-q8` → "Qwen3 4B Q4_K_M", "Qwen3 4B Q8").
+ */
+export function modelNames(ids: readonly string[]): Map<string, string> {
+  const base = new Map(ids.map((id) => [id, baseName(id)]));
+  const count = new Map<string, number>();
+  for (const n of base.values()) count.set(n, (count.get(n) ?? 0) + 1);
+  return new Map(
+    ids.map((id) => {
+      const n = base.get(id)!;
+      const q = quantLabel(id);
+      return [id, (count.get(n) ?? 0) > 1 ? (q ? `${n} ${q}` : `${n} (${id})`) : n];
+    }),
+  );
+}
+
+function baseName(id: string): string {
   const words = id
     .replace(/[-_](i?q\d\w*|f16|bf16|f32)$/i, "")
     .split(/[-_\s]+/)
@@ -55,6 +85,15 @@ export function modelName(id: string): string {
       return w.charAt(0).toUpperCase() + w.slice(1);
     });
   return words.length ? words.join(" ") : id;
+}
+
+/**
+ * The one chat model to badge "Best for this computer": the daemon's largest that fits memory.
+ * Without fit data (an older daemon) there is no basis for one, so none (cards keep "Recommended").
+ */
+export function bestChatModel(chat: readonly ModelInfo[], fit: FitReport | null | undefined): ModelInfo | undefined {
+  if (!fit) return undefined;
+  return chat.find((m) => m.recommended && fit.models.find((f) => f.id === m.id)?.reasons.includes("ram_fits_largest"));
 }
 
 export function ModelsPage() {
@@ -87,9 +126,8 @@ export function ModelsPage() {
   const fitOf = (m: ModelInfo) => fit.data?.models.find((f) => f.id === m.id);
   const chat = list.filter((m) => modelRole(m, fitOf(m)) === "chat");
   const search = list.filter((m) => modelRole(m, fitOf(m)) !== "chat");
-  // One chat model is "the" pick: the daemon's largest that fits memory, else its first recommended.
-  const recommendedChat = chat.filter((m) => m.recommended);
-  const best = recommendedChat.find((m) => fitOf(m)?.reasons.includes("ram_fits_largest")) ?? recommendedChat[0];
+  const best = bestChatModel(chat, fit.data);
+  const names = modelNames(list.map((m) => m.id));
 
   const anyInstalled = list.some((m) => m.installed || progress[m.id]?.phase === "installed");
   const card = (m: ModelInfo) => (
@@ -97,7 +135,10 @@ export function ModelsPage() {
       key={m.id}
       model={m}
       role={modelRole(m, fitOf(m))}
-      pick={modelRole(m, fitOf(m)) === "chat" ? m === best : m.recommended}
+      name={names.get(m.id) ?? modelName(m.id)}
+      best={m === best}
+      hasBest={best !== undefined}
+      recommended={m.recommended}
       progress={progress[m.id]}
       error={requestError[m.id]}
       fit={fit.data}
@@ -171,7 +212,10 @@ export function ModelsPage() {
 function ModelCard({
   model,
   role,
-  pick,
+  name,
+  best,
+  hasBest,
+  recommended,
   progress,
   error,
   fit,
@@ -179,8 +223,13 @@ function ModelCard({
 }: {
   model: ModelInfo;
   role: ModelRole;
-  /** The one to install for this role: badged, and its Install button is primary. */
-  pick: boolean;
+  name: string;
+  /** The one chat model to install: "Best for this computer", and a primary Install button. */
+  best: boolean;
+  /** Some chat model is the best pick, so other chat cards drop their "Recommended" badge. */
+  hasBest: boolean;
+  /** Recommended by the daemon; shown as such when there is no single best pick in this group. */
+  recommended: boolean;
   progress?: ModelProgress;
   error?: string;
   fit?: FitReport | null;
@@ -199,14 +248,15 @@ function ModelCard({
       <div className="card-head">
         <span className="model-title">
           <span id={labelId} className="card-title">
-            {modelName(model.id)}
+            {name}
           </span>
           <bdi dir="ltr" className="model-id">
             <code>{model.id}</code>
           </bdi>
         </span>
         <span className="badges">
-          {pick && !installed && <Badge tone="accent">{role === "chat" ? t("models.best") : t("models.recommended")}</Badge>}
+          {!installed && best && <Badge tone="accent">{t("models.best")}</Badge>}
+          {!installed && !best && recommended && (role !== "chat" || !hasBest) && <Badge tone="accent">{t("models.recommended")}</Badge>}
           {installed && <Badge tone="good">{t("models.installed")}</Badge>}
         </span>
       </div>
@@ -239,7 +289,7 @@ function ModelCard({
 
       {!installed && !busy && (
         <div className="card-actions">
-          <button type="button" className={pick ? "btn btn-primary" : "btn"} onClick={onInstall}>
+          <button type="button" className={best ? "btn btn-primary" : "btn"} onClick={onInstall}>
             {failed || error ? t("models.retryInstall") : t("models.install")}
           </button>
         </div>

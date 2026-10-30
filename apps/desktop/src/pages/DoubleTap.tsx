@@ -45,6 +45,8 @@ export function DoubleTapPage() {
   const [firing, setFiring] = useState(false);
   const [fireNotice, setFireNotice] = useState<Notice>(null);
   const readAheadHintId = useId();
+  const tryHintId = useId();
+  const tryOff = saved.data !== undefined && !saved.data.enabled;
 
   // Start editing from what's saved; a later reload doesn't clobber unsaved edits.
   useEffect(() => {
@@ -109,17 +111,25 @@ export function DoubleTapPage() {
         title={t("doubletap.title")}
         description={t("doubletap.description")}
         actions={
+          // aria-disabled keeps it focusable, so keyboard users reach the reason it can't run.
           <button
             type="button"
             className="btn"
-            onClick={() => void fire()}
-            disabled={firing || !saved.data?.enabled}
-            title={saved.data && !saved.data.enabled ? t("doubletap.try.offHint") : undefined}
+            onClick={() => {
+              if (!firing && saved.data?.enabled) void fire();
+            }}
+            aria-disabled={firing || !saved.data?.enabled || undefined}
+            aria-describedby={tryOff ? tryHintId : undefined}
           >
             {t("doubletap.try.button")}
           </button>
         }
       />
+      {tryOff && (
+        <p id={tryHintId} className="muted small dt-try-hint">
+          {t("doubletap.try.offHint")}
+        </p>
+      )}
       {fireNotice && (
         <p className={fireNotice.error ? "note note-error" : "note"} role="status">
           {fireNotice.text}

@@ -120,6 +120,7 @@ export function Overlay() {
       <div className="overlay-head">
         <span className="overlay-phase" role="status">
           {(view.phase === "reading" || view.phase === "inserting") && <span className="spinner" aria-hidden="true" />}
+          {(view.phase === "error" || view.phase === "refused") && <span className="overlay-icon" aria-hidden="true" />}
           {t(phaseKey)}
         </span>
         {badge && (

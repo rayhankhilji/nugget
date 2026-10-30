@@ -28,7 +28,7 @@ import {
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { formatRelative, formatTime } from "../format";
 import { GoToPage } from "../components/GoToPage";
-import { plainSnippet, SourceBadge } from "../components/Provenance";
+import { SourceBadge } from "../components/Provenance";
 import { Badge, EmptyState, ErrorNote, Loading, PageHeader, Spinner } from "../components/ui";
 import { formatList, formatNumber, useT, type MessageKey } from "../i18n";
 import { ActionDialog } from "./today/ActionDialog";
@@ -592,11 +592,11 @@ function EvidenceList({ evidence, label }: { evidence: CardEvidence[]; label: st
         {evidence.map((ev, i) => {
           const e = evidenceLine(ev);
           const source = sources.get(ev.item.source);
-          const quote = e.quote ? plainSnippet(e.quote) : "";
+          const quote = e.quote;
           return (
             <li key={`${ev.item.source}\u0000${ev.item.key}\u0000${i}`}>
               {quote ? (
-                <blockquote className="evidence-quote" dir="auto" title={e.truncated ? ev.quote ?? undefined : undefined}>
+                <blockquote className="evidence-quote" dir="auto" title={e.truncated ? e.full : undefined}>
                   {quote}
                 </blockquote>
               ) : (

@@ -53,6 +53,12 @@ describe("ErrorNote", () => {
     expect(js.headline).toBe(t("common.error.generic"));
   });
 
+  it("an Error thrown by the app keeps its own (translated) sentence", async () => {
+    const n = await note(new Error(t("plugins.approve.failed")));
+    expect(n.headline).toBe(t("plugins.approve.failed"));
+    expect(n.details).toBeNull();
+  });
+
   it("offline: a quiet hint, not an error", async () => {
     const n = await note({ kind: "disconnected", message: "broken pipe" });
     expect(n.alert.classList.contains("note-error")).toBe(false);

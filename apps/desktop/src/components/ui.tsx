@@ -62,7 +62,10 @@ export function ErrorNote({ error, onRetry }: { error: unknown; onRetry?: () => 
       </div>
     );
   }
-  const { headline, detail } = describeError(e, t);
+  // App code throws plain `Error`s with an already translated sentence (e.g. Plugins' approve);
+  // show those as they are. Runtime errors (TypeError, …) and shell errors keep the generic line.
+  const own = error instanceof Error && !(error instanceof ApiError) && error.name === "Error" && error.message.trim();
+  const { headline, detail } = own ? { headline: error.message.trim(), detail: null } : describeError(e, t);
   return (
     <div className="note note-error" role="alert">
       <span className="note-text" dir="auto">

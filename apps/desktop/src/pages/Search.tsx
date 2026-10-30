@@ -18,6 +18,7 @@ import { citedNumbers, splitCitations, withheldNotice } from "../citations";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../components/Provenance";
+import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { formatNumber, useT } from "../i18n";
 
@@ -139,8 +140,8 @@ export function SearchPage() {
       {hits && hits.length > 0 && (
         <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy}>
           {hits.map((h, i) => {
-            const title = h.title || itemFileName(h.item.key);
             const source = byId.get(h.item.source);
+            const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");
             return (
               <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
                 <div className="result-head">
@@ -458,7 +459,7 @@ function CitationItem({
   idPrefix?: string;
 }) {
   const t = useT();
-  const title = c.title || itemFileName(c.item.key);
+  const title = c.title || itemFileName(c.item.key, source?.kind ?? sourceKindOf(c.item.source)) || t("search.untitled");
   return (
     <li id={`${idPrefix}-${c.n}`} tabIndex={-1} className="citation">
       <span className="cite-n">[{c.n}]</span>
