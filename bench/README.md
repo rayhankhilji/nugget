@@ -1585,7 +1585,7 @@ Options (all suites):
 | `--draft-judge-model ID` | `draft`: judge with this manifest model on a second local server next to the drafting one (same `--models-home`), instead of the drafting model; implies `--draft-judge model` (`params.judge.model`, `judge.same_model_as_drafts`) |
 | `--draft-judge-timeout-s N` | `draft`: per-request timeout of the model judge (default 240 with `--draft-judge-model`, else the draft timeout; `params.judge.timeout_s`) |
 | `--draft-judge-grounding` | `draft`: also judge the grounded Nugget arm against the ungrounded one (`draft.judge_grounding.*`; needs `--draft-grounding both`; doubles the judge requests) |
-| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` all 93); the scenario items are always kept |
+| `--knowledge-items N` | `knowledge`: items extracted by the real model instead of the scale's subset (`smoke` 8, `quick` 30, `standard` and `all`: every item of the corpus); the scenario items are always kept. `--knowledge-corpus original` restricts the corpus to the 93 items before EE1 |
 | `--knowledge-dump FILE` | `knowledge` (any LLM): write false positives / negatives and, with a real model, every request with its answer and gate verdicts, as JSONL (see the `knowledge` section) |
 | `NUGGET_BENCH_CUA_TASK_TIMEOUT` | `cua`: per-task wall-clock limit in seconds (default 300) |
 
