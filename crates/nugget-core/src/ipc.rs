@@ -87,6 +87,12 @@ pub mod method {
     pub const DRAFT_FEEDBACK: &str = "draft.feedback";
     /// Sent when the trigger fires, before `draft.begin`: warm the provider, retrieval and voice.
     pub const DRAFT_PREWARM: &str = "draft.prewarm";
+    /// Sent while a reply field keeps focus (Double Tap read-ahead, local providers only):
+    /// prefill the coming draft's whole prompt into the local server's cache, generating
+    /// nothing. Params: `DraftRequest`; result `{ "started": bool, "skipped": reason? }`.
+    pub const DRAFT_READ_AHEAD: &str = "draft.read_ahead";
+    /// Cancel a read-ahead in progress (the field lost focus). Result `{ "cancelled": bool }`.
+    pub const DRAFT_READ_AHEAD_CANCEL: &str = "draft.read_ahead_cancel";
     pub const VOICE_STATUS: &str = "voice.status";
 }
 

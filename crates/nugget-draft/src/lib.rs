@@ -39,6 +39,7 @@ mod engine;
 pub mod post;
 pub mod prompt;
 mod voice;
+mod warm;
 
 pub use classify::{
     DEFAULT_EXCLUDED_APPS, DEFAULT_TERMINAL_APPS, Refusal, classify, gate, gate_with, is_secure,
@@ -50,6 +51,7 @@ pub use engine::{
     Warmer, post_options, retrieval_query,
 };
 pub use prompt::{FEATURE_DRAFT, LengthBand, PromptLimits};
+pub use warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};
 pub use voice::{ProfileVoice, VoiceFeedback, feedback_parts, profile_query};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

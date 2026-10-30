@@ -23,6 +23,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use crate::FieldKind;
+use crate::warm::{ReadAheadConfig, ReadAheadOutcome, ReadAheadSkip};
 use crate::classify::{DEFAULT_EXCLUDED_APPS, gate_with, normalize_app_id, url_host_path};
 use crate::post::{Emit, PostOptions, PostProcessor, is_greeting_line, is_signoff};
 use crate::prompt::{
@@ -177,6 +178,8 @@ pub struct DraftConfig {
     /// Smaller prompts for on-device and LAN providers ([`LocalBudget`]); cloud providers keep
     /// `budget_tokens` and `limits`.
     pub local: LocalBudget,
+    /// Read-ahead while a reply field keeps focus ([`Drafter::read_ahead`]).
+    pub read_ahead: ReadAheadConfig,
 }
 
 /// The prompt budget for non-cloud providers, whose prompt reading dominates Double Tap latency.
@@ -193,6 +196,11 @@ pub struct LocalBudget {
     /// snippets a sensitive one (a card number, a password) is more likely to make the cut and
     /// a small model to paste it into a draft that is then sent from a third-party app.
     pub include_sensitive: bool,
+    /// Drafts routed by tier to a non-cloud provider go to this provider first (the small
+    /// Double Tap model, `local-draft`), falling back to the tier's candidates. Ignored when
+    /// the request or the app names a provider, or the tier's first candidate is a cloud one.
+    #[serde(default)]
+    pub provider: Option<ProviderId>,
     #[serde(skip, default = "PromptLimits::local")]
     pub limits: PromptLimits,
 }
@@ -204,6 +212,7 @@ impl Default for LocalBudget {
             budget_tokens: 300,
             max_snippets: 3,
             include_sensitive: false,
+            provider: None,
             limits: PromptLimits::local(),
         }
     }
@@ -227,6 +236,7 @@ impl Default for DraftConfig {
             prewarm_ttl_ms: 30_000,
             limits: PromptLimits::default(),
             local: LocalBudget::default(),
+            read_ahead: ReadAheadConfig::default(),
         }
     }
 }
@@ -639,6 +649,21 @@ impl Drafter {
             }
         }
         Err(last_err.unwrap_or_else(|| Error::NotFound("no provider could draft".into())))
+    }
+
+    /// Read ahead (CONTRACT SKELETON, filled in by the engine work): prefill the whole prompt
+    /// `begin` would send for `req` into a non-cloud provider's cache, generating nothing.
+    pub async fn read_ahead(
+        &self,
+        req: DraftRequest,
+    ) -> std::result::Result<ReadAheadOutcome, ReadAheadSkip> {
+        let _ = req;
+        Err(ReadAheadSkip::Disabled)
+    }
+
+    /// Cancel the read-ahead in progress, if any. Returns whether one was running.
+    pub fn cancel_read_ahead(&self) -> bool {
+        false
     }
 
     /// Cancel a draft in progress. Returns whether it was known and still running.
