@@ -116,3 +116,9 @@ Briefs in `docs/waves/wave-dd/`.
 | DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste |
 | DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence |
 | DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker |
+
+## Wave EE (after AA3, alongside DD): cloud sessions from the EE briefs commit
+Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent review layer of subagents.
+
+| WP | Branch | Session | Scope |
+|---|---|---|---|
