@@ -81,6 +81,12 @@ jobs:
     environment: ${{ needs.mode.outputs.release == 'true' && 'release-build' || '' }}
     permissions:
       contents: read
+      # Azure Trusted Signing logs in with a GitHub OIDC token instead of a stored secret
+      # (packaging/windows/sign.ps1). Job permissions can't depend on the matrix or the mode, so
+      # every leg, dry runs included, may request a token; Azure accepts it only if the Entra
+      # federated credential's subject matches, and that subject is
+      # `repo:rayhankhilji/nugget:environment:release-build`, which only `v*` tags can deploy to.
+      id-token: write
     env:
       RELEASE: ${{ needs.mode.outputs.release }}
     timeout-minutes: 120
@@ -206,14 +212,54 @@ jobs:
             echo "::warning::No App Store Connect API key: the app is signed but not notarized."
           fi
 
+      # Two ways to sign, both only on a real release:
+      #  - Azure Trusted Signing (Artifact Signing): `release-build` environment variables
+      #    AZURE_TRUSTED_SIGNING_ENDPOINT/_ACCOUNT/_PROFILE, AZURE_CLIENT_ID, AZURE_TENANT_ID; auth by
+      #    GitHub OIDC (federated credential), or the AZURE_CLIENT_SECRET secret if set. Tauri calls
+      #    packaging/windows/sign.ps1 for every file through `bundle.windows.signCommand`.
+      #  - an exportable .pfx (WINDOWS_CERTIFICATE/_PASSWORD), imported and used by thumbprint.
+      # Trusted Signing wins if both are configured.
       - name: Windows signing setup
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE || '' }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ env.RELEASE == 'true' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_ENDPOINT || '' }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_ACCOUNT || '' }}
+          AZURE_TRUSTED_SIGNING_PROFILE: ${{ env.RELEASE == 'true' && vars.AZURE_TRUSTED_SIGNING_PROFILE || '' }}
+          AZURE_CLIENT_ID: ${{ env.RELEASE == 'true' && vars.AZURE_CLIENT_ID || '' }}
+          AZURE_TENANT_ID: ${{ env.RELEASE == 'true' && vars.AZURE_TENANT_ID || '' }}
         run: |
           $out = Join-Path $env:RUNNER_TEMP 'signing.json'
+          $ats = @(@($env:AZURE_TRUSTED_SIGNING_ENDPOINT, $env:AZURE_TRUSTED_SIGNING_ACCOUNT, $env:AZURE_TRUSTED_SIGNING_PROFILE) | Where-Object { $_ })
+          if ($ats.Count -gt 0) {
+            if ($ats.Count -lt 3 -or -not $env:AZURE_CLIENT_ID -or -not $env:AZURE_TENANT_ID) {
+              Write-Output '::error::Azure Trusted Signing needs all of AZURE_TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE, AZURE_CLIENT_ID and AZURE_TENANT_ID (release-build environment variables).'
+              exit 1
+            }
+            if ($env:WINDOWS_CERTIFICATE) {
+              Write-Output '::warning::Both Azure Trusted Signing and WINDOWS_CERTIFICATE are configured; signing with Trusted Signing and ignoring the .pfx.'
+            }
+            $dlib = & ./packaging/windows/sign.ps1 -InstallDlib (Join-Path $env:RUNNER_TEMP 'artifact-signing') | Select-Object -Last 1
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+            # Identifiers only; the optional client secret goes to the build step alone.
+            @(
+              "AZURE_TRUSTED_SIGNING_ENDPOINT=$env:AZURE_TRUSTED_SIGNING_ENDPOINT"
+              "AZURE_TRUSTED_SIGNING_ACCOUNT=$env:AZURE_TRUSTED_SIGNING_ACCOUNT"
+              "AZURE_TRUSTED_SIGNING_PROFILE=$env:AZURE_TRUSTED_SIGNING_PROFILE"
+              "AZURE_TRUSTED_SIGNING_DLIB=$dlib"
+              "AZURE_CLIENT_ID=$env:AZURE_CLIENT_ID"
+              "AZURE_TENANT_ID=$env:AZURE_TENANT_ID"
+            ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            $script = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
+            @{ bundle = @{ windows = @{ signCommand = @{
+                cmd = 'pwsh'
+                args = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $script, '%1')
+            } } } } | ConvertTo-Json -Depth 6 | Out-File -FilePath $out -Encoding utf8NoBOM
+            Write-Output "Windows signing: Azure Trusted Signing, account $env:AZURE_TRUSTED_SIGNING_ACCOUNT, profile $env:AZURE_TRUSTED_SIGNING_PROFILE"
+            exit 0
+          }
           if (-not $env:WINDOWS_CERTIFICATE) {
             Write-Output '::warning::No Authenticode certificate: the installers are unsigned.'
             '{}' | Out-File -FilePath $out -Encoding utf8NoBOM
@@ -239,6 +285,8 @@ jobs:
           # Public key only: the app verifies updates against it. Set as a repository variable.
           NUGGET_UPDATER_PUBKEY: ${{ env.RELEASE == 'true' && vars.NUGGET_UPDATER_PUBKEY || '' }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # Optional fallback to OIDC for Azure Trusted Signing (sign.ps1); Windows leg only.
+          AZURE_CLIENT_SECRET: ${{ env.RELEASE == 'true' && runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
         run: |
           pnpm tauri build --ci --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} \
             --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"

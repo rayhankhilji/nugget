@@ -1,0 +1,384 @@
+name: Windows signing
+
+# Proves the Windows signing plumbing of release.yml (bundle.windows.signCommand ->
+# packaging/windows/sign.ps1) without any real key: a throwaway self-signed code-signing
+# certificate is created in the job (non-exportable, never uploaded) and deleted at the end.
+#
+#  - `sign-script`: fast checks of sign.ps1 on a copied system exe, failure paths, the pinned
+#    Artifact Signing dlib download, and the Azure Trusted Signing command line (dry mode, plus one
+#    real signtool+dlib call against fake credentials that must fail without leaking the secret).
+#  - `bundles`: builds the NSIS and MSI bundles with the sidecar as release.yml does, signing through
+#    sign.ps1 in thumbprint mode, then checks with signtool that verification fails while the
+#    throwaway root is untrusted and passes, timestamped, once it is trusted, for the setup exe, the
+#    MSI and the installed/extracted nugget-desktop.exe, nuggetd.exe and uninstall.exe.
+
+on:
+  # TEMPORARY while iterating: remove before the final push.
+  push:
+    branches: [ee/release-readiness]
+    paths: [".github/workflows/windows-signing.yml", "packaging/windows/**"]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "packaging/windows/**"
+      - ".github/workflows/windows-signing.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-signing-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  sign-script:
+    name: sign.ps1 checks
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Test only: a self-signed code-signing certificate whose key never leaves this runner.
+      - name: Throwaway code-signing certificate
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Nugget signing test (throwaway)' `
+            -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -KeyAlgorithm RSA -KeyLength 3072 `
+            -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
+          "NUGGET_TEST_CERT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "throwaway certificate $($cert.Thumbprint)"
+
+      - name: Check sign.ps1
+        shell: pwsh
+        run: |
+          $sign = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
+          $logDir = Join-Path $env:RUNNER_TEMP 'signing-proof'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $log = Join-Path $logDir 'sign-script-checks.txt'
+          $script:failures = 0
+          $thumb = $env:NUGGET_TEST_CERT
+          dotnet --list-runtimes | Out-File -FilePath $log -Append
+
+          $modeVars = 'NUGGET_SIGN_CERT_THUMBPRINT', 'AZURE_TRUSTED_SIGNING_ENDPOINT', 'AZURE_TRUSTED_SIGNING_ACCOUNT',
+            'AZURE_TRUSTED_SIGNING_PROFILE', 'AZURE_TRUSTED_SIGNING_DLIB', 'AZURE_CLIENT_ID', 'AZURE_TENANT_ID',
+            'AZURE_CLIENT_SECRET', 'NUGGET_SIGN_DRY_RUN', 'ACTIONS_ID_TOKEN_REQUEST_URL', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN'
+          function Invoke-Sign([string]$name, [hashtable]$vars, [string[]]$argv) {
+            foreach ($n in $modeVars) { Remove-Item "Env:$n" -ErrorAction SilentlyContinue }
+            foreach ($k in $vars.Keys) { Set-Item "Env:$k" $vars[$k] }
+            $out = & pwsh -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $sign @argv 2>&1 | Out-String -Width 4096
+            $code = $LASTEXITCODE
+            foreach ($k in $vars.Keys) { Remove-Item "Env:$k" -ErrorAction SilentlyContinue }
+            "==== $name (exit $code)`n$out" | Out-File -FilePath $log -Append
+            [pscustomobject]@{ Code = $code; Out = $out }
+          }
+          function Check([string]$name, [bool]$ok) {
+            if ($ok) { Write-Output "ok   $name" } else { Write-Output "::error::FAIL $name"; $script:failures++ }
+            "---- $(if ($ok) { 'ok' } else { 'FAIL' }): $name" | Out-File -FilePath $log -Append
+          }
+
+          $work = Join-Path $env:RUNNER_TEMP 'sign-check'
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          $exe = Join-Path $work 'whoami-copy.exe'
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" $exe
+
+          # Thumbprint mode signs, with a timestamp, by the throwaway certificate.
+          $r = Invoke-Sign 'thumbprint mode' @{ NUGGET_SIGN_CERT_THUMBPRINT = $thumb } @($exe)
+          Check 'thumbprint mode exits 0' ($r.Code -eq 0)
+          $sig = Get-AuthenticodeSignature -LiteralPath $exe
+          Check 'signed by the throwaway certificate' ($sig.SignerCertificate -and $sig.SignerCertificate.Thumbprint -eq $thumb)
+          Check 'signature is timestamped' ($null -ne $sig.TimeStamperCertificate)
+
+          # Failure paths exit non-zero.
+          $r = Invoke-Sign 'unknown thumbprint' @{ NUGGET_SIGN_CERT_THUMBPRINT = ('0' * 40) } @($exe)
+          Check 'unknown certificate fails' ($r.Code -ne 0)
+          $r = Invoke-Sign 'malformed thumbprint' @{ NUGGET_SIGN_CERT_THUMBPRINT = 'not-a-thumbprint' } @($exe)
+          Check 'malformed thumbprint fails' ($r.Code -ne 0)
+          $r = Invoke-Sign 'missing file' @{ NUGGET_SIGN_CERT_THUMBPRINT = $thumb } @((Join-Path $work 'nope.exe'))
+          Check 'missing file fails' ($r.Code -ne 0)
+          $r = Invoke-Sign 'no mode' @{} @($exe)
+          Check 'no signing mode fails' ($r.Code -ne 0)
+
+          # The pinned dlib downloads and its checksum matches.
+          $dlib = & pwsh -NoLogo -NoProfile -File $sign -InstallDlib (Join-Path $work 'dlib') | Select-Object -Last 1
+          Check 'dlib installs' ($LASTEXITCODE -eq 0 -and $dlib -and (Test-Path -LiteralPath $dlib))
+
+          $ats = @{
+            AZURE_TRUSTED_SIGNING_ENDPOINT = 'https://eus.codesigning.azure.net'
+            AZURE_TRUSTED_SIGNING_ACCOUNT  = 'nugget-test-account'
+            AZURE_TRUSTED_SIGNING_PROFILE  = 'nugget-test-profile'
+            AZURE_TRUSTED_SIGNING_DLIB     = $dlib
+          }
+          $canary = 'canary-secret-' + [Guid]::NewGuid().ToString('N')
+          $fakeApp = @{ AZURE_CLIENT_ID = '11111111-1111-1111-1111-111111111111'; AZURE_TENANT_ID = '22222222-2222-2222-2222-222222222222' }
+          function Metadata([string]$out) {
+            $line = ($out -split "`r?`n" | Where-Object { $_ -match 'metadata\.json: ' } | Select-Object -First 1)
+            if (-not $line) { return $null }
+            ($line -replace '^.*metadata\.json: ', '') | ConvertFrom-Json
+          }
+
+          # Azure mode, dry: the exact signtool command line, the metadata and the auth choice.
+          $r = Invoke-Sign 'azure dry run, client secret' ($ats + $fakeApp + @{ AZURE_CLIENT_SECRET = $canary; NUGGET_SIGN_DRY_RUN = '1' }) @($exe)
+          Check 'azure dry run exits 0' ($r.Code -eq 0)
+          $line = ($r.Out -split "`r?`n" | Where-Object { $_ -match 'would run: ' } | Select-Object -First 1)
+          $want = "sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /d Nugget /dlib $dlib /dmdf "
+          Check 'azure command line' ($line -and $line.Contains($want) -and $line.EndsWith($exe) -and $line -match 'signtool\.exe')
+          $md = Metadata $r.Out
+          Check 'azure metadata fields' ($md -and $md.Endpoint -eq 'https://eus.codesigning.azure.net' -and
+            $md.CodeSigningAccountName -eq 'nugget-test-account' -and $md.CertificateProfileName -eq 'nugget-test-profile')
+          Check 'client secret mode keeps only EnvironmentCredential' ($md -and $md.ExcludeCredentials.Count -eq 9 -and
+            $md.ExcludeCredentials -notcontains 'EnvironmentCredential' -and $r.Out -match 'auth: client secret')
+          Check 'secret is never printed (dry run)' (-not $r.Out.Contains($canary))
+
+          $r = Invoke-Sign 'azure dry run, oidc' ($ats + $fakeApp + @{ NUGGET_SIGN_DRY_RUN = '1'
+              ACTIONS_ID_TOKEN_REQUEST_URL = 'https://example.invalid/token?api-version=1'; ACTIONS_ID_TOKEN_REQUEST_TOKEN = $canary }) @($exe)
+          $md = Metadata $r.Out
+          Check 'oidc mode keeps only WorkloadIdentityCredential' ($r.Code -eq 0 -and $md -and
+            $md.ExcludeCredentials -notcontains 'WorkloadIdentityCredential' -and $md.ExcludeCredentials.Count -eq 9 -and $r.Out -match 'auth: GitHub OIDC')
+          Check 'oidc request token is never printed' (-not $r.Out.Contains($canary))
+
+          $r = Invoke-Sign 'azure dry run, az login' ($ats + @{ NUGGET_SIGN_DRY_RUN = '1' }) @($exe)
+          Check 'no app registration falls back to the Azure CLI login' ($r.Code -eq 0 -and $r.Out -match 'auth: Azure CLI login')
+
+          $r = Invoke-Sign 'azure partial config' @{ AZURE_TRUSTED_SIGNING_ENDPOINT = 'https://eus.codesigning.azure.net'; NUGGET_SIGN_DRY_RUN = '1' } @($exe)
+          Check 'partial azure config fails' ($r.Code -ne 0)
+          $bad = $ats.Clone(); $bad.AZURE_TRUSTED_SIGNING_ENDPOINT = 'https://attacker.example.com'
+          $r = Invoke-Sign 'azure foreign endpoint' ($bad + @{ NUGGET_SIGN_DRY_RUN = '1' }) @($exe)
+          Check 'non-codesigning.azure.net endpoint fails' ($r.Code -ne 0)
+          $r = Invoke-Sign 'azure client id without tenant' ($ats + @{ AZURE_CLIENT_ID = '1'; AZURE_CLIENT_SECRET = $canary; NUGGET_SIGN_DRY_RUN = '1' }) @($exe)
+          Check 'client id without tenant fails' ($r.Code -ne 0 -and -not $r.Out.Contains($canary))
+
+          # Azure mode, real signtool + dlib, fake credentials: must fail, and not leak the secret.
+          $fresh = Join-Path $work 'whoami-azure.exe'
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" $fresh
+          $r = Invoke-Sign 'azure real call, fake credentials' ($ats + $fakeApp + @{ AZURE_CLIENT_SECRET = $canary }) @($fresh)
+          Check 'azure with fake credentials fails' ($r.Code -ne 0)
+          Check 'secret is never printed (signtool and dlib output)' (-not $r.Out.Contains($canary))
+          Check 'file stays unsigned' ((Get-AuthenticodeSignature -LiteralPath $fresh).Status -eq 'NotSigned')
+
+          Get-Content $log
+          if ($script:failures -gt 0) { Write-Output "::error::$($script:failures) sign.ps1 check(s) failed"; exit 1 }
+          exit 0
+
+      - name: Remove the throwaway certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:NUGGET_TEST_CERT) {
+            Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | Remove-Item -DeleteKey
+          }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: windows-signing-sign-script
+          path: ${{ runner.temp }}/signing-proof/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  bundles:
+    name: Signed bundles (throwaway certificate)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # From here to "Build bundles": the Windows leg of release.yml's build job.
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add "$TARGET"
+
+      - name: Deterministic build environment
+        shell: bash
+        run: packaging/scripts/repro-env.sh --github-env
+
+      - name: Use Strawberry Perl for vendored OpenSSL
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b # v1.5.2
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          package_json_file: apps/desktop/package.json
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and stage the nuggetd sidecar
+        shell: bash
+        env:
+          NUGGET_TRUST_DEV_MANIFEST_KEY: "1"
+        run: packaging/scripts/stage-sidecar.sh "$TARGET"
+
+      # Test only: a self-signed code-signing certificate whose key never leaves this runner.
+      - name: Throwaway code-signing certificate
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Nugget signing test (throwaway)' `
+            -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -KeyAlgorithm RSA -KeyLength 3072 `
+            -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(2)
+          "NUGGET_TEST_CERT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "throwaway certificate $($cert.Thumbprint)"
+
+      # The same fragment release.yml writes for Azure Trusted Signing, with sign.ps1 switched to
+      # thumbprint mode by NUGGET_SIGN_CERT_THUMBPRINT.
+      - name: Signing config
+        shell: pwsh
+        run: |
+          $logDir = Join-Path $env:RUNNER_TEMP 'signing-proof'
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          @(
+            "NUGGET_SIGN_CERT_THUMBPRINT=$env:NUGGET_TEST_CERT"
+            "NUGGET_SIGN_LOG=$(Join-Path $logDir 'signed-by-tauri.txt')"
+          ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $script = Join-Path $env:GITHUB_WORKSPACE 'packaging\windows\sign.ps1'
+          $out = Join-Path $env:RUNNER_TEMP 'signing.json'
+          @{ bundle = @{ windows = @{ signCommand = @{
+              cmd = 'pwsh'
+              args = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $script, '%1')
+          } } } } | ConvertTo-Json -Depth 6 | Out-File -FilePath $out -Encoding utf8NoBOM
+          Get-Content $out
+
+      - name: Build bundles
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          pnpm tauri build --ci --target "$TARGET" --bundles nsis,msi \
+            --config src-tauri/tauri.bundle.conf.json --config "$RUNNER_TEMP/signing.json"
+
+      - name: Verify signatures
+        shell: pwsh
+        run: |
+          $thumb = $env:NUGGET_TEST_CERT
+          $logDir = Join-Path $env:RUNNER_TEMP 'signing-proof'
+          $script:failures = 0
+          $summary = @('## Windows signing proof', '', "Throwaway certificate ``$thumb``", '')
+          function Check([string]$name, [bool]$ok) {
+            if ($ok) { Write-Output "ok   $name" } else { Write-Output "::error::FAIL $name"; $script:failures++ }
+            $script:summary += "- $(if ($ok) { 'ok' } else { '**FAIL**' }): $name"
+          }
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1 -ExpandProperty FullName
+          Write-Output "signtool: $signtool"
+          function Verify([string]$file, [string[]]$opts, [string]$tag) {
+            $out = & $signtool verify @opts $file 2>&1 | Out-String -Width 4096
+            $code = $LASTEXITCODE
+            $name = (Split-Path $file -Leaf) + ".$tag.txt"
+            "signtool verify $($opts -join ' ') $file`n(exit $code)`n$out" | Out-File -FilePath (Join-Path $logDir $name)
+            [pscustomobject]@{ Code = $code; Out = $out }
+          }
+
+          $bundle = "target\$env:TARGET\release\bundle"
+          $nsis = @(Get-ChildItem "$bundle\nsis\*-setup.exe")
+          $msi = @(Get-ChildItem "$bundle\msi\*.msi")
+          Check 'one NSIS installer and one MSI' ($nsis.Count -eq 1 -and $msi.Count -eq 1)
+          $nsis = $nsis[0].FullName; $msi = $msi[0].FullName
+
+          if (Test-Path $env:NUGGET_SIGN_LOG) {
+            $summary += '', 'Files Tauri passed to sign.ps1:', '```'
+            $summary += Get-Content $env:NUGGET_SIGN_LOG
+            $summary += '```', ''
+          }
+
+          # (a) The throwaway root is not trusted yet, so policy verification must fail.
+          foreach ($f in $nsis, $msi) {
+            $r = Verify $f @('/pa', '/v') 'untrusted'
+            Check "$(Split-Path $f -Leaf) fails verification while the root is untrusted" ($r.Code -ne 0 -and $r.Out -match 'not trusted')
+          }
+
+          # (b) TEST ONLY: trust the throwaway certificate as a root, so the same signatures verify.
+          # LocalMachine (the runner is elevated) because adding to CurrentUser\Root pops a
+          # confirmation dialog that would hang a headless job. Removed again in the last step.
+          $cert = Get-Item "Cert:\CurrentUser\My\$thumb"
+          $root = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+          $root.Open('ReadWrite')
+          $root.Add([Security.Cryptography.X509Certificates.X509Certificate2]::new($cert.RawData)) # public part only
+          $root.Close()
+
+          # (c) Install the NSIS bundle and extract the MSI; the installed copies are what users run.
+          $inst = Join-Path $env:RUNNER_TEMP 'nsis-install'
+          $p = Start-Process -FilePath $nsis -ArgumentList '/S', "/D=$inst" -Wait -PassThru
+          Check 'NSIS silent install' ($p.ExitCode -eq 0)
+          $ext = Join-Path $env:RUNNER_TEMP 'msi-extract'
+          $p = Start-Process -FilePath msiexec.exe -ArgumentList '/a', "`"$msi`"", '/qn', "TARGETDIR=`"$ext`"" -Wait -PassThru
+          Check 'MSI administrative extract' ($p.ExitCode -eq 0)
+
+          $app = @(Get-ChildItem $inst -Filter *.exe | Where-Object { $_.Name -notin 'nuggetd.exe', 'uninstall.exe' })
+          $msiApp = @(Get-ChildItem $ext -Recurse -Filter *.exe | Where-Object { $_.Name -ne 'nuggetd.exe' })
+          $msiD = @(Get-ChildItem $ext -Recurse -Filter nuggetd.exe)
+          Check 'installed layout: one app exe, nuggetd.exe, uninstall.exe' ($app.Count -eq 1 -and
+            (Test-Path "$inst\nuggetd.exe") -and (Test-Path "$inst\uninstall.exe"))
+          Check 'MSI layout: one app exe, nuggetd.exe' ($msiApp.Count -eq 1 -and $msiD.Count -eq 1)
+
+          $targets = [ordered]@{
+            'NSIS setup' = $nsis
+            'MSI' = $msi
+            'NSIS-installed app' = $app[0].FullName
+            'NSIS-installed nuggetd.exe' = "$inst\nuggetd.exe"
+            'NSIS-installed uninstall.exe' = "$inst\uninstall.exe"
+            'MSI-extracted app' = $msiApp[0].FullName
+            'MSI-extracted nuggetd.exe' = $msiD[0].FullName
+          }
+          $summary += '', '| File | verify /pa /all | timestamped | signer |', '|---|---|---|---|'
+          foreach ($k in $targets.Keys) {
+            $f = $targets[$k]
+            $r = Verify $f @('/pa', '/all', '/v') ($k -replace '\W', '-')
+            $ok = $r.Code -eq 0 -and $r.Out -match 'Successfully verified'
+            $ts = $r.Out -match 'The signature is timestamped' -and $r.Out -notmatch 'is not timestamped'
+            $signer = $r.Out -match $thumb
+            Check "$k ($(Split-Path $f -Leaf)) verifies" $ok
+            Check "$k is timestamped" $ts
+            Check "$k is signed by the throwaway certificate" $signer
+            $summary += "| $k ``$(Split-Path $f -Leaf)`` | $(if ($ok) {'pass'} else {'FAIL'}) | $(if ($ts) {'yes'} else {'NO'}) | $(if ($signer) {'throwaway cert'} else {'OTHER'}) |"
+          }
+
+          $un = Start-Process -FilePath "$inst\uninstall.exe" -ArgumentList '/S', "_?=$inst" -Wait -PassThru
+          Write-Output "uninstall exit $($un.ExitCode)"
+
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          $summary | Out-File -FilePath (Join-Path $logDir 'summary.md') -Encoding utf8
+          if ($script:failures -gt 0) { Write-Output "::error::$($script:failures) check(s) failed"; exit 1 }
+          exit 0
+
+      # (d) Leave nothing behind, pass or fail.
+      - name: Remove the throwaway certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if (-not $env:NUGGET_TEST_CERT) { exit 0 }
+          $root = [Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+          $root.Open('ReadWrite')
+          @($root.Certificates | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT) | ForEach-Object { $root.Remove($_) }
+          $root.Close()
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | Remove-Item -DeleteKey
+          $left = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\Root | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT)
+          if ($left.Count -gt 0) { Write-Output '::error::throwaway certificate still present'; exit 1 }
+          Write-Output 'throwaway certificate removed'
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: windows-signing-proof
+          path: ${{ runner.temp }}/signing-proof/
+          if-no-files-found: ignore
+          retention-days: 14
