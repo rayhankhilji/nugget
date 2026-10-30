@@ -236,6 +236,15 @@ function healthText(s: SourceInfo, t: TFunction): { reason: string; fix: string 
   }
 }
 
+/** The folder (or vault) a local source reads, and how many more folders it has. */
+function sourcePath(s: SourceInfo): { path: string; more: number } | null {
+  const roots = s.settings?.roots;
+  if (Array.isArray(roots) && typeof roots[0] === "string") return { path: roots[0], more: roots.length - 1 };
+  const vault = s.settings?.vault;
+  if (typeof vault === "string" && vault) return { path: vault, more: 0 };
+  return null;
+}
+
 function progressText(p: IngestProgress, t: TFunction): string {
   const args = { phase: p.phase, done: p.done, total: p.total };
   if (p.total) return t("sources.progress.total", args);
@@ -271,6 +280,9 @@ function SourceRow({
   const mode = connectMode(s.kind, s.settings);
   const signIn = mode === "browser" || mode === "device";
   const health = healthText(s, t);
+  const path = sourcePath(s);
+  // A healthy state is said by the sync line; only states that need attention get a badge.
+  const quietState = s.state === "watching" || s.state === "idle";
 
   const run = async (what: "toggle" | "sync" | "auth", f: () => Promise<void>) => {
     setBusy(what);
@@ -318,16 +330,34 @@ function SourceRow({
           <h2 id={headingId} className="source-name" dir="auto">
             {s.name}
           </h2>
-          <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>
+          {!quietState && <Badge tone={tone}>{sourceStateLabel(s.state)}</Badge>}
+          <label className="switch source-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={s.enabled}
+              onChange={() => void toggle()}
+              disabled={busy !== null}
+              aria-describedby={headingId}
+            />
+            <span className="switch-track" aria-hidden="true" />
+            <span>{t("sources.enabled")}</span>
+          </label>
         </div>
         <p className="muted small source-meta">
-          {kindLabel} · <code>{s.id}</code>
+          <span>{kindLabel}</span>
+          {path && (
+            <span className="source-path" title={path.path}>
+              <bdi dir="ltr">{path.path}</bdi>
+              {path.more > 0 && <> {t("sources.morePaths", { n: path.more })}</>}
+            </span>
+          )}
         </p>
         <p className="small source-meta">
           <span>{t("sources.items", { n: s.items })}</span>
-          <span>{t("sources.chunks", { n: s.chunks })}</span>
           <span title={s.last_sync ? formatTime(s.last_sync) : undefined}>
             {s.last_sync ? t("sources.synced", { when: formatRelative(s.last_sync, now) }) : t("sources.neverSynced")}
+            {s.state === "watching" && <> · {t("sources.watchingNote")}</>}
           </span>
         </p>
         {progress && (
@@ -372,18 +402,6 @@ function SourceRow({
         )}
         <ErrorNote error={error} />
         <div className="source-actions">
-          <label className="switch">
-            <input
-              type="checkbox"
-              role="switch"
-              checked={s.enabled}
-              onChange={() => void toggle()}
-              disabled={busy !== null}
-              aria-describedby={headingId}
-            />
-            <span className="switch-track" aria-hidden="true" />
-            <span>{t("sources.enabled")}</span>
-          </label>
           <button type="button" className="btn btn-small" onClick={() => void sync()} disabled={!s.enabled || busy !== null}>
             {busy === "sync" ? <Spinner label={t("sources.startingSync")} /> : t("sources.syncNow")}
           </button>
@@ -408,9 +426,17 @@ function SourceRow({
               {s.state === "needs_auth" ? t("sources.setToken") : t("sources.changeToken")}
             </button>
           )}
-          <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
-            {t("sources.remove")}
-          </button>
+          <span className="source-actions-end">
+            <details className="source-details">
+              <summary className="small">{t("sources.details")}</summary>
+              <p className="muted small">
+                {t("sources.detailsId")} <code>{s.id}</code> · {t("sources.chunks", { n: s.chunks })}
+              </p>
+            </details>
+            <button type="button" className="btn btn-small btn-danger-ghost" onClick={onRemove} disabled={busy !== null}>
+              {t("sources.remove")}
+            </button>
+          </span>
         </div>
       </div>
     </li>

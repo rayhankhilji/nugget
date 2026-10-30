@@ -39,7 +39,11 @@
     "shortcuts.key.ctrl",
     "shortcuts.key.esc",
     "status.version",
+    "today.actionFullName",
     "today.learned.line"
+  ],
+  "ar": [
+    "shortcuts.key.enter"
   ],
   "de": [
     "addSource.imap.port",
@@ -59,6 +63,10 @@
     "chat.title",
     "common.details",
     "connectApp.tabsLabel",
+    "entity.attr.handle",
+    "entity.attr.team",
+    "entity.attr.url",
+    "entity.attr.website",
     "format.locality.cloud",
     "format.tier.embedding",
     "format.tier.rerank",
@@ -79,6 +87,8 @@
     "safety.rule.id",
     "search.budget",
     "settings.languageSystem",
+    "sources.details",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.cap.tools",
@@ -112,6 +122,7 @@
     "privacy.col.host",
     "privacy.stat.hosts",
     "search.budgetTokens",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.contextTokens",
@@ -152,6 +163,7 @@
     "graph.source",
     "knowledge.page",
     "merge.mentions",
+    "onboarding.done.summary.sources",
     "palette.group.action",
     "palette.group.page",
     "plugins.title",
@@ -175,9 +187,13 @@
   ],
   "hi": [
     "addSource.linear.include",
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.contextTokens"
   ],
   "ja": [
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.contextTokens"
   ],
   "pt-BR": [
@@ -190,6 +206,7 @@
     "chat.tokens",
     "connectApp.tabsLabel",
     "connectApp.tokenWhat",
+    "entity.attr.url",
     "format.duration.dh",
     "format.duration.s",
     "offline.socket",
@@ -198,6 +215,8 @@
     "privacy.col.host",
     "privacy.stat.hosts",
     "search.budgetTokens",
+    "shortcuts.key.enter",
+    "sources.detailsId",
     "status.cap.embeddings",
     "status.cap.streaming",
     "status.contextTokens",
@@ -208,5 +227,8 @@
     "status.title",
     "updates.badge.beta"
   ],
-  "zh-CN": []
+  "zh-CN": [
+    "shortcuts.key.enter",
+    "sources.detailsId"
+  ]
 }

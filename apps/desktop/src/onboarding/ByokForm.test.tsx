@@ -49,7 +49,8 @@ describe("ByokForm", () => {
         return result({ ok: true, models: ["m1"], saved: true, provider_id: "custom" });
       },
     });
-    const { container } = await render(<ByokForm kind="compatible" />);
+    const saved: string[] = [];
+    const { container } = await render(<ByokForm kind="compatible" onSaved={(id) => saved.push(id)} />);
     expect(field(container, "Name").value).toBe("custom");
     await type(field(container, "Address (base URL)"), "http://127.0.0.1:9999/v1/");
     await type(field(container, "API key"), " sk-e2e-good ");
@@ -64,6 +65,8 @@ describe("ByokForm", () => {
     expect(container.querySelector('[role="status"]')?.textContent).toBe("Key checked and saved. Restart Nugget to start using it.");
     expect(container.querySelector('[role="alert"]')).toBeNull();
     expect(field(container, "API key").value).toBe("");
+    // Tells onboarding the BYOK path is set up.
+    expect(saved).toEqual(["custom"]);
     expect(await violations()).toEqual([]);
   });
 
@@ -71,7 +74,8 @@ describe("ByokForm", () => {
     mockDaemon({
       ai_key_save: () => result({ reason: "bad_key", message: "rejected" }),
     });
-    const { container } = await render(<ByokForm kind="openai" />);
+    const saved: string[] = [];
+    const { container } = await render(<ByokForm kind="openai" onSaved={(id) => saved.push(id)} />);
     expect(field(container, "Address (base URL)").value).toBe("https://api.openai.com/v1");
     await type(field(container, "API key"), "sk-wrong");
     await type(field(container, "Model"), "m1");
@@ -80,8 +84,9 @@ describe("ByokForm", () => {
       "The provider rejected this key. Check that you copied all of it.",
     );
     expect(container.querySelector('[role="status"]')?.textContent).toBe("");
-    // A failed save keeps the key so it can be corrected.
+    // A failed save keeps the key so it can be corrected, and sets nothing up.
     expect(field(container, "API key").value).toBe("sk-wrong");
+    expect(saved).toEqual([]);
   });
 
   it("tests a key and reports how many models the provider has", async () => {

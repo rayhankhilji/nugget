@@ -75,7 +75,7 @@ describe("EntityDetailPanel facts", () => {
   it("shows a source icon and date for each evidence item", async () => {
     mockDaemon({ knowledge_entity: timed });
     const { container } = await render(panel(new Map([["mail", "imap"]])));
-    await click(byText(container, "button", /^Why\?/));
+    await click(byText(container, "button", /^Based on/));
     const items = Array.from(container.querySelectorAll("ul.evidence > li"));
     expect(items.length).toBe(2);
     expect(items[0]!.querySelector("svg.source-icon-imap")).toBeTruthy();

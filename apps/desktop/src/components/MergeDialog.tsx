@@ -9,6 +9,18 @@ import { ErrorNote, Spinner } from "./ui";
 const RESULTS = 20;
 
 /**
+ * Something that tells two same-name entities apart: another alias, an identifier (an email),
+ * else the end of the id. Only used when the names collide.
+ */
+export function distinguishing(name: string, id: string, d: Pick<EntityDetail, "aliases" | "identifiers"> | null): string {
+  const alias = d?.aliases.find((a) => a.trim().toLocaleLowerCase() !== name.trim().toLocaleLowerCase());
+  if (alias) return alias;
+  const ident = d?.identifiers[0]?.[1];
+  if (ident) return ident;
+  return `#${id.slice(-6)}`;
+}
+
+/**
  * Merge another entity with `target`: pick it, choose which one stays, see what the result
  * will look like, then confirm. The merged-away id keeps resolving (links never break).
  */
@@ -39,6 +51,7 @@ export function MergeDialog({
   const otherDetail = other.data && other.data.id === picked?.id ? other.data : null;
 
   const into = keep === "target" ? target : otherDetail;
+  const sameName = picked !== null && picked.name.trim().toLocaleLowerCase() === target.name.trim().toLocaleLowerCase();
   const from = keep === "target" ? otherDetail : target;
 
   const submit = async (e: FormEvent) => {
@@ -74,6 +87,8 @@ export function MergeDialog({
             spellCheck={false}
             data-autofocus=""
             aria-controls={listId}
+            placeholder={t("merge.findPlaceholder")}
+            dir="auto"
           />
         </div>
         <fieldset className="field">
@@ -85,8 +100,8 @@ export function MergeDialog({
             {results.data?.map((r) => (
               <label key={r.id} className="check merge-option">
                 <input type="radio" name="merge-other" checked={picked?.id === r.id} onChange={() => setPicked(r)} />
-                <span>
-                  <span className="merge-name">{r.name}</span>{" "}
+                <span className="merge-option-text">
+                  <bdi className="merge-name">{r.name}</bdi>
                   <span className="muted small">
                     {t("merge.optionMeta", { kind: kindLabel(r.kind), claims: r.claims, mentions: r.mentions })}
                   </span>
@@ -102,13 +117,31 @@ export function MergeDialog({
             <label className="check">
               <input type="radio" name="merge-keep" checked={keep === "target"} onChange={() => setKeep("target")} />
               <span>
-                {target.name} <span className="muted small">({target.id})</span>
+                <bdi>{target.name}</bdi>{" "}
+                <span className="muted small">
+                  {t("merge.keepMeta", { kind: kindLabel(target.kind), claims: target.claims.length })}
+                  {sameName && (
+                    <>
+                      {" · "}
+                      <bdi>{distinguishing(target.name, target.id, target)}</bdi>
+                    </>
+                  )}
+                </span>
               </span>
             </label>
             <label className="check">
               <input type="radio" name="merge-keep" checked={keep === "other"} onChange={() => setKeep("other")} />
               <span>
-                {picked.name} <span className="muted small">({picked.id})</span>
+                <bdi>{picked.name}</bdi>{" "}
+                <span className="muted small">
+                  {t("merge.keepMeta", { kind: kindLabel(picked.kind), claims: picked.claims })}
+                  {sameName && (
+                    <>
+                      {" · "}
+                      <bdi>{distinguishing(picked.name, picked.id, otherDetail)}</bdi>
+                    </>
+                  )}
+                </span>
               </span>
             </label>
           </fieldset>
@@ -127,7 +160,7 @@ export function MergeDialog({
           <button type="button" className="btn" onClick={onClose} disabled={busy}>
             {t("common.cancel")}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={busy || !into || !from}>
+          <button type="submit" className="btn btn-danger" disabled={busy || !into || !from}>
             {busy ? <Spinner label={t("merge.merging")} /> : t("merge.merge")}
           </button>
         </div>
@@ -143,18 +176,18 @@ function MergePreview({ into, from }: { into: EntityDetail; from: EntityDetail }
   return (
     <>
       <p>
-        <Trans k="merge.summary" args={{ from: from.name, into: into.name }} tags={{ b: (c) => <b>{c}</b> }} />
+        <Trans k="merge.summary" args={{ from: from.name, into: into.name }} tags={{ b: (c) => <b><bdi>{c}</bdi></b> }} />
       </p>
       <dl className="entity-props">
         <div>
           <dt>{t("merge.name")}</dt>
           <dd>
-            {into.name} <span className="muted small">({kindLabel(into.kind)})</span>
+            <bdi>{into.name}</bdi> <span className="muted small">({kindLabel(into.kind)})</span>
           </dd>
         </div>
         <div>
           <dt>{t("merge.aliases")}</dt>
-          <dd>{aliases.length > 0 ? aliases.join(t("common.listSeparator")) : <span className="muted">{t("merge.none")}</span>}</dd>
+          <dd>{aliases.length > 0 ? <bdi>{aliases.join(t("common.listSeparator"))}</bdi> : <span className="muted">{t("merge.none")}</span>}</dd>
         </div>
         <div>
           <dt>{t("merge.facts")}</dt>
@@ -172,13 +205,14 @@ function MergePreview({ into, from }: { into: EntityDetail; from: EntityDetail }
         </div>
       </dl>
       <p className="muted small">
-        <Trans k="merge.aliasNote" args={{ from: from.id, into: into.id }} tags={{ code: (c) => <code>{c}</code> }} />
+        <Trans k="merge.aliasNote" args={{ from: from.name, into: into.name }} tags={{ b: (c) => <b><bdi>{c}</bdi></b>, code: (c) => <bdi>{c}</bdi> }} />
       </p>
       {!sameKind && (
         <p className="note small" role="status">
           {t("merge.kindMismatch", { fromKind: kindLabel(from.kind), intoKind: kindLabel(into.kind) })}
         </p>
       )}
+      <p className="small merge-warning">{t("merge.cantUndo")}</p>
     </>
   );
 }

@@ -36,7 +36,7 @@ Features you will see:
 | Feature | Caused by |
 |---|---|
 | `chat` | A chat in the Chat page to a non-local provider |
-| `ask` | Ask with context to a non-local provider |
+| `ask` | Ask a question with a non-local provider |
 | `embed` | Embeddings sent to a non-local embedding provider (only if you opted in, or a LAN server) |
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
 | `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |

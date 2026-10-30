@@ -53,7 +53,7 @@ After setup, or to check on things later:
    [Adding sources](sources.md).
 4. Watch the **Indexing** widget. Items become searchable as they are indexed; you do not have to
    wait for the whole backfill.
-5. Try **Search**, then **Ask with context**. See [Search and Ask](search-ask.md).
+5. Try **Search**, then **Ask a question**. See [Search and Ask](search-ask.md).
 6. Open **Knowledge** to see the people, organisations and facts found so far, and
    **Connected AI apps** to let Claude Desktop, Claude Code or Cursor read them over
    [MCP](mcp.md).

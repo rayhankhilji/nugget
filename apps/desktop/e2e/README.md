@@ -6,7 +6,7 @@ Chromium against it. Nothing is mocked except the Tauri shell itself, and it mak
 besides localhost. The vitest suites in `../tests` cover the UI against a mocked daemon; this test
 covers the wire between the two.
 
-It runs eight scenarios:
+It runs nine scenarios:
 
 - **pages**: a home with the corpus already indexed; every page is opened and checked.
 - **i18n**: on the same indexed home (indexed once, shared with pages), every page is opened in
@@ -40,6 +40,9 @@ It runs eight scenarios:
   command palette (Ctrl+K / ⌘K, arrows, Enter) and Sources → Add source. Every Tab stop must show
   a focus ring, focus is never lost to `<body>` or trapped outside a dialog, stays inside an open
   one, and Escape closes it and returns focus to its opener (`NN-keyboard-*.png`).
+- **visual**: on the indexed home, screenshots of every page and a few views in light and dark are
+  compared pixel by pixel with the committed baselines in `e2e/visual-baselines/` (Linux only;
+  see "What happens: visual").
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -58,7 +61,7 @@ It builds the frontend first when `dist/` is missing, and runs `cargo build --lo
 (a no-op when up to date) unless `NUGGETD` names a binary. ai-setup also needs `nuggetd-e2e` and
 `nuggetd-fake-llama-server`: it runs `cargo build --locked -p nuggetd --features fake-runtime --bins`
 unless `NUGGETD_E2E` and `NUGGET_FAKE_LLAMA_SERVER` name them (CI builds that way once and sets all three). A run takes about 35 s once both are
-built, plus about 60 s for the i18n scenario. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
+built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux and macOS only, because the bridge speaks to the daemon's Unix socket.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -70,7 +73,9 @@ built, plus about 60 s for the i18n scenario. Linux and macOS only, because the 
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual` | Which scenarios to run, comma-separated. |
+| `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
+| `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
 | `E2E_FIRST_RUN_BUDGET_MS` | 120000 | First run: the most app start to a cited answer may take. |
 | `E2E_AI_BUDGET_MS` | 180000 | ai-setup: the most app start to a cited model answer may take. |
@@ -112,7 +117,7 @@ built, plus about 60 s for the i18n scenario. Linux and macOS only, because the 
 | vault | the daemon's vault has an `Ada Wexford` page with `[^1]` footnote citations |
 
 UI strings come from `src/i18n/locales/en.json`, so copy changes don't break the test.
-There is no screenshot diffing.
+Screenshots are compared with committed baselines only in the visual scenario (see "What happens: visual").
 
 ## What happens: first run
 
@@ -203,6 +208,54 @@ impact, nodes }`); what axe could not decide is recorded with impact `needs-revi
 fails. `summary.json` has `a11y` with the counts by rule. Accepted violations go in `ALLOW` in
 `a11y.mjs` (rule id and selector) with the reason; it is empty.
 
+## What happens: visual
+
+`visual.mjs` runs on Linux only (elsewhere it logs a skip and starts no daemon): font rendering
+differs between operating systems, and the baselines are made on Linux. It shows these screens at
+1280×800 in English, in light and in dark (`colorScheme`), and compares each with
+`e2e/visual-baselines/<screen>-<theme>.png`:
+
+| Screen | What |
+| --- | --- |
+| `<page>` | every page of the `PAGES` registry as it opens |
+| `search-results` | Search for "Tidewater budget" |
+| `knowledge-entity` | Knowledge with Ada Wexford open |
+| `onboarding-welcome` | onboarding's Welcome step (nothing in `localStorage`) |
+
+The knowledge graph is left out: its force layout is not deterministic. What makes the shots
+repeatable:
+
+| What | How |
+| --- | --- |
+| motion | `reducedMotion: "reduce"`, screenshots with `animations: "disabled"` and `caret: "hide"`; a screen is shot until two shots in a row are identical (up to five) |
+| clock | `page.clock.setFixedTime(2026-10-30T09:00:00Z)`, so corpus dates come out as the same relative times |
+| fonts | a stylesheet sets `--font` to "DejaVu Sans" and `--mono` to "DejaVu Sans Mono" (and `font-family` on `body`, dialogs and the overlay), so `system-ui` never resolves differently; CI installs `fonts-dejavu-core` |
+| Today | `cards_list` and `brief_get` answer with one fixed card and brief (the daemon computes them from the wall-clock date) |
+| Models | `models_fit` answers for a fixed machine (16 GB, no GPU, enough disk); on a machine whose memory isn't 16 GB the recommendations differ, so the model list is masked there |
+| the run's own timestamps and paths | in every answer, timestamps from the run (indexing, extraction, sync) become 2026-10-30T08:55:00Z and the temp home's path `/home/robin/.nugget` |
+| what still changes | masked (painted magenta): every `<time>` (`RelativeTime`), and elements whose text is a relative time ("… ago", "just now"), a temp path, a latency ("101 ms"), an uptime ("1m 7s") or a hashed id (`ent_…`) |
+
+Comparing needs no extra dependency: in a blank page, Chromium decodes both PNGs (an `<img>` drawn
+on a `<canvas>`, read with `getImageData`). A pixel differs when a channel (RGBA) differs by more
+than 24/255; a screen fails when more than `E2E_VISUAL_TOLERANCE` (0.5%) of its pixels differ, when
+its size differs, or when it has no baseline. A failure writes `visual-<screen>-<theme>-actual.png`,
+`-expected.png` and `-diff.png` (differing pixels red over the faded baseline) to the artifacts.
+`summary.json` has `visual.screens` with each screen's `ratio` and `differing` pixel count.
+
+To refresh the baselines after an intended UI change, on Linux (the CI runner is Ubuntu 24.04):
+
+```sh
+cd apps/desktop
+pnpm exec vite build
+E2E_SCENARIOS=visual E2E_VISUAL_UPDATE=1 pnpm run e2e
+git add e2e/visual-baselines
+```
+
+Without a Linux machine, take them from CI: the `desktop-e2e` artifact of a failed run has
+`visual-<screen>-<theme>-actual.png` for every screen that differs; copy each to
+`e2e/visual-baselines/<screen>-<theme>.png`. Look at the `-diff.png` first: the change should be
+the one you meant.
+
 ## Events
 
 `bridge.mjs` keeps one connection to the daemon open, like the shell, and turns its notifications
@@ -269,6 +322,16 @@ onboarding the test chooses "Bring your own key", selects the OpenAI-compatible 
 Then `config.toml` has a `[[providers]]` table with `api_key = "keychain:…"` and neither it nor the
 daemon logs contain the key; `egress.recent` and the Privacy page show requests to 127.0.0.1.
 
+## Design review screenshots
+
+`node e2e/review.mjs` (not part of `pnpm run e2e`; it checks nothing) captures every page, its
+main views and dialogs, every onboarding step and the Double Tap overlay in each phase, in light
+and dark, in English, Arabic and German, at 900×600 and 1600×1000, plus each page's empty,
+loading and error state, into `e2e/artifacts/review/<locale>-<theme>-<size>/`. Scrolled content is
+captured by growing the window to fit. `REVIEW_LOCALES`, `REVIEW_THEMES`, `REVIEW_SIZES`,
+`REVIEW_ONLY` (screen-name prefixes) and `REVIEW_STATES=0` narrow the run; it uses the existing
+`dist/` (`E2E_DIST`) and the same `NUGGETD`. About 20 minutes for the whole matrix.
+
 ## Artifacts
 
 `e2e/artifacts/` (git-ignored; CI uploads it as `desktop-e2e`): a numbered screenshot per page and
@@ -277,7 +340,8 @@ per step (`FAIL-<page>.png` when a page fails; `first-run-*.png` for each onboar
 the commands the UI called, `i18n`, `first_run`, `first_run_ai` and `byok`), `daemon-logs/`, `nuggetd.out.log`, the first run's
 `first-run-daemon-logs/` and `first-run-nuggetd.out.log`, and the rendered `vault-Ada-Wexford.md`; also `ai-setup-*.png`, `ai-setup-daemon-logs/`,
 `ai-setup-nuggetd.out.log`, `byok-*.png`, `byok-daemon-logs/` and `byok-config.toml` (with the key masked, if it ever leaked).
-The a11y scenario adds `a11y-<theme>-<check>.png` and `a11y-violations.json`.
+The a11y scenario adds `a11y-<theme>-<check>.png` and `a11y-violations.json`; a failed visual check
+`visual-<screen>-<theme>-actual.png`, `-expected.png` and `-diff.png`.
 
 `harness.mjs` holds what the scenarios share: settings from the environment, the log, `t(key)`
 for UI strings, `check`, `until`, `shot` and the browser context setup.

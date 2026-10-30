@@ -82,6 +82,44 @@
   justify-content: flex-start;
 }
 
+/* One footer row: the proposed actions and Accept first, Snooze and Dismiss quieter at the end. */
+.today-card-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-block-start: var(--space-1);
+}
+
+.today-proposed {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.today-card-footer-end {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-inline-start: auto;
+}
+
+.today-unsupported {
+  margin: 0;
+}
+
+.today-metrics {
+  margin-block-start: var(--space-3);
+}
+
+/* Long explanatory text stays readable on wide windows. */
+.today-learning > p,
+.today-brief > p,
+.today-card-summary,
+.today-card-detail {
+  max-width: 70ch;
+}
+
 .today-dismiss fieldset {
   border: 1px solid var(--border);
   border-radius: var(--radius-small);

@@ -69,7 +69,7 @@ The desktop app on a fictional corpus (light or dark follows your system). More 
 <p>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/knowledge-why-dark.png">
-  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Why? to show the quoted calendar event" width="49%">
+  <img src="docs/book/src/images/screenshots/knowledge-why-light.png" alt="Knowledge: the facts about Ada Wexford, one opened with Based on 1 source to show the quoted calendar event" width="49%">
 </picture>
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/book/src/images/screenshots/today-dark.png">

@@ -100,7 +100,8 @@ describe("onboarding flow", () => {
     expect(heading()).toBe(t("onboarding.source.heading"));
     await click(button(t("onboarding.skipAll")));
     expect(nav()).not.toBeNull();
-    expect(loadState()).toMatchObject({ finished: true, ai: "later", completed: ["welcome", "ai"], skipped: ["source", "permissions", "trigger"] });
+    // "Decide later" sets nothing up, so Continue recorded the AI step as skipped, not done.
+    expect(loadState()).toMatchObject({ finished: true, ai: "later", completed: ["welcome"], skipped: ["ai", "source", "permissions", "trigger"] });
   });
 
   it("jumps to a step from the progress list", async () => {

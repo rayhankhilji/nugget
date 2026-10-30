@@ -55,6 +55,49 @@ describe("overlay", () => {
     expect(result.violations.map((v) => v.id)).toEqual([]);
   });
 
+  it("merges the locality and provider into one pill, dropping raw or generic values", async () => {
+    setup({ ...streaming, provider: "anthropic", locality: "cloud" });
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    const pills = container.querySelectorAll(".overlay-badges .badge");
+    expect(pills).toHaveLength(1);
+    expect(pills[0]!.textContent).toBe("Cloud · anthropic");
+    expect(pills[0]!.className).toContain("badge-warn");
+
+    await act(() => emit(DOUBLETAP_OVERLAY_EVENT, { ...streaming, provider: "local", locality: "on_device" }));
+    await flush(2);
+    expect(container.querySelector(".overlay-badges")?.textContent).toBe("On device");
+    // A locality this version doesn't know (and a generic provider) shows nothing raw.
+    await act(() => emit(DOUBLETAP_OVERLAY_EVENT, { ...streaming, provider: "local", locality: "somewhere" }));
+    await flush(2);
+    expect(container.querySelector(".overlay-badges")).toBeNull();
+  });
+
+  it("says Accept takes what is shown while the draft is still streaming", async () => {
+    setup();
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    const accept = () => container.querySelector<HTMLButtonElement>(".overlay-foot button")!;
+    expect(accept().textContent).toContain("Accept so far");
+    expect(accept().title).toBe("Inserts the text shown now and stops the rest of the draft.");
+    expect(accept().className).not.toContain("btn-primary");
+    await act(() => emit(DOUBLETAP_OVERLAY_EVENT, { ...streaming, phase: "done" }));
+    await flush(2);
+    expect(accept().textContent).toMatch(/^Accept/);
+    expect(accept().textContent).not.toContain("so far");
+    expect(accept().className).toContain("btn-primary");
+    expect(container.querySelector(".overlay-text")?.getAttribute("dir")).toBe("auto");
+  });
+
+  it("tells how to retry after an error, without reading out the status glyph", async () => {
+    setup({ ...EMPTY_VIEW, phase: "error", message: "doubletap.error.draft_failed" });
+    const { container } = await render(<Overlay />);
+    await flush(5);
+    expect(container.querySelector(".overlay-hint")?.textContent).toBe("To try again, close this and use your trigger again.");
+    expect(container.querySelector(".overlay-icon")?.getAttribute("aria-hidden")).toBe("true");
+    expect(container.querySelector('[role="status"]')?.textContent).toBe("Something went wrong");
+  });
+
   it("Enter accepts unchanged", async () => {
     const { accepted } = setup();
     await render(<Overlay />);
