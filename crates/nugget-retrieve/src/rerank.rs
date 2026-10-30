@@ -47,6 +47,12 @@ pub trait Reranker: Send + Sync {
     /// A short name for logs.
     fn name(&self) -> &str;
 
+    /// Where the passages go. Sensitive items (see [`crate::is_sensitive`]) are never sent to a
+    /// `Cloud` reranker. Defaults to `Cloud` so an implementation that does not say fails closed.
+    fn locality(&self) -> Locality {
+        Locality::Cloud
+    }
+
     /// One relevance score per passage, in passage order. Higher is more relevant; the scale is
     /// the model's own (probabilities or logits): the retriever only compares scores of one call.
     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>>;
@@ -328,6 +334,10 @@ impl HttpReranker {
 impl Reranker for HttpReranker {
     fn name(&self) -> &str {
         &self.host
+    }
+
+    fn locality(&self) -> Locality {
+        self.locality
     }
 
     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>> {

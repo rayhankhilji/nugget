@@ -171,6 +171,11 @@ impl Reranker for LocalReranker {
         &self.name
     }
 
+    /// The runtime's own server, on this device.
+    fn locality(&self) -> nugget_core::capability::Locality {
+        nugget_core::capability::Locality::OnDevice
+    }
+
     async fn rerank(&self, query: &str, passages: &[String]) -> Result<Vec<f32>> {
         self.rerank_items(query, passages, &[]).await
     }

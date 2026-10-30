@@ -2002,7 +2002,13 @@ and 0.40 → 0.72 (standard), eval set MRR 0.931 → 0.984. On a machine where i
 budget (a GPU, Apple Silicon or a faster CPU), the adaptive pool keeps that gain: the pool shrinks
 only as far as the time per passage requires.
 
-FULL_PLACEHOLDER
+#### Full scale
+
+**Running** ([41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865), hash and
+nomic on one runner, 20,000 files and 1,000 queries). The first attempt (run 41027473994) stopped at
+the bench's one-hour limit on the initial ingest with 7,713 of 20,000 files embedded (2.1 files/s on
+an EPYC 9V74); the limit is now five hours for local embedders. Its hash arm finished: hybrid R@10
+0.877 vs the fake index's 0.874 (met), freshness p95 0.69 s.
 
 
 ### Bugs the real models exposed

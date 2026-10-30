@@ -610,10 +610,18 @@ impl Retriever {
         n: usize,
     ) -> Result<bool> {
         let n = n.min(pool.len());
-        let ids: Vec<ChunkId> = pool[..n].iter().map(|r| r.cand.chunk_id).collect();
+        // Sensitive items never go to a cloud reranker (as for cloud embeddings and contexts):
+        // only the others are sent, and a withheld item keeps its first-stage relevance.
+        let cloud = reranker.locality() == Locality::Cloud;
+        let sent: Vec<usize> = (0..n).filter(|&i| !(cloud && pool[i].sensitive)).collect();
+        if sent.is_empty() {
+            return Ok(false);
+        }
+        let ids: Vec<ChunkId> = sent.iter().map(|&i| pool[i].cand.chunk_id).collect();
         let chunks = self.chunks_by_id(&ids)?;
-        let passages: Vec<String> = pool[..n]
+        let passages: Vec<String> = sent
             .iter()
+            .map(|&i| &pool[i])
             .map(|r| {
                 let text = chunks
                     .get(&r.cand.chunk_id)
@@ -624,21 +632,21 @@ impl Retriever {
                 }
             })
             .collect();
-        let items: Vec<_> = pool[..n].iter().map(|r| r.cand.item.clone()).collect();
+        let items: Vec<_> = sent.iter().map(|&i| pool[i].cand.item.clone()).collect();
         let timeout = Duration::from_millis(self.config.rerank_timeout_ms.max(1));
         let call = reranker.rerank_items(query, &passages, &items);
         let started = tokio::time::Instant::now();
         let scores = match tokio::time::timeout(timeout, call).await {
-            Ok(Ok(s)) if s.len() == n && s.iter().all(|x| x.is_finite()) => {
+            Ok(Ok(s)) if s.len() == sent.len() && s.iter().all(|x| x.is_finite()) => {
                 self.rerank_gov
-                    .completed(&self.config, n, started.elapsed());
+                    .completed(&self.config, sent.len(), started.elapsed());
                 s
             }
             Ok(Ok(s)) => {
                 tracing::warn!(
                     reranker = reranker.name(),
                     got = s.len(),
-                    expected = n,
+                    expected = sent.len(),
                     "bad rerank scores; keeping first-stage order"
                 );
                 return Ok(false);
@@ -652,7 +660,7 @@ impl Retriever {
                     reranker = reranker.name(),
                     "reranking timed out; keeping first-stage order"
                 );
-                self.rerank_gov.timed_out(&self.config, n);
+                self.rerank_gov.timed_out(&self.config, sent.len());
                 return Ok(false);
             }
         };
@@ -662,8 +670,17 @@ impl Retriever {
             1.0
         };
         let scores = normalise_scores(&scores);
+        let mut by_pos: Vec<Option<f32>> = vec![None; pool.len()];
+        for (&i, &s) in sent.iter().zip(&scores) {
+            by_pos[i] = Some(s);
+        }
         for (i, r) in pool.iter_mut().enumerate() {
-            let s = scores.get(i).copied().unwrap_or(0.0);
+            let s = match by_pos[i] {
+                Some(s) => s,
+                // Withheld from a cloud reranker: neither promoted nor demoted.
+                None if i < n => r.cand.rel,
+                None => 0.0,
+            };
             r.cand.rel = w * s + (1.0 - w) * r.cand.rel;
         }
         pool.sort_by(|a, b| b.cand.rel.total_cmp(&a.cand.rel));
