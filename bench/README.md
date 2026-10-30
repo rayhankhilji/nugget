@@ -327,7 +327,7 @@ Glimmerfen Labs, and the people around them.
 | Items | 106: 57 mails (RFC 822, with the IMAP metadata ingest stores: folder, flags, Message-ID, size), 16 calendar events (iCalendar, with CalDAV metadata), 33 Markdown notes (frontmatter, `[[wikilinks]]`, `#tags`, an Obsidian-style vault of people, projects and journal notes) |
 | Gold entities | 91: 30 people, 8 organisations, 10 projects, 16 events, 8 places, 7 commitments, 6 preferences, 6 topics (plus 5 `optional` ones) |
 | Gold claims | 185 scored triples (16 more `optional` event start dates), 5 of them `superseded` |
-| Gold mentions | 578 (item, entity, surface forms) |
+| Gold mentions | 579 (item, entity, surface forms) |
 | Scripted LLM | 168 claims: 160 quote-supported, 4 with hallucinated quotes, 4 injected |
 
 The hard cases are deliberate. `scenario.json` lists them by kind; each kind's metric passes only
@@ -346,12 +346,18 @@ others were added in EE1, items `mail-049`–`mail-057`, `cal-016`, `note-031`�
   (`mail-051`; "Rob" is also a prefix of the user's name, Robin), and the user's reply, addressed
   to him alone in that thread, says "Thanks, Bob" (`mail-052`). The scripted model gets "Kate"
   right and returns "Kate S", "Rob" and "Bob" as names of their own (realistic mistakes the
-  pipeline must cope with).
+  pipeline must cope with). For these cases the majority vote of the resolution score is not
+  enough: every system mention in their items under one of their gold surfaces must be on their
+  single entity, so a "Bob" kept as its own person fails even if the vote goes right. The same
+  stricter rule applies to Maggie (it does not change her pre-EE1 result on the scripted path;
+  `params.hard_case_details` also reports each case's `majority_vote`, the pre-EE1 rule, for
+  comparison with older runs).
 - **The same nickname with nothing to corroborate it** (EE1). `note-031` ("Book club at Kate's on
   Thursday") names no surname, address, organisation or thread: nothing says this Kate is
   Katherine Selkirk, a procurement contact. Her gold mention belongs to an `optional` person
   "Kate" (neither a hit nor a miss), and the case requires that the system does not give that
-  mention to Katherine Selkirk's entity.
+  mention to Katherine Selkirk's entity: no system mention in `note-031`, whatever its surface,
+  may land on her.
 - **Two people, one first name.** Sam Okafor (Ostrander Freight) and Sam Whitlock (Marrowbank
   Rowing Club) both sign "Sam"; two notes mention a bare "Sam" whom only context identifies.
   EE1 adds Tamsin Rook (Quillfeather Systems, Engineering Manager on Quarry Bridge, `mail-056`) and
@@ -359,7 +365,14 @@ others were added in EE1, items `mail-049`–`mail-057`, `cal-016`, `note-031`�
   "Tamsin"; a standup note says only "Priya and Tamsin from Quillfeather ... sandbox API keys for
   [[Quarry Bridge]]" (`note-032`: context says Tamsin Rook, and the gold says so); an errands note
   says "Drop the spare bike lights round to Tamsin" (`note-033`: nothing says which Tamsin, if
-  either, so its mention is an `optional` person "Tamsin" and must be given to neither).
+  either, so its mention is an `optional` person "Tamsin" and must be given to neither: no system
+  mention in `note-033` may land on either Tamsin). The EE1 pair also requires each Tamsin to be
+  resolved to one entity of her own, the standup note's bare "Tamsin" on Tamsin Rook's; the
+  original Sam pair keeps the M2 rule (the two resolve apart; the rowing log's bare "Sam" may
+  stay unresolved), so pre-EE1 results stay comparable. The scripted model also makes one
+  quote-supported mistake here: it reads Tamsin Galloway's "I mentor there on Tuesdays myself"
+  as `works_at` Bramblecote Primary School (she volunteers). The gate keeps it (the quote is in
+  the mail), and it counts as a claim false positive.
 - **A job change.** Priya Castellane leaves Cindergate Analytics (Senior Data Scientist) and joins
   Quillfeather Systems (Head of Data) from a new address. The old employer, role and project are
   `superseded` in the gold labels.
@@ -473,7 +486,7 @@ without it the suite reports `not_implemented`):
 | `merge.fidelity` | Share of the 16 user edits still verbatim in their page after the deletions and the re-render. **Target 1.0** |
 | `retraction.correctness` | After the deletions: gold claims supported only by deleted items are gone, and those with support left that were active are still active. **Target 1.0** |
 | `retraction.dangling_refs` | Active claims citing, and mentions in, deleted items. **Target 0** |
-| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when every case of the kind is handled: each nickname person's mentions (Maggie, Kate, Rob) resolve to one entity holding nobody else's, and the unattributed "Kate" is not on it; each same-first-name pair (the Sams, the Tamsins) resolves apart, and the unattributed "Tamsin" is on neither; for each job change (Priya, Delphine) the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives. On a subset, a kind is scored over its cases in scope (a nickname case needs two mentions, a pair a mention of each, a job change all its claims); `params.hard_case_details` gives each case's result (`not_in_subset` when out of scope; for pairs also `one_entity_each`, whether each person's mentions, context-resolved first names included, end up on a single entity) |
+| `hard_cases.{nickname_identity,same_first_name,job_change,deleted_item,injection}` | 1 when every case of the kind is handled: each nickname person's mentions (Maggie, Kate, Rob) resolve to one entity holding nobody else's, every system mention under their gold surfaces in their items is on it, and nothing in the unattributed "Kate" item is on it; each same-first-name pair (the Sams, the Tamsins) resolves apart, nothing in the unattributed "Tamsin" item is on either, and (EE1 pair only) each Tamsin resolves strictly to one entity, the context-identified "Tamsin" included; for each job change (Priya, Delphine) the old job and role are inactive and the new ones active; retraction is exact; no injected claim survives. On a subset, a kind is scored over its cases in scope (a nickname case needs two mentions, a pair a mention of each, a job change all its claims); `params.hard_case_details` gives each case's result (`not_in_subset` when out of scope; for nickname cases also `majority_vote`, the pre-EE1 rule; for pairs `one_entity_each`, the strict per-person rule, part of the pass for the EE1 pair only) |
 | `throughput.items_per_s`, `throughput.extract_s` | The extraction run |
 | `mcp.get_context.{p50,p95}_ms`, `mcp.get_context.cited_rate` | In-process round trips, and answers with at least one citation |
 | `llm.calls`, `llm.unmatched`, `vault.pages`, `vault.facts`, `vault.render_ms`, `retraction.checks`, `merge.edits` | Context (`info`) |
@@ -513,8 +526,11 @@ dropped items, and the claims left without support. The result equals the pre-EE
 hard-case kind), so every `--knowledge-items N` selects the same items and scores the same gold as
 the pre-EE1 bench (a test pins the `smoke` 8, `quick` 30 and 40-item lists taken from the pre-EE1
 selection), and the scripted run reproduces the 93-item column above exactly. The choice is
-recorded as `params.knowledge_corpus`. `--knowledge-items all`
-(or any number at or above the corpus size) runs every item.
+recorded as `params.knowledge_corpus`. `--knowledge-items all` (or any number at or above the
+corpus size) runs every item. The suite's own quality floors are the pre-EE1 ones on `original`
+(subset scores ≥ 0.9 with the scripted answers; entity precision ≥ 0.85 for the simulated noisy
+local model); on `all` they are relaxed while the pipeline fails the EE1 cases (subsets within
+0.07 of the whole corpus and ≥ 0.85; noisy-model entity precision ≥ 0.75, measured 0.78).
 
 **EE1 hard cases, scripted path** (`knowledge --scale smoke`, the corpus before and after the 13
 items; same pipeline, `ee/entity-resolution` at `d643a5a`):
@@ -524,19 +540,21 @@ items; same pipeline, `ee/entity-resolution` at `d643a5a`):
 | Entity P / R / F1 | 0.934 / 1.0 / 0.966 | 0.867 / 1.0 / 0.929 |
 | Person F1 | 0.980 | 0.870 |
 | Claim P / R / F1 | 0.975 / 0.951 / 0.963 | 0.956 / 0.956 / 0.956 |
-| Resolution B³ F1 / mention recall | 0.988 / 0.791 | 0.979 / 0.784 |
+| Resolution B³ F1 / mention recall | 0.988 / 0.791 | 0.979 / 0.782 |
 | `claims.superseded_active` | 1 | 3 |
-| Hard cases: nickname / same first name / job change | pass / pass / pass | **fail** (Rob) / pass / **fail** (Delphine) |
+| Hard cases: nickname / same first name / job change | pass / pass / pass | **fail** (Rob) / **fail** (Tamsin) / **fail** (Delphine) |
 
 Per case (`--knowledge-dump`): Kate passes (the "Kate S" reply and "K. Selkirk" join her, the
 book-club "Kate" stays apart); **Rob fails**: "Rob" and "Bob" stay people of their own although the
-mails' headers name Robert Ferrand; the Tamsins stay apart and the errands "Tamsin" is given to
-neither, but the standup note's "Tamsin" (and "Priya") also stays a person of its own instead of
-resolving by context, so its two claims miss (`one_entity_each` is false for both pairs: the
-rowing log's "Sam" has the same problem); **Delphine fails**: she ends up as three entities (the
+mails' headers name Robert Ferrand; **the Tamsin pair fails**: they stay apart and the errands
+"Tamsin" is given to neither, but the standup note's "Tamsin" (and "Priya") stays a person of its
+own instead of resolving to Tamsin Rook by context, so its two claims miss too (`one_entity_each`
+is also false for the Sams, where the rowing log's "Sam" has the same problem, but that is not
+part of the original pair's pass); **Delphine fails**: she ends up as three entities (the
 new address, the old address, and the name in the announcement), so nothing supersedes the
 Vellum & Thistle employment and role. Bare "Felix" and "Yusuf" in the new mails also stay
-separate people. Every other target still holds.
+separate people, and the scripted Tamsin Galloway `works_at` Bramblecote is a claim false positive
+(see above). Every other target still holds.
 
 Not covered yet: embedding-based resolution, the daemon's change-feed path (wave 2), the
 encrypted on-disk store, and graded or partial claim matching.
