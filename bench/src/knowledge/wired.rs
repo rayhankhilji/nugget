@@ -13,7 +13,10 @@
 //!   facts, footnotes and the evidence behind them) is parsed from the files, independently of the
 //!   vault's own validator: fact lines (`- …`) in the `facts` block, footnote references that are
 //!   defined in the `sources` block, and the claim marker `<!-- c:ID -->`, whose evidence is read
-//!   from the graph (the renderer writes one footnote per evidence entry).
+//!   from the graph (the renderer writes one footnote per evidence entry). History lines
+//!   (superseded claims, indented under `*Earlier:*`, marked `<!-- h:ID -->`) are kept apart
+//!   from the facts (flagged `history`): they must be cited and their evidence must check out,
+//!   but they do not count as facts.
 //! - **MCP:** an in-process `nugget_mcp::McpServer`, called through `call_tool("get_context")`
 //!   for one client with default scopes. The daemon's `KnowledgeBackend` is wave-2 work (M2-G), so
 //!   the backend here is minimal: `context` packs the store's full-text hits; the other methods
@@ -82,6 +85,8 @@ mod real {
     const SOURCES_BEGIN: &str = "<!-- nugget:begin sources -->";
     const SOURCES_END: &str = "<!-- nugget:end sources -->";
     const CLAIM_MARK: &str = "<!-- c:";
+    /// History lines (superseded claims) carry this marker instead.
+    const HIST_MARK: &str = "<!-- h:";
     /// Passages `get_context` packs at most.
     const CONTEXT_PASSAGES: usize = 8;
 
@@ -348,11 +353,12 @@ mod real {
                 .iter()
                 .filter(|r| defined.contains(r))
                 .count();
-            let claim = t.find(CLAIM_MARK).and_then(|at| {
-                let digits: String = t[at + CLAIM_MARK.len()..]
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
+            let history = t.contains(HIST_MARK);
+            let mark = [CLAIM_MARK, HIST_MARK]
+                .into_iter()
+                .find_map(|m| t.find(m).map(|at| at + m.len()));
+            let claim = mark.and_then(|at| {
+                let digits: String = t[at..].chars().take_while(char::is_ascii_digit).collect();
                 digits.parse::<i64>().ok()
             });
             let citations = match claim {
@@ -366,6 +372,7 @@ mod real {
                 text: t.to_owned(),
                 footnotes,
                 citations,
+                history,
             });
         }
         Ok(Some(RenderedPage {
@@ -520,6 +527,7 @@ mod real {
 <!-- nugget:begin facts -->\n## Facts\n\n### Works at <!-- p:works_at -->\n\
 - Sam works at [[Organization/Acme (x)|Acme]]. [^1][^2] <!-- c:12 -->\n\
 - Likes tea. (you) <!-- c:13 -->\n- No source. <!-- c:14 -->\n- Undefined note [^9] <!-- c:15 -->\n\
+\n*Earlier:*\n  - Sam works at Initech. (until 2026-09-30) [^2] <!-- h:11 -->\n\
 <!-- nugget:end facts -->\n\n<!-- nugget:begin sources -->\n[^1]: [Mail](nugget://x): \"q\"\n\
 [^2]: [Note](nugget://y)\n<!-- nugget:end sources -->\n\n## Notes\n";
             let g = nugget_graph::MemGraph::new();
@@ -527,9 +535,20 @@ mod real {
                 .unwrap()
                 .unwrap();
             assert_eq!(p.entity.as_str(), "ent_000007");
-            let f: Vec<(Option<i64>, usize)> =
-                p.facts.iter().map(|f| (f.claim, f.footnotes)).collect();
-            assert_eq!(f, [(Some(12), 2), (Some(14), 0), (Some(15), 0)]);
+            let f: Vec<(Option<i64>, usize, bool)> = p
+                .facts
+                .iter()
+                .map(|f| (f.claim, f.footnotes, f.history))
+                .collect();
+            assert_eq!(
+                f,
+                [
+                    (Some(12), 2, false),
+                    (Some(14), 0, false),
+                    (Some(15), 0, false),
+                    (Some(11), 1, true)
+                ]
+            );
             let stub = "---\nnugget_id: \"ent_1\"\nmerged_into: \"ent_2\"\n---\n";
             assert!(parse_page(Path::new("a.md"), stub, &g).unwrap().is_none());
             assert_eq!(footnote_refs("a [^1] b [^x]: c"), ["1"]);

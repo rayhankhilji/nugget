@@ -11,7 +11,10 @@
 //!   caller writes the new render to a sidecar).
 //! - **The facts region** never conflicts: user edits to fact lines were already applied to the
 //!   graph (so the new render contains them), and any other text the user wrote inside it is
-//!   re-anchored after the fact line (or group) it followed.
+//!   re-anchored after the fact line, history line (or group) it followed. History lines
+//!   (`<!-- h:N -->`, superseded claims) are machine-owned: they always come from the new render,
+//!   so an edited or deleted history line is restored (the graph is not changed; see
+//!   [`edits`](crate::edits)).
 //! - Regions the new render lacks are dropped unless the user changed them, in which case their
 //!   text is kept as user text. Regions the user's file lacks are re-inserted in template order.
 
@@ -62,7 +65,15 @@ pub(crate) fn merge(base: Option<&Doc>, user: &Doc, new: &Doc, opts: &MergeOpts)
     }
 
     let mut out: Vec<Segment> = Vec::new();
+    // Set after dropping a generated region: the single blank line the renderer put after it
+    // goes too (e.g. the `merged` block of an entity that was split again).
+    let mut drop_separator = false;
     for seg in &user.segs {
+        if std::mem::take(&mut drop_separator)
+            && matches!(seg, Segment::User(l) if l.len() == 1 && l[0].is_empty())
+        {
+            continue;
+        }
         match seg {
             Segment::User(lines) => out.push(Segment::User(apply_renames(lines, opts.renames))),
             Segment::Region { name, body } => match new.region(name) {
@@ -81,6 +92,8 @@ pub(crate) fn merge(base: Option<&Doc>, user: &Doc, new: &Doc, opts: &MergeOpts)
                     let unchanged = base.and_then(|b| b.region(name)) == Some(body.as_slice());
                     if !unchanged && body.iter().any(|l| !l.trim().is_empty()) {
                         out.push(Segment::User(body.clone()));
+                    } else {
+                        drop_separator = true;
                     }
                 }
             },
@@ -239,14 +252,37 @@ pub(crate) enum FLine {
         claim: Option<ClaimId>,
         content: String,
     },
+    /// A history line (a superseded claim, `<!-- h:N -->`): machine-owned, never an edit.
+    History(ClaimId),
     Other,
 }
 
 pub(crate) fn classify_facts(lines: &[String]) -> Vec<FLine> {
+    classify_facts_with(lines, None)
+}
+
+/// History ids of a rendered facts region.
+pub(crate) fn history_ids(lines: &[String]) -> HashSet<ClaimId> {
+    lines.iter().filter_map(|l| parse_history(l)).collect()
+}
+
+/// [`classify_facts`] for the user's version of a region: a line is history only if its id is
+/// one the last render (`known`) showed as history. Any other `<!-- h:N -->` line is the user's
+/// own text (`Other`), never silently replaced.
+pub(crate) fn classify_facts_with(
+    lines: &[String],
+    known: Option<&HashSet<ClaimId>>,
+) -> Vec<FLine> {
     let mut out = Vec::with_capacity(lines.len());
     for (i, l) in lines.iter().enumerate() {
         if l.trim().is_empty() {
             out.push(FLine::Blank);
+        } else if let Some(id) = parse_history(l) {
+            out.push(if known.is_none_or(|k| k.contains(&id)) {
+                FLine::History(id)
+            } else {
+                FLine::Other
+            });
         } else if let Some((title, pred)) = parse_group_heading(l) {
             match pred {
                 Some(p) => out.push(FLine::Heading(p)),
@@ -276,6 +312,7 @@ enum Anchor {
     Start,
     Heading(String),
     Claim(ClaimId, Option<String>),
+    History(ClaimId, Option<String>),
     Line(String, Option<String>),
     GroupEnd(Option<String>),
 }
@@ -284,7 +321,7 @@ enum Anchor {
 /// heading or a generated line) re-inserted after whatever it followed in the user's version.
 fn reanchor(base: &[String], user: &[String], new: &[String]) -> Vec<String> {
     let generated: HashSet<&str> = base.iter().map(String::as_str).collect();
-    let ucls = classify_facts(user);
+    let ucls = classify_facts_with(user, Some(&history_ids(base)));
     let is_prose =
         |i: usize| matches!(ucls[i], FLine::Other) && !generated.contains(user[i].as_str());
 
@@ -307,6 +344,10 @@ fn reanchor(base: &[String], user: &[String], new: &[String]) -> Vec<String> {
             }
             FLine::Fact { claim: None, .. } => {
                 anchor = Anchor::GroupEnd(group.clone());
+                in_prose = false;
+            }
+            FLine::History(id) => {
+                anchor = Anchor::History(*id, group.clone());
                 in_prose = false;
             }
             FLine::Blank => {
@@ -357,13 +398,45 @@ fn reanchor(base: &[String], user: &[String], new: &[String]) -> Vec<String> {
         let pos = match &a {
             Anchor::Start => 0,
             Anchor::Heading(g) => heading_at(g).map_or(new.len(), |i| i + 1),
-            Anchor::Claim(id, g) => (0..new.len())
-                .find(|&i| matches!(&ncls[i], FLine::Fact { claim: Some(c), .. } if c == id))
-                .map_or_else(|| group_end(g), |i| i + 1),
-            Anchor::Line(text, g) => new
-                .iter()
-                .position(|l| l == text)
-                .map_or_else(|| group_end(g), |i| i + 1),
+            // A fact that became history (superseded) keeps its notes: they follow its history
+            // line, and the other way round.
+            Anchor::Claim(id, g) | Anchor::History(id, g) => {
+                // 0: the line of the anchor's own kind, 1: the other kind, 2: neither.
+                let rank = |i: usize| match (&ncls[i], &a) {
+                    (FLine::Fact { claim: Some(c), .. }, Anchor::Claim(..))
+                    | (FLine::History(c), Anchor::History(..))
+                        if c == id =>
+                    {
+                        0
+                    }
+                    (FLine::Fact { claim: Some(c), .. }, _) | (FLine::History(c), _) if c == id => {
+                        1
+                    }
+                    _ => 2,
+                };
+                (0..new.len())
+                    .filter(|&i| rank(i) < 2)
+                    .min_by_key(|&i| (rank(i), i))
+                    .map_or_else(|| group_end(g), |i| i + 1)
+            }
+            Anchor::Line(text, g) => {
+                // Lines like `*Earlier:*` repeat per group: look only inside the anchor's own
+                // group (the whole region when it had none), else fall back to its end.
+                let range = match g.as_deref().map(heading_at) {
+                    None => 0..new.len(),
+                    Some(None) => 0..0,
+                    Some(Some(h)) => {
+                        let end = (h + 1..new.len())
+                            .find(|&i| matches!(ncls[i], FLine::Heading(_)))
+                            .unwrap_or(new.len());
+                        h..end
+                    }
+                };
+                range
+                    .into_iter()
+                    .find(|&i| new[i] == *text)
+                    .map_or_else(|| group_end(g), |i| i + 1)
+            }
             Anchor::GroupEnd(g) => group_end(g),
         };
         inserts.entry(pos).or_default().extend(lines);
@@ -433,6 +506,59 @@ mod tests {
                 "## Facts\nintro\n\n### A <!-- p:a -->\n- two [^1] <!-- c:2 -->\n- three [^2] <!-- c:3 -->\n  - sub note\n\npara 1\n\npara 2"
             )
         );
+    }
+
+    #[test]
+    fn notes_follow_a_fact_into_history() {
+        let base = v("## Facts\n\n### A <!-- p:a -->\n- old [^1] <!-- c:1 -->");
+        let user = v("## Facts\n\n### A <!-- p:a -->\n- old [^1] <!-- c:1 -->\n  - my note");
+        let new = v(
+            "## Facts\n\n### A <!-- p:a -->\n- new [^1] <!-- c:2 -->\n\n*Earlier:*\n  - old [^2] <!-- h:1 -->",
+        );
+        assert_eq!(
+            reanchor(&base, &user, &new),
+            v(
+                "## Facts\n\n### A <!-- p:a -->\n- new [^1] <!-- c:2 -->\n\n*Earlier:*\n  - old [^2] <!-- h:1 -->\n  - my note"
+            )
+        );
+        // An edited history line is dropped (restored from the render); prose after it stays.
+        let base = new.clone();
+        let mut user = new.clone();
+        user[6] = "  - old, edited [^2] <!-- h:1 -->".into();
+        user.push("after history".into());
+        let mut want = new.clone();
+        want.push("after history".into());
+        assert_eq!(reanchor(&base, &user, &new), want);
+    }
+
+    #[test]
+    fn notes_after_earlier_stay_in_their_group() {
+        let base = v(
+            "## Facts\n\n### A <!-- p:a -->\n- a [^1] <!-- c:1 -->\n\n*Earlier:*\n  - a0 [^1] <!-- h:2 -->\n\n### B <!-- p:b -->\n- b [^1] <!-- c:3 -->\n\n*Earlier:*\n  - b0 [^1] <!-- h:4 -->",
+        );
+        let mut user = base.clone();
+        user.insert(12, "note on B's history".into());
+        // B's history is gone; A's is still there. The note stays in group B.
+        let new = v(
+            "## Facts\n\n### A <!-- p:a -->\n- a [^1] <!-- c:1 -->\n\n*Earlier:*\n  - a0 [^1] <!-- h:2 -->\n\n### B <!-- p:b -->\n- b [^1] <!-- c:3 -->",
+        );
+        let out = reanchor(&base, &user, &new);
+        let mut want = new.clone();
+        want.push("note on B's history".into());
+        assert_eq!(out, want);
+    }
+
+    #[test]
+    fn foreign_and_appended_history_markers() {
+        let base = v("## Facts\n\n### A <!-- p:a -->\n*Earlier:*\n  - a0 [^1] <!-- h:2 -->");
+        // Text appended after a known marker: restored. A marker the render never showed: kept.
+        let user = v(
+            "## Facts\n\n### A <!-- p:a -->\n*Earlier:*\n  - a0 [^1] <!-- h:2 --> (really?)\n- my line <!-- h:99 -->",
+        );
+        let out = reanchor(&base, &user, &base);
+        let mut want = base.clone();
+        want.push("- my line <!-- h:99 -->".into());
+        assert_eq!(out, want);
     }
 
     #[test]
