@@ -155,10 +155,28 @@ def check(rec, sc):
     if e.get("no_greeting") and re.match(r"\s*(hi|hello|hey|dear|hallo|hola|liebe|lieber)\b", low):
         probs.append("greeting where none belongs")
     if e.get("no_repeat_prefix"):
-        before = (sc["request"]["context"]["field"].get("value") or "").strip()
-        tail = before[-25:].lower()
-        if len(tail) >= 12 and tail in low:
+        before = (sc["request"]["context"]["field"].get("value") or "").strip().lower()
+        tail = before[-25:]
+        head = low.lstrip()
+        # The draft restates the typed tail, or starts with an overlap of the typed text.
+        overlap = max((k for k in range(4, min(len(before), len(head)) + 1)
+                       if before.endswith(head[:k])), default=0)
+        if (len(tail) >= 12 and tail in low) or overlap >= 4:
             probs.append("repeats text already in the field")
+    ins = r.get("inserted_field")
+    if ins is not None:
+        for pat in e.get("inserted_required_regex", []):
+            if not re.search(pat, ins):
+                probs.append(f"inserted field lacks {pat!r}: {ins[:80]!r}")
+        for pat in e.get("inserted_forbidden_regex", []):
+            m = re.search(pat, ins)
+            if m:
+                probs.append(f"inserted field has {pat!r}: {m.group(0)!r}")
+    ra = r.get("read_ahead")
+    if ra is not None and "read_ahead" in e:
+        got = ra.get("outcome") if ra.get("outcome") != "skipped" else ra.get("reason")
+        if got != e["read_ahead"]:
+            probs.append(f"read_ahead {got} (want {e['read_ahead']})")
     if e.get("no_signoff_name"):
         if re.search(r"\n\s*" + re.escape(e["no_signoff_name"].lower()) + r"\s*$", low):
             probs.append("signs off although the field already has a sign-off")
