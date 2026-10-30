@@ -481,7 +481,11 @@ export async function keyboardScenario({ browser, bin }) {
       } catch {
         /* an unknown kind keeps the daemon's label */
       }
-      const actionBtn = page.locator("main").getByRole("button", { name: actionName, exact: true });
+      // Within this card's actions group: two cards can offer the same kind of action.
+      const actionBtn = page
+        .locator("main")
+        .getByRole("group", { name: t("today.actionsLabel").replace("{title}", card.title), exact: true })
+        .getByRole("button", { name: actionName, exact: true });
       await tabTo(page, actionBtn, { what: `the card action "${actionName}"`, max: 80 });
       await markOpener(page);
       await page.keyboard.press("Enter");
