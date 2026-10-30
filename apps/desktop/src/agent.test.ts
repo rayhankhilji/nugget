@@ -3,6 +3,7 @@ import type { ActionDescriptor, AgentEvent, PolicyConfig, PolicyRule } from "./a
 import {
   addRule,
   ANY_TARGET,
+  answered,
   canApproveForTask,
   emptyDraft,
   emptyRun,
@@ -117,6 +118,26 @@ describe("timeline reducer", () => {
     expect(isLive(run)).toBe(true);
   });
 
+  it("keeps the question's options until it is answered or the run ends", () => {
+    const options = ["Sam Lee — Can I take Friday off?", "Sam Ortiz — Renew the contract at +20%?"];
+    const run = play([
+      { event: "suspended", task_id: T, question: "Which Sam?", options },
+      { event: "finished", task_id: T, outcome: { outcome: "needs_input", detail: "Which Sam?" }, summary: null },
+    ]);
+    expect(run.options).toEqual(options);
+    expect(run.items.find((i) => i.kind === "question")).toEqual({ kind: "question", question: "Which Sam?", options });
+    const after = answered(run);
+    expect(after.question).toBeNull();
+    expect(after.options).toEqual([]);
+    expect(after.outcome).toBeNull();
+    // Without options the question is free text.
+    expect(play([{ event: "suspended", task_id: T, question: "Which Sam?" }]).options).toEqual([]);
+    // A run that ends (cancelled while waiting) drops the question and its options.
+    const ended = reduceRun(run, { task_id: T, event: { event: "finished", task_id: T, outcome: { outcome: "cancelled" }, summary: null } }, 0);
+    expect(ended.question).toBeNull();
+    expect(ended.options).toEqual([]);
+  });
+
   it("formats budget outcomes and ignores unknown events", () => {
     expect(outcomeDetail({ outcome: "budget_exhausted", detail: { budget: "steps", limit: 30 } })).toContain("30");
     const run = emptyRun(T);
@@ -137,10 +158,12 @@ describe("timeline reducer", () => {
         explain: "",
         pending: [],
         question: "Which?",
+        options: ["Sam Lee", "", "Sam Ortiz", "Sam Lee"],
       },
       0,
     );
     expect(run.question).toBe("Which?");
+    expect(run.options).toEqual(["Sam Lee", "Sam Ortiz"]);
     expect(run.verification.passed).toBe(1);
   });
 

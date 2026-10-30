@@ -400,6 +400,7 @@ impl AgentFeature {
             t.suspended.take().map(|st| {
                 t.state = AgentTaskState::Running;
                 t.question = None;
+                t.options.clear();
                 (st, t.agent.clone(), t.cfg(self.shutdown.child_token()))
             })
         };
@@ -471,6 +472,7 @@ impl AgentFeature {
             };
             t.state = AgentTaskState::Running;
             t.question = None;
+            t.options.clear();
             t.cancel = self.shutdown.child_token();
             let cfg = t.cfg(t.cancel.clone());
             (st, t.agent.clone(), cfg)
@@ -523,16 +525,17 @@ impl AgentFeature {
                 t.summary(task_id),
                 t.pending.values().map(to_json).collect::<Vec<_>>(),
                 t.question.clone(),
+                t.options.clone(),
             )
         });
-        let (summary, pending, question) = match live {
+        let (summary, pending, question, options) = match live {
             Some(l) => l,
             None => {
                 let s = summaries_from_log(&entries)
                     .into_iter()
                     .next()
                     .ok_or_else(|| unknown_task(task_id))?;
-                (s, Vec::new(), None)
+                (s, Vec::new(), None, Vec::new())
             }
         };
         Ok(AgentTaskDetail {
@@ -541,6 +544,7 @@ impl AgentFeature {
             explain,
             pending,
             question,
+            options,
         })
     }
 }
@@ -650,6 +654,8 @@ struct TaskEntry {
     /// Open confirmations by request id.
     pending: BTreeMap<String, ConfirmationRequest>,
     question: Option<String>,
+    /// Candidate answers offered with `question`.
+    options: Vec<String>,
     /// Set while the run waits on `ask_user`.
     suspended: Option<RunState>,
     /// The `suspended` event, held back until the run's state is stored (so a client that sees
@@ -676,6 +682,7 @@ impl TaskEntry {
             verification: AgentVerificationCounts::default(),
             pending: BTreeMap::new(),
             question: None,
+            options: Vec::new(),
             suspended: None,
             deferred: None,
             confirmations: agent.confirmations(),
@@ -767,8 +774,11 @@ impl Runs {
             AgentEvent::Verification { verification, .. } => {
                 count(&mut t.verification, verification);
             }
-            AgentEvent::Suspended { question, .. } => {
+            AgentEvent::Suspended {
+                question, options, ..
+            } => {
                 t.question = Some(question.clone());
+                t.options.clone_from(options);
                 t.deferred = Some(event.clone());
                 return false;
             }
@@ -796,6 +806,7 @@ impl Runs {
             pending.remove(&id);
         }
         t.question = None;
+        t.options.clear();
         t.suspended = None;
         t.deferred = None;
     }
@@ -811,6 +822,11 @@ impl Runs {
             match run.suspended {
                 Some(st) => {
                     t.question = st.pending.as_ref().map(|p| p.question.clone());
+                    t.options = st
+                        .pending
+                        .as_ref()
+                        .map(|p| p.options.clone())
+                        .unwrap_or_default();
                     t.suspended = Some(st);
                     t.state = AgentTaskState::NeedsInput;
                     t.deferred.take()
@@ -1056,10 +1072,11 @@ mod tests {
         runs.emit(AgentEvent::Suspended {
             task_id: "t".into(),
             question: "which one?".into(),
-            options: Vec::new(),
+            options: vec!["Sam Lee".into(), "Sam Ortiz".into()],
         });
         assert!(runs.lock()["t"].deferred.is_some());
         assert_eq!(runs.lock()["t"].question.as_deref(), Some("which one?"));
+        assert_eq!(runs.lock()["t"].options, ["Sam Lee", "Sam Ortiz"]);
 
         // A run stopped while a confirmation was open drops it.
         runs.emit(AgentEvent::ConfirmationNeeded {
@@ -1078,5 +1095,7 @@ mod tests {
         assert!(s.finished_ms.is_some());
         assert!(safety.pending.lock().unwrap().is_empty());
         assert!(runs.lock()["t"].pending.is_empty());
+        assert!(runs.lock()["t"].question.is_none());
+        assert!(runs.lock()["t"].options.is_empty());
     }
 }
