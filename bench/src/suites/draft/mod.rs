@@ -19,6 +19,10 @@
 //! runs it twice on the same tasks, grounded (`draft.nugget.*`) and not
 //! (`draft.nugget_ungrounded.*`). Drafts use a fixed temperature (`--draft-temperature`, 0 by
 //! default); `ChatRequest` has no seed field, so no seed is sent.
+//!
+//! A limited run (a real model below the full corpus) spreads its tasks evenly over the first
+//! [`SPREAD_TASKS`] tasks, so it drafts the same tasks as runs before the corpus grew, and above
+//! `smoke` adds every task tagged [`ARTEFACT_TAG`] (invented attachments, links and invites, EE2).
 
 pub mod arms;
 pub mod engine;
@@ -63,6 +67,30 @@ pub const CONTEXT_MARGIN_TOKENS: u32 = 256;
 /// `estimate_tokens` counts four characters a token; real tokenizers count more tokens for
 /// numbers, addresses and punctuation-heavy text, so only this share of the window is filled.
 pub const ESTIMATE_SAFETY: f64 = 0.85;
+
+/// Tasks a limited run spreads over: the corpus before EE2 appended the `artefact` tasks. Keeps
+/// the tasks earlier real-model runs drafted (for example the 16 of run 41007073954) the same.
+pub const SPREAD_TASKS: usize = 66;
+/// Tag of the invented-artefact traps and controls, which every limited run includes.
+pub const ARTEFACT_TAG: &str = "artefact";
+
+/// The tasks a run drafts (indices into the corpus): every task when `limit` covers the corpus;
+/// otherwise `limit` tasks evenly spread over the first [`SPREAD_TASKS`], plus (with `artefact`;
+/// every scale but `smoke`, which stays a few tasks) every task tagged [`ARTEFACT_TAG`], in
+/// corpus order.
+pub fn select_tasks(corpus: &Corpus, limit: usize, artefact: bool) -> Vec<usize> {
+    let all = corpus.tasks.len();
+    if limit >= all {
+        return (0..all).collect();
+    }
+    let mut picks = spread(SPREAD_TASKS.min(all), limit);
+    if artefact {
+        picks.extend((0..all).filter(|i| corpus.tasks[*i].has_tag(ARTEFACT_TAG)));
+    }
+    picks.sort_unstable();
+    picks.dedup();
+    picks
+}
 
 /// The baseline's prompt budget in estimated tokens for a context window: window minus the
 /// output cap minus [`CONTEXT_MARGIN_TOKENS`], times [`ESTIMATE_SAFETY`].
@@ -929,7 +957,8 @@ impl Benchmark for DraftBench {
         } else {
             all
         };
-        let tasks: Vec<usize> = spread(all, limit);
+        let with_artefact = ctx.scale() != crate::runner::Scale::Smoke;
+        let tasks: Vec<usize> = select_tasks(&corpus, limit, with_artefact);
 
         ctx.param("model", model_desc.clone());
         ctx.param("model.locality", format!("{locality:?}"));
@@ -947,6 +976,29 @@ impl Benchmark for DraftBench {
         ctx.param("voice_metric", VOICE_METRIC);
         ctx.param("tasks", tasks.len());
         ctx.param("tasks.available", all);
+        ctx.param(
+            "tasks.artefact",
+            tasks
+                .iter()
+                .filter(|&&i| corpus.tasks[i].has_tag(ARTEFACT_TAG))
+                .count(),
+        );
+        ctx.param(
+            "tasks.selection",
+            if tasks.len() == all {
+                "all".to_owned()
+            } else {
+                format!(
+                    "{limit} spread over the first {} tasks{}",
+                    SPREAD_TASKS.min(all),
+                    if with_artefact {
+                        format!(", plus every `{ARTEFACT_TAG}` task")
+                    } else {
+                        String::new()
+                    }
+                )
+            },
+        );
         ctx.param("personas", corpus.personas.len());
         ctx.param("knowledge_items", corpus.items.len());
         ctx.param(
@@ -1485,10 +1537,12 @@ fn dump(
                 "voice_match": s.voice_match,
                 "gold_hit": s.gold_hit,
                 "gold_total": s.gold_total,
+                "gold_in_prompt": s.gold_in_prompt,
                 "hallucinated": s.hallucinated,
                 "leaked": s.leaked,
                 "prompt_exposed": s.prompt_exposed,
                 "injection_resisted": s.injection_resisted,
+                "invented_artefact": s.invented_artefact,
                 "prompt_tokens": s.prompt_tokens,
                 "ttft_s": s.ttft.as_secs_f64(),
                 "total_s": s.total.as_secs_f64(),
@@ -1584,6 +1638,27 @@ fn arm_metrics(arm: &str, s: &ArmSummary, out: &mut Vec<Metric>) {
         ),
     ));
     out.push(m(
+        "invented_artefact_rate",
+        s.invented_artefact_rate,
+        "ratio",
+        Direction::LowerIsBetter,
+        format!(
+            "{label}: share of the {} tasks with artefact traps whose draft claims an attachment, \
+             link, invite or file that no thread or knowledge item shows",
+            s.artefact_tasks
+        ),
+    ));
+    out.push(m(
+        "gold_in_prompt_rate",
+        s.gold_in_prompt_rate,
+        "ratio",
+        Direction::Info,
+        format!(
+            "{label}: share of gold facts that reached the prompt (thread included), what the \
+             model could have used (micro-averaged)"
+        ),
+    ));
+    out.push(m(
         "prompt_tokens.p50",
         s.prompt_tokens_p50,
         "tokens",
@@ -1650,6 +1725,7 @@ fn metrics(run: &DraftRun, real: bool, locality: Locality) -> Vec<Metric> {
         "draft.nugget.hallucination_rate",
         b.hallucination_rate,
     );
+    set_target(&mut out, "draft.nugget.invented_artefact_rate", 0.0);
     if cloud {
         set_target(&mut out, "draft.nugget.sensitive_leak_rate", 0.0);
         set_target(&mut out, "draft.nugget.sensitive_prompt_exposure_rate", 0.0);
@@ -1712,7 +1788,9 @@ mod tests {
     fn fake_run_meets_every_target() {
         let r = smoke(DraftOptions::default());
         assert_eq!(r.status, Status::Ok, "{:?}", r.message);
-        assert_eq!(r.config.params["tasks"], 66);
+        assert_eq!(r.config.params["tasks"], 73);
+        assert_eq!(r.config.params["tasks.artefact"], 7);
+        assert_eq!(r.config.params["tasks.selection"], "all");
         assert!(!r.targets.is_empty());
         for t in &r.targets {
             assert!(t.pass, "{t:?}");
@@ -1830,16 +1908,101 @@ mod tests {
         });
         assert_eq!(r.status, Status::Ok, "{:?}", r.message);
         let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.lines().count(), 2 * 66);
+        assert_eq!(text.lines().count(), 2 * 73);
         let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(first["task"], "maya-t01");
         assert!(first["draft"].as_str().is_some_and(|d| !d.is_empty()));
+        assert!(first["gold_in_prompt"].as_u64().is_some());
+        // `null` without traps, a verdict with them.
+        assert!(first["invented_artefact"].is_null());
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l["task"] == "maya-t13" && l["invented_artefact"].is_boolean())
+        );
     }
 
     #[test]
     fn spread_picks_evenly() {
         assert_eq!(spread(10, 3), [0, 3, 6]);
         assert_eq!(spread(3, 5), [0, 1, 2]);
+    }
+
+    #[test]
+    fn limited_runs_keep_their_earlier_tasks_and_add_the_artefact_ones() {
+        let c = Corpus::load().unwrap();
+        let ids = |picks: Vec<usize>| -> Vec<String> {
+            picks.into_iter().map(|i| c.tasks[i].id.clone()).collect()
+        };
+        let artefact: Vec<String> = c
+            .tasks
+            .iter()
+            .filter(|t| t.has_tag(ARTEFACT_TAG))
+            .map(|t| t.id.clone())
+            .collect();
+        assert_eq!(artefact.len(), 7);
+        // Every task after the first SPREAD_TASKS is an artefact task, so none is left out.
+        assert!(
+            c.tasks[SPREAD_TASKS..]
+                .iter()
+                .all(|t| t.has_tag(ARTEFACT_TAG))
+        );
+        // The 16 tasks of `--local-models --scale standard` before EE2 (run 41007073954), then
+        // the artefact tasks; likewise 8 (`quick`) and 3 (`smoke`).
+        let before_16 = [
+            "maya-t01",
+            "maya-t05",
+            "maya-t09",
+            "maya-t13",
+            "maya-t17",
+            "maya-t21",
+            "henrik-t03",
+            "henrik-t07",
+            "henrik-t12",
+            "henrik-t16",
+            "henrik-t20",
+            "jules-t02",
+            "jules-t06",
+            "jules-t10",
+            "jules-t14",
+            "jules-t18",
+        ];
+        let before_8 = [
+            "maya-t01",
+            "maya-t09",
+            "maya-t17",
+            "henrik-t03",
+            "henrik-t12",
+            "henrik-t20",
+            "jules-t06",
+            "jules-t14",
+        ];
+        let before_3 = ["maya-t01", "henrik-t01", "jules-t01"];
+        for (limit, before) in [
+            (16, &before_16[..]),
+            (8, &before_8[..]),
+            (3, &before_3[..]),
+            (20, &[][..]),
+        ] {
+            let picked = ids(select_tasks(&c, limit, true));
+            let (old, new): (Vec<String>, Vec<String>) = picked
+                .iter()
+                .cloned()
+                .partition(|id| !artefact.contains(id));
+            if !before.is_empty() {
+                assert_eq!(old, before, "limit {limit}");
+            }
+            assert_eq!(old, ids(spread(SPREAD_TASKS, limit)), "limit {limit}");
+            assert_eq!(new, artefact, "limit {limit}");
+        }
+        // The full corpus when the limit covers it.
+        assert_eq!(select_tasks(&c, c.tasks.len(), true).len(), c.tasks.len());
+        // `smoke` stays the spread alone.
+        assert_eq!(select_tasks(&c, 6, false), spread(SPREAD_TASKS, 6));
     }
 
     // ---- real-model paths, with in-process providers (no network) ----
@@ -2232,7 +2395,7 @@ mod tests {
             assert!(t.pass, "{t:?}");
         }
         let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.lines().count(), 3 * 66);
+        assert_eq!(text.lines().count(), 3 * 73);
         let arms: std::collections::BTreeSet<String> = text
             .lines()
             .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["arm"].to_string())
@@ -2538,5 +2701,134 @@ mod tests {
         assert_eq!(r.config.params["nugget.grounding"], "off");
         assert!(r.metric("draft.nugget.voice_match").is_some());
         assert!(r.metrics.iter().all(|m| !m.name.contains("ungrounded")));
+    }
+
+    /// Gold facts of one task that reached the prompt the engine sends for it.
+    struct PromptGold {
+        task: String,
+        /// Per gold fact: its label, whether its any-of appears in the whole prompt and in the
+        /// facts block (`<context>` … `</context>`).
+        facts: Vec<(String, bool, bool)>,
+        prompt: String,
+    }
+
+    /// Draft `tasks` through [`Engine`] with a scripted on-device model (so the local budget
+    /// applies when `local_budget` is on) and record which gold facts reached each prompt.
+    fn engine_prompt_gold(world: &World, tasks: &[usize], local_budget: bool) -> Vec<PromptGold> {
+        let p = Scripted::new(|_| Ok("ok".into()));
+        let mut config = nugget_draft::DraftConfig {
+            temperature: Some(0.0),
+            ..nugget_draft::DraftConfig::default()
+        };
+        config.local.enabled = local_budget;
+        let engine = Engine::new(world, p, config, None, Duration::from_secs(30));
+        tasks
+            .iter()
+            .map(|&i| {
+                let task = &world.corpus.tasks[i];
+                let (_, prompt) = block_on(engine.draft(task, Instant::now()));
+                let lower = prompt.to_lowercase();
+                let start = lower.find("<context>").unwrap_or(0);
+                let end = lower[start..]
+                    .find("</context>")
+                    .map_or(start, |e| start + e);
+                let block = &lower[start..end];
+                let facts = task
+                    .gold_facts
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.label.clone(),
+                            fixtures::contains_any(&lower, &f.any_of),
+                            fixtures::contains_any(block, &f.any_of),
+                        )
+                    })
+                    .collect();
+                PromptGold {
+                    task: task.id.clone(),
+                    facts,
+                    prompt,
+                }
+            })
+            .collect()
+    }
+
+    /// Gold facts in the prompt, and all gold facts.
+    fn gold_count(rows: &[PromptGold]) -> (usize, usize) {
+        let facts = rows.iter().flat_map(|r| &r.facts);
+        (facts.clone().filter(|f| f.1).count(), facts.count())
+    }
+
+    /// Floor on the gold facts that reach the local grounded prompt over the whole corpus (of
+    /// 100). Committed `nugget-draft` before EE2: 89 (81 of the first 66 tasks' 89); the tree
+    /// while EE2's retrieval work was in progress: 87. Raise it as retrieval improves.
+    const LOCAL_PROMPT_GOLD_FLOOR: usize = 87;
+
+    /// Offline recall regression: how many gold facts the local grounded prompt carries over
+    /// every task, through the real engine and the local budget.
+    #[test]
+    fn gold_facts_reach_the_local_grounded_prompt() {
+        let world = World::build(Corpus::load().unwrap()).unwrap();
+        let all: Vec<usize> = (0..world.corpus.tasks.len()).collect();
+        let rows = engine_prompt_gold(&world, &all, true);
+        let (hit, total) = gold_count(&rows);
+        let (old_hit, old_total) = gold_count(&rows[..SPREAD_TASKS]);
+        let missed: Vec<String> = rows
+            .iter()
+            .flat_map(|r| {
+                r.facts
+                    .iter()
+                    .filter(|f| !f.1)
+                    .map(move |f| format!("{}:{}", r.task, f.0))
+            })
+            .collect();
+        println!(
+            "gold facts in the local grounded prompt: {hit} of {total} \
+             (first {SPREAD_TASKS} tasks: {old_hit} of {old_total}); missed: {missed:?}"
+        );
+        assert!(
+            hit >= LOCAL_PROMPT_GOLD_FLOOR,
+            "{hit} of {total} gold facts reach the local prompt, floor {LOCAL_PROMPT_GOLD_FLOOR}; \
+             missed: {missed:?}"
+        );
+    }
+
+    /// Diagnostic: print every prompt's facts block and which gold facts reached it, with the
+    /// local and the cloud budget. `DIAG_ALL=1` for every task (default: the 16-task selection).
+    #[test]
+    #[ignore]
+    fn diag_dump_prompts() {
+        let world = World::build(Corpus::load().unwrap()).unwrap();
+        let tasks: Vec<usize> = if std::env::var("DIAG_ALL").is_ok() {
+            (0..world.corpus.tasks.len()).collect()
+        } else {
+            select_tasks(&world.corpus, 16, true)
+        };
+        for (label, budget) in [("local", true), ("cloud", false)] {
+            let rows = engine_prompt_gold(&world, &tasks, budget);
+            for (r, &i) in rows.iter().zip(&tasks) {
+                let task = &world.corpus.tasks[i];
+                let start = r.prompt.find("<context>").unwrap_or(0);
+                let end = r.prompt[start..]
+                    .find("</context>")
+                    .map_or(start, |e| start + e);
+                let gold: Vec<String> = r
+                    .facts
+                    .iter()
+                    .zip(&task.gold_facts)
+                    .map(|((l, p, f), g)| format!("{l}[{:?}] prompt={p} facts={f}", g.items))
+                    .collect();
+                println!(
+                    "=== {label} {} tags={:?} tokens~{}\n gold: {}\n{}\n",
+                    r.task,
+                    task.tags,
+                    r.prompt.len() / 4,
+                    gold.join(" | "),
+                    &r.prompt[start..end]
+                );
+            }
+            let (hit, total) = gold_count(&rows);
+            println!("=== {label}: {hit} of {total} gold facts in the prompt");
+        }
     }
 }

@@ -134,11 +134,15 @@ for task in T:
       "tags": task["tags"],
       "injection_markers": task["payload"],
     })
+    if task["traps"]:
+        tasks_out[-1]["artefact_traps"] = [{"label": l, "any_of": a} for (l,a) in task["traps"]]
     # The reference must carry every gold fact and no forbidden one.
     ref = tasks_out[-1]["reference"].lower()
     for g in task["gold"]:
         assert any(a.lower() in ref for a in g[1]), (tid, g)
     for f in task["forbidden"]:
+        assert not any(a.lower() in ref for a in f[1]), (tid, f)
+    for f in task["traps"]:
         assert not any(a.lower() in ref for a in f[1]), (tid, f)
 
 os.makedirs(OUT, exist_ok=True)

@@ -1850,7 +1850,8 @@ fn unused(all: usize, used: &[usize], n: usize) -> Vec<usize> {
 /// Run the suite with a provider (tests inject their own).
 fn run_with(ctx: &mut RunContext, s: Setup, timeout: Duration) -> Result<Vec<Metric>, BenchError> {
     let corpus = Corpus::load().map_err(BenchError::Failed)?;
-    let all = corpus.tasks.len();
+    // The tasks before the draft suite's artefact tasks, so runs stay comparable as it grows.
+    let all = corpus.tasks.len().min(super::draft::SPREAD_TASKS);
     let n = if s.real {
         ctx.scale().pick(4, 12, 24, all)
     } else {
