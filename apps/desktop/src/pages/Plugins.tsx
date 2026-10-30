@@ -226,7 +226,7 @@ function AvailablePlugins({
   onInstall: (entry: PluginCatalogEntry) => void;
 }) {
   const t = useT();
-  const sorted = [...(entries ?? [])].sort((a, b) => (a.name || a.file_name).localeCompare(b.name || b.file_name));
+  const sorted = [...(entries ?? [])].sort((a, b) => catalogName(a).localeCompare(catalogName(b)));
   return (
     <section aria-labelledby="plugins-available-title">
       <h2 id="plugins-available-title">{t("plugins.available.title")}</h2>
@@ -264,7 +264,7 @@ function CatalogRow({
   onInstall: () => void;
 }) {
   const t = useT();
-  const name = e.name || e.file_name;
+  const name = catalogName(e);
   const access = capabilityLines(e.requested, t);
   const upToDate = installed && !e.update_available;
 
@@ -278,7 +278,8 @@ function CatalogRow({
           <h3 className="source-name">
             {name}
           </h3>
-          <Badge tone={SIGNATURE_TONE[e.signature]}>{t(SIGNATURE_LABEL[e.signature])}</Badge>
+          {/* Without a verified signer (unreadable, unsigned, untrusted) the error says why. */}
+          {!(e.error && !e.signer) && <Badge tone={SIGNATURE_TONE[e.signature]}>{t(SIGNATURE_LABEL[e.signature])}</Badge>}
           {upToDate && <Badge tone="good">{t("plugins.available.installed")}</Badge>}
           {e.update_available && !e.error && <Badge tone="accent">{t("plugins.available.updateAvailable")}</Badge>}
         </div>
@@ -295,7 +296,7 @@ function CatalogRow({
           </p>
         )}
         {e.error ? (
-          <p className="note note-error small" role="status">
+          <p className="note note-error small">
             {t("plugins.available.cannotInstall", { file: e.file_name || e.path, error: e.error })}
           </p>
         ) : (
@@ -332,6 +333,17 @@ function CatalogRow({
       </div>
     </li>
   );
+}
+
+/** Last segment of a `/` or `\\` path (the whole path when it has none). */
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** What a catalog entry is called: its name, else its file (or unreadable folder) name. */
+function catalogName(e: PluginCatalogEntry): string {
+  return e.name || e.file_name || baseName(e.path);
 }
 
 function PluginIcon() {

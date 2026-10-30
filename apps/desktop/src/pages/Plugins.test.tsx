@@ -135,7 +135,8 @@ describe("PluginsPage", () => {
         entries: [
           entry(),
           entry({ path: "/opt/c/rss.nuggetplugin", file_name: "rss.nuggetplugin", id: "rss", name: "RSS feeds", version: "1.3.0", installed_version: "1.2.0", update_available: true, needs_approval: false, requested: { hosts: ["feeds.example.com"], secrets: [], kv_max_bytes: 0 } }),
-          entry({ path: "/opt/c/bad.nuggetplugin", file_name: "bad.nuggetplugin", id: "", name: "", version: "", description: "", kinds: [], signature: "untrusted", error: "plugin signature does not match any trusted key" }),
+          entry({ path: "/opt/c/bad.nuggetplugin", file_name: "bad.nuggetplugin", id: "", name: "", version: "", description: "", kinds: [], signature: "untrusted", signer: "", error: "plugin signature does not match any trusted key" }),
+          entry({ path: "/srv/locked-catalog", file_name: "", id: "", name: "", version: "", description: "", kinds: [], signature: "untrusted", signer: "", error: "cannot read the folder: permission denied" }),
         ],
         dirs: ["/opt/c"],
         truncated: false,
@@ -150,12 +151,18 @@ describe("PluginsPage", () => {
     expect(container.querySelector("#plugins-available-title")?.textContent).toBe("Available plugins");
     const list = availableList(container)!;
     const rows = Array.from(list.querySelectorAll("li.source"));
-    expect(rows.map((r) => r.querySelector("h3")?.textContent)).toEqual(["bad.nuggetplugin", "Obsidian vault", "RSS feeds"]);
+    expect(rows.map((r) => r.querySelector("h3")?.textContent)).toEqual(["bad.nuggetplugin", "locked-catalog", "Obsidian vault", "RSS feeds"]);
 
-    // A package that can't be verified shows why, with no install button.
+    // A package that can't be verified shows why, with no install button and no signer badge
+    // (there is no verified signer to describe).
     expect(rows[0]!.textContent).toContain("Can't install bad.nuggetplugin: plugin signature does not match any trusted key");
-    expect(rows[0]!.textContent).toContain("Untrusted signer");
+    expect(rows[0]!.textContent).not.toContain("signer");
     expect(rows[0]!.querySelector("button")).toBeNull();
+    expect(rows[0]!.querySelector('[role="status"]')).toBeNull();
+    // An unreadable catalog folder is named by its last path segment.
+    expect(rows[1]!.textContent).toContain("cannot read the folder");
+    expect(rows[1]!.textContent).not.toContain("signer");
+    rows.splice(1, 1);
 
     // File access is described in plain language.
     expect(rows[1]!.textContent).toContain("Trusted signer");
@@ -192,6 +199,44 @@ describe("PluginsPage", () => {
     const { container: old } = await render(<PluginsPage />);
     expect(old.querySelector("#plugins-available-title")).toBeNull();
     expect(old.textContent).toContain("RSS feeds");
+  });
+
+  it("reloads the catalog after an install, an update and a removal", async () => {
+    const catalogCalls = (calls: string[]) => calls.filter((c) => c === "plugins_catalog").length;
+    const calls = mockDaemon({
+      plugins_catalog: {
+        entries: [
+          entry(),
+          entry({ path: "/opt/c/rss.nuggetplugin", file_name: "rss.nuggetplugin", id: "rss", name: "RSS feeds", version: "1.3.0", installed_version: "1.2.0", update_available: true, needs_approval: false, requested: { hosts: ["feeds.example.com"], secrets: [], kv_max_bytes: 0 } }),
+        ],
+      },
+      plugins_install: (args: unknown) => {
+        const path = (args as { request: { path: string } }).request.path;
+        return path.endsWith("rss.nuggetplugin")
+          ? staged({ id: "rss", name: "RSS feeds", version: "1.3.0", installed_version: "1.2.0", needs_approval: false, installed: true })
+          : staged({ id: "dev.nugget.obsidian", name: "Obsidian vault" });
+      },
+      plugins_approve: { plugin: { ...plugins[0]!, id: "dev.nugget.obsidian", name: "Obsidian vault" } },
+      plugins_remove: { removed: true },
+    });
+    const { container } = await render(<PluginsPage />);
+    expect(catalogCalls(calls)).toBe(1);
+
+    // Approved install.
+    await click(availableList(container)!.querySelector<HTMLButtonElement>('button[aria-label="Install Obsidian vault"]')!);
+    await click(byText(dialog()!, "button", "Allow and install"));
+    expect(catalogCalls(calls)).toBe(2);
+
+    // Update committed at once (no approval needed).
+    await click(availableList(container)!.querySelector<HTMLButtonElement>('button[aria-label="Update RSS feeds to version 1.3.0"]')!);
+    expect(dialog()).toBeNull();
+    expect(catalogCalls(calls)).toBe(3);
+
+    // Removal.
+    const installedList = container.querySelector<HTMLElement>('ul[aria-label="Installed plugins"]')!;
+    await click(installedList.querySelector<HTMLButtonElement>('button[aria-label="Remove RSS feeds"]')!);
+    await click(byText(dialog()!, "button", "Remove"));
+    expect(catalogCalls(calls)).toBe(4);
   });
 
   it("does nothing when the file picker is cancelled", async () => {

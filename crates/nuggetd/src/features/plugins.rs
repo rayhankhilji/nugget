@@ -84,6 +84,8 @@ const CATALOG_DIR: &str = "plugin-catalog";
 const CATALOG_ENV: &str = "NUGGET_PLUGIN_CATALOG";
 /// Most packages `plugins.catalog` reads (over all directories).
 const MAX_CATALOG_ENTRIES: usize = 64;
+/// Most directory entries `plugins.catalog` looks at per directory, packages or not.
+const MAX_CATALOG_SCAN: usize = 4096;
 
 const METHODS: &[&str] = &[
     plugin_method::LIST,
@@ -249,6 +251,8 @@ struct Runtime {
     slots: Mutex<HashMap<String, Slot>>,
     /// Where `plugins.catalog` looks for packages.
     catalog_dirs: Vec<PathBuf>,
+    /// Verified catalog packages, so a page load does not re-read and re-hash every file.
+    catalog_cache: Mutex<HashMap<PathBuf, CachedPackage>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -304,6 +308,7 @@ impl Runtime {
             dev_key: Mutex::new(dev_key),
             slots: Mutex::new(HashMap::new()),
             catalog_dirs,
+            catalog_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -537,13 +542,19 @@ enum Found {
     Unreadable(PathBuf, String),
 }
 
-/// The package files in the catalog directories, sorted by directory then name, at most
-/// [`MAX_CATALOG_ENTRIES`] (the flag says whether more were found). A directory that does not
-/// exist is skipped; one that cannot be read is reported.
+/// The package files in the catalog directories, at most [`MAX_CATALOG_ENTRIES`] in all (the
+/// flag says whether there were more), sorted by name within each directory. Each directory is
+/// read only until the cap (or [`MAX_CATALOG_SCAN`] entries) is reached, so beyond the cap which
+/// packages are listed depends on the directory order. A directory that does not exist is
+/// skipped; one that cannot be read is reported.
 fn scan_catalog(dirs: &[PathBuf]) -> (Vec<Found>, bool) {
     let mut out = Vec::new();
     let mut truncated = false;
     for dir in dirs {
+        if out.len() >= MAX_CATALOG_ENTRIES {
+            truncated = true;
+            break;
+        }
         let read = match std::fs::read_dir(dir) {
             Ok(r) => r,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
@@ -555,32 +566,77 @@ fn scan_catalog(dirs: &[PathBuf]) -> (Vec<Found>, bool) {
                 continue;
             }
         };
-        let mut files: Vec<PathBuf> = read
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(PACKAGE_EXTENSION))
-            // Follows symlinks: a packager may link packages in. Directories are not listed.
-            .filter(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file()))
-            .collect();
-        files.sort();
-        for f in files {
-            if out.len() >= MAX_CATALOG_ENTRIES {
+        let mut files = Vec::new();
+        for (seen, entry) in read.enumerate() {
+            if seen >= MAX_CATALOG_SCAN {
                 truncated = true;
                 break;
             }
-            out.push(Found::Package(f));
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some(PACKAGE_EXTENSION)
+                // Follows symlinks: a packager may link packages in. Directories are not listed.
+                || !std::fs::metadata(&path).is_ok_and(|m| m.is_file())
+            {
+                continue;
+            }
+            if out.len() + files.len() >= MAX_CATALOG_ENTRIES {
+                truncated = true;
+                break;
+            }
+            files.push(path);
         }
-        if truncated {
-            break;
-        }
+        files.sort();
+        out.extend(files.into_iter().map(Found::Package));
     }
     (out, truncated)
 }
 
+/// File identity for the catalog cache: a changed file is read again.
+#[derive(Clone, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: std::time::SystemTime,
+}
+
+/// The stamp of a file that may be cached: `None` when it cannot be read, or when it changed so
+/// recently that a further same-size write could keep the same time on a filesystem with coarse
+/// timestamps (as git does for its index).
+fn file_stamp(path: &Path) -> Option<FileStamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?;
+    let age = std::time::SystemTime::now().duration_since(modified).ok()?;
+    (age >= Duration::from_secs(3)).then_some(FileStamp {
+        len: meta.len(),
+        modified,
+    })
+}
+
+/// A catalog package as read and verified, before it is compared with what is installed.
+struct CachedPackage {
+    stamp: FileStamp,
+    /// The dev key when it was read (an unsigned package is installed under it).
+    dev_key: Option<VerifyingKey>,
+    verified: std::result::Result<VerifiedCatalogPackage, String>,
+}
+
+#[derive(Clone)]
+struct VerifiedCatalogPackage {
+    manifest: Manifest,
+    /// Hex key the package is (or, unsigned in dev mode, will be) signed with; `None` for an
+    /// unsigned package before a dev key exists.
+    signer: Option<String>,
+    unsigned: bool,
+}
+
 impl Runtime {
     /// Describe one catalog package as `plugins.install` would see it, without installing it.
-    /// Reads and verifies the file: call from a blocking thread.
-    fn catalog_entry(&self, path: &Path) -> PluginCatalogEntry {
+    /// Reads and verifies the file unless `cache` holds it unchanged: call from a blocking thread.
+    fn catalog_entry(
+        &self,
+        path: &Path,
+        cache: &mut HashMap<PathBuf, CachedPackage>,
+    ) -> PluginCatalogEntry {
         let mut entry = PluginCatalogEntry {
             path: path.display().to_string(),
             file_name: path
@@ -589,17 +645,50 @@ impl Runtime {
                 .unwrap_or_default(),
             ..Default::default()
         };
-        if let Err(e) = self.describe(path, &mut entry) {
-            entry.error = Some(e.to_string());
+        let dev_key = self.dev_key();
+        let stamp = file_stamp(path);
+        let cached = cache
+            .get(path)
+            .filter(|c| Some(&c.stamp) == stamp.as_ref() && c.dev_key == dev_key)
+            .map(|c| c.verified.clone());
+        let verified = match cached {
+            Some(v) => v,
+            None => {
+                let v = self.verify_catalog_package(path).map_err(|e| e.to_string());
+                match stamp {
+                    Some(stamp) => {
+                        cache.insert(
+                            path.to_path_buf(),
+                            CachedPackage {
+                                stamp,
+                                dev_key,
+                                verified: v.clone(),
+                            },
+                        );
+                    }
+                    None => {
+                        cache.remove(path);
+                    }
+                }
+                v
+            }
+        };
+        match verified {
+            Ok(v) => {
+                if let Err(e) = self.describe(&v, &mut entry) {
+                    entry.error = Some(e.to_string());
+                }
+            }
+            Err(e) => entry.error = Some(e),
         }
         entry
     }
 
-    fn describe(&self, path: &Path, entry: &mut PluginCatalogEntry) -> Result<()> {
+    /// Read and verify a catalog package as `plugins.install` does (the signature before the
+    /// manifest; unsigned packages only in dev mode).
+    fn verify_catalog_package(&self, path: &Path) -> Result<VerifiedCatalogPackage> {
         let package = read_package(path)?;
-        let trusted = self.trusted_keys();
-        let unsigned = package.signature.is_empty();
-        let manifest = if unsigned {
+        if package.signature.is_empty() {
             if !self.settings.dev_mode {
                 return Err(Error::Unauthorized(
                     "the plugin package is unsigned; unsigned plugins install only with \
@@ -607,61 +696,91 @@ impl Runtime {
                         .into(),
                 ));
             }
-            // `plugins.install` signs it with the dev key.
-            entry.signature = PluginSignature::Dev;
-            Manifest::parse(&package.manifest)?
-        } else {
-            if trusted.is_empty() {
-                return Err(Error::Unauthorized(
-                    "no plugin signing key is trusted yet: add the publisher's public key to \
-                     [plugins] trusted_keys"
-                        .into(),
-                ));
-            }
-            // The signature is checked before the manifest is parsed.
-            let verified = package.verify(&trusted).map_err(|e| {
-                Error::Unauthorized(format!(
-                    "{e}: the publisher's key is not in [plugins] trusted_keys, or the file was \
-                     changed after signing"
-                ))
-            })?;
-            entry.signer = hex(verified.signer.as_bytes());
-            entry.signature = self.signature(&entry.signer);
-            verified.manifest
-        };
-        entry.id = manifest.id.clone();
-        entry.name = manifest.name.clone();
-        entry.version = manifest.version.to_string();
-        entry.description = manifest.description.clone();
-        entry.kinds = kinds(&manifest);
-        entry.requested = caps(&manifest.capabilities);
-        entry.connector_display_name = manifest.connector.as_ref().map(|c| c.display_name.clone());
+            // `plugins.install` signs it with the dev key (creating one if there is none).
+            return Ok(VerifiedCatalogPackage {
+                manifest: Manifest::parse(&package.manifest)?,
+                signer: self.dev_key().map(|k| hex(k.as_bytes())),
+                unsigned: true,
+            });
+        }
+        let trusted = self.trusted_keys();
+        if trusted.is_empty() {
+            return Err(Error::Unauthorized(
+                "no plugin signing key is trusted yet: add the publisher's public key to \
+                 [plugins] trusted_keys"
+                    .into(),
+            ));
+        }
+        let verified = package.verify(&trusted).map_err(|e| {
+            Error::Unauthorized(format!(
+                "{e}: the publisher's key is not in [plugins] trusted_keys, or the file was \
+                 changed after signing"
+            ))
+        })?;
+        Ok(VerifiedCatalogPackage {
+            manifest: verified.manifest,
+            signer: Some(hex(verified.signer.as_bytes())),
+            unsigned: false,
+        })
+    }
 
-        let installed = self.store.get(&manifest.id)?;
+    /// Fill `entry` from a verified package and compare it with the installed version, with the
+    /// rules of `plugins.install` (`PluginStore::preview`): a higher version signed by the same
+    /// key, approved again only for access beyond what was approved. (`plugins.install` itself
+    /// runs the full preview, including the approval seal.)
+    fn describe(&self, v: &VerifiedCatalogPackage, entry: &mut PluginCatalogEntry) -> Result<()> {
+        let m = &v.manifest;
+        entry.signer = v.signer.clone().unwrap_or_default();
+        entry.signature = if v.unsigned {
+            PluginSignature::Dev
+        } else {
+            self.signature(&entry.signer)
+        };
+        entry.id = m.id.clone();
+        entry.name = m.name.clone();
+        entry.version = m.version.to_string();
+        entry.description = m.description.clone();
+        entry.kinds = kinds(m);
+        entry.requested = caps(&m.capabilities);
+        entry.connector_display_name = m.connector.as_ref().map(|c| c.display_name.clone());
+
+        let installed = self.store.get(&m.id)?;
         entry.installed_version = installed.as_ref().map(|i| i.manifest.version.to_string());
         match installed {
-            Some(old) if old.manifest.version >= manifest.version => {}
-            Some(old) if unsigned => {
+            None => entry.needs_approval = true,
+            Some(old) if old.manifest.version >= m.version => {}
+            Some(old) => {
+                let same_signer = v
+                    .signer
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case(&old.signer));
+                if !same_signer {
+                    return Err(Error::Unauthorized(format!(
+                        "this version is signed by a different key than the installed version \
+                         ({}); remove the installed plugin first to switch publishers",
+                        old.signer
+                    )));
+                }
                 entry.update_available = true;
-                entry.needs_approval = !manifest.capabilities.is_subset_of(&old.approved);
-            }
-            None if unsigned => entry.needs_approval = true,
-            _ => {
-                // The same checks `plugins.install` runs (signer, seal, downgrade), writing nothing.
-                let preview = self.store.preview(&package, &trusted)?;
-                entry.update_available = preview.installed_version.is_some();
-                entry.needs_approval = preview.needs_approval;
+                entry.needs_approval = !m.capabilities.is_subset_of(&old.approved);
             }
         }
         Ok(())
     }
 
+    /// `plugins.catalog`. Holds the cache lock throughout, so concurrent calls run one at a time.
     fn catalog(&self) -> PluginCatalogResult {
+        let mut cache = lock(&self.catalog_cache);
         let (found, truncated) = scan_catalog(&self.catalog_dirs);
+        cache.retain(|p, _| {
+            found
+                .iter()
+                .any(|f| matches!(f, Found::Package(q) if q == p))
+        });
         let entries = found
             .into_iter()
             .map(|f| match f {
-                Found::Package(path) => self.catalog_entry(&path),
+                Found::Package(path) => self.catalog_entry(&path, &mut cache),
                 Found::Unreadable(dir, error) => PluginCatalogEntry {
                     path: dir.display().to_string(),
                     error: Some(error),
@@ -1821,12 +1940,106 @@ mod tests {
         let r = fx.f.catalog().await.unwrap();
         assert!(r.truncated);
         assert_eq!(r.entries.len(), MAX_CATALOG_ENTRIES);
+        // Which 64 depends on the directory order; they are sorted and distinct.
+        let names: Vec<&str> = r.entries.iter().map(|e| e.file_name.as_str()).collect();
+        assert!(names.windows(2).all(|w| w[0] < w[1]), "{names:?}");
         let first = &r.entries[0];
-        assert_eq!(first.id, "dev.test.p000");
+        assert!(first.id.starts_with("dev.test.p"));
         assert_eq!(first.signature, PluginSignature::Dev);
         assert!(first.error.is_none() && first.needs_approval && first.signer.is_empty());
         // No dev key was created just by listing.
         assert_eq!(fx.secrets.get(DEV_KEY_ACCOUNT).unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn catalog_checks_the_signer_of_unsigned_updates_in_dev_mode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = tmp.path().join("catalog");
+        std::fs::create_dir_all(&cat).unwrap();
+        let cfg = format!(
+            "[plugins]\ndev_mode = true\ntrusted_keys = [\"{}\"]\ncatalog_dirs = [{}]\n",
+            pubhex(1),
+            toml_str(&cat)
+        );
+        let fx = Fx::at(tmp.path(), &cfg).await;
+        let unsigned = |id: &str, version: &str| PluginPackage {
+            manifest: manifest(id, version, "[\"tool\"]", "").into_bytes(),
+            wasm: EMPTY_COMPONENT.to_vec(),
+            signature: Vec::new(),
+        };
+        let write = |name: &str, pkg: &PluginPackage| {
+            pkg.write_file(&cat.join(format!("{name}.{PACKAGE_EXTENSION}")))
+                .unwrap()
+        };
+
+        // Installed from a publisher; an unsigned (dev-signed) newer version cannot update it.
+        let p = fx.write("pub", &signed("dev.test.pub", "1.0.0", "", 1));
+        let r = fx.install(&p).await.unwrap();
+        fx.approve(&r.token, true).await.unwrap();
+        write("a-pub", &unsigned("dev.test.pub", "1.1.0"));
+        let e = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(!e.update_available, "{e:?}");
+        assert!(
+            e.error.as_deref().unwrap().contains("different key"),
+            "{e:?}"
+        );
+        // And install agrees.
+        assert!(fx.install(&e.path).await.is_err());
+
+        // Installed dev-signed: an unsigned newer version is an update.
+        let p = fx.write("dev", &unsigned("dev.test.dev", "1.0.0"));
+        let r = fx.install(&p).await.unwrap();
+        fx.approve(&r.token, true).await.unwrap();
+        write("b-dev", &unsigned("dev.test.dev", "1.1.0"));
+        let r = fx.f.catalog().await.unwrap();
+        let e = r.entries.iter().find(|e| e.id == "dev.test.dev").unwrap();
+        assert!(e.update_available && e.error.is_none(), "{e:?}");
+        assert_eq!(
+            e.signer,
+            fx.f.rt.dev_key().map(|k| hex(k.as_bytes())).unwrap()
+        );
+        let r = fx.install(&e.path).await.unwrap();
+        assert!(
+            r.installed,
+            "an update within the approved access commits at once"
+        );
+    }
+
+    #[tokio::test]
+    async fn catalog_caches_verified_packages_until_the_file_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cat = tmp.path().join("catalog");
+        std::fs::create_dir_all(&cat).unwrap();
+        let fx = Fx::at(tmp.path(), &catalog_cfg(1, &cat)).await;
+        let path = cat.join(format!("a.{PACKAGE_EXTENSION}"));
+        signed("dev.test.tool", "1.0.0", "", 1)
+            .write_file(&path)
+            .unwrap();
+        let set_modified = |t: std::time::SystemTime| {
+            let f = std::fs::File::options().write(true).open(&path).unwrap();
+            f.set_modified(t).unwrap();
+        };
+        // A file changed just now is not cached.
+        assert!(file_stamp(&path).is_none());
+        let modified = std::time::SystemTime::now() - Duration::from_secs(60);
+        set_modified(modified);
+        let e = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(e.error.is_none(), "{e:?}");
+        let len = std::fs::metadata(&path).unwrap().len() as usize;
+
+        // Same size and time: served from the cache, the file is not read again.
+        std::fs::write(&path, vec![b'x'; len]).unwrap();
+        set_modified(modified);
+        let e = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(e.error.is_none() && e.id == "dev.test.tool", "{e:?}");
+        // A new time: read again (and now it is junk).
+        set_modified(modified + Duration::from_secs(5));
+        let e = &fx.f.catalog().await.unwrap().entries[0];
+        assert!(e.error.is_some() && e.id.is_empty(), "{e:?}");
+        // A removed file leaves the cache.
+        std::fs::remove_file(&path).unwrap();
+        assert!(fx.f.catalog().await.unwrap().entries.is_empty());
+        assert!(lock(&fx.f.rt.catalog_cache).is_empty());
     }
 
     #[tokio::test]
