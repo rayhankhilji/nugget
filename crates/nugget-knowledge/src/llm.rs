@@ -727,6 +727,9 @@ const HONORIFICS: &[&str] = &[
     "sir",
     "dame",
     "rev",
+    "captain",
+    "capt",
+    "coach",
 ];
 
 const ORG_SUFFIXES: &[&str] = &[
@@ -992,6 +995,90 @@ fn is_address_like(name: &str) -> bool {
 }
 
 /// Whether a name that should be a proper noun has no capital letter (in a cased script).
+/// Lower-case words a name of these kinds may contain ("Bank of England", "Vellum & Thistle",
+/// "Ludwig van Beethoven"). Any other lower-case word after the first makes the name a phrase.
+const NAME_PARTICLES: &[&str] = &[
+    "of", "the", "and", "&", "for", "de", "da", "di", "van", "von", "der", "den", "del", "la",
+    "le", "du", "dos", "y", "on", "at", "in", "upon",
+];
+const PERSON_PARTICLES: &[&str] = &[
+    "de", "da", "di", "van", "von", "der", "den", "del", "la", "le", "du", "dos", "bin", "al",
+];
+/// Job-title words: a name holding one is a title or a person with their title, never a place
+/// or an organisation ("Senior Data Engineer", "Harriet Quennell Chief Operating Officer").
+const TITLE_WORDS: &[&str] = &[
+    "officer",
+    "engineer",
+    "manager",
+    "director",
+    "scientist",
+    "counsel",
+    "analyst",
+    "designer",
+    "developer",
+    "coordinator",
+    "lead",
+    "head",
+    "ceo",
+    "cto",
+    "cfo",
+    "coo",
+    "vp",
+    "president",
+    "partner",
+    "associate",
+    "intern",
+];
+
+/// Why a model-proposed name of `kind` is a phrase or a title rather than a proper name, if it
+/// is one. Only people, organisations, projects and places are checked: event titles are
+/// legitimately written in sentence case ("Lodestar kickoff").
+fn not_a_name(kind: EntityKind, name: &str) -> Option<&'static str> {
+    let words: Vec<&str> = name.split_whitespace().collect();
+    let particles = match kind {
+        EntityKind::Person => PERSON_PARTICLES,
+        EntityKind::Organization | EntityKind::Project | EntityKind::Place => NAME_PARTICLES,
+        _ => return None,
+    };
+    if words
+        .iter()
+        .skip(1)
+        .any(|w| w.starts_with(char::is_lowercase) && !particles.contains(w))
+    {
+        return Some("a phrase, not a name");
+    }
+    if name.contains("[[") || name.contains("]]") {
+        return Some("a phrase, not a name");
+    }
+    match kind {
+        EntityKind::Person => {
+            if words.len() > 4 || name.chars().any(|c| c.is_ascii_digit()) {
+                return Some("a phrase, not a name");
+            }
+            // "GP", "HR": an acronym is a role or a department, not a person.
+            if let [w] = words[..]
+                && w.chars().count() <= 4
+                && w.chars().all(|c| c.is_uppercase())
+            {
+                return Some("an acronym, not a person");
+            }
+        }
+        EntityKind::Organization | EntityKind::Place
+            if words.iter().any(|w| {
+                TITLE_WORDS.contains(
+                    &w.trim_matches(|c: char| !c.is_alphanumeric())
+                        .to_lowercase()
+                        .as_str(),
+                )
+            }) =>
+        {
+            return Some("a job title");
+        }
+        _ => {}
+    }
+    None
+}
+
 fn lacks_capital(name: &str) -> bool {
     let cased = name.chars().any(|c| c.is_lowercase() || c.is_uppercase());
     cased && !name.chars().any(char::is_uppercase)
@@ -1209,6 +1296,9 @@ fn clean_entity(kind: EntityKind, raw_name: &str, raw_aliases: &[String], cx: &C
     ) && lacks_capital(&name)
     {
         return Cleaned::Literal(name, "not a proper name");
+    }
+    if let Some(why) = not_a_name(kind, &name) {
+        return Cleaned::Literal(name, why);
     }
     aliases.retain(|a| cx.in_text(a) && normalize_name(a) != normalize_name(&name));
     aliases.dedup_by_key(|a| normalize_name(a));
@@ -1909,7 +1999,72 @@ pub(crate) fn adopt_known_kinds(
         kinds.dedup();
         if let [k] = kinds[..] {
             e.kind = k;
+            continue;
         }
+        if kinds.is_empty()
+            && e.kind != EntityKind::Person
+            && let Some(k) = kind_of_longer_name(graph, me, &name)
+        {
+            e.kind = k;
+        }
+    }
+}
+
+/// The one kind of the graph's entities (the user excluded) that have a longer name or alias
+/// made of `short` plus whole words ("Ostrander" in "Ostrander Freight Cooperative", "Priya" at
+/// the start of "Priya Castellane"), when they all share it. A short name the model gave the
+/// wrong kind ("Ostrander" as a place) then reaches the same-kind fold. Names under 4
+/// characters are too ambiguous.
+fn kind_of_longer_name(
+    graph: &dyn GraphStore,
+    me: Option<&EntityId>,
+    short: &str,
+) -> Option<EntityKind> {
+    if short.chars().count() < 4 {
+        return None;
+    }
+    let found = graph
+        .list_entities(&EntityQuery {
+            text: Some(short.to_owned()),
+            kind: None,
+            limit: 64,
+            offset: 0,
+        })
+        .ok()?;
+    if found.len() >= 64 {
+        return None;
+    }
+    let mut kinds: Vec<EntityKind> = Vec::new();
+    for s in found {
+        if Some(&s.id) == me {
+            continue;
+        }
+        let Some(x) = graph.get_entity(&s.id).ok().flatten() else {
+            continue;
+        };
+        // Events, commitments and preferences are named after what they are about ("Driftwood
+        // API design review"): their names say nothing about the kind of the short name.
+        if !matches!(
+            x.kind,
+            EntityKind::Person | EntityKind::Organization | EntityKind::Project | EntityKind::Place
+        ) {
+            continue;
+        }
+        let longer = std::iter::once(&x.name).chain(&x.aliases).any(|n| {
+            let n = normalize_name(n);
+            n.len() > short.len()
+                && (n.starts_with(&format!("{short} "))
+                    || (x.kind != EntityKind::Person
+                        && (n.ends_with(&format!(" {short}"))
+                            || n.contains(&format!(" {short} ")))))
+        });
+        if longer && !kinds.contains(&x.kind) {
+            kinds.push(x.kind);
+        }
+    }
+    match kinds[..] {
+        [k] => Some(k),
+        _ => None,
     }
 }
 
@@ -2053,3 +2208,71 @@ pub(crate) async fn extract(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod name_shape_tests {
+    use super::not_a_name;
+    use nugget_graph::EntityKind::{Event, Organization, Person, Place, Project};
+
+    #[test]
+    fn phrases_titles_and_acronyms_are_not_names() {
+        for (kind, name) in [
+            (Person, "Sam asked me to share the endpoint with you"),
+            (Person, "Felix tells me"),
+            (Person, "Margaret and I"),
+            (Person, "Three candidates"),
+            (Person, "Driftwood API v2"),
+            (Person, "GP"),
+            (
+                Person,
+                "Freight tracking integration for [[Ostrander Freight Cooperative",
+            ),
+            (Organization, "Lodestar team"),
+            (Organization, "Harriet Quennell Chief Operating Officer"),
+            (Project, "Lodestar sprint 3"),
+            (Place, "Senior Data Engineer"),
+            (Place, "Kingsbarrow to Fernhollow"),
+        ] {
+            assert!(not_a_name(kind, name).is_some(), "{name}");
+        }
+        for (kind, name) in [
+            (Person, "Margaret Thistlewood"),
+            (Person, "Ludwig van Beethoven"),
+            (Person, "Sam"),
+            (Organization, "Vellum & Thistle LLP"),
+            (Organization, "Bank of England"),
+            (Project, "Quarry Bridge"),
+            (Place, "Fernhollow Conference Centre"),
+            (Event, "Lodestar kickoff"),
+            (Event, "Hiring panel: Senior Data Engineer"),
+        ] {
+            assert_eq!(not_a_name(kind, name), None, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_short_name_of_the_wrong_kind_takes_the_kind_of_its_longer_name() {
+        use crate::spec::{EntitySpec, Extraction};
+        use nugget_graph::{GraphStore, MemGraph, NewEntity};
+        let g = MemGraph::new();
+        g.create_entity(&NewEntity::new(
+            Organization,
+            "Ostrander Freight Cooperative",
+        ))
+        .unwrap();
+        g.create_entity(&NewEntity::new(Project, "Harbourline tracking feed"))
+            .unwrap();
+        g.create_entity(&NewEntity::new(Organization, "Harbourline Logistics"))
+            .unwrap();
+        g.create_entity(&NewEntity::new(Event, "Fernhollow site visit"))
+            .unwrap();
+        let mut extra = Extraction::default();
+        extra.entities.push(EntitySpec::new(Place, "Ostrander"));
+        extra.entities.push(EntitySpec::new(Place, "Harbourline"));
+        extra.entities.push(EntitySpec::new(Place, "Fernhollow"));
+        super::adopt_known_kinds(&g, None, &Extraction::default(), &mut extra);
+        let kinds: Vec<_> = extra.entities.iter().map(|e| e.kind).collect();
+        // Unique longer name: adopted. Two kinds ("Harbourline"): left alone. Unknown: left.
+        assert_eq!(kinds, [Organization, Place, Place]);
+    }
+}

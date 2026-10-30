@@ -450,6 +450,109 @@
     "optional": false
   },
   {
+    "id": "p-kate",
+    "kind": "person",
+    "name": "Katherine Selkirk",
+    "surfaces": [
+      "Katherine Selkirk",
+      "Kate",
+      "Kate S",
+      "K. Selkirk",
+      "katherine.selkirk@ostrander-freight.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "katherine.selkirk@ostrander-freight.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: nickname (Kate), a display-name variant (Kate S) and initials (K. Selkirk), always with her address or a thread to corroborate; note-031's Kate is not her",
+    "added": "ee1"
+  },
+  {
+    "id": "p-rob",
+    "kind": "person",
+    "name": "Robert Ferrand",
+    "surfaces": [
+      "Robert Ferrand",
+      "Rob",
+      "Bob",
+      "robert.ferrand@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "robert.ferrand@glimmerfen.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: diminutives Rob (a prefix of the user's name) and Bob (not a prefix of Robert), each in a mail whose headers name him",
+    "added": "ee1"
+  },
+  {
+    "id": "p-delphine",
+    "kind": "person",
+    "name": "Delphine Corrigan",
+    "surfaces": [
+      "Delphine Corrigan",
+      "Delphine",
+      "delphine.corrigan@vellumthistle.test",
+      "delphine.corrigan@glimmerfen.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "delphine.corrigan@vellumthistle.test"
+      },
+      {
+        "scheme": "email",
+        "value": "delphine.corrigan@glimmerfen.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: changes job (Vellum & Thistle -> Glimmerfen Labs) and address; the old-employer mail is delivered after the new one",
+    "added": "ee1"
+  },
+  {
+    "id": "p-tamsinr",
+    "kind": "person",
+    "name": "Tamsin Rook",
+    "surfaces": [
+      "Tamsin Rook",
+      "Tamsin",
+      "tamsin.rook@quillfeather.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "tamsin.rook@quillfeather.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: shares a first name with Tamsin Galloway; note-032's bare Tamsin is her (Quillfeather, Quarry Bridge keys)",
+    "added": "ee1"
+  },
+  {
+    "id": "p-tamsing",
+    "kind": "person",
+    "name": "Tamsin Galloway",
+    "surfaces": [
+      "Tamsin Galloway",
+      "Tamsin",
+      "tamsin.galloway@mail.test"
+    ],
+    "identifiers": [
+      {
+        "scheme": "email",
+        "value": "tamsin.galloway@mail.test"
+      }
+    ],
+    "optional": false,
+    "note": "hard case: shares a first name with Tamsin Rook",
+    "added": "ee1"
+  },
+  {
     "id": "p-mallory",
     "kind": "person",
     "name": "Mallory Quint",
@@ -477,6 +580,30 @@
     ],
     "optional": true,
     "note": "sender of the prompt-injection mail"
+  },
+  {
+    "id": "p-kate-unknown",
+    "kind": "person",
+    "name": "Kate",
+    "surfaces": [
+      "Kate"
+    ],
+    "identifiers": [],
+    "optional": true,
+    "note": "the Kate of note-031 (book club): nothing in the item identifies her, so she is not labelled as Katherine Selkirk; optional, and she must not be attributed to Katherine",
+    "added": "ee1"
+  },
+  {
+    "id": "p-tamsin-unknown",
+    "kind": "person",
+    "name": "Tamsin",
+    "surfaces": [
+      "Tamsin"
+    ],
+    "identifiers": [],
+    "optional": true,
+    "note": "the Tamsin of note-033 (errands): nothing says which Tamsin, if either; optional, and she must not be attributed to either known Tamsin",
+    "added": "ee1"
   },
   {
     "id": "o-glimmerfen",
@@ -1033,6 +1160,17 @@
       }
     ],
     "optional": false
+  },
+  {
+    "id": "e-po-signoff",
+    "kind": "event",
+    "name": "Harbourline PO sign-off",
+    "surfaces": [
+      "Harbourline PO sign-off"
+    ],
+    "identifiers": [],
+    "optional": false,
+    "added": "ee1"
   },
   {
     "id": "k-deposit",

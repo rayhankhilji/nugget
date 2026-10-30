@@ -26,7 +26,7 @@ use nugget_graph::{
 };
 
 use super::fixture::{
-    Fixture, GoldClaim, GoldMention, GoldStatus, Ingested, normalize_quote, quote_in,
+    Fixture, GoldClaim, GoldMention, GoldStatus, Ingested, Unattributed, normalize_quote, quote_in,
 };
 use super::system::{RenderedPage, RenderedVault};
 use crate::corpus::Rng;
@@ -962,6 +962,65 @@ pub fn distinct_identities(gold: &GoldIndex<'_>, res: &ResolutionScores, ids: &[
             .iter()
             .enumerate()
             .all(|(i, a)| sets[i + 1..].iter().all(|b| a.is_disjoint(b)))
+}
+
+/// Hard case: a name nothing identifies (a bare nickname or first name) is not attributed to
+/// any of `people`. Fails when the system records, in that item, any mention (whatever its
+/// surface) of an entity that `people`'s gold mentions resolve to: the items hold nobody else
+/// the people could be. Optional gold mentions are not in [`ResolutionScores`], so this reads
+/// the system's mentions directly.
+pub fn unattributed(
+    gold: &GoldIndex<'_>,
+    res: &ResolutionScores,
+    snap: &Snapshot,
+    ing: &Ingested,
+    people: &[String],
+    cases: &[Unattributed],
+) -> bool {
+    let theirs: BTreeSet<EntityId> = people
+        .iter()
+        .flat_map(|p| assigned_entities(gold, res, p))
+        .collect();
+    cases.iter().all(|u| {
+        !snap.mentions.iter().any(|m| {
+            ing.by_ref(&m.item).is_some_and(|i| i.id == u.item)
+                && snap
+                    .entity(&m.entity)
+                    .is_some_and(|e| theirs.contains(&e.id))
+        })
+    })
+}
+
+/// Hard case, strict form of [`same_identity`]: besides the majority vote, every system mention
+/// in an item where the person has a gold mention, under one of that gold mention's surfaces,
+/// is on the person's single entity. A nickname kept as an entity of its own ("Bob" next to
+/// "Robert Ferrand" in the same item) fails here even when the vote over the item's surfaces
+/// goes to the right entity.
+pub fn resolved_strictly(
+    gold: &GoldIndex<'_>,
+    res: &ResolutionScores,
+    snap: &Snapshot,
+    ing: &Ingested,
+    gold_id: &str,
+) -> bool {
+    if !same_identity(gold, res, gold_id) {
+        return false;
+    }
+    let Some(entity) = assigned_entities(gold, res, gold_id).into_iter().next() else {
+        return false;
+    };
+    gold.fx
+        .mentions
+        .iter()
+        .filter(|g| g.entity == gold_id)
+        .all(|g| {
+            let surfaces: BTreeSet<String> = g.surfaces.iter().map(|s| normalize_name(s)).collect();
+            snap.mentions.iter().all(|m| {
+                !(ing.by_ref(&m.item).is_some_and(|i| i.id == g.item)
+                    && surfaces.contains(&normalize_name(&m.surface)))
+                    || snap.entity(&m.entity).is_some_and(|e| e.id == entity)
+            })
+        })
 }
 
 // =============================================================================================

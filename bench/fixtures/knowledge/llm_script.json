@@ -2499,6 +2499,486 @@
     "fingerprint": "Captain Sam Whitlock reminds members that the Regatta Fundraiser needs volunteers."
   },
   {
+    "item": "mail-049",
+    "entities": [
+      {
+        "name": "Harbourline",
+        "kind": "project",
+        "surface": "Harbourline"
+      },
+      {
+        "name": "Ostrander Freight Cooperative",
+        "kind": "organization",
+        "surface": "Ostrander Freight Cooperative"
+      },
+      {
+        "name": "Katherine Selkirk",
+        "kind": "person",
+        "surface": "Kate"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      },
+      {
+        "name": "Sam Okafor",
+        "kind": "person",
+        "surface": "Sam"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Katherine Selkirk",
+        "predicate": "works_at",
+        "object": "Ostrander Freight Cooperative",
+        "object_type": "entity",
+        "text": "Katherine Selkirk works at Ostrander Freight Cooperative.",
+        "quote": "I'm Head of Procurement at Ostrander Freight Cooperative",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Katherine Selkirk",
+        "predicate": "has_role",
+        "object": "Head of Procurement",
+        "object_type": "literal",
+        "text": "Katherine Selkirk has role Head of Procurement.",
+        "quote": "I'm Head of Procurement at Ostrander Freight Cooperative",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Katherine Selkirk",
+        "predicate": "works_on",
+        "object": "Harbourline",
+        "object_type": "entity",
+        "text": "Katherine Selkirk works on Harbourline.",
+        "quote": "I'll handle the purchase order for Harbourline",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "I'm Head of Procurement at Ostrander Freight Cooperative, and I'll handle the purchase order for Harbourline."
+  },
+  {
+    "item": "mail-050",
+    "entities": [
+      {
+        "name": "Kate S",
+        "kind": "person",
+        "surface": "Kate"
+      },
+      {
+        "name": "Ostrander Depot",
+        "kind": "place",
+        "surface": "Ostrander Depot"
+      },
+      {
+        "name": "Yusuf",
+        "kind": "person",
+        "surface": "Yusuf"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [],
+    "fingerprint": "The purchase order is approved on our side."
+  },
+  {
+    "item": "mail-051",
+    "entities": [
+      {
+        "name": "Glimmerfen Labs",
+        "kind": "organization",
+        "surface": "Glimmerfen Labs"
+      },
+      {
+        "name": "Driftwood API",
+        "kind": "project",
+        "surface": "Driftwood API"
+      },
+      {
+        "name": "Rob",
+        "kind": "person",
+        "surface": "Rob"
+      },
+      {
+        "name": "Felix",
+        "kind": "person",
+        "surface": "Felix"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Rob",
+        "predicate": "works_at",
+        "object": "Glimmerfen Labs",
+        "object_type": "entity",
+        "text": "Rob works at Glimmerfen Labs.",
+        "quote": "I've just joined Glimmerfen Labs as a Site Reliability Engineer",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Rob",
+        "predicate": "job_title",
+        "object": "Site Reliability Engineer",
+        "object_type": "literal",
+        "text": "Rob job title Site Reliability Engineer.",
+        "quote": "I've just joined Glimmerfen Labs as a Site Reliability Engineer",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Rob",
+        "predicate": "works_on",
+        "object": "Driftwood API",
+        "object_type": "entity",
+        "text": "Rob works on Driftwood API.",
+        "quote": "a Site Reliability Engineer on the Driftwood API team",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "I've just joined Glimmerfen Labs as a Site Reliability Engineer on the Driftwood API team, and I'll run the on-call rota from November."
+  },
+  {
+    "item": "mail-052",
+    "entities": [
+      {
+        "name": "Bob",
+        "kind": "person",
+        "surface": "Bob"
+      },
+      {
+        "name": "Felix Ravensworth",
+        "kind": "person",
+        "surface": "Felix Ravensworth"
+      },
+      {
+        "name": "Driftwood API",
+        "kind": "project",
+        "surface": "Driftwood API"
+      },
+      {
+        "name": "Glimmerfen Labs",
+        "kind": "organization",
+        "surface": "Glimmerfen"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Felix Ravensworth",
+        "predicate": "leads",
+        "object": "Driftwood API",
+        "object_type": "entity",
+        "text": "Felix Ravensworth leads Driftwood API.",
+        "quote": "Felix Ravensworth owns the Driftwood API",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "Thanks, Bob, and welcome to Glimmerfen."
+  },
+  {
+    "item": "mail-053",
+    "entities": [
+      {
+        "name": "Glimmerfen Labs",
+        "kind": "organization",
+        "surface": "Glimmerfen Labs"
+      },
+      {
+        "name": "Tidewater Billing",
+        "kind": "project",
+        "surface": "Tidewater Billing"
+      },
+      {
+        "name": "Vellum & Thistle LLP",
+        "kind": "organization",
+        "surface": "Vellum & Thistle"
+      },
+      {
+        "name": "Delphine Corrigan",
+        "kind": "person",
+        "surface": "Delphine"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "works_at",
+        "object": "Glimmerfen Labs",
+        "object_type": "entity",
+        "text": "Delphine Corrigan works at Glimmerfen Labs.",
+        "quote": "I've joined Glimmerfen Labs as Legal Counsel",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "has_role",
+        "object": "Legal Counsel",
+        "object_type": "literal",
+        "text": "Delphine Corrigan has role Legal Counsel.",
+        "quote": "I've joined Glimmerfen Labs as Legal Counsel",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "works_on",
+        "object": "Tidewater Billing",
+        "object_type": "entity",
+        "text": "Delphine Corrigan works on Tidewater Billing.",
+        "quote": "I'll take over the Tidewater Billing contract review from our side",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "As of Monday I've joined Glimmerfen Labs as Legal Counsel, so we're colleagues now."
+  },
+  {
+    "item": "mail-054",
+    "entities": [
+      {
+        "name": "Delphine Corrigan",
+        "kind": "person",
+        "surface": "Delphine Corrigan"
+      },
+      {
+        "name": "Vellum & Thistle LLP",
+        "kind": "organization",
+        "surface": "Vellum & Thistle LLP"
+      },
+      {
+        "name": "Clementine Arkwright",
+        "kind": "person",
+        "surface": "Clem"
+      },
+      {
+        "name": "Tidewater Billing",
+        "kind": "project",
+        "surface": "Tidewater Billing"
+      },
+      {
+        "name": "Lucia Penhallow",
+        "kind": "person",
+        "surface": "Lucia Penhallow"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "works_at",
+        "object": "Vellum & Thistle LLP",
+        "object_type": "entity",
+        "text": "Delphine Corrigan works at Vellum & Thistle LLP.",
+        "quote": "Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle LLP",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Clementine Arkwright",
+        "predicate": "works_on",
+        "object": "Tidewater Billing",
+        "object_type": "entity",
+        "text": "Clementine Arkwright works on Tidewater Billing.",
+        "quote": "Clem will look after the Tidewater Billing file",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Lucia Penhallow",
+        "predicate": "works_at",
+        "object": "Vellum & Thistle LLP",
+        "object_type": "entity",
+        "text": "Lucia Penhallow works at Vellum & Thistle LLP.",
+        "quote": "Partner, Vellum & Thistle LLP",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Lucia Penhallow",
+        "predicate": "has_role",
+        "object": "Partner",
+        "object_type": "literal",
+        "text": "Lucia Penhallow has role Partner.",
+        "quote": "Partner, Vellum & Thistle LLP",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "A quick note: Friday 23 October is Delphine Corrigan's last day at Vellum & Thistle LLP."
+  },
+  {
+    "item": "mail-055",
+    "entities": [
+      {
+        "name": "Tidewater Billing",
+        "kind": "project",
+        "surface": "Tidewater Billing"
+      },
+      {
+        "name": "Vellum & Thistle LLP",
+        "kind": "organization",
+        "surface": "Vellum & Thistle LLP"
+      },
+      {
+        "name": "Delphine Corrigan",
+        "kind": "person",
+        "surface": "Delphine Corrigan"
+      },
+      {
+        "name": "Lucia Penhallow",
+        "kind": "person",
+        "surface": "Lucia"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "works_at",
+        "object": "Vellum & Thistle LLP",
+        "object_type": "entity",
+        "text": "Delphine Corrigan works at Vellum & Thistle LLP.",
+        "quote": "I'm an Associate at Vellum & Thistle LLP",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Delphine Corrigan",
+        "predicate": "has_role",
+        "object": "Associate",
+        "object_type": "literal",
+        "text": "Delphine Corrigan has role Associate.",
+        "quote": "I'm an Associate at Vellum & Thistle LLP",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "Lucia asked me to send over the engagement letter for the Tidewater Billing review."
+  },
+  {
+    "item": "mail-056",
+    "entities": [
+      {
+        "name": "Quarry Bridge",
+        "kind": "project",
+        "surface": "Quarry Bridge"
+      },
+      {
+        "name": "Quillfeather Systems",
+        "kind": "organization",
+        "surface": "Quillfeather Systems"
+      },
+      {
+        "name": "Tamsin Rook",
+        "kind": "person",
+        "surface": "Tamsin"
+      },
+      {
+        "name": "Priya Castellane",
+        "kind": "person",
+        "surface": "Priya"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Tamsin Rook",
+        "predicate": "works_at",
+        "object": "Quillfeather Systems",
+        "object_type": "entity",
+        "text": "Tamsin Rook works at Quillfeather Systems.",
+        "quote": "I'm the Engineering Manager at Quillfeather Systems",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Tamsin Rook",
+        "predicate": "has_role",
+        "object": "Engineering Manager",
+        "object_type": "literal",
+        "text": "Tamsin Rook has role Engineering Manager.",
+        "quote": "I'm the Engineering Manager at Quillfeather Systems",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Tamsin Rook",
+        "predicate": "works_on",
+        "object": "Quarry Bridge",
+        "object_type": "entity",
+        "text": "Tamsin Rook works on Quarry Bridge.",
+        "quote": "I'll be working on Quarry Bridge with Priya",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Priya Castellane",
+        "predicate": "works_on",
+        "object": "Quarry Bridge",
+        "object_type": "entity",
+        "text": "Priya Castellane works on Quarry Bridge.",
+        "quote": "I'll be working on Quarry Bridge with Priya",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "I'm the Engineering Manager at Quillfeather Systems and I'll be working on Quarry Bridge with Priya."
+  },
+  {
+    "item": "mail-057",
+    "entities": [
+      {
+        "name": "Tamsin Galloway",
+        "kind": "person",
+        "surface": "Tamsin"
+      },
+      {
+        "name": "Bea",
+        "kind": "person",
+        "surface": "Bea"
+      },
+      {
+        "name": "Bramblecote Primary School",
+        "kind": "organization",
+        "surface": "Bramblecote Primary School"
+      },
+      {
+        "name": "Robin Ashgrove",
+        "kind": "person",
+        "surface": "Robin"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Tamsin Galloway",
+        "predicate": "works_at",
+        "object": "Bramblecote Primary School",
+        "object_type": "entity",
+        "text": "Tamsin Galloway works at Bramblecote Primary School.",
+        "quote": "I mentor there on Tuesdays myself",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "Bea asked me to put together the rota for the reading mentors at Bramblecote Primary School."
+  },
+  {
     "item": "cal-001",
     "entities": [
       {
@@ -2627,6 +3107,12 @@
     "entities": [],
     "claims": [],
     "fingerprint": "Regatta Fundraiser planning"
+  },
+  {
+    "item": "cal-016",
+    "entities": [],
+    "claims": [],
+    "fingerprint": "Harbourline PO sign-off"
   },
   {
     "item": "note-001",
@@ -3650,5 +4136,84 @@
     ],
     "claims": [],
     "fingerprint": "Harbourline, Tidewater Billing and the Regatta Fundraiser float are funded. #budget"
+  },
+  {
+    "item": "note-031",
+    "entities": [
+      {
+        "name": "Kate",
+        "kind": "person",
+        "surface": "Kate"
+      }
+    ],
+    "claims": [],
+    "fingerprint": "Book club at Kate's on Thursday."
+  },
+  {
+    "item": "note-032",
+    "entities": [
+      {
+        "name": "Tamsin",
+        "kind": "person",
+        "surface": "Tamsin"
+      },
+      {
+        "name": "Priya",
+        "kind": "person",
+        "surface": "Priya"
+      },
+      {
+        "name": "Quillfeather Systems",
+        "kind": "organization",
+        "surface": "Quillfeather"
+      },
+      {
+        "name": "Quarry Bridge",
+        "kind": "project",
+        "surface": "Quarry Bridge"
+      }
+    ],
+    "claims": [
+      {
+        "subject": "Tamsin",
+        "predicate": "works_on",
+        "object": "Quarry Bridge",
+        "object_type": "entity",
+        "text": "Tamsin works on Quarry Bridge.",
+        "quote": "Tamsin is sorting out the sandbox API keys for [[Quarry Bridge]]",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Tamsin",
+        "predicate": "works_at",
+        "object": "Quillfeather Systems",
+        "object_type": "entity",
+        "text": "Tamsin works at Quillfeather Systems.",
+        "quote": "Standup with Priya and Tamsin from Quillfeather",
+        "confidence": 0.9
+      },
+      {
+        "subject": "Priya",
+        "predicate": "works_at",
+        "object": "Quillfeather Systems",
+        "object_type": "entity",
+        "text": "Priya works at Quillfeather Systems.",
+        "quote": "Standup with Priya and Tamsin from Quillfeather",
+        "confidence": 0.9
+      }
+    ],
+    "fingerprint": "Standup with Priya and Tamsin from Quillfeather."
+  },
+  {
+    "item": "note-033",
+    "entities": [
+      {
+        "name": "Tamsin",
+        "kind": "person",
+        "surface": "Tamsin"
+      }
+    ],
+    "claims": [],
+    "fingerprint": "Drop the spare bike lights round to Tamsin before Saturday."
   }
 ]

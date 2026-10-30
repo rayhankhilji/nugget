@@ -57,6 +57,9 @@ pub struct ItemSpec {
     pub version: String,
     /// Connector metadata, stored under `metadata.source` like ingest does.
     pub metadata: Value,
+    /// The work package that added it (`ee1`); absent for the original M2 corpus.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 impl ItemSpec {
@@ -90,6 +93,9 @@ pub struct GoldEntity {
     pub optional: bool,
     #[serde(default)]
     pub note: Option<String>,
+    /// The work package that added it (`ee1`); absent for the original M2 corpus.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -179,21 +185,78 @@ pub struct ScriptEntry {
     pub claims: Vec<ScriptClaim>,
 }
 
+/// One job change: claims that must end up inactive, and the ones that replace them.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobChange {
     pub superseded: Vec<String>,
     pub current: Vec<String>,
+    /// The work package that added the case (`ee1`); absent for the original M2 cases.
+    #[serde(default)]
+    pub added: Option<String>,
 }
 
+/// A name in an item that nothing in the item ties to a known person (a bare first name or
+/// nickname with no corroborating header, thread, organisation or context). Its gold mention, if
+/// any, is of an `optional` entity; the hard case requires that the system does not attribute it
+/// to the case's people.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Unattributed {
+    pub item: String,
+    pub surface: String,
+}
+
+/// One person written under a nickname, display-name variants, initials or several addresses.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NicknameCase {
+    pub entity: String,
+    /// The same nickname used for somebody the corpus cannot identify.
+    #[serde(default)]
+    pub unattributed: Vec<Unattributed>,
+    #[serde(default)]
+    pub added: Option<String>,
+}
+
+/// People who share a first name.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SameFirstNameCase {
+    pub entities: Vec<String>,
+    /// The bare first name where nothing says which of them (if either) is meant.
+    #[serde(default)]
+    pub unattributed: Vec<Unattributed>,
+    #[serde(default)]
+    pub added: Option<String>,
+}
+
+/// The resolution and time-awareness hard cases. Each metric (`hard_cases.<kind>`) passes when
+/// every case of its kind in scope is handled. The first case of each kind is the original M2
+/// case; a real-model subset always keeps its items (see [`Fixture::select_items`]).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HardCases {
-    /// One person under a nickname, two addresses and calendar attendee names.
-    pub nickname_identity: String,
-    /// Two people who share a first name.
-    pub same_first_name: Vec<String>,
-    pub job_change: JobChange,
+    pub nickname_identity: Vec<NicknameCase>,
+    pub same_first_name: Vec<SameFirstNameCase>,
+    pub job_change: Vec<JobChange>,
+}
+
+impl HardCases {
+    /// Every claim id a job-change case names.
+    pub fn job_change_claims(&self) -> impl Iterator<Item = &String> {
+        self.job_change
+            .iter()
+            .flat_map(|j| j.superseded.iter().chain(&j.current))
+    }
+
+    /// Every unattributed mention, of either kind.
+    pub fn unattributed(&self) -> impl Iterator<Item = &Unattributed> {
+        self.nickname_identity
+            .iter()
+            .flat_map(|c| &c.unattributed)
+            .chain(self.same_first_name.iter().flat_map(|c| &c.unattributed))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -229,6 +292,26 @@ pub struct Fixture {
     pub scenario: Scenario,
 }
 
+/// Which corpus a run uses (`--knowledge-corpus`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Corpus {
+    /// Every item and hard case.
+    #[default]
+    All,
+    /// The corpus as it was before EE1 (93 items): everything marked `added` is left out, so
+    /// item selection and the scored gold equal the pre-EE1 bench's, for before/after runs.
+    Original,
+}
+
+impl Corpus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Corpus::All => "all",
+            Corpus::Original => "original",
+        }
+    }
+}
+
 /// Counts recorded in the report's `params`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FixtureStats {
@@ -255,6 +338,35 @@ impl Fixture {
     /// The corpus shipped in `bench/fixtures/knowledge/`.
     pub fn builtin() -> Result<Self, BenchError> {
         Self::load(Path::new(FIXTURE_DIR))
+    }
+
+    /// The corpus restricted to `corpus`. `Original` drops the items, entities and hard cases
+    /// marked `added`, the mentions and scripted answers of dropped items, their support on
+    /// the remaining claims, and the claims left with no support (which only they stated).
+    pub fn corpus(&self, corpus: Corpus) -> Fixture {
+        let mut fx = self.clone();
+        if corpus == Corpus::All {
+            return fx;
+        }
+        let dropped: HashSet<String> = fx
+            .items
+            .iter()
+            .filter(|i| i.added.is_some())
+            .map(|i| i.id.clone())
+            .collect();
+        fx.items.retain(|i| i.added.is_none());
+        fx.entities.retain(|e| e.added.is_none());
+        fx.mentions.retain(|m| !dropped.contains(&m.item));
+        fx.script.retain(|s| !dropped.contains(&s.item));
+        for c in &mut fx.claims {
+            c.support.retain(|s| !dropped.contains(&s.item));
+        }
+        fx.claims.retain(|c| !c.support.is_empty());
+        let hc = &mut fx.scenario.hard_cases;
+        hc.nickname_identity.retain(|c| c.added.is_none());
+        hc.same_first_name.retain(|c| c.added.is_none());
+        hc.job_change.retain(|c| c.added.is_none());
+        fx
     }
 
     pub fn load(dir: &Path) -> Result<Self, BenchError> {
@@ -373,17 +485,28 @@ impl Fixture {
             item(id, "scenario")?;
         }
         entity(&sc.me, "scenario")?;
-        entity(&sc.hard_cases.nickname_identity, "scenario")?;
-        for id in &sc.hard_cases.same_first_name {
-            entity(id, "scenario")?;
-        }
-        for id in sc
-            .hard_cases
-            .job_change
-            .superseded
-            .iter()
-            .chain(&sc.hard_cases.job_change.current)
+        let hc = &sc.hard_cases;
+        if hc.nickname_identity.is_empty()
+            || hc.same_first_name.is_empty()
+            || hc.job_change.is_empty()
         {
+            return Err("scenario: every hard-case kind needs at least one case".into());
+        }
+        for c in &hc.nickname_identity {
+            entity(&c.entity, "scenario")?;
+        }
+        for c in &hc.same_first_name {
+            if c.entities.len() < 2 {
+                return Err("scenario: a same-first-name case needs two people".into());
+            }
+            for id in &c.entities {
+                entity(id, "scenario")?;
+            }
+        }
+        for u in hc.unattributed() {
+            item(&u.item, "scenario")?;
+        }
+        for id in hc.job_change_claims() {
             if !claim_ids.contains(id.as_str()) {
                 return Err(format!("scenario: unknown claim {id}"));
             }
@@ -400,11 +523,14 @@ impl Fixture {
     }
 
     /// Up to `n` item ids for a real-model run, in manifest order, deterministic: first the items
-    /// the scenario needs (the deleted items, the prompt-injection items, the items supporting
-    /// the job-change claims, two items mentioning the nickname person and one per
-    /// same-first-name person), then items evenly spaced through the rest of the manifest (which
-    /// keeps the mail / calendar / note mix). The scenario items are always kept, even when
-    /// they alone exceed `n`. `n >= items` keeps everything.
+    /// the scenario needs (the deleted items, the prompt-injection items, and for the first case
+    /// of each hard-case kind: the items supporting the job-change claims (other than those of
+    /// a further case), two items mentioning the nickname person and one per same-first-name
+    /// person), then each further hard case as a whole (every item mentioning its people or
+    /// supporting its claims, plus its unattributed mentions) while it fits, then items evenly
+    /// spaced through the rest of the manifest (which keeps the mail / calendar / note mix). The
+    /// first group is always kept, even when it alone exceeds `n`. `n >= items` keeps
+    /// everything.
     pub fn select_items(&self, n: usize) -> Vec<String> {
         if n >= self.items.len() {
             return self.items.iter().map(|i| i.id.clone()).collect();
@@ -421,16 +547,14 @@ impl Fixture {
         for id in sc.delete.iter().chain(&sc.injection) {
             add(self, id, &mut keep);
         }
-        let jc = &sc.hard_cases.job_change;
-        for c in self
-            .claims
-            .iter()
-            .filter(|c| jc.superseded.contains(&c.id) || jc.current.contains(&c.id))
-        {
-            for s in &c.support {
-                add(self, &s.item, &mut keep);
-            }
-        }
+        let hc = &sc.hard_cases;
+        let supporting = |jc: &JobChange| -> Vec<&str> {
+            self.claims
+                .iter()
+                .filter(|c| jc.superseded.contains(&c.id) || jc.current.contains(&c.id))
+                .flat_map(|c| c.support.iter().map(|s| s.item.as_str()))
+                .collect()
+        };
         let mentioned = |entity: &str| -> Vec<&str> {
             let mut v: Vec<&str> = self
                 .mentions
@@ -442,19 +566,69 @@ impl Fixture {
             v.dedup();
             v
         };
-        let nick = mentioned(&sc.hard_cases.nickname_identity);
-        for id in &nick {
-            if nick.iter().filter(|i| keep.contains(i)).count() >= 2 {
-                break;
-            }
-            add(self, id, &mut keep);
+        // Every further case, whole: all the items mentioning its people or supporting its
+        // claims, and its unattributed mentions.
+        let mut further: Vec<Vec<&str>> = Vec::new();
+        for c in hc.nickname_identity.iter().skip(1) {
+            let mut v = mentioned(&c.entity);
+            v.extend(c.unattributed.iter().map(|u| u.item.as_str()));
+            further.push(v);
         }
-        for e in &sc.hard_cases.same_first_name {
-            let items = mentioned(e);
-            if !items.iter().any(|i| keep.contains(i))
-                && let Some(first) = items.first()
-            {
-                add(self, first, &mut keep);
+        for c in hc.same_first_name.iter().skip(1) {
+            let mut v: Vec<&str> = c.entities.iter().flat_map(|e| mentioned(e)).collect();
+            v.extend(c.unattributed.iter().map(|u| u.item.as_str()));
+            further.push(v);
+        }
+        for jc in hc.job_change.iter().skip(1) {
+            further.push(supporting(jc));
+        }
+        // The original case of each kind (the first): always kept. For the job change, the
+        // items supporting its claims, except those of a further case (which come whole or not
+        // at all).
+        if let Some(jc) = hc.job_change.first() {
+            for id in supporting(jc) {
+                if !further.iter().flatten().any(|f| *f == id) {
+                    add(self, id, &mut keep);
+                }
+            }
+            // Skipping a further case's items must not take the original job change out of
+            // scope: every one of its claims keeps a supporting item.
+            debug_assert!(
+                self.claims
+                    .iter()
+                    .filter(|c| jc.superseded.contains(&c.id) || jc.current.contains(&c.id))
+                    .all(|c| c.support.iter().any(|s| keep.contains(&s.item.as_str()))),
+                "the original job change lost all support for a claim"
+            );
+        }
+        if let Some(c) = hc.nickname_identity.first() {
+            let nick = mentioned(&c.entity);
+            for id in &nick {
+                if nick.iter().filter(|i| keep.contains(i)).count() >= 2 {
+                    break;
+                }
+                add(self, id, &mut keep);
+            }
+        }
+        if let Some(c) = hc.same_first_name.first() {
+            for e in &c.entities {
+                let items = mentioned(e);
+                if !items.iter().any(|i| keep.contains(i))
+                    && let Some(first) = items.first()
+                {
+                    add(self, first, &mut keep);
+                }
+            }
+        }
+        // Then each further case, while it fits in `n`.
+        for case in further {
+            let mut new: Vec<&str> = case.into_iter().filter(|id| !keep.contains(id)).collect();
+            new.sort_unstable();
+            new.dedup();
+            if keep.len() + new.len() <= n {
+                for id in new {
+                    add(self, id, &mut keep);
+                }
             }
         }
         let rest: Vec<&str> = self
@@ -504,17 +678,49 @@ impl Fixture {
                 c.support = support;
             }
         }
-        let jc = &fx.scenario.hard_cases.job_change;
-        let replaced = jc.current.iter().all(|id| {
-            fx.claims
-                .iter()
-                .any(|c| &c.id == id && !c.optional && c.status == GoldStatus::Active)
-        });
-        if !replaced {
-            for c in &mut fx.claims {
-                if c.status == GoldStatus::Superseded {
-                    c.optional = true;
-                }
+        // A superseded claim stays scored only while a job change that replaces it (one naming
+        // it, else one about the same person) has all its current claims in scope.
+        let active: HashSet<&str> = fx
+            .claims
+            .iter()
+            .filter(|c| !c.optional && c.status == GoldStatus::Active)
+            .map(|c| c.id.as_str())
+            .collect();
+        let subject: HashMap<&str, &str> = fx
+            .claims
+            .iter()
+            .map(|c| (c.id.as_str(), c.subject.as_str()))
+            .collect();
+        let jcs = &fx.scenario.hard_cases.job_change;
+        let unreplaced: Vec<String> = fx
+            .claims
+            .iter()
+            .filter(|c| c.status == GoldStatus::Superseded)
+            .filter(|c| {
+                let naming: Vec<&JobChange> = jcs
+                    .iter()
+                    .filter(|j| j.superseded.contains(&c.id))
+                    .collect();
+                let cases = if naming.is_empty() {
+                    jcs.iter()
+                        .filter(|j| {
+                            j.current
+                                .iter()
+                                .any(|id| subject.get(id.as_str()) == Some(&c.subject.as_str()))
+                        })
+                        .collect()
+                } else {
+                    naming
+                };
+                !cases
+                    .iter()
+                    .any(|j| j.current.iter().all(|id| active.contains(id.as_str())))
+            })
+            .map(|c| c.id.clone())
+            .collect();
+        for c in &mut fx.claims {
+            if unreplaced.contains(&c.id) {
+                c.optional = true;
             }
         }
         let mut in_scope: HashSet<String> = fx.mentions.iter().map(|m| m.entity.clone()).collect();
@@ -743,7 +949,7 @@ mod tests {
         let fx = Fixture::builtin().unwrap();
         let s = fx.stats();
         assert!((60..=120).contains(&s.items), "{s:?}");
-        assert_eq!(s.entities_by_kind["person"], 25);
+        assert_eq!(s.entities_by_kind["person"], 30);
         assert_eq!(s.entities_by_kind["organization"], 8);
         assert_eq!(s.entities_by_kind["project"], 10);
         for k in ["mail", "calendar", "note"] {
@@ -835,6 +1041,35 @@ mod tests {
                 );
             }
         }
+        // An unattributed name is in its item, and the gold labels do not give it to the people
+        // it must not be attributed to (it is an optional entity's mention, if anyone's).
+        let hc = &fx.scenario.hard_cases;
+        let cases = hc
+            .nickname_identity
+            .iter()
+            .map(|c| (vec![c.entity.clone()], &c.unattributed))
+            .chain(
+                hc.same_first_name
+                    .iter()
+                    .map(|c| (c.entities.clone(), &c.unattributed)),
+            );
+        for (people, unattributed) in cases {
+            for u in unattributed {
+                let raw =
+                    std::fs::read_to_string(fx.dir.join(&fx.item(&u.item).unwrap().path)).unwrap();
+                assert!(raw.contains(&u.surface), "{} {}", u.item, u.surface);
+                for m in fx.mentions.iter().filter(|m| m.item == u.item) {
+                    let named = m
+                        .surfaces
+                        .iter()
+                        .any(|s| normalize_name(s) == normalize_name(&u.surface));
+                    if named {
+                        assert!(!people.contains(&m.entity), "{} {}", u.item, m.entity);
+                        assert!(fx.entity(&m.entity).unwrap().optional, "{}", m.entity);
+                    }
+                }
+            }
+        }
         // Every stored item has text and at least one chunk.
         for it in &ing.items {
             assert!(!it.chunks.is_empty(), "{}", it.id);
@@ -862,12 +1097,112 @@ mod tests {
                 "{kind:?}"
             );
         }
+        // The quick subset carries the further hard cases whole: each item mentioning their
+        // people, holding an unattributed name or supporting a further job change's claims.
+        let hc = &fx.scenario.hard_cases;
+        let people: Vec<&String> = hc
+            .nickname_identity
+            .iter()
+            .skip(1)
+            .map(|c| &c.entity)
+            .chain(hc.same_first_name.iter().skip(1).flat_map(|c| &c.entities))
+            .collect();
+        let mut needed: Vec<&str> = fx
+            .mentions
+            .iter()
+            .filter(|m| people.contains(&&m.entity))
+            .map(|m| m.item.as_str())
+            .collect();
+        needed.extend(hc.unattributed().map(|u| u.item.as_str()));
+        let jc: Vec<&String> = hc
+            .job_change
+            .iter()
+            .skip(1)
+            .flat_map(|j| j.superseded.iter().chain(&j.current))
+            .collect();
+        needed.extend(
+            fx.claims
+                .iter()
+                .filter(|c| jc.contains(&&c.id))
+                .flat_map(|c| c.support.iter().map(|s| s.item.as_str())),
+        );
+        assert!(needed.len() >= 10);
+        for id in needed {
+            assert!(quick.contains(&id.to_owned()), "{id}");
+        }
         // Manifest order, no duplicates.
         let pos: Vec<usize> = quick
             .iter()
             .map(|id| fx.items.iter().position(|i| &i.id == id).unwrap())
             .collect();
         assert!(pos.windows(2).all(|w| w[0] < w[1]));
+    }
+
+    /// `--knowledge-corpus original` is the pre-EE1 corpus (d643a5a): the same counts, and the
+    /// same real-model item selection for every size. The lists were computed with the pre-EE1
+    /// `select_items` on the pre-EE1 fixture.
+    #[test]
+    fn the_original_corpus_reproduces_the_pre_ee1_selection() {
+        let fx = Fixture::builtin().unwrap().corpus(Corpus::Original);
+        fx.validate().unwrap();
+        let s = fx.stats();
+        assert_eq!(s.items, 93);
+        assert_eq!(
+            (s.items_by_kind["mail"], s.items_by_kind["calendar"]),
+            (48, 15)
+        );
+        assert_eq!(s.items_by_kind["note"], 30);
+        assert_eq!(s.entities, 85);
+        assert_eq!(s.entities_by_kind["person"], 25);
+        assert_eq!(fx.entities.len(), 88);
+        assert_eq!(s.claims, 166);
+        assert_eq!(fx.claims.len(), 181);
+        assert_eq!(s.superseded_claims, 3);
+        assert_eq!(s.mentions, 515);
+        let scripted: usize = fx.script.iter().map(|e| e.claims.len()).sum();
+        assert_eq!(scripted, 144);
+        assert_eq!((s.hallucinated_quotes, s.injected_claims), (4, 4));
+        let hc = &fx.scenario.hard_cases;
+        assert_eq!(hc.nickname_identity.len(), 1);
+        assert_eq!(hc.same_first_name.len(), 1);
+        assert_eq!(hc.job_change.len(), 1);
+        assert!(fx.items.iter().all(|i| i.added.is_none()));
+        assert!(
+            fx.claims
+                .iter()
+                .flat_map(|c| &c.support)
+                .all(|s| fx.item(&s.item).is_some())
+        );
+
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let smoke = ids(&[
+            "mail-002", "mail-004", "mail-006", "mail-008", "mail-022", "mail-025", "note-002",
+            "note-025",
+        ]);
+        let quick = ids(&[
+            "mail-001", "mail-002", "mail-004", "mail-006", "mail-007", "mail-008", "mail-012",
+            "mail-016", "mail-020", "mail-022", "mail-025", "mail-026", "mail-030", "mail-034",
+            "mail-037", "mail-041", "mail-045", "cal-001", "cal-005", "cal-009", "cal-013",
+            "note-001", "note-002", "note-006", "note-010", "note-014", "note-018", "note-022",
+            "note-025", "note-027",
+        ]);
+        let forty = ids(&[
+            "mail-001", "mail-002", "mail-004", "mail-005", "mail-006", "mail-008", "mail-010",
+            "mail-012", "mail-015", "mail-018", "mail-020", "mail-022", "mail-024", "mail-025",
+            "mail-028", "mail-030", "mail-033", "mail-036", "mail-038", "mail-041", "mail-044",
+            "mail-046", "cal-001", "cal-004", "cal-006", "cal-009", "cal-012", "cal-014",
+            "note-002", "note-003", "note-006", "note-008", "note-011", "note-014", "note-016",
+            "note-019", "note-022", "note-024", "note-025", "note-028",
+        ]);
+        assert_eq!(fx.select_items(8), smoke);
+        assert_eq!(fx.select_items(30), quick);
+        assert_eq!(fx.select_items(40), forty);
+        assert_eq!(fx.select_items(93).len(), 93);
+        assert_eq!(fx.select_items(usize::MAX).len(), 93);
+        // The default corpus keeps everything.
+        let all = Fixture::builtin().unwrap();
+        assert_eq!(all.corpus(Corpus::All).items.len(), all.items.len());
+        assert!(all.items.len() > 93);
     }
 
     /// Scoring a subset: only what the kept items support counts.
@@ -910,6 +1245,17 @@ mod tests {
                 .all(|c| c.optional)
         );
         assert!(old_only.scenario.delete.is_empty());
+        // Each job change on its own: the second one's new job (mail-053) keeps its old claims
+        // superseded, while the first one's (no new job in scope) are not scored.
+        let second = fx.subset(&["mail-053".to_owned(), "mail-055".to_owned()]);
+        let superseded_scored = |sub: &Fixture, who: &str| {
+            sub.claims
+                .iter()
+                .filter(|c| c.status == GoldStatus::Superseded && c.subject == who)
+                .all(|c| !c.optional)
+        };
+        assert!(superseded_scored(&second, "p-delphine"));
+        assert!(!superseded_scored(&second, "p-priya"));
     }
 
     #[test]
