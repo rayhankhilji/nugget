@@ -217,10 +217,22 @@ fn a_trailing_dot_in_a_host_rule_still_matches() {
     assert!(w.matches(&url::Url::parse("https://a.example.com/").unwrap()));
     assert!(HostRule::parse(".").is_err());
     // Found by the plugin_caps fuzz target: stripping dots must not turn a name into an address.
-    for bad in ["2..", "a..b", "example.com..", "*.example..com"] {
+    for bad in [
+        "2..",
+        "a..b",
+        "bücher.ex%2ample",
+        "a%2eb.com",
+        "example.com..",
+        "*.example..com",
+    ] {
         assert!(HostRule::parse(bad).is_err(), "{bad} parsed");
     }
-    for ok in ["example.com.", "*.example.com.", "localhost."] {
+    for ok in [
+        "example.com.",
+        "*.example.com.",
+        "localhost.",
+        "bücher.example",
+    ] {
         let r = HostRule::parse(ok).unwrap();
         assert_eq!(
             HostRule::parse(&r.to_string()).unwrap(),

@@ -263,7 +263,7 @@ impl HostRule {
         if scheme != "https" && scheme != "http" {
             return Err(bad("scheme must be https or http"));
         }
-        if rest.is_empty() || rest.contains(['/', '@', '?', '#', '\\', ' ']) {
+        if rest.is_empty() || rest.contains(['/', '@', '?', '#', '\\', ' ', '%']) {
             return Err(bad(
                 "must be a bare host[:port] without path or credentials",
             ));
@@ -285,6 +285,14 @@ impl HostRule {
                 let d = d.strip_suffix('.').unwrap_or(d);
                 if d.is_empty() || d.split('.').any(str::is_empty) {
                     return Err(bad("empty label in host name"));
+                }
+                // After IDNA and percent-decoding (`ex%2ample` becomes `ex*ample`), only plain
+                // DNS characters may remain, so the rule round-trips through its own spelling.
+                if !d
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                {
+                    return Err(bad("host name has characters DNS does not allow"));
                 }
                 match Url::parse(&format!("{scheme}://{d}/"))
                     .ok()
