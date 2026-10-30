@@ -4,10 +4,11 @@
 //! [`ContextResponse::text`] holds passages under `[n] Title (source)` headers (see
 //! `nugget_retrieve`'s packer) and each [`Citation`](nugget_core::ipc::Citation) may carry the
 //! item's date. [`facts`] turns them into [`Fact`]s with ids `F1`, `F2`, … (newest first, undated
-//! last) and marks a fact **superseded** when a newer fact is on the same subject and either
-//! states a different value of the same type (money, number, percentage, date) or is a decision
-//! where the older one was a draft or proposal. The check is conservative: both facts must be
-//! dated, share distinctive title terms, and the older must actually conflict.
+//! last) and marks a fact **superseded** when a newer fact is on the same subject, is a decision
+//! (or final, approved, ...) where the older one was a draft or proposal, and states a different
+//! value of a type both state (money, number, percentage, date). The check is conservative: both
+//! facts must be dated, share distinctive title terms, change status and conflict, so two notes
+//! on related subjects (a September recap, a November plan) both stay current.
 //!
 //! [`facts_section`] renders the block for the user message, wrapped in `<context>` tags and
 //! fenced like all untrusted text, followed by the rules for using it.
@@ -37,15 +38,15 @@ pub struct Fact {
 
 /// Rules for the facts, placed right after the block.
 pub const FACTS_RULES: &str = "\
-How to use the facts: state only facts that are in the thread or in the facts above. When facts \
-disagree, the newest one is right; never state a value from a fact marked superseded. Don't add \
-facts the reply doesn't need. If the reply needs a fact that isn't there, don't guess: leave it \
-out or say you'll check.";
+How to use the facts: state only facts that are in the thread or in the facts above, and only \
+the ones the reply needs. A fact's date is when it was written, not the date of what it \
+describes. Never state a value from a fact marked superseded. If a fact the reply needs is \
+missing, leave it out rather than guess.";
 
 /// The same rules when nothing was retrieved.
 pub const THREAD_RULES: &str = "\
-How to use facts: state only facts that are in the thread. Don't add facts the reply doesn't \
-need. If the reply needs a fact that isn't there, don't guess: leave it out or say you'll check.";
+How to use facts: state only facts that are in the thread, and only the ones the reply needs. \
+If a fact the reply needs is missing, leave it out rather than guess.";
 
 /// Words that mark an earlier, unsettled version.
 const OLD_MARKERS: &[&str] = &[
@@ -231,7 +232,9 @@ pub fn facts_section(context: &ContextResponse) -> String {
         block.push_str(&format!(
             "F{} ({}, \"{}\"",
             f.id,
-            f.date.as_deref().unwrap_or("undated"),
+            f.date
+                .as_deref()
+                .map_or_else(|| "undated".to_owned(), |d| format!("written {d}")),
             f.title
         ));
         if let Some(by) = f.superseded_by {
@@ -419,9 +422,14 @@ fn supersedes(new: &Fact, np: &Profile, old: &Fact, op: &Profile) -> bool {
     if !same_subject {
         return false;
     }
+    // Both a status change (draft or proposal, then decision or final) and a changed value:
+    // two notes on related subjects (a September recap, a November plan) each stay current.
     let status = op.old_marked && !op.new_marked && np.new_marked;
+    if !status {
+        return false;
+    }
     // A value of a type the newer fact also states, that the newer fact doesn't state.
-    let conflict = op.values.iter().any(|(kind, keys)| {
+    op.values.iter().any(|(kind, keys)| {
         let newer: Vec<&Vec<String>> = np
             .values
             .iter()
@@ -429,8 +437,7 @@ fn supersedes(new: &Fact, np: &Profile, old: &Fact, op: &Profile) -> bool {
             .map(|(_, v)| v)
             .collect();
         !newer.is_empty() && !newer.iter().any(|v| v.iter().any(|k| keys.contains(k)))
-    });
-    conflict || status
+    })
 }
 
 #[cfg(test)]
@@ -530,11 +537,11 @@ will send their SSO metadata before the kickoff. Tom Becker runs the technical s
         assert_eq!(f[1].superseded_by, None);
         assert_eq!(f[0].superseded_by, None);
         let s = facts_section(&henrik());
-        assert!(s.contains("F2 (2026-09-25, \"Q4 budget approved\"): Decision: the board"));
+        assert!(s.contains("F2 (written 2026-09-25, \"Q4 budget approved\"): Decision: the board"));
         assert!(s.contains(
-            "F3 (2026-08-30, \"Q4 budget draft\"; superseded by F2, its values are out of date): Draft Q4"
+            "F3 (written 2026-08-30, \"Q4 budget draft\"; superseded by F2, its values are out of date): Draft Q4"
         ));
-        assert!(s.contains("<context>\nF1 (2026-09-26, \"Q4 headcount plan\")"));
+        assert!(s.contains("<context>\nF1 (written 2026-09-26, \"Q4 headcount plan\")"));
         assert!(s.contains("\n</context>\nHow to use the facts:"));
     }
 
@@ -573,6 +580,26 @@ will send their SSO metadata before the kickoff. Tom Becker runs the technical s
             })
             .contains("only facts that are in the thread")
         );
+    }
+
+    #[test]
+    fn related_notes_without_a_status_change_both_stay_current() {
+        // The September recap is not replaced by the November plan (a real-model draft
+        // reported the November RSVPs as September's attendance when it was).
+        let f = facts(&context(&[
+            (
+                "Meetup September recap",
+                Some("2026-08-25"),
+                "September meetup recap: 60 people came and the pizza budget was $400.",
+            ),
+            (
+                "Community meetup November",
+                Some("2026-10-13"),
+                "The next community meetup is on November 6. There are 85 RSVPs so far and the \
+pizza budget is $600.",
+            ),
+        ]));
+        assert!(f.iter().all(|f| f.superseded_by.is_none()), "{f:?}");
     }
 
     #[test]

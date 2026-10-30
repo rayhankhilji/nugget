@@ -941,7 +941,7 @@ except for customer visits. One trade show was cut.",
                 user.contains("\"Q4 budget draft\"; superseded by F"),
                 "{user}"
             );
-            assert!(user.contains("never state a value from a fact marked superseded"));
+            assert!(user.contains("Never state a value from a fact marked superseded"));
             assert_eq!(
                 text,
                 "Dear Ravi,\n\nThe board approved a Q4 marketing budget of $275,000. Travel is \
