@@ -41,9 +41,10 @@ futures-util = { version = "0.3", default-features = false }
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 x11rb = { version = "0.13", features = ["xinput", "xtest"] }
 
-# Real-OS integration tests (tests/windows_it.rs, tests/macos_it.rs): the Double Tap path from the
-# trigger to the inserted text, through the same crates the desktop shell and daemon use.
-[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dev-dependencies]
+# Real-OS integration tests (tests/windows_it.rs, tests/macos_it.rs, tests/wayland_it.rs): the
+# Double Tap path from the trigger to the inserted text, through the same crates the desktop
+# shell and daemon use.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dev-dependencies]
 nugget-a11y.workspace = true
 nugget-draft.workspace = true
 nugget-infer.workspace = true

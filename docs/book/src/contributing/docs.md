@@ -43,7 +43,7 @@ may share one marker (the IPC method tables do); their rows are combined.
 | `ipc.errors` | The `code` constants in `nugget-ipc`, names **and** values |
 | `mcp.tools`, `mcp.scopes` | The tool constants in `nugget-mcp` and the `McpScopes` struct |
 | `connector.kinds` | Each connector's kind constant and display name |
-| `connector.files`, `connector.obsidian`, `connector.gmail`, `connector.gcal`, `connector.imap`, `connector.caldav` | Each connector's settings struct |
+| `connector.files`, `connector.obsidian`, `connector.gmail`, `connector.gcal`, `connector.gdrive`, `connector.imap`, `connector.caldav` | Each connector's settings struct |
 | `crates` | The workspace members' package names |
 
 **Extra checks on those tables:**

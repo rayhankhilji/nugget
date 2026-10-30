@@ -1,4 +1,4 @@
-//! Source settings for `gmail` and `gcal`.
+//! Source settings for `gmail`, `gcal` and `gdrive`.
 
 use nugget_core::{Error, Result};
 use serde::Deserialize;
@@ -45,6 +45,33 @@ pub(crate) struct CalendarSettings {
     pub past_days: u32,
     #[serde(default = "default_window")]
     pub future_days: u32,
+}
+
+/// Default and largest per-file download for `gdrive`, in MiB.
+pub(crate) const DEFAULT_DRIVE_FILE_MB: u32 = 25;
+pub(crate) const MAX_DRIVE_FILE_MB: u32 = 200;
+
+fn default_drive_file_mb() -> u32 {
+    DEFAULT_DRIVE_FILE_MB
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DriveSettings {
+    pub client_id: String,
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    #[serde(default)]
+    pub account_hint: Option<String>,
+    /// Also index files other people shared with you (not in a shared drive).
+    #[serde(default)]
+    pub include_shared_with_me: bool,
+    /// Also index files in shared drives you are a member of.
+    #[serde(default)]
+    pub include_shared_drives: bool,
+    /// Largest file downloaded or exported, in MiB; bigger files get a "not indexed" stub.
+    #[serde(default = "default_drive_file_mb")]
+    pub max_file_mb: u32,
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(settings: &Value) -> Result<T> {
@@ -151,6 +178,43 @@ impl CalendarSettings {
         props["future_days"] = json!({
             "type": "integer", "minimum": 0, "maximum": MAX_WINDOW_DAYS, "default": 365,
             "title": "Days of future events"
+        });
+        schema
+    }
+}
+
+impl DriveSettings {
+    pub(crate) fn parse(settings: &Value) -> Result<Self> {
+        let s: Self = parse(settings)?;
+        check_client(&s.client_id, s.account_hint.as_deref())?;
+        if s.max_file_mb < 1 || s.max_file_mb > MAX_DRIVE_FILE_MB {
+            return Err(Error::Invalid(format!(
+                "settings: max_file_mb must be between 1 and {MAX_DRIVE_FILE_MB}"
+            )));
+        }
+        Ok(s)
+    }
+
+    /// The per-file cap in bytes.
+    pub(crate) fn max_bytes(&self) -> u64 {
+        u64::from(self.max_file_mb) * 1024 * 1024
+    }
+
+    pub(crate) fn schema() -> Value {
+        let mut schema = common_schema();
+        let props = &mut schema["properties"];
+        props["include_shared_with_me"] = json!({
+            "type": "boolean", "default": false, "title": "Include files shared with me",
+            "description": "Also index files other people shared with you."
+        });
+        props["include_shared_drives"] = json!({
+            "type": "boolean", "default": false, "title": "Include shared drives",
+            "description": "Also index files in shared drives you are a member of."
+        });
+        props["max_file_mb"] = json!({
+            "type": "integer", "minimum": 1, "maximum": MAX_DRIVE_FILE_MB,
+            "default": DEFAULT_DRIVE_FILE_MB, "title": "Largest file (MB)",
+            "description": "Bigger files are listed by name with the reason they were not indexed."
         });
         schema
     }

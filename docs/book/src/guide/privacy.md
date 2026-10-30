@@ -41,7 +41,7 @@ Features you will see:
 | `triage` | Triage on a local-network provider (cloud is never used for triage) |
 | `knowledge` | LLM fact extraction on a non-local provider (only for sources you allowed) |
 | `probe` | Capability probes of a non-local provider |
-| `sync:gmail`, `sync:gcal`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
+| `sync:gmail`, `sync:gcal`, `sync:gdrive`, `sync:imap`, `sync:caldav` | Connector syncs, including OAuth token refreshes |
 | `model_download`, `runtime_download` | Downloading a model or the `llama-server` runtime |
 
 And for the newer features:

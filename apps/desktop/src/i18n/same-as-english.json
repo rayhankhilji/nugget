@@ -18,6 +18,7 @@
     "format.latency.ms",
     "format.latency.s",
     "format.sourceKind.gcal",
+    "format.sourceKind.gdrive",
     "format.sourceKind.github",
     "format.sourceKind.gmail",
     "format.sourceKind.linear",

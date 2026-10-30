@@ -7,18 +7,19 @@ use super::*;
 use crate::{CalendarFactory, GmailFactory};
 
 #[test]
-fn registers_both_kinds_with_oauth() {
+fn registers_every_kind_with_oauth() {
     let mut r = Registry::new();
     crate::register(&mut r);
     let kinds = r.kinds();
     let names: Vec<_> = kinds.iter().map(|k| k.kind).collect();
-    assert_eq!(names, vec!["gcal", "gmail"]);
+    assert_eq!(names, vec!["gcal", "gdrive", "gmail"]);
     assert!(kinds.iter().all(|k| k.auth == AuthKind::OAuth));
     for k in &kinds {
         assert_eq!(k.settings_schema["required"], json!(["client_id"]));
         assert_eq!(k.settings_schema["additionalProperties"], json!(false));
     }
-    assert!(kinds[1].settings_schema["properties"]["window_days"].is_object());
+    assert!(kinds[2].settings_schema["properties"]["window_days"].is_object());
+    assert!(kinds[1].settings_schema["properties"]["include_shared_drives"].is_object());
     assert!(kinds[0].settings_schema["properties"]["calendars"].is_object());
 }
 

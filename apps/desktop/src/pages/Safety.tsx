@@ -150,6 +150,7 @@ function KillSwitch({ halted, onChange }: { halted: boolean; onChange: (halted: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const flip = async () => {
+    if (busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -174,7 +175,8 @@ function KillSwitch({ halted, onChange }: { halted: boolean; onChange: (halted: 
       </div>
       <ErrorNote error={error} />
       <div className="card-actions">
-        <button type="button" className={halted ? "btn btn-primary" : "btn btn-danger"} onClick={() => void flip()} disabled={busy}>
+        {/* aria-disabled, not disabled: a disabled button drops keyboard focus to the page body. */}
+        <button type="button" className={halted ? "btn btn-primary" : "btn btn-danger"} onClick={() => void flip()} aria-disabled={busy || undefined}>
           {halted ? t("safety.kill.resume") : t("safety.kill.stop")}
         </button>
       </div>

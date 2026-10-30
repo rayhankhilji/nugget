@@ -8,7 +8,9 @@
 // and right-to-left locales on the same indexed home and measures text that doesn't fit.
 // ai-setup.mjs installs the recommended local model in onboarding (signed test manifest, mock
 // download, fake llama-server) and times app start to a cited answer streamed by that model;
-// byok.mjs checks and saves an API key in onboarding.
+// byok.mjs checks and saves an API key in onboarding. a11y.mjs runs axe-core over every page and the
+// main dialogs in light and dark and checks the accessibility tree; prefs.mjs checks reduced motion,
+// more contrast and 200% zoom; keyboard.mjs completes the core flows without a mouse.
 //
 // usage: pnpm run e2e        (see e2e/README.md for the environment variables)
 import { spawnSync } from "node:child_process";
@@ -21,6 +23,9 @@ import { firstRunScenario } from "./first-run.mjs";
 import { i18nScenario } from "./i18n.mjs";
 import { aiSetupScenario } from "./ai-setup.mjs";
 import { byokScenario } from "./byok.mjs";
+import { a11yScenario } from "./a11y.mjs";
+import { prefsScenario } from "./prefs.mjs";
+import { keyboardScenario } from "./keyboard.mjs";
 import {
   check,
   DESKTOP,
@@ -46,11 +51,11 @@ import {
 /**
  * Scenarios to run (E2E_SCENARIOS, comma-separated): every page on an indexed home, the same pages
  * in other locales (sharing that home), a first run, a first run with the recommended local model,
- * and bring-your-own-key.
+ * bring-your-own-key, the accessibility audit, display preferences and keyboard-only use.
  */
-const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok"];
+const SCENARIOS = ["pages", "i18n", "first-run", "ai-setup", "byok", "a11y", "prefs", "keyboard"];
 /** Scenarios that use the shared indexed home. */
-const INDEXED = ["pages", "i18n"];
+const INDEXED = ["pages", "i18n", "a11y", "prefs"];
 
 // ---- the page registry, read from the app source so new pages are covered automatically ----
 
@@ -394,7 +399,14 @@ async function main() {
           summary.i18n = await i18nScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
         } else if (name === "first-run") summary.first_run = await firstRunScenario({ browser, bin });
         else if (name === "ai-setup") summary.first_run_ai = await aiSetupScenario({ browser });
-        else summary.byok = await byokScenario({ browser, bin });
+        else if (name === "byok") summary.byok = await byokScenario({ browser, bin });
+        else if (name === "a11y") {
+          const { daemon } = await indexedHome(bin);
+          summary.a11y = await a11yScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
+        } else if (name === "prefs") {
+          const { daemon } = await indexedHome(bin);
+          summary.prefs = await prefsScenario({ browser, socket: daemon.socket, pages: pageRegistry(), onboarded: ONBOARDED });
+        } else summary.keyboard = await keyboardScenario({ browser, bin });
       } catch (e) {
         // A setup failure (daemon, indexing) fails the scenario and lets the next one run.
         results.push({ name: `scenario ${name}`, ok: false, ms: 0, error: e.stack ?? String(e) });

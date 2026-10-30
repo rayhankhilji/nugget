@@ -62,6 +62,22 @@ const LABEL_FONT_BOLD = `600 12px system-ui, -apple-system, "Segoe UI", sans-ser
 const LABEL_HEIGHT = 14;
 /** Opacity of nodes outside the highlighted neighbourhood. */
 const DIM_NODE_ALPHA = 0.35;
+/** Upper bound on the ticks of a layout settled in one go (reduced motion). */
+const MAX_SETTLE_TICKS = 400;
+
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+/**
+ * Run `sim` to rest without drawing: until its alpha runs out, its nodes stop moving or
+ * `MAX_SETTLE_TICKS` (counted, not timed, so the result is deterministic). Then stop it.
+ */
+function settleNow(sim: Simulation<SimNode, SimLink>, nodes: readonly SimNode[]) {
+  for (let i = 0; i < MAX_SETTLE_TICKS && sim.alpha() > sim.alphaMin(); i++) {
+    sim.tick();
+    if (sim.alpha() < 0.3 && isSettled(nodes)) break;
+  }
+  sim.alpha(0);
+}
 
 function shortName(s: string): string {
   const chars = Array.from(s);
@@ -81,6 +97,10 @@ type Gesture =
  * C centres, Escape clears, + / − zoom, F or 0 fits. Labels are placed without overlaps (most
  * connected first; hovered, selected and focused always). The list view is the accessible
  * alternative for everything here.
+ *
+ * With `prefers-reduced-motion: reduce` (followed live) nothing moves on its own: the layout is
+ * settled before the first paint, the view jumps instead of easing, dragging a node moves only
+ * that node, and a frame is drawn only when something changed.
  */
 export function GraphCanvas({
   graph,
@@ -111,7 +131,6 @@ export function GraphCanvas({
   const paletteRef = useRef<Palette | null>(null);
   const rafRef = useRef(0);
   const reducedMotion = useRef(false);
-  const settled = useRef(false);
   // Label placement state, reused across frames (no allocations in the draw loop).
   const placerRef = useRef<LabelPlacer | null>(null);
   const widthsRef = useRef<WidthCache | null>(null);
@@ -183,14 +202,6 @@ export function GraphCanvas({
     ctx.globalAlpha = 1;
     ctx.fillStyle = pal.bg;
     ctx.fillRect(0, 0, w, h);
-
-    if (reducedMotion.current && !settled.current) {
-      ctx.fillStyle = pal.muted;
-      ctx.font = "13px system-ui, sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(t("graph.layingOut"), w / 2, h / 2);
-      return;
-    }
 
     ctx.setTransform(dpr * tf.k, 0, 0, dpr * tf.k, dpr * tf.x, dpr * tf.y);
     // Visible world rectangle, for culling.
@@ -333,13 +344,7 @@ export function GraphCanvas({
     const graph = graphRef.current;
     let again = false;
     if (sim && sim.alpha() > sim.alphaMin()) {
-      if (reducedMotion.current && !settled.current) {
-        // No animation: lay out in time-boxed chunks, draw once at the end.
-        const start = performance.now();
-        while (sim.alpha() > sim.alphaMin() && performance.now() - start < 12) sim.tick();
-      } else {
-        sim.tick(graph.nodes.length > 1000 ? 1 : 2);
-      }
+      sim.tick(graph.nodes.length > 1000 ? 1 : 2);
       const dragging = gestureRef.current?.kind === "node";
       // Stop as soon as nodes stop moving, not only when alpha runs out.
       if (!dragging && sim.alpha() < 0.3 && isSettled(graph.nodes)) sim.alpha(0);
@@ -349,10 +354,9 @@ export function GraphCanvas({
         const { w, h } = sizeRef.current;
         const target = fitTransform(graph.nodes, w, h);
         const cur = tRef.current;
-        const f = reducedMotion.current || !again ? 1 : 0.2;
+        const f = !again ? 1 : 0.2;
         tRef.current = { k: cur.k + (target.k - cur.k) * f, x: cur.x + (target.x - cur.x) * f, y: cur.y + (target.y - cur.y) * f };
       }
-      if (!again && !settled.current) settled.current = true;
     }
     draw();
     if (again) schedule();
@@ -363,14 +367,14 @@ export function GraphCanvas({
   };
 
   // New graph: new simulation, pre-ticked off-screen so the first paint is already near its
-  // final shape, then fitted to the view.
+  // final shape (with reduced motion: in its final shape), then fitted to the view.
   useEffect(() => {
-    reducedMotion.current = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    settled.current = false;
+    reducedMotion.current = window.matchMedia?.(REDUCED_MOTION).matches ?? false;
     userMoved.current = false;
     hoverRef.current = null;
     const sim = createSimulation(graph, seed);
-    if (!reducedMotion.current) sim.tick(preTicks(graph.nodes.length));
+    if (reducedMotion.current) settleNow(sim, graph.nodes);
+    else sim.tick(preTicks(graph.nodes.length));
     simRef.current = sim;
     fitNow();
     schedule();
@@ -411,16 +415,36 @@ export function GraphCanvas({
     return () => ro.disconnect();
   }, []);
 
-  // Theme changes: re-read colours.
+  // Reduced motion switched on while the layout still moves: finish it at once.
   useEffect(() => {
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const mq = window.matchMedia?.(REDUCED_MOTION);
     if (!mq) return;
     const onChange = () => {
-      paletteRef.current = null;
+      reducedMotion.current = mq.matches;
+      const sim = simRef.current;
+      if (!mq.matches || !sim || gestureRef.current?.kind === "node") return;
+      sim.alphaTarget(0);
+      settleNow(sim, graphRef.current.nodes);
+      if (!userMoved.current) fitNow();
       schedule();
     };
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // Theme and contrast changes: re-read colours.
+  useEffect(() => {
+    const queries = ["(prefers-color-scheme: dark)", "(prefers-contrast: more)", "(forced-colors: active)"]
+      .map((q) => window.matchMedia?.(q))
+      .filter((mq): mq is MediaQueryList => !!mq);
+    const onChange = () => {
+      paletteRef.current = null;
+      schedule();
+    };
+    for (const mq of queries) mq.addEventListener("change", onChange);
+    return () => {
+      for (const mq of queries) mq.removeEventListener("change", onChange);
+    };
   }, []);
 
   // Wheel zoom needs a non-passive listener to stop the page scrolling.
@@ -476,7 +500,13 @@ export function GraphCanvas({
       g.node.fx = wpt.x;
       g.node.fy = wpt.y;
       const sim = simRef.current;
-      if (sim) {
+      if (reducedMotion.current) {
+        // Only the dragged node moves; the rest of the layout stays put.
+        g.node.x = wpt.x;
+        g.node.y = wpt.y;
+        g.node.vx = 0;
+        g.node.vy = 0;
+      } else if (sim) {
         sim.alphaTarget(0.3);
         if (sim.alpha() < 0.3) sim.alpha(0.3);
       }

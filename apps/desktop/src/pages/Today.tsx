@@ -60,6 +60,8 @@ export function TodayPage() {
   const [action, setAction] = useState<{ card: CardView; action: CardActionView } | null>(null);
   const seen = useRef(new Set<string>());
   const inboxRef = useRef<HTMLHeadingElement>(null);
+  /** Set when an executed action closes its dialog: its card leaves the inbox, so focus goes to the inbox. */
+  const focusInbox = useRef(false);
 
   const reloadAll = () => {
     cards.reload();
@@ -69,6 +71,13 @@ export function TodayPage() {
   };
 
   useEvent(proactiveEvents.onCardsChanged, reloadAll);
+
+  // Runs after the dialog has handed focus back to the card's button, which is about to go.
+  useEffect(() => {
+    if (action || !focusInbox.current) return;
+    focusInbox.current = false;
+    inboxRef.current?.focus();
+  }, [action]);
 
   // A fresh list replaces the optimistic hiding.
   useEffect(() => setHidden(new Set()), [cards.data]);
@@ -83,6 +92,8 @@ export function TodayPage() {
   }, [cards.data]);
 
   const refresh = async () => {
+    // Busy is aria-disabled, not disabled, so the button keeps keyboard focus while it refreshes.
+    if (refreshing) return;
     setRefreshing(true);
     setRefreshError(null);
     try {
@@ -128,7 +139,7 @@ export function TodayPage() {
         title={t("today.title")}
         description={t("today.description")}
         actions={
-          <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={refreshing || disabled}>
+          <button type="button" className="btn btn-ghost" onClick={() => void refresh()} disabled={disabled} aria-disabled={refreshing || undefined}>
             {refreshing ? <Spinner label={t("today.refreshing")} /> : t("today.refresh")}
           </button>
         }
@@ -206,6 +217,7 @@ export function TodayPage() {
           card={action.card}
           action={action.action}
           onClose={(executed) => {
+            focusInbox.current = executed;
             setAction(null);
             if (executed) reloadAll();
           }}

@@ -15,6 +15,7 @@ import {
 import { useAsync, useEvent, useNow, useOpener } from "../hooks";
 import { fileUrl, vaultLinks } from "../knowledge";
 import { formatDuration, formatLatency, formatRelative, localityLabel, sourceKindLabel, tierLabel } from "../format";
+import { Announce, useAnnouncer, useIngestAnnouncements } from "../components/Announce";
 import { GoToPage } from "../components/GoToPage";
 import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
 import { UpdateSettings } from "../components/UpdateSettings";
@@ -273,11 +274,15 @@ function IndexingCard({
       onRetry();
     }
   });
+  // The numbers below refresh silently; an indexing pass is announced when it starts and ends.
+  const [announcement, announce] = useAnnouncer();
+  useIngestAnnouncements(announce, (id) => data?.sources.find((s) => s.id === id));
 
   const failing = (data?.sources ?? []).filter((s) => s.last_error || s.state === "error");
   return (
     <section className="status-card" aria-labelledby="indexing-title">
       <h2 id="indexing-title">{t("status.indexing")}</h2>
+      <Announce message={announcement} />
       {isMethodNotFound(error) ? (
         <NotAvailable />
       ) : (

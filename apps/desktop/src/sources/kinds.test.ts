@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   connectMode,
+  EMPTY_GOOGLE,
   EMPTY_MICROSOFT,
+  googleSettings,
+  isGoogleKind,
+  KIND_GROUPS,
   EMPTY_SAAS,
   isDrivePath,
   isGuid,
@@ -101,6 +105,7 @@ describe("saasSettings", () => {
 describe("connectMode", () => {
   it("maps kinds and settings to how they (re)connect", () => {
     expect(connectMode("gmail")).toBe("browser");
+    expect(connectMode("gdrive", { client_id: "x" })).toBe("browser");
     expect(connectMode("outlook-calendar", { client_id: "x" })).toBe("browser");
     expect(connectMode("imap")).toBe("password");
     expect(connectMode("files")).toBe("none");
@@ -110,5 +115,30 @@ describe("connectMode", () => {
     expect(connectMode("linear", { client_id: "x" })).toBe("browser");
     expect(connectMode("notion", { token_env: "NOTION_TOKEN" })).toBe("env");
     expect(connectMode("dropbox")).toBe("none");
+  });
+});
+
+describe("googleSettings", () => {
+  const clientId = "1234-abc.apps.googleusercontent.com";
+
+  it("Gmail and Calendar send only client_id", () => {
+    for (const kind of ["gmail", "gcal"] as const) {
+      expect(googleSettings(kind, { ...EMPTY_GOOGLE, clientId: ` ${clientId} `, includeSharedDrives: true })).toEqual({ client_id: clientId });
+    }
+  });
+
+  it("Drive sends its two opt-ins, off by default", () => {
+    expect(googleSettings("gdrive", { ...EMPTY_GOOGLE, clientId })).toEqual({ client_id: clientId, include_shared_with_me: false, include_shared_drives: false });
+    expect(googleSettings("gdrive", { clientId, includeSharedWithMe: true, includeSharedDrives: true })).toEqual({
+      client_id: clientId,
+      include_shared_with_me: true,
+      include_shared_drives: true,
+    });
+  });
+
+  it("offers Drive in the Google group", () => {
+    expect(KIND_GROUPS.find((g) => g.id === "google")?.kinds).toEqual(["gmail", "gcal", "gdrive"]);
+    expect(isGoogleKind("gdrive")).toBe(true);
+    expect(isGoogleKind("onedrive")).toBe(false);
   });
 });

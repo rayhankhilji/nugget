@@ -135,8 +135,8 @@ export interface EgressEvent {
 // ---- sources (M1) ----
 
 /** Connector kinds shipped in M1. The daemon may report others; treat `kind` as a string. */
-export type SourceKind = "files" | "obsidian" | "gmail" | "gcal" | "imap" | "caldav";
-export const SOURCE_KINDS: readonly SourceKind[] = ["files", "obsidian", "gmail", "gcal", "imap", "caldav"];
+export type SourceKind = "files" | "obsidian" | "gmail" | "gcal" | "gdrive" | "imap" | "caldav";
+export const SOURCE_KINDS: readonly SourceKind[] = ["files", "obsidian", "gmail", "gcal", "gdrive", "imap", "caldav"];
 
 export type SourceState = "idle" | "syncing" | "watching" | "needs_auth" | "disabled" | "error";
 export const SOURCE_STATES: readonly SourceState[] = ["idle", "syncing", "watching", "needs_auth", "disabled", "error"];
