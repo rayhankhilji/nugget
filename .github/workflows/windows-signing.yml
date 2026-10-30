@@ -15,10 +15,6 @@ name: Windows signing
 #    MSI and the installed/extracted nugget-desktop.exe, nuggetd.exe and uninstall.exe.
 
 on:
-  # TEMPORARY while iterating: remove before the final push.
-  push:
-    branches: [ee/release-readiness]
-    paths: [".github/workflows/windows-signing.yml", "packaging/windows/**"]
   workflow_dispatch:
   pull_request:
     paths:
