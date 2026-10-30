@@ -19,9 +19,13 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4.13"
 # No OCR: the mail and calendar extractors are what is fuzzed here.
 nugget-extract = { path = "../crates/nugget-extract", default-features = false }
+nugget-connector-google = { path = "../crates/nugget-connector-google" }
+nugget-core = { path = "../crates/nugget-core" }
+nugget-draft = { path = "../crates/nugget-draft" }
 nugget-ipc = { path = "../crates/nugget-ipc" }
 nugget-models = { path = "../crates/nugget-models" }
 nugget-plugin = { path = "../crates/nugget-plugin" }
+nugget-voice = { path = "../crates/nugget-voice" }
 url = "2"
 
 # Run with `cargo fuzz run -O` (see README.md): without `-O`, cargo-fuzz adds `-Cdebug-assertions`
@@ -33,6 +37,14 @@ url = "2"
 debug = 1
 
 [profile.release.package.nugget-core]
+debug-assertions = true
+overflow-checks = true
+
+[profile.release.package.nugget-connector-google]
+debug-assertions = true
+overflow-checks = true
+
+[profile.release.package.nugget-draft]
 debug-assertions = true
 overflow-checks = true
 
@@ -83,6 +95,27 @@ bench = false
 [[bin]]
 name = "plugin_manifest"
 path = "fuzz_targets/plugin_manifest.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "facts_block"
+path = "fuzz_targets/facts_block.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "secret_stream"
+path = "fuzz_targets/secret_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "drive_export"
+path = "fuzz_targets/drive_export.rs"
 test = false
 doc = false
 bench = false
