@@ -58,6 +58,7 @@ fn main() {
     let all: Vec<(&str, ProbeFn)> = vec![
         ("p1_bypass_sweep", probes::p1_bypass_sweep),
         ("p1_mail_keyboard_paths", probes::p1_mail_keyboard_paths),
+        ("p1_key_label_gap", probes::p1_key_label_gap),
         ("p1_stale_focus_cache", probes::p1_stale_focus_cache),
         ("p1_external_relabel", probes::p1_external_relabel),
         ("p2_scope", probes::p2_scope),
