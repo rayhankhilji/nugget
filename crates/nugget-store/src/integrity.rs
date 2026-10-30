@@ -50,11 +50,10 @@ pub enum FileHealth {
 ///
 /// A non-empty `-wal` is also scanned frame by frame first, because SQLite silently treats its
 /// first invalid frame as the end of the log, dropping every commit after it (see
-/// [`wal_problem`]). Damage that loses committed transactions is reported as `Corrupt`; the
-/// uncommitted tail a crash leaves behind is not.
-///
-/// Meant for stores that are closed (or crashed): a store being written while it is checked
-/// may show a frame being written as damage.
+/// [`wal_problem`]). Damage in the middle of the log that hides committed transactions is
+/// reported as `Corrupt`; what an ordinary crash leaves at the tail (a torn or partial frame,
+/// an uncommitted transaction) is `Healthy`, since SQLite rolls it back and loses nothing
+/// committed.
 ///
 /// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
 /// as a busy database or an unreadable directory.
@@ -169,17 +168,18 @@ fn read_full(r: &mut impl std::io::Read, buf: &mut [u8]) -> std::io::Result<usiz
 /// when it is absent, empty or sound.
 ///
 /// Following the WAL format (32-byte header, then frames of a 24-byte header and one page,
-/// each with a cumulative checksum and the header's salts), it finds the last valid commit
-/// frame, then classifies what follows:
-/// - valid frames without a commit after them: the uncommitted tail of a crash (sound);
-/// - frames with other salts: left over from before the log was last restarted (sound),
-///   unless frames with the current salts follow them (a damaged frame: corrupt);
-/// - a frame with the current salts but a bad checksum: corrupt if it, or any later frame
-///   with the current salts, is a commit frame (committed transactions would be lost);
-///   otherwise the overwritten remains of an uncommitted transaction (sound);
-/// - a partial frame at the end that carries the current salts (or is too short to tell), or
-///   a damaged header: corrupt. (A crash in the middle of writing a frame looks the same; it
-///   is reported, conservatively.)
+/// each with a cumulative checksum and the header's salts), it finds the first frame that does
+/// not validate. Everything from there on is ignored by SQLite. That is **normal after a
+/// crash** and reported as sound (logged at info): a process kill or power loss while a
+/// transaction was being written leaves a torn or partial frame (commit frame or not) at the
+/// tail, the remains of an uncommitted transaction, or frames from before the log was last
+/// restarted; SQLite rolls that transaction back on open and nothing committed is lost.
+///
+/// It is reported as damage (`Some`) only when committed data would be lost:
+/// - a later frame with the current salts that validates on its own (its checksum, seeded from
+///   the frame before it, matches) and is a commit frame: damage in the middle of the log hides
+///   that commit;
+/// - a damaged header with frames after it.
 pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
     use std::io::BufReader;
     let len = match fs::metadata(wal) {
@@ -199,7 +199,8 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
     };
     let mut hdr = [0u8; WAL_HEADER];
     if read_full(&mut r, &mut hdr)? < WAL_HEADER {
-        return Ok(invalid(0, "truncated inside its header"));
+        tracing::info!(path = %wal.display(), "write-ahead log ends inside its header (crash tail)");
+        return Ok(None);
     }
     let magic = be32(&hdr[0..]);
     let page_size = be32(&hdr[8..]) as usize;
@@ -210,65 +211,60 @@ pub(crate) fn wal_problem(wal: &Path) -> Result<Option<String>> {
         && page_size.is_power_of_two()
         && wal_checksum(big_endian, &hdr[..24], (0, 0)) == (be32(&hdr[24..]), be32(&hdr[28..]));
     if !header_ok {
-        return Ok(invalid(0, "damaged header"));
+        if len > WAL_HEADER as u64 {
+            return Ok(invalid(0, "damaged header with frames after it"));
+        }
+        tracing::info!(path = %wal.display(), "write-ahead log header is torn (crash tail)");
+        return Ok(None);
     }
     let salts = &hdr[16..24];
     let mut cks = (be32(&hdr[24..]), be32(&hdr[28..]));
+    // The checksum stored in the previous frame (valid or not): the seed to validate a frame on
+    // its own after the chain broke.
+    let mut prev_stored = cks;
     let mut offset = WAL_HEADER as u64;
     let mut last_commit_end = offset;
     let mut frame = vec![0u8; WAL_FRAME_HEADER + page_size];
-    // Set once the first invalid frame is met: whether it had the current salts.
-    let mut broken: Option<bool> = None;
+    let mut broken = false;
     loop {
         let n = read_full(&mut r, &mut frame)?;
-        if n == 0 {
+        if n < frame.len() {
+            // End of file, possibly inside a partial frame: ignored by SQLite, and harmless
+            // unless an earlier check found hidden commits.
             break;
         }
         let fh = &frame[..WAL_FRAME_HEADER];
-        if n < frame.len() {
-            // A partial frame ends the file.
-            let current = n < 16 || &fh[8..16] == salts;
-            if current {
-                return Ok(invalid(last_commit_end, "truncated frame"));
-            }
-            break;
-        }
         let current = &fh[8..16] == salts;
         let commit = be32(&fh[4..]) != 0;
-        match broken {
-            None if current => {
-                let next = wal_checksum(big_endian, &fh[..8], cks);
-                let next = wal_checksum(big_endian, &frame[WAL_FRAME_HEADER..], next);
-                if next == (be32(&fh[16..]), be32(&fh[20..])) {
-                    cks = next;
-                    if commit {
-                        last_commit_end = offset + frame.len() as u64;
-                    }
-                } else if commit {
-                    return Ok(invalid(
-                        last_commit_end,
-                        "a commit frame fails its checksum",
-                    ));
-                } else {
-                    broken = Some(true);
+        let stored = (be32(&fh[16..]), be32(&fh[20..]));
+        let checksum_from = |seed| {
+            let c = wal_checksum(big_endian, &fh[..8], seed);
+            wal_checksum(big_endian, &frame[WAL_FRAME_HEADER..], c)
+        };
+        if !broken {
+            if current && checksum_from(cks) == stored {
+                cks = stored;
+                if commit {
+                    last_commit_end = offset + frame.len() as u64;
                 }
+            } else {
+                broken = true;
             }
-            None => broken = Some(false),
-            Some(true) if current && commit => {
-                return Ok(invalid(
-                    last_commit_end,
-                    "a damaged frame hides later commits",
-                ));
-            }
-            Some(false) if current => {
-                return Ok(invalid(
-                    last_commit_end,
-                    "frames of the current log follow a damaged frame",
-                ));
-            }
-            Some(_) => {}
+        } else if current && commit && checksum_from(prev_stored) == stored {
+            return Ok(invalid(
+                last_commit_end,
+                "a damaged frame hides a later commit",
+            ));
         }
+        prev_stored = stored;
         offset += frame.len() as u64;
+    }
+    if len > last_commit_end {
+        tracing::info!(
+            path = %wal.display(),
+            bytes = len - last_commit_end,
+            "write-ahead log has an uncommitted or torn tail (a crash); SQLite rolls it back"
+        );
     }
     Ok(None)
 }
@@ -864,20 +860,15 @@ mod tests {
         bad[fr[2].0 + 8] ^= 0xff;
         assert!(corrupt(health_with_wal(&copy, &bad)));
 
-        // Truncated in the middle of a frame.
-        let cut = fr[fr.len() / 2].0 + 100;
-        assert!(corrupt(health_with_wal(&copy, &wal[..cut])));
-        // A damaged header.
+        // A damaged header with frames after it.
         let mut bad = wal.clone();
         bad[12] ^= 0x01;
         assert!(corrupt(health_with_wal(&copy, &bad)));
-        // Truncated inside the header.
-        assert!(corrupt(health_with_wal(&copy, &wal[..20])));
-        // A damaged last commit frame.
-        let last_commit = fr.iter().rev().find(|f| f.2).unwrap();
-        let mut bad = wal[..last_commit.0 + last_commit.1].to_vec();
-        bad[last_commit.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
-        assert!(corrupt(health_with_wal(&copy, &bad)));
+        // A header torn while it was first written (nothing after it): a crash.
+        assert_eq!(health_with_wal(&copy, &wal[..20]), FileHealth::Healthy);
+        let mut torn = wal[..WAL_HEADER].to_vec();
+        torn[30] ^= 0x01;
+        assert_eq!(health_with_wal(&copy, &torn), FileHealth::Healthy);
 
         // Crash tail: valid frames of a transaction that never committed.
         let tail = (1..fr.len())
@@ -900,6 +891,83 @@ mod tests {
         assert_eq!(health_with_wal(&copy, &stale), FileHealth::Healthy);
         // An empty WAL is no WAL.
         assert_eq!(health_with_wal(&copy, b""), FileHealth::Healthy);
+    }
+
+    /// Open a fresh copy of `copy`'s database with `wal` as its log (a store that crashed with
+    /// that log) and return its item count; the opened store is consistent.
+    fn items_after_crash(copy: &Path, wal: &[u8], name: &str) -> u64 {
+        let dir = copy.parent().unwrap().join(name);
+        fs::create_dir(&dir).unwrap();
+        let db = dir.join("nugget.db");
+        fs::copy(copy, &db).unwrap();
+        fs::write(sidecar(&db, "-wal"), wal).unwrap();
+        let s = Store::open(&db, &key()).unwrap();
+        let report = s.check_consistency().unwrap();
+        assert!(report.ok, "{name}: {:?}", report.problems);
+        report.items
+    }
+
+    /// End of the last commit frame that lies wholly before `cut`.
+    fn commit_end_before(fr: &[(usize, usize, bool)], cut: usize) -> usize {
+        fr.iter()
+            .filter(|f| f.2 && f.0 + f.1 <= cut)
+            .map(|f| f.0 + f.1)
+            .max()
+            .unwrap_or(WAL_HEADER)
+    }
+
+    /// A kill or power loss while a frame is written leaves a torn or partial frame at the
+    /// tail: healthy (no recovery mode after an ordinary crash), and opening the store keeps
+    /// everything committed before it.
+    #[test]
+    fn torn_wal_tails_from_a_crash_are_healthy() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = crashed_copy(dir.path(), 12);
+        fs::remove_file(sidecar(&copy, "-shm")).unwrap();
+        let wal = fs::read(sidecar(&copy, "-wal")).unwrap();
+        let fr = frames(&wal);
+        let full = items_after_crash(&copy, &wal, "full");
+        assert_eq!(full, 12);
+
+        // Truncated in the middle of a frame, at several points.
+        for (n, at) in [fr.len() / 3, fr.len() / 2, fr.len() - 1]
+            .into_iter()
+            .enumerate()
+        {
+            let cut = fr[at].0 + 100;
+            assert_eq!(
+                health_with_wal(&copy, &wal[..cut]),
+                FileHealth::Healthy,
+                "cut {cut}"
+            );
+            let expected =
+                items_after_crash(&copy, &wal[..commit_end_before(&fr, cut)], &format!("b{n}"));
+            assert_eq!(
+                items_after_crash(&copy, &wal[..cut], &format!("t{n}")),
+                expected
+            );
+            if at == fr.len() - 1 {
+                assert!(expected > 0, "nothing committed before the last frame");
+            }
+        }
+
+        // The last commit frame half-written (fails its checksum).
+        let last = *fr.iter().rev().find(|f| f.2).unwrap();
+        let mut torn = wal[..last.0 + last.1].to_vec();
+        torn[last.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
+        assert_eq!(health_with_wal(&copy, &torn), FileHealth::Healthy);
+        let expected = items_after_crash(&copy, &wal[..commit_end_before(&fr, last.0)], "lb");
+        assert_eq!(items_after_crash(&copy, &torn, "lt"), expected);
+
+        // A commit frame in the middle damaged, with later commits that still validate: those
+        // would be lost, so that is corruption.
+        let mid = *fr[..fr.len() / 2].iter().rev().find(|f| f.2).unwrap();
+        let mut bad = wal.clone();
+        bad[mid.0 + WAL_FRAME_HEADER + 7] ^= 0x01;
+        assert!(matches!(
+            health_with_wal(&copy, &bad),
+            FileHealth::Corrupt(_)
+        ));
     }
 
     /// The copy a WAL without `-shm` needs is made beside the file, hidden, and removed.
