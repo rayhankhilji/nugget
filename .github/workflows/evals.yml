@@ -22,17 +22,13 @@ on:
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
-  # TEMPORARY (DD4 measurement): runs the memory job only; removed before the final push.
-  push:
-    branches: [dd/recall-real-embedder]
 
 # Least privilege: the job only reads the repository.
 permissions:
   contents: read
 
 concurrency:
-  # TEMPORARY (DD4 measurement): "-b" lets this run go alongside the one already measuring.
-  group: ${{ github.workflow }}-${{ github.ref }}-b
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -150,8 +146,6 @@ jobs:
   # bench arguments. The `chat_model` input does not apply here: every run names its model.
   doubletap:
     name: ${{ matrix.suite }} (real model)
-    # TEMPORARY (DD4 measurement): not on push; removed with the push trigger.
-    if: github.event_name != 'push'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 340
     strategy:
@@ -277,6 +271,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - scale: quick
+            runs: |
+              hash memory --backend real
+              nomic-prefixes-off memory --backend real --local-models --memory-embed-prefixes off
+              nomic memory --backend real --local-models --memory-rerank local
+              nomic-rerank-unbounded memory --backend real --local-models --memory-rerank local --memory-rerank-timeout-ms 120000 --memory-queries 50 --memory-no-freshness
+          # The reranker never answers within the app's timeout on these runners (quick scale), so
+          # standard measures it without one, on a subset.
+          - scale: standard
+            runs: |
+              hash memory --backend real
+              nomic-prefixes-off memory --backend real --local-models --memory-embed-prefixes off
+              nomic memory --backend real --local-models
+              nomic-rerank-unbounded memory --backend real --local-models --memory-rerank local --memory-rerank-timeout-ms 120000 --memory-queries 50 --memory-no-freshness
+          # Full scale: embedding 20,000 files takes 2–4 hours on these runners, so only the app's
+          # configuration against the hash embedder fits in one job.
           - scale: full
             runs: |
               hash memory --backend real
