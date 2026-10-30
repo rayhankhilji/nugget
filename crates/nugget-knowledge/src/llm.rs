@@ -1964,7 +1964,72 @@ pub(crate) fn adopt_known_kinds(
         kinds.dedup();
         if let [k] = kinds[..] {
             e.kind = k;
+            continue;
         }
+        if kinds.is_empty()
+            && e.kind != EntityKind::Person
+            && let Some(k) = kind_of_longer_name(graph, me, &name)
+        {
+            e.kind = k;
+        }
+    }
+}
+
+/// The one kind of the graph's entities (the user excluded) that have a longer name or alias
+/// made of `short` plus whole words ("Ostrander" in "Ostrander Freight Cooperative", "Priya" at
+/// the start of "Priya Castellane"), when they all share it. A short name the model gave the
+/// wrong kind ("Ostrander" as a place) then reaches the same-kind fold. Names under 4
+/// characters are too ambiguous.
+fn kind_of_longer_name(
+    graph: &dyn GraphStore,
+    me: Option<&EntityId>,
+    short: &str,
+) -> Option<EntityKind> {
+    if short.chars().count() < 4 {
+        return None;
+    }
+    let found = graph
+        .list_entities(&EntityQuery {
+            text: Some(short.to_owned()),
+            kind: None,
+            limit: 64,
+            offset: 0,
+        })
+        .ok()?;
+    if found.len() >= 64 {
+        return None;
+    }
+    let mut kinds: Vec<EntityKind> = Vec::new();
+    for s in found {
+        if Some(&s.id) == me {
+            continue;
+        }
+        let Some(x) = graph.get_entity(&s.id).ok().flatten() else {
+            continue;
+        };
+        // Events, commitments and preferences are named after what they are about ("Driftwood
+        // API design review"): their names say nothing about the kind of the short name.
+        if !matches!(
+            x.kind,
+            EntityKind::Person | EntityKind::Organization | EntityKind::Project | EntityKind::Place
+        ) {
+            continue;
+        }
+        let longer = std::iter::once(&x.name).chain(&x.aliases).any(|n| {
+            let n = normalize_name(n);
+            n.len() > short.len()
+                && (n.starts_with(&format!("{short} "))
+                    || (x.kind != EntityKind::Person
+                        && (n.ends_with(&format!(" {short}"))
+                            || n.contains(&format!(" {short} ")))))
+        });
+        if longer && !kinds.contains(&x.kind) {
+            kinds.push(x.kind);
+        }
+    }
+    match kinds[..] {
+        [k] => Some(k),
+        _ => None,
     }
 }
 
@@ -2147,5 +2212,31 @@ mod name_shape_tests {
         ] {
             assert_eq!(not_a_name(kind, name), None, "{name}");
         }
+    }
+
+    #[test]
+    fn a_short_name_of_the_wrong_kind_takes_the_kind_of_its_longer_name() {
+        use crate::spec::{EntitySpec, Extraction};
+        use nugget_graph::{GraphStore, MemGraph, NewEntity};
+        let g = MemGraph::new();
+        g.create_entity(&NewEntity::new(
+            Organization,
+            "Ostrander Freight Cooperative",
+        ))
+        .unwrap();
+        g.create_entity(&NewEntity::new(Project, "Harbourline tracking feed"))
+            .unwrap();
+        g.create_entity(&NewEntity::new(Organization, "Harbourline Logistics"))
+            .unwrap();
+        g.create_entity(&NewEntity::new(Event, "Fernhollow site visit"))
+            .unwrap();
+        let mut extra = Extraction::default();
+        extra.entities.push(EntitySpec::new(Place, "Ostrander"));
+        extra.entities.push(EntitySpec::new(Place, "Harbourline"));
+        extra.entities.push(EntitySpec::new(Place, "Fernhollow"));
+        super::adopt_known_kinds(&g, None, &Extraction::default(), &mut extra);
+        let kinds: Vec<_> = extra.entities.iter().map(|e| e.kind).collect();
+        // Unique longer name: adopted. Two kinds ("Harbourline"): left alone. Unknown: left.
+        assert_eq!(kinds, [Organization, Place, Place]);
     }
 }
