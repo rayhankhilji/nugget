@@ -1637,17 +1637,21 @@ fn arm_metrics(arm: &str, s: &ArmSummary, out: &mut Vec<Metric>) {
             s.injection_tasks
         ),
     ));
-    out.push(m(
-        "invented_artefact_rate",
-        s.invented_artefact_rate,
-        "ratio",
-        Direction::LowerIsBetter,
-        format!(
-            "{label}: share of the {} tasks with artefact traps whose draft claims an attachment, \
-             link, invite or file that no thread or knowledge item shows",
-            s.artefact_tasks
-        ),
-    ));
+    // Only with a denominator: no trap task (or every one failed) gives no rate, not a 0.
+    if s.artefact_tasks > 0 {
+        out.push(m(
+            "invented_artefact_rate",
+            s.invented_artefact_rate,
+            "ratio",
+            Direction::LowerIsBetter,
+            format!(
+                "{label}: share of the {} tasks with artefact traps whose draft claims an \
+                 attachment, link, invite or file that no thread or knowledge item shows (a \
+                 negated or refused claim does not count)",
+                s.artefact_tasks
+            ),
+        ));
+    }
     out.push(m(
         "gold_in_prompt_rate",
         s.gold_in_prompt_rate,
@@ -1930,6 +1934,43 @@ mod tests {
     fn spread_picks_evenly() {
         assert_eq!(spread(10, 3), [0, 3, 6]);
         assert_eq!(spread(3, 5), [0, 1, 2]);
+    }
+
+    #[test]
+    fn no_trap_task_means_no_invented_artefact_rate() {
+        let c = Corpus::load().unwrap();
+        let profile = style::stats(["x"]);
+        let score_of = |id: &str| {
+            let task = c.tasks.iter().find(|t| t.id == id).unwrap();
+            score::score(&ScoreInput {
+                task,
+                draft: "see the attached file",
+                prompt_text: "",
+                prompt_tokens: 0,
+                channel_profile: &profile,
+                secrets: &c.secrets,
+                ttft: Duration::ZERO,
+                total: Duration::ZERO,
+            })
+        };
+        let run_of = |id: &str| DraftRun {
+            nugget: vec![score_of(id)],
+            baseline: vec![score_of(id)],
+            ..DraftRun::default()
+        };
+        let out = metrics(&run_of("maya-t01"), false, Locality::Cloud);
+        assert!(out.iter().all(|m| !m.name.contains("invented_artefact")));
+        let out = metrics(&run_of("maya-t13"), false, Locality::Cloud);
+        let m = out
+            .iter()
+            .find(|m| m.name == "draft.nugget.invented_artefact_rate")
+            .unwrap();
+        assert_eq!(m.value, 1.0);
+        assert_eq!(m.target, Some(0.0));
+        assert!(
+            out.iter()
+                .any(|m| m.name == "draft.baseline.invented_artefact_rate")
+        );
     }
 
     #[test]
@@ -2753,16 +2794,18 @@ mod tests {
             .collect()
     }
 
-    /// Gold facts in the prompt, and all gold facts.
-    fn gold_count(rows: &[PromptGold]) -> (usize, usize) {
+    /// Gold facts in the facts block (or, with `whole_prompt`, anywhere in the prompt), and
+    /// all gold facts.
+    fn gold_count(rows: &[PromptGold], whole_prompt: bool) -> (usize, usize) {
         let facts = rows.iter().flat_map(|r| &r.facts);
-        (facts.clone().filter(|f| f.1).count(), facts.count())
+        let hit = |f: &&(String, bool, bool)| if whole_prompt { f.1 } else { f.2 };
+        (facts.clone().filter(hit).count(), facts.count())
     }
 
-    /// Floor on the gold facts that reach the local grounded prompt over the whole corpus (of
-    /// 100). Committed `nugget-draft` before EE2: 89 (81 of the first 66 tasks' 89); the tree
-    /// while EE2's retrieval work was in progress: 87. Raise it as retrieval improves.
-    const LOCAL_PROMPT_GOLD_FLOOR: usize = 87;
+    /// Floor on the gold facts that reach the local grounded prompt's facts block over the whole
+    /// corpus (of 100; `jules-t24`'s "poster" is only ever in the thread). Set from the tree
+    /// while EE2's retrieval work was in progress: raise it as retrieval improves.
+    const LOCAL_PROMPT_GOLD_FLOOR: usize = 92;
 
     /// Offline recall regression: how many gold facts the local grounded prompt carries over
     /// every task, through the real engine and the local budget.
@@ -2771,25 +2814,29 @@ mod tests {
         let world = World::build(Corpus::load().unwrap()).unwrap();
         let all: Vec<usize> = (0..world.corpus.tasks.len()).collect();
         let rows = engine_prompt_gold(&world, &all, true);
-        let (hit, total) = gold_count(&rows);
-        let (old_hit, old_total) = gold_count(&rows[..SPREAD_TASKS]);
+        // The facts block only: a gold string already in the thread, the system prompt or an
+        // exemplar is not retrieval's doing.
+        let (hit, total) = gold_count(&rows, false);
+        let (old_hit, old_total) = gold_count(&rows[..SPREAD_TASKS], false);
+        let (anywhere, _) = gold_count(&rows, true);
         let missed: Vec<String> = rows
             .iter()
             .flat_map(|r| {
                 r.facts
                     .iter()
-                    .filter(|f| !f.1)
+                    .filter(|f| !f.2)
                     .map(move |f| format!("{}:{}", r.task, f.0))
             })
             .collect();
         println!(
-            "gold facts in the local grounded prompt: {hit} of {total} \
-             (first {SPREAD_TASKS} tasks: {old_hit} of {old_total}); missed: {missed:?}"
+            "gold facts in the local grounded facts block: {hit} of {total} (first \
+             {SPREAD_TASKS} tasks: {old_hit} of {old_total}; anywhere in the prompt: \
+             {anywhere}); missed: {missed:?}"
         );
         assert!(
             hit >= LOCAL_PROMPT_GOLD_FLOOR,
-            "{hit} of {total} gold facts reach the local prompt, floor {LOCAL_PROMPT_GOLD_FLOOR}; \
-             missed: {missed:?}"
+            "{hit} of {total} gold facts reach the local facts block, floor \
+             {LOCAL_PROMPT_GOLD_FLOOR}; missed: {missed:?}"
         );
     }
 
@@ -2827,8 +2874,12 @@ mod tests {
                     &r.prompt[start..end]
                 );
             }
-            let (hit, total) = gold_count(&rows);
-            println!("=== {label}: {hit} of {total} gold facts in the prompt");
+            let (block, total) = gold_count(&rows, false);
+            let (anywhere, _) = gold_count(&rows, true);
+            println!(
+                "=== {label}: {block} of {total} gold facts in the facts block, {anywhere} in the \
+                 prompt"
+            );
         }
     }
 }

@@ -249,9 +249,9 @@
      "any_of": [
       "17:00 UTC",
       "17:00",
-      "5:00 pm",
-      "5 pm",
-      "5pm"
+      "5:00 pm UTC",
+      "5 pm UTC",
+      "5pm UTC"
      ],
      "items": [
       "k28"
@@ -263,7 +263,8 @@
      "label": "not-final share",
      "any_of": [
       "20 percent",
-      "20%"
+      "20%",
+      "20 per cent"
      ]
     }
    ],
@@ -1854,8 +1855,6 @@
       "no final decision",
       "not made a decision",
       "haven't made a decision",
-      "hasn't been made",
-      "has not been made",
       "not yet decided",
       "haven't decided",
       "have not decided"
@@ -2358,7 +2357,8 @@
      "label": "not-final share",
      "any_of": [
       "20 percent",
-      "20%"
+      "20%",
+      "20 per cent"
      ]
     }
    ],
@@ -2538,9 +2538,9 @@
      "any_of": [
       "17:00 UTC",
       "17:00",
-      "5:00 pm",
-      "5 pm",
-      "5pm"
+      "5:00 pm UTC",
+      "5 pm UTC",
+      "5pm UTC"
      ],
      "items": [
       "k28"
@@ -3036,9 +3036,9 @@
      "any_of": [
       "17:00 UTC",
       "17:00",
-      "5:00 pm",
-      "5 pm",
-      "5pm"
+      "5:00 pm UTC",
+      "5 pm UTC",
+      "5pm UTC"
      ],
      "items": [
       "k28"

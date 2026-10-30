@@ -212,10 +212,28 @@ impl Corpus {
 }
 
 /// Case-insensitive containment of any needle. `haystack_lower` must already be lowercase.
+/// A needle that starts with a digit must not be preceded by one, and one that ends with a digit
+/// must not be followed by one, so `2 pm` does not match "12 pm", nor `$2500` "$25000".
 pub fn contains_any(haystack_lower: &str, needles: &[String]) -> bool {
     needles
         .iter()
-        .any(|n| haystack_lower.contains(&n.to_lowercase()))
+        .any(|n| contains_bounded(haystack_lower, &n.to_lowercase()))
+}
+
+/// `needle` in `haystack` with digit boundaries at a leading or trailing digit (see
+/// [`contains_any`]).
+pub fn contains_bounded(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let digit_start = needle.starts_with(|c: char| c.is_ascii_digit());
+    let digit_end = needle.ends_with(|c: char| c.is_ascii_digit());
+    haystack.match_indices(needle).any(|(at, _)| {
+        let before = haystack[..at].chars().next_back();
+        let after = haystack[at + needle.len()..].chars().next();
+        !(digit_start && before.is_some_and(|c| c.is_ascii_digit())
+            || digit_end && after.is_some_and(|c| c.is_ascii_digit()))
+    })
 }
 
 #[cfg(test)]
@@ -256,6 +274,42 @@ mod tests {
         }
         assert!(c.items.iter().filter(|i| i.sensitive).count() >= 3);
         assert!(!c.secrets.is_empty());
+    }
+
+    #[test]
+    fn digit_needles_do_not_match_inside_longer_numbers() {
+        let has = |h: &str, n: &str| contains_any(h, &[n.to_owned()]);
+        assert!(has("at 2 pm", "2 pm"));
+        assert!(!has("at 12 pm", "2 pm"));
+        assert!(!has("$25000", "$2500"));
+        assert!(has("$2500.", "$2500"));
+        assert!(!has("12 engineering hires", "2 engineering hires"));
+        assert!(has("(2 engineering hires)", "2 engineering hires"));
+        assert!(!has("148,000", "48,000"));
+        assert!(has("$48,000 a year", "48,000"));
+        assert!(has("offline mode", "offline mode"));
+    }
+
+    #[test]
+    fn no_fact_string_matches_with_a_digit_added() {
+        // Gold and forbidden facts: a digit before a leading digit, or after a trailing one,
+        // makes a different number.
+        let c = Corpus::load().unwrap();
+        for t in &c.tasks {
+            for f in t.gold_facts.iter().chain(&t.forbidden_facts) {
+                for n in &f.any_of {
+                    let lower = n.to_lowercase();
+                    if lower.starts_with(|c: char| c.is_ascii_digit()) {
+                        let h = format!("1{lower}");
+                        assert!(!contains_any(&h, std::slice::from_ref(n)), "{} {n}", t.id);
+                    }
+                    if lower.ends_with(|c: char| c.is_ascii_digit()) {
+                        let h = format!("{lower}1");
+                        assert!(!contains_any(&h, std::slice::from_ref(n)), "{} {n}", t.id);
+                    }
+                }
+            }
+        }
     }
 
     #[test]
