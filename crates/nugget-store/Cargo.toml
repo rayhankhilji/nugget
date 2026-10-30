@@ -11,7 +11,7 @@ repository.workspace = true
 nugget-core.workspace = true
 nugget-graph.workspace = true
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 time.workspace = true
 tracing.workspace = true
 # SQLCipher (SQLite + AES-256) built from source with a vendored OpenSSL, so every OS gets the same,

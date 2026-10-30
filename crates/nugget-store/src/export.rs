@@ -1,38 +1,53 @@
 //! Data export: everything a user may want to take out of the store, in open formats.
 //!
-//! - [`Store::export_items`] visits every item (one [`ExportItem`] each, meant to be written as
-//!   one JSON line) in rowid order, reading `page` items per query with keyset pagination, so
-//!   memory stays bounded by the page size whatever the store holds.
+//! - [`Store::export_items`] visits every item (one [`ExportItem`] each, written as one JSON
+//!   line by [`ExportItem::write_jsonl`]) in rowid order.
 //! - [`Store::export_graph_json`] streams the knowledge graph as one JSON document.
 //! - [`Store::export_audit_csv`] and [`Store::export_egress_csv`] write the audit log and the
 //!   egress ledger as RFC 4180 CSV.
 //!
-//! # Consistency
+//! # Paging and consistency
 //!
-//! Exporting a live store is allowed. Item export is **per-page consistent**: each page is read
-//! by one SQL statement, so an item's row, its text and the chunks that text is rebuilt from all
-//! come from one snapshot, but different pages may see different states. An item deleted before
-//! its page is read is not exported, one inserted meanwhile is exported only if its rowid is past
-//! the pages already read, and no item is ever exported twice. The graph export reads all three
-//! sections in one read transaction (claims never name an entity missing from the document);
-//! each CSV export is one statement.
+//! Every export reads in keyset pages (by rowid / primary key), each page with one SQL
+//! statement on a read connection, and writes a page only after that connection is released.
+//! So an export never holds a read transaction while the caller's writer runs: WAL checkpoints
+//! proceed, a pooled connection is not pinned, and a writer (or item callback) may call back
+//! into the store, also on an in-memory store whose reads share the writer connection. Memory
+//! is bounded by one page; item pages also stop early once about [`PAGE_BYTE_BUDGET`] bytes of
+//! item data are read (always at least one item).
+//!
+//! Exporting a live store is therefore **per-page consistent**: each page is one snapshot, but
+//! different pages may see different states. Rows are exported at most once each, and only
+//! those that exist when their page is read. Rowid-keyed scans (items, claims, mentions, audit,
+//! egress) are bounded by the largest rowid at the start of the export, so rows inserted
+//! meanwhile are left out; in particular an item deleted and re-inserted during the export (it
+//! gets a new rowid) is never exported twice. In the graph, a claim or mention may name an
+//! entity created after the entity section was read.
+//!
+//! # Errors
+//!
+//! On `Err` the output written so far is incomplete (the JSON document is then not valid
+//! JSON): callers write to a temporary file and rename it into place only on success. Errors
+//! of the caller's writer surface as `Error::Io`. A damaged item does not stop the item export:
+//! it is exported with what could be read and an `error` field (see [`ExportItem::error`]).
 //!
 //! # CSV
 //!
-//! Cells are written losslessly: a cell holding `,`, `"`, CR or LF is quoted, with `"` doubled;
-//! records end in CRLF; SQL NULL is an empty cell. Cells are **not** altered against "CSV
-//! injection" (a leading `=`, `+`, `-`, `@`, tab or CR is kept as is): this is a data export
-//! that must round-trip exactly, not a report for a spreadsheet. Open it in a spreadsheet with
-//! formula evaluation off (import as text) if its contents are untrusted.
+//! Cells are written losslessly: a cell is quoted (`"` doubled) when it is empty or holds `,`,
+//! `"` or any control character (CR, LF, tab, ...) or starts or ends with whitespace; records
+//! end in CRLF. SQL NULL is an empty, unquoted cell; the empty string is `""`. Cells are **not**
+//! altered against "CSV injection" (a leading `=`, `+`, `-` or `@` is kept as is): this is a
+//! data export that must round-trip exactly, not a report for a spreadsheet. Open it in a
+//! spreadsheet with formula evaluation off (import as text) if its contents are untrusted.
 
-use std::io::{BufWriter, Write};
+use std::io::Write;
 
 use nugget_core::{Error, Result};
-use rusqlite::Connection;
 use rusqlite::types::ValueRef;
-use serde::de::DeserializeOwned;
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_json::value::RawValue;
 
 use crate::Store;
 use crate::error::DbExt;
@@ -41,11 +56,20 @@ use crate::items::decode_text_layout;
 /// Version of the [`Store::export_graph_json`] document (its `format` field).
 pub const GRAPH_EXPORT_FORMAT: u32 = 1;
 
+/// An item page stops once it holds about this many bytes of item data (texts, chunks,
+/// metadata), so pages of large documents stay small; it always holds at least one item.
+pub const PAGE_BYTE_BUDGET: usize = 16 << 20;
+
+/// Rows per page of the graph export.
+const GRAPH_PAGE: usize = 500;
+/// Rows per page of the CSV exports.
+const CSV_PAGE: usize = 1000;
+
 /// One exported item: every column the store keeps for it, with its full text.
 ///
 /// Dates are the stored RFC 3339 strings, unchanged. Source-specific details (author, sender,
-/// participants, labels, ...) are inside `metadata`, which is the stored JSON verbatim.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// participants, labels, ...) are inside `metadata`, which is the stored JSON text verbatim.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExportItem {
     /// Row id in this store (stable for the item's life in this store, not across stores).
     pub id: i64,
@@ -67,15 +91,31 @@ pub struct ExportItem {
     pub content_hash: String,
     /// Connector-defined version token.
     pub version: Option<String>,
-    /// Source metadata as stored. A stored value that is not valid JSON is exported as a JSON
-    /// string holding it, so nothing is dropped.
-    pub metadata: Value,
+    /// Source metadata: the stored JSON text, byte for byte (numbers are not re-encoded). A
+    /// stored value that is not valid JSON is exported as a JSON string holding it.
+    pub metadata: Box<RawValue>,
     /// The item's full text, as written by its connector (rebuilt from its chunks when stored
     /// that way).
     pub text: Option<String>,
-    /// When the item has no text of its own: its chunk texts in order (omitted when empty).
+    /// When `text` is absent (the item has none, or it could not be rebuilt): the item's chunk
+    /// texts in order (omitted when empty).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chunks: Vec<String>,
+    /// What could not be read as stored (a text layout that no longer matches its chunks,
+    /// invalid UTF-8 or JSON, ...), when anything. The item is still exported with everything
+    /// readable; such items are also logged. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ExportItem {
+    /// Write the item as one JSON line (`items.jsonl`). Errors of `w` are `Error::Io`.
+    pub fn write_jsonl(&self, w: &mut dyn Write) -> Result<()> {
+        let mut line = serde_json::to_vec(self)?;
+        line.push(b'\n');
+        w.write_all(&line)?;
+        Ok(())
+    }
 }
 
 /// What [`Store::export_graph_json`] wrote.
@@ -90,8 +130,63 @@ pub struct GraphExportCounts {
     pub mentions: u64,
 }
 
-/// One page of items, rowid order, with what their texts need: the `item_text` layout and,
-/// when `items.text` is NULL, the chunks as a JSON array of `[ord, text]`.
+/// `json` as a raw JSON value, verbatim when valid; otherwise a JSON string holding it, with a
+/// note saying so.
+fn raw_json(json: String) -> (Box<RawValue>, Option<String>) {
+    match RawValue::from_string(json.clone()) {
+        Ok(raw) => (raw, None),
+        Err(e) => {
+            let raw = serde_json::value::to_raw_value(&json)
+                .expect("a string always serialises to a valid JSON string");
+            (
+                raw,
+                Some(format!(
+                    "stored JSON is invalid ({e}), exported as a string"
+                )),
+            )
+        }
+    }
+}
+
+/// A text column read leniently: invalid UTF-8 is converted lossily and a non-text value is
+/// rendered as text, each with a note in `errors`.
+fn lenient_text(
+    r: &rusqlite::Row<'_>,
+    i: usize,
+    what: &str,
+    errors: &mut Vec<String>,
+) -> Option<String> {
+    match r.get_ref(i) {
+        Ok(ValueRef::Null) => None,
+        Ok(ValueRef::Text(t)) => Some(match std::str::from_utf8(t) {
+            Ok(s) => s.to_owned(),
+            Err(_) => {
+                errors.push(format!("{what} is not valid UTF-8 (converted lossily)"));
+                String::from_utf8_lossy(t).into_owned()
+            }
+        }),
+        Ok(ValueRef::Integer(n)) => {
+            errors.push(format!("{what} is stored as an integer"));
+            Some(n.to_string())
+        }
+        Ok(ValueRef::Real(f)) => {
+            errors.push(format!("{what} is stored as a real"));
+            Some(f.to_string())
+        }
+        Ok(ValueRef::Blob(b)) => {
+            errors.push(format!("{what} is stored as a blob (converted lossily)"));
+            Some(String::from_utf8_lossy(b).into_owned())
+        }
+        Err(e) => {
+            errors.push(format!("{what}: {e}"));
+            None
+        }
+    }
+}
+
+/// One page of items (rowid in `(?1, ?2]`, at most `?3`), with what their texts need: the
+/// `item_text` layout and, when `items.text` is NULL, the chunks as a JSON array of
+/// `[ord, text]`.
 const ITEMS_PAGE_SQL: &str = "SELECT i.id, i.source, i.key, i.title, i.mime, i.source_modified_at,
             i.created_at, i.updated_at, i.content_hash, i.version, i.metadata, i.text, t.layout,
             CASE WHEN i.text IS NULL THEN
@@ -99,7 +194,7 @@ const ITEMS_PAGE_SQL: &str = "SELECT i.id, i.source, i.key, i.title, i.mime, i.s
                  FROM chunks c WHERE c.item_id = i.id)
             END
      FROM items i LEFT JOIN item_text t ON t.item_id = i.id
-     WHERE i.id > ?1 ORDER BY i.id LIMIT ?2";
+     WHERE i.id > ?1 AND i.id <= ?2 ORDER BY i.id LIMIT ?3";
 
 /// An item row as read, before its text is rebuilt (done off the read connection).
 struct RawItem {
@@ -116,54 +211,113 @@ struct RawItem {
     metadata: String,
     text: Option<String>,
     layout: Option<Vec<u8>>,
-    chunks: Option<String>,
+    /// Chunk texts by `ord`, sorted (read only when `text` is NULL).
+    chunks: Vec<(u64, String)>,
+    errors: Vec<String>,
 }
 
 impl RawItem {
-    fn read(r: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
-        Ok(Self {
-            id: r.get(0)?,
-            source: r.get(1)?,
-            key: r.get(2)?,
-            title: r.get(3)?,
-            mime: r.get(4)?,
-            source_modified_at: r.get(5)?,
-            created_at: r.get(6)?,
-            updated_at: r.get(7)?,
-            content_hash: r.get(8)?,
-            version: r.get(9)?,
-            metadata: r.get(10)?,
-            text: r.get(11)?,
-            layout: r.get(12)?,
-            chunks: r.get(13)?,
-        })
-    }
-
-    fn into_export(self) -> Result<ExportItem> {
-        let mut chunks: Vec<(u64, String)> = match &self.chunks {
-            Some(json) => serde_json::from_str(json)?,
+    fn read(r: &rusqlite::Row<'_>) -> Result<Self> {
+        let id: i64 = r.get(0).db("read item id")?;
+        let mut errors = Vec::new();
+        let mut text = |i: usize, what: &str| lenient_text(r, i, what, &mut errors);
+        let source = text(1, "source").unwrap_or_default();
+        let key = text(2, "key").unwrap_or_default();
+        let title = text(3, "title");
+        let mime = text(4, "mime");
+        let source_modified_at = text(5, "source_modified_at");
+        let created_at = text(6, "created_at").unwrap_or_default();
+        let updated_at = text(7, "updated_at").unwrap_or_default();
+        let content_hash = text(8, "content_hash").unwrap_or_default();
+        let version = text(9, "version");
+        let metadata = text(10, "metadata").unwrap_or_else(|| "null".into());
+        let item_text = text(11, "text");
+        let chunks_json = text(13, "chunks");
+        let layout = match r.get_ref(12) {
+            Ok(ValueRef::Blob(b) | ValueRef::Text(b)) => Some(b.to_vec()),
+            Ok(ValueRef::Null) => None,
+            Ok(_) => {
+                errors.push("text layout is not a blob".into());
+                None
+            }
+            Err(e) => {
+                errors.push(format!("text layout: {e}"));
+                None
+            }
+        };
+        let mut chunks: Vec<(u64, String)> = match chunks_json {
+            Some(json) => serde_json::from_str(&json).unwrap_or_else(|e| {
+                errors.push(format!("chunks could not be read: {e}"));
+                Vec::new()
+            }),
             None => Vec::new(),
         };
         chunks.sort_unstable_by_key(|(ord, _)| *ord);
-        let (text, chunks) = match (self.text, &self.layout) {
+        Ok(Self {
+            id,
+            source,
+            key,
+            title,
+            mime,
+            source_modified_at,
+            created_at,
+            updated_at,
+            content_hash,
+            version,
+            metadata,
+            text: item_text,
+            layout,
+            chunks,
+            errors,
+        })
+    }
+
+    /// Bytes of item data this row holds (for [`PAGE_BYTE_BUDGET`]).
+    fn size(&self) -> usize {
+        self.metadata.len()
+            + self.text.as_ref().map_or(0, String::len)
+            + self.layout.as_ref().map_or(0, Vec::len)
+            + self.chunks.iter().map(|(_, t)| t.len()).sum::<usize>()
+    }
+
+    fn into_export(self) -> ExportItem {
+        let mut errors = self.errors;
+        let chunks = self.chunks;
+        let (text, chunks) = match (self.text, self.layout) {
             (Some(text), _) => (Some(text), Vec::new()),
             (None, Some(layout)) => {
-                let text = decode_text_layout(self.id, layout, |ord| {
+                let decoded = decode_text_layout(self.id, &layout, |ord| {
                     chunks
                         .binary_search_by_key(&ord, |(o, _)| *o)
                         .ok()
                         .map(|i| chunks[i].1.as_str())
-                })?;
-                (Some(text), Vec::new())
+                });
+                match decoded {
+                    Ok(text) => (Some(text), Vec::new()),
+                    Err(e) => {
+                        errors.push(format!(
+                            "text could not be rebuilt from its chunks ({e}); \
+                             exporting the chunks that remain"
+                        ));
+                        (None, chunks.into_iter().map(|(_, t)| t).collect())
+                    }
+                }
             }
             (None, None) => (None, chunks.into_iter().map(|(_, t)| t).collect()),
         };
-        let metadata = serde_json::from_str(&self.metadata).unwrap_or(Value::String(self.metadata));
-        let url = metadata
-            .get("url")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        Ok(ExportItem {
+        let (metadata, bad) = raw_json(self.metadata);
+        errors.extend(bad.map(|e| format!("metadata: {e}")));
+        /// Just the `url` field of an object; anything else fails to deserialize.
+        #[derive(Deserialize)]
+        struct UrlProbe {
+            #[serde(default)]
+            url: Option<Value>,
+        }
+        let url = serde_json::from_str::<UrlProbe>(metadata.get())
+            .ok()
+            .and_then(|p| p.url)
+            .and_then(|u| u.as_str().map(str::to_owned));
+        ExportItem {
             id: self.id,
             source: self.source,
             key: self.key,
@@ -178,8 +332,36 @@ impl RawItem {
             metadata,
             text,
             chunks,
-        })
+            error: (!errors.is_empty()).then(|| errors.join("; ")),
+        }
     }
+}
+
+/// Read one page of items after `after` (rowid at most `max`, at most `page` rows, stopping
+/// early at [`PAGE_BYTE_BUDGET`]). Returns the rows and whether more may follow.
+fn read_items_page(
+    c: &Connection,
+    after: i64,
+    max: i64,
+    page: usize,
+) -> Result<(Vec<RawItem>, bool)> {
+    let limit = i64::try_from(page).unwrap_or(i64::MAX);
+    let mut stmt = c.prepare_cached(ITEMS_PAGE_SQL).db("prepare item export")?;
+    let mut rows = stmt
+        .query(params![after, max, limit])
+        .db("query item export")?;
+    let mut out = Vec::new();
+    let mut bytes = 0usize;
+    while let Some(r) = rows.next().db("read item export")? {
+        let raw = RawItem::read(r)?;
+        bytes = bytes.saturating_add(raw.size());
+        out.push(raw);
+        if bytes >= PAGE_BYTE_BUDGET {
+            return Ok((out, true));
+        }
+    }
+    let more = out.len() == page;
+    Ok((out, more))
 }
 
 /// An entity alias in the graph export.
@@ -188,6 +370,13 @@ struct ExportAlias {
     alias: String,
     /// Whether this alias row is the entity's current name.
     is_name: bool,
+}
+
+/// An alias as SQLite's `json_object` writes it (`is_name` is the stored 0/1).
+#[derive(Deserialize)]
+struct AliasRow {
+    alias: String,
+    is_name: i64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -212,7 +401,8 @@ struct ExportEntity {
     id: String,
     kind: String,
     name: String,
-    attributes: Value,
+    /// The stored JSON text verbatim (a JSON string holding it when invalid).
+    attributes: Box<RawValue>,
     created_at: String,
     updated_at: String,
     merged_into: Option<String>,
@@ -221,6 +411,8 @@ struct ExportEntity {
     aliases: Vec<ExportAlias>,
     identifiers: Vec<ExportIdentifier>,
     detail_sources: Vec<ExportDetailSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -261,8 +453,8 @@ struct ExportMention {
     created_at: String,
 }
 
-/// Entities with their aliases, identifiers and detail sources (each a JSON array, in row
-/// order), in id order.
+/// A page of entities after `?1` (by id, at most `?2`) with their aliases, identifiers and
+/// detail sources, each a JSON array in row order.
 const ENTITIES_SQL: &str = "SELECT e.id, e.kind, e.name, e.attributes, e.created_at, e.updated_at,
             e.merged_into, e.merged_at, e.deleted_at,
             (SELECT json_group_array(json_object('alias', a.alias, 'is_name', a.is_name))
@@ -276,9 +468,9 @@ const ENTITIES_SQL: &str = "SELECT e.id, e.kind, e.name, e.attributes, e.created
                                                  'key', s.key, 'created_at', s.created_at))
              FROM (SELECT kind, scheme, value, source, key, created_at
                    FROM entity_detail_sources WHERE entity_id = e.id ORDER BY id) s)
-     FROM entities e ORDER BY e.id";
+     FROM entities e WHERE e.id > ?1 ORDER BY e.id LIMIT ?2";
 
-/// Claims with their evidence (a JSON array, in row order), in id order.
+/// A page of claims (id in `(?1, ?2]`, at most `?3`) with their evidence (a JSON array).
 const CLAIMS_SQL: &str = "SELECT c.id, c.subject, c.predicate, c.object_entity, c.object_literal,
             c.text, c.confidence, c.status, c.valid_from, c.valid_to, c.created_at, c.updated_at,
             (SELECT json_group_array(json_object('source', v.source, 'key', v.key,
@@ -286,11 +478,93 @@ const CLAIMS_SQL: &str = "SELECT c.id, c.subject, c.predicate, c.object_entity, 
                                                  'created_at', v.created_at))
              FROM (SELECT source, key, chunk_id, quote, created_at
                    FROM claim_evidence WHERE claim_id = c.id ORDER BY id) v)
-     FROM claims c ORDER BY c.id";
+     FROM claims c WHERE c.id > ?1 AND c.id <= ?2 ORDER BY c.id LIMIT ?3";
 
+/// A page of mentions (id in `(?1, ?2]`, at most `?3`).
 const MENTIONS_SQL: &str = "SELECT id, entity_id, source, key, chunk_id, surface, confidence,
             created_at
-     FROM mentions ORDER BY id";
+     FROM mentions WHERE id > ?1 AND id <= ?2 ORDER BY id LIMIT ?3";
+
+fn parse_list<T: serde::de::DeserializeOwned>(
+    r: &rusqlite::Row<'_>,
+    i: usize,
+    what: &str,
+) -> Result<T> {
+    let json: String = r.get(i).db("read graph export")?;
+    serde_json::from_str(&json).map_err(|e| Error::Storage(format!("export: bad {what}: {e}")))
+}
+
+fn read_entity(r: &rusqlite::Row<'_>) -> Result<ExportEntity> {
+    let (attributes, error) = raw_json(r.get(3).db("read entity")?);
+    Ok(ExportEntity {
+        id: r.get(0).db("read entity")?,
+        kind: r.get(1).db("read entity")?,
+        name: r.get(2).db("read entity")?,
+        attributes,
+        created_at: r.get(4).db("read entity")?,
+        updated_at: r.get(5).db("read entity")?,
+        merged_into: r.get(6).db("read entity")?,
+        merged_at: r.get(7).db("read entity")?,
+        deleted_at: r.get(8).db("read entity")?,
+        aliases: parse_list::<Vec<AliasRow>>(r, 9, "aliases")?
+            .into_iter()
+            .map(|a| ExportAlias {
+                alias: a.alias,
+                is_name: a.is_name != 0,
+            })
+            .collect(),
+        identifiers: parse_list(r, 10, "identifiers")?,
+        detail_sources: parse_list(r, 11, "detail sources")?,
+        error: error.map(|e| format!("attributes: {e}")),
+    })
+}
+
+fn read_claim(r: &rusqlite::Row<'_>) -> Result<ExportClaim> {
+    Ok(ExportClaim {
+        id: r.get(0).db("read claim")?,
+        subject: r.get(1).db("read claim")?,
+        predicate: r.get(2).db("read claim")?,
+        object_entity: r.get(3).db("read claim")?,
+        object_literal: r.get(4).db("read claim")?,
+        text: r.get(5).db("read claim")?,
+        confidence: r.get(6).db("read claim")?,
+        status: r.get(7).db("read claim")?,
+        valid_from: r.get(8).db("read claim")?,
+        valid_to: r.get(9).db("read claim")?,
+        created_at: r.get(10).db("read claim")?,
+        updated_at: r.get(11).db("read claim")?,
+        evidence: parse_list(r, 12, "evidence")?,
+    })
+}
+
+fn read_mention(r: &rusqlite::Row<'_>) -> Result<ExportMention> {
+    Ok(ExportMention {
+        id: r.get(0).db("read mention")?,
+        entity_id: r.get(1).db("read mention")?,
+        source: r.get(2).db("read mention")?,
+        key: r.get(3).db("read mention")?,
+        chunk_id: r.get(4).db("read mention")?,
+        surface: r.get(5).db("read mention")?,
+        confidence: r.get(6).db("read mention")?,
+        created_at: r.get(7).db("read mention")?,
+    })
+}
+
+/// Run one page query and map every row.
+fn query_page<T>(
+    c: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+    mut map: impl FnMut(&rusqlite::Row<'_>) -> Result<T>,
+) -> Result<Vec<T>> {
+    let mut stmt = c.prepare_cached(sql).db("prepare export page")?;
+    let mut rows = stmt.query(params).db("query export page")?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().db("read export page")? {
+        out.push(map(r)?);
+    }
+    Ok(out)
+}
 
 /// Header of [`Store::export_audit_csv`]; the columns of the `audit` table.
 const AUDIT_COLUMNS: [&str; 8] = [
@@ -304,61 +578,37 @@ const AUDIT_COLUMNS: [&str; 8] = [
     "hash",
 ];
 
-fn parse_json<T: DeserializeOwned>(json: &str, what: &str) -> Result<T> {
-    serde_json::from_str(json).map_err(|e| Error::Storage(format!("export: bad {what}: {e}")))
+const AUDIT_PAGE_SQL: &str = "SELECT seq, at, actor, action, target, detail, prev_hash, hash
+     FROM audit WHERE seq > ?1 AND seq <= ?2 ORDER BY seq LIMIT ?3";
+
+const EGRESS_PAGE_SQL: &str =
+    "SELECT * FROM egress WHERE id > ?1 AND id <= ?2 ORDER BY id LIMIT ?3";
+
+/// Whether a CSV cell must be quoted to read back as itself (and as text, not NULL).
+fn needs_quotes(cell: &str) -> bool {
+    cell.is_empty()
+        || cell.starts_with(char::is_whitespace)
+        || cell.ends_with(char::is_whitespace)
+        || cell.contains(|c: char| c == ',' || c == '"' || c.is_control())
 }
 
-/// Run `f` in a read transaction, so all its statements see one snapshot.
-fn read_snapshot<T>(c: &Connection, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
-    c.execute_batch("BEGIN DEFERRED").db("begin export read")?;
-    let res = f(c);
-    let end = c.execute_batch("COMMIT").db("end export read");
-    match res {
-        Ok(v) => end.map(|()| v),
-        Err(e) => {
-            let _ = c.execute_batch("ROLLBACK");
-            Err(e)
+/// Write one CSV cell: `None` (SQL NULL) as nothing, text quoted when [`needs_quotes`].
+fn write_csv_cell(w: &mut dyn Write, cell: Option<&str>) -> std::io::Result<()> {
+    match cell {
+        None => Ok(()),
+        Some(cell) if needs_quotes(cell) => {
+            w.write_all(b"\"")?;
+            w.write_all(cell.replace('"', "\"\"").as_bytes())?;
+            w.write_all(b"\"")
         }
-    }
-}
-
-/// Run `sql` and write each row, mapped by `map`, as an element of a JSON array (`[` and `]`
-/// included, one element per line). Returns the number of elements.
-fn write_json_array<T: Serialize>(
-    c: &Connection,
-    sql: &str,
-    w: &mut dyn Write,
-    mut map: impl FnMut(&rusqlite::Row<'_>) -> Result<T>,
-) -> Result<u64> {
-    let mut stmt = c.prepare(sql).db("prepare graph export")?;
-    let mut rows = stmt.query([]).db("query graph export")?;
-    let mut n = 0u64;
-    w.write_all(b"[")?;
-    while let Some(row) = rows.next().db("read graph export")? {
-        let value = map(row)?;
-        w.write_all(if n == 0 { b"\n" } else { b",\n" })?;
-        serde_json::to_writer(&mut *w, &value)?;
-        n += 1;
-    }
-    w.write_all(if n == 0 { b"]" } else { b"\n]" })?;
-    Ok(n)
-}
-
-/// Write one CSV cell (RFC 4180: quoted only when it holds `,`, `"`, CR or LF).
-fn write_csv_cell(w: &mut dyn Write, cell: &str) -> std::io::Result<()> {
-    if cell.contains([',', '"', '\r', '\n']) {
-        w.write_all(b"\"")?;
-        w.write_all(cell.replace('"', "\"\"").as_bytes())?;
-        w.write_all(b"\"")
-    } else {
-        w.write_all(cell.as_bytes())
+        Some(cell) => w.write_all(cell.as_bytes()),
     }
 }
 
 /// Write one CSV record, CRLF-terminated.
 fn write_csv_record<'a>(
     w: &mut dyn Write,
-    cells: impl IntoIterator<Item = &'a str>,
+    cells: impl IntoIterator<Item = Option<&'a str>>,
 ) -> std::io::Result<()> {
     for (i, cell) in cells.into_iter().enumerate() {
         if i > 0 {
@@ -369,53 +619,37 @@ fn write_csv_record<'a>(
     w.write_all(b"\r\n")
 }
 
-/// A SQL value as CSV cell text: NULL is empty, blobs are lowercase hex.
-fn cell_text(v: ValueRef<'_>) -> Result<String> {
-    Ok(match v {
-        ValueRef::Null => String::new(),
-        ValueRef::Integer(i) => i.to_string(),
-        ValueRef::Real(f) => f.to_string(),
-        ValueRef::Text(t) => std::str::from_utf8(t)
-            .map_err(|e| Error::Storage(format!("export: text cell is not UTF-8: {e}")))?
-            .to_owned(),
-        ValueRef::Blob(b) => hex::encode(b),
-    })
+/// A SQL value as a CSV cell: NULL is `None`, blobs are lowercase hex, invalid UTF-8 is
+/// converted lossily.
+fn cell_text(v: ValueRef<'_>) -> Option<String> {
+    match v {
+        ValueRef::Null => None,
+        ValueRef::Integer(i) => Some(i.to_string()),
+        ValueRef::Real(f) => Some(f.to_string()),
+        ValueRef::Text(t) => Some(String::from_utf8_lossy(t).into_owned()),
+        ValueRef::Blob(b) => Some(hex::encode(b)),
+    }
 }
 
-/// Run `sql` and write a CSV header (`header`, or the statement's column names) and one record
-/// per row. Returns the number of data records.
-fn write_csv(c: &Connection, sql: &str, header: Option<&[&str]>, w: &mut dyn Write) -> Result<u64> {
-    let mut stmt = c.prepare(sql).db("prepare csv export")?;
-    let names: Vec<String> = match header {
-        Some(h) => h.iter().map(|s| (*s).to_owned()).collect(),
-        None => stmt.column_names().into_iter().map(str::to_owned).collect(),
-    };
-    write_csv_record(w, names.iter().map(String::as_str))?;
-    let cols = stmt.column_count();
-    let mut rows = stmt.query([]).db("query csv export")?;
-    let mut cells = Vec::with_capacity(cols);
-    let mut n = 0u64;
-    while let Some(row) = rows.next().db("read csv export")? {
-        cells.clear();
-        for i in 0..cols {
-            cells.push(cell_text(row.get_ref(i).db("read csv cell")?)?);
-        }
-        write_csv_record(w, cells.iter().map(String::as_str))?;
-        n += 1;
-    }
-    Ok(n)
-}
+/// One CSV page: the column names (when asked for) and `(key, cells)` per row.
+type CsvPage = (Option<Vec<String>>, Vec<(i64, Vec<Option<String>>)>);
 
 impl Store {
-    /// Visit every item in rowid order, reading `page` items per query (keyset pagination on a
-    /// read connection, released before `f` runs, so `f` may write to the store). Memory is
-    /// bounded by one page. Returns the number of items visited; an error from `f` stops the
-    /// export and is returned.
+    /// Visit every item in rowid order, reading up to `page` items per query (keyset
+    /// pagination; a page also ends early at [`PAGE_BYTE_BUDGET`] bytes of item data). The read
+    /// connection is released before `f` runs, so `f` may use the store. Memory is bounded by
+    /// one page. Returns the number of items visited.
     ///
-    /// Per-page consistent on a live store: each page is one statement (one snapshot), pages
-    /// may see different states. Every item that exists for the whole export is visited exactly
-    /// once; one deleted before its page is read is skipped, one inserted meanwhile is visited
-    /// only if its rowid is past the pages already read, and none is visited twice.
+    /// Per-page consistent on a live store: each page is one statement (one snapshot); pages
+    /// may see different states. Only items whose rowid is at most the largest one when the
+    /// export starts are visited, each at most once: an item deleted before its page is read
+    /// is skipped, and one inserted (or deleted and re-inserted, which gives it a new rowid)
+    /// meanwhile is left out.
+    ///
+    /// A damaged item does not stop the export: it is passed to `f` with what could be read
+    /// and [`ExportItem::error`] set, and logged; callers count those. An error from `f` stops
+    /// the export and is returned; whatever `f` wrote so far is then incomplete (write to a
+    /// temporary file and rename it on success). `page == 0` is `Error::Invalid`.
     pub fn export_items(
         &self,
         page: usize,
@@ -424,161 +658,251 @@ impl Store {
         if page == 0 {
             return Err(Error::Invalid("export page size must be at least 1".into()));
         }
-        let limit = i64::try_from(page).unwrap_or(i64::MAX);
+        let max: Option<i64> = self.with_read_conn(|c| {
+            c.query_row("SELECT max(id) FROM items", [], |r| r.get(0))
+                .db("read item export bound")
+        })?;
+        let Some(max) = max else {
+            return Ok(0);
+        };
         let mut after = i64::MIN;
         let mut n = 0u64;
         loop {
-            let rows: Vec<RawItem> = self.with_read_conn(|c| {
-                let mut stmt = c.prepare_cached(ITEMS_PAGE_SQL).db("prepare item export")?;
-                let rows = stmt
-                    .query_map([after, limit], RawItem::read)
-                    .db("query item export")?;
-                rows.collect::<rusqlite::Result<_>>().db("read item export")
-            })?;
+            let (rows, more) = self.with_read_conn(|c| read_items_page(c, after, max, page))?;
             let Some(last) = rows.last() else {
                 return Ok(n);
             };
             after = last.id;
-            let full = rows.len() == page;
             for raw in rows {
-                f(raw.into_export()?)?;
+                let item = raw.into_export();
+                if let Some(error) = &item.error {
+                    tracing::warn!(item = item.id, %error, "export: item exported with errors");
+                }
+                f(item)?;
                 n += 1;
             }
-            if !full {
+            if !more {
                 return Ok(n);
             }
         }
     }
 
     /// Write the knowledge graph to `w` as one JSON document:
-    /// `{"format":1,"entities":[...],"claims":[...],"mentions":[...]}`, streamed row by row
-    /// (never the whole graph in memory). Entities carry their `aliases`, `identifiers` and
-    /// `detail_sources`, claims their `evidence`. Merged-away and deleted entities and claims
-    /// of every status are included, so the export is complete. All sections come from one
-    /// snapshot (a read transaction held for the whole export).
+    /// `{"format":1,"entities":[...],"claims":[...],"mentions":[...]}`, read in keyset pages
+    /// (never the whole graph in memory; `w` is written only while no read is open). Entities
+    /// carry their `aliases`, `identifiers` and `detail_sources`, claims their `evidence`;
+    /// `attributes` is the stored JSON verbatim. Merged-away and deleted entities and claims of
+    /// every status are included. Per-page consistent on a live store (see the module docs: a
+    /// claim may name an entity created after the entity section was read). Returns counts.
+    ///
+    /// On `Err` the output is truncated, invalid JSON: write to a temporary file and rename it
+    /// on success. Errors of `w` are `Error::Io`.
     pub fn export_graph_json(&self, w: &mut dyn Write) -> Result<GraphExportCounts> {
-        let mut w = BufWriter::new(w);
-        let counts = self.with_read_conn(|c| {
-            read_snapshot(c, |c| {
-                let mut counts = GraphExportCounts::default();
-                write!(w, "{{\"format\":{GRAPH_EXPORT_FORMAT},\"entities\":")?;
-                counts.entities = write_json_array(c, ENTITIES_SQL, &mut w, |r| {
-                    let attributes: String = r.get(3).db("read entity")?;
-                    Ok(ExportEntity {
-                        id: r.get(0).db("read entity")?,
-                        kind: r.get(1).db("read entity")?,
-                        name: r.get(2).db("read entity")?,
-                        attributes: serde_json::from_str(&attributes)
-                            .unwrap_or(Value::String(attributes)),
-                        created_at: r.get(4).db("read entity")?,
-                        updated_at: r.get(5).db("read entity")?,
-                        merged_into: r.get(6).db("read entity")?,
-                        merged_at: r.get(7).db("read entity")?,
-                        deleted_at: r.get(8).db("read entity")?,
-                        aliases: parse_json::<Vec<AliasRow>>(
-                            &r.get::<_, String>(9).db("read entity")?,
-                            "aliases",
-                        )?
-                        .into_iter()
-                        .map(|a| ExportAlias {
-                            alias: a.alias,
-                            is_name: a.is_name != 0,
-                        })
-                        .collect(),
-                        identifiers: parse_json(
-                            &r.get::<_, String>(10).db("read entity")?,
-                            "identifiers",
-                        )?,
-                        detail_sources: parse_json(
-                            &r.get::<_, String>(11).db("read entity")?,
-                            "detail sources",
-                        )?,
-                    })
-                })?;
-                w.write_all(b",\"claims\":")?;
-                let mut evidence = 0u64;
-                counts.claims = write_json_array(c, CLAIMS_SQL, &mut w, |r| {
-                    let claim = ExportClaim {
-                        id: r.get(0).db("read claim")?,
-                        subject: r.get(1).db("read claim")?,
-                        predicate: r.get(2).db("read claim")?,
-                        object_entity: r.get(3).db("read claim")?,
-                        object_literal: r.get(4).db("read claim")?,
-                        text: r.get(5).db("read claim")?,
-                        confidence: r.get(6).db("read claim")?,
-                        status: r.get(7).db("read claim")?,
-                        valid_from: r.get(8).db("read claim")?,
-                        valid_to: r.get(9).db("read claim")?,
-                        created_at: r.get(10).db("read claim")?,
-                        updated_at: r.get(11).db("read claim")?,
-                        evidence: parse_json(
-                            &r.get::<_, String>(12).db("read claim")?,
-                            "evidence",
-                        )?,
-                    };
-                    evidence += claim.evidence.len() as u64;
-                    Ok(claim)
-                })?;
-                counts.evidence = evidence;
-                w.write_all(b",\"mentions\":")?;
-                counts.mentions = write_json_array(c, MENTIONS_SQL, &mut w, |r| {
-                    Ok(ExportMention {
-                        id: r.get(0).db("read mention")?,
-                        entity_id: r.get(1).db("read mention")?,
-                        source: r.get(2).db("read mention")?,
-                        key: r.get(3).db("read mention")?,
-                        chunk_id: r.get(4).db("read mention")?,
-                        surface: r.get(5).db("read mention")?,
-                        confidence: r.get(6).db("read mention")?,
-                        created_at: r.get(7).db("read mention")?,
-                    })
-                })?;
-                w.write_all(b"}\n")?;
-                Ok(counts)
-            })
+        self.export_graph_paged(w, GRAPH_PAGE)
+    }
+
+    fn export_graph_paged(&self, w: &mut dyn Write, page: usize) -> Result<GraphExportCounts> {
+        let limit = i64::try_from(page).unwrap_or(i64::MAX);
+        let (max_claim, max_mention): (i64, i64) = self.with_read_conn(|c| {
+            c.query_row(
+                "SELECT coalesce((SELECT max(id) FROM claims), 0),
+                        coalesce((SELECT max(id) FROM mentions), 0)",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .db("read graph export bounds")
         })?;
+        let mut counts = GraphExportCounts::default();
+        write!(w, "{{\"format\":{GRAPH_EXPORT_FORMAT},\"entities\":")?;
+        counts.entities = self.write_json_section(
+            w,
+            String::new(),
+            page,
+            |c, after| query_page(c, ENTITIES_SQL, params![after, limit], read_entity),
+            |e| e.id.clone(),
+            |_| {},
+        )?;
+        w.write_all(b",\"claims\":")?;
+        let mut evidence = 0u64;
+        counts.claims = self.write_json_section(
+            w,
+            i64::MIN,
+            page,
+            |c, after| query_page(c, CLAIMS_SQL, params![after, max_claim, limit], read_claim),
+            |c| c.id,
+            |c| evidence += c.evidence.len() as u64,
+        )?;
+        counts.evidence = evidence;
+        w.write_all(b",\"mentions\":")?;
+        counts.mentions = self.write_json_section(
+            w,
+            i64::MIN,
+            page,
+            |c, after| {
+                query_page(
+                    c,
+                    MENTIONS_SQL,
+                    params![after, max_mention, limit],
+                    read_mention,
+                )
+            },
+            |m| m.id,
+            |_| {},
+        )?;
+        w.write_all(b"}\n")?;
         w.flush()?;
         Ok(counts)
     }
 
-    /// Write the audit log to `w` as CSV, oldest entry first, with the header
-    /// `seq,at,actor,action,target,detail,prev_hash,hash` (`detail` is the stored JSON).
-    /// Streamed from one statement. Returns the number of entries written.
-    pub fn export_audit_csv(&self, w: &mut dyn Write) -> Result<u64> {
-        let mut w = BufWriter::new(w);
-        let sql = format!(
-            "SELECT {} FROM audit ORDER BY seq",
-            AUDIT_COLUMNS.join(", ")
-        );
-        let n = self.with_read_conn(|c| write_csv(c, &sql, Some(&AUDIT_COLUMNS), &mut w))?;
-        w.flush()?;
+    /// Write a JSON array (`[`, one element per line, `]`) of the rows `read` returns page by
+    /// page (`read(conn, after)` gives the page after key `after`; `key` is a row's key). Each
+    /// page is serialised and written after its read connection is released.
+    fn write_json_section<T: Serialize, K>(
+        &self,
+        w: &mut dyn Write,
+        mut after: K,
+        page: usize,
+        read: impl Fn(&Connection, &K) -> Result<Vec<T>>,
+        key: impl Fn(&T) -> K,
+        mut seen: impl FnMut(&T),
+    ) -> Result<u64> {
+        let mut n = 0u64;
+        w.write_all(b"[")?;
+        loop {
+            let rows = self.with_read_conn(|c| read(c, &after))?;
+            let Some(last) = rows.last() else {
+                break;
+            };
+            after = key(last);
+            let full = rows.len() >= page;
+            let mut buf = Vec::new();
+            for row in &rows {
+                buf.extend_from_slice(if n == 0 { b"\n" } else { b",\n" });
+                serde_json::to_writer(&mut buf, row)?;
+                seen(row);
+                n += 1;
+            }
+            drop(rows);
+            w.write_all(&buf)?;
+            if !full {
+                break;
+            }
+        }
+        w.write_all(if n == 0 { b"]" } else { b"\n]" })?;
         Ok(n)
+    }
+
+    /// Write the audit log to `w` as CSV, oldest entry first, with the header
+    /// `seq,at,actor,action,target,detail,prev_hash,hash` (`detail` is the stored JSON). Read in
+    /// keyset pages, per-page consistent; entries appended after the export starts are left
+    /// out. Returns the number of entries written.
+    ///
+    /// On `Err` the output is truncated: write to a temporary file and rename it on success.
+    /// Errors of `w` are `Error::Io`.
+    pub fn export_audit_csv(&self, w: &mut dyn Write) -> Result<u64> {
+        self.export_csv_paged(
+            w,
+            CSV_PAGE,
+            AUDIT_PAGE_SQL,
+            "SELECT coalesce(max(seq), 0) FROM audit",
+            "seq",
+            Some(&AUDIT_COLUMNS),
+        )
     }
 
     /// Write the egress ledger to `w` as CSV, oldest row first: a header row with every column
     /// of the ledger table (today `id,at,host,feature,bytes_sent,bytes_received,items,state,
     /// owner`; `items` is the stored JSON array of item refs), then one record per row. Events
-    /// queued but not yet written are flushed first. Returns the number of rows written.
+    /// queued but not yet written are flushed first. Read in keyset pages, per-page consistent;
+    /// rows added after the export starts are left out. Returns the number of rows written.
+    ///
+    /// On `Err` the output is truncated: write to a temporary file and rename it on success.
+    /// Errors of `w` are `Error::Io`.
     pub fn export_egress_csv(&self, w: &mut dyn Write) -> Result<u64> {
         self.flush_egress();
-        let mut w = BufWriter::new(w);
-        let n = self
-            .with_read_conn(|c| write_csv(c, "SELECT * FROM egress ORDER BY id", None, &mut w))?;
+        self.export_csv_paged(
+            w,
+            CSV_PAGE,
+            EGRESS_PAGE_SQL,
+            "SELECT coalesce(max(id), 0) FROM egress",
+            "id",
+            None,
+        )
+    }
+
+    /// Write a CSV export page by page: `page_sql` takes `(after, max, limit)` and orders by
+    /// the integer column `key`; `max_sql` gives the bound read once at the start. The header
+    /// is `header`, or the statement's column names.
+    fn export_csv_paged(
+        &self,
+        w: &mut dyn Write,
+        page: usize,
+        page_sql: &str,
+        max_sql: &str,
+        key: &str,
+        header: Option<&[&str]>,
+    ) -> Result<u64> {
+        let limit = i64::try_from(page).unwrap_or(i64::MAX);
+        let max: i64 = self.with_read_conn(|c| {
+            c.query_row(max_sql, [], |r| r.get(0))
+                .db("read csv export bound")
+        })?;
+        let mut need_header = true;
+        if let Some(h) = header {
+            write_csv_record(w, h.iter().map(|s| Some(*s)))?;
+            need_header = false;
+        }
+        let mut after = i64::MIN;
+        let mut n = 0u64;
+        loop {
+            let (names, rows): CsvPage = self.with_read_conn(|c| {
+                let mut stmt = c.prepare_cached(page_sql).db("prepare csv export")?;
+                let names = need_header
+                    .then(|| stmt.column_names().into_iter().map(str::to_owned).collect());
+                let cols = stmt.column_count();
+                let mut q = stmt
+                    .query(params![after, max, limit])
+                    .db("query csv export")?;
+                let mut rows = Vec::new();
+                while let Some(r) = q.next().db("read csv export")? {
+                    let k: i64 = r.get(key).db("read csv export key")?;
+                    let mut cells = Vec::with_capacity(cols);
+                    for i in 0..cols {
+                        cells.push(cell_text(r.get_ref(i).db("read csv cell")?));
+                    }
+                    rows.push((k, cells));
+                }
+                Ok((names, rows))
+            })?;
+            if let Some(names) = names {
+                write_csv_record(w, names.iter().map(|s| Some(s.as_str())))?;
+                need_header = false;
+            }
+            let Some((last, _)) = rows.last() else {
+                break;
+            };
+            after = *last;
+            let full = rows.len() >= page;
+            let mut buf = Vec::new();
+            for (_, cells) in &rows {
+                write_csv_record(&mut buf, cells.iter().map(Option::as_deref))?;
+                n += 1;
+            }
+            drop(rows);
+            w.write_all(&buf)?;
+            if !full {
+                break;
+            }
+        }
         w.flush()?;
         Ok(n)
     }
 }
 
-/// An alias as SQLite's `json_object` writes it (`is_name` is the stored 0/1).
-#[derive(Deserialize)]
-struct AliasRow {
-    alias: String,
-    is_name: i64,
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::io;
 
     use nugget_core::egress::EgressEvent;
     use nugget_core::ids::{ItemKey, ItemRef, SourceId};
@@ -630,11 +954,7 @@ mod tests {
     fn jsonl(store: &Store, page: usize) -> String {
         let mut buf = Vec::new();
         store
-            .export_items(page, &mut |item| {
-                serde_json::to_writer(&mut buf, &item)?;
-                buf.push(b'\n');
-                Ok(())
-            })
+            .export_items(page, &mut |item| item.write_jsonl(&mut buf))
             .unwrap();
         String::from_utf8(buf).unwrap()
     }
@@ -643,6 +963,39 @@ mod tests {
         store
             .with_read_conn(|c| c.query_row(sql, [], |r| r.get(0)).db("count"))
             .unwrap()
+    }
+
+    fn exec(store: &Store, sql: &str) {
+        store
+            .with_conn(|c| c.execute_batch(sql).db("exec"))
+            .unwrap();
+    }
+
+    fn stored_metadata(store: &Store, id: i64) -> String {
+        store
+            .with_read_conn(|c| {
+                c.query_row("SELECT metadata FROM items WHERE id = ?1", [id], |r| {
+                    r.get(0)
+                })
+                .db("read metadata")
+            })
+            .unwrap()
+    }
+
+    /// Chunks that cover `text` (so it is stored as a layout), split at a char boundary.
+    fn halves(text: &str) -> [NewChunk; 2] {
+        let mut mid = text.len() / 2;
+        while !text.is_char_boundary(mid) {
+            mid += 1;
+        }
+        let (a, b) = text.split_at(mid);
+        [NewChunk::text(a), NewChunk::text(b)]
+    }
+
+    fn long_text(tag: &str) -> String {
+        (0..40)
+            .map(|i| format!("Paragraph {i} of {tag} about things.\n\n"))
+            .collect()
     }
 
     #[test]
@@ -669,14 +1022,11 @@ mod tests {
             )
             .unwrap();
         // Text stored as a layout over its chunks (`items.text` NULL).
-        let long: String = (0..40)
-            .map(|i| format!("Paragraph {i} about things.\n\n"))
-            .collect();
-        let (a, b) = long.split_at(long.len() / 2);
+        let long = long_text("long");
         store
             .upsert_item_with_chunks(
                 &NewItem::new("files", "long.md", content_hash(&long)).with_text(long.clone()),
-                &[NewChunk::text(a), NewChunk::text(b)],
+                &halves(&long),
             )
             .unwrap();
         assert_eq!(
@@ -684,17 +1034,17 @@ mod tests {
             1,
             "the long item's text should be stored as a layout"
         );
-        // No text of its own, only chunks.
+        // No text of its own, only chunks (with control characters).
         store
             .upsert_item_with_chunks(
                 &NewItem::new("mail", "m1", content_hash("m1")),
                 &[
-                    NewChunk::text("first, \"chunk\""),
-                    NewChunk::text("second\nchunk"),
+                    NewChunk::text("first, \"chunk\" \u{1}\u{7}\u{1b}[0m"),
+                    NewChunk::text("second\nchunk\u{7f}\u{0}\u{85}"),
                 ],
             )
             .unwrap();
-        // Metadata that is not a JSON object (stored verbatim too).
+        // Metadata that is not a JSON object.
         store
             .upsert_item(&NewItem::new("mail", "m2", content_hash("m2")).with_metadata(json!(42)))
             .unwrap();
@@ -724,6 +1074,7 @@ mod tests {
             ] {
                 assert!(v.get(field).is_some(), "missing {field} in {v}");
             }
+            assert!(v.get("error").is_none(), "{v}");
         }
         let items: Vec<ExportItem> = lines
             .iter()
@@ -742,7 +1093,11 @@ mod tests {
         assert_eq!(first.mime.as_deref(), Some("text/markdown"));
         assert_eq!(first.version.as_deref(), Some("mtime:1:size:2"));
         assert_eq!(first.content_hash, content_hash("a"));
-        assert_eq!(first.metadata, stored.metadata);
+        assert_eq!(
+            serde_json::from_str::<Value>(first.metadata.get()).unwrap(),
+            stored.metadata
+        );
+        assert_eq!(first.metadata.get(), stored_metadata(&store, first.id));
         assert_eq!(
             first.url.as_deref(),
             Some("https://example.com/a?b=1&c=\"2\"")
@@ -754,40 +1109,117 @@ mod tests {
         assert_eq!(parse_time(&first.created_at).unwrap(), stored.created_at);
         assert_eq!(parse_time(&first.updated_at).unwrap(), stored.updated_at);
         assert!(first.chunks.is_empty());
-        // The stored metadata text is reproduced byte for byte.
-        let raw: String = store
-            .with_read_conn(|c| {
-                c.query_row(
-                    "SELECT metadata FROM items WHERE id = ?1",
-                    [first.id],
-                    |r| r.get(0),
-                )
-                .db("read metadata")
-            })
-            .unwrap();
-        assert_eq!(serde_json::to_string(&first.metadata).unwrap(), raw);
 
         assert_eq!(items[1].text.as_deref(), Some(long.as_str()));
         assert!(items[1].chunks.is_empty());
         assert_eq!(items[2].text, None);
-        assert_eq!(items[2].chunks, ["first, \"chunk\"", "second\nchunk"]);
+        assert_eq!(
+            items[2].chunks,
+            [
+                "first, \"chunk\" \u{1}\u{7}\u{1b}[0m",
+                "second\nchunk\u{7f}\u{0}\u{85}"
+            ]
+        );
         assert!(values[3].get("chunks").is_none());
-        assert_eq!(items[3].metadata, json!(42));
+        assert_eq!(items[3].metadata.get(), "42");
         assert_eq!(items[3].url, None);
     }
 
     #[test]
-    fn invalid_metadata_is_exported_as_a_string() {
+    fn metadata_is_exported_byte_for_byte() {
+        let store = Store::open_in_memory().unwrap();
+        store
+            .upsert_item(&NewItem::new("s", "a", "h").with_metadata(json!({
+                "x": 1.0715660391465826e-75,
+                "big": 12345678901234567890u64,
+                "neg": -9223372036854775808i64,
+                "f": 0.1,
+                "e": 1e300,
+            })))
+            .unwrap();
+        add(&store, "b");
+        // Written by hand: odd spacing, exponents and key order survive too.
+        exec(
+            &store,
+            r#"UPDATE items SET metadata = '{"b": 1.0E+2,  "a" : [1.50, -0.0], "url":"u"}'
+               WHERE key = 'b'"#,
+        );
+        let items = collect(&store, 10);
+        for item in &items {
+            assert_eq!(item.metadata.get(), stored_metadata(&store, item.id));
+            let line = {
+                let mut buf = Vec::new();
+                item.write_jsonl(&mut buf).unwrap();
+                String::from_utf8(buf).unwrap()
+            };
+            assert!(line.contains(item.metadata.get()), "{line}");
+        }
+        assert!(items[0].metadata.get().contains("1.0715660391465826e-75"));
+        assert_eq!(
+            items[1].metadata.get(),
+            r#"{"b": 1.0E+2,  "a" : [1.50, -0.0], "url":"u"}"#
+        );
+        assert_eq!(items[1].url.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn invalid_metadata_is_exported_as_a_string_with_an_error() {
         let store = Store::open_in_memory().unwrap();
         add(&store, "a");
-        store
-            .with_conn(|c| {
-                c.execute("UPDATE items SET metadata = 'not json'", [])
-                    .db("corrupt")
-            })
-            .unwrap();
+        exec(&store, "UPDATE items SET metadata = 'not json'");
         let items = collect(&store, 10);
-        assert_eq!(items[0].metadata, json!("not json"));
+        assert_eq!(items[0].metadata.get(), "\"not json\"");
+        assert!(items[0].error.as_deref().unwrap().contains("metadata"));
+        assert_eq!(items[0].text.as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn damaged_items_are_exported_with_an_error_and_the_export_goes_on() {
+        let store = Store::open_in_memory().unwrap();
+        let (one, two) = (long_text("one"), long_text("two"));
+        for (key, text) in [("one", &one), ("two", &two)] {
+            store
+                .upsert_item_with_chunks(
+                    &NewItem::new("s", key, content_hash(text)).with_text(text.clone()),
+                    &halves(text),
+                )
+                .unwrap();
+        }
+        add(&store, "fine");
+        assert_eq!(count(&store, "SELECT count(*) FROM item_text"), 2);
+        // `one` loses a chunk its layout points at; `two` gets a garbage layout.
+        exec(
+            &store,
+            "DELETE FROM chunks WHERE ord = 1 AND item_id = (SELECT id FROM items WHERE key = 'one');
+             UPDATE item_text SET layout = X'FF00'
+                 WHERE item_id = (SELECT id FROM items WHERE key = 'two');
+             UPDATE items SET title = CAST(X'C328' AS TEXT) WHERE key = 'fine';",
+        );
+        let items = collect(&store, 1);
+        assert_eq!(items.len(), 3);
+        let [one_x, two_x, fine] = &items[..] else {
+            unreachable!()
+        };
+        assert_eq!(one_x.text, None);
+        assert!(
+            one_x
+                .error
+                .as_deref()
+                .unwrap()
+                .contains("chunk 1 is missing")
+        );
+        assert_eq!(one_x.chunks, [halves(&one)[0].text.clone()]);
+        assert_eq!(two_x.text, None);
+        assert!(two_x.error.is_some());
+        assert_eq!(two_x.chunks.concat(), two);
+        // Invalid UTF-8 is converted lossily, with a note.
+        assert_eq!(fine.text.as_deref(), Some("fine"));
+        assert_eq!(fine.title.as_deref(), Some("\u{fffd}("));
+        assert!(fine.error.as_deref().unwrap().contains("title"));
+        // Still valid JSONL.
+        for line in jsonl(&store, 2).lines() {
+            serde_json::from_str::<ExportItem>(line).unwrap();
+        }
     }
 
     #[test]
@@ -812,6 +1244,28 @@ mod tests {
     }
 
     #[test]
+    fn pages_stop_at_the_byte_budget() {
+        let store = Store::open_in_memory().unwrap();
+        let big = "x".repeat(3 << 20);
+        for i in 0..12 {
+            store
+                .upsert_item(
+                    &NewItem::new("s", format!("k{i:02}"), content_hash(i.to_string()))
+                        .with_text(big.clone()),
+                )
+                .unwrap();
+        }
+        let (rows, more) = store
+            .with_read_conn(|c| read_items_page(c, i64::MIN, i64::MAX, 500))
+            .unwrap();
+        assert!(more);
+        assert_eq!(rows.len(), PAGE_BYTE_BUDGET.div_ceil(big.len()));
+        let keys: Vec<String> = collect(&store, 500).into_iter().map(|i| i.key).collect();
+        let want: Vec<String> = (0..12).map(|i| format!("k{i:02}")).collect();
+        assert_eq!(keys, want);
+    }
+
+    #[test]
     fn items_changed_during_export_are_seen_at_most_once() {
         for page in [1, 3, 64] {
             let dir = tempfile::tempdir().unwrap();
@@ -826,6 +1280,7 @@ mod tests {
                     if item.key == "k00" {
                         // Past the first page for page sizes 1 and 3; already read for 64.
                         writer.delete_item(&iref("src", "k10")).unwrap();
+                        // Inserted after the export started: left out.
                         add(&writer, "late");
                         // Updating an unread item neither moves it nor exports it twice.
                         writer
@@ -838,14 +1293,40 @@ mod tests {
                     Ok(())
                 })
                 .unwrap();
-            let unique: HashSet<&String> = seen.iter().collect();
-            assert_eq!(unique.len(), seen.len(), "page {page}: {seen:?}");
             let mut want: Vec<String> = (0..12).map(|i| format!("k{i:02}")).collect();
             if page < 12 {
                 want.retain(|k| k != "k10");
-                want.push("late".into());
             }
             assert_eq!(seen, want, "page {page}");
+        }
+    }
+
+    #[test]
+    fn deleted_and_reinserted_items_are_not_exported_twice() {
+        for page in [1, 2, 100] {
+            let store = Store::open_in_memory().unwrap();
+            for i in 0..6 {
+                add(&store, &format!("k{i}"));
+            }
+            let writer = store.clone();
+            let mut seen = Vec::new();
+            store
+                .export_items(page, &mut |item| {
+                    // Re-insert the item just exported and one not read yet: both get new
+                    // rowids past the bound.
+                    if item.key == "k0" {
+                        for k in ["k0", "k4"] {
+                            writer.delete_item(&iref("src", k)).unwrap();
+                            add(&writer, k);
+                        }
+                    }
+                    seen.push(item.key);
+                    Ok(())
+                })
+                .unwrap();
+            let unique: HashSet<&String> = seen.iter().collect();
+            assert_eq!(unique.len(), seen.len(), "page {page}: {seen:?}");
+            assert_eq!(seen.iter().filter(|k| *k == "k0").count(), 1);
         }
     }
 
@@ -874,6 +1355,7 @@ mod tests {
         let g = store.graph();
         let mut new = NewEntity::new(EntityKind::Person, "Ada \"Countess\" Lovelace");
         new.aliases = vec!["Ada".into(), "A. L.".into()];
+        new.attributes = json!({"born": 1815, "ratio": 1.0715660391465826e-75});
         let ada = g.create_entity(&new).unwrap();
         g.add_identifier(&ada, &Identifier::new("email", "ada@example.com"))
             .unwrap();
@@ -946,17 +1428,23 @@ mod tests {
             );
 
             let (entities, claims, evidence, mentions) = populate_graph(&store);
+            let expected = GraphExportCounts {
+                entities: entities as u64,
+                claims: claims as u64,
+                evidence: evidence as u64,
+                mentions: mentions as u64,
+            };
+            // Every page size gives the same document.
+            let mut docs = Vec::new();
+            for page in [1, 2, GRAPH_PAGE] {
+                let mut buf = Vec::new();
+                assert_eq!(store.export_graph_paged(&mut buf, page).unwrap(), expected);
+                docs.push(buf);
+            }
+            assert!(docs.windows(2).all(|d| d[0] == d[1]));
             let mut buf = Vec::new();
-            let counts = store.export_graph_json(&mut buf).unwrap();
-            assert_eq!(
-                counts,
-                GraphExportCounts {
-                    entities: entities as u64,
-                    claims: claims as u64,
-                    evidence: evidence as u64,
-                    mentions: mentions as u64,
-                }
-            );
+            assert_eq!(store.export_graph_json(&mut buf).unwrap(), expected);
+            assert_eq!(buf, docs[0]);
             assert_eq!(
                 entities as i64,
                 count(&store, "SELECT count(*) FROM entities")
@@ -970,6 +1458,18 @@ mod tests {
                 .find(|e| e["name"] == "Ada \"Countess\" Lovelace")
                 .unwrap();
             assert_eq!(ada["kind"], "person");
+            let stored_attributes: String = store
+                .with_read_conn(|c| {
+                    c.query_row(
+                        "SELECT attributes FROM entities WHERE id = ?1",
+                        [ada["id"].as_str().unwrap()],
+                        |r| r.get(0),
+                    )
+                    .db("attributes")
+                })
+                .unwrap();
+            let text = String::from_utf8(buf.clone()).unwrap();
+            assert!(text.contains(&format!("\"attributes\":{stored_attributes}")));
             let aliases = ada["aliases"].as_array().unwrap();
             assert!(aliases.contains(&json!({"alias": "Ada", "is_name": false})));
             assert!(
@@ -999,7 +1499,6 @@ mod tests {
             assert_eq!(cls[0]["confidence"], 0.75);
             assert_eq!(cls[1]["object_literal"], "likes tea");
             assert_eq!(cls[1]["status"], "user_asserted");
-            // Every claim's subject is an exported entity.
             let ids: HashSet<&str> = ents.iter().map(|e| e["id"].as_str().unwrap()).collect();
             assert!(
                 cls.iter()
@@ -1012,13 +1511,22 @@ mod tests {
         }
     }
 
+    /// A CSV cell as read back: `None` for an empty unquoted cell (SQL NULL).
+    type Cell = Option<String>;
+
     /// Minimal RFC 4180 reader for the tests: records of cells, CRLF-terminated.
-    fn parse_csv(s: &str) -> Vec<Vec<String>> {
+    fn parse_csv(s: &str) -> Vec<Vec<Cell>> {
         let mut records = Vec::new();
         let mut record = Vec::new();
         let mut cell = String::new();
+        let mut was_quoted = false;
         let mut chars = s.chars().peekable();
         let mut quoted = false;
+        let end_cell = |cell: &mut String, was_quoted: &mut bool, record: &mut Vec<Cell>| {
+            let c = std::mem::take(cell);
+            record.push((!c.is_empty() || *was_quoted).then_some(c));
+            *was_quoted = false;
+        };
         while let Some(ch) = chars.next() {
             if quoted {
                 match ch {
@@ -1033,17 +1541,21 @@ mod tests {
             }
             match ch {
                 '"' => {
-                    assert!(cell.is_empty(), "quote inside an unquoted cell");
+                    assert!(cell.is_empty() && !was_quoted, "stray quote");
                     quoted = true;
+                    was_quoted = true;
                 }
-                ',' => record.push(std::mem::take(&mut cell)),
+                ',' => end_cell(&mut cell, &mut was_quoted, &mut record),
                 '\r' => {
                     assert_eq!(chars.next(), Some('\n'), "bare CR outside quotes");
-                    record.push(std::mem::take(&mut cell));
+                    end_cell(&mut cell, &mut was_quoted, &mut record);
                     records.push(std::mem::take(&mut record));
                 }
-                '\n' => panic!("bare LF outside quotes"),
-                _ => cell.push(ch),
+                c if c.is_control() => panic!("unquoted control character {c:?}"),
+                _ => {
+                    assert!(!was_quoted, "text after a closing quote");
+                    cell.push(ch);
+                }
             }
         }
         assert!(
@@ -1051,6 +1563,10 @@ mod tests {
             "truncated CSV"
         );
         records
+    }
+
+    fn some(s: &str) -> Cell {
+        Some(s.to_owned())
     }
 
     #[test]
@@ -1062,10 +1578,14 @@ mod tests {
             "quote \"here\"",
             "new\nline",
             "cr\r\nlf",
+            "lone\rcr",
             "=1+2",
             "-starts with dash",
             "@at",
             "\ttab",
+            " leading space",
+            "trailing space ",
+            "bell\u{7}esc\u{1b}nul\u{0}del\u{7f}nel\u{85}",
             "ünïcödé 🦀",
             "",
         ];
@@ -1085,27 +1605,44 @@ mod tests {
             nasty.len() as u64
         );
         let records = parse_csv(std::str::from_utf8(&buf).unwrap());
-        assert_eq!(records[0], AUDIT_COLUMNS);
+        assert_eq!(
+            records[0],
+            AUDIT_COLUMNS.iter().map(|c| some(c)).collect::<Vec<_>>()
+        );
         assert_eq!(records.len(), nasty.len() + 1);
         let stored = store.recent_audit(100).unwrap();
         for (row, target) in records[1..].iter().zip(nasty) {
             assert_eq!(row.len(), 8);
+            let row: Vec<&str> = row.iter().map(|c| c.as_deref().unwrap()).collect();
             let seq: u64 = row[0].parse().unwrap();
             let rec = stored.iter().find(|r| r.seq == seq).unwrap();
             assert_eq!(row[4], target);
             assert_eq!(row[2], rec.actor);
             assert_eq!(row[3], rec.action);
             assert_eq!(row[4], rec.target);
-            assert_eq!(serde_json::from_str::<Value>(&row[5]).unwrap(), rec.detail);
+            assert_eq!(serde_json::from_str::<Value>(row[5]).unwrap(), rec.detail);
             assert_eq!(row[6], rec.prev_hash);
             assert_eq!(row[7], rec.hash);
-            assert_eq!(parse_time(&row[1]).unwrap(), rec.at);
+            assert_eq!(parse_time(row[1]).unwrap(), rec.at);
         }
+        // Paging does not change the output.
+        let mut paged = Vec::new();
+        store
+            .export_csv_paged(
+                &mut paged,
+                2,
+                AUDIT_PAGE_SQL,
+                "SELECT coalesce(max(seq), 0) FROM audit",
+                "seq",
+                Some(&AUDIT_COLUMNS),
+            )
+            .unwrap();
+        assert_eq!(paged, buf);
         store.verify_audit_chain().unwrap();
     }
 
     #[test]
-    fn egress_csv_has_every_column_and_round_trips() {
+    fn egress_csv_has_every_column_and_keeps_null_apart_from_empty() {
         let store = Store::open_in_memory().unwrap();
         let mut empty = Vec::new();
         assert_eq!(store.export_egress_csv(&mut empty).unwrap(), 0);
@@ -1119,7 +1656,10 @@ mod tests {
                 rows.collect::<rusqlite::Result<_>>().db("columns")
             })
             .unwrap();
-        assert_eq!(header, vec![columns.clone()]);
+        assert_eq!(
+            header,
+            vec![columns.iter().map(|c| some(c)).collect::<Vec<_>>()]
+        );
         for c in [
             "id",
             "at",
@@ -1143,35 +1683,251 @@ mod tests {
             items: vec![iref("mail", "a,b"), iref("files", "x\"y")],
         };
         store.record_egress(&event).unwrap();
+        exec(
+            &store,
+            "INSERT INTO egress (at, host, feature, bytes_sent, bytes_received, items, state, owner)
+             VALUES ('2026-01-01T00:00:00Z', 'h', '', 0, 0, '[]', 'done', NULL)",
+        );
         let mut buf = Vec::new();
-        assert_eq!(store.export_egress_csv(&mut buf).unwrap(), 1);
+        assert_eq!(store.export_egress_csv(&mut buf).unwrap(), 2);
         let records = parse_csv(std::str::from_utf8(&buf).unwrap());
-        assert_eq!(records.len(), 2);
-        let row: HashMap<&str, &str> = records[0]
-            .iter()
-            .map(String::as_str)
-            .zip(records[1].iter().map(String::as_str))
-            .collect();
-        assert_eq!(row["host"], "api.example.com");
-        assert_eq!(row["feature"], event.feature);
-        assert_eq!(row["bytes_sent"], "1234");
-        assert_eq!(row["bytes_received"], "5678");
-        assert_eq!(row["state"], "done");
+        assert_eq!(records.len(), 3);
+        let row = |i: usize| -> HashMap<String, Cell> {
+            records[0]
+                .iter()
+                .map(|c| c.clone().unwrap())
+                .zip(records[i].iter().cloned())
+                .collect()
+        };
+        let first = row(1);
+        assert_eq!(first["host"], some("api.example.com"));
+        assert_eq!(first["feature"], some(&event.feature));
+        assert_eq!(first["bytes_sent"], some("1234"));
+        assert_eq!(first["bytes_received"], some("5678"));
+        assert_eq!(first["state"], some("done"));
         assert_eq!(
-            serde_json::from_str::<Vec<ItemRef>>(row["items"]).unwrap(),
+            serde_json::from_str::<Vec<ItemRef>>(first["items"].as_deref().unwrap()).unwrap(),
             event.items
         );
-        assert_eq!(parse_time(row["at"]).unwrap(), event.at);
+        assert_eq!(
+            parse_time(first["at"].as_deref().unwrap()).unwrap(),
+            event.at
+        );
+        let second = row(2);
+        assert_eq!(second["feature"], some(""));
+        assert_eq!(second["owner"], None);
     }
 
     #[test]
     fn csv_cells_are_quoted_only_when_needed() {
         let mut buf = Vec::new();
-        write_csv_record(&mut buf, ["a", "b,c", "d\"e", "f\ng", "h\ri", "=j", ""]).unwrap();
+        write_csv_record(
+            &mut buf,
+            [
+                Some("a"),
+                Some("b,c"),
+                Some("d\"e"),
+                Some("f\ng"),
+                Some("h\ri"),
+                Some("=j"),
+                Some(""),
+                None,
+                Some(" k"),
+                Some("l "),
+                Some("m\u{1}"),
+                Some("n\to"),
+                Some("p q"),
+            ],
+        )
+        .unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "a,\"b,c\",\"d\"\"e\",\"f\ng\",\"h\ri\",=j,\r\n"
+            "a,\"b,c\",\"d\"\"e\",\"f\ng\",\"h\ri\",=j,\"\",,\" k\",\"l \",\"m\u{1}\",\
+             \"n\to\",p q\r\n"
         );
+    }
+
+    /// Accepts `limit` bytes, then fails like a full disk. Keeps what it accepted.
+    struct FullDisk {
+        limit: usize,
+        written: Vec<u8>,
+    }
+
+    impl Write for FullDisk {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let room = self.limit - self.written.len();
+            if room == 0 {
+                return Err(io::Error::new(io::ErrorKind::StorageFull, "disk full"));
+            }
+            let n = room.min(buf.len());
+            self.written.extend_from_slice(&buf[..n]);
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn writer_errors_are_io_errors_and_leave_truncated_output() {
+        let store = Store::open_in_memory().unwrap();
+        populate_graph(&store);
+        for i in 0..5 {
+            add(&store, &format!("k{i}"));
+            store
+                .append_audit(&AuditEntry {
+                    actor: "user".into(),
+                    action: "a".into(),
+                    target: format!("t{i}"),
+                    detail: json!({}),
+                })
+                .unwrap();
+        }
+        store
+            .record_egress(&EgressEvent {
+                at: OffsetDateTime::now_utc(),
+                host: "h".into(),
+                feature: "f".into(),
+                bytes_sent: 1,
+                bytes_received: 1,
+                items: Vec::new(),
+            })
+            .unwrap();
+        let is_io =
+            |e: &Error| matches!(e, Error::Io(io) if io.kind() == io::ErrorKind::StorageFull);
+
+        let mut w = FullDisk {
+            limit: 100,
+            written: Vec::new(),
+        };
+        let err = store.export_graph_paged(&mut w, 1).unwrap_err();
+        assert!(is_io(&err), "{err:?}");
+        assert_eq!(w.written.len(), 100);
+        // Documented: the output of a failed export is not a valid document.
+        assert!(serde_json::from_slice::<Value>(&w.written).is_err());
+
+        for limit in [0, 10, 60] {
+            let mut w = FullDisk {
+                limit,
+                written: Vec::new(),
+            };
+            let err = store.export_audit_csv(&mut w).unwrap_err();
+            assert!(is_io(&err), "{err:?}");
+            let mut w = FullDisk {
+                limit,
+                written: Vec::new(),
+            };
+            let err = store.export_egress_csv(&mut w).unwrap_err();
+            assert!(is_io(&err), "{err:?}");
+            let mut w = FullDisk {
+                limit,
+                written: Vec::new(),
+            };
+            let err = store
+                .export_items(2, &mut |item| item.write_jsonl(&mut w))
+                .unwrap_err();
+            assert!(is_io(&err), "{err:?}");
+        }
+    }
+
+    /// A writer that checkpoints the WAL and writes to the store on every write, recording each
+    /// checkpoint's `(busy, log frames, checkpointed frames)`.
+    struct Meddler {
+        store: Store,
+        checkpoints: Vec<(i64, i64, i64)>,
+        writes: usize,
+    }
+
+    impl Write for Meddler {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writes += 1;
+            // A write that lands in the WAL, so every checkpoint has frames to copy.
+            add(&self.store, &format!("meddle-{}", self.writes));
+            let ckpt = self
+                .store
+                .with_conn(|c| {
+                    c.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+                        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+                    })
+                    .db("checkpoint")
+                })
+                .unwrap();
+            self.checkpoints.push(ckpt);
+            // Reads through the store work too (on an in-memory store they share the writer).
+            self.store.counts().unwrap();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn exports_hold_no_read_while_the_writer_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        for store in [file_store(&dir), Store::open_in_memory().unwrap()] {
+            populate_graph(&store);
+            for i in 0..5 {
+                store
+                    .append_audit(&AuditEntry {
+                        actor: "user".into(),
+                        action: "a".into(),
+                        target: format!("t{i}"),
+                        detail: json!({}),
+                    })
+                    .unwrap();
+                store
+                    .record_egress(&EgressEvent {
+                        at: OffsetDateTime::now_utc(),
+                        host: format!("h{i}"),
+                        feature: "f".into(),
+                        bytes_sent: 1,
+                        bytes_received: 1,
+                        items: Vec::new(),
+                    })
+                    .unwrap();
+            }
+            let mut w = Meddler {
+                store: store.clone(),
+                checkpoints: Vec::new(),
+                writes: 0,
+            };
+            store.export_graph_paged(&mut w, 1).unwrap();
+            let graph_writes = w.writes;
+            assert!(graph_writes > 8, "{graph_writes} writes");
+            for (sql, max, key, header) in [
+                (
+                    AUDIT_PAGE_SQL,
+                    "SELECT coalesce(max(seq), 0) FROM audit",
+                    "seq",
+                    Some(&AUDIT_COLUMNS[..]),
+                ),
+                (
+                    EGRESS_PAGE_SQL,
+                    "SELECT coalesce(max(id), 0) FROM egress",
+                    "id",
+                    None,
+                ),
+            ] {
+                let before = w.writes;
+                assert_eq!(
+                    store
+                        .export_csv_paged(&mut w, 1, sql, max, key, header)
+                        .unwrap(),
+                    5
+                );
+                assert!(w.writes - before >= 5);
+            }
+            if store.is_encrypted() {
+                for &(busy, log, done) in &w.checkpoints {
+                    assert_eq!(busy, 0);
+                    assert!(log > 0);
+                    assert_eq!(done, log, "checkpoint blocked by the export");
+                }
+            }
+        }
     }
 
     fn bulk_insert(store: &Store, n: usize) {
@@ -1195,13 +1951,9 @@ mod tests {
     }
 
     fn export_to_sink(store: &Store, page: usize) -> u64 {
-        let mut sink = std::io::sink();
+        let mut sink = io::sink();
         store
-            .export_items(page, &mut |item| {
-                serde_json::to_writer(&mut sink, &item)?;
-                sink.write_all(b"\n")?;
-                Ok(())
-            })
+            .export_items(page, &mut |item| item.write_jsonl(&mut sink))
             .unwrap()
     }
 
