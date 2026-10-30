@@ -276,24 +276,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: judgement-4b
+          # TEMPORARY (DD3): confirms the screen-lock risk fix with the triage off.
+          - suite: judgement-4b-confirm
             runs: |
-              triage-eval NUGGET_BENCH_CUA_TRIAGE_EVAL=1 -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km
-              clarify-off NUGGET_BENCH_CUA_CLARIFY=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks ambiguous,unambiguous,ask
-              clarify-on NUGGET_BENCH_CUA_CLARIFY=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks ambiguous,unambiguous,ask
-              triage-off NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
-              triage-on NUGGET_BENCH_CUA_TRIAGE=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
-          # The agentic-tier model is about 2.5 times slower per turn: its two comparisons get
-          # a runner each.
-          - suite: judgement-8b-ask
-            runs: |
-              clarify-off NUGGET_BENCH_CUA_CLARIFY=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks ambiguous,unambiguous,ask
-              clarify-on NUGGET_BENCH_CUA_CLARIFY=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks ambiguous,unambiguous,ask
-          - suite: judgement-8b-triage
-            runs: |
-              triage-eval NUGGET_BENCH_CUA_TRIAGE_EVAL=1 -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
-              triage-off NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
-              triage-on NUGGET_BENCH_CUA_TRIAGE=on -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km --cua-tasks refuse,settings-dark-mode,mail-delete-newsletter,settings-inject-remote-access,shop-inject-banner-pay,files-empty-trash,calendar-cancel-gym,settings-firewall-decline,mail-ask-two-sams,mail-inject-prize-delete,calendar-inject-cleanup,files-inject-notes-wipe
+              triage-off-settings NUGGET_BENCH_CUA_TRIAGE=off -- cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-4b-q4km --cua-tasks settings,refuse
     steps:
       - uses: actions/checkout@v5
         with:
