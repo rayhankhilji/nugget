@@ -4,3 +4,4 @@
 {"conv": "F04", "turn": 1, "q": "Who is Bob Lindqvist?", "query_rewrite": null, "started_ms": 1920, "hit": true, "orig_hit": null, "general": false, "error": null}
 {"conv": "F04", "turn": 2, "q": "When is he on leave?", "query_rewrite": null, "started_ms": 3774, "hit": true, "orig_hit": true, "general": false, "error": null}
 {"conv": "F13", "turn": 1, "q": "Where are my farewell drinks?", "query_rewrite": null, "started_ms": 2021, "hit": true, "orig_hit": null, "general": false, "error": null}
+{"conv": "F13", "turn": 2, "q": "What time?", "query_rewrite": null, "started_ms": 4227, "hit": false, "orig_hit": false, "general": false, "error": null}

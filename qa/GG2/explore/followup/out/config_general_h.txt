@@ -1,0 +1,24 @@
+[[providers]]
+# id = "anthropic"
+# kind = "anthropic"
+# model = "claude-opus-5-5"
+# api_key = "env:ANTHROPIC_API_KEY"
+# tiers = ["synthesis", "agentic"]
+
+# --- Cloud: OpenAI (uncomment to use; requests are recorded in the egress ledger) ----------------
+# [[providers]]
+# id = "openai"
+# kind = "openai_responses"
+# model = "gpt-5"
+# api_key = "env:OPENAI_API_KEY"
+# tiers = ["synthesis", "agentic"]
+
+[[providers]]
+id = "fake"
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:18431/v1"
+model = "fake"
+max_retries = 0
+tiers = ["synthesis"]
+locality = "cloud"
+

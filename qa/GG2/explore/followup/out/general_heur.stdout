@@ -1,0 +1,5 @@
+{"conv": "X06", "turn": 1, "q": "Explain quantum entanglement simply", "query_rewrite": null, "started_ms": 5, "hit": null, "orig_hit": null, "general": true, "error": null}
+{"conv": "X06", "turn": 2, "q": "Thanks. What's my electricity bill?", "query_rewrite": null, "started_ms": 12, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "X06", "turn": 3, "q": "When is it due?", "query_rewrite": "When is it due? thanks electricity bill", "started_ms": 9, "hit": true, "orig_hit": true, "general": false, "error": null}
+{"conv": "X07", "turn": 1, "q": "What is a ryokan?", "query_rewrite": null, "started_ms": 3, "hit": null, "orig_hit": null, "general": false, "error": null}
+{"conv": "X07", "turn": 2, "q": "Am I staying in one?", "query_rewrite": "Am I staying in one? ryokan", "started_ms": 9, "hit": true, "orig_hit": false, "general": false, "error": null}

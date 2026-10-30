@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Start nuggetd on an already-ingested home and dump retrieve.context / retrieve.search for queries.
-usage: probe.py HOME OUTDIR QUERYFILE [budget]   (QUERYFILE: one query per line)"""
+usage: [CORPUS=dir] probe.py HOME OUTDIR QUERYFILE [budget]   (QUERYFILE: one query per line)"""
 import asyncio, json, os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "harness"))
 import ask_qa as h
@@ -12,6 +12,10 @@ async def main(home, out, qfile, budget):
     open(os.path.join(out, "pid"), "w").write(str(proc.pid))
     try:
         rpc = await h.wait_sock(home, proc)
+        corpus = os.environ.get("CORPUS")
+        if corpus and not (await rpc.call("sources.list", timeout=30))[0]:
+            await rpc.call("sources.add", {"kind": "files", "name": "c", "settings": {"roots": [corpus]}}, timeout=120)
+            await h.wait_ingest(rpc, sum(len(fs) for _, _, fs in os.walk(corpus)))
         res = []
         for q in [l.rstrip("\n") for l in open(qfile) if l.strip()]:
             ctx, _, _ = await rpc.call("retrieve.context", {"query": q, "budget_tokens": budget}, timeout=120)

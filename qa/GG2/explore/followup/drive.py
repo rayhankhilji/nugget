@@ -45,6 +45,15 @@ EXTRA += [
                             {"q": "What is the address?", "support": ["mail/4-health/dentist-rescheduled.eml", "calendar/dentist.ics"]}]},
 ]
 
+EXTRA += [
+    # Area 4: a general (no-citation) reply, then a follow-up that should search the items.
+    {"id": "X06", "turns": [{"q": "Explain quantum entanglement simply", "support": []},
+                            {"q": "Thanks. What's my electricity bill?", "support": ["mail/5-bills/citypower.eml"]},
+                            {"q": "When is it due?", "support": ["mail/5-bills/citypower.eml"]}]},
+    {"id": "X07", "turns": [{"q": "What is a ryokan?", "support": []},
+                            {"q": "Am I staying in one?", "support": ["mail/6-travel/kyoto-ryokan.eml"]}]},
+]
+
 # What a good rewriting model would answer (used with --rewrite-mode map).
 GOOD = {
     "Who is it with?": "dentist appointment with whom",
@@ -78,6 +87,7 @@ GOOD = {
     "What's he working on?": "Bob Lindqvist projects",
     "What's the address?": "dentist appointment address",
     "What is the address?": "dentist appointment address",
+    "Am I staying in one?": "ryokan booking stay",
 }
 
 
