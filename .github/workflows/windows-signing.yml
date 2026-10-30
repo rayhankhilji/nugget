@@ -87,8 +87,16 @@ jobs:
 
           $work = Join-Path $env:RUNNER_TEMP 'sign-check'
           New-Item -ItemType Directory -Force -Path $work | Out-Null
+          # A copy of a system exe with zero padding appended: the padding changes its Authenticode
+          # hash, so Windows' catalog signature no longer applies and only our embedded one counts.
+          function New-TestExe([string]$path) {
+            $bytes = [IO.File]::ReadAllBytes("$env:SystemRoot\System32\whoami.exe")
+            $pad = 16 - ($bytes.Length % 8)
+            [IO.File]::WriteAllBytes($path, $bytes + [byte[]]::new($pad))
+            if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'NotSigned') { throw "$path is still signed" }
+          }
           $exe = Join-Path $work 'whoami-copy.exe'
-          Copy-Item "$env:SystemRoot\System32\whoami.exe" $exe
+          New-TestExe $exe
 
           # Thumbprint mode signs, with a timestamp, by the throwaway certificate.
           $r = Invoke-Sign 'thumbprint mode' @{ NUGGET_SIGN_CERT_THUMBPRINT = $thumb } @($exe)
@@ -158,7 +166,7 @@ jobs:
 
           # Azure mode, real signtool + dlib, fake credentials: must fail, and not leak the secret.
           $fresh = Join-Path $work 'whoami-azure.exe'
-          Copy-Item "$env:SystemRoot\System32\whoami.exe" $fresh
+          New-TestExe $fresh
           $r = Invoke-Sign 'azure real call, fake credentials' ($ats + $fakeApp + @{ AZURE_CLIENT_SECRET = $canary }) @($fresh)
           Check 'azure with fake credentials fails' ($r.Code -ne 0)
           Check 'secret is never printed (signtool and dlib output)' (-not $r.Out.Contains($canary))
@@ -173,7 +181,11 @@ jobs:
         shell: pwsh
         run: |
           if ($env:NUGGET_TEST_CERT) {
-            Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | Remove-Item -DeleteKey
+            Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | ForEach-Object {
+              $key = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($_)
+              if ($key -is [Security.Cryptography.RSACng]) { $key.Key.Delete() }
+              Remove-Item -LiteralPath $_.PSPath
+            }
           }
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -370,7 +382,11 @@ jobs:
           $root.Open('ReadWrite')
           @($root.Certificates | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT) | ForEach-Object { $root.Remove($_) }
           $root.Close()
-          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | Remove-Item -DeleteKey
+          Get-ChildItem Cert:\CurrentUser\My | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT | ForEach-Object {
+            $key = [Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPrivateKey($_)
+            if ($key -is [Security.Cryptography.RSACng]) { $key.Key.Delete() }
+            Remove-Item -LiteralPath $_.PSPath
+          }
           $left = @(Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\Root | Where-Object Thumbprint -eq $env:NUGGET_TEST_CERT)
           if ($left.Count -gt 0) { Write-Output '::error::throwaway certificate still present'; exit 1 }
           Write-Output 'throwaway certificate removed'
