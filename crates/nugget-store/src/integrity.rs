@@ -1,0 +1,836 @@
+//! Integrity checks: [`check_file`] looks at a database file without ever writing to it (before
+//! opening a store after a crash, or to verify a backup), and [`Store::check_consistency`] checks
+//! an open store's derived structures against their sources (crash harness, restore
+//! verification).
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use nugget_core::{Error, Result};
+use rusqlite::{Connection, ErrorCode, OpenFlags};
+
+use crate::Store;
+use crate::error::DbExt;
+use crate::key::{StoreKey, create_private_dir};
+use crate::store::{open_keyed, set_common_pragmas, set_key};
+
+/// SQLCipher's page size (the store never changes it): every valid file is a multiple of it.
+const PAGE_SIZE: u64 = 4096;
+/// First bytes of an unencrypted SQLite database.
+const PLAINTEXT_HEADER: &[u8; 16] = b"SQLite format 3\0";
+/// Most `integrity_check` lines kept in a report.
+const MAX_REPORTED_ROWS: usize = 20;
+
+/// What [`check_file`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileHealth {
+    /// No file at the path.
+    Missing,
+    /// The key decrypts the file and SQLite's check passes.
+    Healthy,
+    /// The key does not decrypt the file's first page: another key, or (indistinguishably
+    /// without the right key) a damaged first page.
+    WrongKey,
+    /// The file decrypts but is damaged, truncated, empty or not encrypted; the reason says which.
+    Corrupt(String),
+}
+
+/// Check the database at `path` with `key` **without writing to it**: `PRAGMA quick_check`, or
+/// the slower `PRAGMA integrity_check` when `full`. Never creates, migrates, checkpoints or
+/// modifies the file or its `-wal`/`-shm`/`-journal` files, and creates none of them.
+///
+/// How it opens the file depends on what lies beside it:
+/// - no `-shm` and no (or an empty) `-wal` (closed cleanly, or a backup): opened `immutable`, so
+///   SQLite takes no locks and needs no side files;
+/// - `-wal` and `-shm` (a running store, or one that crashed): opened read-only with a read-only
+///   `-shm`, so pending WAL content is checked too;
+/// - a non-empty `-wal` without `-shm`, or a hot `-journal`: the file and that side file are
+///   copied to a private temporary directory and the copy is checked (its recovery needs writes).
+///
+/// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
+/// as a busy database or an unreadable directory.
+pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth> {
+    let meta = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FileHealth::Missing),
+        Err(e) => return Err(e.into()),
+    };
+    if !meta.is_file() {
+        return Ok(FileHealth::Corrupt("not a regular file".into()));
+    }
+    if meta.len() == 0 {
+        return Ok(FileHealth::Corrupt("the file is empty".into()));
+    }
+    if starts_with_plaintext_header(path)? {
+        return Ok(FileHealth::Corrupt(
+            "the file is an unencrypted SQLite database, not an encrypted store".into(),
+        ));
+    }
+    if meta.len() % PAGE_SIZE != 0 {
+        return Ok(FileHealth::Corrupt(format!(
+            "the file is truncated ({} bytes is not a whole number of pages)",
+            meta.len()
+        )));
+    }
+    let db = ReadOnlyDb::open(path, key)?;
+    match db.first_read() {
+        Ok(()) => {}
+        Err(e) if is_not_a_database(&e) => return Ok(FileHealth::WrongKey),
+        Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
+        Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
+    }
+    let pragma = if full {
+        "PRAGMA integrity_check"
+    } else {
+        "PRAGMA quick_check"
+    };
+    match check_rows(&db.conn, pragma) {
+        Ok(rows) if rows == ["ok"] => {}
+        Ok(rows) => return Ok(FileHealth::Corrupt(rows.join("; "))),
+        Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
+        Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
+    }
+    Ok(FileHealth::Healthy)
+}
+
+fn starts_with_plaintext_header(path: &Path) -> Result<bool> {
+    use std::io::Read;
+    let mut head = [0u8; 16];
+    let mut f = fs::File::open(path)?;
+    let mut read = 0;
+    while read < head.len() {
+        match f.read(&mut head[read..])? {
+            0 => break,
+            n => read += n,
+        }
+    }
+    Ok(read == head.len() && &head == PLAINTEXT_HEADER)
+}
+
+fn is_not_a_database(e: &rusqlite::Error) -> bool {
+    matches!(e, rusqlite::Error::SqliteFailure(f, _) if f.code == ErrorCode::NotADatabase)
+}
+
+/// Errors that say nothing about the file's content.
+fn is_transient(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(f, _)
+            if matches!(f.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked)
+    )
+}
+
+/// The rows of an `integrity_check`-style pragma (at most [`MAX_REPORTED_ROWS`]).
+fn check_rows(conn: &Connection, pragma: &str) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(pragma)?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows.take(MAX_REPORTED_ROWS) {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// `path` with `suffix` appended to its file name (`-wal`, `-shm`, `-journal`).
+pub(crate) fn sidecar(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
+fn non_empty(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|m| m.len() > 0)
+}
+
+/// A read-only, keyed connection to a database file that never writes to it or beside it (see
+/// [`check_file`] for how), plus the temporary copy it may be reading.
+pub(crate) struct ReadOnlyDb {
+    pub(crate) conn: Connection,
+    _copy: Option<TempCopy>,
+}
+
+impl ReadOnlyDb {
+    /// [`ReadOnlyDb::open`], then read the schema: `Error::Integrity` when `key` does not
+    /// decrypt the file or it is damaged.
+    pub(crate) fn open_verified(path: &Path, key: &StoreKey) -> Result<Self> {
+        let db = Self::open(path, key)?;
+        match db.first_read() {
+            Ok(()) => Ok(db),
+            Err(e) if is_not_a_database(&e) => Err(Error::Integrity(format!(
+                "cannot decrypt {}: wrong key or not a Nugget database",
+                path.display()
+            ))),
+            Err(e) if is_transient(&e) => {
+                Err(Error::Storage(format!("read {}: {e}", path.display())))
+            }
+            Err(e) => Err(Error::Integrity(format!(
+                "{} is damaged: {e}",
+                path.display()
+            ))),
+        }
+    }
+
+    /// The first read, which is where SQLCipher checks the key.
+    fn first_read(&self) -> rusqlite::Result<()> {
+        self.conn
+            .query_row("SELECT count(*) FROM sqlite_master", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map(|_| ())
+    }
+
+    /// Open without reading yet (see [`ReadOnlyDb::first_read`]).
+    pub(crate) fn open(path: &Path, key: &StoreKey) -> Result<Self> {
+        crate::vec_ext::ensure_registered()?;
+        let wal = sidecar(path, "-wal");
+        let shm = sidecar(path, "-shm");
+        let journal = sidecar(path, "-journal");
+        let needs_recovery = non_empty(&journal) || (non_empty(&wal) && !shm.exists());
+        if needs_recovery {
+            let copy = TempCopy::of(path, &[&wal, &journal])?;
+            // Read-write on the private copy, so SQLite can roll back or replay what it needs.
+            let conn = Connection::open_with_flags(
+                &copy.db,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )
+            .db("open store copy")?;
+            set_key(&conn, key)?;
+            conn.execute_batch("PRAGMA query_only = ON; PRAGMA temp_store = MEMORY;")
+                .db("configure store copy")?;
+            return Ok(Self {
+                conn,
+                _copy: Some(copy),
+            });
+        }
+        let params = if wal.exists() && shm.exists() {
+            "mode=ro&readonly_shm=1"
+        } else {
+            "mode=ro&immutable=1"
+        };
+        let uri = format!("{}?{params}", file_uri(path)?);
+        let conn = Connection::open_with_flags(
+            &uri,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .db("open store read-only")?;
+        set_key(&conn, key)?;
+        conn.execute_batch(
+            "PRAGMA query_only = ON; PRAGMA temp_store = MEMORY; PRAGMA busy_timeout = 5000;",
+        )
+        .db("configure read-only connection")?;
+        Ok(Self { conn, _copy: None })
+    }
+}
+
+/// A `file:` URI for `path` (absolute, percent-encoded; `/` separators, and a leading `/` before
+/// a Windows drive letter).
+fn file_uri(path: &Path) -> Result<String> {
+    let abs = std::path::absolute(path)?;
+    let s = abs.to_str().ok_or_else(|| {
+        Error::Invalid(format!(
+            "store path {} is not valid UTF-8",
+            abs.to_string_lossy()
+        ))
+    })?;
+    let s = if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.to_owned()
+    };
+    let mut out = String::from("file:");
+    if !s.starts_with('/') {
+        out.push('/');
+    }
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
+                out.push(b as char)
+            }
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    Ok(out)
+}
+
+/// A private temporary directory holding a copy of a database and its side files; removed on
+/// drop. The copy stays encrypted.
+struct TempCopy {
+    dir: PathBuf,
+    db: PathBuf,
+}
+
+impl TempCopy {
+    fn of(path: &Path, sidecars: &[&Path]) -> Result<Self> {
+        let mut rand = [0u8; 8];
+        getrandom::fill(&mut rand)
+            .map_err(|e| Error::Other(format!("OS random number generator failed: {e}")))?;
+        let dir = std::env::temp_dir().join(format!("nugget-check-{}", hex::encode(rand)));
+        if dir.exists() {
+            return Err(Error::Storage(format!(
+                "temporary directory {} already exists",
+                dir.display()
+            )));
+        }
+        create_private_dir(&dir)?;
+        let copy = Self {
+            db: dir.join("store.db"),
+            dir,
+        };
+        fs::copy(path, &copy.db)?;
+        for side in sidecars {
+            if non_empty(side) {
+                let name = side.to_string_lossy();
+                let suffix = &name[path.to_string_lossy().len()..];
+                fs::copy(side, sidecar(&copy.db, suffix))?;
+            }
+        }
+        Ok(copy)
+    }
+}
+
+impl Drop for TempCopy {
+    fn drop(&mut self) {
+        if let Err(e) = fs::remove_dir_all(&self.dir) {
+            tracing::warn!(path = %self.dir.display(), error = %e, "cannot remove temporary store copy");
+        }
+    }
+}
+
+/// What [`Store::check_consistency`] found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsistencyReport {
+    /// No problems.
+    pub ok: bool,
+    /// One line per problem found.
+    pub problems: Vec<String>,
+    /// Items in the store.
+    pub items: u64,
+    /// Chunks in the store.
+    pub chunks: u64,
+}
+
+/// `(description, query counting offending rows)`, run in one read transaction. Each query must
+/// return a single integer.
+const ROW_CHECKS: &[(&str, &str)] = &[
+    (
+        "chunks missing from the full-text index (chunks_fts)",
+        "SELECT count(*) FROM chunks c
+         WHERE NOT EXISTS (SELECT 1 FROM chunks_fts_docsize d WHERE d.id = c.id)",
+    ),
+    (
+        "full-text index rows (chunks_fts) without a chunk",
+        "SELECT count(*) FROM chunks_fts_docsize d
+         WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.id = d.id)",
+    ),
+    (
+        "items missing from the title index (items_fts)",
+        "SELECT count(*) FROM items i
+         WHERE NOT EXISTS (SELECT 1 FROM items_fts_docsize d WHERE d.id = i.id)",
+    ),
+    (
+        "title index rows (items_fts) without an item",
+        "SELECT count(*) FROM items_fts_docsize d
+         WHERE NOT EXISTS (SELECT 1 FROM items i WHERE i.id = d.id)",
+    ),
+    (
+        "entity names missing from the name index (entity_names_fts)",
+        "SELECT count(*) FROM entity_aliases a
+         WHERE NOT EXISTS (SELECT 1 FROM entity_names_fts_docsize d WHERE d.id = a.id)",
+    ),
+    (
+        "name index rows (entity_names_fts) without an entity name",
+        "SELECT count(*) FROM entity_names_fts_docsize d
+         WHERE NOT EXISTS (SELECT 1 FROM entity_aliases a WHERE a.id = d.id)",
+    ),
+    (
+        "duplicate items for one (source, external id)",
+        "SELECT count(*) FROM (SELECT 1 FROM items NOT INDEXED GROUP BY source, key
+                               HAVING count(*) > 1)",
+    ),
+    (
+        "chunks of missing items",
+        "SELECT count(*) FROM chunks c WHERE NOT EXISTS (SELECT 1 FROM items i WHERE i.id = c.item_id)",
+    ),
+    (
+        "item text layouts of missing items",
+        "SELECT count(*) FROM item_text t
+         WHERE NOT EXISTS (SELECT 1 FROM items i WHERE i.id = t.item_id)",
+    ),
+    (
+        "mentions of missing entities",
+        "SELECT count(*) FROM mentions m
+         WHERE NOT EXISTS (SELECT 1 FROM entities e WHERE e.id = m.entity_id)",
+    ),
+    (
+        "claim evidence of missing claims",
+        "SELECT count(*) FROM claim_evidence ev
+         WHERE NOT EXISTS (SELECT 1 FROM claims c WHERE c.id = ev.claim_id)",
+    ),
+    (
+        "items without a live entry in the change feed (item_changes)",
+        "SELECT count(*) FROM items i
+         WHERE NOT EXISTS (SELECT 1 FROM item_changes ch
+                           WHERE ch.source = i.source AND ch.key = i.key AND ch.deleted = 0)",
+    ),
+    (
+        "live change feed entries (item_changes) without an item",
+        "SELECT count(*) FROM item_changes ch
+         WHERE ch.deleted = 0
+           AND NOT EXISTS (SELECT 1 FROM items i WHERE i.source = ch.source AND i.key = ch.key)",
+    ),
+    (
+        "change feed (item_changes) head below its number of entries",
+        "SELECT coalesce(max(seq), 0) < count(*) FROM item_changes",
+    ),
+    (
+        "per-source counts (source_stats) that differ from the items and chunks",
+        "WITH actual AS (
+             SELECT i.source, count(*) AS items,
+                    coalesce(sum((SELECT count(*) FROM chunks c WHERE c.item_id = i.id)), 0)
+                        AS chunks
+             FROM items i GROUP BY i.source
+         )
+         SELECT (SELECT count(*) FROM actual a LEFT JOIN source_stats s ON s.source = a.source
+                 WHERE s.items IS NOT a.items OR s.chunks IS NOT a.chunks)
+              + (SELECT count(*) FROM source_stats s
+                 WHERE (s.items <> 0 OR s.chunks <> 0)
+                   AND NOT EXISTS (SELECT 1 FROM actual a WHERE a.source = s.source))",
+    ),
+];
+
+/// Checks of the vector tables, run once the embedding dimension is fixed (`chunk_vec` exists).
+const VECTOR_CHECKS: &[(&str, &str)] = &[(
+    "vectors (chunk_vec) without a chunk",
+    "SELECT count(*) FROM chunk_vec_rowids v
+     WHERE NOT EXISTS (SELECT 1 FROM chunks c WHERE c.id = v.rowid)",
+)];
+
+/// Checks of the approximate vector index, run while it exists (complete or being built).
+const ANN_CHECKS: &[(&str, &str)] = &[
+    (
+        "approximate index vectors (ann_vectors) without a vector in chunk_vec",
+        "SELECT count(*) FROM ann_vectors a
+         WHERE NOT EXISTS (SELECT 1 FROM chunk_vec_rowids v WHERE v.rowid = a.id)",
+    ),
+    (
+        "approximate index bits (ann_bits) without a vector in chunk_vec",
+        "SELECT count(*) FROM ann_bits_rowids b
+         WHERE NOT EXISTS (SELECT 1 FROM chunk_vec_rowids v WHERE v.rowid = b.rowid)",
+    ),
+];
+
+/// Checks of a complete approximate index: it holds exactly the vectors of `chunk_vec`.
+const ANN_READY_CHECKS: &[(&str, &str)] = &[
+    (
+        "vectors missing from the complete approximate index (ann_vectors)",
+        "SELECT count(*) FROM chunk_vec_rowids v
+         WHERE NOT EXISTS (SELECT 1 FROM ann_vectors a WHERE a.id = v.rowid)",
+    ),
+    (
+        "vectors missing from the complete approximate index (ann_bits)",
+        "SELECT count(*) FROM chunk_vec_rowids v
+         WHERE NOT EXISTS (SELECT 1 FROM ann_bits_rowids b WHERE b.rowid = v.rowid)",
+    ),
+];
+
+fn table_exists(c: &Connection, name: &str) -> rusqlite::Result<bool> {
+    c.query_row(
+        "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+        [name],
+        |r| r.get(0),
+    )
+}
+
+fn run_checks(c: &Connection, checks: &[(&str, &str)], problems: &mut Vec<String>) {
+    for (what, sql) in checks {
+        match c.query_row(sql, [], |r| r.get::<_, i64>(0)) {
+            Ok(0) => {}
+            Ok(n) => problems.push(format!("{what}: {n}")),
+            Err(e) => problems.push(format!("cannot check {what}: {e}")),
+        }
+    }
+}
+
+impl Store {
+    /// Check the whole store and report every problem found (an `Err` only when the checks
+    /// cannot run at all):
+    ///
+    /// - SQLite's `PRAGMA integrity_check` and `PRAGMA foreign_key_check`;
+    /// - the audit chain ([`Store::verify_audit_chain`], including its anchor);
+    /// - the full-text indexes (`chunks_fts`, `items_fts`, `entity_names_fts`) hold exactly the
+    ///   rows of their tables;
+    /// - every vector (`chunk_vec`) belongs to a chunk, and the approximate index, while it
+    ///   exists, only holds such vectors (exactly all of them once complete);
+    /// - no duplicate items per (source, external id); no chunks, text layouts, mentions or
+    ///   evidence pointing at missing items, entities or claims;
+    /// - the item change feed has a live entry per item and none for missing items, and its head
+    ///   is not below its number of entries; the per-source counts match.
+    ///
+    /// Runs inside one read transaction on a connection of its own (a consistent snapshot that
+    /// does not block writers; an in-memory store uses its writer); the audit check runs on the
+    /// writer. It reads everything, so it takes
+    /// time proportional to the store's size. Chunk and vector references from mentions and
+    /// evidence are not checked (chunks are legitimately replaced on re-chunking), nor are items
+    /// that mentions or evidence name by (source, external id).
+    pub fn check_consistency(&self) -> Result<ConsistencyReport> {
+        let mut problems = Vec::new();
+        if let Err(e) = self.verify_audit_chain() {
+            problems.push(e.to_string());
+        }
+        // A connection of its own: pooled readers keep FTS5 index structures cached across
+        // transactions, and `integrity_check` (which includes FTS5's own check) was seen to read
+        // them stale there and report corruption that a fresh connection, the writer and every
+        // search did not see. It also leaves the pool to searches.
+        let (items, chunks) = match self.file() {
+            Some((path, key)) => {
+                let c = open_keyed(path, key, OpenFlags::empty())?;
+                set_common_pragmas(&c)?;
+                c.execute_batch("PRAGMA query_only = ON;")
+                    .db("make check connection read-only")?;
+                check_snapshot(&c, &mut problems)?
+            }
+            None => self.with_conn(|c| check_snapshot(c, &mut problems))?,
+        };
+        Ok(ConsistencyReport {
+            ok: problems.is_empty(),
+            problems,
+            items: items as u64,
+            chunks: chunks as u64,
+        })
+    }
+}
+
+/// The checks of [`Store::check_consistency`] that read the database, in one read transaction
+/// on `c`. Returns the item and chunk counts of that snapshot.
+fn check_snapshot(c: &Connection, problems: &mut Vec<String>) -> Result<(i64, i64)> {
+    let tx = c.unchecked_transaction().db("begin consistency check")?;
+    match check_rows(&tx, "PRAGMA integrity_check") {
+        Ok(rows) if rows == ["ok"] => {}
+        Ok(rows) => problems.extend(rows.into_iter().map(|r| format!("integrity: {r}"))),
+        Err(e) => problems.push(format!("integrity check failed: {e}")),
+    }
+    match foreign_key_problems(&tx) {
+        Ok(p) => problems.extend(p),
+        Err(e) => problems.push(format!("foreign key check failed: {e}")),
+    }
+    run_checks(&tx, ROW_CHECKS, problems);
+    if crate::items::embedding_dim(&tx)?.is_some() {
+        if table_exists(&tx, "chunk_vec_rowids").db("look up vector table")? {
+            run_checks(&tx, VECTOR_CHECKS, problems);
+        } else {
+            problems.push("the embedding dimension is set but the vector table is missing".into());
+        }
+    }
+    if table_exists(&tx, "ann_vectors").db("look up approximate index")? {
+        run_checks(&tx, ANN_CHECKS, problems);
+        if crate::vector::ann_ready(&tx)? {
+            run_checks(&tx, ANN_READY_CHECKS, problems);
+        }
+    }
+    let counts = tx
+        .query_row(
+            "SELECT (SELECT count(*) FROM items), (SELECT count(*) FROM chunks)",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .db("count rows")?;
+    tx.commit().db("end consistency check")?;
+    Ok(counts)
+}
+
+/// One line per `PRAGMA foreign_key_check` violation (at most [`MAX_REPORTED_ROWS`]).
+fn foreign_key_problems(c: &Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = c.prepare("PRAGMA foreign_key_check")?;
+    let rows = stmt.query_map([], |r| {
+        Ok(format!(
+            "foreign key: {} row {} references a missing {} row",
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<i64>>(1)?
+                .map_or_else(|| "?".to_owned(), |id| id.to_string()),
+            r.get::<_, String>(2)?
+        ))
+    })?;
+    rows.take(MAX_REPORTED_ROWS).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use sha2::{Digest, Sha256};
+
+    use super::*;
+    use crate::backup::test_support::*;
+
+    /// Hash of each of the file and its side files (`None` when absent).
+    fn snapshot(path: &Path) -> Vec<Option<String>> {
+        ["", "-wal", "-shm", "-journal"]
+            .iter()
+            .map(|s| {
+                fs::read(sidecar(path, s))
+                    .ok()
+                    .map(|b| hex::encode(Sha256::digest(b)))
+            })
+            .collect()
+    }
+
+    fn check_both(path: &Path, key: &StoreKey) -> FileHealth {
+        let quick = check_file(path, key, false).unwrap();
+        assert_eq!(check_file(path, key, true).unwrap(), quick);
+        quick
+    }
+
+    fn closed_store(dir: &Path) -> PathBuf {
+        let path = dir.join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 20);
+        drop(s);
+        assert!(!sidecar(&path, "-wal").exists());
+        path
+    }
+
+    #[test]
+    fn healthy_closed_store_and_backup_are_left_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        let before = snapshot(&path);
+        assert_eq!(check_both(&path, &key()), FileHealth::Healthy);
+        assert_eq!(
+            snapshot(&path),
+            before,
+            "check_file changed or created files"
+        );
+        assert_eq!(before[1..], [None, None, None]);
+
+        let s = Store::open(&path, &key()).unwrap();
+        let backup = dir.path().join("b.nbk");
+        s.backup_into(&backup, &[]).unwrap();
+        let before = snapshot(&backup);
+        assert_eq!(check_both(&backup, &key()), FileHealth::Healthy);
+        assert_eq!(snapshot(&backup), before);
+    }
+
+    /// A store that crashed with pending WAL content: checked including that content, with
+    /// nothing written; also when the `-shm` is gone.
+    #[test]
+    fn crashed_store_with_wal_is_checked_without_writing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 10);
+        let crash = dir.path().join("crash");
+        fs::create_dir(&crash).unwrap();
+        let copy = crash.join("nugget.db");
+        for suffix in ["", "-wal", "-shm"] {
+            fs::copy(sidecar(&path, suffix), sidecar(&copy, suffix)).unwrap();
+        }
+        drop(s);
+        assert!(fs::metadata(sidecar(&copy, "-wal")).unwrap().len() > 0);
+
+        let before = snapshot(&copy);
+        assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
+        assert_eq!(snapshot(&copy), before);
+        assert_eq!(
+            check_file(&copy, &StoreKey::from_bytes([1; 32]), false).unwrap(),
+            FileHealth::WrongKey
+        );
+        assert_eq!(snapshot(&copy), before);
+
+        // Without the -shm (checked through a private copy).
+        fs::remove_file(sidecar(&copy, "-shm")).unwrap();
+        let before = snapshot(&copy);
+        assert_eq!(check_both(&copy, &key()), FileHealth::Healthy);
+        assert_eq!(snapshot(&copy), before);
+        // The crashed copy itself still opens with all its data.
+        let r = Store::open(&copy, &key()).unwrap();
+        assert_eq!(r.counts().unwrap().items, 10);
+    }
+
+    /// A store in use is checked beside its writer.
+    #[test]
+    fn live_store_is_checked_read_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nugget.db");
+        let s = Store::open(&path, &key()).unwrap();
+        populate(&s, 10);
+        let before = snapshot(&path)[..2].to_vec();
+        assert_eq!(check_both(&path, &key()), FileHealth::Healthy);
+        assert_eq!(snapshot(&path)[..2], before[..]);
+        put_item(&s, 99);
+        assert!(s.check_consistency().unwrap().ok);
+    }
+
+    #[test]
+    fn missing_wrong_key_and_corrupt_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        assert_eq!(
+            check_file(&dir.path().join("nope.db"), &key(), false).unwrap(),
+            FileHealth::Missing
+        );
+        assert!(!dir.path().join("nope.db").exists());
+        let before = snapshot(&path);
+        assert_eq!(
+            check_both(&path, &StoreKey::from_bytes([8; 32])),
+            FileHealth::WrongKey
+        );
+        assert_eq!(snapshot(&path), before);
+
+        // Damage in the middle of a copy.
+        let bad = dir.path().join("bad.db");
+        let mut bytes = fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        for b in &mut bytes[mid..mid + 64] {
+            *b ^= 0x5a;
+        }
+        fs::write(&bad, &bytes).unwrap();
+        let before = snapshot(&bad);
+        for full in [false, true] {
+            let health = check_file(&bad, &key(), full).unwrap();
+            assert!(
+                matches!(health, FileHealth::Corrupt(_)),
+                "full={full}: {health:?}"
+            );
+        }
+        assert_eq!(snapshot(&bad), before);
+
+        let truncated = dir.path().join("short.db");
+        fs::write(&truncated, &fs::read(&path).unwrap()[..5000]).unwrap();
+        assert!(matches!(
+            check_file(&truncated, &key(), false).unwrap(),
+            FileHealth::Corrupt(m) if m.contains("truncated")
+        ));
+
+        let empty = dir.path().join("empty.db");
+        fs::write(&empty, b"").unwrap();
+        assert!(matches!(
+            check_file(&empty, &key(), false).unwrap(),
+            FileHealth::Corrupt(_)
+        ));
+
+        let plain = dir.path().join("plain.db");
+        Connection::open(&plain)
+            .unwrap()
+            .execute_batch("CREATE TABLE t (x); INSERT INTO t VALUES (1);")
+            .unwrap();
+        assert!(matches!(
+            check_file(&plain, &key(), false).unwrap(),
+            FileHealth::Corrupt(m) if m.contains("unencrypted")
+        ));
+
+        assert!(matches!(
+            check_file(dir.path(), &key(), false).unwrap(),
+            FileHealth::Corrupt(_)
+        ));
+    }
+
+    #[test]
+    fn file_uris_are_absolute_and_escaped() {
+        let uri = file_uri(Path::new("/tmp/a b/c%d?e#f.db")).unwrap();
+        if cfg!(windows) {
+            assert!(uri.starts_with("file:/"), "{uri}");
+        } else {
+            assert_eq!(uri, "file:/tmp/a%20b/c%25d%3Fe%23f.db");
+        }
+        assert!(file_uri(Path::new("rel.db")).unwrap().starts_with("file:/"));
+    }
+
+    #[test]
+    fn consistency_is_ok_on_a_populated_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::open(dir.path().join("nugget.db"), &key()).unwrap();
+        let empty = s.check_consistency().unwrap();
+        assert!(empty.ok, "{:?}", empty.problems);
+        populate(&s, 25);
+        s.search_vector_approx(&embedding(1), 3).unwrap();
+        assert!(s.ann_index_ready().unwrap());
+        s.delete_item(&crate::items::item_ref("files:test".into(), "3.txt".into()))
+            .unwrap();
+        let report = s.check_consistency().unwrap();
+        assert!(report.ok, "{:?}", report.problems);
+        assert_eq!((report.items, report.chunks), (24, 48));
+
+        let mem = Store::open_in_memory().unwrap();
+        populate(&mem, 3);
+        assert!(mem.check_consistency().unwrap().ok);
+    }
+
+    /// Each kind of deliberate damage is reported.
+    #[test]
+    fn consistency_flags_broken_rows() {
+        let damage: &[(&str, &str, &str)] = &[
+            (
+                "chunks_fts",
+                "INSERT INTO chunks_fts (chunks_fts, rowid, text)
+                 SELECT 'delete', id, text FROM chunks ORDER BY id LIMIT 1",
+                "chunks missing from the full-text index",
+            ),
+            (
+                "items_fts",
+                "INSERT INTO items_fts (rowid, title) VALUES (424242, 'ghost')",
+                "title index rows (items_fts) without an item",
+            ),
+            (
+                "entity_names_fts",
+                "INSERT INTO entity_names_fts (entity_names_fts, rowid, alias_lower)
+                 SELECT 'delete', id, alias_lower FROM entity_aliases ORDER BY id LIMIT 1",
+                "entity names missing from the name index",
+            ),
+            (
+                "vector",
+                "INSERT INTO chunk_vec (rowid, embedding)
+                 SELECT 999999, embedding FROM chunk_vec LIMIT 1",
+                "vectors (chunk_vec) without a chunk",
+            ),
+            (
+                "ann",
+                "DELETE FROM ann_vectors WHERE id = (SELECT min(id) FROM ann_vectors)",
+                "vectors missing from the complete approximate index (ann_vectors)",
+            ),
+            (
+                "item_changes",
+                "DELETE FROM item_changes WHERE key = '2.txt'",
+                "items without a live entry in the change feed",
+            ),
+            (
+                "source_stats",
+                "UPDATE source_stats SET items = items + 1",
+                "per-source counts",
+            ),
+            (
+                "dangling chunk",
+                "PRAGMA foreign_keys = OFF;
+                 INSERT INTO chunks (item_id, ord, text) VALUES (777777, 0, 'orphan');
+                 PRAGMA foreign_keys = ON;",
+                "chunks of missing items",
+            ),
+            (
+                "dangling mention",
+                "PRAGMA foreign_keys = OFF;
+                 INSERT INTO mentions (entity_id, source, key, surface, confidence, created_at)
+                 VALUES ('ent_missing', 'files:test', '0.txt', 'x', 1.0, '2026-01-01T00:00:00Z');
+                 PRAGMA foreign_keys = ON;",
+                "mentions of missing entities",
+            ),
+            (
+                "audit",
+                "UPDATE meta SET value = 'x' WHERE key = 'audit_seal'",
+                "audit log",
+            ),
+        ];
+        for (name, sql, expect) in damage {
+            let dir = tempfile::tempdir().unwrap();
+            let s = Store::open(dir.path().join("nugget.db"), &key()).unwrap();
+            populate(&s, 6);
+            s.search_vector_approx(&embedding(1), 3).unwrap();
+            s.with_conn(|c| c.execute_batch(sql).db("damage")).unwrap();
+            let report = s.check_consistency().unwrap();
+            assert!(!report.ok, "{name}: not flagged");
+            assert!(
+                report.problems.iter().any(|p| p.contains(expect)),
+                "{name}: {:?}",
+                report.problems
+            );
+        }
+    }
+}

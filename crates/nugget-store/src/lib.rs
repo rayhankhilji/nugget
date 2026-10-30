@@ -19,12 +19,15 @@
 
 mod acl;
 mod audit;
+mod backup;
 mod changes;
 mod egress;
+mod envelope;
 mod error;
 mod export;
 mod fts;
 mod graph;
+mod integrity;
 mod items;
 mod key;
 #[cfg(test)]
@@ -38,9 +41,12 @@ mod vec_ext;
 mod vector;
 
 pub use audit::AuditAnchor;
+pub use backup::{BackupStats, read_backup_files, strip_backup_files};
 pub use egress::{EgressRow, EgressState};
+pub use envelope::KeyEnvelope;
 pub use export::{ExportItem, GRAPH_EXPORT_FORMAT, GraphExportCounts};
 pub use graph::{ENTITY_ID_PREFIX, MAX_MERGE_DEPTH, MAX_NEIGHBOURHOOD_NODES, SqliteGraph};
+pub use integrity::{ConsistencyReport, FileHealth, check_file};
 pub use key::{KEYCHAIN_ENV, KeySource, StoreKey};
 pub use schema::LATEST_VERSION as SCHEMA_VERSION;
 pub use search::TITLE_WEIGHT;
