@@ -114,7 +114,7 @@ Briefs in `docs/waves/wave-dd/`.
 |---|---|---|---|
 | DD1 | `dd/wayland-shortcut` | session_01CTjRSrbhjVwZjhmA3QQoAb | Double Tap global shortcut on Wayland (portal app id, packaging, KWin/GNOME CI) (merged) |
 | DD2 | `dd/energy` | session_01CTjRSt524Nw1erCRtS19P5 | energy and battery cost of daemon, shell, indexing and read-ahead; cut waste (merged) |
-| DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence |
+| DD3 | `dd/agent-judgement` | session_01CTjRSsAKmoyDDN46QUNq67 | computer-use agent asks when targets are ambiguous; triage on/off evidence (merged) |
 | DD4 | `dd/recall-real-embedder` | session_01CTjRSrbHfZnGNeRxohghVF | memory recall gates with the real embedding model and reranker (merged) |
 
 ## Wave EE (after AA3, alongside DD): cloud sessions from the EE briefs commit
@@ -135,7 +135,7 @@ Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent
 | WP | Branch | Session | Scope |
 |---|---|---|---|
 | FF1 | `ff/data-safety` | session_01CTjRSquqrkkGYfv4TUQEat | crash-safety harness, encrypted backup/restore, open-format export, corruption recovery |
-| FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status |
+| FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status (merged) |
 | FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes |
 | FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins |
 
