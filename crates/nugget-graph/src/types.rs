@@ -543,3 +543,73 @@ impl BatchResult {
         }
     }
 }
+
+/// Entity attribute holding [`MergeRecord`]s: why other entities were merged into this one.
+pub const MERGE_LOG_ATTR: &str = "merge_log";
+
+/// Why entity resolution merged one entity (or occurrence) into another, kept in the surviving
+/// entity's attributes under [`MERGE_LOG_ATTR`] so the vault can show it and the user can split
+/// the two again (`knowledge.split`). Written by `nugget-knowledge`; text fields come from
+/// source content and are untrusted.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MergeRecord {
+    /// The merged-away entity (now a tombstone resolving to the survivor), or `None` when an
+    /// occurrence was folded in before it became an entity of its own.
+    #[serde(default)]
+    pub from: Option<EntityId>,
+    /// The name the merged entity or occurrence went by.
+    pub name: String,
+    /// Machine-readable reasons, e.g. `shared_email`, `trusted_record`, `nickname`, `initial`,
+    /// `email_local_part`, `same_item`, `same_thread`, `same_org`, `same_name`.
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    /// One human-readable sentence.
+    #[serde(default)]
+    pub detail: String,
+    /// The item that supplied the corroborating evidence, when there is one.
+    #[serde(default)]
+    pub item: Option<ItemRef>,
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub at: Option<OffsetDateTime>,
+}
+
+/// The merge records of an entity (empty when none or malformed), oldest first.
+pub fn merge_log(e: &Entity) -> Vec<MergeRecord> {
+    merge_log_of(&e.attributes)
+}
+
+/// [`merge_log`] over raw attributes.
+pub fn merge_log_of(attributes: &Value) -> Vec<MergeRecord> {
+    attributes
+        .get(MERGE_LOG_ATTR)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod merge_log_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn merge_log_reads_records_and_skips_malformed_ones() {
+        let attrs = json!({MERGE_LOG_ATTR: [
+            {"from": "ent_a", "name": "Maggie", "reasons": ["nickname", "same_item"],
+             "detail": "x", "at": "2026-10-01T00:00:00Z"},
+            {"bogus": true},
+            {"name": "M. T"}
+        ]});
+        let log = merge_log_of(&attrs);
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].from.as_ref().map(EntityId::as_str), Some("ent_a"));
+        assert_eq!(log[0].reasons, ["nickname", "same_item"]);
+        assert!(log[1].from.is_none() && log[1].reasons.is_empty());
+        assert!(merge_log_of(&json!({})).is_empty());
+        assert!(merge_log_of(&json!({MERGE_LOG_ATTR: "nope"})).is_empty());
+    }
+}
