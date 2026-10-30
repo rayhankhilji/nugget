@@ -34,6 +34,8 @@ pub struct Fact {
     pub body: String,
     /// The id of the newer fact that replaces this one.
     pub superseded_by: Option<usize>,
+    /// The source item is marked sensitive (its citation says so): its contents are private.
+    pub sensitive: bool,
 }
 
 /// Rules for the facts, placed right after the block.
@@ -237,6 +239,9 @@ pub fn facts_section(context: &ContextResponse) -> String {
                 .map_or_else(|| "undated".to_owned(), |d| format!("written {d}")),
             f.title
         ));
+        if f.sensitive {
+            block.push_str("; private: never put its contents in a message");
+        }
         if let Some(by) = f.superseded_by {
             block.push_str(&format!(
                 "; superseded by F{by}, its values are out of date"
@@ -283,6 +288,7 @@ fn passages(context: &ContextResponse) -> Vec<Fact> {
                 title: clean_title(title),
                 body: String::new(),
                 superseded_by: None,
+                sensitive: c.is_some_and(|c| c.sensitive),
             });
         } else {
             if out.is_empty() {
@@ -294,6 +300,7 @@ fn passages(context: &ContextResponse) -> Vec<Fact> {
                     title: String::new(),
                     body: String::new(),
                     superseded_by: None,
+                    sensitive: false,
                 });
             }
             body.push(line);
@@ -600,6 +607,20 @@ pizza budget is $600.",
             ),
         ]));
         assert!(f.iter().all(|f| f.superseded_by.is_none()), "{f:?}");
+    }
+
+    #[test]
+    fn sensitive_facts_are_marked_private() {
+        let mut cr = context(&[(
+            "VPN credentials",
+            Some("2026-10-01"),
+            "The shared office VPN password is tangerine-Otter-42.",
+        )]);
+        cr.citations[0].sensitive = true;
+        assert!(facts(&cr)[0].sensitive);
+        assert!(facts_section(&cr).contains(
+            "F1 (written 2026-10-01, \"VPN credentials\"; private: never put its contents in a message)"
+        ));
     }
 
     #[test]
