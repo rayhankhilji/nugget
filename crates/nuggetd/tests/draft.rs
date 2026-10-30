@@ -653,6 +653,55 @@ async fn disabled_drafting_refuses_but_still_reports_the_voice() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn read_ahead_skips_cloud_providers_and_refused_fields_and_cancel_answers() {
+    let mut h = start("", |_| {}).await;
+    let audit_before = h.audit().len();
+    // The only provider is a cloud one: nothing is sent ahead of the trigger.
+    let v: Value = h
+        .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+        .await;
+    assert_eq!(v, json!({"started": false, "skipped": "cloud"}));
+    // A secure field is refused before anything else.
+    let v: Value = h
+        .call(method::DRAFT_READ_AHEAD, json!({"context": secure_hint()}))
+        .await;
+    assert_eq!(v, json!({"started": false, "skipped": "refused"}));
+    // Nothing running: cancel answers false, with `{}` or without params.
+    let v: Value = h.call(method::DRAFT_READ_AHEAD_CANCEL, json!({})).await;
+    assert_eq!(v, json!({"cancelled": false}));
+    let v: Value = h.call(method::DRAFT_READ_AHEAD_CANCEL, Value::Null).await;
+    assert_eq!(v, json!({"cancelled": false}));
+    // Bad params are an error, not a skip.
+    let e = h
+        .call_err(method::DRAFT_READ_AHEAD, json!({"nope": 1}))
+        .await;
+    assert_eq!(e.code, code::INVALID_PARAMS);
+    // Nothing reached the model, and nothing was audited.
+    assert!(h.model.seen().is_empty(), "{:?}", h.model.seen());
+    assert_eq!(h.audit().len(), audit_before, "{:?}", h.audit());
+    h.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn read_ahead_is_skipped_when_drafting_or_read_ahead_is_off() {
+    for draft in ["enabled = false", "[draft.read_ahead]\nenabled = false"] {
+        let mut h = start(draft, |_| {}).await;
+        let v: Value = h
+            .call(method::DRAFT_READ_AHEAD, json!({"context": chat_context()}))
+            .await;
+        assert_eq!(
+            v,
+            json!({"started": false, "skipped": "disabled"}),
+            "{draft}"
+        );
+        let v: Value = h.call(method::DRAFT_READ_AHEAD_CANCEL, json!({})).await;
+        assert_eq!(v, json!({"cancelled": false}));
+        assert!(h.model.seen().is_empty());
+        h.stop().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn voice_profile_loads_at_startup_and_refreshes_after_an_ingest_commit() {
     let mut h = start("", |s| seed_chat(s, 0, 6)).await;
     let s = voice_status_eventually(&h, |s| s.samples >= 6).await;

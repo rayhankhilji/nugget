@@ -24,6 +24,7 @@ fn with_extra(role: RuntimeRole, args: &[&str]) -> RuntimeOptions {
         RuntimeRole::Chat => o.chat = t,
         RuntimeRole::Embedding => o.embedding = t,
         RuntimeRole::Rerank => o.rerank = t,
+        RuntimeRole::Draft => o.draft = t,
     }
     o
 }
@@ -262,6 +263,78 @@ async fn rerank_role_serves_the_rerank_endpoint_and_no_tier() {
         rt.details(RuntimeRole::Rerank).unwrap().info.state,
         RuntimeState::Stopped
     );
+}
+
+#[tokio::test]
+async fn draft_role_serves_chat_completions_beside_chat_with_no_tier() {
+    let e = env().await;
+    let rt = e.runtime(common::opts());
+    // A reranker cannot draft.
+    assert!(rt.ensure(RuntimeRole::Draft, &e.rerank).await.is_err());
+    let chat_cfg = rt.ensure(RuntimeRole::Chat, &e.chat).await.unwrap();
+    // The same model may serve both roles, from separate processes.
+    let cfg = rt.ensure(RuntimeRole::Draft, &e.chat).await.unwrap();
+    assert_eq!(cfg.id.as_str(), nugget_runtime::DRAFT_PROVIDER_ID);
+    assert_eq!(cfg.id.as_str(), "local-draft");
+    assert!(
+        cfg.tiers.is_empty(),
+        "never routed by tier: {:?}",
+        cfg.tiers
+    );
+    assert_eq!(cfg.locality, Some(Locality::OnDevice));
+    // Like chat, thinking is off.
+    assert_eq!(
+        cfg.extra_body.as_ref().unwrap()["chat_template_kwargs"]["enable_thinking"],
+        false
+    );
+    assert_ne!(addr(&cfg), addr(&chat_cfg), "its own listener");
+    #[cfg(unix)]
+    assert_eq!(
+        cfg.socket_path.as_deref(),
+        Some(e.paths.data.join("run").join("draft.sock").as_path())
+    );
+    let k = key(&rt, RuntimeRole::Draft);
+    assert_ne!(k, key(&rt, RuntimeRole::Chat));
+    let (_, info) = get(&addr(&cfg), "/fake/info", Some(&k)).await;
+    for f in ["--embedding", "--reranking"] {
+        assert!(!info.contains(f), "{info}");
+    }
+
+    let secrets = rt.secrets();
+    let p = tokio::task::spawn_blocking({
+        let c = cfg.clone();
+        move || build_provider_with(&c, Arc::new(NullEgress), &secrets).unwrap()
+    })
+    .await
+    .unwrap();
+    let stream = p
+        .chat(ChatRequest::new(vec![Message::user_text("hi")]))
+        .await
+        .unwrap();
+    assert_eq!(
+        ChatResponse::collect(stream).await.unwrap().text(),
+        "Hello from fake"
+    );
+    let d = rt.details(RuntimeRole::Draft).unwrap();
+    assert_eq!(d.info.state, RuntimeState::Ready);
+    assert_eq!(d.info.provider.as_str(), "local-draft");
+    assert!(
+        d.log_file.ends_with("llama-server-draft.log"),
+        "{}",
+        d.log_file.display()
+    );
+    assert!(rt.status().iter().any(|i| i.role == RuntimeRole::Draft));
+    // Stopping it leaves chat running.
+    rt.stop(RuntimeRole::Draft).await;
+    assert_eq!(
+        rt.details(RuntimeRole::Draft).unwrap().info.state,
+        RuntimeState::Stopped
+    );
+    assert_eq!(
+        rt.details(RuntimeRole::Chat).unwrap().info.state,
+        RuntimeState::Ready
+    );
+    rt.shutdown().await;
 }
 
 #[tokio::test]

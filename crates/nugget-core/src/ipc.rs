@@ -516,6 +516,10 @@ pub enum RuntimeRole {
     /// A cross-encoder reranker (`llama-server --reranking`), used by retrieval only: never
     /// routed for a model tier.
     Rerank,
+    /// The small model local Double Tap drafts with, opt-in via `[draft.local] model`: its own
+    /// server, so drafting never waits behind (or evicts the prompt cache of) Chat. Never routed
+    /// for a model tier; only the draft feature calls it, by provider id (`local-draft`).
+    Draft,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
