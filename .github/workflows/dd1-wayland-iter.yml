@@ -1,0 +1,59 @@
+name: DD1 Wayland iteration (temporary)
+on:
+  push:
+    branches: [dd/wayland-shortcut]
+    paths:
+      - ".github/workflows/dd1-wayland-iter.yml"
+      - "tests/fixtures/native/linux/**"
+permissions:
+  contents: read
+jobs:
+  infra:
+    name: infra (${{ matrix.compositor }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        compositor: [kwin, gnome]
+    env:
+      NUGGET_WAYLAND_COMPOSITOR: ${{ matrix.compositor }}
+      NUGGET_WAYLAND_LOGS: ${{ github.workspace }}/wayland-artifacts
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install
+        run: |
+          common="dbus dbus-bin libglib2.0-bin at-spi2-core xdg-desktop-portal python3-gi gir1.2-atspi-2.0 libgl1-mesa-dri libegl1"
+          if [ "${{ matrix.compositor }}" = kwin ]; then
+            extra="kwin-wayland xdg-desktop-portal-kde qt6-wayland"
+          else
+            extra="gnome-shell mutter xdg-desktop-portal-gnome gnome-control-center dconf-service"
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $common $extra
+          dpkg-query -W xdg-desktop-portal xdg-desktop-portal-kde xdg-desktop-portal-gnome kwin-wayland gnome-shell mutter gnome-control-center qt6-wayland 2>/dev/null || true
+          ls /usr/libexec/ | grep -i "shortcut\|portal" || true
+      - name: Portal client, consent, key press
+        run: |
+          mkdir -p "$NUGGET_WAYLAND_LOGS"
+          tests/fixtures/native/linux/wayland-session.sh bash -c '
+            set -x
+            python3 tests/fixtures/native/linux/portal-shortcut-client.py --seconds 60 > "$NUGGET_WAYLAND_LOGS/client.out" 2>&1 &
+            sleep 3; cat "$NUGGET_WAYLAND_LOGS/client.out"
+            python3 "$NUGGET_WAYLAND_ACCEPT_DIALOG" --timeout 20 --dump; echo "accept rc=$?"
+            sleep 2; cat "$NUGGET_WAYLAND_LOGS/client.out"
+            python3 "$NUGGET_WAYLAND_KEYS" ctrl+alt+space; echo "keys rc=$?"
+            sleep 2
+            python3 "$NUGGET_WAYLAND_KEYS" ctrl+alt+space
+            sleep 2; cat "$NUGGET_WAYLAND_LOGS/client.out"
+            for f in "$NUGGET_WAYLAND_LOGS"/*.log; do echo "=== $f"; tail -n 80 "$f"; done
+            grep -q "activated double-tap" "$NUGGET_WAYLAND_LOGS/client.out"
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: iter-${{ matrix.compositor }}
+          path: wayland-artifacts/
+          if-no-files-found: ignore
