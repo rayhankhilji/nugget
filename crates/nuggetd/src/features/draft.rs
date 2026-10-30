@@ -59,8 +59,9 @@
 //! budget_tokens = 300             # retrieval budget for them
 //! max_snippets = 3                # best retrieved passages kept
 //! include_sensitive = false       # let passages marked sensitive into local prompts
-//! model = "qwen3-4b-q4km"         # a manifest chat model served for Double Tap alone (unset:
-//!                                 # local drafts use the tier's chat server)
+//! model = "qwen3-1.7b-q8"         # a manifest chat model served for Double Tap alone (unset:
+//!                                 # local drafts use the tier's chat server); qwen3-1.7b-q8 is
+//!                                 # pending in manifests/pending/ until signed
 //!
 //! [draft.read_ahead]              # prefill the prompt while a reply field keeps focus
 //! enabled = true                  # false: draft.read_ahead skips ("disabled")

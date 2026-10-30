@@ -88,8 +88,10 @@ The prepared prompt lives only in that server's in-memory cache (and briefly in 
 in-memory retrieval cache); nothing is written to disk or to your store.
 
 **What it costs.** Some CPU (and battery on a laptop) while focus moves between text fields: each
-read-ahead makes the local model read a prompt of several hundred tokens. Measurements of that cost
-will be added to [Latency](#latency).
+read-ahead makes the local model read a prompt of several hundred tokens. Measured on a 2-core
+cloud CPU, that is about 15 CPU-seconds per newly focused reply field with the 4B model, 8 with
+the 1.7B. When you then draft, the draft skips that same reading, so it mostly moves work rather
+than adding it; it is wasted only for fields you focus and don't draft in. See [Latency](#latency).
 
 **Turning it off.** Switch off **Read ahead while you reply** on the Double Tap page. To turn it off
 for every client of the daemon, set `enabled = false` under `[draft.read_ahead]` in `config.toml`
@@ -166,3 +168,10 @@ retrieval and the voice lookup as soon as the trigger fires, and with a local mo
 [read ahead](#read-ahead) before the trigger and draft with a [smaller model](#a-smaller-model-for-double-tap). These targets are measured by the
 `draft` benchmark suite (see [Benchmarks](../architecture/benchmarks.md)); they are not yet measured
 in the shipped app.
+
+Measured with real local models on GitHub's runners (a 2-core cloud CPU and a virtual Apple M2 Pro),
+from the trigger to the first inserted character, median: with the 4B model about 10–12 s without
+read-ahead and **0.2 s with read-ahead** once the read-ahead has finished (it takes about 6–8 s
+after you focus the field on those machines); with the 1.7B, 3–6 s without and about 0.1 s with.
+A trigger pressed before the read-ahead finishes waits for the rest of it. The details are in the
+benchmark results (`bench/README.md`, "Real-model results").
