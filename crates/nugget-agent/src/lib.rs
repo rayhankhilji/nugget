@@ -25,6 +25,11 @@
 //!   `success` / `failure` are accepted as aliases), and `done` is reported as
 //!   [`Outcome::Succeeded`] only when every mutation passed verification; otherwise
 //!   [`Outcome::Unverified`] or [`Outcome::Failed`]. `refused` is [`Outcome::Refused`].
+//! - Ask, don't guess ([`AgentConfig::clarify`], on by default; [`clarify`]): when a tool's
+//!   [`ToolResult::targets`] show more than one item the goal could mean (two people named Sam),
+//!   the next action of `Edit` risk or higher is held back, never run, and the run suspends with
+//!   [`Outcome::NeedsInput`] and the candidates as options; the answer goes back with a note that
+//!   the action was not performed. An `ask_user` the model makes meanwhile gets the candidates too.
 //! - Prompt-injection hardening ([`injection`]): untrusted tool output is fenced as data, the
 //!   prompt says so, and a detector forces a confirmation on the next risky action.
 //! - [`ActionLog`] (append-only; [`MemoryLog`], [`JsonlLog`], and [`ChainedLog`] on the policy
@@ -33,6 +38,7 @@
 
 mod agent;
 pub mod chained;
+pub mod clarify;
 pub mod events;
 pub mod injection;
 pub mod ledger;
@@ -45,6 +51,7 @@ pub use agent::{
     PendingAsk, RunState, Task, ToolRate, TriageReport, TriageVerdict, VerificationSummary,
 };
 pub use chained::{AGENT_SOURCE, ChainedLog, agent_entries};
+pub use clarify::{Ambiguity, ambiguity};
 pub use events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
 pub use injection::{HeuristicDetector, InjectionDetector, InjectionFinding};
 pub use ledger::{ActionLedger, LedgerEntry, MemoryLedger, action_id};

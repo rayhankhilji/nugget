@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+use crate::clarify::{Ambiguity, ambiguity};
 use crate::events::{AgentEvent, ConfirmationRequest, Confirmations, EventSink, NoEvents};
 use crate::injection::{HeuristicDetector, InjectionDetector, InjectionFinding, wrap_untrusted};
 use crate::ledger::{ActionLedger, Fnv128, LedgerEntry, MemoryLedger, action_id};
@@ -244,6 +245,11 @@ pub struct ActionRecord {
     pub executed: bool,
     pub is_error: bool,
     pub verification: Option<Verification>,
+    /// Held back by the ambiguity guard ([`AgentConfig::clarify`]): the target could be more than
+    /// one item, so the run asked the user instead. Not executed; `decision` is a denial whose
+    /// reason starts with `held:`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held_for_user: bool,
 }
 
 /// The `ask_user` a suspended run waits on.
@@ -254,6 +260,10 @@ pub struct PendingAsk {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
     pub call_id: String,
+    /// The ambiguity guard asked, holding back the call `call_id`: the answer goes back to the
+    /// model with a note that the action was not performed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
     /// Results of the other calls in that turn, sent along with the answer.
     pub results: Vec<Part>,
 }
@@ -278,6 +288,13 @@ pub struct RunState {
     /// Per-run nonce for untrusted-content fences.
     pub fence: String,
     pub pending: Option<PendingAsk>,
+    /// The first ambiguous target a tool's screen showed ([`AgentConfig::clarify`]), until the
+    /// user answers a question. A later screen with fewer matches does not clear it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambiguity: Option<Ambiguity>,
+    /// Terms the user has already been asked about (lowercase); not asked again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolved: Vec<String>,
 }
 
 /// Counts of verification results over a run's mutating actions.
@@ -376,8 +393,16 @@ impl Stopper<'_> {
 enum Act {
     Continue(Part),
     Stop(Outcome),
-    Finish { summary: String, claim: Claim },
-    Ask { question: String, call_id: String },
+    Finish {
+        summary: String,
+        claim: Claim,
+    },
+    Ask {
+        question: String,
+        options: Vec<String>,
+        call_id: String,
+        held: bool,
+    },
 }
 
 /// Per-leg state that is not persisted.
@@ -449,6 +474,8 @@ impl Agent {
             consecutive_verify_failures: 0,
             suspicion: None,
             pending: None,
+            ambiguity: None,
+            resolved: Vec::new(),
         };
         self.events.emit(AgentEvent::RunStarted {
             task_id: st.task.id.clone(),
@@ -584,10 +611,20 @@ impl Agent {
             return self.conclude(st, o, None, None, started);
         };
         let mut results = pending.results;
-        results.push(Part::tool_result(
-            pending.call_id,
-            format!("The user answered: {answer}"),
-        ));
+        let reply = if pending.held {
+            format!(
+                "This action was NOT performed: the request could mean more than one item, so the \
+                 user was asked which one they meant.\nThe user answered: {answer}\nAct on the one \
+                 they chose; observe again first if needed."
+            )
+        } else {
+            format!("The user answered: {answer}")
+        };
+        results.push(Part::tool_result(pending.call_id, reply));
+        // Any answer settles the open ambiguity: the user has been asked once.
+        if let Some(a) = st.ambiguity.take() {
+            st.resolved.push(a.term.to_lowercase());
+        }
         st.messages.push(Message::user(results));
         let record = Record::Resumed {
             answer: truncate(answer, LOG_TEXT_MAX),
@@ -723,14 +760,20 @@ impl Agent {
                         ended = Some((o, Some(claim), Some(summary)));
                         break;
                     }
-                    Act::Ask { question, call_id } => {
+                    Act::Ask {
+                        question,
+                        options,
+                        call_id,
+                        held,
+                    } => {
                         for later in &calls[i + 1..] {
                             results.push(skipped(&later.id, "the task paused for the user"));
                         }
                         st.pending = Some(PendingAsk {
                             question: question.clone(),
-                            options: Vec::new(),
+                            options,
                             call_id,
+                            held,
                             results: std::mem::take(&mut results),
                         });
                         ended = Some((Outcome::NeedsInput(question), None, None));
@@ -828,6 +871,16 @@ impl Agent {
                     window_ms: ms(rate.window),
                 }));
             }
+        }
+
+        // Ask, don't guess: while the goal could mean more than one item a screen showed, an
+        // action that changes something is held back (no gate, no confirmation) and the user is
+        // asked which item they meant.
+        if leg.cfg.clarify
+            && risk >= RiskClass::Edit
+            && let Some(a) = st.ambiguity.clone()
+        {
+            return self.hold(st, call, &aid, tool.as_ref(), risk, a);
         }
 
         let target = tool.describe(&args);
@@ -1051,6 +1104,13 @@ impl Agent {
         if let Err(o) = self.append(st, record) {
             return Act::Stop(o);
         }
+        if leg.cfg.clarify && st.ambiguity.is_none() && !result.targets.is_empty() {
+            st.ambiguity = ambiguity(&st.task.goal, &result.targets)
+                .filter(|a| !st.resolved.contains(&a.term.to_lowercase()));
+            if let Some(a) = &st.ambiguity {
+                tracing::debug!(task = %st.task.id, term = %a.term, "ambiguous target on screen");
+            }
+        }
         self.events.emit(AgentEvent::ActionDone {
             task_id: st.task.id.clone(),
             action_id: aid.clone(),
@@ -1139,15 +1199,27 @@ impl Agent {
         }
         match result.control {
             Some(Control::Finish { summary, claim }) => Act::Finish { summary, claim },
-            Some(Control::AskUser { question, options }) => {
+            Some(Control::AskUser {
+                question,
+                mut options,
+            }) => {
+                // The model asked on its own while an ambiguity is open: offer what the screen
+                // showed.
+                if options.is_empty()
+                    && let Some(a) = &st.ambiguity
+                {
+                    options = a.candidates.clone();
+                }
                 self.events.emit(AgentEvent::Suspended {
                     task_id: st.task.id.clone(),
                     question: question.clone(),
-                    options,
+                    options: options.clone(),
                 });
                 Act::Ask {
                     question,
+                    options,
                     call_id: call.id.clone(),
+                    held: false,
                 }
             }
             None => Act::Continue(Part::ToolResult {
@@ -1155,6 +1227,55 @@ impl Agent {
                 content,
                 is_error: result.is_error,
             }),
+        }
+    }
+
+    /// Hold back a call because its target is ambiguous, and suspend with the candidates as
+    /// options. The call is logged as a `held:` denial and never reaches the gate or the tool.
+    fn hold(
+        &self,
+        st: &mut RunState,
+        call: &ToolCall,
+        aid: &str,
+        tool: &dyn Tool,
+        risk: RiskClass,
+        a: Ambiguity,
+    ) -> Act {
+        let question = a.question();
+        let decision = GateOutcome::Denied {
+            reason: format!(
+                "held: the request could mean more than one item (“{}”); asked the user which one",
+                a.term
+            ),
+        };
+        let record = self.decision_record(
+            st.step,
+            aid,
+            call,
+            tool,
+            risk,
+            None,
+            decision.clone(),
+            false,
+            Instant::now(),
+        );
+        if let Err(o) = self.append(st, record) {
+            return Act::Stop(o);
+        }
+        self.record_action(st, aid, &call.name, risk, decision, false, false, None);
+        if let Some(last) = st.actions.last_mut() {
+            last.held_for_user = true;
+        }
+        self.events.emit(AgentEvent::Suspended {
+            task_id: st.task.id.clone(),
+            question: question.clone(),
+            options: a.candidates.clone(),
+        });
+        Act::Ask {
+            question,
+            options: a.candidates,
+            call_id: call.id.clone(),
+            held: true,
         }
     }
 
@@ -1395,6 +1516,7 @@ impl Agent {
             executed,
             is_error,
             verification,
+            held_for_user: false,
         });
     }
 
