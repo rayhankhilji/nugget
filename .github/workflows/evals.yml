@@ -19,8 +19,6 @@ on:
         description: "Manifest id of the chat model (empty: the smallest)"
         default: ""
         type: string
-  push:
-    branches: [aa/grounding]
   schedule:
     # Weekly, Monday 03:17 UTC.
     - cron: "17 3 * * 1"
@@ -30,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.sha }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -57,14 +55,34 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - suite: doubletap
+            args: doubletap
+          # A/B on one runner: llama-server's default threads (the physical cores), then every
+          # logical core.
+          - suite: doubletap-threads
+            args: doubletap
+            args2: doubletap --local-threads 4
+          # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
+          # agentic-tier model rather than the drafting model (AA3).
           - suite: draft
-            scale: standard
-            # Grounded and ungrounded Nugget arms on one runner, temperature 0, judged by the
-            # agentic-tier model rather than the drafting model (AA3).
             args: >-
               draft --draft-grounding both --draft-temperature 0 --draft-judge model
               --draft-judge-model qwen3-8b-q4km --draft-judge-timeout-s 240
               --draft-dump eval-results/draft-drafts.jsonl
+          - suite: cua
+            args: cua --cua-agent nugget --cua-env inproc
+          # The manifest's agentic-tier model, which the app routes the agent to on 16 GB.
+          - suite: cua-8b
+            args: cua --cua-agent nugget --cua-env inproc --local-chat-model qwen3-8b-q4km
+          # Before/after on one runner (AA3): the extractor before AA3 (`base_ref`) on the
+          # scale's subset, then this commit on the same subset, then this commit on every item.
+          - suite: knowledge
+            base_ref: 50e9b751793bcd217e49408189f21559f763d5fd
+            base_args: knowledge
+            args: knowledge --knowledge-dump eval-results/knowledge-dump.jsonl
+            args2: >-
+              knowledge --knowledge-items 93
+              --knowledge-dump eval-results/knowledge-dump-all.jsonl
     steps:
       - uses: actions/checkout@v5
         with:
