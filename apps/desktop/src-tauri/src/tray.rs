@@ -679,6 +679,7 @@ mod tests {
             freshness_p95_ms: None,
             embedding_provider: None,
             triage_provider: None,
+            triage: None,
             sources: states.iter().map(|s| source(*s)).collect(),
         }
     }
