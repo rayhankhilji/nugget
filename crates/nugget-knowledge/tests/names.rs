@@ -667,3 +667,49 @@ async fn a_person_is_named_by_their_fullest_name_in_any_order() {
         assert_eq!(names(&order).await, want, "{order:?}");
     }
 }
+
+/// GG5-9: an invite's `CN="R. Chen"` came first; the person's mail later signs "Robert Chen"
+/// from the same address. The person is then "Robert Chen", with "R. Chen" as an alias only.
+#[tokio::test]
+async fn an_initialled_invite_name_gives_way_to_the_full_name() {
+    let env = Env::new();
+    let cfg = KnowledgeConfig {
+        me: MeConfig {
+            name: Some("Mara Okafor".into()),
+            emails: vec!["mara.okafor@brightwell.example".into()],
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let k = env.knowledge(cfg, None);
+    env.put(
+        ics(
+            "files:cal",
+            "Calendar/a.ics",
+            json!([{
+                "uid": "u1", "summary": "1:1 Mara / Bob", "start": "2026-06-03T13:00:00Z",
+                "organizer": "\"R. Chen\" <robert.chen@brightwell.example>",
+                "attendees": ["\"R. Chen\" <robert.chen@brightwell.example>",
+                              "\"Mara Okafor\" <mara.okafor@brightwell.example>"]
+            }]),
+            "x",
+        ),
+        &["x"],
+    );
+    run(&k).await;
+    let m = Mail {
+        source: "imap:m",
+        key: "m1",
+        from: "Robert Chen <robert.chen@brightwell.example>",
+        to: &["Mara Okafor <mara.okafor@brightwell.example>"],
+        date: "2026-06-04T10:00:00Z",
+        subject: "Harbor",
+        body: "Let's talk Harbor.",
+        ..Default::default()
+    };
+    env.put(m.item(), &[m.body]);
+    run(&k).await;
+    let rob = env.entity(EntityKind::Person, "Robert Chen");
+    assert_eq!(rob.name, "Robert Chen");
+    assert_eq!(rob.aliases, ["R. Chen"]);
+}

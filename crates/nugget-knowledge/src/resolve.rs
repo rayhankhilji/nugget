@@ -794,6 +794,18 @@ When unsure, answer same=false.",
             // An address, or a name made up from a mail domain, gives way to a real name (the
             // graph keeps the old one as an alias).
             patch.name = Some(spec.name.clone());
+        } else if e.kind == EntityKind::Person
+            && !spec.weak_name
+            && let Some(better) = self.better_person_name(e, spec)?
+        {
+            // A fuller name for a person (the old one stays an alias).
+            patch.name = Some(better);
+            if !known_name(e, &spec.name)
+                && normalize_name(&spec.name) != normalize_name(patch.name.as_deref().unwrap_or(""))
+            {
+                self.graph.add_alias(&e.id, &spec.name)?;
+                changed = true;
+            }
         } else if !spec.weak_name && !known_name(e, &spec.name) {
             self.graph.add_alias(&e.id, &spec.name)?;
             changed = true;
@@ -822,13 +834,6 @@ When unsure, answer same=false.",
         }
         if !attrs.is_empty() {
             patch.attributes = Some(Value::Object(attrs));
-        }
-        if patch.name.is_none()
-            && e.kind == EntityKind::Person
-            && !spec.weak_name
-            && let Some(better) = self.better_person_name(e, spec)?
-        {
-            patch.name = Some(better);
         }
         if patch != EntityPatch::default() {
             self.graph.update_entity(&e.id, &patch)?;
