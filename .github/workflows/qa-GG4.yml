@@ -14,10 +14,6 @@ on:
         description: "Space-separated suites (install replay actions brief judge learning)"
         default: "install replay actions brief judge learning"
         type: string
-  # Temporary while QA runs: a push that touches qa/GG4/ci/trigger starts a run.
-  push:
-    branches: [qa/proactive]
-    paths: [qa/GG4/ci/trigger]
 
 permissions:
   contents: read
