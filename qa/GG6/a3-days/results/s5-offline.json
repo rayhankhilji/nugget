@@ -1,0 +1,102 @@
+{
+  "build": "debug",
+  "ready_ms": 211,
+  "index": {
+    "items": 300,
+    "chunks": 480,
+    "queue": 0,
+    "states": "files-1:watching:300",
+    "errors": [],
+    "ms": 2020
+  },
+  "search": {
+    "ms": 20,
+    "hits": 20
+  },
+  "status": {
+    "ms": 1,
+    "r": "{\"audit_chain_ok\":true,\"chunks\":480,\"items\":300,\"protocol\":1,\"providers\":[{\"capabilities\":null,\"error\":null,\"id\":\"anthropic\",\"kind\":\"anthropic\",\"locality\":\"cloud\",\"model\":\"claude-opus-5-5\",\"tiers\":[\"synthesis\",\"agentic\"]}],\"uptime_secs\":2,\"version\":\"0.0.1\"}"
+  },
+  "providers_list": {
+    "ms": 3,
+    "r": "[{\"capabilities\":null,\"error\":null,\"id\":\"anthropic\",\"kind\":\"anthropic\",\"locality\":\"cloud\",\"model\":\"claude-opus-5-5\",\"tiers\":[\"synthesis\",\"agentic\"]}]"
+  },
+  "probe_cloud": {
+    "ms": 2491,
+    "r": "{\"jsonrpc\":\"2.0\",\"id\":22,\"error\":{\"code\":-32003,\"message\":\"provider `anthropic` is unreachable (network error: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): client error (Connect)); probe results were not recorded\"}}"
+  },
+  "ask": {
+    "ms": 2213,
+    "error": "retrieve.ask failed: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): client error (Connect) (code -32003)"
+  },
+  "chat": {
+    "ms": 2183,
+    "error": "chat failed: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): client error (Connect) (code -32003)"
+  },
+  "models_list": {
+    "ms": 2,
+    "r": "[[\"qwen3-4b-q4km\",true,false],[\"qwen3-1.7b-q8\",false,false],[\"qwen3-8b-q4km\",true,false],[\"nomic-embed-text-v1.5-q8\",true,false],[\"bge-reranker-v2-m3-q4km\",false,false]]"
+  },
+  "models_install": {
+    "ms": 97910,
+    "r": "{\"id\":\"qwen3-4b-q4km\",\"downloaded\":0,\"total\":2497280256,\"phase\":\"failed\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf)\"}"
+  },
+  "runtime_status": {
+    "ms": 1,
+    "r": "[{\"error\":null,\"model_id\":\"qwen3-4b-q4km\",\"provider\":\"local-chat\",\"role\":\"chat\",\"state\":\"not_installed\"},{\"error\":null,\"model_id\":\"nomic-embed-text-v1.5-q8\",\"provider\":\"local-embedding\",\"role\":\"embedding\",\"state\":\"not_installed\"}]"
+  },
+  "imap_add": {
+    "ms": 5,
+    "r": "{\"chunks\":0,\"enabled\":true,\"health\":{\"code\":\"ok\",\"fix\":\"\",\"item_errors\":0,\"reason\":\"Up to date.\"},\"id\":\"imap-1\",\"items\":0,\"kind\":\"imap\",\"last_error\":null,\"last_sync\":null,\"name\":\"Mail\",\"settings\":{\"host\":\"imap.example.com\",\"username\":\"qa@example.com\"},\"state\":\"idle\"}"
+  },
+  "imap_secret": {
+    "ms": 4,
+    "r": "null"
+  },
+  "caldav_add": {
+    "ms": 10,
+    "r": "{\"chunks\":0,\"enabled\":true,\"health\":{\"code\":\"ok\",\"fix\":\"\",\"item_errors\":0,\"reason\":\"Up to date.\"},\"id\":\"caldav-1\",\"items\":0,\"kind\":\"caldav\",\"last_error\":null,\"last_sync\":null,\"name\":\"Cal\",\"settings\":{\"url\":\"https://dav.example.com/cal/\",\"username\":\"qa\"},\"state\":\"idle\"}"
+  },
+  "caldav_secret": {
+    "ms": 4,
+    "r": "null"
+  },
+  "sources_after_20s": {
+    "ms": 3,
+    "r": "[{\"id\":\"caldav-1\",\"state\":\"error\",\"last_error\":\"network error: request failed: error sending request for url (https://dav.example.com/cal/)\"},{\"id\":\"files-1\",\"state\":\"watching\",\"last_error\":null},{\"id\":\"imap-1\",\"state\":\"error\",\"last_error\":\"network error: connect imap.example.com:993: failed to lookup address information: Temporary failure in name resolution\"}]"
+  },
+  "gmail_auth": {
+    "ms": 24,
+    "r": "{\"jsonrpc\":\"2.0\",\"id\":35,\"result\":{\"url\":\"https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=x.apps.googleusercontent.com&redirect_uri=http%3A%2F%2F127.0.0.1%3A40757%2F&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.readonly&state=PoxbBJNyowPIT5jyTvb63bCmwBEpzIAee8WgBhNpXN8&code_challenge=ONEY_7kVALe_GLKMqFTZzKBhyuOOVULoklfb792Dq68&code_challenge_method=S256&access_type=offline&prompt=consent\"}}"
+  },
+  "egress": {
+    "ms": 2,
+    "r": "[{\"at\":\"2026-10-31T20:12:09.933358008Z\",\"bytes_received\":0,\"bytes_sent\":0,\"feature\":\"sync:imap\",\"host\":\"imap.example.com\",\"items\":[]},{\"at\":\"2026-10-31T20:12:08.654546674Z\",\"bytes_received\":0,\"bytes_sent\":501,\"feature\":\"sync:caldav\",\"host\":\"dav.example.com\",\"items\":[]},{\"at\":\"2026-10-31T20:12:02.699568753Z\",\"bytes_received\":0,\"bytes_sent\":0,\"feature\":\"sync:imap\",\"host\":\"imap.example.com\",\"items\":[]},{\"at\":\"2026-10-31T20:12:01.04001055Z\",\"bytes_received\":0,\"bytes_sent\":501,\"feature\":\"sync:caldav\",\"host\":\"dav.example.com\",\"items\":[]},{\"at\":\"2026-10-31T20:11:57.919952671Z\",\"bytes_received\":0,\"byt"
+  },
+  "proactive_refresh": {
+    "ms": 61,
+    "r": "{\"created\":0,\"open\":0,\"reason\":\"refresh\",\"resolved\":0}"
+  },
+  "log_warn": [
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:10.994293Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"981ms\",\"attempt\":0},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:11.979060Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"1.499s\",\"attempt\":1},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:13.481579Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe not recorded: provider unreachable\",\"provider\":\"anthropic\",\"error\":\"network error: provider `anthropic` is unreachable (network error: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): clien",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:13.521202Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"ask: provider failed; trying next\",\"provider\":\"local-chat\",\"error\":\"capability unsupported: local model `qwen3-4b-q4km` is not installed\"},\"target\":\"nuggetd::handler\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:13.599069Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"992ms\",\"attempt\":0},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:14.594658Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"1.098s\",\"attempt\":1},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:15.695832Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"ask: provider failed; trying next\",\"provider\":\"anthropic\",\"error\":\"network error: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): client error (Connect)\"},\"target\":\"nuggetd::handler\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:15.699005Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"706ms\",\"attempt\":0},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:16.408069Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"retrying\",\"provider\":\"anthropic\",\"error\":\"error sending request for url (https://api.anthropic.com/v1/messages)\",\"wait\":\"1.468s\",\"attempt\":1},\"target\":\"nugget_infer::http\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:17.879539Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"provider failed; trying next\",\"provider\":\"anthropic\",\"error\":\"network error: anthropic: connection failed: error sending request for url (https://api.anthropic.com/v1/messages): client error (Connect)\",\"tier\":\"Synthesis\"},\"target\":\"nugget_infer::r",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:17.885705Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:18.474586Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:19.519171Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:21.861884Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:26.181217Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:34.888525Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:10:50.950144Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:11:23.350489Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"probe failed; retrying\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwe",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:11:55.791938Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"source unusable\",\"url\":\"https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwen3-4B-G",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:11:55.792335Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"model install failed\",\"model\":\"qwen3-4b-q4km\",\"error\":\"network error: download failed: error sending request for url (https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf)\"},\"target\":\"nugg"
+  ]
+}

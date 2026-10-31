@@ -1,0 +1,85 @@
+{
+  "minutes": 30,
+  "files": 2000,
+  "index": {
+    "items": 2000,
+    "chunks": 3200,
+    "queue": 0,
+    "states": "files-1:watching:2000",
+    "errors": [],
+    "ms": 8103
+  },
+  "build": "debug",
+  "children": [],
+  "log_lines_during_soak": 6,
+  "idle_log_histogram": [
+    [
+      "knowledge run",
+      4
+    ],
+    [
+      "voice profile ready",
+      1
+    ],
+    [
+      "morning brief ready",
+      1
+    ]
+  ],
+  "knowledge": {
+    "claims": 621,
+    "entities": 219,
+    "extractor_provider": null,
+    "last_run": "2026-10-31T20:32:20.76499483Z",
+    "mentions": 2577,
+    "pending_items": 0,
+    "vault": {
+      "conflicts": [],
+      "invalid": [],
+      "last_render": "2026-10-31T20:02:39.210350078Z",
+      "pages": 219,
+      "path": "/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a3/s7/home/data/vault"
+    }
+  },
+  "ingest": {
+    "embedding_provider": null,
+    "freshness_p50_ms": 258,
+    "freshness_p95_ms": 349,
+    "queue_depth": 0,
+    "sources": [
+      {
+        "chunks": 3200,
+        "enabled": true,
+        "health": {
+          "code": "ok",
+          "fix": "",
+          "item_errors": 0,
+          "reason": "Up to date."
+        },
+        "id": "files-1",
+        "items": 2000,
+        "kind": "files",
+        "last_error": null,
+        "last_sync": "2026-10-31T20:02:27.786448132Z",
+        "name": "Docs",
+        "settings": {
+          "exclude": [],
+          "roots": [
+            "/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a3/s7/corpus"
+          ]
+        },
+        "state": "watching"
+      }
+    ],
+    "triage_provider": null
+  },
+  "stop": {
+    "forced": false,
+    "ms": 51,
+    "exited": {
+      "code": 0,
+      "signal": null,
+      "at": 1793478750629
+    }
+  }
+}

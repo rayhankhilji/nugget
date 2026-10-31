@@ -1,0 +1,206 @@
+{
+  "build": "debug",
+  "install": {
+    "id": "e2e-chat-q4",
+    "downloaded": 4194304,
+    "total": 4194304,
+    "phase": "installed",
+    "error": null
+  },
+  "first_ask": {
+    "label": "first",
+    "ms": 133,
+    "provider": "local-chat",
+    "error": null,
+    "text": "According to your notes, \"date 2026-10-31\" [1]."
+  },
+  "rt_after_first": {
+    "error": null,
+    "model_id": "e2e-chat-q4",
+    "provider": "local-chat",
+    "role": "chat",
+    "state": "ready"
+  },
+  "idle_kill_pid": 4517,
+  "idle_kill_states": [
+    {
+      "ms": 2,
+      "state": "failed",
+      "error": "llama-server exited unexpectedly (signal: 9 (SIGKILL))"
+    },
+    {
+      "ms": 1328,
+      "state": "starting",
+      "error": "llama-server exited unexpectedly (signal: 9 (SIGKILL))"
+    },
+    {
+      "ms": 1430,
+      "state": "ready",
+      "error": null
+    }
+  ],
+  "idle_kill_recover_ms": 1430,
+  "ask_after_idle_kill": {
+    "label": "after idle kill",
+    "ms": 56,
+    "provider": "local-chat",
+    "error": null,
+    "text": "According to your notes, \"date 2026-10-31\" [1]."
+  },
+  "mid_answer": {
+    "label": "mid-answer",
+    "ms": 1504,
+    "rpc_error": "retrieve.ask failed: local-chat: request failed: error sending request for url (http://localhost/v1/chat/completions): client error (SendRequest) (code -32003)"
+  },
+  "mid_answer_ms_after_kill": 2,
+  "rt_after_mid": {
+    "error": "llama-server exited unexpectedly (signal: 9 (SIGKILL))",
+    "model_id": "e2e-chat-q4",
+    "provider": "local-chat",
+    "role": "chat",
+    "state": "failed"
+  },
+  "ask_after_mid": {
+    "label": "after mid-answer kill",
+    "ms": 2257,
+    "provider": "local-chat",
+    "error": null,
+    "text": "According to your notes, \"date 2026-10-31\" [1]."
+  },
+  "wait_before_chat_mid": {
+    "label": "before chat mid",
+    "waited_ms": 1,
+    "pid": 4521
+  },
+  "chat_mid_answer": {
+    "label": "chat mid-answer",
+    "ms": 1503,
+    "rpc_error": "chat failed: local-chat: request failed: error sending request for url (http://localhost/v1/chat/completions): client error (SendRequest) (code -32003)"
+  },
+  "wait_after_chat_mid": {
+    "label": "after chat mid",
+    "waited_ms": 1443,
+    "pid": 4550
+  },
+  "hung_server_ask": {
+    "label": "hung server",
+    "ms": 200004,
+    "rpc_error": "retrieve.ask: not done within 200000 ms; result undefined, 1 notification(s): [{\"params\":{\"entities\":[\"ent_3ds3j2bvgxiyb5ox\",\"ent_3pimf24w4d4opzpq\",\"ent_4od5ytvkkzg5j3jw\",\"ent_4u2umcxc3zmiziwd\",\"ent_5zdcm4yb5olprttg\",\"ent_6r2tzxybwpqm7ozv\",\"ent_6xgpesyqf5yn4fyi\",\"ent_7t34pkzskelcf3vr\",\"ent_c7nsmr7fohlswtze\",\"ent_cehsf7tbtx4q6ko7\",\"ent_ctz563gfpafj344g\",\"ent_ddmsnxfxylnasltd\",\"ent_dmyotvfhqp652ofw\""
+  },
+  "rt_while_hung": {
+    "error": null,
+    "model_id": "e2e-chat-q4",
+    "provider": "local-chat",
+    "role": "chat",
+    "state": "ready"
+  },
+  "wait_before_loop": {
+    "label": "before loop",
+    "waited_ms": 1,
+    "pid": 5248
+  },
+  "crashloop_ask": {
+    "label": "ask during crash loop",
+    "ms": 30949,
+    "rpc_error": "retrieve.ask failed: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status:"
+  },
+  "crashloop_states": [
+    {
+      "s": 0,
+      "state": "failed",
+      "error": "llama-server exited unexpectedly (signal: 9 (SIGKILL))"
+    },
+    {
+      "s": 3,
+      "state": "failed",
+      "error": "provider error: llama-server exited during start-up (exit status: 1); last output: main: model loaded (alias e2e-chat-q4) | fake: listening on /tmp/nugget-run-c"
+    },
+    {
+      "s": 7,
+      "state": "failed",
+      "error": "provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x819"
+    },
+    {
+      "s": 31,
+      "state": "failed",
+      "error": "provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during st"
+    }
+  ],
+  "crashloop_launch_times": [
+    2.1,
+    6.3,
+    14.5,
+    30.6,
+    30.8
+  ],
+  "crashloop_status_providers": [
+    {
+      "capabilities": {
+        "context_tokens": 8192,
+        "embeddings": false,
+        "json_schema": true,
+        "streaming": true,
+        "tools": false,
+        "vision": false
+      },
+      "error": "provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: main: model loaded (alias e2e-chat-q4) | fake: listening on /tmp/nugget-run-cda180dc579d278e/chat.sock | llama-server exited unexpectedly (signal: 9 (SIGKILL)) | starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | gave up after 6 consecutive failures; call ensure() to retry | starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash",
+      "id": "local-chat",
+      "kind": "openai_compatible",
+      "locality": "on_device",
+      "model": "e2e-chat-q4",
+      "tiers": [
+        "triage",
+        "light",
+        "synthesis",
+        "agentic"
+      ]
+    }
+  ],
+  "crashloop_ask2": {
+    "label": "second ask after give-up",
+    "ms": 199,
+    "rpc_error": "retrieve.ask failed: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during start-up (exit status:"
+  },
+  "crashloop_launches_total": 6,
+  "recover_ask": {
+    "label": "after fix",
+    "ms": 174,
+    "provider": "local-chat",
+    "error": null,
+    "text": "According to your notes, \"date 2026-10-31\" [1]."
+  },
+  "rt_after_fix": {
+    "error": null,
+    "model_id": "e2e-chat-q4",
+    "provider": "local-chat",
+    "role": "chat",
+    "state": "ready"
+  },
+  "logs": [
+    "llama-server-chat.log: 2026-10-31T20:08:21.270909531Z [nugget] start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /",
+    "llama-server-chat.log: 2026-10-31T20:08:37.433546323Z [nugget] start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /",
+    "llama-server-chat.log: 2026-10-31T20:08:37.433749108Z [nugget] gave up after 6 consecutive failures; call ensure() to retry",
+    "llama-server-chat.log: 2026-10-31T20:08:37.595769515Z [nugget] start failed: provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start f",
+    "llama-server-chat.log: 2026-10-31T20:09:37.18784989Z [nugget] start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start fa",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:30.411744Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime ready\",\"role\":\"chat\",\"model\":\"e2e-chat-q4\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\",\"accel\":\"cpu\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:30.419516Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:30.419626Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime ready\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::daemon\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:30.671800Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"local runtime crashed\",\"role\":\"chat\",\"status\":\"signal: 9 (SIGKILL)\",\"failures\":1},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:31.783801Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime restarted\",\"role\":\"chat\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:31.790954Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:33.550096Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"local runtime crashed\",\"role\":\"chat\",\"status\":\"signal: 9 (SIGKILL)\",\"failures\":2},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:35.663527Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime restarted\",\"role\":\"chat\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:35.671064Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:37.432421Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"local runtime crashed\",\"role\":\"chat\",\"status\":\"signal: 9 (SIGKILL)\",\"failures\":3},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:41.550858Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime restarted\",\"role\":\"chat\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:04:41.560231Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:08:01.886053Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"local runtime crashed\",\"role\":\"chat\",\"status\":\"signal: 9 (SIGKILL)\",\"failures\":1},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:08:03.002029Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime restarted\",\"role\":\"chat\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:08:03.009918Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:08:06.782964Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"local runtime crashed\",\"role\":\"chat\",\"status\":\"signal: 9 (SIGKILL)\",\"failures\":2},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:08:37.596109Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"ask: provider failed; trying next\",\"provider\":\"local-chat\",\"error\":\"provider error: llama-server exited during start-up (exit status: 1); last output: simulated crash | start failed: provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nu",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:09:37.189506Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"ask: provider failed; trying next\",\"provider\":\"local-chat\",\"error\":\"provider error: llama-server exited during start-up (exit status: 1); last output: starting e2e-chat-q4 on /tmp/nugget-run-cda180dc579d278e/chat.sock (ctx 1x8192, ngl 0, accel cpu) | simulated crash | start failed: provider error",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:09:37.345754Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime ready\",\"role\":\"chat\",\"model\":\"e2e-chat-q4\",\"listen\":\"/tmp/nugget-run-cda180dc579d278e/chat.sock\",\"accel\":\"cpu\"},\"target\":\"nugget_runtime::supervisor\"}",
+    "nuggetd.2026-10-31.log: {\"timestamp\":\"2026-10-31T20:09:37.353690Z\",\"level\":\"INFO\",\"fields\":{\"message\":\"local runtime routed\",\"provider\":\"local-chat\",\"model\":\"e2e-chat-q4\"},\"target\":\"nuggetd::local\"}"
+  ]
+}
