@@ -177,9 +177,14 @@ pub fn score_thread(got: &[GotMessage], truth: &[TruthMessage]) -> Value {
     let m = pairs.len() as f64;
     let precision = (!got.is_empty()).then(|| m / got.len() as f64);
     let recall = (!truth.is_empty()).then(|| m / truth.len() as f64);
+    // `None` is "not claimed": right for other people's messages, wrong for the user's own
+    // (Double Tap must know which messages the user wrote).
     let from_me_right = pairs
         .iter()
-        .filter(|(gi, ti)| got[*gi].from_me == Some(truth[*ti].from_me))
+        .filter(|(gi, ti)| match got[*gi].from_me {
+            Some(v) => v == truth[*ti].from_me,
+            None => !truth[*ti].from_me,
+        })
         .count();
     let (from_me_ok, from_me_accuracy) = if pairs.is_empty() {
         (None, None)
@@ -471,8 +476,17 @@ mod tests {
         assert_eq!(s["matched"], 3);
         assert_eq!(s["precision"], 0.75);
         assert_eq!(s["recall"], 1.0);
+        assert_eq!(s["from_me_ok"], true);
+        assert_eq!(s["from_me_accuracy"], 1.0);
+        // The user's own message must be claimed; a wrong claim is wrong.
+        let got2 = [
+            g("Are we still on for Thursday?", Some(true)),
+            g("Yes, 3pm works for me.", None),
+            g("Great, see you then", None),
+        ];
+        let s = score_thread(&got2, &truth);
         assert_eq!(s["from_me_ok"], false);
-        assert_eq!(s["from_me_accuracy"], 0.667);
+        assert_eq!(s["from_me_accuracy"], 0.333);
         // Each truth message is matched at most once.
         let dup = [
             g("Yes, 3pm works for me.", Some(true)),

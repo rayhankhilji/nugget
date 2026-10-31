@@ -77,6 +77,7 @@ jobs:
       - name: App matrix
         env:
           NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
           NUGGET_A11Y_RUNNER: macos-latest
         run: |
           mkdir -p "$RUNNER_TEMP/a11y-apps"
@@ -165,6 +166,7 @@ jobs:
       - name: App matrix
         env:
           NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
           NUGGET_A11Y_RUNNER: ${{ matrix.os }}
         shell: bash
         run: |
@@ -232,6 +234,7 @@ jobs:
       - name: App matrix
         env:
           NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
           NUGGET_A11Y_RUNNER: ubuntu-24.04
         run: |
           mkdir -p "$RUNNER_TEMP/a11y-apps"
