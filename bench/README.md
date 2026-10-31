@@ -3248,15 +3248,41 @@ Run [41234041743](https://github.com/rayhankhilji/nugget/actions/runs/4123404174
 | Asks during sync citing a supporting item | 2/6 | **6/6** |
 | `search` during sync p50 / p95 | 40 ms / 52 ms | 98 ms / 367 ms |
 
+Run [41235376197](https://github.com/rayhankhilji/nugget/actions/runs/41235376197): before
+`7add95a`, after `9246413` (final code: rule hits are triaged too, unknown counts as sensitive,
+review fixes); 4 vCPUs, AMD EPYC 7763 (a slower runner than above).
+
+| | Before | After |
+|---|---|---|
+| Half the items searchable | 1,540 s | **28 s** |
+| All 315 items searchable | 3,116 s | **46 s** |
+| Fully triaged | 3,116 s | **2,373 s** |
+| Freshness p50 / p95 | 616 s / 924 s | **7.7 s / 16.0 s** |
+| Items without chunks | 98 | **0** |
+| GG2 recall probes found (`search`) | 6/10 | **10/10** |
+| Boiler email / onboarding invite (GG2-7) first found | never / never | **27 s / 12 s** |
+| Ask during sync: time to first token p50 / max | 56.6 s / 62.1 s | **48.3 s** / 125.2 s |
+| Asks during sync citing a supporting item | 1/6 | **6/6** |
+| `search` during sync p50 / p95 | 50 ms / 70 ms | 207 ms / 516 ms |
+
+In this run triage labelled all 315 items with the model (rule hits get a junk label too), at about
+8 items per 40–55 s request on this CPU; it held off completely while the 6 Asks ran (`yielding`,
+0 done until the last Ask ended).
+
 Misses and caveats, not hidden:
-- The slowest Ask during the sync got slower (55.4 s vs 42.4 s): a triage batch can still be
-  mid-prefill when an Ask arrives on llama-server's single slot. Triage drops its request at once,
-  but the server may finish the step it is on.
+- The slowest Ask during the sync got slower (55.4 s vs 42.4 s above; 125.2 s vs 62.1 s here, one
+  question). Triage was yielding, so the likely cause is a batch already being prefilled when the
+  Ask arrived: triage drops its request at once, but llama-server's single slot may finish
+  processing that batch prompt (up to about 6,000 characters) first. Smaller batches
+  (`triage_batch_chars`) would bound this; not yet measured.
+- Fully triaged is only ~25 % faster than the old inline triage: batching cuts the per-request
+  overhead and decode, but prefill of the documents dominates on these CPUs.
 - `search` during the sync is slower because embedding now runs for every item up front, instead
   of being spread over 24 minutes behind triage.
-- The "idle" Ask (same 6 questions after settling) measured 193 ms p50 after vs 19.9 s before.
-  That is llama-server's prompt cache answering repeated prompts, not a real speed-up, so it is
-  left out of the table.
+- The "idle" Ask (same 6 questions after settling) measured 193 ms and 340 ms p50 after vs 19.9 s
+  and 49.1 s before. That is very likely llama-server's prompt cache answering repeated prompts
+  (the before runs re-ran triage between the two rounds), not a real speed-up, so it is left out
+  of the tables.
 
 ### Bugs the real models exposed
 
