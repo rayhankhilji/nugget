@@ -15,6 +15,7 @@
   - [IMAP and CalDAV](guide/sources-imap-caldav.md)
   - [Microsoft 365](guide/sources-microsoft.md)
   - [Slack, Notion, GitHub and Linear](guide/sources-saas.md)
+  - [iMessage, WhatsApp and Telegram](guide/sources-messaging.md)
 - [Search and Ask, with citations](guide/search-ask.md)
 - [The knowledge graph and vault](guide/knowledge.md)
 - [Connecting AI apps over MCP](guide/mcp.md)

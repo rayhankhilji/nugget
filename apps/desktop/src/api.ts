@@ -1462,8 +1462,9 @@ export type SaasKind = "slack" | "notion" | "github" | "linear";
 export const SAAS_KINDS: readonly SaasKind[] = ["slack", "notion", "github", "linear"];
 
 /** Every kind the Add source wizard offers. */
-export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind;
-export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS];
+export type ConnectorKind = SourceKind | MicrosoftKind | SaasKind | MessagingKind;
+// The messaging kinds are spelled out (MESSAGING_KINDS is declared at the end of the file).
+export const CONNECTOR_KINDS: readonly ConnectorKind[] = [...SOURCE_KINDS, ...MICROSOFT_KINDS, ...SAAS_KINDS, "imessage", "whatsapp", "telegram"];
 
 export function isConnectorKind(v: unknown): v is ConnectorKind {
   return typeof v === "string" && (CONNECTOR_KINDS as readonly string[]).includes(v);
@@ -2483,3 +2484,33 @@ export async function restoreAndRestart(
   onPhase("done");
   return conn;
 }
+
+// ---- II1: messaging imports ----
+// Kinds of `crates/nugget-connector-messaging`; settings keys mirror that crate's `lib.rs`.
+
+/** Local message history: the macOS Messages database, WhatsApp chat exports, Telegram Desktop exports. */
+export type MessagingKind = "imessage" | "whatsapp" | "telegram";
+export const MESSAGING_KINDS: readonly MessagingKind[] = ["imessage", "whatsapp", "telegram"];
+
+/** `sources.add` settings of the messaging kinds. Absent keys take the connector's defaults. */
+export interface MessagingSettings {
+  /** Default `true`: documents are marked sensitive (kept away from cloud models and embeddings). */
+  private?: boolean;
+  /** Only messages newer than this many days (≥ 1). Absent: everything. */
+  since_days?: number;
+  /** Default `true`. */
+  include_groups?: boolean;
+  /** iMessage: default `~/Library/Messages/chat.db`. */
+  db_path?: string;
+  /** iMessage: names from the macOS address book (default `true`). */
+  contacts?: boolean;
+  /** WhatsApp: the folder watched for "Export chat" files. */
+  folder?: string;
+  /** WhatsApp: the user's own name as it appears in the exports. */
+  me?: string;
+  /** Telegram: an export folder or its `result.json`. */
+  path?: string;
+}
+
+/** The daemon's error when macOS keeps the Messages database from Nugget (Full Disk Access is off). */
+export const needsFullDiskAccess = (message: string | null | undefined): boolean => /full disk access/i.test(message ?? "");

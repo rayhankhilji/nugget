@@ -5,6 +5,7 @@ import {
   events,
   isMethodNotFound,
   mergeSources,
+  needsFullDiskAccess,
   sourcesFromChange,
   type IngestProgress,
   type SourceInfo,
@@ -19,6 +20,7 @@ import { Badge, EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Progre
 import { DeviceSignInDialog } from "../sources/auth";
 import { connectMode, isGoogleKind, isSaasKind } from "../sources/kinds";
 import { KindIcon } from "../sources/KindIcon";
+import { FullDiskAccessSteps } from "../sources/MessagingForm";
 import { TOKEN_LABEL } from "../sources/SaasForm";
 
 export function SourcesPage() {
@@ -378,6 +380,11 @@ function SourceRow({
               <span className="block">{signIn || mode === "password" || mode === "token" ? t("sources.errorHintAuth") : t("sources.errorHint")}</span>
             )}
             {!health && isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
+          </div>
+        )}
+        {s.kind === "imessage" && hasProblem(s) && needsFullDiskAccess(s.last_error ?? s.health?.reason) && (
+          <div className="note small messaging-error">
+            <FullDiskAccessSteps />
           </div>
         )}
         {!hasProblem(s) && (s.health?.item_errors ?? 0) > 0 && (
