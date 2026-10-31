@@ -6,7 +6,7 @@ name: E2E
 
 on:
   push:
-    branches: [main, ff/mcp-plugins] # TEMP-FF4
+    branches: [main]
   pull_request:
   workflow_dispatch:
 

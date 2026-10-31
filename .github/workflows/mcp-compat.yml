@@ -26,7 +26,7 @@ on:
       - "apps/desktop/e2e/daemon.mjs"
       - ".github/workflows/mcp-compat.yml"
   push:
-    branches: [main, ff/mcp-plugins] # TEMP-FF4
+    branches: [main]
     paths:
       - "crates/nugget-mcp/**"
       - "crates/nuggetd/src/mcp*.rs"
