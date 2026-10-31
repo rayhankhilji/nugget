@@ -43,7 +43,7 @@ pub(crate) fn extract(data: &[u8], ctx: &Ctx<'_>) -> Result<Extracted> {
             }
         }
     }
-    let text = full[body_start..].to_owned();
+    let text = strip_hidden(&full[body_start..]);
     drop(full);
 
     let scan = scan(&text);
@@ -189,9 +189,109 @@ impl Ranges {
     }
 
     fn contains(&self, p: usize) -> bool {
-        let i = self.0.partition_point(|&(s, _)| s <= p);
-        i > 0 && p < self.0[i - 1].1
+        self.containing(p).is_some()
     }
+
+    fn containing(&self, p: usize) -> Option<(usize, usize)> {
+        let i = self.0.partition_point(|&(s, _)| s <= p);
+        (i > 0 && p < self.0[i - 1].1).then(|| self.0[i - 1])
+    }
+}
+
+/// `text` without what a Markdown renderer never shows: HTML comments (in HTML blocks and inline
+/// HTML, never in code) and comment-style link reference definitions (`[//]: # (...)`,
+/// `[comment]: <> (...)`: a definition whose destination is `#` or empty).
+fn strip_hidden(text: &str) -> String {
+    if !text.contains("<!--") && !text.contains("]:") {
+        return text.to_owned();
+    }
+    let mut html = Vec::new();
+    let mut blocks = Vec::new();
+    let mut parser = Parser::new_ext(text, OPTIONS).into_offset_iter();
+    for (ev, range) in parser.by_ref() {
+        match ev {
+            Event::Start(Tag::HtmlBlock) | Event::InlineHtml(_) | Event::Html(_) => {
+                html.push((range.start, range.end));
+            }
+            _ => {}
+        }
+        if let Event::Start(_) = ev {
+            blocks.push((range.start, range.end));
+        }
+    }
+    let comment_labels: Vec<String> = parser
+        .reference_definitions()
+        .iter()
+        .filter(|(_, d)| matches!(d.dest.trim(), "" | "#"))
+        .map(|(label, _)| label.to_lowercase())
+        .collect();
+    let html = Ranges::merged(html);
+    let blocks = Ranges::merged(blocks);
+
+    let mut cut: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while let Some(rel) = text[i..].find("<!--") {
+        let s = i + rel;
+        i = s + 4;
+        let Some((_, range_end)) = html.containing(s) else {
+            continue;
+        };
+        // `<!-->` and `<!--->` are complete (empty) comments; an unclosed one runs to the end of
+        // its HTML block.
+        let end = text[s + 2..]
+            .find("-->")
+            .map_or(range_end, |e| s + 2 + e + 3);
+        cut.push((s, end));
+        i = end;
+    }
+    if !comment_labels.is_empty() {
+        let mut pos = 0;
+        for line in text.split_inclusive('\n') {
+            let start = pos;
+            pos += line.len();
+            if blocks.contains(start) {
+                continue;
+            }
+            if let Some(label) = comment_definition_label(line)
+                && comment_labels.contains(&label.to_lowercase())
+            {
+                cut.push((start, pos));
+            }
+        }
+    }
+    if cut.is_empty() {
+        return text.to_owned();
+    }
+    let cut = Ranges::merged(cut);
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for &(a, b) in &cut.0 {
+        out.push_str(&text[at..a]);
+        at = b;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// The label of a one-line link reference definition whose destination is `#` or `<>`.
+fn comment_definition_label(line: &str) -> Option<&str> {
+    let indent = line.len() - line.trim_start_matches(' ').len();
+    if indent > 3 {
+        return None;
+    }
+    let rest = line[indent..].strip_prefix('[')?;
+    let close = rest.find("]:")?;
+    let label = &rest[..close];
+    if label.trim().is_empty() || label.contains(['[', ']']) {
+        return None;
+    }
+    let dest = rest[close + 2..].trim_start();
+    let after = dest.strip_prefix("<>").or_else(|| dest.strip_prefix('#'))?;
+    after
+        .chars()
+        .next()
+        .is_none_or(char::is_whitespace)
+        .then_some(label)
 }
 
 struct Scan {
@@ -203,12 +303,14 @@ struct Scan {
     md_links: Vec<(usize, String)>,
 }
 
+const OPTIONS: Options = Options::ENABLE_TABLES
+    .union(Options::ENABLE_FOOTNOTES)
+    .union(Options::ENABLE_STRIKETHROUGH)
+    .union(Options::ENABLE_TASKLISTS)
+    .union(Options::ENABLE_MATH);
+
 fn scan(text: &str) -> Scan {
-    let opts = Options::ENABLE_TABLES
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_MATH;
+    let opts = OPTIONS;
     let mut tracker = SectionTracker::default();
     let mut first_h1 = None;
     let mut code = Vec::new();

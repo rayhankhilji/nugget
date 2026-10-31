@@ -1403,16 +1403,33 @@ fn is_sensitive(m: &Value) -> bool {
 }
 
 fn item_text(store: &Store, item: &Item) -> Result<String> {
-    if let Some(t) = &item.text {
-        return Ok(t.clone());
+    let text = match &item.text {
+        Some(t) => t.clone(),
+        None => {
+            let ords: Vec<u32> = (0..FALLBACK_CHUNKS).collect();
+            let chunks = store.get_chunks_by_ord(&item.item, &ords)?;
+            chunks
+                .into_iter()
+                .map(|c| c.text)
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
+    };
+    Ok(without_text_header(&item.metadata, text))
+}
+
+/// The message without the `From:` / `Date:` lines extraction puts before a mail's body
+/// (`metadata.extracted.text_header`): they are not the user's writing.
+fn without_text_header(meta: &Value, text: String) -> String {
+    match meta
+        .get("extracted")
+        .and_then(|e| e.get("text_header"))
+        .and_then(Value::as_str)
+        .filter(|h| !h.is_empty())
+    {
+        Some(h) if text.starts_with(h) => text[h.len()..].to_owned(),
+        _ => text,
     }
-    let ords: Vec<u32> = (0..FALLBACK_CHUNKS).collect();
-    let chunks = store.get_chunks_by_ord(&item.item, &ords)?;
-    Ok(chunks
-        .into_iter()
-        .map(|c| c.text)
-        .collect::<Vec<_>>()
-        .join("\n\n"))
 }
 
 /// The parts of one of the user's messages a sample is made from.
@@ -1518,6 +1535,20 @@ mod tests {
     use nugget_store::{NewChunk, NewItem, content_hash};
 
     use super::*;
+
+    #[test]
+    fn the_mail_text_header_is_not_the_users_writing() {
+        let meta = serde_json::json!({"extracted": {"text_header": "From: Me <me@x.example>\nDate: 2026-10-20\n\n"}});
+        let text = "From: Me <me@x.example>\nDate: 2026-10-20\n\nHi Priya,\nThanks!".to_owned();
+        assert_eq!(without_text_header(&meta, text), "Hi Priya,\nThanks!");
+        // Older items (no header) and a header that doesn't match are left alone.
+        let plain = "Hi Priya,\nThanks!".to_owned();
+        assert_eq!(
+            without_text_header(&serde_json::json!({}), plain.clone()),
+            plain
+        );
+        assert_eq!(without_text_header(&meta, plain.clone()), plain);
+    }
 
     /// A sample as the earlier implementation held it.
     struct RefSample {

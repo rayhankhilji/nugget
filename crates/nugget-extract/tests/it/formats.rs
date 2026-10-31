@@ -274,7 +274,12 @@ fn mail_plain_with_quotes_signature_attachment() {
     assert_eq!(e.title.as_deref(), Some("Re: Lunch on Friday?"));
     assert_eq!(
         e.text,
-        "Friday works. Let's try the café at noon.\n\nDetails: https://example.com/menu"
+        "From: Alice Smith <alice@example.com>\nDate: 2024-01-15\n\n\
+         Friday works. Let's try the café at noon.\n\nDetails: https://example.com/menu"
+    );
+    assert_eq!(
+        e.metadata["text_header"],
+        "From: Alice Smith <alice@example.com>\nDate: 2024-01-15\n\n"
     );
     let m = &e.metadata;
     assert_eq!(m["from"], "Alice Smith <alice@example.com>");
@@ -304,7 +309,10 @@ fn mail_plain_with_quotes_signature_attachment() {
 fn mail_html_only() {
     let e = run("message/rfc822", &fixture("html_only.eml"));
     assert_eq!(e.title.as_deref(), Some("Weekly digest"));
-    assert_eq!(e.text, "Thanks for the update!\n\nRead more at the site.");
+    assert_eq!(
+        e.text,
+        "From: newsletter@example.org\nDate: 2024-01-16\n\nThanks for the update!\n\nRead more at the site."
+    );
     assert_eq!(e.metadata["signature"], "Newsletter Team");
     assert!(
         e.metadata["quoted"]
