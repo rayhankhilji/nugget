@@ -231,6 +231,10 @@ impl Knowledge {
                 Err(e) => s.last_error = Some(e.to_string()),
             }
         });
+        if res.is_err() {
+            // The carried plan was dropped; the next run plans afresh.
+            self.forget_plan();
+        }
         res.map(|(stats, _)| stats)
     }
 
@@ -368,6 +372,15 @@ impl Knowledge {
         self.inner.stopping.store(false, Ordering::Relaxed);
     }
 
+    fn forget_plan(&self) {
+        self.inner.plan_left.store(0, Ordering::Relaxed);
+        *self
+            .inner
+            .planned_through
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
     /// Wait until no run is in progress (a run started later is not waited for).
     pub async fn idle(&self) {
         drop(self.inner.run_lock.lock().await);
@@ -397,16 +410,21 @@ impl Knowledge {
         {
             unplanned.extend(changes.into_iter().map(|c| c.item));
         }
-        // While a plan is open it already holds the deferred items.
-        let deferred = if left > 0 {
-            0
-        } else {
-            state
-                .deferred
-                .iter()
-                .filter(|d| !unplanned.contains(*d))
-                .count()
-        };
+        // A carried plan already holds the deferred items it planned (while a run is going,
+        // its own may be counted twice until it ends).
+        let carried: HashSet<nugget_core::ids::ItemRef> = self
+            .inner
+            .carry
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+            .map(|(_, p)| p.upserts.iter().map(|w| w.item.clone()).collect())
+            .unwrap_or_default();
+        let deferred = state
+            .deferred
+            .iter()
+            .filter(|d| !unplanned.contains(&d.item) && !carried.contains(&d.item))
+            .count();
         Ok(left + unplanned.len() as u64 + deferred as u64)
     }
 
@@ -434,6 +452,7 @@ impl Knowledge {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .take();
+        self.forget_plan();
         let feed = self.inner.feed.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
             let mut state = State::load(feed.as_ref())?;

@@ -130,7 +130,13 @@ fn plan_deferred(feed: &dyn ItemFeed, p: &mut Plan) -> Result<()> {
     }
     let mut planned: HashSet<ItemRef> = p.deletes.iter().cloned().collect();
     planned.extend(p.upserts.iter().map(|w| w.item.clone()));
-    for item in p.state.deferred.clone() {
+    for item in p
+        .state
+        .deferred
+        .iter()
+        .map(|d| d.item.clone())
+        .collect::<Vec<_>>()
+    {
         if planned.contains(&item) {
             continue;
         }
@@ -141,7 +147,7 @@ fn plan_deferred(feed: &dyn ItemFeed, p: &mut Plan) -> Result<()> {
         let prev = p.ledgers[&item.source].get(&item.key).cloned();
         let Some(prev) = prev else {
             // Forgotten meanwhile (reset, deletion): nothing to protect any more.
-            p.state.deferred.retain(|d| *d != item);
+            p.state.deferred.retain(|d| d.item != item);
             continue;
         };
         planned.insert(item.clone());
@@ -790,9 +796,6 @@ impl<'a> Session<'a> {
                 // Keep the earlier facts; the ledger keeps describing the version they are
                 // from, and the next plans pick the item up again.
                 self.stats.items_deferred += 1;
-                if !self.state.deferred.contains(&w.item) {
-                    self.state.deferred.push(w.item.clone());
-                }
                 return Ok(false);
             }
             Ok(Some(llm)) => {
@@ -827,7 +830,32 @@ impl<'a> Session<'a> {
     }
 
     fn undefer(&mut self, item: &ItemRef) {
-        self.state.deferred.retain(|d| d != item);
+        self.state.deferred.retain(|d| d.item != *item);
+    }
+
+    /// Keep `item` deferred. `failed`: the model step ran for it and did not finish, which
+    /// counts as an attempt; returns `false` (and forgets the item) once attempts are used up,
+    /// so it is extracted without the model rather than waiting forever.
+    fn defer(&mut self, item: &ItemRef, failed: bool) -> bool {
+        let max = self.inner.cfg.llm.max_attempts.max(1);
+        let pos = match self.state.deferred.iter().position(|d| d.item == *item) {
+            Some(i) => i,
+            None => {
+                self.state.deferred.push(crate::state::Deferred {
+                    item: item.clone(),
+                    attempts: 0,
+                });
+                self.state.deferred.len() - 1
+            }
+        };
+        if failed {
+            self.state.deferred[pos].attempts += 1;
+            if self.state.deferred[pos].attempts >= max {
+                self.state.deferred.remove(pos);
+                return false;
+            }
+        }
+        true
     }
 
     /// Whether the model is wanted for `item` but cannot run for it now: this run's request
@@ -851,6 +879,7 @@ impl<'a> Session<'a> {
         had_model: bool,
     ) -> Result<Option<u32>> {
         if had_model && self.llm_blocked(item) {
+            self.defer(&item.item, false);
             return Ok(None);
         }
         let date = crate::extract::item_date(item);
@@ -875,9 +904,18 @@ impl<'a> Session<'a> {
             let name = ex.me_name.take();
             self.learn_me(&emails, name.as_deref())?;
         }
+        let failed_before = self.stats.llm_failed_requests;
         let llm = self.llm_step(item, &chunks, &mut ex, prev_llm).await;
-        if had_model && llm >= LLM_PENDING && self.inner.stopping() {
-            // The request was cut off by shutdown (the runtime stops with the daemon).
+        let failed = self.stats.llm_failed_requests > failed_before;
+        if had_model && self.inner.stopping() && (llm >= LLM_PENDING || failed) {
+            // A request was cut off by shutdown (the runtime stops with the daemon): even a
+            // partial answer would replace the full one. Not counted as an attempt.
+            self.defer(&item.item, false);
+            return Ok(None);
+        }
+        if had_model && llm >= LLM_PENDING && self.defer(&item.item, true) {
+            // No provider, failed requests, or the budget ran out within the item: keep the
+            // earlier model facts for now (bounded by `max_attempts`).
             return Ok(None);
         }
         // Retracted only now, once the model step is known to have run (or not to be wanted).

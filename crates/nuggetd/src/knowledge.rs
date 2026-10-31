@@ -206,6 +206,8 @@ impl KnowledgeService {
         // its plan carries the rest over to the next run, which does not plan again, so commits
         // that arrive meanwhile are planned only by a run after the chain.
         let mut chain_from: Option<u64> = None;
+        // Some run of the chain left items for the model after spending its request budget.
+        let mut chain_deferred = false;
         loop {
             let deadline = if self.cfg.enabled {
                 [due, periodic].into_iter().flatten().min()
@@ -256,15 +258,18 @@ impl KnowledgeService {
                     let from = *chain_from.get_or_insert(seen);
                     match self.run_now().await {
                         Ok(stats) => {
+                            chain_deferred |= deferred_for_budget(&stats);
+                            if run_again(&stats, from, *committed.borrow(), chain_deferred) {
+                                due = Some(Instant::now());
+                            }
                             if stats.remaining == 0 {
                                 chain_from = None;
-                            }
-                            if run_again(&stats, from, *committed.borrow()) {
-                                due = Some(Instant::now());
+                                chain_deferred = false;
                             }
                         }
                         Err(e) => {
                             chain_from = None;
+                            chain_deferred = false;
                             tracing::warn!(error = %e, "knowledge run failed");
                         }
                     }
@@ -415,11 +420,18 @@ impl KnowledgeService {
 /// rest is carried over); or the chain of carried-over runs that began when the commit counter
 /// was `chain_from` is over and commits arrived since (a carried plan never plans again, so
 /// they are not in it); or items were left for the model because this run's request budget
-/// ran out.
-fn run_again(stats: &RunStats, chain_from: u64, committed: u64) -> bool {
-    stats.remaining > 0
-        || committed != chain_from
-        || (stats.items_deferred > 0 && stats.llm_requests > 0)
+/// ran out somewhere in the chain (`chain_deferred`, see [`deferred_for_budget`]).
+fn run_again(stats: &RunStats, chain_from: u64, committed: u64, chain_deferred: bool) -> bool {
+    stats.remaining > 0 || committed != chain_from || chain_deferred
+}
+
+/// Whether a run left items for the model because its request budget ran out while it made
+/// progress with the model (so a fresh budget will get further). A run that extracted nothing
+/// (every request failed, power constrained) does not count: that would loop.
+fn deferred_for_budget(stats: &RunStats) -> bool {
+    stats.items_deferred > 0
+        && stats.llm_requests > stats.llm_failed_requests
+        && stats.items_processed > 0
 }
 
 /// Sleep until `deadline`, or forever without one.
@@ -498,24 +510,34 @@ mod tests {
             ..RunStats::default()
         };
         // Budget cut: continue the chain.
-        assert!(run_again(&carried, 7, 7));
+        assert!(run_again(&carried, 7, 7, false));
         // Chain over, nothing committed since it started: sleep.
-        assert!(!run_again(&done, 7, 7));
+        assert!(!run_again(&done, 7, 7, false));
         // Chain over, commits arrived while it ran (QA GG5-7): plan again now.
-        assert!(run_again(&done, 7, 9));
-        // Items deferred because the request budget ran out: retry with a fresh budget.
-        let deferred = RunStats {
+        assert!(run_again(&done, 7, 9, false));
+        // Items deferred somewhere in the chain because the request budget ran out.
+        assert!(run_again(&done, 7, 7, true));
+        let budget = RunStats {
             items_deferred: 2,
+            items_processed: 3,
             llm_requests: 4,
             ..RunStats::default()
         };
-        assert!(run_again(&deferred, 7, 7));
-        // Deferred without any request (power constrained): wait for a later trigger.
+        assert!(deferred_for_budget(&budget));
+        // No progress with the model (constrained, or every request failed): no busy loop.
         let constrained = RunStats {
             items_deferred: 2,
             ..RunStats::default()
         };
-        assert!(!run_again(&constrained, 7, 7));
+        assert!(!deferred_for_budget(&constrained));
+        let failing = RunStats {
+            items_deferred: 2,
+            items_processed: 1,
+            llm_requests: 4,
+            llm_failed_requests: 4,
+            ..RunStats::default()
+        };
+        assert!(!deferred_for_budget(&failing));
     }
 
     #[test]
