@@ -1,0 +1,10 @@
+label	second_exit	second_ms	first_alive	first_log_after
+noarg	0	45	yes	
+search	0	47	yes	2026-10-31T23:05:43.117810Z  INFO nugget_desktop::deeplink: opening a link kind="search" 
+ask	0	48	yes	
+creds	0	46	yes	2026-10-31T23:05:46.467155Z  WARN nugget_desktop::deeplink: ignored a link error=unexpected parts in the link 
+unknown-page	0	45	yes	2026-10-31T23:05:48.140077Z  WARN nugget_desktop::deeplink: ignored a link error=unknown page 
+rlo	0	46	yes	2026-10-31T23:05:49.813513Z  INFO nugget_desktop::deeplink: opening a link kind="search" 
+plugin-file	0	47	yes	2026-10-31T23:05:51.489421Z  INFO nugget_desktop::deeplink: opening a link kind="plugin" 
+plugin-symlink	0	46	yes	2026-10-31T23:05:53.161826Z  WARN nugget_desktop::deeplink: ignored a link error=not a .nuggetplugin file 
+item	0	47	yes	2026-10-31T23:05:54.842553Z  INFO nugget_desktop::deeplink: opening a link kind="item" 
