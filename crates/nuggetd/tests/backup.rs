@@ -166,7 +166,9 @@ impl Running {
             .unwrap();
     }
 
-    /// Wait for the daemon to stop by itself (after a staged restore).
+    /// Wait for the daemon to stop by itself (after a staged restore). Only the Unix-only
+    /// in-process restore tests use it.
+    #[cfg_attr(not(unix), allow(dead_code))]
     async fn exited(self) {
         drop(self.client);
         drop(self.store);

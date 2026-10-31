@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, ff/data-safety] # TEMP(FF1): remove before final push
+    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
