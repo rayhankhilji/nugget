@@ -124,7 +124,7 @@ Briefs in `docs/waves/wave-ee/`. Each lead runs a build layer and an independent
 |---|---|---|---|
 | EE1 | `ee/entity-resolution` | session_01CTjRSqYumRoCNPsSqWU2cj | knowledge entity resolution (nicknames, job changes) to entity F1 ≥ 0.8 |
 | EE2 | `ee/draft-recall` | session_01CTjRSt5sQsEtmsjpgvdjDp | draft fact recall ≥ 0.8, no invented attachments, read-ahead latency kept |
-| EE3 | `ee/ask-quality` | session_01CTjRSuP6na1rnf1rpacnuU | Ask answer-quality suite with real models (correctness, citations, abstention) and fixes |
+| EE3 | `ee/ask-quality` | session_01CTjRSuP6na1rnf1rpacnuU | Ask answer-quality suite with real models (correctness, citations, abstention) and fixes (merged) |
 | EE4 | `ee/security-review-2` | session_01CTjRSrVUg4uRkQ2yhjxPSi | security review of AA, BB, CC and manifest v4; fixes with regression tests (merged) |
 | EE5 | `ee/release-readiness` | session_01CTjRSqf3cixr49jrhBuKmL | Windows cloud signing path, throwaway-key release rehearsal, release checklist, status page |
 | EE6 | `ee/ui-polish` | session_01CTjRSuMKsfCZJQtWc4LnsJ | page-by-page UI review in light/dark/RTL/de, fixes, visual regression check (merged) |
@@ -137,7 +137,7 @@ Briefs in `docs/waves/wave-ff/`. Each lead runs a build layer and an independent
 | FF1 | `ff/data-safety` | session_01CTjRSquqrkkGYfv4TUQEat | crash-safety harness, encrypted backup/restore, open-format export, corruption recovery |
 | FF2 | `ff/connector-hardening` | session_01CTjRSsffsNYDoWtbuPyEx5 | connector conformance suite (pagination, 429s, token refresh, deltas, crashes), fixes, sync status (merged) |
 | FF3 | `ff/a11y-apps` | session_01CTjRSrGRrLv1FvtvRdVkMp | Double Tap read/insert matrix across native editors, browsers and rich-editor frameworks on 3 OSes |
-| FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins |
+| FF4 | `ff/mcp-plugins` | session_01CTjRSrAf5oakXNcKynQoQK | MCP compatibility with official SDK clients, plugin SDK and three first-party plugins (merged) |
 
 ## Wave GG (independent QA, new files only): cloud sessions from 5f1998e
 Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every finding reproduced by a second subagent; findings go to the owning build team through the orchestrator.
