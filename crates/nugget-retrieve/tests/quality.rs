@@ -17,7 +17,8 @@ use nugget_infer::{
     StopReason,
 };
 use nugget_retrieve::{
-    HttpReranker, HttpRerankerConfig, Reranker, RetrieveConfig, Retriever, RewriteMethod,
+    ContextOptions, HttpReranker, HttpRerankerConfig, Reranker, RetrieveConfig, Retriever,
+    RewriteMethod,
 };
 use nugget_store::{NewChunk, NewItem, Store, content_hash};
 use serde_json::json;
@@ -440,6 +441,292 @@ async fn date_phrases_filter_by_modification_time() {
     assert_eq!(ctx.response.citations.len(), 1);
 }
 
+/// A mail, an event and a note as a folder copied today: every file's modification time is
+/// today, but the mail keeps its `Date` and the event its start (GG2-3).
+fn copied_folder() -> Store {
+    let store = Store::open_in_memory().unwrap();
+    let put = |key: &str, title: &str, text: &str, meta: serde_json::Value| {
+        let item = NewItem::new("files", key, content_hash(text))
+            .with_title(title)
+            .with_modified_at(at("2026-03-04T08:00:00Z"))
+            .with_metadata(meta);
+        store.upsert_item(&item).unwrap();
+        store
+            .replace_chunks(&item.item, &[NewChunk::text(text)])
+            .unwrap();
+    };
+    put(
+        "atlas-steering.ics",
+        "Atlas steering meeting",
+        "Atlas steering meeting with the leads.",
+        json!({"extracted": {"start": "2026-02-24T09:30:00Z"}}),
+    );
+    put(
+        "onboarding-call.ics",
+        "Onboarding call meeting",
+        "Onboarding call meeting for the new hire.",
+        json!({"extracted": {"start": "2026-03-12T15:00:00Z"}}),
+    );
+    put(
+        "invoice.eml",
+        "Invoice from Lumen Fiber",
+        "Your Lumen Fiber bill: 49 EUR.",
+        json!({"extracted": {"date": "2026-02-26T07:00:00+01:00"}}),
+    );
+    put(
+        "invoice-old.eml",
+        "Invoice from Lumen Fiber",
+        "Your Lumen Fiber bill: 45 EUR.",
+        json!({"extracted": {"date": "2025-12-26T07:00:00+01:00"}}),
+    );
+    put(
+        "dentist.ics",
+        "Dentist appointment",
+        "Dentist appointment with Dr. Lin.",
+        json!({"start": {"date_time": "2026-03-10T08:00:00Z"}}),
+    );
+    store
+}
+
+#[tokio::test]
+async fn items_are_dated_by_their_event_or_mail_date_not_the_file_time() {
+    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
+    // Last week (23 Feb – 1 Mar): the meeting held then, not next week's.
+    let res = r
+        .search("What meetings did I have last week?", 5)
+        .await
+        .unwrap();
+    assert!(res.date.as_ref().unwrap().applied);
+    assert_eq!(keys(&res.items), ["atlas-steering.ics"]);
+    // Citations carry the event's and the mail's own dates.
+    let ctx = r.pack_context("meeting", 2_000).await.unwrap();
+    let dates: HashMap<&str, Option<&str>> = ctx
+        .response
+        .citations
+        .iter()
+        .map(|c| (c.item.key.as_str(), c.date.as_deref()))
+        .collect();
+    assert_eq!(dates["atlas-steering.ics"], Some("2026-02-24"));
+    assert_eq!(dates["onboarding-call.ics"], Some("2026-03-12"));
+    let ctx = r.pack_context("Lumen Fiber bill", 2_000).await.unwrap();
+    assert!(
+        ctx.response
+            .citations
+            .iter()
+            .any(|c| c.date.as_deref() == Some("2026-02-26"))
+    );
+    // This week holds none of them (the files were all copied today).
+    let res = r.search("meetings this week", 5).await.unwrap();
+    assert!(!res.date.as_ref().unwrap().applied);
+}
+
+#[tokio::test]
+async fn future_phrases_find_upcoming_events() {
+    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
+    // GG2-12: next week is 9–15 March.
+    let res = r.search("dentist next week", 5).await.unwrap();
+    assert!(res.date.as_ref().unwrap().applied);
+    assert_eq!(keys(&res.items), ["dentist.ics"]);
+    let res = r.search("meetings next week", 5).await.unwrap();
+    assert_eq!(keys(&res.items), ["onboarding-call.ics"]);
+}
+
+#[tokio::test]
+async fn generic_period_questions_list_the_period() {
+    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
+    // GG2-11: nothing but the period is asked, so its items are listed by date.
+    let res = r.search("Summarise last week", 10).await.unwrap();
+    let date = res.date.as_ref().unwrap();
+    assert!(date.applied && date.listed);
+    assert_eq!(keys(&res.items), ["invoice.eml", "atlas-steering.ics"]);
+    // A future period: soonest first.
+    let res = r.search("What do I have next week?", 10).await.unwrap();
+    assert!(res.date.as_ref().unwrap().listed);
+    assert_eq!(keys(&res.items), ["dentist.ics", "onboarding-call.ics"]);
+    // A weekday next to a date is part of it (GG2-12).
+    let res = r
+        .search("What's on my calendar on Tuesday 10 March 2026?", 10)
+        .await
+        .unwrap();
+    assert!(res.date.as_ref().unwrap().listed);
+    assert_eq!(keys(&res.items), ["dentist.ics"]);
+    // A topic is searched, not listed.
+    let res = r.search("dentist last week", 10).await.unwrap();
+    assert!(!res.date.as_ref().unwrap().listed);
+}
+
+#[tokio::test]
+async fn now_and_latest_prefer_the_newest_item() {
+    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
+    // GG2-13: the December bill matches "45" as well as the February one matches "49".
+    let res = r
+        .search("How much is my Lumen Fiber bill now?", 5)
+        .await
+        .unwrap();
+    assert_eq!(keys(&res.items)[0], "invoice.eml");
+    let res = r.search("latest Lumen Fiber bill", 5).await.unwrap();
+    assert_eq!(keys(&res.items)[0], "invoice.eml");
+}
+
+#[tokio::test]
+async fn contexts_can_ignore_date_phrases() {
+    let r = Retriever::new(copied_folder(), None, cfg()).with_reference_time(now());
+    // GG1-6: a thread saying "last week" must not filter out the facts a reply needs.
+    let q = "Did the Lumen Fiber payment from last week go through?";
+    let filtered = r.pack_context(q, 2_000).await.unwrap();
+    assert!(filtered.date.is_some());
+    let thread = r
+        .pack_context_with(
+            q,
+            2_000,
+            ContextOptions {
+                ignore_dates: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(thread.date, None);
+    assert!(thread.response.text.contains("Lumen Fiber"));
+}
+
+/// Notes added so a test store is big enough for the relevance floor.
+const FILLER_NOTES: usize = 120;
+
+/// GG2-8: QA's "not in your items" questions against near misses. A passage without the
+/// question's rare key term ("therapy", "Tokyo", "Berlin") is marked a partial match, so the
+/// answer prompt can say it is not in the items.
+#[tokio::test]
+async fn near_misses_are_marked() {
+    let store = Store::open_in_memory().unwrap();
+    for (key, title, text) in [
+        (
+            "physio",
+            "Physio booking",
+            "Physio session with Ines Duarte confirmed for Monday 2 November 2026 at 17:15.",
+        ),
+        (
+            "ryokan",
+            "Kyoto ryokan",
+            "Booked the ryokan Hanaya in Kyoto for three nights, hotel confirmation KX-2231.",
+        ),
+        (
+            "kyoto-flight",
+            "Flight to Kyoto",
+            "Flight to Kyoto (via Osaka) on 14 November, booking reference QF7.",
+        ),
+        (
+            "dentist",
+            "Dentist appointment",
+            "Dentist appointment with Dr. Lin on Tuesday at 09:00.",
+        ),
+        (
+            "car-service",
+            "Car service",
+            "Car service invoice: 289 USD paid.",
+        ),
+    ] {
+        add(&store, key, title, text, Some("2026-02-20T09:00:00Z"));
+    }
+    // Enough other notes for word counts to mean something (common words: session, book...).
+    for i in 0..FILLER_NOTES {
+        add(
+            &store,
+            &format!("note-{i}"),
+            &format!("Weekly note {i}"),
+            &format!(
+                "Note {i}: session planning, book club, hotel points, flight alerts, appointment reminders."
+            ),
+            Some("2026-01-10T09:00:00Z"),
+        );
+    }
+    let r = Retriever::new(store, None, cfg()).with_reference_time(now());
+    for q in [
+        "When is my therapy session?",
+        "Which hotel did I book in Tokyo?",
+        "When is my flight to Berlin?",
+    ] {
+        let ctx = r.pack_context(q, 2_000).await.unwrap();
+        assert!(!ctx.passages.is_empty(), "{q}");
+        assert!(
+            ctx.passages.iter().all(|p| p.partial),
+            "{q}: {:?}",
+            ctx.passages
+        );
+    }
+    // A real match is packed unmarked; the other passages that matched a common word are marked.
+    let ctx = r
+        .pack_context("When is my dentist appointment?", 2_000)
+        .await
+        .unwrap();
+    assert!(
+        ctx.response
+            .text
+            .starts_with("[1] Dentist appointment (notes)\n"),
+        "{}",
+        ctx.response.text
+    );
+    assert!(!ctx.passages[0].partial, "{:?}", ctx.passages);
+    assert!(ctx.passages.iter().skip(1).all(|p| p.partial));
+    // Thread text (drafts) is not marked.
+    let thread = r
+        .pack_context_with(
+            "When is my therapy session?",
+            2_000,
+            ContextOptions {
+                ignore_dates: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(thread.passages.iter().all(|p| !p.partial));
+}
+
+/// With a vector leg, near misses stay (the embedder may have found a real synonym) but are
+/// marked, so the model can tell them from an answer.
+#[tokio::test]
+async fn near_misses_are_marked_in_hybrid_contexts() {
+    let store = Store::open_in_memory().unwrap();
+    let emb = nugget_retrieve::eval::HashEmbedder::new(32, &[]);
+    let fillers: Vec<(String, String)> = (0..FILLER_NOTES)
+        .map(|i| {
+            (
+                format!("note-{i}"),
+                format!("Note {i}: planning and reminders."),
+            )
+        })
+        .collect();
+    for (key, text) in [
+        ("physio", "Physio session with Ines Duarte on Monday."),
+        ("standup", "Standup session notes for the team."),
+    ]
+    .into_iter()
+    .chain(fillers.iter().map(|(k, t)| (k.as_str(), t.as_str())))
+    {
+        let item = NewItem::new("notes", key, content_hash(text)).with_title(key);
+        store.upsert_item(&item).unwrap();
+        store
+            .replace_chunks(
+                &item.item,
+                &[NewChunk::embedded(text, emb.embed_text(text))],
+            )
+            .unwrap();
+    }
+    let router = Arc::new(Router::new(
+        vec![Arc::new(emb) as Arc<dyn Provider>],
+        HashMap::from([(Tier::Embedding, vec![ProviderId::new("hash-embedder")])]),
+    ));
+    let r = Retriever::new(store, Some(router), cfg()).with_reference_time(now());
+    let ctx = r
+        .pack_context("When is my therapy session?", 2_000)
+        .await
+        .unwrap();
+    assert!(!ctx.mode.is_text_only());
+    assert!(!ctx.response.citations.is_empty());
+    assert!(ctx.passages.iter().any(|p| p.partial), "{:?}", ctx.passages);
+}
+
 /// Items without a source modification time are filtered by the store's update time, and the
 /// items kept by the filter come back fully loaded (title, recency, packed text).
 #[tokio::test]
@@ -677,16 +964,21 @@ async fn rewrite_falls_back_without_a_usable_model() {
         RewriteMethod::Heuristic
     );
 
-    // Model errors, empty output, a timeout: the original query.
+    // Model errors, empty output, a reasoning block, a timeout: the heuristic rewrite.
     let failing = Arc::new(FakeChat::new("bad", Locality::OnDevice, Err(())));
     let empty = Arc::new(FakeChat::new(
         "empty",
         Locality::LocalNetwork,
         Ok("  \n\"\""),
     ));
+    let thinking = Arc::new(FakeChat::new(
+        "thinking",
+        Locality::OnDevice,
+        Ok("<think>\nThe user is asking about"),
+    ));
     let mut slow = FakeChat::new("slow", Locality::OnDevice, Ok("late"));
     slow.delay = Duration::from_secs(5);
-    for p in [failing, empty, Arc::new(slow)] {
+    for p in [failing, empty, thinking, Arc::new(slow)] {
         let r = Retriever::new(
             boiler_store(),
             Some(chat_router(vec![(Tier::Light, p.clone())])),
@@ -695,9 +987,18 @@ async fn rewrite_falls_back_without_a_usable_model() {
                 ..cfg()
             },
         );
+        let started = std::time::Instant::now();
         let rw = r.rewrite_query(&history(), "and last year?").await;
-        assert_eq!(rw.method, RewriteMethod::Unchanged, "{}", p.id());
-        assert_eq!(rw.query, "and last year?");
+        assert!(started.elapsed() < Duration::from_secs(2), "{}", p.id());
+        assert_eq!(
+            rw.method,
+            RewriteMethod::HeuristicFallback {
+                tried: vec![p.id().clone()]
+            },
+            "{}",
+            p.id()
+        );
+        assert_eq!(rw.query, "and last year? engineer say boiler fault");
         assert_eq!(p.calls(), 1);
     }
 
@@ -732,6 +1033,138 @@ async fn rewrite_falls_back_without_a_usable_model() {
         r.rewrite_query(&history(), "what about it?").await.method,
         RewriteMethod::Unchanged
     );
+}
+
+#[tokio::test]
+async fn rewrite_tries_the_next_local_model_when_one_fails() {
+    let down = Arc::new(FakeChat::new("down", Locality::OnDevice, Err(())));
+    let up = Arc::new(FakeChat::new(
+        "up",
+        Locality::OnDevice,
+        Ok("boiler fault last year"),
+    ));
+    let router = chat_router(vec![(Tier::Light, down.clone()), (Tier::Light, up.clone())]);
+    let r = Retriever::new(boiler_store(), Some(router.clone()), cfg());
+    let rw = r.rewrite_query(&history(), "and last year?").await;
+    assert_eq!(rw.query, "boiler fault last year");
+    assert_eq!(
+        rw.method,
+        RewriteMethod::Model {
+            provider: ProviderId::new("up")
+        }
+    );
+    assert_eq!((down.calls(), up.calls()), (1, 1));
+    assert!(router.in_cooldown(down.id()));
+
+    // In cooldown, the failed model is skipped.
+    let rw = r.rewrite_query(&history(), "what about it?").await;
+    assert!(matches!(rw.method, RewriteMethod::Model { .. }));
+    assert_eq!((down.calls(), up.calls()), (1, 2));
+
+    // An unusable reply also moves on to the next model.
+    let thinking = Arc::new(FakeChat::new("thinking", Locality::OnDevice, Ok("<think>")));
+    let up = Arc::new(FakeChat::new("up", Locality::LocalNetwork, Ok("boiler")));
+    let router = chat_router(vec![
+        (Tier::Light, thinking.clone()),
+        (Tier::Triage, up.clone()),
+    ]);
+    let r = Retriever::new(boiler_store(), Some(router), cfg());
+    let rw = r.rewrite_query(&history(), "and last year?").await;
+    assert_eq!(
+        rw.method,
+        RewriteMethod::Model {
+            provider: ProviderId::new("up")
+        }
+    );
+}
+
+#[tokio::test]
+async fn rewrite_falls_back_to_the_heuristic_when_every_model_fails() {
+    let a = Arc::new(FakeChat::new("a", Locality::OnDevice, Err(())));
+    let b = Arc::new(FakeChat::new("b", Locality::LocalNetwork, Ok("<think>hmm")));
+    let mut slow = FakeChat::new("c", Locality::OnDevice, Ok("late"));
+    slow.delay = Duration::from_secs(5);
+    let c = Arc::new(slow);
+    let d = Arc::new(FakeChat::new("d", Locality::OnDevice, Ok("never asked")));
+    let router = chat_router(vec![
+        (Tier::Light, a.clone()),
+        (Tier::Light, b.clone()),
+        (Tier::Triage, c.clone()),
+        (Tier::Synthesis, d.clone()),
+    ]);
+    let r = Retriever::new(
+        boiler_store(),
+        Some(router.clone()),
+        RetrieveConfig {
+            rewrite_timeout_ms: 150,
+            ..cfg()
+        },
+    );
+    let started = std::time::Instant::now();
+    let rw = r.rewrite_query(&history(), "and last year?").await;
+    // One budget for all attempts: the timeout ends the search for a model.
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(rw.query, "and last year? engineer say boiler fault");
+    assert_eq!(
+        rw.method,
+        RewriteMethod::HeuristicFallback {
+            tried: vec![
+                ProviderId::new("a"),
+                ProviderId::new("b"),
+                ProviderId::new("c")
+            ]
+        }
+    );
+    assert_eq!(d.calls(), 0, "no budget left");
+    let json = serde_json::to_value(&rw).unwrap();
+    assert_eq!(json["method"], "heuristic_fallback");
+    assert_eq!(json["tried"], serde_json::json!(["a", "b", "c"]));
+
+    // Only `a` is in cooldown now; with every model cooling down, none is asked.
+    router.report_failure(b.id());
+    router.report_failure(c.id());
+    router.report_failure(d.id());
+    let calls = (a.calls(), b.calls(), c.calls(), d.calls());
+    let rw = r.rewrite_query(&history(), "and last year?").await;
+    assert_eq!(
+        rw.method,
+        RewriteMethod::HeuristicFallback { tried: vec![] }
+    );
+    assert_eq!(calls, (a.calls(), b.calls(), c.calls(), d.calls()));
+}
+
+#[tokio::test]
+async fn contracted_followups_are_rewritten() {
+    let h = vec![
+        ChatMessage {
+            role: Role::User,
+            text: "When is my dentist appointment?".into(),
+        },
+        ChatMessage {
+            role: Role::Assistant,
+            text: "Tuesday at 10:00 [1].".into(),
+        },
+    ];
+    let r = Retriever::new(boiler_store(), None, cfg());
+    for q in [
+        "What's the address?",
+        "What\u{2019}s the address?",
+        "What should I bring?",
+    ] {
+        let rw = r.rewrite_query(&h, q).await;
+        assert_eq!(rw.method, RewriteMethod::Heuristic, "{q}");
+        assert_eq!(rw.query, format!("{q} dentist appointment"));
+    }
+    // A failing model falls back to the same rewrite.
+    let down = Arc::new(FakeChat::new("down", Locality::OnDevice, Err(())));
+    let r = Retriever::new(
+        boiler_store(),
+        Some(chat_router(vec![(Tier::Light, down)])),
+        cfg(),
+    );
+    let rw = r.rewrite_query(&h, "What's the address?").await;
+    assert_eq!(rw.query, "What's the address? dentist appointment");
+    assert!(matches!(rw.method, RewriteMethod::HeuristicFallback { .. }));
 }
 
 /// A cloud reranker that records the passages it was sent.
