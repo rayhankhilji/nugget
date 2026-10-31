@@ -89,8 +89,11 @@ A token bucket per client: a burst of 60 requests, refilled at 120 per minute.
 ## Audit
 
 Every `tools/call` and `resources/read` produces one audit entry: the client, the tool, a summary of
-the arguments (long strings clipped), the outcome and references to the items returned, never their
-content. MCP is local only, so these calls do not create egress-ledger rows.
+the arguments, the outcome and references to the items returned, never their content. Free-text
+arguments (`query`, `text`, `id`) are kept only as their length and a keyed hash (HMAC-SHA256 under
+the MCP server key, 16 hex characters), so repeated queries can be told apart without storing them;
+scope arguments (`kind`, `source`, `key`, `since`) are kept, clipped to 80 characters, and numbers
+and booleans as is. MCP is local only, so these calls do not create egress-ledger rows.
 
 ## Untrusted content
 

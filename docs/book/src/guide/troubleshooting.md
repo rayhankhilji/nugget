@@ -8,7 +8,9 @@
    one file per day (`nuggetd.<date>.log`), 14 kept. Local model servers log to
    `llama-server-chat.log` and `llama-server-embedding.log` in the same folder.
 3. More detail: start the daemon with `NUGGET_LOG=debug nuggetd`. `NUGGET_LOG` takes the usual
-   `tracing` filter syntax, for example `NUGGET_LOG=info,nugget_ingest=debug`.
+   `tracing` filter syntax, for example `NUGGET_LOG=info,nugget_ingest=debug`. The MCP SDK
+   (`rmcp`) stays at `info` whatever you set, since at `debug` it would log AI apps' queries and
+   the results returned to them.
 
 Logs never contain secrets or the content of your items at `info` level or above.
 

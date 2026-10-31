@@ -363,10 +363,17 @@ impl KnowledgeService {
         self.vault.as_ref().map(|v| v.status()).unwrap_or_default()
     }
 
-    /// The local provider LLM extraction would use, if any.
+    /// The provider of the last LLM extraction (cloud included), or before any, the local
+    /// provider it would use.
     pub fn extractor_provider(&self) -> Option<nugget_core::ids::ProviderId> {
         let st = self.knowledge.status();
-        if !st.llm_enabled || !st.llm_local_available {
+        if !st.llm_enabled {
+            return None;
+        }
+        if st.llm_provider.is_some() {
+            return st.llm_provider;
+        }
+        if !st.llm_local_available {
             return None;
         }
         let caps = nugget_core::capability::Capabilities {

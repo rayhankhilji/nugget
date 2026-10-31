@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use nugget_core::capability::Tier;
-use nugget_core::ids::EntityId;
+use nugget_core::ids::{EntityId, ProviderId};
 use nugget_core::{Error, Result};
 use nugget_graph::GraphStore;
 use nugget_infer::Router;
@@ -49,6 +49,10 @@ pub struct RunStats {
     pub links_resolved: u64,
     pub llm_requests: u64,
     pub llm_failed_requests: u64,
+    /// The provider that answered this run's last successful extraction request (cloud
+    /// included), if any.
+    #[serde(default)]
+    pub llm_provider: Option<ProviderId>,
     pub llm_claims_accepted: u64,
     /// Claims dropped by the quote gate (no verbatim, relevant quote) or malformed.
     pub llm_claims_dropped: u64,
@@ -81,6 +85,10 @@ pub struct KnowledgeStatus {
     /// local-only items.
     pub llm_local_available: bool,
     pub pending_links: u64,
+    /// The provider that answered the most recent extraction request (cloud included), kept
+    /// across runs that send none.
+    #[serde(default)]
+    pub llm_provider: Option<ProviderId>,
 }
 
 impl Inner {
@@ -193,6 +201,9 @@ impl Knowledge {
                     s.processed_total = state.processed_total;
                     s.me = state.me.clone();
                     s.pending_links = state.pending_links.len() as u64;
+                    if stats.llm_provider.is_some() {
+                        s.llm_provider = stats.llm_provider.clone();
+                    }
                 }
                 Err(e) => s.last_error = Some(e.to_string()),
             }
