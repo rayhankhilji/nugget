@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use nugget_core::Result;
 use nugget_core::ids::{EntityId, ItemRef};
-use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore};
+use nugget_graph::{Claim, ClaimObject, ClaimStatus, Entity, EntityKind, GraphStore, Identifier};
 use time::UtcOffset;
 use time::format_description::well_known::Rfc3339;
 
@@ -184,6 +184,46 @@ impl<'a> Ctx<'a> {
         self.sensitive.borrow_mut().clear();
     }
 
+    /// Look up every item in `items` not looked up yet in this pass, in one batch
+    /// ([`ItemLookup::source_infos`]), so the per-item checks below hit the cache.
+    pub fn prefetch<'i>(&self, items: impl IntoIterator<Item = &'i ItemRef>) {
+        let want: Vec<ItemRef> = {
+            let cached = self.sources.borrow();
+            let mut seen = std::collections::HashSet::new();
+            items
+                .into_iter()
+                .filter(|i| !cached.contains_key(*i) && seen.insert(*i))
+                .cloned()
+                .collect()
+        };
+        if want.is_empty() {
+            return;
+        }
+        let found = match self.items.source_infos(&want) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                tracing::warn!(error = %e, "vault: source lookup failed");
+                None
+            }
+        };
+        let missing = self.items.missing_is_sensitive();
+        let mut cache = self.sources.borrow_mut();
+        for item in want {
+            let info = match &found {
+                Some(f) => f.get(&item).cloned().unwrap_or_else(|| SourceInfo {
+                    sensitive: missing,
+                    ..SourceInfo::default()
+                }),
+                // A failed lookup counts as sensitive.
+                None => SourceInfo {
+                    sensitive: true,
+                    ..SourceInfo::default()
+                },
+            };
+            cache.insert(item, info);
+        }
+    }
+
     /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
     /// the lookup says so ([`ItemLookup::missing_is_sensitive`]); a failed lookup always does.
     pub fn item_sensitive(&self, item: &ItemRef) -> bool {
@@ -204,10 +244,16 @@ impl<'a> Ctx<'a> {
             return Ok(*s);
         }
         let claims = self.graph.claims_for(id, false)?;
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
         let mut any = !claims.is_empty();
         let mut sensitive = claims.iter().all(|c| self.claim_sensitive(c));
         if sensitive {
             let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
+            self.prefetch(mentions.iter().map(|m| &m.item));
             any |= !mentions.is_empty();
             sensitive = mentions.iter().all(|m| self.item_sensitive(&m.item));
         }
@@ -216,37 +262,84 @@ impl<'a> Ctx<'a> {
         Ok(out)
     }
 
+    /// Whether any of the entity's origins (evidence of its active claims, its mentions) is a
+    /// sensitive item: then, as for default-scope MCP clients, only the aliases and identifiers
+    /// that a non-sensitive item supplied are shown.
+    fn has_sensitive_origin(&self, id: &EntityId) -> Result<bool> {
+        let claims = self.graph.claims_for(id, false)?;
+        let items = || {
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item))
+        };
+        self.prefetch(items());
+        if items().any(|i| self.item_sensitive(i)) {
+            return Ok(true);
+        }
+        let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
+        self.prefetch(mentions.iter().map(|m| &m.item));
+        Ok(mentions.iter().any(|m| self.item_sensitive(&m.item)))
+    }
+
+    /// The aliases and identifiers the page may show. All of them when no origin of the entity
+    /// is sensitive; otherwise only those whose recorded provenance
+    /// ([`GraphStore::entity_provenance`]) includes a non-sensitive item (a detail without
+    /// recorded provenance cannot be shown to be safe). The same rule MCP applies for
+    /// default-scope clients.
+    fn shown_details(&self, e: &Entity) -> Result<(Vec<String>, Vec<Identifier>)> {
+        if !self.has_sensitive_origin(&e.id)? {
+            return Ok((e.aliases.clone(), e.identifiers.clone()));
+        }
+        let Some(p) = self.graph.entity_provenance(&e.id)? else {
+            return Ok((Vec::new(), Vec::new()));
+        };
+        self.prefetch(
+            p.aliases
+                .iter()
+                .flat_map(|(_, items)| items)
+                .chain(p.identifiers.iter().flat_map(|(_, items)| items)),
+        );
+        let public = |items: &[ItemRef]| items.iter().any(|i| !self.item_sensitive(i));
+        let aliases = p
+            .aliases
+            .iter()
+            .filter(|(a, items)| e.aliases.contains(a) && public(items))
+            .map(|(a, _)| a.clone())
+            .collect();
+        let identifiers = p
+            .identifiers
+            .iter()
+            .filter(|(i, items)| e.identifiers.contains(i) && public(items))
+            .map(|(i, _)| i.clone())
+            .collect();
+        Ok((aliases, identifiers))
+    }
+
     fn source(&self, item: &ItemRef) -> SourceInfo {
         if let Some(s) = self.sources.borrow().get(item) {
             return s.clone();
         }
-        let info = match self.items.source_info(item) {
-            Ok(Some(i)) => i,
-            Ok(None) => SourceInfo {
-                sensitive: self.items.missing_is_sensitive(),
+        self.prefetch([item]);
+        self.sources
+            .borrow()
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| SourceInfo {
+                sensitive: true,
                 ..SourceInfo::default()
-            },
-            Err(e) => {
-                tracing::warn!(error = %e, "vault: source lookup failed");
-                SourceInfo {
-                    sensitive: true,
-                    ..SourceInfo::default()
-                }
-            }
-        };
-        self.sources.borrow_mut().insert(item.clone(), info.clone());
-        info
+            })
     }
 
-    fn frontmatter(&self, e: &Entity) -> Vec<String> {
+    fn frontmatter(&self, e: &Entity) -> Result<Vec<String>> {
+        let (aliases, identifiers) = self.shown_details(e)?;
         let mut fm = vec![
             format!("nugget_id: {}", json(e.id.as_str())),
             format!("kind: {}", json(e.kind.as_str())),
-            format!("aliases: {}", json(&e.aliases)),
+            format!("aliases: {}", json(&aliases)),
         ];
-        if self.cfg.include_identifiers && !e.identifiers.is_empty() {
+        if self.cfg.include_identifiers && !identifiers.is_empty() {
             let mut ids: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
-            for i in &e.identifiers {
+            for i in &identifiers {
                 ids.entry(i.scheme.as_str())
                     .or_default()
                     .push(i.value.as_str());
@@ -254,11 +347,16 @@ impl<'a> Ctx<'a> {
             fm.push(format!("identifiers: {}", json(ids)));
         }
         fm.push(format!("updated: {}", json(rfc3339(e.updated_at))));
-        fm
+        Ok(fm)
     }
 
     pub fn render_entity(&self, e: &Entity, claims: &[Claim]) -> Result<Rendered> {
         let mut links = BTreeSet::new();
+        self.prefetch(
+            claims
+                .iter()
+                .flat_map(|c| c.evidence.iter().map(|e| &e.item)),
+        );
 
         // ---- facts ----
         let mut groups: BTreeMap<&str, Vec<&Claim>> = BTreeMap::new();
@@ -344,7 +442,7 @@ impl<'a> Ctx<'a> {
         related.extend(rows.into_iter().map(|(_, l)| l));
 
         let doc = Doc {
-            fm: Some(self.frontmatter(e)),
+            fm: Some(self.frontmatter(e)?),
             segs: vec![
                 Segment::Region {
                     name: R_HEADER.into(),
@@ -480,13 +578,16 @@ impl<'a> Ctx<'a> {
         line
     }
 
-    /// Stub for a page whose entity was merged away (`target`) or no longer exists.
+    /// Stub for a page whose entity was merged away (`target`) or no longer exists. With
+    /// `hide_name` (the entity is now known only from sensitive items) the stub does not name
+    /// it: the heading is neutral.
     pub fn render_stub(
         &self,
         id: &EntityId,
         kind: EntityKind,
         name: &str,
         target: Option<&Entity>,
+        hide_name: bool,
     ) -> Rendered {
         let mut fm = vec![
             format!("nugget_id: {}", json(id.as_str())),
@@ -508,12 +609,17 @@ impl<'a> Ctx<'a> {
                     .into()
             }
         };
+        let heading = if hide_name {
+            "# Hidden page".to_owned()
+        } else {
+            format!("# {}", inline(name))
+        };
         Rendered {
             doc: Doc {
                 fm: Some(fm),
                 segs: vec![Segment::Region {
                     name: R_REDIRECT.into(),
-                    body: vec![format!("# {}", inline(name)), String::new(), line],
+                    body: vec![heading, String::new(), line],
                 }],
             },
             links,

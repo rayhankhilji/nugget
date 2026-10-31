@@ -11,8 +11,10 @@
 //! - **Vault.** After every run (and after merges and claim-status changes), pages of entities
 //!   changed in the graph's change feed are re-rendered with `Vault::render_changed`; the
 //!   high-water mark is persisted in the store (cursor key [`VAULT_MARK_KEY`], with the vault
-//!   root, so moving the vault re-renders everything). `Vault::watch` applies user edits and
-//!   signals them (`Vault::subscribe_edits`), which triggers that pass.
+//!   root, so moving the vault re-renders everything; a vault last rendered under older render
+//!   rules, `Vault::needs_full_render`, is rendered in full once even with no graph change).
+//!   `Vault::watch` applies user edits and signals them (`Vault::subscribe_edits`), which
+//!   triggers that pass.
 //! - **No polling.** The worker sleeps until one of those events or a deadline (debounce,
 //!   `interval_minutes`), so an idle daemon spends no wakeups here.
 
@@ -344,7 +346,9 @@ impl KnowledgeService {
             let root = vault.root().display().to_string();
             let mark = load_mark(&store, &root, &vault)?;
             let (peek, _) = graph.changes_since(mark, MAX_NOTIFIED_IDS)?;
-            if peek.is_empty() {
+            // After an upgrade that changed what pages show, render everything once even when
+            // the graph has not changed (`render_changed` does the full pass itself).
+            if peek.is_empty() && !vault.needs_full_render() {
                 return Ok(Vec::new());
             }
             let report = vault.render_changed(mark)?;

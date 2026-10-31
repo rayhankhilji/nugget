@@ -111,3 +111,26 @@ fn item_dates_are_cheap_and_skip_unknown_items() {
     assert_eq!(d2.source_modified_at, None);
     assert!(s.item_dates(&[]).unwrap().is_empty());
 }
+
+#[test]
+fn item_meta_reads_title_and_metadata_and_skips_unknown_items() {
+    let s = Store::open_in_memory().unwrap();
+    s.upsert_item(
+        &NewItem::new("mail", "m1", "h1")
+            .with_title("Lunch")
+            .with_text("long body text")
+            .with_metadata(json!({"sensitive": false, "url": "https://x.test/1"})),
+    )
+    .unwrap();
+    s.upsert_item(&NewItem::new("mail", "m2", "h2")).unwrap();
+    let got = s
+        .item_meta(&[iref("mail", "m1"), iref("mail", "nope"), iref("mail", "m2")])
+        .unwrap();
+    assert_eq!(got.len(), 2);
+    let m1 = &got[&iref("mail", "m1")];
+    assert_eq!(m1.title.as_deref(), Some("Lunch"));
+    assert_eq!(m1.metadata["sensitive"], json!(false));
+    assert_eq!(m1.metadata["url"], json!("https://x.test/1"));
+    assert!(got[&iref("mail", "m2")].metadata.get("sensitive").is_none());
+    assert!(s.item_meta(&[]).unwrap().is_empty());
+}

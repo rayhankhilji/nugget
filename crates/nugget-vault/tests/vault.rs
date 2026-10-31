@@ -1112,14 +1112,31 @@ fn a_page_whose_sources_turn_sensitive_becomes_a_stub_and_comes_back() {
     std::fs::write(&page, format!("{text}my own note\n")).unwrap();
     v.apply_pending_edits().unwrap();
 
+    let session_page = v.page_path(&session).unwrap().expect("session page");
+
     items.invite_sensitive.store(true, Ordering::SeqCst);
-    v.render_all().unwrap();
+    let report = v.render_all().unwrap();
+    // Jonas's page keeps the user's note, in place, under a neutral heading.
     let stub = std::fs::read_to_string(&page).unwrap();
     assert!(stub.contains("no longer in your knowledge graph"), "{stub}");
+    assert!(stub.contains("# Hidden page"), "{stub}");
     assert!(stub.contains("my own note"), "{stub}");
-    for leak in ["Organizer", "Counselling", "albers.example", "SECRET"] {
+    for leak in [
+        "Jonas",
+        "Organizer",
+        "Counselling",
+        "albers.example",
+        "SECRET",
+    ] {
         assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
     }
+    // Session and place pages had nothing of the user's: gone, merge bases included.
+    assert!(!session_page.exists(), "{}", session_page.display());
+    assert_eq!(report.removed.len(), 2, "session and place: {report:?}");
+    assert_nowhere(
+        &root.join(".nugget"),
+        &["Counselling", "Organizer", "SECRET"],
+    );
     assert_eq!(v.page_path(&jonas).unwrap(), None);
     let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
     assert!(
@@ -1391,4 +1408,212 @@ fn split_after_a_mistaken_merge_redirects_the_old_page_to_the_split_off_entity()
     assert_eq!(f.vault.page_path(&dup).unwrap().unwrap(), f.page(&back));
     assert!(!f.read(&f.sam).contains("Lisbon"));
     assert!(f.vault.validate().unwrap().is_ok());
+}
+
+// ---- sensitive items: upgrade, frontmatter, hidden pages, lookups (GG5-3 review) ----
+
+/// A vault rendered before the sensitivity rules (no `rules` in its state) is rendered in full
+/// once at the next `render_changed`, even with nothing in the change feed: pages, index
+/// entries and footnotes of sensitive-only entities go.
+#[test]
+fn an_upgraded_vault_is_rendered_in_full_once() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    let (jonas, session, ..) = add_counselling(&g, &sam);
+    let items = Arc::new(Switch {
+        invite_sensitive: false.into(),
+        missing_sensitive: true,
+    });
+    let root = dir.path().join("v");
+    let v = Vault::new(&root, g.clone(), items.clone(), config()).unwrap();
+    let root = v.root().to_path_buf();
+    assert!(!v.needs_full_render(), "nothing rendered under older rules");
+    let first = v.render_changed(0).unwrap();
+    assert!(first.written.iter().any(|p| p == "README.md"), "{first:?}");
+    let mark = first.high_water;
+    assert!(!v.needs_full_render());
+    assert!(v.page_path(&session).unwrap().is_some());
+    drop(v);
+
+    // As an older version left it: same state, without the render-rules version.
+    let state_path = root.join(".nugget/state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    state.as_object_mut().unwrap().remove("rules");
+    std::fs::write(&state_path, serde_json::to_string(&state).unwrap()).unwrap();
+    // The invite is sensitive (as an upgraded ingest now says), with no graph change.
+    items.invite_sensitive.store(true, Ordering::SeqCst);
+
+    let v = Vault::new(&root, g.clone(), items.clone(), config()).unwrap();
+    assert!(v.needs_full_render());
+    assert!(g.changes_since(mark, 10).unwrap().0.is_empty());
+    let report = v.render_changed(mark).unwrap();
+    assert!(!v.needs_full_render());
+    assert!(report.removed.len() >= 2, "{report:?}");
+    for id in [&jonas, &session] {
+        assert_eq!(v.page_path(id).unwrap(), None, "{id}");
+    }
+    assert_nowhere(
+        &root,
+        &[
+            "Jonas",
+            "Counselling",
+            "Quay Lane",
+            "SECRET",
+            "counselling.ics",
+        ],
+    );
+    assert!(v.validate().unwrap().is_ok());
+    // Once only: the next sync with no change does nothing.
+    let again = v.render_changed(report.high_water).unwrap();
+    assert!(
+        again.written.is_empty() && again.removed.is_empty(),
+        "{again:?}"
+    );
+}
+
+/// An entity with a sensitive origin shows only the aliases and identifiers that a
+/// non-sensitive item supplied; one without shows them all.
+#[test]
+fn frontmatter_leaves_out_aliases_and_identifiers_learned_from_sensitive_items() {
+    let f = fixture();
+    let g = &f.graph;
+    add_counselling(g, &f.sam);
+    let invite = item("files", "counselling.ics");
+    let notes = item("files", "notes.md");
+    g.add_alias(&f.sam, "Sammy Lee-Albers").unwrap();
+    g.add_detail_source(
+        &f.sam,
+        &EntityDetail::Alias("Sammy Lee-Albers".into()),
+        &invite,
+    )
+    .unwrap();
+    g.add_alias(&f.sam, "Sam L").unwrap();
+    g.add_detail_source(&f.sam, &EntityDetail::Alias("Sam L".into()), &invite)
+        .unwrap();
+    g.add_detail_source(&f.sam, &EntityDetail::Alias("Sam L".into()), &notes)
+        .unwrap();
+    let secret_phone = Identifier::new("phone", "+49 30 1234567");
+    g.add_identifier(&f.sam, &secret_phone).unwrap();
+    g.add_detail_source(&f.sam, &EntityDetail::Identifier(secret_phone), &invite)
+        .unwrap();
+    let mail = Identifier::new("email", "sam@example.com");
+    g.add_detail_source(&f.sam, &EntityDetail::Identifier(mail), &notes)
+        .unwrap();
+    let v = Vault::new(
+        f.root.join("v2"),
+        f.graph.clone(),
+        Arc::new(lookup),
+        VaultConfig {
+            include_identifiers: true,
+            ..config()
+        },
+    )
+    .unwrap();
+    v.render_all().unwrap();
+    let page = std::fs::read_to_string(v.page_path(&f.sam).unwrap().unwrap()).unwrap();
+    let fm: Vec<&str> = page
+        .lines()
+        .take_while(|l| !l.contains("nugget:begin"))
+        .collect();
+    let fm = fm.join("\n");
+    // Supplied by a non-sensitive item (also by the sensitive one): shown.
+    assert!(fm.contains("\"Sam L\""), "{fm}");
+    assert!(fm.contains("sam@example.com"), "{fm}");
+    // Only from the invite, or with no recorded source: left out.
+    assert!(!fm.contains("Sammy"), "{fm}");
+    assert!(!fm.contains("1234567"), "{fm}");
+    assert!(!fm.contains("\"Sam\""), "{fm}");
+    assert!(
+        !page.contains("Sammy") && !page.contains("1234567"),
+        "{page}"
+    );
+    // Acme has no sensitive origin: everything it has is shown.
+    g.add_alias(&f.acme, "Acme Corp").unwrap();
+    v.render_all().unwrap();
+    let acme = std::fs::read_to_string(v.page_path(&f.acme).unwrap().unwrap()).unwrap();
+    assert!(acme.contains("aliases: [\"Acme Corp\"]"), "{acme}");
+}
+
+/// A held alias the page does not show, kept in the user's frontmatter, is not added again
+/// (which would mark the entity changed, and re-render it, on every pass).
+#[test]
+fn a_hidden_alias_in_the_users_frontmatter_does_not_churn_the_graph() {
+    let f = fixture();
+    add_counselling(&f.graph, &f.sam);
+    f.graph.add_alias(&f.sam, "Sammy").unwrap();
+    f.graph
+        .add_detail_source(
+            &f.sam,
+            &EntityDetail::Alias("Sammy".into()),
+            &item("files", "counselling.ics"),
+        )
+        .unwrap();
+    f.vault.render_all().unwrap();
+    let path = f.page(&f.sam);
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("Sammy"), "{text}");
+    let edited = text.replacen("aliases: []", "aliases: [\"Sammy\"]", 1);
+    assert_ne!(edited, text, "{text}");
+    std::fs::write(&path, edited).unwrap();
+    let (_, head) = f.graph.changes_since(0, 10_000).unwrap();
+    let rep = f.vault.apply_user_edits(&path).unwrap();
+    assert!(rep.aliases_added.is_empty(), "{rep:?}");
+    let (changed, _) = f.graph.changes_since(head, 10).unwrap();
+    assert!(changed.is_empty(), "{changed:?}");
+}
+
+/// Counts lookups: the vault asks in batches and never twice for an item in one pass.
+#[derive(Default)]
+struct Counting {
+    single: std::sync::atomic::AtomicUsize,
+    per_item: std::sync::Mutex<std::collections::HashMap<ItemRef, usize>>,
+}
+
+impl ItemLookup for Counting {
+    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
+        self.single
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(lookup(it))
+    }
+
+    fn source_infos(
+        &self,
+        items: &[ItemRef],
+    ) -> nugget_core::Result<std::collections::HashMap<ItemRef, SourceInfo>> {
+        let mut seen = self.per_item.lock().unwrap();
+        let mut out = std::collections::HashMap::new();
+        for it in items {
+            *seen.entry(it.clone()).or_default() += 1;
+            if let Some(i) = lookup(it) {
+                out.insert(it.clone(), i);
+            }
+        }
+        Ok(out)
+    }
+
+    fn missing_is_sensitive(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn items_are_looked_up_in_batches_once_per_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    add_counselling(&g, &sam);
+    let items = Arc::new(Counting::default());
+    let v = Vault::new(dir.path().join("v"), g, items.clone(), config()).unwrap();
+    v.render_all().unwrap();
+    assert_eq!(
+        items.single.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "no one-item lookups"
+    );
+    let seen = items.per_item.lock().unwrap();
+    assert!(seen.contains_key(&item("files", "counselling.ics")));
+    assert!(seen.values().all(|n| *n == 1), "{seen:?}");
 }

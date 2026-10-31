@@ -59,8 +59,19 @@
 //! - a footnote never cites or quotes a sensitive item, even for a fact that also has other
 //!   evidence (only that other evidence is cited);
 //! - an entity with at least one active fact or mention, all of them from sensitive items, gets
-//!   no page and no index entry; a page rendered before becomes a "no longer in your knowledge
-//!   graph" stub (keeping the user's notes), and other pages name it without a link.
+//!   no page and no index entry, and other pages name it without a link. A page rendered before
+//!   is deleted (with its merge base) when the user wrote nothing on it; otherwise it becomes a
+//!   "no longer in your knowledge graph" stub with a neutral heading that keeps the user's
+//!   notes in place (its file name still names the entity: the user's file is not moved);
+//! - when any of an entity's facts or mentions comes from a sensitive item, the frontmatter
+//!   lists only the aliases and identifiers a non-sensitive item supplied
+//!   (`GraphStore::entity_provenance`), as MCP does for default-scope clients. The page name
+//!   and heading are the entity's name whatever supplied it.
+//!
+//! Sensitivity is not in the graph's change feed. Pages rendered under older rules are
+//! rendered again in full once (see [`Vault::needs_full_render`]); after that, an item turning
+//! sensitive (or not) changes the pages it supports at their entity's next change, or at the
+//! next [`Vault::render_all`].
 //!
 //! # Merging
 //! See [`merge`](crate::merge) for the three-way merge and [`edits`](crate::edits) for how edits
@@ -107,6 +118,13 @@ const STATE_FILE: &str = ".nugget/state.json";
 const INDEX_PAGE: &str = "README.md";
 const INDEX_BASE: &str = ".nugget/base/README.md";
 const STATE_VERSION: u32 = 1;
+/// Version of the rules deciding what a page shows. A vault last fully rendered under older
+/// rules is re-rendered in full once, at its next [`Vault::render_changed`] (or
+/// [`Vault::render_all`]), so pages, index entries and footnotes written under the old rules do
+/// not wait for their entity to change. History:
+/// - 1: sensitive items (GG5-3): sensitive-only facts and entities left out, frontmatter
+///   aliases and identifiers filtered, pages of sensitive-only entities removed or hidden.
+const RENDER_RULES: u32 = 1;
 /// How often a page is re-rendered when the user keeps changing it under us.
 const WRITE_ATTEMPTS: usize = 3;
 
@@ -148,6 +166,9 @@ pub struct RenderReport {
     pub moved: Vec<(String, String)>,
     /// Pages turned into redirect or retraction stubs.
     pub stubs: Vec<String>,
+    /// Pages deleted: their entity is now known only from sensitive items and the user wrote
+    /// nothing on them.
+    pub removed: Vec<String>,
     /// Pages with an unresolved conflict after this pass.
     pub conflicts: Vec<String>,
     /// Pages left untouched because they could not be read safely.
@@ -160,8 +181,13 @@ pub struct RenderReport {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Stub {
-    Merged { into: EntityId },
+    Merged {
+        into: EntityId,
+    },
     Gone,
+    /// The entity is live but known only from sensitive items: the page keeps the user's notes
+    /// under a neutral heading (a page without notes is deleted instead).
+    Hidden,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +216,9 @@ struct IndexState {
 struct State {
     #[serde(default)]
     version: u32,
+    /// [`RENDER_RULES`] of the last full render (0: none, or before the rules were versioned).
+    #[serde(default)]
+    rules: u32,
     #[serde(default)]
     pages: BTreeMap<EntityId, PageState>,
     #[serde(default)]
@@ -313,8 +342,12 @@ impl Vault {
 
     /// Render the entities changed after `since_seq` in the graph's change feed. The report's
     /// `high_water` is the mark to pass next time.
+    ///
+    /// When the vault was last fully rendered under older rules (see
+    /// [`Vault::needs_full_render`]), this renders everything instead, once.
     pub fn render_changed(&self, since_seq: u64) -> Result<RenderReport> {
         let mut st = self.lock();
+        let full = st.rules < RENDER_RULES;
         let mut ids = Vec::new();
         let mut cur = since_seq;
         loop {
@@ -325,13 +358,29 @@ impl Vault {
             ids.extend(batch);
             cur = high;
         }
-        let mut report = if ids.is_empty() {
+        let mut report = if full {
+            self.run(&mut st, None)?
+        } else if ids.is_empty() {
             RenderReport::default()
         } else {
             self.run(&mut st, Some(ids))?
         };
         report.high_water = cur;
         Ok(report)
+    }
+
+    /// Whether this vault has pages rendered under older rules (an upgrade changed what pages
+    /// may show), so the next [`Vault::render_changed`] renders every page. Callers that skip
+    /// `render_changed` when the change feed is empty must call it anyway then. A vault never
+    /// rendered says `false` (there is nothing to fix, and an empty vault directory stays
+    /// empty); its first `render_changed` with changes renders everything anyway.
+    ///
+    /// Sensitivity is not in the change feed: after this one full render, an entity whose
+    /// items turn sensitive (or stop being sensitive) without a graph change is re-rendered
+    /// with the new answer at its next change (or the next full render).
+    pub fn needs_full_render(&self) -> bool {
+        let st = self.lock();
+        st.last_render.is_some() && st.rules < RENDER_RULES
     }
 
     /// Apply the user's edits in the page at `path` (absolute, or relative to the root) to the
@@ -533,6 +582,7 @@ impl Vault {
     fn run(&self, st: &mut State, ids: Option<Vec<EntityId>>) -> Result<RenderReport> {
         let ctx = Ctx::new(self.graph.as_ref(), self.items.as_ref(), &self.config);
         let mut pass = Pass::default();
+        let full = ids.is_none();
         let ids = match ids {
             Some(v) => v,
             None => {
@@ -569,6 +619,10 @@ impl Vault {
         })();
         st.last_render = Some(OffsetDateTime::now_utc());
         st.version = STATE_VERSION;
+        // A page left alone (unreadable, or changing under us) keeps the full render pending.
+        if full && result.is_ok() && pass.report.skipped.is_empty() {
+            st.rules = RENDER_RULES;
+        }
         self.save_state(st)?;
         result?;
         let mut report = pass.report;
@@ -590,7 +644,8 @@ impl Vault {
     ) -> Result<()> {
         let mut live: Vec<Entity> = Vec::new();
         let mut seen = BTreeSet::new();
-        let mut tombs: Vec<(EntityId, Option<Entity>)> = Vec::new();
+        // (page, merged into, hidden: the entity is sensitive-only)
+        let mut tombs: Vec<(EntityId, Option<Entity>, bool)> = Vec::new();
         let mut tomb_seen = BTreeSet::new();
         for id in ids {
             match ctx.entity(&id)? {
@@ -601,7 +656,7 @@ impl Vault {
                 }
                 Some(e) => {
                     if st.pages.contains_key(&id) && tomb_seen.insert(id.clone()) {
-                        tombs.push((id, Some(e.clone())));
+                        tombs.push((id, Some(e.clone()), false));
                     }
                     if seen.insert(e.id.clone()) {
                         live.push(e);
@@ -609,33 +664,35 @@ impl Vault {
                 }
                 None => {
                     if st.pages.contains_key(&id) && tomb_seen.insert(id.clone()) {
-                        tombs.push((id, None));
+                        tombs.push((id, None, false));
                     }
                 }
             }
         }
-        // Sensitive-only entities get no page: one rendered before becomes a "no longer in your
-        // knowledge graph" stub (keeping the user's notes, none of the generated text), and a
-        // page merged into one is treated the same way instead of pointing at it.
+        // Sensitive-only entities get no page: one rendered before is deleted, or, if the user
+        // wrote notes on it, becomes a hidden stub (the notes under a neutral heading, none of
+        // the generated text). A page merged into one is treated the same way instead of
+        // pointing at it.
         let mut shown = Vec::with_capacity(live.len());
         for e in live {
             if !ctx.entity_sensitive(&e.id)? {
                 shown.push(e);
             } else if st.pages.contains_key(&e.id) && tomb_seen.insert(e.id.clone()) {
-                tombs.push((e.id, None));
+                tombs.push((e.id, None, true));
             }
         }
         let live = shown;
-        for (_, target) in &mut tombs {
+        for (_, target, hidden) in &mut tombs {
             if let Some(t) = target
                 && ctx.entity_sensitive(&t.id)?
             {
                 *target = None;
+                *hidden = true;
             }
         }
 
         // 1. Notes on pages of merged entities move to the surviving page.
-        for (id, target) in &tombs {
+        for (id, target, _) in &tombs {
             let Some(t) = target else { continue };
             let prev = &st.pages[id];
             if prev.stub.is_some() {
@@ -652,14 +709,7 @@ impl Vault {
                 continue;
             };
             let base = self.read_base(id).map(|b| Doc::parse(&b));
-            let mut content = user.user_content(base.as_ref());
-            content.retain(|l| l.trim() != "## Notes");
-            while content.first().is_some_and(|l| l.trim().is_empty()) {
-                content.remove(0);
-            }
-            while content.last().is_some_and(|l| l.trim().is_empty()) {
-                content.pop();
-            }
+            let content = user_notes(&user, base.as_ref());
             if content.is_empty() {
                 continue;
             }
@@ -678,8 +728,8 @@ impl Vault {
         }
 
         // 3. Stubs.
-        for (id, target) in tombs {
-            self.render_stub_page(st, ctx, pass, &id, target.as_ref())?;
+        for (id, target, hidden) in tombs {
+            self.render_stub_page(st, ctx, pass, &id, target.as_ref(), hidden)?;
         }
         Ok(())
     }
@@ -844,6 +894,14 @@ impl Vault {
             rep.asserted.push(g.add_claim(&new)?);
         }
         for a in &plan.aliases {
+            // Already held (for example one the page does not show, see `Ctx::shown_details`):
+            // adding it again would only mark the entity changed, and re-render it, every pass.
+            let a_low = a.trim().to_lowercase();
+            if a_low == e.name.trim().to_lowercase()
+                || e.aliases.iter().any(|x| x.trim().to_lowercase() == a_low)
+            {
+                continue;
+            }
             g.add_alias(&e.id, a)?;
             rep.aliases_added.push(a.clone());
         }
@@ -1021,10 +1079,14 @@ impl Vault {
         pass: &mut Pass,
         id: &EntityId,
         target: Option<&Entity>,
+        hidden: bool,
     ) -> Result<()> {
         let prev = st.pages[id].clone();
+        // A hidden page whose entity is then deleted stays hidden (never names it again).
+        let hidden = hidden || (target.is_none() && prev.stub == Some(Stub::Hidden));
         let want = match target {
             Some(t) => Stub::Merged { into: t.id.clone() },
+            None if hidden => Stub::Hidden,
             None => Stub::Gone,
         };
         let transition = prev.stub.as_ref() != Some(&want);
@@ -1046,7 +1108,40 @@ impl Vault {
         };
         let base = self.read_base(id).map(|b| Doc::parse(&b));
         let user = user_text.as_deref().map(Doc::parse);
-        let rendered = ctx.render_stub(id, prev.kind, &prev.name, target);
+        if hidden && transition {
+            // Live pages linking here are rendered again: they now name it without a link.
+            for (other, p) in &st.pages {
+                if p.stub.is_none() && p.links.contains(id) {
+                    pass.affected.insert(other.clone());
+                }
+            }
+            // Nothing of the user's on the page: delete it (its path and heading name the
+            // entity) with its merge base and conflict copy.
+            if user
+                .as_ref()
+                .is_none_or(|u| user_notes(u, base.as_ref()).is_empty())
+            {
+                if self.fs.read(&rel).ok().flatten() != user_text {
+                    return Ok(()); // changed under us; next pass
+                }
+                if user_text.is_some() {
+                    self.fs.remove(&rel)?;
+                    if let Some((dir, _)) = rel.rsplit_once('/') {
+                        self.fs.prune_empty_dir(dir);
+                    }
+                }
+                let base = base_rel(id);
+                for f in [pending_rel(&base), base, conflict_rel(&rel)] {
+                    if self.fs.is_file(&f) {
+                        self.fs.remove(&f)?;
+                    }
+                }
+                st.pages.remove(id);
+                pass.report.removed.push(rel);
+                return Ok(());
+            }
+        }
+        let rendered = ctx.render_stub(id, prev.kind, &prev.name, target, hidden);
         let gen_text = rendered.doc.render();
         let (doc, conflicts) = match (&user, transition) {
             (Some(u), false) => {
@@ -1161,6 +1256,20 @@ impl Vault {
         });
         Ok(())
     }
+}
+
+/// What the user wrote on a page (outside generated blocks), without the `## Notes` heading and
+/// surrounding blank lines; empty when they wrote nothing.
+fn user_notes(user: &Doc, base: Option<&Doc>) -> Vec<String> {
+    let mut content = user.user_content(base);
+    content.retain(|l| l.trim() != "## Notes");
+    while content.first().is_some_and(|l| l.trim().is_empty()) {
+        content.remove(0);
+    }
+    while content.last().is_some_and(|l| l.trim().is_empty()) {
+        content.pop();
+    }
+    content
 }
 
 /// Crash safety: a pass interrupted at the worst points (here by an injected write or removal
