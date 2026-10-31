@@ -4,10 +4,12 @@ use nugget_core::ipc::{VoiceStatus, method};
 use nugget_hotkey::Platform;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 
-use super::overlay::{Event, OverlayView};
+use super::history::Entry;
+use super::overlay::{Event, OverlayView, Refinement};
 use super::permissions::{self, DoubleTapStatus, PermissionState};
+use super::practice::PracticeField;
 use super::settings::{self, DoubleTapSettings, TriggerSpec};
-use super::{DoubleTap, OVERLAY_LABEL, SETTINGS_EVENT, flow, lock, readahead};
+use super::{DoubleTap, MAIN_LABEL, OVERLAY_LABEL, SETTINGS_EVENT, flow, lock, readahead};
 use crate::daemon::{CmdError, Daemon};
 
 fn only_overlay(window: &WebviewWindow) -> Result<(), CmdError> {
@@ -165,5 +167,108 @@ pub fn overlay_accept(
 pub fn overlay_cancel(app: AppHandle, window: WebviewWindow) -> Result<(), CmdError> {
     only_overlay(&window)?;
     flow::apply(&app, Event::Cancel);
+    Ok(())
+}
+
+/// Retry: a new draft from the same context.
+#[tauri::command]
+pub fn overlay_retry(app: AppHandle, window: WebviewWindow) -> Result<(), CmdError> {
+    only_overlay(&window)?;
+    flow::apply(&app, Event::Retry);
+    Ok(())
+}
+
+/// A refinement of `base` (the user's edit), or of the text shown when `base` is null.
+#[tauri::command]
+pub fn overlay_refine(
+    app: AppHandle,
+    window: WebviewWindow,
+    kind: Refinement,
+    base: Option<String>,
+) -> Result<(), CmdError> {
+    only_overlay(&window)?;
+    flow::apply(&app, Event::Refine { kind, base });
+    Ok(())
+}
+
+/// The overlay measured its content (logical pixels); returns the height applied.
+#[tauri::command]
+pub fn overlay_resize(app: AppHandle, window: WebviewWindow, height: f64) -> Result<f64, CmdError> {
+    only_overlay(&window)?;
+    Ok(flow::resize_overlay(&app, height))
+}
+
+/// Insert a draft from the history instead of the one shown.
+#[tauri::command]
+pub fn overlay_insert_previous(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DoubleTap>,
+    id: u64,
+) -> Result<(), CmdError> {
+    only_overlay(&window)?;
+    let text = lock(&state.history)
+        .get(id)
+        .map(|e| e.text.clone())
+        .ok_or_else(|| CmdError::Other("that draft is no longer in the history".into()))?;
+    flow::apply(&app, Event::InsertPrevious(text));
+    Ok(())
+}
+
+/// The draft history, newest first.
+#[tauri::command]
+pub fn doubletap_history(state: State<'_, DoubleTap>) -> Vec<Entry> {
+    lock(&state.history).list()
+}
+
+#[tauri::command]
+pub fn doubletap_history_clear(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DoubleTap>,
+) -> Result<(), CmdError> {
+    not_overlay(&window)?;
+    if lock(&state.history).clear() {
+        flow::emit_history(&app, &[]);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn doubletap_history_remove(
+    app: AppHandle,
+    window: WebviewWindow,
+    state: State<'_, DoubleTap>,
+    id: u64,
+) -> Result<(), CmdError> {
+    not_overlay(&window)?;
+    let list = {
+        let mut h = lock(&state.history);
+        if !h.remove(id) {
+            return Ok(());
+        }
+        h.list()
+    };
+    flow::emit_history(&app, &list);
+    Ok(())
+}
+
+/// The practice field on the Double Tap page gained focus or changed (`null` when it lost it).
+#[tauri::command]
+pub fn doubletap_practice(
+    window: WebviewWindow,
+    state: State<'_, DoubleTap>,
+    field: Option<PracticeField>,
+) -> Result<(), CmdError> {
+    if window.label() != MAIN_LABEL {
+        return Err(CmdError::Other(
+            "only the main window has the practice field".into(),
+        ));
+    }
+    let field = field
+        .map(PracticeField::validated)
+        .transpose()
+        .map_err(CmdError::Other)?;
+    *lock(&state.practice) = field;
     Ok(())
 }

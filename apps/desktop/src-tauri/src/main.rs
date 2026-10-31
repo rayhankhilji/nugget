@@ -156,6 +156,14 @@ fn main() {
             doubletap::commands::overlay_state,
             doubletap::commands::overlay_accept,
             doubletap::commands::overlay_cancel,
+            doubletap::commands::overlay_retry,
+            doubletap::commands::overlay_refine,
+            doubletap::commands::overlay_resize,
+            doubletap::commands::overlay_insert_previous,
+            doubletap::commands::doubletap_history,
+            doubletap::commands::doubletap_history_clear,
+            doubletap::commands::doubletap_history_remove,
+            doubletap::commands::doubletap_practice,
         ])
         .setup(|app| {
             app.manage(updater::Updates::new(app.handle()));

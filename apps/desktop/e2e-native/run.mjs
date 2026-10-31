@@ -245,16 +245,42 @@ async function main() {
     await os_.screenshot(path.join(out, "overlay.png"), winDone);
     await os_.screenshot(path.join(out, "overlay-screen.png"));
 
-    // (c) Accept with the overlay's own key, Enter. The overlay takes the keyboard while a draft
-    // is open; if the window system kept it elsewhere, click the overlay's text first (no button
-    // there), as a user would, and say so.
+    // The overlay fitted itself to the draft: it asked the shell for its content height.
+    const resizes = probeLines(probe).filter((l) => l.event === "resize" && l.t >= firedAt.t);
+    summary.overlay_resizes = resizes.length;
+    summary.overlay_size = resizes.at(-1)?.detail ?? null;
+    if (!resizes.length) throw new Error("the overlay never resized to its content (no probe 'resize')");
+    log(`overlay resized ${resizes.length} times; last ${JSON.stringify(resizes.at(-1).detail)}`);
+
+    // The overlay takes the keyboard while a draft is open; if the window system kept it
+    // elsewhere, click the overlay's text first (no button there), as a user would, and say so.
     const fg = await os_.foreground();
     summary.overlay_focused = fg.includes("Nugget Double Tap") || Boolean(await os_.overlayIsForeground?.(fg));
     if (!summary.overlay_focused) {
       log(`overlay not focused (foreground "${fg}"); clicking it first`);
-      await os_.click(winDone.x + winDone.w / 2, winDone.y + 70);
+      await os_.click(winDone.x + winDone.w / 2, winDone.y + 40);
       await sleep(300);
     }
+
+    // (c) Retry with the overlay's own key, R: back to reading, then a second draft streams in
+    // from the same context (the fake provider streams the same text again).
+    const retryAt = Date.now();
+    const requestsBefore = provider.requests.filter((r) => r.stream).length;
+    await os_.retry();
+    await waitFor("the retry (phase reading)", () => probeLines(probe).find((l) => l.event === "view" && l.t >= retryAt - 5 && l.detail.phase === "reading"), 10_000);
+    const retried = await waitFor("the retried draft (phase done)", () => {
+      const lines = probeLines(probe);
+      const err = lines.find((l) => l.event === "view" && l.t >= retryAt - 5 && l.detail.phase === "error");
+      if (err) throw new Error(`the retry failed: ${err.detail.message}`);
+      return lines.find((l) => l.event === "view" && l.t >= retryAt - 5 && l.detail.phase === "done");
+    }, 30_000);
+    if (provider.requests.filter((r) => r.stream).length <= requestsBefore) throw new Error("Retry sent no new request to the provider");
+    if (!retried.detail.text.includes("noon works for me")) throw new Error(`unexpected retried draft ${JSON.stringify(retried.detail.text)}`);
+    summary.retry_ms = Math.round(retried.t - retryAt);
+    log(`retry: a new draft in ${summary.retry_ms} ms`);
+    await os_.screenshot(path.join(out, "overlay-retried.png"), (await os_.overlayWindows()).find((w) => w.visible) ?? winDone);
+
+    // (d) Accept with the overlay's own key, Enter.
     const acceptAt = Date.now();
     await os_.enter();
     const inserted = await waitFor("the insertion (phase inserted)", () => {
@@ -324,9 +350,9 @@ async function main() {
       [
         `### Double Tap overlay on ${summary.os}: ${summary.ok ? "ok" : "FAILED"}`,
         "",
-        "| target | trigger | keys→fire ms | fire→overlay shown ms | fire→first token ms | fire→draft done ms | accept→inserted ms | method | verified | overlay focused |",
-        "|---|---|---|---|---|---|---|---|---|---|",
-        `| ${summary.target} | ${summary.trigger} | ${m.keys_to_trigger ?? "–"} | ${m.trigger_to_overlay_shown ?? "–"} | ${m.trigger_to_first_token ?? "–"} | ${m.trigger_to_draft_done ?? "–"} | ${m.accept_to_inserted ?? "–"} | ${summary.method ?? "–"} | ${summary.verified ?? "–"} | ${summary.overlay_focused ?? "–"} |`,
+        "| target | trigger | keys→fire ms | fire→overlay shown ms | fire→first token ms | fire→draft done ms | retry ms | resizes | accept→inserted ms | method | verified | overlay focused |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|",
+        `| ${summary.target} | ${summary.trigger} | ${m.keys_to_trigger ?? "–"} | ${m.trigger_to_overlay_shown ?? "–"} | ${m.trigger_to_first_token ?? "–"} | ${m.trigger_to_draft_done ?? "–"} | ${summary.retry_ms ?? "–"} | ${summary.overlay_resizes ?? "–"} | ${m.accept_to_inserted ?? "–"} | ${summary.method ?? "–"} | ${summary.verified ?? "–"} | ${summary.overlay_focused ?? "–"} |`,
         "",
         summary.error ? `Error: \`${summary.error}\`\n` : "",
       ].join("\n"),
