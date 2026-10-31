@@ -1,0 +1,464 @@
+[
+ {
+  "id": "ev-standup",
+  "at": "2026-10-01T08:00:00-04:00",
+  "path": "Calendar/ev-standup.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "ev-mom-bday",
+  "at": "2026-10-01T08:05:00-04:00",
+  "path": "Calendar/ev-mom-bday.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "h-theo-0",
+  "at": "2026-10-02T10:05:00-04:00",
+  "path": "Mail/Sent/20261002-1005-h-theo-0.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-priya-0",
+  "at": "2026-10-02T11:00:00-04:00",
+  "path": "Mail/Sent/20261002-1100-h-priya-0.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-dana-0",
+  "at": "2026-10-02T15:30:00-04:00",
+  "path": "Mail/Sent/20261002-1530-h-dana-0.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-pixel-receipt",
+  "at": "2026-10-03T06:12:00-04:00",
+  "path": "Mail/Inbox/20261003-0612-h-pixel-receipt.eml",
+  "kind": "mail",
+  "scenario": "S5-renewal"
+ },
+ {
+  "id": "h-theo-1",
+  "at": "2026-10-07T10:05:00-04:00",
+  "path": "Mail/Sent/20261007-1005-h-theo-1.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-priya-1",
+  "at": "2026-10-07T11:00:00-04:00",
+  "path": "Mail/Sent/20261007-1100-h-priya-1.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-dana-1",
+  "at": "2026-10-07T15:30:00-04:00",
+  "path": "Mail/Sent/20261007-1530-h-dana-1.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-mom-0",
+  "at": "2026-10-11T19:00:00-04:00",
+  "path": "Mail/Sent/20261011-1900-h-mom-0.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-theo-2",
+  "at": "2026-10-13T10:05:00-04:00",
+  "path": "Mail/Sent/20261013-1005-h-theo-2.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-priya-2",
+  "at": "2026-10-13T11:00:00-04:00",
+  "path": "Mail/Sent/20261013-1100-h-priya-2.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-dana-2",
+  "at": "2026-10-13T15:30:00-04:00",
+  "path": "Mail/Sent/20261013-1530-h-dana-2.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-sofia-0",
+  "at": "2026-10-17T12:00:00-04:00",
+  "path": "Mail/Sent/20261017-1200-h-sofia-0.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-theo-3",
+  "at": "2026-10-20T10:05:00-04:00",
+  "path": "Mail/Sent/20261020-1005-h-theo-3.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-priya-3",
+  "at": "2026-10-20T11:00:00-04:00",
+  "path": "Mail/Sent/20261020-1100-h-priya-3.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "h-dana-3",
+  "at": "2026-10-20T15:30:00-04:00",
+  "path": "Mail/Sent/20261020-1530-h-dana-3.eml",
+  "kind": "mail-sent",
+  "scenario": "history"
+ },
+ {
+  "id": "ev-flight",
+  "at": "2026-10-20T18:00:00-04:00",
+  "path": "Calendar/ev-flight.ics",
+  "kind": "event",
+  "scenario": "S4-trip"
+ },
+ {
+  "id": "h-harriet-0",
+  "at": "2026-10-21T09:00:00-04:00",
+  "path": "Mail/Inbox/20261021-0900-h-harriet-0.eml",
+  "kind": "mail",
+  "scenario": "S12-harriet"
+ },
+ {
+  "id": "h-harriet-0r",
+  "at": "2026-10-21T13:00:00-04:00",
+  "path": "Mail/Sent/20261021-1300-h-harriet-0r.eml",
+  "kind": "mail-sent",
+  "scenario": "S12-harriet"
+ },
+ {
+  "id": "doc-northwind-notes",
+  "at": "2026-10-22T17:00:00-04:00",
+  "path": "Documents/Northwind/checkout-notes.md",
+  "kind": "doc",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "ev-nw-review",
+  "at": "2026-10-23T12:00:00-04:00",
+  "path": "Calendar/ev-nw-review.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "doc-todo",
+  "at": "2026-10-25T21:00:00-04:00",
+  "path": "Documents/todo.md",
+  "kind": "doc",
+  "scenario": "S10-notes"
+ },
+ {
+  "id": "n-news1",
+  "at": "2026-10-26T06:00:00-04:00",
+  "path": "Mail/Inbox/20261026-0600-n-news1.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "ev-nw-qa-v0",
+  "at": "2026-10-26T09:00:00-04:00",
+  "path": "Calendar/ev-nw-qa-v0.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "s1-dana-ask",
+  "at": "2026-10-26T09:14:00-04:00",
+  "path": "Mail/Inbox/20261026-0914-s1-dana-ask.eml",
+  "kind": "mail",
+  "scenario": "S1-dana"
+ },
+ {
+  "id": "s1-dana-ask-copy",
+  "at": "2026-10-26T09:14:00-04:00",
+  "path": "Mail/Clients/20261026-0914-s1-dana-ask.eml",
+  "kind": "mail",
+  "scenario": "S9-dup"
+ },
+ {
+  "id": "n-accept",
+  "at": "2026-10-26T09:40:00-04:00",
+  "path": "Mail/Inbox/20261026-0940-n-accept.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "s3-maya-ask",
+  "at": "2026-10-26T13:30:00-04:00",
+  "path": "Mail/Sent/20261026-1330-s3-maya-ask.eml",
+  "kind": "mail-sent",
+  "scenario": "S3-vendor"
+ },
+ {
+  "id": "s5-pixel-notice",
+  "at": "2026-10-27T05:30:00-04:00",
+  "path": "Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+  "kind": "mail",
+  "scenario": "S5-renewal"
+ },
+ {
+  "id": "n-promo",
+  "at": "2026-10-27T07:00:00-04:00",
+  "path": "Mail/Inbox/20261027-0700-n-promo.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "ev-nw-sprint",
+  "at": "2026-10-27T09:00:00-04:00",
+  "path": "Calendar/ev-nw-sprint.ics",
+  "kind": "event",
+  "scenario": "S4-dst"
+ },
+ {
+  "id": "s2-theo-ask",
+  "at": "2026-10-27T10:40:00-04:00",
+  "path": "Mail/Inbox/20261027-1040-s2-theo-ask.eml",
+  "kind": "mail",
+  "scenario": "S2-budget"
+ },
+ {
+  "id": "s2-maya-promise",
+  "at": "2026-10-27T11:05:00-04:00",
+  "path": "Mail/Sent/20261027-1105-s2-maya-promise.eml",
+  "kind": "mail-sent",
+  "scenario": "S2-budget"
+ },
+ {
+  "id": "n-kelsey",
+  "at": "2026-10-27T14:00:00-04:00",
+  "path": "Mail/Inbox/20261027-1400-n-kelsey.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "ev-kelsey-coffee",
+  "at": "2026-10-27T15:00:00-04:00",
+  "path": "Calendar/ev-kelsey-coffee.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "s1-maya-promise",
+  "at": "2026-10-27T16:02:00-04:00",
+  "path": "Mail/Sent/20261027-1602-s1-maya-promise.eml",
+  "kind": "mail-sent",
+  "scenario": "S1-dana"
+ },
+ {
+  "id": "ev-runclub",
+  "at": "2026-10-27T20:00:00-04:00",
+  "path": "Calendar/ev-runclub.ics",
+  "kind": "event",
+  "scenario": "S4-dst"
+ },
+ {
+  "id": "n-gh",
+  "at": "2026-10-28T03:00:00-04:00",
+  "path": "Mail/Inbox/20261028-0300-n-gh.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "s6-lab",
+  "at": "2026-10-28T06:40:00-04:00",
+  "path": "Mail/Inbox/20261028-0640-s6-lab.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "ev-maint",
+  "at": "2026-10-28T10:00:00-04:00",
+  "path": "Calendar/ev-maint.ics",
+  "kind": "event",
+  "scenario": "S4-dst"
+ },
+ {
+  "id": "s7-mom",
+  "at": "2026-10-28T19:30:00-04:00",
+  "path": "Mail/Inbox/20261028-1930-s7-mom.eml",
+  "kind": "mail",
+  "scenario": "S7-personal"
+ },
+ {
+  "id": "s5-cloudvault-trial",
+  "at": "2026-10-29T07:00:00-04:00",
+  "path": "Mail/Inbox/20261029-0700-s5-cloudvault-trial.eml",
+  "kind": "mail",
+  "scenario": "S5-renewal"
+ },
+ {
+  "id": "ev-nw-qa-v1",
+  "at": "2026-10-29T08:00:00-04:00",
+  "path": "Calendar/ev-nw-qa-v1.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "ev-foundry",
+  "at": "2026-10-29T09:00:00+00:00",
+  "path": "Calendar/ev-foundry.ics",
+  "kind": "event",
+  "scenario": "S4-trip"
+ },
+ {
+  "id": "n-ooo",
+  "at": "2026-10-29T09:00:00-04:00",
+  "path": "Mail/Inbox/20261029-0900-n-ooo.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "s12-harriet-ask",
+  "at": "2026-10-29T09:15:00+00:00",
+  "path": "Mail/Inbox/20261029-0915-s12-harriet-ask.eml",
+  "kind": "mail",
+  "scenario": "S12-harriet"
+ },
+ {
+  "id": "s6-nurse",
+  "at": "2026-10-29T10:15:00-04:00",
+  "path": "Mail/Inbox/20261029-1015-s6-nurse.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "s1-maya-deliver",
+  "at": "2026-10-29T11:20:00-04:00",
+  "path": "Mail/Sent/20261029-1120-s1-maya-deliver.eml",
+  "kind": "mail-sent",
+  "scenario": "S1-dana"
+ },
+ {
+  "id": "s7-sofia",
+  "at": "2026-10-29T12:10:00-04:00",
+  "path": "Mail/Inbox/20261029-1210-s7-sofia.eml",
+  "kind": "mail",
+  "scenario": "S7-personal"
+ },
+ {
+  "id": "s7-sofia-r",
+  "at": "2026-10-29T12:40:00-04:00",
+  "path": "Mail/Sent/20261029-1240-s7-sofia-r.eml",
+  "kind": "mail-sent",
+  "scenario": "S7-personal"
+ },
+ {
+  "id": "s6-bank",
+  "at": "2026-10-30T02:11:00-04:00",
+  "path": "Mail/Inbox/20261030-0211-s6-bank.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "ev-retro",
+  "at": "2026-10-30T09:00:00-04:00",
+  "path": "Calendar/ev-retro.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "ev-kelsey-cancel",
+  "at": "2026-10-30T10:00:00-04:00",
+  "path": "Calendar/ev-kelsey-cancel.ics",
+  "kind": "event",
+  "scenario": "S4-meetings"
+ },
+ {
+  "id": "s3-jonah-reply",
+  "at": "2026-10-30T14:45:00-04:00",
+  "path": "Mail/Inbox/20261030-1445-s3-jonah-reply.eml",
+  "kind": "mail",
+  "scenario": "S3-vendor"
+ },
+ {
+  "id": "doc-budget",
+  "at": "2026-10-30T15:00:00-04:00",
+  "path": "Documents/Q4-budget-draft.md",
+  "kind": "doc",
+  "scenario": "S2-budget"
+ },
+ {
+  "id": "s6-hr",
+  "at": "2026-10-30T16:00:00-04:00",
+  "path": "Mail/Inbox/20261030-1600-s6-hr.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "s11-gus",
+  "at": "2026-10-30T18:30:00-04:00",
+  "path": "Mail/Inbox/20261030-1830-s11-gus.eml",
+  "kind": "mail",
+  "scenario": "S11-landlord"
+ },
+ {
+  "id": "n-news2",
+  "at": "2026-11-02T06:00:00-05:00",
+  "path": "Mail/Inbox/20261102-0600-n-news2.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "s6-therapy",
+  "at": "2026-11-02T08:20:00-05:00",
+  "path": "Mail/Inbox/20261102-0820-s6-therapy.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "s2-maya-deliver",
+  "at": "2026-11-02T09:10:00-05:00",
+  "path": "Mail/Sent/20261102-0910-s2-maya-deliver.eml",
+  "kind": "mail-sent",
+  "scenario": "S2-budget"
+ },
+ {
+  "id": "n-airline",
+  "at": "2026-11-02T11:00:00-05:00",
+  "path": "Mail/Inbox/20261102-1100-n-airline.eml",
+  "kind": "mail",
+  "scenario": "S8-noise"
+ },
+ {
+  "id": "s12-maya-agenda",
+  "at": "2026-11-02T12:00:00-05:00",
+  "path": "Mail/Sent/20261102-1200-s12-maya-agenda.eml",
+  "kind": "mail-sent",
+  "scenario": "S12-harriet"
+ },
+ {
+  "id": "s11-maya",
+  "at": "2026-11-02T20:00:00-05:00",
+  "path": "Mail/Sent/20261102-2000-s11-maya.eml",
+  "kind": "mail-sent",
+  "scenario": "S11-landlord"
+ },
+ {
+  "id": "s6-pw",
+  "at": "2026-11-04T07:05:00-05:00",
+  "path": "Mail/Inbox/20261104-0705-s6-pw.eml",
+  "kind": "mail",
+  "scenario": "S6-sensitive"
+ },
+ {
+  "id": "s7-mom-r",
+  "at": "2026-11-05T21:00:00-05:00",
+  "path": "Mail/Sent/20261105-2100-s7-mom-r.eml",
+  "kind": "mail-sent",
+  "scenario": "S7-personal"
+ }
+]

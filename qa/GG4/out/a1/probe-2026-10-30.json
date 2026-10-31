@@ -1,0 +1,818 @@
+{
+  "candidates": [
+    {
+      "actions": [
+        {
+          "body": null,
+          "cc": [],
+          "in_reply_to_message_id": "n-kelsey@mail.gg4.example",
+          "intent": "Answer their question.",
+          "reply_to": {
+            "key": "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+            "source": "files-1"
+          },
+          "subject": "Re: Senior designer role at a fintech?",
+          "to": [
+            "kelsey@talentbridge.example"
+          ],
+          "type": "draft_reply"
+        },
+        {
+          "messages": [
+            {
+              "key": "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+              "source": "files-1"
+            }
+          ],
+          "subject": "Senior designer role at a fintech?",
+          "type": "archive_thread"
+        }
+      ],
+      "dedup_key": "unanswered:f348d8a2cd7ff3fc",
+      "detail": "Kelsey Vance wrote 2 days ago and hasn't heard back.",
+      "due": null,
+      "evidence": [
+        {
+          "item": {
+            "key": "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+            "source": "files-1"
+          },
+          "quote": "Would you be open to a quick chat?",
+          "url": "file:///tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a1/nouser/maya/Mail/Inbox/20261027-1400-n-kelsey.eml"
+        }
+      ],
+      "expires_at": "2026-11-10T14:00:00-04:00",
+      "features": {
+        "activity_at": "2026-10-27T14:00:00-04:00",
+        "direct": 1.0,
+        "freshness": 0.675192167180178,
+        "importance": 0.49491262604822334,
+        "kind": "unanswered_thread",
+        "question": 1.0,
+        "sender": "kelsey@talentbridge.example",
+        "thread": "6c3c4cad4018ec77",
+        "urgency": 0.11782738095238095
+      },
+      "kind": "unanswered_thread",
+      "people": [
+        "kelsey@talentbridge.example"
+      ],
+      "sensitive": false,
+      "title": "Reply to Kelsey Vance: Senior designer role at a fintech?"
+    },
+    {
+      "actions": [
+        {
+          "about": {
+            "key": "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+            "source": "files-1"
+          },
+          "at": "2026-11-02T09:00:00-04:00",
+          "text": "Renewal: Pixelboard — $144.00",
+          "type": "reminder"
+        }
+      ],
+      "dedup_key": "renewal:abb0d3876cf56c41",
+      "detail": "Keep it, or cancel before the charge.",
+      "due": "2026-11-03T09:00:00-04:00",
+      "evidence": [
+        {
+          "item": {
+            "key": "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+            "source": "files-1"
+          },
+          "quote": "Your Pixelboard Pro plan renews soon",
+          "url": "file:///tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a1/nouser/maya/Mail/Inbox/20261027-0530-s5-pixel-notice.eml"
+        }
+      ],
+      "expires_at": "2026-11-04T09:00:00-04:00",
+      "features": {
+        "direct": 1.0,
+        "freshness": 0.641880471170777,
+        "importance": 0.8,
+        "kind": "renewal",
+        "question": 0.0,
+        "urgency": 0.19831979066244318
+      },
+      "kind": "renewal",
+      "people": [
+        "billing@pixelboard.example"
+      ],
+      "sensitive": false,
+      "title": "Pixelboard renews 2026-11-03 — $144.00"
+    },
+    {
+      "actions": [
+        {
+          "body": null,
+          "cc": [],
+          "in_reply_to_message_id": "h-sofia-0@mail.gg4.example",
+          "intent": "Gently follow up on your question.",
+          "reply_to": {
+            "key": "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+            "source": "files-1"
+          },
+          "subject": "Re: brunch?",
+          "to": [
+            "sofia.alvarez@gmail.com"
+          ],
+          "type": "draft_reply"
+        },
+        {
+          "about": {
+            "key": "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+            "source": "files-1"
+          },
+          "at": "2026-10-30T13:59:00Z",
+          "text": "Follow up with Sofia Alvarez: brunch?",
+          "type": "reminder"
+        }
+      ],
+      "dedup_key": "awaiting:edba0a675a003ffa",
+      "detail": "You asked 12 days ago and haven't heard back.",
+      "due": null,
+      "evidence": [
+        {
+          "item": {
+            "key": "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+            "source": "files-1"
+          },
+          "quote": "Brunch next weekend?",
+          "url": "file:///tmp/claude-0/-home-user-nugget/61d25a04-712a-54eb-9902-fa28fd5951d3/scratchpad/a1/nouser/maya/Mail/Sent/20261017-1200-h-sofia-0.eml"
+        }
+      ],
+      "expires_at": "2026-10-31T12:00:00-04:00",
+      "features": {
+        "activity_at": "2026-10-17T12:00:00-04:00",
+        "direct": 1.0,
+        "freshness": 0.15989560795240074,
+        "importance": 0.45815690999132624,
+        "kind": "follow_up",
+        "question": 1.0,
+        "sender": "sofia.alvarez@gmail.com",
+        "thread": "0bf83be6a807d5b1",
+        "urgency": 0.549970238095238
+      },
+      "kind": "follow_up",
+      "people": [
+        "sofia.alvarez@gmail.com"
+      ],
+      "sensitive": false,
+      "title": "No answer from Sofia Alvarez: brunch?"
+    }
+  ],
+  "events": [
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-10-05T09:45:00-04:00",
+      "key": "0:Calendar/ev-standup.ics",
+      "start": "2026-10-05T09:30:00-04:00",
+      "title": "Design standup",
+      "uid": "standup-gg4@larkspur.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-10-28T15:00:00-04:00",
+      "key": "0:Calendar/ev-nw-review.ics",
+      "start": "2026-10-28T14:00:00-04:00",
+      "title": "Northwind checkout review",
+      "uid": "nw-review-gg4@northwind-outfitters.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-10-30T14:00:00-04:00",
+      "key": "0:Calendar/ev-nw-qa-v0.ics",
+      "start": "2026-10-30T13:00:00-04:00",
+      "title": "Northwind design QA",
+      "uid": "nw-qa-gg4@northwind-outfitters.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-10-30T16:00:00-04:00",
+      "key": "0:Calendar/ev-nw-qa-v1.ics",
+      "start": "2026-10-30T15:00:00-04:00",
+      "title": "Northwind design QA",
+      "uid": "nw-qa-gg4@northwind-outfitters.example"
+    },
+    {
+      "all_day": true,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-01T00:00:00-04:00",
+      "key": "0:Calendar/ev-mom-bday.ics",
+      "start": "2026-10-31T00:00:00-04:00",
+      "title": "Mom's birthday",
+      "uid": "mom-bday-gg4@larkspur.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-01T02:00:00-04:00",
+      "key": "0:Calendar/ev-maint.ics",
+      "start": "2026-11-01T01:30:00-04:00",
+      "title": "Studio server maintenance",
+      "uid": "maint-gg4@larkspur.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-02T08:00:00-04:00",
+      "key": "0:Calendar/ev-runclub.ics",
+      "start": "2026-11-02T07:00:00-04:00",
+      "title": "Run club",
+      "uid": "runclub-gg4@personal.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-02T11:00:00-04:00",
+      "key": "0:Calendar/ev-nw-sprint.ics",
+      "start": "2026-11-02T10:00:00-04:00",
+      "title": "Northwind sprint planning",
+      "uid": "nw-sprint-gg4@northwind-outfitters.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-04T07:00:00-04:00",
+      "key": "0:Calendar/ev-flight.ics",
+      "start": "2026-11-03T19:00:00-04:00",
+      "title": "Flight BA178 JFK to LHR",
+      "uid": "flight-gg4@personal.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-05T16:00:00-04:00",
+      "key": "0:Calendar/ev-foundry.ics",
+      "start": "2026-11-05T10:00:00-04:00",
+      "title": "Foundry service design workshop",
+      "uid": "foundry-ws-gg4@foundry-ldn.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-06T09:30:00-04:00",
+      "key": "0:Calendar/ev-kelsey-cancel.ics",
+      "start": "2026-11-06T09:00:00-04:00",
+      "title": "Coffee with Kelsey (TalentBridge)",
+      "uid": "kelsey-coffee-gg4@talentbridge.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-06T09:30:00-04:00",
+      "key": "0:Calendar/ev-kelsey-coffee.ics",
+      "start": "2026-11-06T09:00:00-04:00",
+      "title": "Coffee with Kelsey (TalentBridge)",
+      "uid": "kelsey-coffee-gg4@talentbridge.example"
+    },
+    {
+      "all_day": false,
+      "attendees": [],
+      "cancelled": false,
+      "end": "2026-11-06T17:00:00-04:00",
+      "key": "0:Calendar/ev-retro.ics",
+      "start": "2026-11-06T16:00:00-04:00",
+      "title": "Studio retro",
+      "uid": "retro-gg4@larkspur.example"
+    }
+  ],
+  "internal": [
+    "larkspur.example"
+  ],
+  "mail": [
+    {
+      "auto": null,
+      "date": "2026-10-02T10:05:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261002-1005-h-theo-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Weekly design notes (2026-10-02)",
+      "thread": "d32fef1c444112fb"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-02T11:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261002-1100-h-priya-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Handoff specs",
+      "thread": "371a4a7455ae420e"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-02T15:30:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261002-1530-h-dana-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Northwind checkout: status 2026-10-02",
+      "thread": "37f8b5326977b591"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-10-03T06:12:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261003-0612-h-pixel-receipt.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your Pixelboard receipt",
+      "thread": "a9d487a9743cf8dd"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-07T10:05:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261007-1005-h-theo-1.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Weekly design notes (2026-10-07)",
+      "thread": "38c7a54a292614ed"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-07T11:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261007-1100-h-priya-1.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Handoff specs",
+      "thread": "371a4a7455ae420e"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-07T15:30:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261007-1530-h-dana-1.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Northwind checkout: status 2026-10-07",
+      "thread": "4347527d8e1ab6a5"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-11T19:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261011-1900-h-mom-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Sunday call",
+      "thread": "7bcc255d95023700"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-13T10:05:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261013-1005-h-theo-2.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Weekly design notes (2026-10-13)",
+      "thread": "02c36b73848634ec"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-13T11:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261013-1100-h-priya-2.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Handoff specs",
+      "thread": "371a4a7455ae420e"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-13T15:30:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261013-1530-h-dana-2.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Northwind checkout: status 2026-10-13",
+      "thread": "69094c96acbff065"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-17T12:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261017-1200-h-sofia-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "brunch?",
+      "thread": "f426c869b5e6bb63"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-20T10:05:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261020-1005-h-theo-3.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Weekly design notes (2026-10-20)",
+      "thread": "fd121cf41f95f3bf"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-20T11:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261020-1100-h-priya-3.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Handoff specs",
+      "thread": "371a4a7455ae420e"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-20T15:30:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261020-1530-h-dana-3.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Northwind checkout: status 2026-10-20",
+      "thread": "3c2f37ee55f0fe58"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-21T09:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261021-0900-h-harriet-0.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Foundry x Larkspur workshop in London",
+      "thread": "5d4bc78645a60892"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-21T13:00:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261021-1300-h-harriet-0r.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Foundry x Larkspur workshop in London",
+      "thread": "5d4bc78645a60892"
+    },
+    {
+      "auto": "list-unsubscribe",
+      "date": "2026-10-26T06:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261026-0600-n-news1.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "UX Weekly #212: dark patterns",
+      "thread": "824f1917e3b5c19a"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-26T09:14:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Clients/20261026-0914-s1-dana-ask.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Revised checkout mockups",
+      "thread": "b476a899f9106755"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-26T09:14:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261026-0914-s1-dana-ask.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Revised checkout mockups",
+      "thread": "b476a899f9106755"
+    },
+    {
+      "auto": "generated-subject",
+      "date": "2026-10-26T09:40:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261026-0940-n-accept.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Accepted: Northwind design QA",
+      "thread": "ad5dd9c0d02fd7a8"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-26T13:30:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261026-1330-s3-maya-ask.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Quote for 500 brochures",
+      "thread": "965edf5b4c62f40d"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-10-27T05:30:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261027-0530-s5-pixel-notice.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your Pixelboard Pro plan renews soon",
+      "thread": "3af79d47681161ea"
+    },
+    {
+      "auto": "list-unsubscribe",
+      "date": "2026-10-27T07:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261027-0700-n-promo.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "48 hours only: 30% off boots - ends Thursday",
+      "thread": "6ef5bc87a326dddb"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-27T10:40:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261027-1040-s2-theo-ask.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Q4 design budget",
+      "thread": "288a5997cd47fb9c"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-27T11:05:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261027-1105-s2-maya-promise.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Q4 design budget",
+      "thread": "288a5997cd47fb9c"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-27T14:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261027-1400-n-kelsey.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Senior designer role at a fintech?",
+      "thread": "227f1e1980966b30"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-27T16:02:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261027-1602-s1-maya-promise.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Revised checkout mockups",
+      "thread": "b476a899f9106755"
+    },
+    {
+      "auto": "auto-submitted",
+      "date": "2026-10-28T03:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261028-0300-n-gh.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "[larkspur/site] Build failed on main",
+      "thread": "30fdb47e36a17b6a"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-10-28T06:40:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261028-0640-s6-lab.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your test results are available",
+      "thread": "797a351d026479ef"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-28T19:30:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261028-1930-s7-mom.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Thanksgiving",
+      "thread": "9a96cf60963e901a"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-29T09:15:00Z",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261029-0915-s12-harriet-ask.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Workshop agenda",
+      "thread": "5d4bc78645a60892"
+    },
+    {
+      "auto": "list-unsubscribe",
+      "date": "2026-10-29T07:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261029-0700-s5-cloudvault-trial.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your Cloudvault trial ends November 5",
+      "thread": "fac80aa1a5e0cef5"
+    },
+    {
+      "auto": "auto-submitted",
+      "date": "2026-10-29T09:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261029-0900-n-ooo.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Automatic reply: Revised checkout mockups",
+      "thread": "d03222cc252f78ca"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-29T10:15:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261029-1015-s6-nurse.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your results - please call",
+      "thread": "f520a3c0d0fe0e78"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-29T11:20:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261029-1120-s1-maya-deliver.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Revised checkout mockups",
+      "thread": "b476a899f9106755"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-29T12:10:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261029-1210-s7-sofia.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "drinks friday?",
+      "thread": "95b0cb99f24503f9"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-29T12:40:00-04:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261029-1240-s7-sofia-r.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: drinks friday?",
+      "thread": "95b0cb99f24503f9"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-10-30T02:11:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261030-0211-s6-bank.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Fraud alert: unusual charge on card ending 4417",
+      "thread": "223e499d778c1552"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-30T14:45:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261030-1445-s3-jonah-reply.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Quote for 500 brochures",
+      "thread": "965edf5b4c62f40d"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-30T16:00:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261030-1600-s6-hr.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Confidential: your 2027 compensation",
+      "thread": "34728073709ed006"
+    },
+    {
+      "auto": null,
+      "date": "2026-10-30T18:30:00-04:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261030-1830-s11-gus.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Radiator repair",
+      "thread": "0166b31e679bec7d"
+    },
+    {
+      "auto": "list-unsubscribe",
+      "date": "2026-11-02T06:00:00-05:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261102-0600-n-news2.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "UX Weekly #213: can you answer this survey?",
+      "thread": "f7284fbaa80c3470"
+    },
+    {
+      "auto": null,
+      "date": "2026-11-02T08:20:00-05:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261102-0820-s6-therapy.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Thursday session",
+      "thread": "188593c55290556b"
+    },
+    {
+      "auto": null,
+      "date": "2026-11-02T09:10:00-05:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261102-0910-s2-maya-deliver.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Q4 design budget",
+      "thread": "288a5997cd47fb9c"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-11-02T11:00:00-05:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261102-1100-n-airline.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Check in now for BA178 to London",
+      "thread": "f1f224c3d5373371"
+    },
+    {
+      "auto": null,
+      "date": "2026-11-02T12:00:00-05:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261102-1200-s12-maya-agenda.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Workshop agenda",
+      "thread": "5d4bc78645a60892"
+    },
+    {
+      "auto": null,
+      "date": "2026-11-02T20:00:00-05:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261102-2000-s11-maya.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Radiator repair",
+      "thread": "0166b31e679bec7d"
+    },
+    {
+      "auto": "automated-sender",
+      "date": "2026-11-04T07:05:00-05:00",
+      "from_user": false,
+      "key": "0:Mail/Inbox/20261104-0705-s6-pw.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Your Pixelboard verification code",
+      "thread": "9c98526f2bf47bee"
+    },
+    {
+      "auto": null,
+      "date": "2026-11-05T21:00:00-05:00",
+      "from_user": true,
+      "key": "0:Mail/Sent/20261105-2100-s7-mom-r.eml",
+      "labels": [],
+      "sensitive": false,
+      "subject": "Re: Thanksgiving",
+      "thread": "9a96cf60963e901a"
+    }
+  ],
+  "notes": [
+    {
+      "key": "0:Documents/Northwind/checkout-notes.md",
+      "title": "checkout-notes"
+    },
+    {
+      "key": "0:Documents/Q4-budget-draft.md",
+      "title": "Q4-budget-draft"
+    },
+    {
+      "key": "0:Documents/todo.md",
+      "title": "todo"
+    }
+  ],
+  "user": [
+    "maya@larkspur.example"
+  ]
+}

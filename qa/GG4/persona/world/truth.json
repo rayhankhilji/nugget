@@ -1,0 +1,362 @@
+[
+ {
+  "id": "S1",
+  "title": "Dana asks for mockups by Thu; Maya answers Tue and delivers Thu",
+  "expect": [
+   {
+    "kind": "unanswered_thread",
+    "match": "checkout mockups",
+    "first": "2026-10-27",
+    "last": "2026-10-27"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "checkout mockups",
+    "from": "2026-10-28",
+    "kind": "unanswered_thread",
+    "why": "Maya replied Tue 16:02"
+   },
+   {
+    "match": "checkout mockups",
+    "from": "2026-10-30",
+    "why": "delivered Thu 11:20"
+   }
+  ],
+  "note": "A follow-up card for 'I'll send ... by Thursday' on Wed 28/Thu 29 is fine."
+ },
+ {
+  "id": "S2",
+  "title": "Maya promised Theo the budget by Fri Oct 30; sends it Mon Nov 2",
+  "expect": [
+   {
+    "kind": "follow_up",
+    "match": "budget",
+    "first": "2026-10-29",
+    "last": "2026-11-02"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "budget",
+    "from": "2026-11-03",
+    "why": "sent Mon 09:10"
+   }
+  ],
+  "note": "Card should appear by the lead time (2 days before Fri) and stay (overdue) until she sends it."
+ },
+ {
+  "id": "S3",
+  "title": "Maya waits on Jonah's quote (3+ days), he answers Fri afternoon",
+  "expect": [
+   {
+    "kind": "follow_up",
+    "match": "brochure",
+    "first": "2026-10-29",
+    "last": "2026-10-30"
+   },
+   {
+    "kind": "unanswered_thread",
+    "match": "brochure",
+    "first": "2026-10-31",
+    "last": "2026-11-02",
+    "optional": true
+   }
+  ],
+  "forbid": [],
+  "note": "'No answer yet' card from Thu 29 (3 days); after Jonah's reply an unanswered card for his quote is reasonable."
+ },
+ {
+  "id": "S4",
+  "title": "Meetings: external prep cards, internal none, moved and cancelled events, DST, trip",
+  "expect": [
+   {
+    "kind": "meeting_prep",
+    "match": "northwind checkout review",
+    "first": "2026-10-27",
+    "last": "2026-10-28"
+   },
+   {
+    "kind": "meeting_prep",
+    "match": "northwind design qa",
+    "first": "2026-10-29",
+    "last": "2026-10-30"
+   },
+   {
+    "kind": "meeting_prep",
+    "match": "northwind sprint planning",
+    "first": "2026-11-01",
+    "last": "2026-11-02"
+   },
+   {
+    "kind": "meeting_prep",
+    "match": "foundry",
+    "first": "2026-11-04",
+    "last": "2026-11-05"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "design standup",
+    "kind": "meeting_prep",
+    "why": "internal recurring"
+   },
+   {
+    "match": "studio retro",
+    "kind": "meeting_prep",
+    "why": "internal"
+   },
+   {
+    "match": "kelsey",
+    "kind": "meeting_prep",
+    "from": "2026-10-30",
+    "why": "cancelled Fri 30"
+   }
+  ],
+  "note": "Brief: QA at 15:00 (moved), sprint at 10:00 EST on Nov 2, workshop 10:00 GMT on Nov 5, birthday on Sat 31 only.",
+  "brief": [
+   {
+    "date": "2026-10-28",
+    "meeting": "Northwind checkout review",
+    "local": "14:00",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-10-30",
+    "meeting": "Northwind design QA",
+    "local": "15:00",
+    "tz": "America/New_York",
+    "not_local": "13:00"
+   },
+   {
+    "date": "2026-10-31",
+    "meeting": "Mom's birthday",
+    "all_day": true
+   },
+   {
+    "date": "2026-10-30",
+    "absent": "Mom's birthday"
+   },
+   {
+    "date": "2026-11-01",
+    "absent": "Mom's birthday"
+   },
+   {
+    "date": "2026-11-01",
+    "meeting": "Studio server maintenance",
+    "local": "01:30",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-11-02",
+    "meeting": "Northwind sprint planning",
+    "local": "10:00",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-11-02",
+    "meeting": "Run club",
+    "local": "07:00",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-11-03",
+    "meeting": "Flight BA178",
+    "local": "19:00",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-11-05",
+    "meeting": "Foundry service design workshop",
+    "local": "10:00",
+    "tz": "Europe/London"
+   },
+   {
+    "date": "2026-11-06",
+    "absent": "Kelsey"
+   },
+   {
+    "date": "2026-11-06",
+    "meeting": "Studio retro",
+    "local": "21:00",
+    "tz": "Europe/London"
+   },
+   {
+    "date": "2026-10-26",
+    "meeting": "Design standup",
+    "local": "09:30",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-11-02",
+    "meeting": "Design standup",
+    "local": "09:30",
+    "tz": "America/New_York"
+   },
+   {
+    "date": "2026-10-31",
+    "absent": "Design standup"
+   }
+  ]
+ },
+ {
+  "id": "S5",
+  "title": "Pixelboard renews Nov 3 for $144 (she pays them); Cloudvault trial she never paid",
+  "expect": [
+   {
+    "kind": "renewal",
+    "match": "pixelboard",
+    "first": "2026-10-28",
+    "last": "2026-11-03"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "cloudvault",
+    "why": "trial of a service she never paid; marketing"
+   }
+  ],
+  "note": ""
+ },
+ {
+  "id": "S6",
+  "title": "Health, money, salary, therapy, codes",
+  "expect": [
+   {
+    "kind": "unanswered_thread",
+    "match": "results",
+    "first": "2026-10-30",
+    "last": "2026-11-03",
+    "sensitive": true,
+    "optional": true
+   }
+  ],
+  "forbid": [
+   {
+    "match": "verification code",
+    "why": "one-time code"
+   },
+   {
+    "match": "compensation",
+    "why": "HR letter, no action asked"
+   },
+   {
+    "match": "test results are available",
+    "why": "automated portal notice"
+   }
+  ],
+  "note": "If clinic/therapy cards appear they must be marked sensitive; the brief should not quote diagnoses."
+ },
+ {
+  "id": "S7",
+  "title": "Mom asks about Thanksgiving (answered Nov 5); Sofia answered same day",
+  "expect": [
+   {
+    "kind": "unanswered_thread",
+    "match": "thanksgiving",
+    "first": "2026-10-30",
+    "last": "2026-11-05"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "drinks",
+    "why": "answered in 30 minutes"
+   },
+   {
+    "match": "thanksgiving",
+    "from": "2026-11-06",
+    "why": "answered Nov 5"
+   }
+  ],
+  "note": ""
+ },
+ {
+  "id": "S8",
+  "title": "Newsletters, promos, CI, auto-replies, acceptances, airline notices: no cards",
+  "expect": [],
+  "forbid": [
+   {
+    "match": "ux weekly",
+    "why": "newsletter"
+   },
+   {
+    "match": "boots",
+    "why": "promo"
+   },
+   {
+    "match": "build failed",
+    "why": "CI"
+   },
+   {
+    "match": "automatic reply",
+    "why": "auto-reply"
+   },
+   {
+    "match": "accepted:",
+    "why": "calendar response"
+   },
+   {
+    "match": "check in now",
+    "why": "airline bulk"
+   }
+  ],
+  "note": "Recruiter cold mail (Kelsey) is acceptable only ranked low."
+ },
+ {
+  "id": "S11",
+  "title": "Landlord asks to confirm access; Maya answers Mon evening",
+  "expect": [
+   {
+    "kind": "unanswered_thread",
+    "match": "radiator",
+    "first": "2026-10-31",
+    "last": "2026-11-02"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "radiator",
+    "from": "2026-11-03",
+    "why": "answered Mon 20:00"
+   }
+  ],
+  "note": ""
+ },
+ {
+  "id": "S12",
+  "title": "Harriet needs the agenda by Mon Nov 2 (sent Mon noon)",
+  "expect": [
+   {
+    "kind": "unanswered_thread",
+    "match": "agenda",
+    "first": "2026-10-30",
+    "last": "2026-11-02"
+   }
+  ],
+  "forbid": [
+   {
+    "match": "agenda",
+    "kind": "unanswered_thread",
+    "from": "2026-11-03",
+    "why": "sent Mon 12:00"
+   }
+  ],
+  "note": ""
+ },
+ {
+  "id": "S10",
+  "title": "Note to-do: send Jonah the brochure files by Nov 4",
+  "expect": [
+   {
+    "kind": "any",
+    "match": "brochure files",
+    "first": "2026-11-02",
+    "last": "2026-11-04",
+    "optional": true
+   }
+  ],
+  "forbid": [],
+  "note": ""
+ }
+]

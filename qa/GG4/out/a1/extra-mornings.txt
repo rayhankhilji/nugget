@@ -1,0 +1,162 @@
+
+## day 1 2026-10-26 America/New_York  refresh={'created': 0, 'open': 1, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.80 sens=False No answer from Sofia Alvarez: brunch?
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: brunch?
+
+## day 2 2026-10-27 America/New_York  refresh={'created': 0, 'open': 1, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.82 sens=False No answer from Sofia Alvarez: brunch?
+  MISSES: [('S1', 'checkout mockups', False), ('S4', 'northwind checkout review', False)]
+
+## day 3 2026-10-28 America/New_York  refresh={'created': 0, 'open': 4, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.90 sens=False You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  OPEN  follow_up          r=0.87 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.83 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  renewal            r=0.79 sens=False Pixelboard renews 2026-11-03 — $144.00
+  TRANS +new                 follow_up          You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  TRANS +new                 follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  TRANS +new                 renewal            Pixelboard renews 2026-11-03 — $144.00
+  HITS: [('S5', 'pixelboard')]
+  MISSES: [('S4', 'northwind checkout review', False)]
+  OUT_OF_WINDOW: [('S2', 'budget', [['b7fb6a531ef6b4fc', 'follow_up', 'You told Theo Brandt: "Sure, I\'ll send the budget estimate by Friday."']])]
+
+## day 4 2026-10-29 America/New_York  refresh={'created': 0, 'open': 6, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.95 sens=False You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  OPEN  follow_up          r=0.89 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.84 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  unanswered_thread  r=0.80 sens=False Reply to Priya Raman: Onboarding copy
+  OPEN  renewal            r=0.79 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.76 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  TRANS +new                 unanswered_thread  Reply to Priya Raman: Onboarding copy
+  TRANS +new                 unanswered_thread  Reply to Kelsey Vance: Senior designer role at a fintech?
+  HITS: [('S2', 'budget'), ('S5', 'pixelboard'), ('X6', 'onboarding copy')]
+  MISSES: [('S3', 'brochure', False), ('S4', 'northwind design qa', False)]
+
+## day 5 2026-10-30 America/New_York  refresh={'created': 0, 'open': 9, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.95 sens=False You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  OPEN  follow_up          r=0.94 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.88 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  renewal            r=0.79 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  follow_up          r=0.77 sens=False No answer from Jonah Pike: Quote for 500 brochures
+  OPEN  unanswered_thread  r=0.76 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Priya Raman: Illustration invoice
+  TRANS +new                 follow_up          You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  TRANS +new                 unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  TRANS +new                 follow_up          No answer from Jonah Pike: Quote for 500 brochures
+  TRANS +new                 unanswered_thread  Reply to Ngozi Okafor: Thanksgiving
+  TRANS +new                 unanswered_thread  Reply to Priya Raman: Illustration invoice
+  TRANS new->expired         follow_up          You told Dana Whitfield: "Yes, I'll send the revised mockups by Thursday."
+  TRANS new->expired         unanswered_thread  Reply to Priya Raman: Onboarding copy
+  HITS: [('S2', 'budget'), ('S3', 'brochure'), ('S5', 'pixelboard'), ('S7', 'thanksgiving'), ('S12', 'agenda'), ('X1', 'icon audit')]
+  MISSES: [('S4', 'northwind design qa', False), ('S6', 'results', True), ('X6', 'onboarding copy', False)]
+  FORBIDDEN: [('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+
+## day 6 2026-10-31 America/New_York  refresh={'created': 0, 'open': 9, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.98 sens=False You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  OPEN  follow_up          r=0.98 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  follow_up          r=0.89 sens=False No answer from Sofia Alvarez: brunch?
+  OPEN  unanswered_thread  r=0.82 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  renewal            r=0.80 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Ngozi Okafor: Thanksgiving
+  TRANS +new                 unanswered_thread  Reply to Priya Raman: Re: Onboarding copy
+  TRANS new->expired         follow_up          No answer from Jonah Pike: Quote for 500 brochures
+  HITS: [('S2', 'budget'), ('S5', 'pixelboard'), ('S7', 'thanksgiving'), ('S12', 'agenda'), ('X1', 'icon audit'), ('X6', 'onboarding copy')]
+  MISSES: [('S3', 'brochure', True), ('S6', 'results', True), ('S11', 'radiator', False)]
+  FORBIDDEN: [('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+
+## day 7 2026-11-01 America/New_York  refresh={'created': 2, 'open': 10, 'reason': 'refresh', 'resolved': 1}
+  OPEN  follow_up          r=0.98 sens=False You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  OPEN  follow_up          r=0.98 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  unanswered_thread  r=0.83 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  renewal            r=0.82 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.73 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.73 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  OPEN  unanswered_thread  r=0.70 sens=False Reply to Gus Moreno: Radiator repair
+  TRANS +new                 unanswered_thread  Reply to Larkspur People Team: Confidential: your 2027 compensation
+  TRANS +new                 unanswered_thread  Reply to Gus Moreno: Radiator repair
+  TRANS new->expired         follow_up          No answer from Sofia Alvarez: brunch?
+  HITS: [('S2', 'budget'), ('S5', 'pixelboard'), ('S7', 'thanksgiving'), ('S11', 'radiator'), ('S12', 'agenda'), ('X1', 'icon audit'), ('X6', 'onboarding copy')]
+  MISSES: [('S3', 'brochure', True), ('S4', 'northwind sprint planning', False), ('S6', 'results', True)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked'), ('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False)]
+
+## day 8 2026-11-02 America/New_York  refresh={'created': 0, 'open': 12, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.98 sens=False You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  OPEN  follow_up          r=0.98 sens=False You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  OPEN  renewal            r=0.86 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.83 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  follow_up          r=0.80 sens=False No answer from Sofia Alvarez: Re: drinks friday?
+  OPEN  commitment         r=0.79 sens=False Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  OPEN  unanswered_thread  r=0.79 sens=False Reply to Harriet Cole: Workshop agenda
+  OPEN  unanswered_thread  r=0.79 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.74 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.74 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  OPEN  unanswered_thread  r=0.70 sens=False Reply to Gus Moreno: Radiator repair
+  TRANS +new                 follow_up          No answer from Sofia Alvarez: Re: drinks friday?
+  TRANS +new                 commitment         Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  HITS: [('S2', 'budget'), ('S5', 'pixelboard'), ('S7', 'thanksgiving'), ('S11', 'radiator'), ('S12', 'agenda'), ('S10', 'brochure files'), ('X1', 'icon audit'), ('X6', 'onboarding copy')]
+  MISSES: [('S3', 'brochure', True), ('S4', 'northwind sprint planning', False), ('S6', 'results', True)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked'), ('S7', 'No answer from Sofia Alvarez: Re: drinks friday?', 'answered in 30 minutes'), ('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False)]
+
+## day 9 2026-11-03 America/New_York  refresh={'created': 0, 'open': 9, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.96 sens=False You told Dana Whitfield: "I'll send the sprint notes tomorrow."
+  OPEN  renewal            r=0.95 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  unanswered_thread  r=0.85 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  commitment         r=0.83 sens=False Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  OPEN  follow_up          r=0.80 sens=False No answer from Sofia Alvarez: Re: drinks friday?
+  OPEN  unanswered_thread  r=0.80 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.75 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.73 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  TRANS +new                 follow_up          You told Dana Whitfield: "I'll send the sprint notes tomorrow."
+  TRANS new->expired         unanswered_thread  Reply to Harriet Cole: Workshop agenda
+  TRANS new->expired         follow_up          You told Priya Raman: "Sure, I'll send the icon audit by Friday."
+  TRANS new->expired         follow_up          You told Theo Brandt: "Sure, I'll send the budget estimate by Friday."
+  TRANS new->expired         unanswered_thread  Reply to Gus Moreno: Radiator repair
+  HITS: [('S5', 'pixelboard'), ('S7', 'thanksgiving'), ('S10', 'brochure files'), ('X2', 'sprint notes'), ('X6', 'onboarding copy')]
+  MISSES: [('S6', 'results', True)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked'), ('S7', 'No answer from Sofia Alvarez: Re: drinks friday?', 'answered in 30 minutes'), ('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False)]
+
+## day 10 2026-11-04 Europe/London  refresh={'created': 0, 'open': 10, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.99 sens=False You told Dana Whitfield: "I'll send the sprint notes tomorrow."
+  OPEN  renewal            r=0.97 sens=False Pixelboard renews 2026-11-03 — $144.00
+  OPEN  commitment         r=0.91 sens=False Due 2026-11-04: Send Jonah the final brochure files by Nov 4
+  OPEN  unanswered_thread  r=0.86 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  follow_up          r=0.81 sens=False No answer from Sofia Alvarez: Re: drinks friday?
+  OPEN  unanswered_thread  r=0.81 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.78 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.76 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.74 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Rebecca Moss: Thursday session
+  TRANS +new                 unanswered_thread  Reply to Rebecca Moss: Thursday session
+  HITS: [('S7', 'thanksgiving'), ('S10', 'brochure files'), ('X2', 'sprint notes'), ('X6', 'onboarding copy')]
+  MISSES: [('S4', 'foundry', False)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked'), ('S7', 'No answer from Sofia Alvarez: Re: drinks friday?', 'answered in 30 minutes'), ('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+  OUT_OF_WINDOW: [('S5', 'pixelboard', [['1767d32fce21dbb4', 'renewal', 'Pixelboard renews 2026-11-03 — $144.00']])]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False), ('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]
+
+## day 11 2026-11-05 Europe/London  refresh={'created': 0, 'open': 9, 'reason': 'refresh', 'resolved': 0}
+  OPEN  follow_up          r=0.98 sens=False You told Dana Whitfield: "I'll send the sprint notes tomorrow."
+  OPEN  commitment         r=0.97 sens=False Overdue since 2026-11-04: Send Jonah the final brochure files by Nov 4
+  OPEN  unanswered_thread  r=0.86 sens=False Reply to Priya Raman: Re: Onboarding copy
+  OPEN  follow_up          r=0.82 sens=False No answer from Sofia Alvarez: Re: drinks friday?
+  OPEN  unanswered_thread  r=0.82 sens=False Reply to Kelsey Vance: Senior designer role at a fintech?
+  OPEN  unanswered_thread  r=0.79 sens=False Reply to Priya Raman: Illustration invoice
+  OPEN  unanswered_thread  r=0.77 sens=False Reply to Ngozi Okafor: Thanksgiving
+  OPEN  unanswered_thread  r=0.75 sens=False Reply to Larkspur People Team: Confidential: your 2027 compensation
+  OPEN  unanswered_thread  r=0.72 sens=False Reply to Rebecca Moss: Thursday session
+  TRANS new->expired         renewal            Pixelboard renews 2026-11-03 — $144.00
+  HITS: [('S7', 'thanksgiving'), ('X2', 'sprint notes'), ('X6', 'onboarding copy')]
+  MISSES: [('S4', 'foundry', False)]
+  FORBIDDEN: [('S6', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'HR letter, no action asked'), ('S7', 'No answer from Sofia Alvarez: Re: drinks friday?', 'answered in 30 minutes'), ('X4', 'Reply to Priya Raman: Illustration invoice', 'asked of Theo, Maya is Cc')]
+  LEAKS: [('unanswered_thread', 'Reply to Larkspur People Team: Confidential: your 2027 compensation', 'compensation', False), ('unanswered_thread', 'Reply to Rebecca Moss: Thursday session', 'session', False)]

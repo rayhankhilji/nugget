@@ -74,3 +74,18 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG3-7 Risk judged from a cached screen; changed label not re-checked | High | DD3 follow-up | in progress |
 | GG3-8, 13, 14, 19, 20 | Medium | DD3 follow-up | in progress |
 | GG3-10, 11, 12, 15–18, 21–25 | Medium/Low | HH1 | in progress |
+
+## GG4: proactive cards and morning brief ([report](GG4.md)), simulated two weeks, real models
+
+| Finding | Severity | Owner | State |
+|---|---|---|---|
+| GG4-1 .ics attendees/organizer/status read from the wrong place: no meeting prep, cancelled events stay | High | BB2 follow-up | routed |
+| GG4-2 No UID/SEQUENCE dedup: moved meetings shown twice | High | BB2 follow-up | routed |
+| GG4-3 RRULE never expanded: recurring meetings missing | High | BB2 follow-up | routed |
+| GG4-4 TZID ignored: cross-zone times off by hours | High | BB2 follow-up | routed |
+| GG4-5 One shared learning model: one dismissal moves unrelated senders, never decays | High | BB2 follow-up | routed |
+| GG4-6 Items never marked sensitive at ingest (therapy, clinic, salary) | High | HH2 | routed |
+| GG4-7 Confidential HR salary letter becomes a quoted "Reply to" card | High | BB2 follow-up | routed |
+| GG4-8 Scoped learning resets leave the shared part | High | BB2 follow-up | routed |
+| GG4-9 to GG4-19 | Medium | BB2 follow-up | routed |
+| GG4-20 to GG4-33 | Low | see report | open |
