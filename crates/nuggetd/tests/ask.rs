@@ -11,7 +11,8 @@ use nugget_core::capability::Locality;
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::{ItemKey, ItemRef, SourceId};
 use nugget_core::ipc::{
-    AskStarted, ChatDelta, ChatDone, ChatStarted, ClaimFlag, FlaggedClaim, method, notification,
+    AskRestarted, AskStarted, ChatDelta, ChatDone, ChatStarted, ClaimFlag, FlaggedClaim, method,
+    notification,
 };
 use nugget_core::paths::Paths;
 use nugget_ingest::MemorySecrets;
@@ -21,7 +22,7 @@ use nuggetd::{Daemon, DaemonOptions, Startup};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
-use wiremock::matchers::method as http_method;
+use wiremock::matchers::{body_string_contains, method as http_method};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
 const WAIT: Duration = Duration::from_secs(20);
@@ -260,6 +261,56 @@ async fn collect(
     }
 }
 
+/// One `retrieve.ask` stream as the client sees it, in order.
+#[derive(Debug, Default)]
+struct AskStream {
+    restarts: Vec<AskRestarted>,
+    text: String,
+    /// Whether every `ask.restarted` came before the first delta.
+    restarts_first: bool,
+}
+
+/// Like [`collect`], keeping the stream's `ask.restarted` notifications too.
+async fn collect_ask(
+    notes: &mut (impl futures::Stream<Item = Notification> + Unpin),
+    stream_id: &str,
+) -> (AskStream, ChatDone) {
+    let mut out = AskStream {
+        restarts_first: true,
+        ..AskStream::default()
+    };
+    loop {
+        let n = tokio::time::timeout(WAIT, notes.next())
+            .await
+            .expect("ask notification in time")
+            .expect("connection open");
+        match n.method.as_str() {
+            notification::ASK_RESTARTED => {
+                let r: AskRestarted = n.params_as().unwrap();
+                if r.stream_id == stream_id {
+                    if !out.text.is_empty() {
+                        out.restarts_first = false;
+                    }
+                    out.restarts.push(r);
+                }
+            }
+            notification::CHAT_DELTA => {
+                let d: ChatDelta = n.params_as().unwrap();
+                if d.stream_id == stream_id {
+                    out.text.push_str(&d.text);
+                }
+            }
+            notification::CHAT_DONE => {
+                let d: ChatDone = n.params_as().unwrap();
+                if d.stream_id == stream_id {
+                    return (out, d);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 const CLOUD: &str = r#"
 [[providers]]
 id = "remote"
@@ -308,22 +359,36 @@ async fn ask_never_sends_sensitive_passages_to_a_cloud_model() {
     let mut notes = h.client.notifications();
 
     // Routed by tier: the local provider is tried first, fails, and the cloud one answers.
-    // The context is packed again for the cloud provider, without the sensitive item.
+    // The reply carries the local provider's context (EE3: it comes before the model answers);
+    // the context is packed again for the cloud provider, without the sensitive item, and
+    // announced with `ask.restarted` before any delta.
     let started: AskStarted = h
         .call(
             method::RETRIEVE_ASK,
             json!({"query": "heron", "budget_tokens": 2000}),
         )
         .await;
-    assert_eq!(started.provider.as_str(), "remote");
-    assert_eq!(started.locality, Locality::Cloud);
-    assert_eq!(started.excluded_sensitive, 1);
-    let cited: Vec<&ItemRef> = started.citations.iter().map(|c| &c.item).collect();
-    assert_eq!(cited, vec![&iref("walk.md")]);
-    assert!(started.citations.iter().all(|c| !c.sensitive));
-    let (text, done) = collect(&mut notes, &started.stream_id).await;
+    assert_eq!(started.provider.as_str(), "dead");
+    assert_eq!(started.locality, Locality::OnDevice);
+    assert_eq!(started.excluded_sensitive, 0);
+    let (ask, done) = collect_ask(&mut notes, &started.stream_id).await;
     assert_eq!(done.error, None);
-    assert_eq!(text, "Herons [1]");
+    assert_eq!(ask.text, "Herons [1]");
+    assert!(ask.restarts_first, "ask.restarted came after a delta");
+    assert_eq!(ask.restarts.len(), 1, "{:?}", ask.restarts);
+    let restarted = &ask.restarts[0];
+    assert_eq!(restarted.provider.as_str(), "remote");
+    assert_eq!(restarted.locality, Locality::Cloud);
+    assert_eq!(restarted.excluded_sensitive, 1);
+    assert!(!restarted.general);
+    let cited: Vec<&ItemRef> = restarted.citations.iter().map(|c| &c.item).collect();
+    assert_eq!(cited, vec![&iref("walk.md")]);
+    assert!(restarted.citations.iter().all(|c| !c.sensitive));
+    // The audit row names the provider that answered.
+    let audit = audited_ask(&h.store);
+    assert_eq!(audit["locality"], json!("cloud"), "{audit}");
+    assert_eq!(audit["fallbacks"], json!(1), "{audit}");
+    assert_eq!(audit["excluded_sensitive"], json!(1), "{audit}");
 
     let bodies = h.bodies().await;
     assert!(bodies.contains("watched a heron"), "context was sent");
@@ -431,6 +496,18 @@ async fn ask_rejects_bad_requests() {
         .await;
     assert!(r.is_err());
     assert!(h.bodies().await.is_empty(), "nothing was sent");
+    // QA GG2-17: an enormous question is refused, not forwarded whole to the model.
+    let long = "why ".repeat(1_001);
+    let err = h
+        .client
+        .call_value(
+            method::RETRIEVE_ASK,
+            json!({"query": long, "budget_tokens": 2000}),
+        )
+        .await
+        .expect_err("a 4,003-character question is refused");
+    assert!(err.to_string().contains("too long"), "{err}");
+    assert!(h.bodies().await.is_empty(), "nothing reached the model");
     h.stop().await;
 }
 
@@ -604,8 +681,11 @@ async fn ask_with_nothing_relevant_answers_as_a_general_chat() {
         .iter()
         .map(|m| m["role"].as_str().unwrap())
         .collect();
-    assert_eq!(roles, ["user"], "no sourced system prompt");
+    // The general prompt (if any) and the question: no passages, no sourced rules.
+    assert_eq!(roles.last(), Some(&"user"), "{roles:?}");
+    assert!(roles.len() <= 2 && roles[..roles.len() - 1].iter().all(|r| *r == "system"));
     assert!(!h.bodies().await.contains("<passages>"));
+    assert!(!h.bodies().await.contains(nuggetd::ask::NOT_FOUND_REPLY));
     assert_eq!(audited_ask(&h.store)["general"], json!(true));
 
     // With passages it is a sourced answer, as before.
@@ -701,7 +781,8 @@ async fn ask_dates_today_at_the_clients_offset() {
         let offset = time::UtcOffset::from_whole_seconds(minutes * 60).unwrap();
         let today = time::OffsetDateTime::now_utc().to_offset(offset).date();
         let line = format!(
-            "Today is {:04}-{:02}-{:02}.",
+            "Today is {}, {:04}-{:02}-{:02}.",
+            today.weekday(),
             today.year(),
             u8::from(today.month()),
             today.day()
@@ -905,5 +986,107 @@ async fn ask_sends_no_local_paths_to_a_cloud_model() {
         !bodies.contains("/home/alice"),
         "a local path reached the cloud"
     );
+    h.stop().await;
+}
+
+/// A question the mock model is slow to start answering (a CPU-only prefill).
+const SLOW_QUESTION: &str = "Where was the slow heron fishing?";
+/// How long the mock model takes to send its first byte for [`SLOW_QUESTION`].
+const PREFILL: Duration = Duration::from_secs(3);
+
+/// [`Answer`], after [`PREFILL`].
+struct Slow;
+
+impl Respond for Slow {
+    fn respond(&self, req: &Request) -> ResponseTemplate {
+        Answer.respond(req).set_delay(PREFILL)
+    }
+}
+
+async fn start_slow(providers: &str) -> Harness {
+    let h = start(providers).await;
+    Mock::given(http_method("POST"))
+        .and(body_string_contains("slow heron"))
+        .respond_with(Slow)
+        .with_priority(1)
+        .mount(&h.mock)
+        .await;
+    h
+}
+
+/// QA GG2-5: the sources come back while the model is still reading them, not after its
+/// first token; the answer then streams on the same stream.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_returns_its_sources_before_the_model_answers() {
+    let mut h = start_slow(LOCAL).await;
+    let mut notes = h.client.notifications();
+    let asked = tokio::time::Instant::now();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": SLOW_QUESTION, "budget_tokens": 2000}),
+        )
+        .await;
+    let replied = asked.elapsed();
+    assert!(
+        replied < Duration::from_millis(1500),
+        "retrieve.ask took {replied:?} (the model takes {PREFILL:?} to start)"
+    );
+    assert_eq!(started.provider.as_str(), "ollama");
+    assert!(!started.general);
+    assert!(
+        started.citations.iter().any(|c| c.item == iref("walk.md")),
+        "{started:?}"
+    );
+    let (ask, done) = collect_ask(&mut notes, &started.stream_id).await;
+    assert!(
+        asked.elapsed() >= PREFILL,
+        "the answer came after the prefill"
+    );
+    assert_eq!(done.error, None);
+    assert_eq!(ask.text, "Herons [1]");
+    assert!(ask.restarts.is_empty(), "{:?}", ask.restarts);
+    assert!(done.check.is_some(), "a sourced answer is still checked");
+    assert_eq!(audited_ask(&h.store)["fallbacks"], json!(0));
+
+    // The stream can be stopped while the model is still reading.
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": SLOW_QUESTION, "budget_tokens": 2000}),
+        )
+        .await;
+    let cancelled = tokio::time::Instant::now();
+    let _: Value = h
+        .call(method::CHAT_CANCEL, json!({"stream_id": started.stream_id}))
+        .await;
+    let (ask, done) = collect_ask(&mut notes, &started.stream_id).await;
+    assert_eq!(done.error.as_deref(), Some("cancelled"));
+    assert!(ask.text.is_empty());
+    assert!(
+        cancelled.elapsed() < PREFILL,
+        "cancelled before the model answered"
+    );
+    h.stop().await;
+}
+
+/// An explicit provider is never substituted: when it fails, the stream (already announced
+/// with its sources) ends with an error, and nothing goes to another provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ask_with_a_failing_explicit_provider_ends_the_stream_with_an_error() {
+    let mut h = start(DEAD_LOCAL_THEN_CLOUD).await;
+    let mut notes = h.client.notifications();
+    let started: AskStarted = h
+        .call(
+            method::RETRIEVE_ASK,
+            json!({"query": "heron", "budget_tokens": 2000, "provider": "dead"}),
+        )
+        .await;
+    assert_eq!(started.provider.as_str(), "dead");
+    let (ask, done) = collect_ask(&mut notes, &started.stream_id).await;
+    assert!(done.error.is_some(), "{done:?}");
+    assert!(ask.text.is_empty());
+    assert!(ask.restarts.is_empty(), "{:?}", ask.restarts);
+    assert!(h.bodies().await.is_empty(), "nothing went to the cloud");
     h.stop().await;
 }

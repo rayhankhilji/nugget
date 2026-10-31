@@ -35,7 +35,7 @@ pub const SOCKET_NAME: &str = "nuggetd.sock";
 /// | `sources.secret.set` | [`SourceSecret`] | `null` |
 /// | `ingest.status` | `{}` | [`IngestStatus`] |
 /// | `retrieve.context` | [`ContextRequest`] | [`ContextResponse`] |
-/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications |
+/// | `retrieve.ask` | [`AskRequest`] | [`AskStarted`], then `chat.delta`/`chat.done` notifications (and `ask.restarted` ([`AskRestarted`]) before them when the stream falls back to another provider) |
 /// | `runtime.status` | `{}` | `Vec<`[`RuntimeInfo`]`>` |
 /// | `knowledge.entities` | [`EntitiesRequest`] | `Vec<`[`EntitySummaryView`]`>` |
 /// | `knowledge.entity` | [`EntityRef`] | [`EntityDetail`] |
@@ -104,6 +104,8 @@ pub mod notification {
     pub const SOURCES_CHANGED: &str = "sources.changed";
     /// [`KnowledgeChanged`].
     pub const KNOWLEDGE_CHANGED: &str = "knowledge.changed";
+    /// [`AskRestarted`]: a `retrieve.ask` stream moved on to another provider (EE3).
+    pub const ASK_RESTARTED: &str = "ask.restarted";
 }
 
 // ---- status ----
@@ -557,6 +559,11 @@ fn default_ask_tier() -> Tier {
 }
 
 /// Result of `retrieve.ask`: the stream (as for `chat`) plus the context it was given.
+///
+/// Returned as soon as the context for the first provider tried is packed, before that
+/// provider answers (EE3): a provider failure then ends the stream with `chat.done { error }`,
+/// or, routing by tier, moves it on to the next provider with an `ask.restarted`
+/// ([`AskRestarted`]) notification.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AskStarted {
     pub stream_id: String,
@@ -572,6 +579,25 @@ pub struct AskStarted {
     pub query_rewrite: Option<String>,
     /// Nothing relevant was found in the sources, so the model answers as an ordinary chat
     /// (no passages, no citations). Clients should say so on the reply.
+    #[serde(default)]
+    pub general: bool,
+}
+
+/// `ask.restarted` notification: the provider [`AskStarted`] named could not answer and the
+/// `retrieve.ask` stream `stream_id` moved on to `provider` (routing by tier only; an explicit
+/// provider is never substituted). The context is the one packed for that provider's locality,
+/// so `citations`, `excluded_sensitive` and `general` replace the earlier ones: the answer's
+/// `[n]` markers refer to these. Sent before the new provider's request goes out, so before any
+/// `chat.delta` of it, at most once per provider tried; it can arrive before the
+/// `retrieve.ask` reply. The searched query (`AskStarted::query_rewrite`) is unchanged.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AskRestarted {
+    pub stream_id: String,
+    pub provider: ProviderId,
+    pub locality: Locality,
+    pub citations: Vec<Citation>,
+    #[serde(default)]
+    pub excluded_sensitive: u32,
     #[serde(default)]
     pub general: bool,
 }

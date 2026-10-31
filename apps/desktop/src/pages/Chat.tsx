@@ -9,7 +9,9 @@ import {
   errorMessage,
   isCommandMissing,
   isOpenableUrl,
+  onAskRestarted,
   type AnswerCheck,
+  type AskRestarted,
   type AskStarted,
   type ChatDone,
   type ChatMessage,
@@ -76,6 +78,19 @@ export function writeUseSources(on: boolean): void {
 interface Early {
   text: string;
   done?: ChatDone;
+  /** The latest `ask.restarted`: the stream moved on to another provider before the reply came. */
+  restarted?: AskRestarted;
+}
+
+/** A sourced reply's stream moved on to another provider: its sources and provider are now these. */
+function restartTurn(turn: Turn, r: AskRestarted): Turn {
+  return {
+    ...turn,
+    provider: r.provider,
+    citations: r.general ? undefined : r.citations,
+    excludedSensitive: r.excluded_sensitive ?? 0,
+    generalAnswer: r.general ? true : undefined,
+  };
 }
 
 let nextTurnId = 1;
@@ -315,6 +330,18 @@ export function ChatPage() {
     }
   });
 
+  // EE3: an Ask stream moved on to another provider (before any delta of it): new sources.
+  useEvent(onAskRestarted, (r) => {
+    if (dropped.current.has(r.stream_id)) return;
+    if (attached.current.has(r.stream_id)) {
+      setTurns((ts) => ts.map((x) => (x.streamId === r.stream_id && isActive(x) ? restartTurn(x, r) : x)));
+    } else if (awaiting.current > 0) {
+      const e = early.current.get(r.stream_id) ?? { text: "" };
+      e.restarted = r;
+      early.current.set(r.stream_id, e);
+    }
+  });
+
   // A reply that streamed here is announced once it is complete, never per delta. A failed one
   // announces itself through its alert; a stopped one through `stop`.
   const streamed = useRef(new Set<number>());
@@ -402,6 +429,7 @@ export function ChatPage() {
             next.generalAnswer = true;
             next.excludedSensitive = general.excluded_sensitive ?? 0;
           }
+          if (buffered?.restarted && (asked || general)) next = restartTurn(next, buffered.restarted);
           if (buffered?.done) next = finish(next, buffered.done);
           return next;
         }),
@@ -777,6 +805,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   };
 
   const streaming = isActive(turn);
+  // EE3: the sources arrive with the reply, long before its first words on a slow model: while
+  // the model reads them, say so and list them all (nothing is cited yet).
+  const reading = turn.role === "assistant" && turn.state === "pending" && !turn.text && !!turn.citations?.length;
   return (
     <li className={`msg msg-${turn.role}`}>
       <div className="msg-meta">
@@ -799,7 +830,11 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         <div className="msg-body msg-md" dir="auto">
           {turn.text && <Markdown text={turn.text} onOpenLink={onOpenLink} citations={cite} />}
           {streaming && <span className="caret" aria-hidden="true" />}
-          {turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>}
+          {reading ? (
+            <p className="muted small chat-reading">{t("chat.reading", { count: turn.citations!.length })}</p>
+          ) : (
+            turn.state === "pending" && !turn.text && <span className="visually-hidden">{t("chat.waiting")}</span>
+          )}
         </div>
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
@@ -839,7 +874,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
         <div className="chat-sources" ref={sourcesRef}>
           <h3 className="chat-sources-title small muted">{t("chat.sources")}</h3>
           {sources.cited.length > 0 && <ol className="citations chat-citations">{sources.cited.map(sourceItem)}</ol>}
-          {sources.uncited.length > 0 && (
+          {reading ? (
+            <ol className="citations chat-citations chat-citations-reading">{sources.uncited.map(sourceItem)}</ol>
+          ) : sources.uncited.length > 0 && (
             <>
               <button
                 type="button"

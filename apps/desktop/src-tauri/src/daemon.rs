@@ -31,6 +31,8 @@ pub mod event {
     pub const SOURCES_CHANGED: &str = "nugget:sources-changed";
     /// `nugget_core::ipc::KnowledgeChanged`: entities whose facts, mentions or pages changed.
     pub const KNOWLEDGE_CHANGED: &str = "nugget:knowledge-changed";
+    /// `nugget_core::ipc::AskRestarted`: an Ask stream moved on to another provider (EE3).
+    pub const ASK_RESTARTED: &str = "nugget:ask-restarted";
     /// Every daemon notification as `{ method, params }`, including unknown ones.
     pub const NOTIFICATION: &str = "nugget:notification";
     /// A page id (`"status"`, ...): the tray asks the window to navigate.
@@ -280,6 +282,7 @@ fn event_for(method: &str) -> Option<&'static str> {
         notification::INGEST_PROGRESS => Some(event::INGEST_PROGRESS),
         notification::SOURCES_CHANGED => Some(event::SOURCES_CHANGED),
         notification::KNOWLEDGE_CHANGED => Some(event::KNOWLEDGE_CHANGED),
+        notification::ASK_RESTARTED => Some(event::ASK_RESTARTED),
         _ => None,
     }
 }
@@ -451,6 +454,10 @@ mod tests {
             event_for(notification::SOURCES_CHANGED),
             Some(event::SOURCES_CHANGED)
         );
+        assert_eq!(
+            event_for(notification::ASK_RESTARTED),
+            Some(event::ASK_RESTARTED)
+        );
         assert_eq!(event_for("something.new"), None);
         // Tauri event names allow only `[A-Za-z0-9-/:_]`.
         for name in [
@@ -460,6 +467,7 @@ mod tests {
             event::INGEST_PROGRESS,
             event::SOURCES_CHANGED,
             event::KNOWLEDGE_CHANGED,
+            event::ASK_RESTARTED,
         ] {
             assert!(
                 name.chars()

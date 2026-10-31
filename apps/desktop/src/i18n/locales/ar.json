@@ -344,6 +344,7 @@
   "chat.stopped": "متوقف",
   "chat.tokens": "{n, plural, zero {لا رموز} one {رمز واحد} two {رمزان} few {# رموز} many {# رمزًا} other {# رمز}}",
   "chat.waiting": "في انتظار الرد",
+  "chat.reading": "{count, plural, zero {لا مقاطع للقراءة} one {جارٍ قراءة مقطع واحد…} two {جارٍ قراءة مقطعين…} few {جارٍ قراءة # مقاطع…} many {جارٍ قراءة # مقطعًا…} other {جارٍ قراءة # مقطع…}}",
   "chat.message": "الرسالة",
   "chat.placeholder": "راسل Nugget  (Enter للإرسال، Shift+Enter لسطر جديد)",
   "chat.stop": "إيقاف",

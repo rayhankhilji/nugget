@@ -344,6 +344,7 @@
   "chat.stopped": "停止しました",
   "chat.tokens": "{n, plural, other {# トークン}}",
   "chat.waiting": "返信を待っています",
+  "chat.reading": "{count, plural, other {# 件の文章を読んでいます…}}",
   "chat.message": "メッセージ",
   "chat.placeholder": "Nuggetにメッセージを送信（Enterで送信、Shift+Enterで改行）",
   "chat.stop": "停止",

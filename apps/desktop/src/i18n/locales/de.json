@@ -344,6 +344,7 @@
   "chat.stopped": "Gestoppt",
   "chat.tokens": "{n, plural, one {# Token} other {# Tokens}}",
   "chat.waiting": "Wartet auf Antwort",
+  "chat.reading": "{count, plural, one {Liest # Passage …} other {Liest # Passagen …}}",
   "chat.message": "Nachricht",
   "chat.placeholder": "Nachricht an Nugget  (Eingabetaste zum Senden, Umschalt+Eingabetaste für neue Zeile)",
   "chat.stop": "Stoppen",

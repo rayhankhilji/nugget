@@ -485,6 +485,7 @@
     "today.notify.briefTitle",
     "updates.intro",
     "updates.login.ask",
-    "updates.upToDate"
+    "updates.upToDate",
+    "chat.reading"
   ]
 }

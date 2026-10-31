@@ -344,6 +344,7 @@
   "chat.stopped": "रोका गया",
   "chat.tokens": "{n, plural, one {# टोकन} other {# टोकन}}",
   "chat.waiting": "जवाब का इंतज़ार",
+  "chat.reading": "{count, plural, one {# अंश पढ़ा जा रहा है…} other {# अंश पढ़े जा रहे हैं…}}",
   "chat.message": "संदेश",
   "chat.placeholder": "Nugget को संदेश लिखें  (भेजने के लिए Enter, नई लाइन के लिए Shift+Enter)",
   "chat.stop": "रोकें",

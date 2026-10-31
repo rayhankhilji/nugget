@@ -514,6 +514,7 @@
     "chat.provider",
     "chat.providerAuto",
     "chat.providerOptionUnavailable",
+    "chat.reading",
     "chat.replyWhat",
     "chat.searchedFor",
     "chat.send",

@@ -1732,7 +1732,7 @@ Passages:\n[1] walk.md (notes)\nherons"
         // Rules before data: the prefix up to the date is the same for every question.
         let rules = s.find("Rules:").unwrap();
         assert!(rules < s.find("<passages>").unwrap());
-        assert!(s.ends_with("\n</passages>"));
+        assert!(s.ends_with(&format!("\n</passages>\n{PASSAGES_REMINDER}")));
         let undated = grounded(&context(&[("walk.md", None, "herons")]));
         assert!(
             undated.contains("[1] walk.md\ndate: unknown\nherons"),

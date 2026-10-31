@@ -344,6 +344,7 @@
   "chat.stopped": "已停止",
   "chat.tokens": "{n, plural, other {# 个 token}}",
   "chat.waiting": "正在等待回复",
+  "chat.reading": "{count, plural, other {正在阅读 # 段内容…}}",
   "chat.message": "消息",
   "chat.placeholder": "给 Nugget 发消息（按 Enter 发送，Shift+Enter 换行）",
   "chat.stop": "停止",

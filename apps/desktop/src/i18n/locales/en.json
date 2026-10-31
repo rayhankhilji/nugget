@@ -344,6 +344,7 @@
   "chat.stopped": "Stopped",
   "chat.tokens": "{n, plural, one {# token} other {# tokens}}",
   "chat.waiting": "Waiting for reply",
+  "chat.reading": "{count, plural, one {Reading # passage…} other {Reading # passages…}}",
   "chat.message": "Message",
   "chat.placeholder": "Message Nugget  (Enter to send, Shift+Enter for a new line)",
   "chat.stop": "Stop",
