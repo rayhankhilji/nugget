@@ -252,6 +252,17 @@ export interface IngestStatus {
   embedding_provider?: string | null;
   triage_provider?: string | null;
   sources: SourceInfo[];
+  /** HH2: background triage progress (items are searchable before triage). */
+  triage?: TriageProgress | null;
+}
+
+/** HH2: background triage (junk / sensitive labels) progress. */
+export interface TriageProgress {
+  state: "off" | "idle" | "running" | "yielding" | "paused";
+  pending: number;
+  done: number;
+  skipped?: number;
+  failed?: number;
 }
 
 // ---- retrieval ----

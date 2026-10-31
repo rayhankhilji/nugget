@@ -261,6 +261,94 @@ impl Store {
         })
     }
 
+    /// Items whose metadata says triage is still to run (`metadata.triage.state == "pending"`,
+    /// written by ingest), ordered by `(source, key)`, at most `limit`, starting after `after`
+    /// (keyset pagination). A full scan of `items`: meant for the background triage job's
+    /// recovery pass at start, not for hot paths.
+    pub fn items_pending_triage(
+        &self,
+        after: Option<&ItemRef>,
+        limit: usize,
+    ) -> Result<Vec<ItemRef>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
+        self.with_read_conn(|conn| {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT i.source, i.key FROM items i
+                     WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                       AND json_valid(i.metadata)
+                       AND json_extract(i.metadata, '$.triage.state') = 'pending'
+                     ORDER BY i.source, i.key
+                     LIMIT ?3",
+                )
+                .db("prepare items_pending_triage")?;
+            let rows = stmt
+                .query_map(params![src, key, limit], |r| {
+                    Ok(item_ref(r.get(0)?, r.get(1)?))
+                })
+                .db("query items_pending_triage")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read items_pending_triage")
+        })
+    }
+
+    /// Items without a `metadata.triage.state` (written before background triage existed),
+    /// ordered by `(source, key)`, at most `limit`, after `after` (keyset pagination). A full
+    /// scan, for a one-off migration at start.
+    pub fn items_without_triage_state(
+        &self,
+        after: Option<&ItemRef>,
+        limit: usize,
+    ) -> Result<Vec<ItemRef>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let (src, key) = after.map_or(("", ""), |a| (a.source.as_str(), a.key.as_str()));
+        self.with_read_conn(|conn| {
+            let mut stmt = conn
+                .prepare_cached(
+                    "SELECT i.source, i.key FROM items i
+                     WHERE (i.source > ?1 OR (i.source = ?1 AND i.key > ?2))
+                       AND (NOT json_valid(i.metadata)
+                            OR json_extract(i.metadata, '$.triage.state') IS NULL)
+                     ORDER BY i.source, i.key
+                     LIMIT ?3",
+                )
+                .db("prepare items_without_triage_state")?;
+            let rows = stmt
+                .query_map(params![src, key, limit], |r| {
+                    Ok(item_ref(r.get(0)?, r.get(1)?))
+                })
+                .db("query items_without_triage_state")?;
+            rows.collect::<rusqlite::Result<_>>()
+                .db("read items_without_triage_state")
+        })
+    }
+
+    /// Forget the stored `version` of items marked `metadata.junk = true` that have no chunks
+    /// and no `metadata.triage.state` (stored metadata-only by the old triage, QA GG2-7), so
+    /// the next full pass of their source re-indexes them. Returns how many were reset. Leaves
+    /// `updated_at` alone.
+    pub fn reset_versions_of_legacy_junk(&self) -> Result<usize> {
+        self.with_conn(|conn| {
+            conn.execute(
+                "UPDATE items SET version = NULL
+                 WHERE version IS NOT NULL
+                   AND json_valid(metadata)
+                   AND json_extract(metadata, '$.junk') = 1
+                   AND json_extract(metadata, '$.triage.state') IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM chunks c WHERE c.item_id = items.id)",
+                [],
+            )
+            .db("reset versions of legacy junk")
+        })
+    }
+
     /// Item and chunk counts per source, sorted by source id. Read from the counts that
     /// triggers keep per source (schema v10), so the cost does not grow with the store.
     pub fn source_counts(&self) -> Result<Vec<SourceCounts>> {

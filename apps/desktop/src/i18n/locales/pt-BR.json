@@ -477,6 +477,7 @@
   "status.embeddings": "Embeddings",
   "status.textOnly": "Busca só por texto",
   "status.triage": "Classificação por IA",
+  "status.triagePending": "{n} para organizar; já pesquisáveis",
   "status.off": "Desativada",
   "status.freshnessHint": "O atraso é o tempo entre uma mudança em uma fonte e o momento em que ela aparece na busca, considerando as mudanças recentes.",
   "status.errors": "Erros",

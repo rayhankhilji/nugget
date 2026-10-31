@@ -477,6 +477,7 @@
   "status.embeddings": "Vectorisation",
   "status.textOnly": "Recherche texte uniquement",
   "status.triage": "Tri par IA",
+  "status.triagePending": "{n} à trier ; déjà consultables",
   "status.off": "Désactivé",
   "status.freshnessHint": "Le délai est le temps entre une modification dans une source et le moment où elle devient consultable, mesuré sur les modifications récentes.",
   "status.errors": "Erreurs",

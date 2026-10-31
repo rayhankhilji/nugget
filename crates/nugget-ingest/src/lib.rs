@@ -7,9 +7,12 @@
 //!                              ▼
 //!          connector ──Change──▶ bounded queue ─▶ worker (in order)
 //!                                                   extract (blocking, timeout)
-//!                                                   PII scan ─▶ triage (local only)
-//!                                                   chunk ─▶ embed (batched, local by default)
+//!                                                   PII scan ─▶ chunk ─▶ embed (batched,
+//!                                                   local by default)
 //!                                                   store: item + chunks + version (atomic)
+//!                                                   ─▶ triage queue (searchable already)
+//!          triage job (background, batched, local only, yields to interactive model use)
+//!                                                   ─▶ junk / sensitive labels (metadata only)
 //!                                checkpoint(cursor) ─▶ set_cursor after everything before it
 //! ```
 //!
@@ -40,10 +43,18 @@
 //!   no longer write credentials.
 //! - **Bounded errors.** `last_error`, item errors and progress errors are capped at
 //!   [`MAX_ERROR_CHARS`] characters (see [`cap_error`]).
-//! - **Privacy.** Items with PII findings (or flagged by triage, or marked by their connector with
-//!   `metadata.sensitive = true`) are *sensitive*. Triage never uses `Cloud` providers;
-//!   embeddings use `Cloud` providers only when [`IngestConfig::allow_cloud_embeddings`] is set
-//!   **and** the item is not sensitive.
+//! - **Search before triage.** Items are searchable as soon as they are written; triage labels
+//!   them later in the background and never removes an item (or its chunks) from search. See
+//!   the `triage` module docs and `ingest.status.triage` for progress.
+//! - **Privacy.** Items with PII findings, items the deterministic sensitivity rules flag
+//!   (health, money, credentials, legal, `Health/` or `#finance` filing, sensitive senders
+//!   like `hr@`), items their connector marks with `metadata.sensitive = true`, and items
+//!   flagged by triage are *sensitive*. Unknown counts as sensitive: an
+//!   item no rule flags stays sensitive until local triage clears it, also while no triage
+//!   model is routable or triage is off ([`IngestConfig::assume_unflagged_safe`] opts out); so is every
+//!   item still waiting for triage or whose triage failed (fail closed). Triage never
+//!   uses `Cloud` providers; embeddings use `Cloud` providers only when
+//!   [`IngestConfig::allow_cloud_embeddings`] is set **and** the item is not sensitive.
 //! - **Isolation.** A bad item is recorded (see [`Ingest::errors`]) and skipped; it never stops
 //!   its source. Sources never block each other.
 //! - **Backpressure.** `ChangeSink::send` waits when the source's queue
@@ -53,9 +64,10 @@
 //!
 //! # Item metadata
 //! Items are stored with `metadata` = `{ source: <connector metadata>, url?, mime, extracted?,
-//! links?, tags?, sensitive, pii?: {card?, ssn?, iban?, secret?} (counts only), junk, triage?:
-//! {keep, junk, sensitive, summary, title}, truncated?, extract_error?, triage_error?,
-//! embed_error?, embedding_provider? }`.
+//! links?, tags?, sensitive, sensitive_rule?: "pii" | "connector" | "health" | "financial" |
+//! "credentials" | "legal" | "identity", pii?: {card?, ssn?, iban?, secret?} (counts only), junk, triage?:
+//! {state: "pending" | "done" | "skipped" | "failed" | "unknown", junk?, sensitive?, provider?, reason?,
+//! error?}, truncated?, extract_error?, embed_error?, embedding_provider? }`.
 
 mod ai;
 mod config;
@@ -65,18 +77,22 @@ mod metrics;
 mod pii;
 mod pipeline;
 mod power;
+mod priority;
 mod reembed;
 mod secrets;
+mod sensitivity;
 mod sources;
 mod supervisor;
+mod triage;
 mod util;
 
-pub use ai::{FEATURE_TRIAGE, SUMMARY_MAX_WORDS, Triage};
+pub use ai::{FEATURE_TRIAGE, Triage};
 pub use config::IngestConfig;
 pub use ingest::{AUTH_TIMEOUT, Ingest, IngestBuilder, IngestEvent, ItemError, SettingsResolver};
 pub use known::StoreKnownItems;
 pub use pii::{PiiFindings, scan as scan_pii};
 pub use power::{NoPowerPolicy, PowerPolicy, SystemPowerPolicy};
+pub use priority::{BACKGROUND_FEATURES, Foreground, ForegroundGuard, is_interactive};
 pub use reembed::ReembedStats;
 pub use secrets::{KeyringSecrets, MemorySecrets, account_belongs_to};
 pub use util::{MAX_ERROR_CHARS, cap_error};

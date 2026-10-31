@@ -3215,6 +3215,49 @@ A first run on the code before review ([41028090092](https://github.com/rayhankh
 showed the same direction with a scorer the review then fixed (it missed prose refusals and
 under-counted the plain arm's declines).
 
+### Ingest triage (HH2)
+
+QA GG2 found that ingest triaged every item with the chat model **before** writing it: the 315-file
+GG2 corpus took about 41 minutes to become searchable with the 4B, Ask during that sync was about 3×
+slower, and a small model's "junk" verdict stored real items without chunks (GG2-6, GG2-7). Now
+items are written (chunked, embedded, searchable) at once; triage labels them afterwards in a
+background job: batched (up to 8 items per request, two booleans each), at low priority (it waits
+for interactive on-device chats and drops its own request when one starts), and it never removes
+anything from search. Deterministic sensitivity rules (GG4-6, GG5-2) mark health, money,
+credential and legal content without a model, and unknown counts as sensitive until triage
+decides.
+
+Measured with [`qa/HH2`](../qa/HH2/README.md) (workflow `hh2-ingest.yml`): both builds in **one
+job on one runner**, fresh homes, the GG2 corpus (dated 2026-10-30), `qwen3-4b-q4km`, the same 6
+Ask questions during the sync (from 60 s after the source is added) and again once it settled.
+
+Run [41234041743](https://github.com/rayhankhilji/nugget/actions/runs/41234041743): before
+`7add95a`, after `f3751f5` (background triage and the first sensitivity rules); 4 vCPUs, AMD EPYC
+9V45.
+
+| | Before | After |
+|---|---|---|
+| Half the items searchable | 673 s | **16 s** |
+| All 315 items searchable | 1,436 s | **28 s** |
+| Fully triaged | 1,436 s | **819 s** |
+| Freshness p50 / p95 | 309 s / 448 s | **5.0 s / 8.3 s** |
+| Items without chunks | 98 | **0** |
+| GG2 recall probes found (`search`) | 7/10 | **10/10** |
+| Boiler email (GG2-7) first found | never | **16 s** |
+| Ask during sync: time to first token p50 / max | 31.5 s / 42.4 s | **18.9 s** / 55.4 s |
+| Asks during sync citing a supporting item | 2/6 | **6/6** |
+| `search` during sync p50 / p95 | 40 ms / 52 ms | 98 ms / 367 ms |
+
+Misses and caveats, not hidden:
+- The slowest Ask during the sync got slower (55.4 s vs 42.4 s): a triage batch can still be
+  mid-prefill when an Ask arrives on llama-server's single slot. Triage drops its request at once,
+  but the server may finish the step it is on.
+- `search` during the sync is slower because embedding now runs for every item up front, instead
+  of being spread over 24 minutes behind triage.
+- The "idle" Ask (same 6 questions after settling) measured 193 ms p50 after vs 19.9 s before.
+  That is llama-server's prompt cache answering repeated prompts, not a real speed-up, so it is
+  left out of the table.
+
 ### Bugs the real models exposed
 
 - **Fixed:** Qwen3 thought before every answer in the app (empty drafts; see Thinking above).

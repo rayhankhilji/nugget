@@ -477,6 +477,7 @@
   "status.embeddings": "嵌入",
   "status.textOnly": "仅文本搜索",
   "status.triage": "AI 分类",
+  "status.triagePending": "还有 {n} 项待整理；已可搜索",
   "status.off": "关闭",
   "status.freshnessHint": "延迟是指来源中的内容发生变化后到可以被搜索到所用的时间，按最近的变化统计。",
   "status.errors": "错误",

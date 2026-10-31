@@ -477,6 +477,7 @@
   "status.embeddings": "埋め込み",
   "status.textOnly": "テキストのみの検索",
   "status.triage": "AIによる仕分け",
+  "status.triagePending": "残り {n} 件を整理中（検索は可能）",
   "status.off": "オフ",
   "status.freshnessHint": "遅延とは、ソースが変更されてから検索可能になるまでの時間で、最近の変更をもとに算出しています。",
   "status.errors": "エラー",

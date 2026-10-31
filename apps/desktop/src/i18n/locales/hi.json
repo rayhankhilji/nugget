@@ -477,6 +477,7 @@
   "status.embeddings": "एम्बेडिंग",
   "status.textOnly": "सिर्फ़ टेक्स्ट खोज",
   "status.triage": "AI छँटाई",
+  "status.triagePending": "{n} छाँटना बाकी; पहले से खोजे जा सकते हैं",
   "status.off": "बंद",
   "status.freshnessHint": "देरी का मतलब है किसी स्रोत में बदलाव होने से लेकर उसके खोजने योग्य होने तक का समय, हाल के बदलावों के आधार पर।",
   "status.errors": "त्रुटियाँ",
