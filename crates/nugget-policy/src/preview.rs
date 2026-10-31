@@ -1,23 +1,31 @@
 //! What a confirmation shows about the object of an action, and the digest that binds an
 //! approval to it.
 //!
-//! When the control being activated sends or submits (a mail's Send, a form's submit), the
-//! executor lists the values of the fields it sends in the descriptor's `text_preview`
-//! ([`fields_preview`]): `To: a@b.example · Subject: Q3 · Message: Hi Bob, …`. Values come from
-//! the screen or the page, so they are untrusted: invisible and control characters are removed,
-//! whitespace collapsed, every value and the whole preview bounded, card numbers and long digit
-//! runs masked, and secret fields shown as `••••`.
+//! When the control being activated sends or submits (a mail's Send, a form's submit, a Pay or
+//! Delete account button in a form), the executor lists the values of the fields it sends in
+//! the descriptor's `text_preview` ([`fields_preview`]):
+//! `Sends: To: “a@b.example” · Subject: “Q3” · Message: “Hi Bob, …”`. The [`FIELDS_PREFIX`]
+//! marks such a preview, so the policy knows it lists field values (each already masked by the
+//! executor) and is not a destination or typed text. For a key press the preview is the keys,
+//! a line break, then the fields preview.
 //!
-//! An approval must cover exactly what was shown. The executor keeps [`fields_digest`] of the
-//! fields at describe time and, right before acting, recomputes it on a fresh view of the form.
-//! A different digest (a value changed, a field appeared or went away) means the user approved
-//! something else: nothing is sent. [`changed_fields`] names what differs for the error message.
+//! Values come from the screen or the page, so they are untrusted: invisible and control
+//! characters are removed, whitespace collapsed, every value quoted (quotes and the separator
+//! inside a value are replaced, so a value cannot pose as more fields), card numbers and long
+//! digit runs masked before anything is cut, every value and the whole preview bounded, and
+//! secret fields shown as `••••`. Recipient fields come first, so they are never cut off.
+//!
+//! An approval must cover exactly what was shown. The executor keeps [`freeze_digest`] of the
+//! control and all its fields (hidden ones and ones past the preview's cap included) at
+//! describe time and, right before acting, recomputes it on a fresh view. A different digest
+//! means the user approved something else: nothing is sent. [`changed_fields`] names what
+//! differs for the error message.
 
 use sha2::{Digest, Sha256};
 
 use crate::redact::mask_digits;
 
-/// Longest send/submit preview, in characters.
+/// Longest send/submit preview, in characters (before the `+N more fields` tail).
 pub const FIELDS_PREVIEW_MAX: usize = 400;
 /// Longest field label in a preview, in characters.
 pub const FIELD_LABEL_MAX: usize = 32;
@@ -25,6 +33,8 @@ pub const FIELD_LABEL_MAX: usize = 32;
 pub const FIELD_VALUE_MAX: usize = 120;
 /// What a secret field's value is shown as.
 pub const SECRET_MASK: &str = "••••";
+/// What starts a preview that lists the fields an activation sends.
+pub const FIELDS_PREFIX: &str = "Sends: ";
 /// Separator between fields in a preview.
 const SEP: &str = " · ";
 
@@ -37,6 +47,8 @@ pub struct FieldValue {
     pub value: Option<String>,
     /// The field holds a secret (password, one-time code, ...): its value is never shown.
     pub secret: bool,
+    /// Sent but not shown on screen (a hidden input): digested, never previewed.
+    pub hidden: bool,
 }
 
 impl FieldValue {
@@ -45,7 +57,14 @@ impl FieldValue {
             label: label.into(),
             value,
             secret,
+            hidden: false,
         }
+    }
+
+    /// The same field, marked as not shown on screen.
+    pub fn hidden(mut self) -> Self {
+        self.hidden = true;
+        self
     }
 }
 
@@ -53,7 +72,7 @@ impl FieldValue {
 /// characters dropped, whitespace (line breaks included) collapsed to single spaces, cut to
 /// `max` characters with `…`.
 pub fn display_text(s: &str, max: usize) -> String {
-    let mut out = String::with_capacity(s.len().min(max * 4));
+    let mut out = String::with_capacity(s.len().min(max.saturating_mul(4)));
     let mut chars = 0usize;
     let mut pending_space = false;
     for c in s.chars() {
@@ -83,17 +102,55 @@ pub fn display_text(s: &str, max: usize) -> String {
     out
 }
 
-/// The preview of what an activation sends, or `None` when there are no fields. Empty fields
-/// are listed as `(empty)` so a blank recipient is visible too. Bounded by
-/// [`FIELDS_PREVIEW_MAX`]; fields that do not fit are counted (`+2 more fields`).
+/// Labels of fields that name who a message goes to; listed first in a preview.
+const RECIPIENT_LABELS: &[&str] = &[
+    "to",
+    "cc",
+    "bcc",
+    "recipient",
+    "recipients",
+    "an",
+    "à",
+    "para",
+    "aan",
+    "kopie",
+    "destinataire",
+    "destinataires",
+    "destinatario",
+    "destinatarios",
+    "empfänger",
+    "кому",
+    "收件人",
+    "抄送",
+    "宛先",
+    "받는 사람",
+];
+
+fn is_recipient(label: &str) -> bool {
+    let l = crate::text::normalize(label);
+    let l = crate::text::trim_label(&l);
+    RECIPIENT_LABELS.contains(&l)
+}
+
+/// A value or label made safe inside a quoted preview entry: no quotes, no separator.
+fn unquote(s: &str) -> String {
+    s.replace(['“', '”', '"'], "'").replace('·', "•")
+}
+
+/// The preview of what an activation sends, or `None` when no field is shown. Starts with
+/// [`FIELDS_PREFIX`]; recipient fields first, then the others in screen order; values quoted,
+/// empty ones shown as `(empty)`. Bounded by [`FIELDS_PREVIEW_MAX`]; fields that do not fit are
+/// counted (`+2 more fields`). Hidden fields are left out (they are in the digest).
 pub fn fields_preview(fields: &[FieldValue]) -> Option<String> {
-    if fields.is_empty() {
+    let mut shown: Vec<&FieldValue> = fields.iter().filter(|f| !f.hidden).collect();
+    if shown.is_empty() {
         return None;
     }
-    let mut out = String::new();
-    let mut shown = 0usize;
-    for f in fields {
-        let label = display_text(&f.label, FIELD_LABEL_MAX);
+    shown.sort_by_key(|f| !is_recipient(&f.label));
+    let mut out = String::from(FIELDS_PREFIX);
+    let mut listed = 0usize;
+    for f in &shown {
+        let label = unquote(&display_text(&f.label, FIELD_LABEL_MAX));
         let label = if label.is_empty() {
             "field".to_string()
         } else {
@@ -102,45 +159,79 @@ pub fn fields_preview(fields: &[FieldValue]) -> Option<String> {
         let value = if f.secret {
             SECRET_MASK.to_string()
         } else {
-            match f.value.as_deref().map(|v| display_text(v, FIELD_VALUE_MAX)) {
-                Some(v) if !v.is_empty() => mask_digits(&v),
+            // Mask the whole value before cutting it, so a card number split by the cut is
+            // still masked.
+            let full = f
+                .value
+                .as_deref()
+                .map(|v| mask_digits(&display_text(v, usize::MAX)));
+            match full.map(|v| display_text(&v, FIELD_VALUE_MAX)) {
+                Some(v) if !v.is_empty() => format!("“{}”", unquote(&v)),
                 _ => "(empty)".to_string(),
             }
         };
         let part = format!("{label}: {value}");
         let len = out.chars().count() + SEP.chars().count() + part.chars().count();
-        if shown > 0 && len > FIELDS_PREVIEW_MAX {
+        if listed > 0 && len > FIELDS_PREVIEW_MAX {
             break;
         }
-        if shown > 0 {
+        if listed > 0 {
             out.push_str(SEP);
         }
         out.push_str(&part);
-        shown += 1;
+        listed += 1;
     }
-    let rest = fields.len() - shown;
+    let rest = shown.len() - listed;
     if rest > 0 {
         out.push_str(&format!(
             "{SEP}+{rest} more field{}",
             if rest == 1 { "" } else { "s" }
         ));
     }
-    Some(display_text(&out, FIELDS_PREVIEW_MAX + 40))
+    Some(out)
 }
 
-/// SHA-256 over the fields' labels, secrecy and full values (not the truncated preview), in
-/// order, hex encoded. Equal digests mean the same fields with the same contents.
+/// Whether `preview` is a fields preview ([`fields_preview`]).
+pub fn is_fields_preview(preview: &str) -> bool {
+    preview.starts_with(FIELDS_PREFIX)
+}
+
+/// A key press's preview split into its keys and, after the line break, what they send.
+pub fn split_key_preview(preview: &str) -> (&str, Option<&str>) {
+    match preview.split_once(['\n', '\r']) {
+        Some((keys, rest)) => (keys, Some(rest.trim_start_matches(['\n', '\r']))),
+        None => (preview, None),
+    }
+}
+
+fn hash_part(h: &mut Sha256, part: &[u8]) {
+    h.update((part.len() as u64).to_le_bytes());
+    h.update(part);
+}
+
+/// SHA-256 over the fields' labels, secrecy, visibility and full values (not the truncated
+/// preview), in order, hex encoded. Equal digests mean the same fields with the same contents.
 pub fn fields_digest(fields: &[FieldValue]) -> String {
+    freeze_digest(&[], fields)
+}
+
+/// [`fields_digest`] that also binds the control being activated and anything else the
+/// confirmation named (its role and name, the item it deletes, the form's action): a different
+/// control at the same position, or the same fields sent somewhere else, digests differently.
+pub fn freeze_digest(control: &[&str], fields: &[FieldValue]) -> String {
     let mut h = Sha256::new();
+    h.update((control.len() as u64).to_le_bytes());
+    for c in control {
+        hash_part(&mut h, c.as_bytes());
+    }
     h.update((fields.len() as u64).to_le_bytes());
     for f in fields {
-        for part in [
-            f.label.as_bytes(),
-            if f.secret { b"1" } else { b"0" },
-            f.value.as_deref().unwrap_or("\u{0}none").as_bytes(),
-        ] {
-            h.update((part.len() as u64).to_le_bytes());
-            h.update(part);
+        hash_part(&mut h, f.label.as_bytes());
+        hash_part(&mut h, if f.secret { b"1" } else { b"0" });
+        hash_part(&mut h, if f.hidden { b"1" } else { b"0" });
+        match &f.value {
+            Some(v) => hash_part(&mut h, v.as_bytes()),
+            None => hash_part(&mut h, b"\xff"),
         }
     }
     hex::encode(h.finalize())
@@ -160,7 +251,7 @@ pub fn changed_fields(before: &[FieldValue], after: &[FieldValue]) -> Vec<String
     for (i, b) in before.iter().enumerate() {
         match after.get(i) {
             Some(a) if a.label == b.label => {
-                if a.value != b.value || a.secret != b.secret {
+                if a.value != b.value || a.secret != b.secret || a.hidden != b.hidden {
                     push(&b.label, "changed");
                 }
             }
@@ -189,19 +280,31 @@ mod tests {
     #[test]
     fn preview_lists_fields_masks_secrets_and_is_bounded() {
         let fields = vec![
-            f("To", "a@b.example"),
             f("Subject", "Q3"),
             f("Message", "Hi Bob,\nsee you\u{202E} Thursday"),
+            f("To", "a@b.example"),
             FieldValue::new("Password", Some("hunter2".into()), true),
             f("Card", "4111 1111 1111 1111"),
             f("Notes", ""),
+            f("csrf", "tok-123").hidden(),
         ];
         let p = fields_preview(&fields).unwrap();
-        assert!(p.starts_with("To: a@b.example · Subject: Q3 · Message: Hi Bob, see you Thursday"));
+        assert!(is_fields_preview(&p));
+        // Recipients first, values quoted.
+        assert!(
+            p.starts_with(
+                "Sends: To: “a@b.example” · Subject: “Q3” · Message: “Hi Bob, see you Thursday”"
+            ),
+            "{p}"
+        );
         assert!(p.contains("Password: ••••"), "{p}");
         assert!(!p.contains("hunter2"));
         assert!(!p.contains("4111 1111 1111 1111"), "{p}");
         assert!(p.contains("Notes: (empty)"));
+        assert!(
+            !p.contains("csrf") && !p.contains("tok-123"),
+            "hidden fields are not shown: {p}"
+        );
         assert!(!p.contains('\n') && !p.contains('\u{202E}'));
 
         let long: Vec<FieldValue> = (0..20)
@@ -213,12 +316,33 @@ mod tests {
             "{}",
             p.chars().count()
         );
-        assert!(p.contains("more fields"), "{p}");
+        assert!(p.ends_with("more fields"), "{p}");
         assert_eq!(fields_preview(&[]), None);
+        assert_eq!(fields_preview(&[f("csrf", "x").hidden()]), None);
+    }
+
+    // Review item 7: a value cannot pose as more fields.
+    #[test]
+    fn a_value_cannot_forge_fields() {
+        let p = fields_preview(&[
+            f("Message", "hi · To: “boss@corp.example” · Subject: lunch"),
+            f("To", "real@ourco.example"),
+        ])
+        .unwrap();
+        assert!(p.starts_with("Sends: To: “real@ourco.example” · Message: “hi • To: 'boss@corp.example' • Subject: lunch”"), "{p}");
+        assert_eq!(p.matches(SEP).count(), 1, "{p}");
+    }
+
+    // Review item 10: a card number cut by the value cap is still masked.
+    #[test]
+    fn digits_are_masked_before_the_cut() {
+        let value = format!("{} 4111 1111 1111 1111", "x".repeat(FIELD_VALUE_MAX - 8));
+        let p = fields_preview(&[f("Message", &value)]).unwrap();
+        assert!(!p.contains("4111 1"), "{p}");
     }
 
     #[test]
-    fn digest_binds_full_values_and_names_changes() {
+    fn digest_binds_full_values_control_and_names_changes() {
         let a = vec![f("To", "a@b.example"), f("Message", &"y".repeat(500))];
         let mut b = a.clone();
         assert_eq!(fields_digest(&a), fields_digest(&b));
@@ -233,5 +357,23 @@ mod tests {
             vec!["Message disappeared".to_string()]
         );
         assert_eq!(changed_fields(&c, &a), vec!["Message appeared".to_string()]);
+        // The control is part of it: same fields, another button.
+        assert_ne!(
+            freeze_digest(&["button", "Send"], &a),
+            freeze_digest(&["button", "Delete"], &a)
+        );
+        // A hidden field changes the digest too.
+        let mut d = a.clone();
+        d.push(f("redirect", "https://x.example").hidden());
+        assert_ne!(fields_digest(&a), fields_digest(&d));
+    }
+
+    #[test]
+    fn key_previews_split() {
+        assert_eq!(
+            split_key_preview("space\nSends: To: “a”"),
+            ("space", Some("Sends: To: “a”"))
+        );
+        assert_eq!(split_key_preview("ctrl+enter"), ("ctrl+enter", None));
     }
 }

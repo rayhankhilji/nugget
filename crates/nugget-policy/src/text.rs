@@ -53,7 +53,7 @@ fn normalize_with(s: &str, invisible_as_space: bool) -> String {
     out
 }
 
-pub(crate) fn is_invisible(c: char) -> bool {
+pub fn is_invisible(c: char) -> bool {
     matches!(
         c,
         '\u{00AD}'

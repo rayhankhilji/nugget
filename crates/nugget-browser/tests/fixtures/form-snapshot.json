@@ -270,5 +270,13 @@
   "elements_truncated": false,
   "text": "Create your account\nAlready a member? Log in\nEmail address Full name  I agree to the terms Disabled Create account\nCustom control\nDraft text",
   "text_truncated": false,
-  "frames": []
+  "frames": [],
+  "forms": [
+    {
+      "id": "n3",
+      "action": "https://shop.example/signup",
+      "method": "post",
+      "digest": "08a5762aa2abf1e516a7bf98c7e93cf93952b7cb62e481dc19f18bc4f63a0c23"
+    }
+  ]
 }

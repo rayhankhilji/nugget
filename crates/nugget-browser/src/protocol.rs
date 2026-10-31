@@ -37,6 +37,10 @@ pub enum HostRequest {
         tab_id: Option<i64>,
         snapshot_id: String,
         action: BrowserAction,
+        /// A confirmed submit: the extension digests the form again right before dispatching
+        /// and refuses (`form_changed`) if it differs. Older extensions ignore it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_form: Option<FormExpectation>,
     },
     Overlay {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -49,6 +53,13 @@ pub enum HostRequest {
     /// The user resumed agents from the daemon (the desktop's Resume): lift a halt the host
     /// sent. An extension that does not know it answers `bad_request`; that is harmless.
     Resume,
+}
+
+/// The form a confirmed action may only submit while it has exactly this digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormExpectation {
+    pub form: String,
+    pub digest: String,
 }
 
 /// A request with its correlation id, as framed to the extension.
@@ -77,6 +88,8 @@ pub enum ErrorCode {
     BadUrl,
     Timeout,
     Halted,
+    /// The form changed after the user confirmed submitting it; nothing was sent.
+    FormChanged,
     Internal,
     #[serde(other)]
     Unknown,

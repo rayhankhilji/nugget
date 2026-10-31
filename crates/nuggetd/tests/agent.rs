@@ -139,6 +139,7 @@ fn contact_page(text: &str) -> PageSnapshot {
         text: text.into(),
         text_truncated: false,
         frames: Vec::new(),
+        forms: Vec::new(),
     }
 }
 

@@ -57,8 +57,8 @@ pub use redact::RedactedAction;
 pub use rules::{Effect, PolicyConfig, Rule, default_rules};
 pub use store::{JsonFilePolicyStore, MemoryPolicyStore, PolicyStore};
 pub use text::{
-    fold_confusables, normalize as normalize_text, normalize_spaced as normalize_text_spaced,
-    strip_marks as strip_text_marks,
+    fold_confusables, is_invisible, normalize as normalize_text,
+    normalize_spaced as normalize_text_spaced, strip_marks as strip_text_marks,
 };
 
 /// What kind of consequence an action can have. Higher classes need stronger consent.

@@ -22,6 +22,7 @@ fn round_trip_sync() {
                 text: "naïve — 日本語 🍣".into(),
                 clear: Some(false),
             },
+            expect_form: None,
         },
     };
     let mut buf = Vec::new();

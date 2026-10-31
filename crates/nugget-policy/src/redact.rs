@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::classify::card_spans;
-use crate::text::{Keyword, cap, normalize};
+use crate::text::cap;
 use crate::{ActionContext, ActionDescriptor, RiskClass};
 
 /// Longest text preview kept, in characters.
@@ -41,7 +41,7 @@ impl RedactedAction {
             text_preview: action
                 .text_preview
                 .as_deref()
-                .map(|p| redact_preview(p, secure)),
+                .map(|p| redact_action_preview(p, secure, PREVIEW_CAP)),
             declared_risk: action.declared_risk,
             task_id: cap(&action.task_id, LABEL_CAP),
         }
@@ -51,17 +51,7 @@ impl RedactedAction {
 /// Whether a field label names a secret (password, PIN, one-time code, card security code, ...),
 /// in the languages the classifier knows.
 pub fn is_secure_label(label: &str) -> bool {
-    use std::sync::OnceLock;
-    static KEYWORDS: OnceLock<Vec<Keyword>> = OnceLock::new();
-    let kws = KEYWORDS.get_or_init(|| {
-        crate::classify::SECURE_LABELS
-            .iter()
-            .chain(["cvv", "cvc", "csc"].iter())
-            .map(|k| Keyword::new(k))
-            .collect()
-    });
-    let label = normalize(label);
-    kws.iter().any(|k| k.matches(&label))
+    crate::classify::is_secure_label_text(label)
 }
 
 /// Text that would be typed or sent, made safe to log: `[redacted]` for secure fields, card
@@ -73,6 +63,27 @@ pub fn redact_preview(preview: &str, secure: bool) -> String {
 /// Longest preview a confirmation prompt shows, in characters: room for what a Send or a form
 /// submit sends (see [`crate::preview`]).
 pub const CONFIRM_PREVIEW_CAP: usize = crate::preview::FIELDS_PREVIEW_MAX + 40;
+
+/// A descriptor's preview made safe to log or show, capped at `max`.
+///
+/// A fields preview ([`crate::preview::fields_preview`]) lists values the executor has already
+/// masked field by field (secrets as `••••`): it is never redacted as a whole because of the
+/// target's label ("Send verification code", "Reset password"); digit runs are still masked.
+/// A key press's preview (keys, a line break, the fields) is shown as `keys — fields`, each part
+/// capped on its own so the fields keep their `+N more fields` tail. Anything else is
+/// [`redact_preview_capped`].
+pub fn redact_action_preview(preview: &str, secure: bool, max: usize) -> String {
+    use crate::preview::{is_fields_preview, split_key_preview};
+    match split_key_preview(preview) {
+        (keys, Some(sent)) if is_fields_preview(sent) => format!(
+            "{} — {}",
+            redact_preview_capped(keys, false, 60),
+            cap(&mask_digits(sent), max)
+        ),
+        _ if is_fields_preview(preview) => cap(&mask_digits(preview), max),
+        _ => redact_preview_capped(preview, secure, max),
+    }
+}
 
 /// [`redact_preview`] with its own cap.
 pub fn redact_preview_capped(preview: &str, secure: bool, max: usize) -> String {

@@ -914,12 +914,28 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
         s.push_str(&format!(" “{label}”"));
     }
     // The confirmation shows the whole bounded preview (what a Send sends), not the log's cut.
-    let secure = r.text_preview.as_deref() == Some(crate::redact::REDACTED);
-    let preview = action.text_preview.as_deref().map(|p| {
-        crate::redact::redact_preview_capped(p, secure, crate::redact::CONFIRM_PREVIEW_CAP)
-    });
-    if let Some(preview) = &preview {
-        s.push_str(&format!(" with “{preview}”"));
+    // A fields preview is masked field by field already; it is not hidden as a whole because
+    // the button's label mentions a password or a code.
+    let secure = ctx.secure_field
+        || action
+            .target_label
+            .as_deref()
+            .is_some_and(crate::redact::is_secure_label);
+    if let Some(p) = action.text_preview.as_deref() {
+        let shown =
+            crate::redact::redact_action_preview(p, secure, crate::redact::CONFIRM_PREVIEW_CAP);
+        let (keys, sent) = match shown.split_once(" — ") {
+            Some((k, f)) if crate::preview::is_fields_preview(f) => (Some(k), Some(f)),
+            _ if crate::preview::is_fields_preview(&shown) => (None, Some(shown.as_str())),
+            _ => (Some(shown.as_str()), None),
+        };
+        if let Some(k) = keys {
+            s.push_str(&format!(" with “{k}”"));
+        }
+        if let Some(f) = sent {
+            let f = f.strip_prefix(crate::preview::FIELDS_PREFIX).unwrap_or(f);
+            s.push_str(&format!(", which sends {f}"));
+        }
     }
     s.push('.');
     if a.risk > a.declared {
@@ -1890,14 +1906,52 @@ mod tests {
         let e = engine();
         let mut a = act("mail", "click", Some("Send"), RiskClass::Send);
         let body = format!(
-            "To: a@b.example · Subject: Q3 · Message: {}END",
-            "x".repeat(150)
+            "Sends: To: “a@b.example” · Subject: “Q3” · Message: “{}END”",
+            "x".repeat(110)
         );
         a.text_preview = Some(body);
         let Decision::Confirm(text) = e.evaluate(&a) else {
             panic!("a send asks");
         };
-        assert!(text.contains("To: a@b.example"), "{text}");
+        assert!(
+            text.contains("click “Send”, which sends To: “a@b.example”"),
+            "{text}"
+        );
         assert!(text.contains("END"), "{text}");
+    }
+
+    // Review items 8 and 14: a fields preview is not hidden because of the button's label,
+    // and a key press shows its keys, then what they send, with the fields' tail kept.
+    #[test]
+    fn fields_preview_redaction_is_per_field_and_keys_render_cleanly() {
+        let e = engine();
+        let mut a = act(
+            "mail",
+            "click",
+            Some("Send verification code"),
+            RiskClass::Send,
+        );
+        a.text_preview = Some("Sends: Email: “me@ourco.example” · Code: ••••".into());
+        let Decision::Confirm(text) = e.evaluate(&a) else {
+            panic!("asks");
+        };
+        assert!(
+            text.contains("which sends Email: “me@ourco.example” · Code: ••••"),
+            "{text}"
+        );
+        assert!(!text.contains("[redacted]"), "{text}");
+
+        let fields: String = (0..12)
+            .map(|i| format!("F{i}: “{}”", "y".repeat(25)))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let mut k = act("mail", "press_key", Some("Send"), RiskClass::Send);
+        k.text_preview = Some(format!("space\nSends: {fields} · +7 more fields"));
+        let Decision::Confirm(text) = e.evaluate(&k) else {
+            panic!("asks");
+        };
+        assert!(text.contains("with “space”, which sends F0:"), "{text}");
+        assert!(text.contains("+7 more fields"), "{text}");
+        assert!(!text.contains('\n'), "{text}");
     }
 }

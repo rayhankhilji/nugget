@@ -35,7 +35,9 @@ pub(crate) struct Frozen {
     /// The control that sends.
     pub element: ElementId,
     pub window: WindowId,
+    /// What was shown, for naming what changed.
     pub fields: Vec<FieldValue>,
+    /// [`FreezeView::digest`] at describe time.
     pub digest: String,
 }
 
@@ -87,11 +89,11 @@ impl Shared {
         q.remove(i).map(|(_, f)| f)
     }
 
-    /// The fields an activation of `id` sends, from the cached snapshots.
-    pub fn send_fields(&self, id: &ElementId) -> Option<(WindowId, Vec<FieldValue>)> {
+    /// The [`FreezeView`] of `id`, from the cached snapshots.
+    pub fn freeze_view(&self, id: &ElementId) -> Option<(WindowId, FreezeView)> {
         let c = self.cache();
         c.iter()
-            .find_map(|t| send_fields(t, id).map(|f| (t.window.id.clone(), f)))
+            .find_map(|t| freeze_view(t, id).map(|v| (t.window.id.clone(), v)))
     }
 
     /// The item an action on `id` applies to (see [`subject_item`]), from the cached snapshots.
@@ -238,40 +240,85 @@ fn scope_of<'a>(tree: &'a UiTree, path: &[&'a UiNode]) -> &'a UiNode {
         .unwrap_or(&tree.root)
 }
 
+/// What a control at the end of `path` sends: the nearest container around it that holds
+/// fields (its form or pane), stopping at its dialog; the window when nothing nearer does. So a
+/// page-controlled "To" field elsewhere in the window is not mixed in.
+fn send_scope<'a>(tree: &'a UiTree, path: &[&'a UiNode]) -> &'a UiNode {
+    for n in path.iter().rev().skip(1) {
+        if n.role == Role::Dialog || n.iter().any(is_sent_field) {
+            return n;
+        }
+    }
+    &tree.root
+}
+
 /// Is `n` a field whose contents a send or submit carries? Search fields are not.
 fn is_sent_field(n: &UiNode) -> bool {
     matches!(n.role, Role::TextField | Role::TextArea | Role::ComboBox)
         || (n.states.editable && matches!(n.role, Role::Document | Role::Unknown))
 }
 
-/// The editable fields in the dialog around `id` (else its window), in screen order, with
-/// their full values: what activating `id` sends. `None` when `id` is not in `tree`.
+fn field_value(n: &UiNode) -> FieldValue {
+    let label = [&n.name, &n.placeholder, &n.description]
+        .into_iter()
+        .flatten()
+        .find(|s| !s.trim().is_empty())
+        .cloned()
+        .unwrap_or_else(|| n.role.as_str().replace('_', " "));
+    let secret = crate::risk::is_secret_field(n);
+    let value = if n.states.secure {
+        None
+    } else {
+        n.value.clone()
+    };
+    FieldValue::new(label, value, secret)
+}
+
+/// The editable fields that activating `id` sends (see [`send_scope`]), all of them, in screen
+/// order, with their full values. `None` when `id` is not in `tree`.
 pub(crate) fn send_fields(tree: &UiTree, id: &ElementId) -> Option<Vec<FieldValue>> {
     let mut path = Vec::new();
     if !path_to(&tree.root, id, &mut path) {
         return None;
     }
-    let fields = scope_of(tree, &path)
-        .iter()
-        .filter(|n| is_sent_field(n))
-        .take(CONTEXT_ITEMS_MAX)
-        .map(|n| {
-            let label = [&n.name, &n.placeholder, &n.description]
-                .into_iter()
-                .flatten()
-                .find(|s| !s.trim().is_empty())
-                .cloned()
-                .unwrap_or_else(|| n.role.as_str().replace('_', " "));
-            let secret = crate::risk::is_secret_field(n);
-            let value = if n.states.secure {
-                None
-            } else {
-                n.value.clone()
-            };
-            FieldValue::new(label, value, secret)
-        })
-        .collect();
-    Some(fields)
+    Some(
+        send_scope(tree, &path)
+            .iter()
+            .filter(|n| is_sent_field(n))
+            .map(field_value)
+            .collect(),
+    )
+}
+
+/// What a confirmation of an activation of `id` binds: the control itself (role, name and the
+/// item it acts on) and the fields it sends.
+#[derive(Debug, Clone)]
+pub(crate) struct FreezeView {
+    pub control: Vec<String>,
+    pub fields: Vec<FieldValue>,
+}
+
+impl FreezeView {
+    pub fn digest(&self) -> String {
+        let control: Vec<&str> = self.control.iter().map(String::as_str).collect();
+        nugget_policy::preview::freeze_digest(&control, &self.fields)
+    }
+}
+
+/// The [`FreezeView`] of `id` in `tree`, `None` when it is not there.
+pub(crate) fn freeze_view(tree: &UiTree, id: &ElementId) -> Option<FreezeView> {
+    let node = tree.find(id)?;
+    let subject = subject_item(tree, id)
+        .map(|(how, item)| format!("{how}: {item}"))
+        .unwrap_or_default();
+    Some(FreezeView {
+        control: vec![
+            node.role.as_str().to_string(),
+            node.name.clone().unwrap_or_default(),
+            subject,
+        ],
+        fields: send_fields(tree, id)?,
+    })
 }
 
 /// A row's own name, else the text of its first text children.
@@ -291,11 +338,21 @@ fn row_name(n: &UiNode) -> Option<String> {
 }
 
 const ROW_ROLES: [Role; 3] = [Role::ListItem, Role::Row, Role::Cell];
+const COLLECTION_ROLES: [Role; 5] = [
+    Role::List,
+    Role::ListItem,
+    Role::Table,
+    Role::Row,
+    Role::Cell,
+];
 
-/// What an action on `id` (a Delete, say) applies to, for its confirmation: the row the control
-/// sits in, else the selected row of a list, table or tree in its dialog or window
-/// (`"selected"`), else the heading of the open item (`"open"`). The text is screen text,
-/// sanitized and bounded.
+/// What an action on `id` (a Delete, say) applies to, for its confirmation:
+/// - `"in"`: the row the control sits in (a per-row button);
+/// - `"selected"`: the selected row of a list, table or tree in its dialog or window;
+/// - `"open"`: the heading of its dialog, or of the window when the window clearly shows one
+///   item (a single heading and no list or table: a message or document view).
+///
+/// The text is screen text, sanitized and bounded.
 pub(crate) fn subject_item(tree: &UiTree, id: &ElementId) -> Option<(&'static str, String)> {
     let mut path = Vec::new();
     if !path_to(&tree.root, id, &mut path) {
@@ -306,7 +363,6 @@ pub(crate) fn subject_item(tree: &UiTree, id: &ElementId) -> Option<(&'static st
         (!t.is_empty()).then_some(t)
     };
     let own = path.last()?;
-    // The row a per-row button sits in.
     if let Some(row) = path
         .iter()
         .rev()
@@ -315,7 +371,7 @@ pub(crate) fn subject_item(tree: &UiTree, id: &ElementId) -> Option<(&'static st
         && let Some(t) = row_name(row).and_then(clean)
         && own.name.as_deref().is_none_or(|n| n.trim() != t)
     {
-        return Some(("selected", t));
+        return Some(("in", t));
     }
     let scope = scope_of(tree, &path);
     if let Some(t) = scope
@@ -326,11 +382,18 @@ pub(crate) fn subject_item(tree: &UiTree, id: &ElementId) -> Option<(&'static st
     {
         return Some(("selected", t));
     }
-    scope
-        .iter()
-        .filter(|n| n.role == Role::Heading)
-        .find_map(|n| n.name.clone().or_else(|| n.value.clone()).and_then(clean))
-        .map(|t| ("open", t))
+    let heading = |n: &UiNode| n.name.clone().or_else(|| n.value.clone()).and_then(clean);
+    let in_dialog = scope.role == Role::Dialog;
+    let headings: Vec<&UiNode> = scope.iter().filter(|n| n.role == Role::Heading).collect();
+    let item_view = in_dialog
+        || (headings.len() == 1 && !scope.iter().any(|n| COLLECTION_ROLES.contains(&n.role)));
+    if item_view {
+        return headings
+            .first()
+            .and_then(|n| heading(n))
+            .map(|t| ("open", t));
+    }
+    None
 }
 
 /// Run a backend call on the blocking pool (backends talk to the OS synchronously).

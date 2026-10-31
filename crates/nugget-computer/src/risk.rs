@@ -92,8 +92,8 @@ const SECRET_FIELD_WORDS: &[&str] = &[
     "passkey",
     "pin",
     "otp",
-    "secret",
-    "token",
+    // "token" and "secret" alone are too common ("Token amount", "Secret Santa"): the policy's
+    // table knows the credential phrases.
     "cvv",
     "cvc",
     "security code",
@@ -494,30 +494,33 @@ pub fn keys_risk(
     keys_risk_in(chords, target, &[], context, kw)
 }
 
-/// Does this chord move keyboard focus (so a later Space or Enter in the same call presses
-/// some other control than the target)?
-fn moves_focus(c: &KeyChord) -> bool {
+/// Does this chord, pressed in a text field, move keyboard focus out of it (so a later Space
+/// or Enter in the same call presses some other control)? Outside a text field every chord may
+/// (type-ahead letters pick another menu item or row), see [`keys_risk_in`].
+fn moves_focus_from_text(c: &KeyChord) -> bool {
     matches!(
         c.key,
         Key::Named(
             NamedKey::Tab
                 | NamedKey::Up
                 | NamedKey::Down
-                | NamedKey::Left
-                | NamedKey::Right
-                | NamedKey::Home
-                | NamedKey::End
                 | NamedKey::PageUp
                 | NamedKey::PageDown
+                | NamedKey::Escape
+                | NamedKey::F(_)
         )
-    ) || (c.key == Key::Char('f') && (c.modifiers.ctrl || c.modifiers.meta))
+    ) || c.modifiers.alt
+        || ((c.modifiers.ctrl || c.modifiers.meta)
+            && matches!(c.key, Key::Char('f' | 'F' | 'l' | 'L' | 'k' | 'K')))
 }
 
-/// Does `chords` press the control it goes to: a Space or Enter without Ctrl, Alt or Meta?
+/// Does `chords` press or submit what it goes to: a Space without Ctrl, Alt or Meta, or an
+/// Enter (Ctrl/Cmd+Enter sends a compose form)?
 pub(crate) fn activates(chords: &[KeyChord]) -> bool {
-    chords.iter().any(|c| {
-        matches!(c.key, Key::Named(NamedKey::Space | NamedKey::Enter))
-            && !(c.modifiers.ctrl || c.modifiers.meta || c.modifiers.alt)
+    chords.iter().any(|c| match c.key {
+        Key::Named(NamedKey::Space) => !(c.modifiers.ctrl || c.modifiers.meta || c.modifiers.alt),
+        Key::Named(NamedKey::Enter) => !c.modifiers.alt,
+        _ => false,
     })
 }
 
@@ -560,11 +563,13 @@ fn keys_risk_in(
         .iter()
         .map(|c| {
             let m = c.modifiers;
-            // After Tab or an arrow, Space and Enter press whatever has focus then: unknown.
+            // Once an earlier chord may have moved focus (any chord outside a text field: Tab,
+            // an arrow, a type-ahead letter, Escape, F6, Alt+letter), Space and Enter press
+            // whatever has focus then: unknown, as a click on an unknown element is.
             let target = if focus_moved { None } else { target };
             let pressable = pressable && !focus_moved;
             let text_input = text_input && !focus_moved;
-            focus_moved |= moves_focus(c);
+            focus_moved |= !text_input || moves_focus_from_text(c);
             let as_click = || click_risk_in(target, ancestors, context, kw);
             match c.key {
                 Key::Named(NamedKey::Enter) => {

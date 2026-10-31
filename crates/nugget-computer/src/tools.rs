@@ -13,7 +13,7 @@ use nugget_a11y::{
 use nugget_agent::tool::{redact_default, truncate};
 use nugget_agent::{ActionTarget, Snapshot, Tool, ToolCtx, ToolResult, Verification};
 use nugget_core::Error;
-use nugget_policy::preview::{changed_fields, fields_digest, fields_preview};
+use nugget_policy::preview::{changed_fields, fields_preview};
 use nugget_policy::{ActionDescriptor, RiskClass, RiskClassifier};
 use serde_json::{Value, json};
 
@@ -23,7 +23,7 @@ use crate::risk::{
     activates, classify_text, input_risk, is_secret_field, is_terminal_app, is_terminal_role,
     keys_risk_found,
 };
-use crate::state::{Found, Frozen, Shared, blocking, send_fields};
+use crate::state::{Found, Frozen, Shared, blocking, freeze_view};
 
 #[path = "tools_view.rs"]
 mod view;
@@ -517,8 +517,8 @@ impl ComputerTool {
                 element_desc(found.as_ref(), &id)
             ));
         }
-        if let Some(r) = self.check_frozen(args).await {
-            return r;
+        if let Err(r) = self.check_frozen(args).await {
+            return *r;
         }
         let plan = found
             .as_ref()
@@ -638,6 +638,11 @@ impl ComputerTool {
                     typed += n;
                     outcome = Some(merge_outcomes(outcome, o, true));
                 }
+                // A later piece the backend reduced to nothing (only characters a single-line
+                // field drops) typed all it could: done, as the whole text would have been.
+                Err(Error::Invalid(m)) if typed > 0 && m.contains("nothing to type") => {
+                    typed += n;
+                }
                 Err(e) if typed == 0 => return fail(format!("typing failed: {e}")),
                 Err(e) => {
                     return fail(format!(
@@ -675,9 +680,12 @@ impl ComputerTool {
             Err(e) => return fail(e),
         };
         let (found, _) = self.target(args);
-        if let Some(r) = self.check_frozen(args).await {
-            return r;
-        }
+        // Keys without `element` that were confirmed for the focused control go to exactly
+        // that control.
+        let id = match self.check_frozen(args).await {
+            Err(r) => return *r,
+            Ok(frozen) => id.or(frozen),
+        };
         let keys: Vec<String> = chords.iter().map(ToString::to_string).collect();
         // One chord per backend call, checking for Stop in between (GG3-11). Only the first goes
         // to `element`: the rest go wherever the earlier keys moved focus, as one sequence would.
@@ -914,27 +922,23 @@ impl ComputerTool {
 }
 
 impl ComputerTool {
-    /// For a click or key press that sends, deletes or submits, say what it acts on: the values
-    /// of the fields a send carries go in the preview (and are frozen for `call`, see
-    /// [`ComputerTool::check_frozen`]); a Delete names the selected or open item (GG3-5,
-    /// GG3-15). Screen text, so sanitized and bounded.
-    fn describe_object(
-        &self,
-        args: &Value,
-        f: &Found,
-        key: String,
-        target_app: &str,
-        target_label: &mut Option<String>,
-        text_preview: &mut Option<String>,
-    ) {
+    /// The risk class of activating `f` as this call would (the policy's classifier with the
+    /// context, or the tool's own estimate if higher), and whether the call presses it at all
+    /// (a click, or keys with an unmodified Space or Enter).
+    fn object_class(&self, args: &Value, f: &Found) -> (RiskClass, bool) {
         let chords = parse_keys(args).ok();
         let activating = self.kind == Kind::Click || chords.as_deref().is_some_and(activates);
         let ctx = crate::risk::action_context(Some(f));
         let probe = ActionDescriptor {
-            target_app: target_app.to_string(),
+            target_app: f.app.clone(),
             verb: self.kind.name().into(),
-            target_label: target_label.clone(),
-            text_preview: text_preview.clone(),
+            target_label: label(Some(f), None),
+            text_preview: chords.map(|c| {
+                c.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }),
             declared_risk: RiskClass::Observe,
             task_id: String::new(),
         };
@@ -942,26 +946,51 @@ impl ComputerTool {
             .classify_with_context(&probe, &ctx)
             .risk
             .max(self.risk(args));
-        let sends = class == RiskClass::Send || (activating && ctx.submits == Some(true));
-        if sends && let Some((window, fields)) = self.shared.send_fields(&f.node.id) {
-            if let Some(shown) = fields_preview(&fields) {
-                *text_preview = Some(match (self.kind, text_preview.take()) {
-                    // A key press's preview starts with its keys; what they send follows on
-                    // the next line (the policy reads only the first line as keys).
-                    (Kind::PressKey, Some(keys)) => format!("{keys}\n{shown}"),
-                    _ => shown,
-                });
-            }
-            let digest = fields_digest(&fields);
-            self.shared.freeze(
-                key,
-                Frozen {
-                    element: f.node.id.clone(),
-                    window,
-                    fields,
-                    digest,
-                },
-            );
+        let class = if ctx.submits == Some(true) && activating {
+            class.max(RiskClass::Send)
+        } else {
+            class
+        };
+        (class, activating)
+    }
+
+    /// Whether this call must have been frozen at describe time: it presses a control whose
+    /// activation is Send or above.
+    fn needs_freeze(&self, args: &Value, f: &Found) -> bool {
+        if self.in_terminal(Some(f)) {
+            return false;
+        }
+        let (class, activating) = self.object_class(args, f);
+        activating && class >= RiskClass::Send
+    }
+
+    /// For a click or key press that sends, pays, deletes or changes security, say what it acts
+    /// on and freeze it: the values of the fields it sends go in the preview; a Delete names the
+    /// item it applies to; the control, the item and all its fields are digested for `call`
+    /// (see [`ComputerTool::check_frozen`]). Screen text, so sanitized and bounded (GG3-5,
+    /// GG3-15).
+    fn describe_object(
+        &self,
+        args: &Value,
+        f: &Found,
+        key: String,
+        target_label: &mut Option<String>,
+        text_preview: &mut Option<String>,
+    ) {
+        let (class, activating) = self.object_class(args, f);
+        if !(activating && class >= RiskClass::Send) {
+            return;
+        }
+        let Some((window, view)) = self.shared.freeze_view(&f.node.id) else {
+            return;
+        };
+        if let Some(shown) = fields_preview(&view.fields) {
+            *text_preview = Some(match (self.kind, text_preview.take()) {
+                // A key press's preview starts with its keys; what they send follows on the
+                // next line (the policy reads only the first line as keys).
+                (Kind::PressKey, Some(keys)) => format!("{keys}\n{shown}"),
+                _ => shown,
+            });
         }
         let own_row = matches!(f.node.role, Role::ListItem | Role::Row | Role::Cell);
         if class == RiskClass::Destroy
@@ -969,49 +998,68 @@ impl ComputerTool {
             && let Some((how, item)) = self.shared.subject_item(&f.node.id)
             && let Some(l) = target_label.as_deref()
         {
-            *target_label = Some(format!("“{l}” — {how}: “{item}”"));
+            *target_label = Some(format!("{l} ({how}: {item})"));
         }
+        let digest = view.digest();
+        self.shared.freeze(
+            key,
+            Frozen {
+                element: f.node.id.clone(),
+                window,
+                fields: view.fields,
+                digest,
+            },
+        );
     }
 
-    /// Before a click or key press whose confirmation listed what it sends: re-read the window
-    /// and press only if the fields still hold exactly that (same digest, same fields, the same
-    /// control). The frozen description is used up either way.
-    async fn check_frozen(&self, args: &Value) -> Option<ToolResult> {
-        let fz = self.shared.thaw(&freeze_key(self.kind, args))?;
-        let current = match element_arg(args) {
-            Ok(Some(id)) => Some(id),
-            _ => self.shared.focused().map(|f| f.node.id),
+    /// Before a click or key press that must match its confirmation: re-read the window and
+    /// press only if the control, the item it acts on and its fields are exactly what was
+    /// described, and (for keys without `element`) the control still has focus in the fresh
+    /// snapshot. Fails closed: a Send-or-above activation with no frozen description (evicted,
+    /// never described, or the screen turned it risky since) is refused too. `Ok(Some(id))` is
+    /// the control the first key must go to.
+    async fn check_frozen(&self, args: &Value) -> Result<Option<ElementId>, Box<ToolResult>> {
+        let refuse = |why: String| {
+            let mut r = fail(format!(
+                "The action changed after it was shown for confirmation ({why}); nothing was \
+                 done. Observe and try again."
+            ));
+            r.data = Some(json!({"refused": true, "changed_after_confirmation": true}));
+            Box::new(r)
         };
-        let why = if current.as_ref() != Some(&fz.element) {
-            "keyboard focus moved to another control".to_string()
-        } else {
-            let window = fz.window.clone();
-            let el = fz.element.clone();
-            let fresh = blocking(&self.shared, move |s| {
-                let tree = s.snapshot(&WindowSel::Id(window))?;
-                Ok(send_fields(&tree, &el))
-            })
-            .await;
-            match fresh {
-                Err(e) => format!("the window could not be read again: {e}"),
-                Ok(None) => "the control is no longer there".into(),
-                Ok(Some(now)) if fields_digest(&now) != fz.digest => {
-                    let changed = changed_fields(&fz.fields, &now);
-                    if changed.is_empty() {
-                        "its fields changed".into()
-                    } else {
-                        changed.join(", ")
-                    }
+        let Some(fz) = self.shared.thaw(&freeze_key(self.kind, args)) else {
+            return match self.target(args).0 {
+                Some(f) if self.needs_freeze(args, &f) => {
+                    Err(refuse("it was not confirmed as it now stands".into()))
                 }
-                Ok(Some(_)) => return None,
-            }
+                _ => Ok(None),
+            };
         };
-        let mut r = fail(format!(
-            "The message changed after it was shown for confirmation ({why}); nothing was sent. \
-             Observe and try again."
-        ));
-        r.data = Some(json!({"refused": true, "changed_after_confirmation": true}));
-        Some(r)
+        let explicit = element_arg(args).ok().flatten();
+        let window = fz.window.clone();
+        let el = fz.element.clone();
+        let fresh = blocking(&self.shared, move |s| {
+            let tree = s.snapshot(&WindowSel::Id(window))?;
+            Ok((tree.focused.clone(), freeze_view(&tree, &el)))
+        })
+        .await;
+        let why = match fresh {
+            Err(e) => format!("the window could not be read again: {e}"),
+            Ok((focus, _)) if explicit.is_none() && focus.as_ref() != Some(&fz.element) => {
+                "keyboard focus moved to another control".into()
+            }
+            Ok((_, None)) => "the control is no longer there".into(),
+            Ok((_, Some(now))) if now.digest() != fz.digest => {
+                let changed = changed_fields(&fz.fields, &now.fields);
+                if changed.is_empty() {
+                    "the control or the item it acts on changed".into()
+                } else {
+                    changed.join(", ")
+                }
+            }
+            Ok(_) => return Ok(Some(fz.element)),
+        };
+        Err(refuse(why))
     }
 }
 
@@ -1035,24 +1083,27 @@ fn observe_hint(e: &Error, denied: bool, linux: bool) -> &'static str {
     }
 }
 
-/// Key under which a call's send confirmation is frozen: the tool and the element argument
-/// (or the focus).
+/// Key under which a call's confirmation is frozen: the tool and its full arguments (keys
+/// included), so a different call never uses another's description. `describe` does not know
+/// the task, so two tasks making the very same call share the entry; each call uses it up.
 fn freeze_key(kind: Kind, args: &Value) -> String {
-    let element = match element_arg(args) {
-        Ok(Some(id)) => id.0,
-        Ok(None) => "(focus)".into(),
-        Err(_) => "(invalid)".into(),
-    };
-    format!("{}:{element}", kind.name())
+    format!(
+        "{}:{}",
+        kind.name(),
+        serde_json::to_string(args).unwrap_or_default()
+    )
 }
 
-/// `text` in pieces of about `size` characters, never splitting a CR LF pair or putting a
-/// combining mark, joiner, variation selector or tag character at the start of a piece.
-fn text_chunks(text: &str, size: usize) -> Vec<String> {
+/// `text` in pieces of about `size` characters, never putting a line break, a combining mark,
+/// a joiner, a variation selector or a tag character at the start of a piece (so a CR LF pair
+/// stays whole, and no piece is only line breaks, which a single-line field would drop to
+/// nothing).
+pub(crate) fn text_chunks(text: &str, size: usize) -> Vec<String> {
     fn joins(prev: char, c: char) -> bool {
-        (prev == '\r' && c == '\n')
-            || prev == '\u{200D}'
+        prev == '\u{200D}'
             || matches!(c,
+                '\n' | '\r' | '\u{2028}' | '\u{2029}' | '\u{85}'
+                |
                 '\u{0300}'..='\u{036F}'
                 | '\u{1AB0}'..='\u{1AFF}'
                 | '\u{1DC0}'..='\u{1DFF}'
@@ -1312,14 +1363,7 @@ impl Tool for ComputerTool {
             let key = freeze_key(self.kind, args);
             self.shared.thaw(&key);
             if let Some(f) = found.as_ref().filter(|f| !self.in_terminal(Some(f))) {
-                self.describe_object(
-                    args,
-                    f,
-                    key,
-                    &target_app,
-                    &mut target_label,
-                    &mut text_preview,
-                );
+                self.describe_object(args, f, key, &mut target_label, &mut text_preview);
             }
         }
         ActionTarget {

@@ -3,11 +3,11 @@
 
 import { PageAgent } from "./agent";
 import { createOverlay } from "./overlay";
-import { ProtocolError, type BrowserAction, type SnapshotOptions } from "./protocol";
+import { ProtocolError, type BrowserAction, type FormExpectation, type SnapshotOptions } from "./protocol";
 
 export type ContentRequest =
   | { nugget: "snapshot"; options?: SnapshotOptions }
-  | { nugget: "act"; snapshot_id: string; action: BrowserAction }
+  | { nugget: "act"; snapshot_id: string; action: BrowserAction; expect_form?: FormExpectation }
   | { nugget: "overlay"; active: boolean; label?: string }
   | { nugget: "halt" }
   | { nugget: "resume" }
@@ -37,7 +37,7 @@ if (!window.__nuggetAgent) {
       case "snapshot":
         return agent.snapshot(req.options);
       case "act":
-        return agent.act(req.snapshot_id, req.action);
+        return agent.act(req.snapshot_id, req.action, req.expect_form);
       case "overlay":
         if (req.active) overlay.show(req.label);
         else overlay.hide();

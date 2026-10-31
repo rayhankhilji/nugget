@@ -8,10 +8,12 @@
 // - Hidden subtrees (`hidden`, `display: none`, `aria-hidden="true"`) are skipped unless
 //   `include_hidden` is set; `visibility: hidden` and zero-size elements are listed as not visible.
 
+import { formDigest } from "./digest";
 import { isOverlay } from "./overlay";
 import { ElementRegistry } from "./registry";
 import {
   type ElementInfo,
+  type FormInfo,
   type FrameInfo,
   LIMITS,
   type PageSnapshot,
@@ -64,12 +66,14 @@ export function buildSnapshot(doc: Document, ctx: SnapshotContext, options: Snap
     text: options.include_text === false ? "" : walker.text.trim(),
     text_truncated: walker.textTruncated,
     frames: walker.frames,
+    forms: walker.forms,
   };
 }
 
 class Walker {
   elements: ElementInfo[] = [];
   frames: FrameInfo[] = [];
+  forms: FormInfo[] = [];
   text = "";
   elementsTruncated = false;
   textTruncated = false;
@@ -193,7 +197,17 @@ class Walker {
     if (el.tagName === "SELECT") info.options = optionsOf(el as HTMLSelectElement, sensitive !== undefined);
     if (el.tagName === "A" && el.hasAttribute("href")) info.href = cap((el as HTMLAnchorElement).href, LIMITS.maxHrefChars);
     const form = formOf(el);
-    if (form) info.form = this.ctx.registry.idFor(form);
+    if (form) {
+      info.form = this.ctx.registry.idFor(form);
+      if (!this.forms.some((f) => f.id === info.form)) {
+        this.forms.push({
+          id: info.form,
+          action: cap(form.action, LIMITS.maxUrlChars),
+          method: (form.getAttribute("method") ?? "get").toLowerCase(),
+          digest: formDigest(form, this.ctx.registry.salt),
+        });
+      }
+    }
     if (frameId) info.frame = frameId;
     this.elements.push(info);
   }

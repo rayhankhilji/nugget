@@ -77,7 +77,6 @@ pub struct RiskClassifier {
     payment_fields: Vec<Keyword>,
     compose_fields: Vec<Keyword>,
     compose_titles: Vec<Keyword>,
-    secure_labels: Vec<Keyword>,
     card_labels: Vec<Keyword>,
     cancel_phrases: Vec<Keyword>,
     store_labels: Vec<Keyword>,
@@ -148,7 +147,6 @@ impl RiskClassifier {
             payment_fields: kw(PAYMENT_FIELDS),
             compose_fields: kw(COMPOSE_FIELDS),
             compose_titles: kw(COMPOSE_TITLES),
-            secure_labels: kw(SECURE_LABELS),
             card_labels: kw(CARD_LABELS),
             cancel_phrases: kw(CANCEL_PHRASES),
             store_labels: kw(STORE_LABELS),
@@ -187,7 +185,7 @@ impl RiskClassifier {
         let preview = action.text_preview.as_deref();
         // A key press's preview is its keys; anything after a line break is what they send,
         // shown to the user, never parsed as keys (see [`ActionDescriptor::text_preview`]).
-        let keys_preview = preview.map(|p| p.split(['\n', '\r']).next().unwrap_or(""));
+        let keys_preview = preview.map(|p| crate::preview::split_key_preview(p).0);
 
         // 1. The verb itself.
         if kind != VerbKind::Key {
@@ -225,7 +223,9 @@ impl RiskClassifier {
             kind,
             VerbKind::Navigate | VerbKind::Activate | VerbKind::Other
         ) {
-            let preview_counts = kind != VerbKind::Activate;
+            // Only a fields preview is exempt; any other preview (a third-party tool's URL) is
+            // still scanned.
+            let preview_counts = preview.is_some_and(|p| !crate::preview::is_fields_preview(p));
             for text in [
                 action.target_label.as_deref(),
                 preview.filter(|_| preview_counts),
@@ -348,9 +348,7 @@ impl RiskClassifier {
 
         // 7. Typing.
         if kind == VerbKind::Type {
-            let label_secure = label
-                .as_deref()
-                .is_some_and(|l| self.secure_labels.iter().any(|k| k.matches(l)));
+            let label_secure = label.as_deref().is_some_and(is_secure_label_text);
             if ctx.secure_field || label_secure {
                 acc.raise(RiskClass::Security, || "types into a secure field".into());
             }
@@ -1764,6 +1762,26 @@ const COMPOSE_TITLES: &[&str] = &[
     "편지쓰기",
 ];
 
+/// Labels that name a secret only when they are the whole label ("Token", "Secret:").
+const SECURE_EXACT: &[&str] = &["token", "secret", "key"];
+
+/// Whether a field label names a secret: [`SECURE_LABELS`] anywhere in it, or a label that is
+/// only one of [`SECURE_EXACT`].
+pub(crate) fn is_secure_label_text(label: &str) -> bool {
+    static KEYWORDS: OnceLock<Vec<Keyword>> = OnceLock::new();
+    let kws = KEYWORDS.get_or_init(|| {
+        SECURE_LABELS
+            .iter()
+            .chain(["cvv", "cvc", "csc"].iter())
+            .map(|k| Keyword::new(k))
+            .collect()
+    });
+    let label = normalize(label);
+    let folded = fold_confusables(&label);
+    SECURE_EXACT.contains(&trim_label(&label))
+        || kws.iter().any(|k| k.matches(&label) || k.matches(&folded))
+}
+
 /// Field labels that name a secret (shared with [`crate::redact::is_secure_label`] and, through
 /// it, with the executors' own secret-field checks).
 pub(crate) const SECURE_LABELS: &[&str] = &[
@@ -1799,9 +1817,22 @@ pub(crate) const SECURE_LABELS: &[&str] = &[
     "recovery code",
     "backup code",
     "private key",
-    "secret",
+    // "token" and "secret" alone are too common ("Token amount", "Secret Santa"): only these
+    // phrases, or a label that is just the word (see [`SECURE_EXACT`]).
+    "access token",
+    "api token",
+    "auth token",
+    "bearer token",
+    "refresh token",
+    "security token",
+    "session token",
+    "secret key",
+    "secret code",
+    "secret answer",
+    "secret token",
+    "client secret",
+    "shared secret",
     "api key",
-    "token",
     "digit code",
     "ssn",
     "social security",
@@ -1813,7 +1844,19 @@ pub(crate) const SECURE_LABELS: &[&str] = &[
     "验证码",
     "驗證碼",
     "認証コード",
+    "確認コード",
     "인증번호",
+    "인증 코드",
+    "인증코드",
+    "código de verificação",
+    "codigo de verificacao",
+    "codice di verifica",
+    "verificatiecode",
+    "kod weryfikacyjny",
+    "doğrulama kodu",
+    "رمز التحقق",
+    "einmalcode",
+    "zugangscode",
     "contraseña",
     "senha",
     "mot de passe",
@@ -2649,9 +2692,55 @@ mod tests {
             "mail",
             "click",
             Some("Send"),
-            Some("To: a@b.example · Message: pay here https://x.example/delete"),
+            Some("Sends: To: “a@b.example” · Message: “pay here https://x.example/delete”"),
         );
         assert_eq!(c.classify(&a).risk, RiskClass::Send);
+        // Review item 13: any other preview on a click (a third-party tool's URL) still counts.
+        let url = action(
+            "tool",
+            "click",
+            Some("Open"),
+            Some("https://evil.example/account/delete"),
+        );
+        assert_eq!(c.classify(&url).risk, RiskClass::Destroy);
+    }
+
+    // Review item 9: more languages; "token" and "secret" only as credentials.
+    #[test]
+    fn secret_labels_more_languages_and_word_bounded() {
+        for label in [
+            "Código de verificação",
+            "Codice di verifica",
+            "Verificatiecode",
+            "Kod weryfikacyjny",
+            "Doğrulama kodu",
+            "確認コード",
+            "인증 코드",
+            "رمز التحقق",
+            "Einmalcode",
+            "Zugangscode",
+            "Token",
+            "Secret:",
+            "API token",
+            "Client secret",
+        ] {
+            assert!(crate::redact::is_secure_label(label), "{label}");
+        }
+        for label in [
+            "Token amount",
+            "Secret Santa",
+            "Gift token value",
+            "Promo code",
+        ] {
+            assert!(!crate::redact::is_secure_label(label), "{label}");
+            let c = RiskClassifier::new();
+            assert_eq!(
+                c.classify(&action("app", "set_value", Some(label), Some("5")))
+                    .risk,
+                RiskClass::Observe,
+                "{label}"
+            );
+        }
     }
 
     // GG3-22: secret fields in other languages and newer wordings are Security to type into.

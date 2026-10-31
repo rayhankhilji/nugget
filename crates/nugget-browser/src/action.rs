@@ -4,10 +4,11 @@
 //! The extension validates again in the page (`extensions/browser/src/actions.ts`); validating
 //! here as well means a bad action is refused before the policy gate or the user is asked about it.
 
-use nugget_policy::preview::{FieldValue, fields_preview};
+use nugget_policy::preview::{FieldValue, fields_preview, freeze_digest};
 use nugget_policy::{ActionDescriptor, RiskClass};
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::FormExpectation;
 use crate::snapshot::{ElementInfo, PageSnapshot, Sensitive, SnapshotDiff, host_of};
 
 /// Longest text a single `type` action may enter (matches the extension).
@@ -339,24 +340,24 @@ pub(crate) fn submits(e: &ElementInfo) -> bool {
             || matches!(e.input_type.as_deref(), Some("submit" | "image")))
 }
 
-/// Most fields of one form listed in a preview or digest.
-const FORM_FIELDS_MAX: usize = 32;
-
-/// The value-carrying fields of `form`: text inputs, text areas, selects, check boxes and radio
-/// buttons. Password, payment and secret-labelled fields are marked secret (their values are
-/// never shown).
+/// Every value-carrying control of `form` in the snapshot, in page order: text inputs, text
+/// areas, selects, check boxes, radio buttons, file inputs and editable regions. Controls that
+/// are not visible are kept, marked hidden (digested, never previewed). Password, payment and
+/// secret-labelled fields are marked secret (their values are never shown). No cap: the preview
+/// bounds itself, and the digest must cover everything. (Hidden `<input type=hidden>` controls
+/// and values longer than the snapshot keeps are covered by the extension's own form digest,
+/// [`crate::snapshot::FormInfo::digest`].)
 pub fn form_fields(snapshot: &PageSnapshot, form: &str) -> Vec<FieldValue> {
     snapshot
         .form_elements(form)
         .filter(|e| match e.tag.as_str() {
             "input" => !matches!(
                 e.input_type.as_deref(),
-                Some("submit" | "button" | "image" | "reset" | "hidden" | "file")
+                Some("submit" | "button" | "image" | "reset")
             ),
             "textarea" | "select" => true,
             _ => e.editable,
         })
-        .take(FORM_FIELDS_MAX)
         .map(|e| {
             let label = if e.name.trim().is_empty() {
                 e.input_type.clone().unwrap_or_else(|| e.tag.clone())
@@ -375,9 +376,68 @@ pub fn form_fields(snapshot: &PageSnapshot, form: &str) -> Vec<FieldValue> {
             } else {
                 e.value.clone()
             };
-            FieldValue::new(label, value, secret)
+            let f = FieldValue::new(label, value, secret);
+            if e.visible { f } else { f.hidden() }
         })
         .collect()
+}
+
+/// What a confirmation of a click or submit binds (see [`BrowserAction::freeze_view`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FreezeView {
+    /// The control (verb, role, name, link target) and, for a submit, the form's action,
+    /// method and the extension's digest of it.
+    pub control: Vec<String>,
+    /// The form's fields (empty when nothing is submitted).
+    pub fields: Vec<FieldValue>,
+    /// What the extension must still see right before dispatching, when it gave a digest.
+    pub expect: Option<FormExpectation>,
+}
+
+impl FreezeView {
+    pub fn digest(&self) -> String {
+        let control: Vec<&str> = self.control.iter().map(String::as_str).collect();
+        freeze_digest(&control, &self.fields)
+    }
+}
+
+impl BrowserAction {
+    /// The [`FreezeView`] of a click or submit in `snapshot`; `None` for other actions or when
+    /// the element is not there.
+    pub fn freeze_view(&self, snapshot: Option<&PageSnapshot>) -> Option<FreezeView> {
+        let snap = snapshot?;
+        let id = match self {
+            Self::Click { element } | Self::Submit { element } => element,
+            _ => return None,
+        };
+        let e = snap.element(id)?;
+        let mut control = vec![
+            self.verb().to_string(),
+            e.role.clone(),
+            e.name.clone(),
+            e.href.clone().unwrap_or_default(),
+        ];
+        let mut fields = Vec::new();
+        let mut expect = None;
+        if let Some(form) = self.submitted_form(Some(snap)) {
+            fields = form_fields(snap, form);
+            let info = snap.form(form);
+            control.push(form.to_string());
+            control.push(info.map(|f| f.action.clone()).unwrap_or_default());
+            control.push(info.map(|f| f.method.clone()).unwrap_or_default());
+            let digest = info.and_then(|f| f.digest.clone());
+            control.push(digest.clone().unwrap_or_default());
+            expect = digest.map(|digest| FormExpectation {
+                form: form.to_string(),
+                digest,
+            });
+        }
+        Some(FreezeView {
+            control,
+            fields,
+            expect,
+        })
+    }
 }
 
 fn describe_wait(until: &WaitCondition) -> String {

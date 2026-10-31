@@ -152,5 +152,13 @@
   "elements_truncated": false,
   "text": "Pay $20.00",
   "text_truncated": false,
-  "frames": []
+  "frames": [],
+  "forms": [
+    {
+      "id": "n2",
+      "action": "https://shop.example/page",
+      "method": "get",
+      "digest": "01f96b30a3288e8310f0171b7827858aa8f8c1e08913c6f11396e42efeff7107"
+    }
+  ]
 }

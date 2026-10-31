@@ -13,9 +13,12 @@ export class ElementRegistry {
   private seq = 0;
   /** Random per-document token; snapshot ids from another document never validate. */
   readonly token: string;
+  /** Random per-document secret that salts form digests (never sent anywhere). */
+  readonly salt: string;
 
-  constructor(token?: string) {
+  constructor(token?: string, salt?: string) {
     this.token = token ?? randomToken();
+    this.salt = salt ?? randomToken() + randomToken();
   }
 
   idFor(el: Element): string {

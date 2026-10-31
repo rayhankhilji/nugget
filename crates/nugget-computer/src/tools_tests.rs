@@ -784,7 +784,7 @@ fn set_field(kit: &Kit, id: &str, value: &str) {
 }
 
 // GG3-5 (regression): a send's confirmation lists what it sends, and the press happens only if
-// the fields still hold exactly that.
+// the control and its fields are still exactly that.
 #[tokio::test]
 async fn gg3_5_send_preview_and_freeze() {
     let kit = send_kit();
@@ -793,7 +793,9 @@ async fn gg3_5_send_preview_and_freeze() {
     let d = kit.tool("click").describe(&send);
     let p = d.text_preview.clone().unwrap_or_default();
     assert!(
-        p.starts_with("To: bob@ourco.example · Subject: Q3 numbers · Message: Hi Bob, the numbers"),
+        p.starts_with(
+            "Sends: To: “bob@ourco.example” · Subject: “Q3 numbers” · Message: “Hi Bob, the numbers"
+        ),
         "{p}"
     );
     assert!(
@@ -833,16 +835,6 @@ async fn gg3_5_send_preview_and_freeze() {
         kit.acts()
     );
 
-    // The frozen description was used up: it does not linger for later calls, and describing
-    // something else (Discard is no send) freezes nothing.
-    assert!(
-        kit.tool("click")
-            .describe(&json!({"element": "c-discard"}))
-            .text_preview
-            .is_none()
-    );
-    assert!(kit.fake.windows.lock().unwrap().len() == 1);
-
     // A field that appears between confirmation and press also refuses.
     kit.tool("click").describe(&send);
     {
@@ -864,7 +856,7 @@ async fn gg3_5_send_preview_and_freeze() {
     let d = kit.tool("press_key").describe(&keys);
     let p = d.text_preview.unwrap();
     assert_eq!(p.lines().next(), Some("space"), "{p}");
-    assert!(p.contains("Bcc: eve@evil.example"), "{p}");
+    assert!(p.contains("Bcc: “eve@evil.example”"), "{p}");
     set_field(&kit, "c-body", "Wire $9,800 to DE89 3704 0044 0532 0130 00");
     let r = kit.call("press_key", keys).await;
     assert!(
@@ -872,18 +864,184 @@ async fn gg3_5_send_preview_and_freeze() {
         "{}",
         r.content
     );
+    let inputs = kit.fake.inputs.lock().unwrap().clone();
     assert!(
-        !kit.fake
-            .inputs
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|a| a.starts_with("keys:c-send"))
+        !inputs.iter().any(|a| a.starts_with("keys:c-send")),
+        "{inputs:?}"
     );
 }
 
-// GG3-6 (regression): Space or Enter on a button is judged like a click on it; after Tab the
-// pressed control is unknown.
+// Review item 3: a send with no frozen description (never described, evicted, or the call is
+// not the one described) is refused, and a different control at the same id is refused.
+#[tokio::test]
+async fn a_send_without_its_description_fails_closed() {
+    let kit = send_kit();
+    kit.call("observe", json!({})).await;
+    let send = json!({"element": "c-send"});
+    let r = kit.call("click", send.clone()).await;
+    assert!(
+        r.is_error && r.content.contains("not confirmed as it now stands"),
+        "{}",
+        r.content
+    );
+    // Described with other arguments (other keys): no entry for this call.
+    kit.tool("press_key")
+        .describe(&json!({"element": "c-send", "keys": "enter"}));
+    let r = kit
+        .call("press_key", json!({"element": "c-send", "keys": "space"}))
+        .await;
+    assert!(r.is_error, "{}", r.content);
+    // Evicted by many other descriptions.
+    kit.tool("click").describe(&send);
+    for i in 0..10 {
+        kit.tool("press_key")
+            .describe(&json!({"element": "c-send", "keys": format!("f{}", i + 1)}));
+        kit.tool("click")
+            .describe(&json!({"element": "c-discard", "n": i}));
+    }
+    let r = kit.call("click", send.clone()).await;
+    assert!(r.is_error, "{}", r.content);
+    assert!(
+        !kit.acts().iter().any(|a| a.contains("c-send")),
+        "{:?}",
+        kit.acts()
+    );
+    // The control at that id was swapped for another (same fields, same position).
+    kit.tool("click").describe(&send);
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        let n = node_mut(&mut ws[0].root, &ElementId("c-send".into())).unwrap();
+        n.name = Some("Senden und archivieren".into());
+    }
+    let r = kit.call("click", send.clone()).await;
+    assert!(
+        r.is_error && r.content.contains("the control"),
+        "{}",
+        r.content
+    );
+    // A benign click needs no description.
+    let r = kit.call("click", json!({"element": "c-search"})).await;
+    assert!(!r.content.contains("not confirmed"), "{}", r.content);
+}
+
+// Review item 2: Pay, Delete account and other submits above Send are previewed and frozen too.
+#[tokio::test]
+async fn a_spend_submit_is_previewed_and_frozen() {
+    let field = |id: &str, name: &str, value: &str| {
+        let mut n = node(id, Role::TextField, name);
+        n.value = Some(value.into());
+        n
+    };
+    let pay = window(
+        "w3",
+        "Bank",
+        vec![
+            field("p-iban", "Recipient IBAN", "DE89 3704 0044 0532 0130 00"),
+            field("p-amount", "Amount", "12.00"),
+            node("p-pay", Role::Button, "Pay now"),
+        ],
+    );
+    let kit = Kit::with(vec![pay], Vec::new());
+    kit.call("observe", json!({})).await;
+    let args = json!({"element": "p-pay"});
+    let d = kit.tool("click").describe(&args);
+    let p = d.text_preview.unwrap_or_default();
+    assert!(
+        p.contains("Amount: “12.00”") && p.contains("Recipient IBAN"),
+        "{p}"
+    );
+    set_field(&kit, "p-amount", "9800.00");
+    let r = kit.call("click", args.clone()).await;
+    assert!(
+        r.is_error && r.content.contains("Amount changed"),
+        "{}",
+        r.content
+    );
+    assert!(
+        !kit.acts().iter().any(|a| a.contains("p-pay")),
+        "{:?}",
+        kit.acts()
+    );
+}
+
+// Review item 1: keys confirmed for the focused control go to that control, and are refused
+// when focus moved in the meantime.
+#[tokio::test]
+async fn keys_follow_the_confirmed_focus() {
+    let kit = send_kit();
+    kit.call("click", json!({"element": "c-send"})).await; // refused, but nothing else
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws[0].focused = Some(ElementId("c-send".into()));
+    }
+    kit.call("observe", json!({})).await;
+    let keys = json!({"keys": "enter"});
+    let d = kit.tool("press_key").describe(&keys);
+    assert!(d.text_preview.unwrap().contains("To: “bob@ourco.example”"));
+    // Focus moves to Discard before the press.
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws[0].focused = Some(ElementId("c-discard".into()));
+    }
+    let r = kit.call("press_key", keys.clone()).await;
+    assert!(
+        r.is_error && r.content.contains("focus moved"),
+        "{}",
+        r.content
+    );
+    assert!(kit.fake.inputs.lock().unwrap().is_empty());
+    // Focus is back: the key goes to the confirmed control by id.
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws[0].focused = Some(ElementId("c-send".into()));
+    }
+    kit.call("observe", json!({})).await;
+    kit.tool("press_key").describe(&keys);
+    let r = kit.call("press_key", keys).await;
+    assert!(!r.is_error, "{}", r.content);
+    assert_eq!(
+        kit.fake.inputs.lock().unwrap().clone(),
+        vec!["keys:c-send:enter".to_string()]
+    );
+}
+
+// Review item 7: the fields are those of the control's own pane, not the whole window.
+#[tokio::test]
+async fn the_preview_is_scoped_to_the_controls_pane() {
+    let field = |id: &str, name: &str, value: &str| {
+        let mut n = node(id, Role::TextField, name);
+        n.value = Some(value.into());
+        n
+    };
+    let w = window(
+        "w4",
+        "Mail",
+        vec![
+            UiNode {
+                children: vec![field("x-to", "To", "boss@corp.example")],
+                ..node("ad", Role::Group, "Sponsored")
+            },
+            UiNode {
+                children: vec![
+                    field("m-to", "To", "bob@ourco.example"),
+                    node("m-send", Role::Button, "Send"),
+                ],
+                ..node("pane", Role::Group, "Compose")
+            },
+        ],
+    );
+    let kit = Kit::with(vec![w], Vec::new());
+    kit.call("observe", json!({})).await;
+    let p = kit
+        .tool("click")
+        .describe(&json!({"element": "m-send"}))
+        .text_preview
+        .unwrap();
+    assert_eq!(p, "Sends: To: “bob@ourco.example”");
+}
+
+// GG3-6 (regression): Space or Enter on a button is judged like a click on it; after any other
+// key the pressed control is unknown.
 #[tokio::test]
 async fn gg3_6_keys_on_a_button_are_a_click() {
     let kit = Kit::new();
@@ -900,17 +1058,36 @@ async fn gg3_6_keys_on_a_button_are_a_click() {
         ),
         kit.risk("click", json!({"element": "mail-compose"}))
     );
+    // Review item 6: Tab, a type-ahead letter, Escape, F6 or Alt+letter before Space/Enter.
+    for keys in [
+        "tab space",
+        "d enter",
+        "escape enter",
+        "f6 space",
+        "alt+d enter",
+        "shift+tab enter",
+    ] {
+        assert_eq!(
+            kit.risk(
+                "press_key",
+                json!({"element": "mail-compose", "keys": keys})
+            ),
+            RiskClass::Send,
+            "{keys}"
+        );
+    }
+    // In a text field, editing keys before Enter keep the field as the target.
     assert_eq!(
         kit.risk(
             "press_key",
-            json!({"element": "mail-compose", "keys": "tab space"})
+            json!({"element": "mail-to", "keys": "ctrl+a backspace"})
         ),
-        RiskClass::Send
+        RiskClass::Edit
     );
 }
 
-// GG3-15 (regression): a Delete names what it deletes: the open item's heading, or the selected
-// row.
+// GG3-15 (regression): a Delete names what it deletes: the open item's heading, the selected
+// row, or the row its button sits in; never a list view's heading.
 #[tokio::test]
 async fn gg3_15_delete_names_the_item() {
     let mut heading = node("m-subject", Role::Heading, "Lunch Thursday?");
@@ -930,10 +1107,17 @@ async fn gg3_15_delete_names_the_item() {
         "w7",
         "Files",
         vec![
+            node("f-title", Role::Heading, "Inbox"),
             node("f-delete", Role::Button, "Delete"),
             node("f-rename", Role::Button, "Rename"),
             UiNode {
-                children: vec![node("r-1", Role::ListItem, "Holiday plan"), selected],
+                children: vec![
+                    UiNode {
+                        children: vec![node("r-1-del", Role::Button, "Delete")],
+                        ..node("r-1", Role::ListItem, "Holiday plan")
+                    },
+                    selected,
+                ],
                 ..node("f-list", Role::List, "Files")
             },
         ],
@@ -944,16 +1128,76 @@ async fn gg3_15_delete_names_the_item() {
     let d = kit.tool("click").describe(&json!({"element": "m-delete"}));
     assert_eq!(
         d.target_label.as_deref(),
-        Some("“Löschen” — open: “Lunch Thursday?”")
+        Some("Löschen (open: Lunch Thursday?)")
     );
     let d = kit.tool("click").describe(&json!({"element": "f-delete"}));
     assert_eq!(
         d.target_label.as_deref(),
-        Some("“Delete” — selected: “Budget review”")
+        Some("Delete (selected: Budget review)")
     );
+    let d = kit.tool("click").describe(&json!({"element": "r-1-del"}));
+    assert_eq!(d.target_label.as_deref(), Some("Delete (in: Holiday plan)"));
+    // Nothing selected in a list view: the view's heading ("Inbox") is not named.
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        let n = node_mut(&mut ws[1].root, &ElementId("r-2".into())).unwrap();
+        n.states.selected = false;
+    }
+    kit.call("observe", json!({"window": "w7"})).await;
+    let d = kit.tool("click").describe(&json!({"element": "f-delete"}));
+    assert_eq!(d.target_label.as_deref(), Some("Delete"));
     // Not a Delete: the label is unchanged.
     let d = kit.tool("click").describe(&json!({"element": "f-rename"}));
     assert_eq!(d.target_label.as_deref(), Some("Rename"));
+}
+
+// Review item 9: "Token amount" and "Secret Santa" are not secrets; "Einmalcode" is.
+#[test]
+fn secret_fields_are_word_bounded() {
+    for (label, secret) in [
+        ("Token amount", false),
+        ("Secret Santa", false),
+        ("API token", true),
+        ("Einmalcode", true),
+        ("Codice di verifica", true),
+    ] {
+        let n = node("x", Role::TextField, label);
+        assert_eq!(crate::risk::is_secret_field(&n), secret, "{label}");
+    }
+}
+
+// Review items 11 and 15: how text is cut into pieces.
+#[test]
+fn text_chunks_edge_cases() {
+    use super::text_chunks;
+    let join = |v: &[String]| v.concat();
+    // CR LF stays whole and never starts a piece; no piece is only a line break.
+    let t = format!("{}\r\nnext", "a".repeat(4));
+    let c = text_chunks(&t, 4);
+    assert_eq!(join(&c), t);
+    assert!(c.iter().all(|p| !p.starts_with(['\r', '\n'])), "{c:?}");
+    let c = text_chunks("abcd\n", 4);
+    assert_eq!(c, vec!["abcd\n".to_string()]);
+    // A combining mark stays with its letter; an emoji modifier with its emoji.
+    let c = text_chunks("abce\u{301}fg", 4);
+    assert_eq!(c[0], "abce\u{301}");
+    let c = text_chunks("abc👍🏽x", 4);
+    assert_eq!(c[0], "abc👍🏽");
+    assert!(text_chunks("", 4).is_empty());
+}
+
+// Review item 11: a final piece a single-line field drops entirely does not fail the call.
+#[tokio::test]
+async fn a_trailing_newline_into_a_single_line_field_still_types() {
+    let kit = send_kit();
+    kit.call("observe", json!({})).await;
+    set_field(&kit, "c-subject", "");
+    let text = format!("{}\n", "s".repeat(super::TYPE_CHUNK));
+    let r = kit
+        .call("type_text", json!({"element": "c-subject", "text": text}))
+        .await;
+    assert!(!r.is_error, "{}", r.content);
+    assert_eq!(kit.fake.inputs.lock().unwrap().len(), 1);
 }
 
 // GG3-22 (regression): secret fields are recognised in other languages and wordings.

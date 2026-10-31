@@ -152,8 +152,20 @@ export function parseHostRequest(raw: unknown): HostRequest {
         },
       };
     }
-    case "act":
-      return { id, type: "act", tab_id, snapshot_id: str(raw, "snapshot_id")!, action: parseAction(raw.action) };
+    case "act": {
+      const e = raw.expect_form;
+      if (e !== undefined && (!isObj(e) || typeof e.form !== "string" || typeof e.digest !== "string")) {
+        throw new ProtocolError("bad_request", "`expect_form` must be {form, digest}");
+      }
+      return {
+        id,
+        type: "act",
+        tab_id,
+        snapshot_id: str(raw, "snapshot_id")!,
+        action: parseAction(raw.action),
+        ...(e ? { expect_form: { form: e.form as string, digest: e.digest as string } } : {}),
+      };
+    }
     case "overlay":
       if (typeof raw.active !== "boolean") throw new ProtocolError("bad_request", "`active` must be a boolean");
       return { id, type: "overlay", tab_id, active: raw.active, label: str(raw, "label", true) };

@@ -79,6 +79,22 @@ pub struct Viewport {
     pub scroll_y: f64,
 }
 
+/// A form some element of the snapshot belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FormInfo {
+    pub id: String,
+    /// The resolved `action` URL.
+    #[serde(default)]
+    pub action: String,
+    #[serde(default)]
+    pub method: String,
+    /// The extension's salted digest of everything the form would send (every control, hidden
+    /// ones and full values included). Only equality is meaningful. Absent from older
+    /// extensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PageSnapshot {
     pub snapshot_id: String,
@@ -95,6 +111,9 @@ pub struct PageSnapshot {
     pub text_truncated: bool,
     #[serde(default)]
     pub frames: Vec<FrameInfo>,
+    /// The forms the elements belong to.
+    #[serde(default)]
+    pub forms: Vec<FormInfo>,
 }
 
 impl PageSnapshot {
@@ -105,6 +124,11 @@ impl PageSnapshot {
     /// The page's host (`example.com`), which is what policy allow/deny lists match on.
     pub fn host(&self) -> Option<String> {
         host_of(&self.url)
+    }
+
+    /// The form with id `form`, if the snapshot lists it.
+    pub fn form(&self, form: &str) -> Option<&FormInfo> {
+        self.forms.iter().find(|f| f.id == form)
     }
 
     /// Elements of the form with id `form`.

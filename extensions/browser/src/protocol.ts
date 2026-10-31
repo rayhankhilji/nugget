@@ -83,6 +83,16 @@ export interface Viewport {
   scroll_y: number;
 }
 
+/** A form some element of the snapshot belongs to. */
+export interface FormInfo {
+  id: string;
+  /** Resolved `action` URL. */
+  action: string;
+  method: string;
+  /** Salted digest of everything the form would send (see `digest.ts`); compare for equality only. */
+  digest: string;
+}
+
 export interface PageSnapshot {
   snapshot_id: string;
   url: string;
@@ -94,6 +104,8 @@ export interface PageSnapshot {
   text: string;
   text_truncated: boolean;
   frames: FrameInfo[];
+  /** Forms the elements belong to, in document order. */
+  forms: FormInfo[];
 }
 
 export interface ElementChange {
@@ -125,6 +137,12 @@ export type BrowserAction =
   | { kind: "submit"; element: string }
   | { kind: "wait_for"; until: WaitCondition; timeout_ms?: number };
 
+/** A confirmed submit: dispatch it only while `form` still has exactly this digest. */
+export interface FormExpectation {
+  form: string;
+  digest: string;
+}
+
 export interface SnapshotOptions {
   include_text?: boolean;
   include_hidden?: boolean;
@@ -133,7 +151,7 @@ export interface SnapshotOptions {
 export type HostRequest =
   | { id: number; type: "hello"; protocol: number }
   | { id: number; type: "snapshot"; tab_id?: number; options?: SnapshotOptions }
-  | { id: number; type: "act"; tab_id?: number; snapshot_id: string; action: BrowserAction }
+  | { id: number; type: "act"; tab_id?: number; snapshot_id: string; action: BrowserAction; expect_form?: FormExpectation }
   | { id: number; type: "overlay"; tab_id?: number; active: boolean; label?: string }
   | { id: number; type: "halt" }
   | { id: number; type: "resume" };
@@ -165,6 +183,7 @@ export type ErrorCode =
   | "bad_url"
   | "timeout"
   | "halted"
+  | "form_changed"
   | "internal";
 
 export interface ReplyError {

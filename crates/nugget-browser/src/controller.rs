@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{BrowserAction, ValidationError, Verification, verify};
 use crate::bridge::{BridgeError, BrowserBridge};
-use crate::protocol::{ActResult, ErrorCode, HostRequest, SnapshotOptions};
+use crate::protocol::{ActResult, ErrorCode, FormExpectation, HostRequest, SnapshotOptions};
 use crate::snapshot::{PageSnapshot, SnapshotDiff};
 use crate::tool::action_context;
 
@@ -45,6 +45,8 @@ pub enum BrowserError {
     PermissionRequired,
     #[error("the page changed since the last snapshot; take a new snapshot")]
     StaleSnapshot,
+    #[error("the form changed after it was confirmed; nothing was sent: {0}")]
+    FormChanged(String),
     #[error(transparent)]
     Bridge(BridgeError),
 }
@@ -64,6 +66,10 @@ impl From<BridgeError> for BrowserError {
                 code: ErrorCode::StaleSnapshot | ErrorCode::UnknownElement,
                 ..
             } => Self::StaleSnapshot,
+            BridgeError::Extension {
+                code: ErrorCode::FormChanged,
+                message,
+            } => Self::FormChanged(message),
             other => Self::Bridge(other),
         }
     }
@@ -199,6 +205,17 @@ impl BrowserController {
         task_id: &str,
         action: BrowserAction,
     ) -> Result<ActionOutcome, BrowserError> {
+        self.act_expecting(task_id, action, None).await
+    }
+
+    /// [`BrowserController::act`] for a confirmed submit: the extension dispatches it only while
+    /// the form still has the digest the user confirmed (see [`FormExpectation`]).
+    pub async fn act_expecting(
+        &self,
+        task_id: &str,
+        action: BrowserAction,
+        expect_form: Option<FormExpectation>,
+    ) -> Result<ActionOutcome, BrowserError> {
         self.check_halt().await?;
         let latest = self.latest_snapshot();
         action.validate(latest.as_ref())?;
@@ -222,6 +239,7 @@ impl BrowserController {
                     .map(|s| s.snapshot_id.clone())
                     .unwrap_or_default(),
                 action: action.clone(),
+                expect_form,
             })
             .await;
         let value = match value {

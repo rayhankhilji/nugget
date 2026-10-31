@@ -123,7 +123,12 @@ export class Router {
         if (this.halted) throw new ProtocolError("halted", "Nugget was stopped by the user");
         if (req.action.kind === "navigate") return this.navigate(req.tab_id, req.action.url);
         const tab = await this.grantedTab(req.tab_id);
-        const result = (await this.toTab(tab.id, { nugget: "act", snapshot_id: req.snapshot_id, action: req.action })) as ActResult;
+        const result = (await this.toTab(tab.id, {
+          nugget: "act",
+          snapshot_id: req.snapshot_id,
+          action: req.action,
+          ...(req.expect_form ? { expect_form: req.expect_form } : {}),
+        })) as ActResult;
         await this.checkSnapshotOrigin(result.snapshot);
         this.latest.set(tab.id, result.snapshot);
         return result;
