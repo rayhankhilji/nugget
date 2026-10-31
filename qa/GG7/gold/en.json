@@ -1,0 +1,423 @@
+{
+  "lang": "en",
+  "note": "English is the baseline language: no T/V distinction, so register markers are salutation/closing conventions; all four ask questions are English, and the cross_lingual search uses a German query for an English item.",
+  "search": [
+    {
+      "id": "en-s1",
+      "query": "Copperline Print",
+      "expect": [
+        "en/03-invoice-copperline-print.eml"
+      ],
+      "kind": "exact",
+      "why": "vendor name in the base64-encoded invoice body"
+    },
+    {
+      "id": "en-s2",
+      "query": "Ridgeline Trail",
+      "expect": [
+        "en/02-ridgeline-hike-saturday.eml"
+      ],
+      "kind": "exact",
+      "why": "trail name in the friend's mail"
+    },
+    {
+      "id": "en-s3",
+      "query": "hiking",
+      "expect": [
+        "en/02-ridgeline-hike-saturday.eml"
+      ],
+      "kind": "inflected",
+      "why": "text only has 'hike'; query uses the -ing form"
+    },
+    {
+      "id": "en-s4",
+      "query": "cornbread",
+      "expect": [
+        "en/05-thanksgiving-plan.md"
+      ],
+      "kind": "compound_part",
+      "why": "first part of the hyphenated 'Cornbread-sausage stuffing'"
+    },
+    {
+      "id": "en-s5",
+      "query": "creme brulee",
+      "expect": [
+        "en/05-thanksgiving-plan.md"
+      ],
+      "kind": "no_diacritics",
+      "why": "note writes 'crème brûlée'; query typed without accents"
+    },
+    {
+      "id": "en-s6",
+      "query": "Margaret Ellison",
+      "expect": [
+        "en/01-meeting-request-harlow-pike.eml"
+      ],
+      "kind": "name",
+      "why": "sender name and signature"
+    },
+    {
+      "id": "en-s7",
+      "query": "outdoor mountain walk with a buddy",
+      "expect": [
+        "en/02-ridgeline-hike-saturday.eml"
+      ],
+      "kind": "semantic",
+      "why": "paraphrase of the Saturday hike plan without shared words"
+    },
+    {
+      "id": "en-s8",
+      "query": "Rechnung der Druckerei",
+      "expect": [
+        "en/03-invoice-copperline-print.eml"
+      ],
+      "kind": "cross_lingual",
+      "why": "German query ('invoice from the print shop') for the English invoice"
+    }
+  ],
+  "ask": [
+    {
+      "id": "en-a1",
+      "question_lang": "en",
+      "question": "How much do I owe Copperline Print and when is it due?",
+      "facts": [
+        [
+          "$3,486.75",
+          "3,486.75",
+          "3486.75"
+        ],
+        [
+          "November 20",
+          "Nov 20",
+          "2026-11-20",
+          "11/20"
+        ]
+      ],
+      "cite": [
+        "en/03-invoice-copperline-print.eml"
+      ]
+    },
+    {
+      "id": "en-a2",
+      "question_lang": "en",
+      "question": "When and where does Margaret Ellison want to meet?",
+      "facts": [
+        [
+          "November 10",
+          "Nov 10",
+          "2026-11-10",
+          "11/10"
+        ],
+        [
+          "2:00 p.m.",
+          "2:00 pm",
+          "2 p.m.",
+          "2 pm",
+          "14:00"
+        ],
+        [
+          "418 Commerce Street",
+          "Commerce Street",
+          "Nashville"
+        ]
+      ],
+      "cite": [
+        "en/01-meeting-request-harlow-pike.eml"
+      ]
+    },
+    {
+      "id": "en-a3",
+      "question_lang": "en",
+      "question": "What does Rachel need from me, by when, and who is consolidating it?",
+      "facts": [
+        [
+          "Q4",
+          "forecast"
+        ],
+        [
+          "November 13",
+          "Nov 13",
+          "2026-11-13",
+          "11/13",
+          "the 13th"
+        ],
+        [
+          "Kevin Marsh",
+          "Kevin"
+        ]
+      ],
+      "cite": [
+        "en/04-q4-forecast-deadline.eml"
+      ]
+    },
+    {
+      "id": "en-a4",
+      "question_lang": "en",
+      "question": "What's the deadline for the Lakeview Lodge deposit and how much is it?",
+      "facts": [
+        [
+          "November 5",
+          "Nov 5",
+          "2026-11-05",
+          "11/5"
+        ],
+        [
+          "$500",
+          "500"
+        ]
+      ],
+      "cite": [
+        "en/06-re-offsite-venue.eml"
+      ]
+    }
+  ],
+  "draft": [
+    {
+      "id": "en-d1",
+      "file": "en/01-meeting-request-harlow-pike.eml",
+      "register": "formal",
+      "instruction": "accept the meeting and ask whether parking is available",
+      "accept_lang": [
+        "en"
+      ],
+      "formal_markers": [
+        "Dear",
+        "Ms. Ellison",
+        "Kind regards",
+        "Best regards",
+        "Sincerely"
+      ],
+      "informal_markers": [
+        "Hey",
+        "gonna",
+        "wanna",
+        "lol"
+      ],
+      "note": "Formal business English: 'Dear Ms. Ellison', full sentences, no contractions-heavy chat style."
+    },
+    {
+      "id": "en-d2",
+      "file": "en/02-ridgeline-hike-saturday.eml",
+      "register": "informal",
+      "instruction": "",
+      "accept_lang": [
+        "en"
+      ],
+      "formal_markers": [
+        "Dear Danny",
+        "Sincerely",
+        "Kind regards"
+      ],
+      "informal_markers": [
+        "Hey",
+        "Hi Danny",
+        "sounds good",
+        "!"
+      ],
+      "note": "Casual reply to a friend; should answer about Saturday, the 7:30 start, coffee/bagels and Mia."
+    },
+    {
+      "id": "en-d3",
+      "file": "en/06-re-offsite-venue.eml",
+      "register": "neutral",
+      "instruction": "tell Jordan to go ahead and sign",
+      "accept_lang": [
+        "en"
+      ],
+      "formal_markers": [
+        "Dear Mr. Pierce",
+        "Sincerely"
+      ],
+      "informal_markers": [
+        "Hi Jordan",
+        "Thanks",
+        "go ahead"
+      ],
+      "note": "Colleague thread, friendly-professional; reply to Jordan's latest message, not to the quoted one."
+    }
+  ],
+  "extract": {
+    "people": [
+      {
+        "name": "Margaret Ellison",
+        "aliases": [
+          "Ms. Ellison"
+        ],
+        "email": "m.ellison@harlowpike.example",
+        "file": "en/01-meeting-request-harlow-pike.eml"
+      },
+      {
+        "name": "Danny Reyes",
+        "aliases": [
+          "Danny"
+        ],
+        "email": "danny.reyes@example.org",
+        "file": "en/02-ridgeline-hike-saturday.eml"
+      },
+      {
+        "name": "Mia",
+        "aliases": [],
+        "email": null,
+        "file": "en/02-ridgeline-hike-saturday.eml"
+      },
+      {
+        "name": "Rachel Thornton",
+        "aliases": [
+          "Rachel"
+        ],
+        "email": "rachel.thornton@brightwater.example",
+        "file": "en/04-q4-forecast-deadline.eml"
+      },
+      {
+        "name": "Kevin Marsh",
+        "aliases": [
+          "Kevin"
+        ],
+        "email": "kevin.marsh@brightwater.example",
+        "file": "en/04-q4-forecast-deadline.eml"
+      },
+      {
+        "name": "Jordan Pierce",
+        "aliases": [
+          "Jordan"
+        ],
+        "email": "jordan.pierce@brightwater.example",
+        "file": "en/06-re-offsite-venue.eml"
+      }
+    ],
+    "orgs": [
+      {
+        "name": "Harlow & Pike Consulting",
+        "file": "en/01-meeting-request-harlow-pike.eml"
+      },
+      {
+        "name": "Copperline Print Co.",
+        "file": "en/03-invoice-copperline-print.eml"
+      },
+      {
+        "name": "Brightwater Analytics",
+        "file": "en/04-q4-forecast-deadline.eml"
+      },
+      {
+        "name": "Lakeview Lodge",
+        "file": "en/06-re-offsite-venue.eml"
+      }
+    ],
+    "dates": [
+      {
+        "date": "2026-11-10",
+        "time": "14:00",
+        "text": "Tuesday, November 10, at 2:00 p.m.",
+        "file": "en/01-meeting-request-harlow-pike.eml",
+        "what": "Meeting at Harlow & Pike, Nashville"
+      },
+      {
+        "date": "2026-11-07",
+        "time": "07:30",
+        "text": "Saturday, November 7",
+        "file": "en/02-ridgeline-hike-saturday.eml",
+        "what": "Ridgeline Trail hike"
+      },
+      {
+        "date": "2026-11-20",
+        "text": "Friday, November 20, 2026",
+        "file": "en/03-invoice-copperline-print.eml",
+        "what": "Invoice INV-2026-0412 due"
+      },
+      {
+        "date": "2026-11-13",
+        "text": "Friday, November 13",
+        "file": "en/04-q4-forecast-deadline.eml",
+        "what": "Q4 forecast due"
+      },
+      {
+        "date": "2026-11-26",
+        "text": "Thursday, November 26",
+        "file": "en/05-thanksgiving-plan.md",
+        "what": "Thanksgiving dinner"
+      },
+      {
+        "date": "2026-11-19",
+        "time": "09:00",
+        "text": "Thursday, November 19, from 9:00 a.m. to 4:00 p.m.",
+        "file": "en/06-re-offsite-venue.eml",
+        "what": "Team offsite, Birch Room"
+      },
+      {
+        "date": "2026-11-05",
+        "text": "Thursday, November 5",
+        "file": "en/06-re-offsite-venue.eml",
+        "what": "Lakeview Lodge contract + deposit"
+      }
+    ],
+    "amounts": [
+      {
+        "text": "$3,486.75",
+        "value": 3486.75,
+        "currency": "USD",
+        "file": "en/03-invoice-copperline-print.eml"
+      },
+      {
+        "text": "$500",
+        "value": 500,
+        "currency": "USD",
+        "file": "en/06-re-offsite-venue.eml"
+      },
+      {
+        "text": "$68 per person",
+        "value": 68,
+        "currency": "USD",
+        "file": "en/06-re-offsite-venue.eml"
+      }
+    ],
+    "ids": [
+      {
+        "text": "INV-2026-0412",
+        "file": "en/03-invoice-copperline-print.eml"
+      }
+    ]
+  },
+  "proactive": [
+    {
+      "file": "en/01-meeting-request-harlow-pike.eml",
+      "expect": "reply_needed"
+    },
+    {
+      "file": "en/01-meeting-request-harlow-pike.eml",
+      "expect": "event",
+      "date": "2026-11-10",
+      "time": "14:00"
+    },
+    {
+      "file": "en/02-ridgeline-hike-saturday.eml",
+      "expect": "reply_needed",
+      "due": "2026-10-29",
+      "who": "Danny Reyes"
+    },
+    {
+      "file": "en/03-invoice-copperline-print.eml",
+      "expect": "payment_due",
+      "due": "2026-11-20",
+      "amount": "$3,486.75"
+    },
+    {
+      "file": "en/04-q4-forecast-deadline.eml",
+      "expect": "commitment",
+      "due": "2026-11-13",
+      "who": "Rachel Thornton",
+      "what": "Q4 headcount and spend forecast"
+    },
+    {
+      "file": "en/06-re-offsite-venue.eml",
+      "expect": "reply_needed",
+      "who": "Jordan Pierce"
+    },
+    {
+      "file": "en/06-re-offsite-venue.eml",
+      "expect": "commitment",
+      "due": "2026-11-05",
+      "who": "Jordan Pierce",
+      "what": "sign Lakeview Lodge contract, $500 deposit"
+    }
+  ]
+}

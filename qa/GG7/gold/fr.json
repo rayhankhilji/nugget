@@ -1,0 +1,450 @@
+{
+  "lang": "fr",
+  "note": "French typography: several bodies use U+00A0 before : ; ? ! € and U+202F as thousands separator (1 236,80 €). Fact alternatives include the exact NBSP forms plus plain-space and unspaced variants.",
+  "search": [
+    {
+      "id": "fr-s1",
+      "query": "Duval-Roche",
+      "expect": [
+        "fr/01-rdv-ateliers-duval-roche.eml"
+      ],
+      "kind": "exact",
+      "why": "hyphenated company name in body and signature"
+    },
+    {
+      "id": "fr-s2",
+      "query": "HT-2026-58214",
+      "expect": [
+        "fr/03-reservation-hotel-tilleuls.eml"
+      ],
+      "kind": "exact",
+      "why": "booking number in the quoted-printable body"
+    },
+    {
+      "id": "fr-s3",
+      "query": "façades",
+      "expect": [
+        "fr/05-cr-conseil-syndical.md"
+      ],
+      "kind": "inflected",
+      "why": "text only has singular 'façade' (Ravalement de façade, Rénov'Façade)"
+    },
+    {
+      "id": "fr-s4",
+      "query": "échafaudage",
+      "expect": [
+        "fr/05-cr-conseil-syndical.md"
+      ],
+      "kind": "compound_part",
+      "why": "appears only with elided article: l'échafaudage"
+    },
+    {
+      "id": "fr-s5",
+      "query": "Etretat",
+      "expect": [
+        "fr/02-weekend-etretat.eml"
+      ],
+      "kind": "no_diacritics",
+      "why": "text has 'Étretat' with capital É"
+    },
+    {
+      "id": "fr-s6",
+      "query": "Helene Marchand",
+      "expect": [
+        "fr/01-rdv-ateliers-duval-roche.eml"
+      ],
+      "kind": "name",
+      "why": "sender 'Hélène Marchand' (encoded-word From) typed without accents"
+    },
+    {
+      "id": "fr-s7",
+      "query": "escapade normande entre copains",
+      "expect": [
+        "fr/02-weekend-etretat.eml"
+      ],
+      "kind": "semantic",
+      "why": "paraphrase of Camille's weekend plan; none of these words in the mail"
+    },
+    {
+      "id": "fr-s8",
+      "query": "condo board meeting about the building facade and elevator",
+      "expect": [
+        "fr/05-cr-conseil-syndical.md"
+      ],
+      "kind": "cross_lingual",
+      "why": "English query for the French conseil syndical notes"
+    }
+  ],
+  "ask": [
+    {
+      "id": "fr-a1",
+      "question_lang": "fr",
+      "question": "Combien coûte mon séjour à l'Hôtel des Tilleuls et avant quand dois-je payer l'acompte ?",
+      "facts": [
+        [
+          "1 236,80",
+          "1 236,80",
+          "1236,80",
+          "1 236,80"
+        ],
+        [
+          "371,04"
+        ],
+        [
+          "6 novembre",
+          "06/11",
+          "6/11",
+          "2026-11-06"
+        ]
+      ],
+      "cite": [
+        "fr/03-reservation-hotel-tilleuls.eml"
+      ]
+    },
+    {
+      "id": "fr-a2",
+      "question_lang": "fr",
+      "question": "Quand et où Hélène Marchand propose-t-elle de me rencontrer ?",
+      "facts": [
+        [
+          "17 novembre",
+          "17/11",
+          "2026-11-17"
+        ],
+        [
+          "14 h 30",
+          "14 h 30",
+          "14h30",
+          "14:30"
+        ],
+        [
+          "quai Saint-Vincent",
+          "Saône",
+          "Lyon"
+        ]
+      ],
+      "cite": [
+        "fr/01-rdv-ateliers-duval-roche.eml"
+      ]
+    },
+    {
+      "id": "fr-a3",
+      "question_lang": "fr",
+      "question": "Pour quand Julien attend-il le rapport d'audit, et qui m'envoie les comptes rendus des visites ?",
+      "facts": [
+        [
+          "13 novembre",
+          "13/11",
+          "2026-11-13"
+        ],
+        [
+          "Nadia Benali",
+          "Nadia"
+        ]
+      ],
+      "cite": [
+        "fr/04-rapport-audit-13-novembre.eml"
+      ]
+    },
+    {
+      "id": "fr-a4",
+      "question_lang": "en",
+      "question": "When is Bernard's farewell drink and what is Agathe asking me to do?",
+      "facts": [
+        [
+          "26 November",
+          "November 26",
+          "Nov 26",
+          "2026-11-26",
+          "26 novembre"
+        ],
+        [
+          "18:00",
+          "6 p.m.",
+          "6 pm",
+          "18 h",
+          "18h"
+        ],
+        [
+          "speech",
+          "discours"
+        ]
+      ],
+      "cite": [
+        "fr/06-re-pot-de-depart-bernard.eml"
+      ]
+    }
+  ],
+  "draft": [
+    {
+      "id": "fr-d1",
+      "file": "fr/01-rdv-ateliers-duval-roche.eml",
+      "register": "formal",
+      "instruction": "accepter le rendez-vous et demander s'il y a un parking visiteurs",
+      "accept_lang": [
+        "fr"
+      ],
+      "formal_markers": [
+        "vous",
+        "votre",
+        "vos ",
+        "Madame",
+        "salutations"
+      ],
+      "informal_markers": [
+        "tu ",
+        "te ",
+        "t'",
+        "toi",
+        "ton ",
+        "ta "
+      ],
+      "note": "Vouvoiement, 'Madame' / 'Bonjour Madame Marchand', formule de politesse ('Bien cordialement' at minimum, 'Je vous prie d'agréer...' ideal)."
+    },
+    {
+      "id": "fr-d2",
+      "file": "fr/02-weekend-etretat.eml",
+      "register": "informal",
+      "instruction": "",
+      "accept_lang": [
+        "fr"
+      ],
+      "formal_markers": [
+        "vous ",
+        "votre",
+        "Madame"
+      ],
+      "informal_markers": [
+        "tu ",
+        "te ",
+        "t'",
+        "toi",
+        "ton ",
+        "ta "
+      ],
+      "note": "Tutoiement between friends; 'vous' only acceptable as plural (Léa et Mathis), so markers are indicative. Should answer before 4 November."
+    },
+    {
+      "id": "fr-d3",
+      "file": "fr/06-re-pot-de-depart-bernard.eml",
+      "register": "informal",
+      "instruction": "accepter de faire le discours",
+      "accept_lang": [
+        "fr"
+      ],
+      "formal_markers": [
+        "vous ",
+        "votre",
+        "Madame"
+      ],
+      "informal_markers": [
+        "tu ",
+        "te ",
+        "t'",
+        "toi",
+        "ton ",
+        "ta "
+      ],
+      "note": "Colleague thread in tu-register; reply to Agathe's latest message (date 26/11, speech, +10 €)."
+    }
+  ],
+  "extract": {
+    "people": [
+      {
+        "name": "Hélène Marchand",
+        "aliases": [
+          "Mme Marchand",
+          "Madame Marchand"
+        ],
+        "email": "h.marchand@duval-roche.example",
+        "file": "fr/01-rdv-ateliers-duval-roche.eml"
+      },
+      {
+        "name": "Arnaud Lebrun",
+        "aliases": [
+          "M. Lebrun"
+        ],
+        "email": null,
+        "file": "fr/01-rdv-ateliers-duval-roche.eml"
+      },
+      {
+        "name": "Camille Rousseau",
+        "aliases": [
+          "Camille"
+        ],
+        "email": "camille.rousseau@example.org",
+        "file": "fr/02-weekend-etretat.eml"
+      },
+      {
+        "name": "Julien Mercier",
+        "aliases": [
+          "Julien"
+        ],
+        "email": "julien.mercier@lumenpfad.example",
+        "file": "fr/04-rapport-audit-13-novembre.eml"
+      },
+      {
+        "name": "Nadia Benali",
+        "aliases": [
+          "Nadia"
+        ],
+        "email": "nadia.benali@lumenpfad.example",
+        "file": "fr/04-rapport-audit-13-novembre.eml"
+      },
+      {
+        "name": "Agathe Fontaine",
+        "aliases": [
+          "Agathe"
+        ],
+        "email": "agathe.fontaine@lumenpfad.example",
+        "file": "fr/06-re-pot-de-depart-bernard.eml"
+      },
+      {
+        "name": "Bernard",
+        "aliases": [],
+        "email": null,
+        "file": "fr/06-re-pot-de-depart-bernard.eml"
+      },
+      {
+        "name": "Karim",
+        "aliases": [],
+        "email": null,
+        "file": "fr/06-re-pot-de-depart-bernard.eml"
+      }
+    ],
+    "orgs": [
+      {
+        "name": "Ateliers Duval-Roche SAS",
+        "file": "fr/01-rdv-ateliers-duval-roche.eml"
+      },
+      {
+        "name": "Hôtel des Tilleuls",
+        "file": "fr/03-reservation-hotel-tilleuls.eml"
+      },
+      {
+        "name": "Lumen Pfad SAS",
+        "file": "fr/04-rapport-audit-13-novembre.eml"
+      },
+      {
+        "name": "Cycles Moreau",
+        "file": "fr/06-re-pot-de-depart-bernard.eml"
+      }
+    ],
+    "dates": [
+      {
+        "date": "2026-11-17",
+        "time": "14:30",
+        "text": "mardi 17 novembre 2026 à 14 h 30",
+        "file": "fr/01-rdv-ateliers-duval-roche.eml",
+        "what": "Rendez-vous contrat d'approvisionnement, salle Saône"
+      },
+      {
+        "date": "2026-11-21",
+        "text": "les 21 et 22 novembre",
+        "file": "fr/02-weekend-etretat.eml",
+        "what": "Week-end à Étretat"
+      },
+      {
+        "date": "2026-11-04",
+        "text": "mercredi 4 novembre",
+        "file": "fr/02-weekend-etretat.eml",
+        "what": "Réponse à Camille pour le gîte"
+      },
+      {
+        "date": "2026-11-23",
+        "text": "lundi 23 novembre 2026",
+        "file": "fr/03-reservation-hotel-tilleuls.eml",
+        "what": "Arrivée Hôtel des Tilleuls (départ le 27)"
+      },
+      {
+        "date": "2026-11-06",
+        "text": "vendredi 6 novembre 2026",
+        "file": "fr/03-reservation-hotel-tilleuls.eml",
+        "what": "Acompte 371,04 €"
+      },
+      {
+        "date": "2026-11-13",
+        "time": "17:00",
+        "text": "vendredi 13 novembre, 17 h",
+        "file": "fr/04-rapport-audit-13-novembre.eml",
+        "what": "Rapport d'audit fournisseurs Grand Est"
+      },
+      {
+        "date": "2026-11-26",
+        "time": "18:00",
+        "text": "jeudi 26 novembre à 18 h",
+        "file": "fr/06-re-pot-de-depart-bernard.eml",
+        "what": "Pot de départ de Bernard"
+      }
+    ],
+    "amounts": [
+      {
+        "text": "1 236,80 €",
+        "value": 1236.8,
+        "currency": "EUR",
+        "file": "fr/03-reservation-hotel-tilleuls.eml"
+      },
+      {
+        "text": "371,04 €",
+        "value": 371.04,
+        "currency": "EUR",
+        "file": "fr/03-reservation-hotel-tilleuls.eml"
+      },
+      {
+        "text": "85 €",
+        "value": 85,
+        "currency": "EUR",
+        "file": "fr/02-weekend-etretat.eml"
+      }
+    ],
+    "ids": [
+      {
+        "text": "HT-2026-58214",
+        "file": "fr/03-reservation-hotel-tilleuls.eml"
+      }
+    ]
+  },
+  "proactive": [
+    {
+      "file": "fr/01-rdv-ateliers-duval-roche.eml",
+      "expect": "reply_needed"
+    },
+    {
+      "file": "fr/01-rdv-ateliers-duval-roche.eml",
+      "expect": "event",
+      "date": "2026-11-17",
+      "time": "14:30"
+    },
+    {
+      "file": "fr/02-weekend-etretat.eml",
+      "expect": "reply_needed",
+      "due": "2026-11-04",
+      "who": "Camille Rousseau"
+    },
+    {
+      "file": "fr/03-reservation-hotel-tilleuls.eml",
+      "expect": "payment_due",
+      "due": "2026-11-06",
+      "amount": "371,04 €"
+    },
+    {
+      "file": "fr/04-rapport-audit-13-novembre.eml",
+      "expect": "commitment",
+      "due": "2026-11-13",
+      "who": "Julien Mercier",
+      "what": "rapport d'audit fournisseurs Grand Est + synthèse d'une page"
+    },
+    {
+      "file": "fr/06-re-pot-de-depart-bernard.eml",
+      "expect": "reply_needed",
+      "due": "2026-10-30",
+      "who": "Agathe Fontaine"
+    },
+    {
+      "file": "fr/06-re-pot-de-depart-bernard.eml",
+      "expect": "event",
+      "date": "2026-11-26",
+      "time": "18:00"
+    }
+  ]
+}
