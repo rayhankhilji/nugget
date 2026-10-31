@@ -14,7 +14,10 @@
 //!   `departed`, `resigned from`, `retired from`, `moved from` / `moving from` / `switched
 //!   from` / `went from`, `former`, `formerly`, `previously` (not `as previously`, nor
 //!   `previously agreed/discussed/mentioned/noted/stated/planned`), `used to`, `no longer`,
-//!   `until recently`, and `ex-` right before the object (any hyphen, U+2010–U+2015 included).
+//!   `until recently`, `before that` / `before this` / `prior to that` ("Before that she was
+//!   Design Lead", QA GG5-15), and `ex-` right before the object (any hyphen, U+2010–U+2015
+//!   included). A subject pronoun and a past copula may stand between a cue and the object
+//!   ("previously she was", "before that he had been").
 //! - **Started** cues, at most [`MAX_GAP`] words before the object: `joined`, `joining`, `now`,
 //!   `new role`, `new job`, `new position`, `moved to` / `moving to`, `started at` / `started
 //!   as` / `starting at` / `starts at`, `promoted to`; and the second half of a transition, a
@@ -58,6 +61,9 @@ const ENDED: &[&[&str]] = &[
     &["no", "longer"],
     &["until", "recently"],
     &["used", "to"],
+    &["before", "that"],
+    &["before", "this"],
+    &["prior", "to", "that"],
     &["left"],
     &["leaving"],
     &["quit"],
@@ -97,7 +103,8 @@ const STARTED: &[&[&str]] = &[
 /// Words that may stand between a cue and the object it is about.
 pub(crate) const BRIDGE: &[&str] = &[
     "at", "from", "of", "the", "a", "an", "her", "his", "their", "my", "our", "your", "its", "as",
-    "in", "with", "for", "work", "works", "worked", "working", "job", "role", "position",
+    "in", "with", "for", "work", "works", "worked", "working", "job", "role", "position", "she",
+    "he", "they", "i", "we", "was", "were", "had", "been",
 ];
 
 /// `left` followed by one of these is a direction or a place, not a departure.
@@ -282,6 +289,8 @@ const STEMS: &[&str] = &[
     "no longer",
     "until recently",
     "used to",
+    "before th",
+    "prior to",
     "left",
     "leaving",
     "quit",
@@ -395,6 +404,10 @@ mod tests {
             ("an ex\u{2011}Cindergate data scientist", "Cindergate"),
             ("an ex\u{2013}Cindergate data scientist", "Cindergate"),
             ("She quit her job at Cindergate", "Cindergate"),
+            // QA GG5-15: the 8B model kept Dana "Design Lead" from this.
+            ("Before that she was Design Lead", "Design Lead"),
+            ("Previously she was CTO at Acme", "CTO"),
+            ("Prior to that he had been CTO", "CTO"),
         ] {
             assert_eq!(cue(q, &[o]), Cue::Ended, "{q}");
         }

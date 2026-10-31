@@ -59,8 +59,9 @@ pub struct RunStats {
     pub llm_quotes_rejected: u64,
     /// Entities not named in the text (or malformed).
     pub llm_entities_dropped: u64,
-    /// Items not sent to any model because only cloud providers exist and the item is
-    /// sensitive or its source is not allow-listed.
+    /// Items not sent to any model: flagged sensitive (`metadata.sensitive == true`: no model
+    /// at all), or only cloud providers exist and the item is sensitive or its source is not
+    /// allow-listed.
     pub llm_skipped_privacy: u64,
     /// Entities whose data changed (also sent to [`Knowledge::subscribe`]rs).
     pub changed_entities: u64,

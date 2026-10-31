@@ -42,7 +42,7 @@ fn reply() -> String {
             {"subject": "e1", "predicate": "works_at", "object": "e2",
              "text": "Priya Patel works at Initech.", "confidence": 0.95,
              "quotes": [{"chunk": 0, "text": "Priya Patel joined   Initech as head of research"}]},
-            {"subject": "e1", "predicate": "owes", "object": "$1,000,000",
+            {"subject": "e1", "predicate": "owes", "object": "one million dollars",
              "text": "Priya owes a million dollars.", "confidence": 0.9,
              "quotes": [{"chunk": 0, "text": "Priya Patel owes us one million dollars"}]},
             {"subject": "e1", "predicate": "has_title", "object": "CEO",
@@ -240,7 +240,7 @@ async fn status_reports_the_cloud_extractor() {
 #[tokio::test]
 async fn no_fallback_from_local_to_cloud() {
     let env = Env::new();
-    env.put(memo("files:notes", "m", Some(true)), &[MEMO]);
+    env.put(memo("files:notes", "m", Some(false)), &[MEMO]);
     // The local provider fails (unparseable output); the cloud one must not be tried.
     let local = FakeProvider::new("local", Locality::OnDevice, |_| "not json".into());
     let cloud = FakeProvider::new("cloud", Locality::Cloud, |_| reply());
@@ -256,6 +256,28 @@ async fn no_fallback_from_local_to_cloud() {
     run(&k).await;
     assert_eq!(local.calls(), 3);
     assert_eq!(cloud.calls(), 0);
+}
+
+#[tokio::test]
+async fn items_flagged_sensitive_reach_no_model_at_all() {
+    // QA GG5-1: a mail the PII scan flags (a card number) went to the local model, which put
+    // the number into the vault. Flagged items get the deterministic extractors only.
+    let env = Env::new();
+    env.put(memo("files:notes", "flagged", Some(true)), &[MEMO]);
+    env.put(memo("files:notes", "unknown", None), &[MEMO]);
+    let local = FakeProvider::new("local", Locality::OnDevice, |_| reply());
+    let k = env.knowledge(
+        llm_cfg(),
+        Some(router(Tier::Synthesis, vec![local.clone()])),
+    );
+    let stats = run(&k).await;
+    // Unknown sensitivity still goes to the local model; the flagged item does not.
+    assert_eq!(local.calls(), 1);
+    assert_eq!(stats.llm_skipped_privacy, 1);
+    assert_eq!(stats.items_processed, 2);
+    // Not retried later either.
+    let again = run(&k).await;
+    assert_eq!(again.llm_requests, 0);
 }
 
 #[tokio::test]
