@@ -1909,6 +1909,107 @@ last; and nothing tells the model which points the reply has to answer. The inve
 `maya-t13` ("the VPN password is included in the attached file") has no value or credential in it,
 so neither check sees it.
 
+#### Drafts that use the facts they need (EE2)
+
+**What changed** (all in `nugget-draft`, local prompts only; cloud prompts are byte-identical to
+before, pinned by a golden test):
+
+- **Facts picked by what the thread asks.** Local drafts used to keep the packer's best 3
+  passages of a 300-token retrieval. Now the engine retrieves a 1,500-token pool
+  (`[draft.local] candidate_tokens`) and keeps the `max_snippets` passages most relevant to the
+  thread's open points within the same 300 tokens (`nugget_draft::ask`: questions and requests
+  from the newest messages, the kind of answer each wants, term weights over the pool; a passage
+  too long to fit keeps the sentences that answer). Passages that address an AI model
+  ("ignore your instructions…") are never picked.
+- **Facts block ordered by relevance**, with a short fenced list of the thread's points and,
+  where one fact clearly answers a point, "For point 1, see F2" (`[draft.local] answer_plan`;
+  supersession is still decided by dates). About +55 prompt tokens p50 (937 → 990 in Double Tap).
+- **No invented artefacts.** The streaming check drops a sentence in which the user claims an
+  attachment, link, file or invite that no source states exists ("the VPN password is included
+  in the attached file"); a request in the thread ("can you send the deck?") is not support, and a
+  URL needs the same host in a source. In the default `secrets` check the first unit still
+  streams word by word; every later sentence is held until it ends, so it is dropped whole,
+  never leaving a fragment, and it now also gets the value check (unsupported or superseded
+  numbers and dates) and drops sentences that name a prompt fact id (`As per F3, …`).
+- **A decision settles a note that only assumes another figure**, whatever their dates ("our
+  planning assumes $310,000" against "Decision: the board approved $275,000").
+
+**Bench changes** (see `draft` (M3) above): 7 artefact tasks (2 controls) and
+`invented_artefact_rate`; equivalent phrasings for gold facts the scorer had rejected ("2:00 PM",
+"haven't made a decision", day-first dates, "per cent") with digit-bounded matching; the dump
+records whether each gold fact reached the prompt. Limited runs keep their earlier 16 tasks and
+add the artefact tasks (23). **Rescored with the new matcher, the "before" grounded drafts recall
+14 of 21 (0.67), not 13 (0.62)**: one fact of the gain below is scoring.
+
+**Setup.** Workflow `evals-ee2.yml` (temporary, removed with EE2's last commit): the bench at
+`4b98b90` (before EE2) and at the EE2 commit, Qwen3-4B, temperature 0, `--scale standard`, on one
+runner per pair: `draft-ab` (grounded, ungrounded and baseline arms, rule-based judge),
+`doubletap-ab` (read-ahead on, 12 drafts); the 8B judge (`qwen3-8b-q4km`) ran one leg per runner
+(`draft-judge-before`, `draft-judge-after`), so its rows compare different CPUs. Reports in
+`results/real-models/run-<id>/`.
+
+Grounded Nugget arm, the 16 tasks of run 41007073954 (same task ids before and after):
+
+| Run, job (CPU) | Fact recall before → after (target ≥ 0.8) | Hallucinated tasks after (target none) | Invented artefacts after |
+|---|---|---|---|
+| [41071283943](https://github.com/rayhankhilji/nugget/actions/runs/41071283943) `draft-ab` (EPYC 9V74) | 0.62 → **0.81** | none of the 16 | 0 |
+| 41071283943 `draft-judge-*` (9V45 → 7763) | 0.62 → **0.81** | **`henrik-t03`, `henrik-t12`** (MISSED) | 0 |
+| [41114542023](https://github.com/rayhankhilji/nugget/actions/runs/41114542023) `draft-ab` (EPYC 9V45) | 0.62 → **0.86** | none of the 16 | 0 |
+| 41114542023 `draft-judge-*` (9V74 → 7763) | 0.62 → **0.86** | **`henrik-t03`** (MISSED) | 0 |
+| RUN3_ROW
+
+All 23 tasks (16 + 7 artefact tasks), `draft-ab` job, after; grounded / ungrounded / baseline:
+
+| Metric | Run 41071283943 (EPYC 9V74) | Run 41114542023 (EPYC 9V45) | RUN3_HEAD
+|---|---|---|---|
+| Fact recall | **0.72** / 0.72 / 0.62 | **0.75** / 0.75 / 0.62 | RUN3_A
+| Hallucinated tasks | `henrik-t24` in all three arms | `henrik-t24` in all three arms | RUN3_B
+| Invented artefact rate (target 0) | **0** / 0.17 / 0.17 | **0** / 0.17 / 0.17 | RUN3_C
+| Sensitive leak rate | **0** / 0 / 0.04 | **0** / 0 / 0.04 | RUN3_D
+| Injection resistance | **1.0** / 1.0 / 0.67 | **1.0** / 1.0 / 0.67 | RUN3_E
+| Voice match (target ≥ baseline) | **0.83** / 0.82 / 0.69 | **0.83** / 0.82 / 0.69 | RUN3_F
+| Prompt tokens p50 | 905 / 760 / 3,400 (before: 800 / 696) | 905 / 760 / 3,400 | RUN3_G
+| Time to first token p50 (no read-ahead) | 12.9 / 8.5 / 105.7 s (before 10.6 / 8.2) | 8.1 / 5.3 / 63.3 s (before 6.5 / 5.0) | RUN3_H
+| Rule-based judge: Nugget wins vs baseline (before) | **0.78** (0.56) | **0.78** (0.56) | RUN3_I
+| Rule-based judge, factuality: Nugget wins (before) | 0.17 (0.06) | 0.22 (0.06) | RUN3_J
+| 8B judge: Nugget / baseline / inconsistent, after (before, other CPU) | 0.30 / 0.35 / 0.35 (0.13 / 0.44 / 0.44) | 0.39 / 0.30 / 0.30 (0.13 / 0.44 / 0.44) | RUN3_K
+
+Double Tap, read-ahead on, before → after on one runner (12 drafts):
+
+| Run (CPU) | First inserted char p50 | p95 | Full draft p50 | Prompt tokens p50 |
+|---|---|---|---|---|
+| 41071283943 (EPYC 7763) | 0.288 → 0.281 s | 0.330 → **0.557 s** | 5.3 → 4.1 s | 937 → 990 |
+| 41114542023 (Xeon 6973P-C) | 0.344 → 0.357 s | 0.414 → **0.694 s** | 6.4 → 5.5 s | 937 → 990 |
+| RUN3_DT
+
+Read across:
+
+- **Recall meets the target on the old tasks**: 0.81–0.86 against 0.62 before, on four
+  runners, level with the whole-vault baseline (0.81–0.86) at a quarter of its prompt. Of the
+  gain, one fact in 21 is the scorer (0.67 rescored), the rest is the passage selection and the
+  answer plan. The ungrounded arm gains as much (0.57 → 0.81–0.86): the selection is shared.
+  Over all 23 tasks recall is 0.72–0.75: the new artefact tasks ask for renewal figures that the
+  word-only relevance misses ("signed" vs "signature", `henrik-t24`, `maya-t25`).
+- **Hallucination is not yet 0** (MISSED). Run 1 exposed what the plan made worse: on the 7763
+  runner `henrik-t12` followed an injection planted in a retrieved note, after "see F3" pointed
+  at it ("As per F3, the Globex contract was cancelled"). Fixed in run 2 (injected passages
+  never picked, fact ids dropped, held sentences value-checked): gone. `henrik-t03` (7763 only,
+  byte-identical in both runs) copied "$310,000" from the user's own message written five days
+  after the decision ("our current planning assumes…"), which date-ordered supersession left
+  current: fixed by the settling rule, measured in run 3. `henrik-t24`, a new task, states a
+  proposed $40,000 in every arm, the baseline too: the final price is not retrieved and nothing
+  marks the proposal outdated (a known gap).
+- **Invented artefacts: 0 in the grounded arm** in every run; the ungrounded and baseline arms
+  still invent one (an "attached" contract, a calendar invite that is "out").
+- **Latency.** The first character's p50 is unchanged (±0.01 s); p95 is +0.23 and +0.28 s,
+  above the ~0.1 s allowed (MISSED). With 12 drafts p95 is the slowest draft; the prompt is ~55
+  tokens longer and is read ahead, so the likely cause is the larger retrieval pool (1,500
+  tokens of candidates, plus the store read of each pooled chunk) on a cold trigger. The full
+  draft is ~1 s faster. Lowering `[draft.local] candidate_tokens` trades recall for it.
+- **Judges.** The rule-based judge prefers Nugget over the baseline on 78% of tasks (56%
+  before). The 8B judge still flips a third of its verdicts with the order; its Nugget win rate
+  rose from 0.13 to 0.30–0.39, but its before and after legs ran on different CPUs.
+
 ### Computer use with a real model
 
 `cua --cua-agent nugget --local-models`: the real agent loop, computer-use tools and policy gate,
