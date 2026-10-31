@@ -1,0 +1,8 @@
+commit: 48d752966a193267ac3fc6d06023246ad15a31d5
+runner: GitHub Actions 1000011284
+CPU(s):                                  4
+Model name:                              INTEL(R) XEON(R) PLATINUM 8573C
+CPU(s) scaling MHz:                      156%
+               total        used        free      shared  buff/cache   available
+Mem:              15           1           9           0           5          14
+Swap:              2           0           2
