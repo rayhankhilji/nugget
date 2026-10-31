@@ -185,7 +185,17 @@ pub(crate) fn user_prompt(history: &[ChatMessage], query: &str, turns: usize) ->
 /// label, surrounding quotes or control characters, cut at a word boundary to `max_chars`.
 /// `None` if nothing searchable is left.
 pub(crate) fn clean_reply(reply: &str, max_chars: usize) -> Option<String> {
+    // A reasoning model's `<think>…</think>` block is not the query; an unclosed one means the
+    // reply has no query at all (QA GG2-15).
+    let reply = match reply.rfind("</think>") {
+        Some(i) => &reply[i + "</think>".len()..],
+        None if reply.contains("<think>") => return None,
+        None => reply,
+    };
     let line = reply.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if line.starts_with('<') {
+        return None;
+    }
     let mut line = line;
     for label in ["standalone search query:", "search query:", "query:"] {
         if line.len() >= label.len() && line[..label.len()].eq_ignore_ascii_case(label) {
@@ -218,6 +228,21 @@ mod tests {
             role,
             text: text.into(),
         }
+    }
+
+    #[test]
+    fn thinking_is_never_the_query() {
+        assert_eq!(
+            clean_reply(
+                "<think>\nThe user asks about herons.\n</think>\n\nheron river walk",
+                100
+            )
+            .as_deref(),
+            Some("heron river walk")
+        );
+        assert_eq!(clean_reply("<think>\nThe user asks about", 100), None);
+        assert_eq!(clean_reply("<think>", 100), None);
+        assert_eq!(clean_reply("<answer>heron</answer>", 100), None);
     }
 
     #[test]
