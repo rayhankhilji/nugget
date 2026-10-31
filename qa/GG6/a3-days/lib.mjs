@@ -133,7 +133,13 @@ export const CLK_TCK = 100;
 
 /** Children pids of pid (one level). */
 export function children(pid) {
-  try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; }
+  const out = [];
+  try {
+    for (const t of fs.readdirSync(`/proc/${pid}/task`)) {
+      try { out.push(...fs.readFileSync(`/proc/${pid}/task/${t}/children`, "utf8").trim().split(/\s+/).filter(Boolean).map(Number)); } catch {}
+    }
+  } catch {}
+  return [...new Set(out)];
 }
 
 export function du(p) {

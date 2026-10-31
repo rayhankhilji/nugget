@@ -66,7 +66,7 @@ export async function snap(page, name) {
 export async function boot(browser, { name, noCap = true } = {}) {
   const bin = noCap ? nuggetdWrapper() : process.env.NUGGETD;
   const t0 = Date.now();
-  const daemon = await startDaemon(bin, { stderrPath: path.join(SCRATCH, `${name}-nuggetd.out.log`), config: FIRST_RUN_CONFIG });
+  const daemon = await startDaemon(bin, { stderrPath: path.join(SCRATCH, `${name}-nuggetd.out.log`), config: FIRST_RUN_CONFIG, env: { TMPDIR: "/tmp" } }); // short socket path (sun_path limit)
   const daemonMs = Date.now() - t0;
   const picker = { next: [] };
   const bridge = await startBridge({ socket: daemon.socket, pickFolders: () => picker.next });

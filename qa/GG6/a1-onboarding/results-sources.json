@@ -1,0 +1,376 @@
+{
+ "empty": {
+  "name": "empty",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "waiting",
+    "text": "empty: getting ready to index…",
+    "ms": 904
+   }
+  ],
+  "finalPhase": "waiting",
+  "finalText": "empty: getting ready to index…",
+  "settleMs": 25968,
+  "source": [
+   {
+    "name": "empty",
+    "state": "watching",
+    "items": 0,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-empty.png",
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Start using Nugget"
+ },
+ "unsupported": {
+  "name": "unsupported",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "waiting",
+    "text": "unsupported: getting ready to index…",
+    "ms": 897
+   }
+  ],
+  "finalPhase": "waiting",
+  "finalText": "unsupported: getting ready to index…",
+  "settleMs": 25912,
+  "source": [
+   {
+    "name": "unsupported",
+    "state": "watching",
+    "items": 0,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-unsupported.png",
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Start using Nugget"
+ },
+ "huge200mb": {
+  "name": "huge200mb",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "waiting",
+    "text": "huge: getting ready to index…",
+    "ms": 886
+   }
+  ],
+  "finalPhase": "waiting",
+  "finalText": "huge: getting ready to index…",
+  "settleMs": 90875,
+  "source": [
+   {
+    "name": "huge",
+    "state": "watching",
+    "items": 0,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-huge200mb.png",
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Start using Nugget"
+ },
+ "chmod000": {
+  "name": "chmod000",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "waiting",
+    "text": "locked: getting ready to index…",
+    "ms": 879
+   }
+  ],
+  "finalPhase": "waiting",
+  "finalText": "locked: getting ready to index…",
+  "settleMs": 25912,
+  "source": [
+   {
+    "name": "locked",
+    "state": "watching",
+    "items": 0,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-chmod000.png",
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Start using Nugget"
+ },
+ "unicode": {
+  "name": "unicode",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "ready",
+    "text": "Café résumé 📁: 1 item indexed. Search works now.",
+    "ms": 875
+   }
+  ],
+  "finalPhase": "ready",
+  "finalText": "Café résumé 📁: 1 item indexed. Search works now.",
+  "settleMs": 875,
+  "source": [
+   {
+    "name": "Café résumé 📁",
+    "state": "watching",
+    "items": 1,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-unicode.png",
+  "searchHits": [
+   "重要 meeting — notes"
+  ],
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Search your sources"
+ },
+ "home": {
+  "name": "home",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "indexing",
+    "text": "home-sam: indexing, 4 items so far…",
+    "ms": 900
+   },
+   {
+    "phase": "indexing",
+    "text": "home-sam: indexing, 528 items so far…",
+    "ms": 1203
+   },
+   {
+    "phase": "indexing",
+    "text": "home-sam: indexing, 1,055 items so far…",
+    "ms": 2115
+   },
+   {
+    "phase": "ready",
+    "text": "home-sam: 1,501 items indexed. Search works now.",
+    "ms": 3332
+   }
+  ],
+  "finalPhase": "ready",
+  "finalText": "home-sam: 1,501 items indexed. Search works now.",
+  "settleMs": 3332,
+  "source": [
+   {
+    "name": "home-sam",
+    "state": "watching",
+    "items": 1501,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-home.png",
+  "searchHits": [
+   "n0",
+   "n10",
+   "n100",
+   "n101",
+   "n102"
+  ],
+  "items": 1501,
+  "hits:OPENSSH PRIVATE KEY": [],
+  "hits:API_TOKEN": [],
+  "hits:hunter2": [
+   "file:///tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/home-sam/Documents/passwords.txt"
+  ],
+  "hits:deleted": [],
+  "hits:module.exports": [
+   "file:///tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/home-sam/code/webapp/src/c0.ts",
+   "file:///tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/home-sam/code/webapp/src/c10.ts",
+   "file:///tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/home-sam/code/webapp/src/c100.ts"
+  ],
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. 1,501 items are indexed and searchable. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Search your sources"
+ },
+ "tilde": {
+  "name": "tilde",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "root `~` must be an absolute path"
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-tilde.png"
+ },
+ "tildeDocs": {
+  "name": "tildeDocs",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "root `~/Documents` must be an absolute path"
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-tildeDocs.png"
+ },
+ "nonexistent": {
+  "name": "nonexistent",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "`/Users/sam/Documnets` is not a folder"
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-nonexistent.png"
+ },
+ "relative": {
+  "name": "relative",
+  "formErrorsBeforeSubmit": [
+   "Use a full path, like /Users/me/Documents or C:\\Users\\me\\Documents."
+  ],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "Add at least one folder."
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-relative.png"
+ },
+ "overlap": {
+  "name": "overlap",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "roots `/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/overlap` and `/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/overlap/sub` overlap"
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-overlap.png"
+ },
+ "file": {
+  "name": "file",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": true,
+  "dialogErrors": [
+   "`/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/just-a-file.md` is not a folder"
+  ],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-file.png"
+ },
+ "mixedUnreadable": {
+  "name": "mixedUnreadable",
+  "formErrorsBeforeSubmit": [],
+  "dialogStayedOpen": false,
+  "phases": [
+   {
+    "phase": "ready",
+    "text": "mixed: 1 item indexed. Search works now.",
+    "ms": 875
+   }
+  ],
+  "finalPhase": "ready",
+  "finalText": "mixed: 1 item indexed. Search works now.",
+  "settleMs": 875,
+  "source": [
+   {
+    "name": "mixed",
+    "state": "watching",
+    "items": 1,
+    "last_error": null
+   }
+  ],
+  "errors": [],
+  "shot": "qa/GG6/a1-onboarding/shots/20-src-mixedUnreadable.png",
+  "doneText": "Step 6 of 6 You're all set Nugget keeps indexing in the background. Search works straight away; chat and drafting start once you choose a model. AI: decide later Every step is done. You can run setup again from the sidebar.",
+  "donePrimary": "Start using Nugget"
+ },
+ "checks": [
+  {
+   "scenario": "source:empty",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": false,
+   "detail": "waiting after 25968ms: empty: getting ready to index…"
+  },
+  {
+   "scenario": "source:unsupported",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": false,
+   "detail": "waiting after 25912ms: unsupported: getting ready to index…"
+  },
+  {
+   "scenario": "source:huge200mb",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": false,
+   "detail": "waiting after 90875ms: huge: getting ready to index…"
+  },
+  {
+   "scenario": "source:chmod000",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": false,
+   "detail": "waiting after 25912ms: locked: getting ready to index…"
+  },
+  {
+   "scenario": "source:unicode",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": true,
+   "detail": "ready after 875ms: Café résumé 📁: 1 item indexed. Search works now."
+  },
+  {
+   "scenario": "source:home",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": true,
+   "detail": "ready after 3332ms: home-sam: 1,501 items indexed. Search works now."
+  },
+  {
+   "scenario": "source:tilde",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "root `~` must be an absolute path"
+   ]
+  },
+  {
+   "scenario": "source:tildeDocs",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "root `~/Documents` must be an absolute path"
+   ]
+  },
+  {
+   "scenario": "source:nonexistent",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "`/Users/sam/Documnets` is not a folder"
+   ]
+  },
+  {
+   "scenario": "source:relative",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "Add at least one folder."
+   ]
+  },
+  {
+   "scenario": "source:overlap",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "roots `/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/overlap` and `/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/overlap/sub` overlap"
+   ]
+  },
+  {
+   "scenario": "source:file",
+   "name": "user is told what went wrong (dialog)",
+   "ok": true,
+   "detail": [
+    "`/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a1/src-cases/just-a-file.md` is not a folder"
+   ]
+  },
+  {
+   "scenario": "source:mixedUnreadable",
+   "name": "the step settles (ready or failed) instead of spinning",
+   "ok": true,
+   "detail": "ready after 875ms: mixed: 1 item indexed. Search works now."
+  }
+ ]
+}

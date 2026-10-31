@@ -1,0 +1,182 @@
+{
+  "drop-once": {
+    "ok": false,
+    "wall_ms": 455,
+    "error": "Error: daemon exited ({\"code\":1,\"signal\":null}): nuggetd-e2e: the e2e manifest /tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a2/dl-dropOnce-a1scaL/manifest.json does not verify: invalid input: model `qa-dropOnce`: id must be 1-64 chars of [a-z0-9._-] and not start with '.'\n\n    at startHome (file:///home/user/nugget/qa/GG6/a2-ai-setup/lib.mjs:195:23)\n    at async setup (file:///home/user/nugget/qa/GG6/a2-ai-setup/downloads.mjs:61:13)\n    at async drop-once (file:///home/user/nugget/qa/GG6/a2-ai-setup/downloads.mjs:76:15)\n    at async file:///home/user/nugget/qa/GG6/a2-ai-setup/downloads.mjs:227:17\n    at async Promise.all (index 1)\n    at async file:///home/user/nugget/qa/GG6/a2-ai-setup/downloads.mjs:222:1"
+  },
+  "http404": {
+    "ok": true,
+    "wall_ms": 438,
+    "how": "failed",
+    "ms": 6,
+    "reply": {
+      "result": null
+    },
+    "n_progress": 1,
+    "last": {
+      "id": "qa-h404",
+      "downloaded": 0,
+      "total": 8388608,
+      "phase": "failed",
+      "error": "download failed: HTTP 404 Not Found from 127.0.0.1",
+      "at_ms": 6
+    },
+    "max_pct": 0,
+    "requests": 1,
+    "log_tail": [
+      "{\"timestamp\":\"2026-10-30T20:02:38.942231Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"source unusable\",\"url\":\"http://127.0.0.1:45883/10919dcd87fab29e352ac66d8d2944c3b66f3f38/qa-h404.gguf\",\"error\":\"download failed: HTTP 404 Not Found from 127.0.0.1\"},\"target\":\"nugget_models::download\"}",
+      "{\"timestamp\":\"2026-10-30T20:02:38.942442Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"model install failed\",\"model\":\"qa-h404\",\"error\":\"download failed: HTTP 404 Not Found from 127.0.0.1\"},\"target\":\"nuggetd::handler\"}",
+      ""
+    ]
+  },
+  "disk-preflight": {
+    "ok": true,
+    "wall_ms": 413,
+    "how": "failed",
+    "ms": 2,
+    "reply": {
+      "result": null
+    },
+    "n_progress": 1,
+    "last": {
+      "id": "qa-preflight",
+      "downloaded": 0,
+      "total": 8388608,
+      "phase": "failed",
+      "error": "insufficient disk space: need 1082969292 bytes, 20492288 available",
+      "at_ms": 2
+    },
+    "max_pct": 0,
+    "fit_free_disk": 20504576,
+    "fits_disk": [
+      false
+    ],
+    "requests": 0,
+    "log_tail": [
+      "{\"timestamp\":\"2026-10-30T20:02:39.015045Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"insufficient disk space (model + 10% + 1 GiB)\",\"dir\":\"/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a2/tmpfs20-6bbUUN/data/models\",\"needed\":1082969292,\"available\":20492288},\"target\":\"nugget_models::preflight\"}",
+      "{\"timestamp\":\"2026-10-30T20:02:39.015259Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"model install failed\",\"model\":\"qa-preflight\",\"error\":\"insufficient disk space: need 1082969292 bytes, 20492288 available\"},\"target\":\"nuggetd::handler\"}",
+      ""
+    ]
+  },
+  "baseline": {
+    "ok": true,
+    "wall_ms": 4603,
+    "how": "installed",
+    "ms": 4230,
+    "reply": {
+      "result": null
+    },
+    "n_progress": 12,
+    "last": {
+      "id": "qa-baseline",
+      "downloaded": 8388608,
+      "total": 8388608,
+      "phase": "installed",
+      "error": null,
+      "at_ms": 4230
+    },
+    "max_pct": 100,
+    "requests": 2,
+    "log_tail": [
+      ""
+    ]
+  },
+  "sha-mismatch": {
+    "ok": true,
+    "wall_ms": 4670,
+    "how": "failed",
+    "ms": 4227,
+    "reply": {
+      "result": null
+    },
+    "n_progress": 12,
+    "last": {
+      "id": "qa-sha",
+      "downloaded": 0,
+      "total": 8388608,
+      "phase": "failed",
+      "error": "integrity check failed: model `qa-sha`: SHA-256 mismatch (expected 584631631ea3fa64f86e40f9af9f39cb30425c23d260b5c1f9b2d52aa03d88f7, got b16bd32b101132fd0102461bc75ea65442c37293ac881ae953486c8ac26a7388); staging discarded",
+      "at_ms": 4226
+    },
+    "max_pct": 100,
+    "staging_dir": "/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a2/home-WmE9Fe/data/models/staging",
+    "staging_bytes_after": 0,
+    "log_tail": [
+      "{\"timestamp\":\"2026-10-30T20:02:43.143417Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"model install failed\",\"model\":\"qa-sha\",\"error\":\"integrity check failed: model `qa-sha`: SHA-256 mismatch (expected 584631631ea3fa64f86e40f9af9f39cb30425c23d260b5c1f9b2d52aa03d88f7, got b16bd32b101132fd0102461bc75ea65442c37293ac881ae953486c8ac26a7388); staging discarded\"},\"target\":\"nuggetd::handler\"}",
+      ""
+    ]
+  },
+  "cancel": {
+    "ok": true,
+    "wall_ms": 13360,
+    "cancel": {
+      "how": "aborted-by-client",
+      "ms": 2984,
+      "reply": {
+        "result": null
+      },
+      "n_progress": 7,
+      "last": {
+        "id": "qa-cancel",
+        "downloaded": 6291456,
+        "total": 16777216,
+        "phase": "downloading",
+        "error": null,
+        "at_ms": 2984
+      },
+      "max_pct": 38
+    },
+    "staged_bytes_kept": 6291607,
+    "models_list_installed": false,
+    "reinstall": {
+      "how": "installed",
+      "ms": 8435,
+      "reply": {
+        "result": null
+      },
+      "n_progress": 22,
+      "last": {
+        "id": "qa-cancel",
+        "downloaded": 16777216,
+        "total": 16777216,
+        "phase": "installed",
+        "error": null,
+        "at_ms": 8435
+      },
+      "max_pct": 100
+    },
+    "reinstall_bytes_served": 16777217,
+    "model_bytes": 16777216,
+    "reinstall_requests": [
+      "bytes=0-16777215",
+      "bytes=0-0",
+      "bytes=0-16777215"
+    ],
+    "log_tail": [
+      ""
+    ]
+  },
+  "html": {
+    "ok": true,
+    "wall_ms": 103199,
+    "how": "failed",
+    "ms": 102772,
+    "reply": {
+      "result": null
+    },
+    "n_progress": 10,
+    "last": {
+      "id": "qa-html",
+      "downloaded": 0,
+      "total": 8388608,
+      "phase": "failed",
+      "error": "network error: download failed: connection closed after 53 of 8388608 bytes",
+      "at_ms": 102772
+    },
+    "max_pct": 0,
+    "log_tail": [
+      "{\"timestamp\":\"2026-10-30T20:04:21.725879Z\",\"level\":\"WARN\",\"fields\":{\"message\":\"model install failed\",\"model\":\"qa-html\",\"error\":\"network error: download failed: connection closed after 53 of 8388608 bytes\"},\"target\":\"nuggetd::handler\"}",
+      ""
+    ]
+  }
+}
