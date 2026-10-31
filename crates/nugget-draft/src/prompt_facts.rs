@@ -217,8 +217,11 @@ pub fn facts(context: &ContextResponse) -> Vec<Fact> {
     let profiles: Vec<Profile> = out.iter().map(Profile::new).collect();
     for old in 0..out.len() {
         // The newest fact that replaces it (facts before `old` are newer or as new).
+        // The newest fact that replaces it (facts before `old` are newer or as new), else a
+        // decision, of any date, that settles what it only assumes.
         out[old].superseded_by = (0..old)
             .find(|&new| supersedes(&out[new], &profiles[new], &out[old], &profiles[old]))
+            .or_else(|| (0..out.len()).find(|&d| d != old && settles(&profiles[d], &profiles[old])))
             .map(|new| out[new].id);
     }
     out
@@ -438,7 +441,13 @@ struct Profile {
     all: HashSet<String>,
     old_marked: bool,
     new_marked: bool,
+    /// States an assumption or working figure ([`ASSUMPTION_PHRASES`]).
+    assumes: bool,
     values: Vec<(ValueKind, Vec<String>)>,
+    /// Values in the sentences that assume.
+    assumed: Vec<(ValueKind, Vec<String>)>,
+    /// Values in the sentences that state a decision ([`NEW_MARKERS`]).
+    decided: Vec<(ValueKind, Vec<String>)>,
 }
 
 impl Profile {
@@ -452,18 +461,49 @@ impl Profile {
             title,
             old_marked: marked(OLD_MARKERS),
             new_marked: marked(NEW_MARKERS),
-            values: values(&f.body)
-                .into_iter()
-                .filter(|v| {
-                    matches!(
-                        v.kind,
-                        ValueKind::Money | ValueKind::Number | ValueKind::Percent | ValueKind::Date
-                    )
-                })
-                .map(|v| (comparable(v.kind), v.keys))
+            assumes: assumes(&f.body),
+            assumed: sentences(&f.body)
+                .filter(|s| assumes(s))
+                .flat_map(key_values)
                 .collect(),
+            decided: sentences(&f.body)
+                .filter(|s| lower_words(s).any(|w| NEW_MARKERS.contains(&w.as_str())))
+                .flat_map(key_values)
+                .collect(),
+            values: key_values(&f.body),
         }
     }
+}
+
+/// The money, numbers, percentages and dates in `text`, by comparable kind.
+fn key_values(text: &str) -> Vec<(ValueKind, Vec<String>)> {
+    values(text)
+        .into_iter()
+        .filter(|v| {
+            matches!(
+                v.kind,
+                ValueKind::Money | ValueKind::Number | ValueKind::Percent | ValueKind::Date
+            )
+        })
+        .map(|v| (comparable(v.kind), v.keys))
+        .collect()
+}
+
+/// Rough sentences, enough to keep a value with the words around it.
+fn sentences(text: &str) -> impl Iterator<Item = &str> {
+    text.split_inclusive(['.', '!', '?', ';'])
+}
+
+/// Whether `text` states an assumption or a working figure ([`ASSUMPTION_PHRASES`]).
+fn assumes(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    ASSUMPTION_PHRASES.iter().any(|p| {
+        if p.contains(' ') {
+            lower.contains(p)
+        } else {
+            lower_words(&lower).any(|w| w == *p)
+        }
+    })
 }
 
 /// Money and plain numbers compare with each other ("$310,000" vs "275,000").
@@ -496,6 +536,43 @@ fn terms(text: &str) -> HashSet<String> {
 }
 
 /// Whether `new` replaces `old`.
+/// Phrases that state an assumption or a working figure rather than a settled one.
+const ASSUMPTION_PHRASES: &[&str] = &[
+    "assume",
+    "assumes",
+    "assumed",
+    "assuming",
+    "planning assumes",
+    "working figure",
+    "working assumption",
+    "ballpark",
+];
+
+/// Whether decision `dp` settles what `op` only assumes ("our planning assumes a budget of
+/// $310,000" against "Decision: the board approved $275,000"), whatever their dates: a later
+/// note that still repeats the working figure does not undo the decision. As conservative as
+/// [`supersedes`] otherwise: the two must share at least three distinctive terms, and a value
+/// in a sentence that assumes must differ from every value of its type in the decision's
+/// deciding sentences (a sentence with a [`NEW_MARKERS`] word). A fact that itself assumes,
+/// or that reads as a draft, never settles.
+fn settles(dp: &Profile, op: &Profile) -> bool {
+    if dp.assumes || dp.old_marked || dp.decided.is_empty() || op.assumed.is_empty() {
+        return false;
+    }
+    if dp.all.intersection(&op.all).count() < 3 {
+        return false;
+    }
+    op.assumed.iter().any(|(kind, keys)| {
+        let decided: Vec<&Vec<String>> = dp
+            .decided
+            .iter()
+            .filter(|(k, _)| k == kind)
+            .map(|(_, v)| v)
+            .collect();
+        !decided.is_empty() && !decided.iter().any(|v| v.iter().any(|k| keys.contains(k)))
+    })
+}
+
 fn supersedes(new: &Fact, np: &Profile, old: &Fact, op: &Profile) -> bool {
     let (Some(nd), Some(od)) = (&new.date, &old.date) else {
         return false;
@@ -587,6 +664,39 @@ frozen except for customer visits. One trade show was cut.",
 2027. Ravi Menon signs off on every new offer.",
             ),
         ])
+    }
+
+    #[test]
+    fn a_decision_settles_a_later_note_that_still_assumes_the_old_figure() {
+        let approved = (
+            "Q4 budget approved",
+            Some("2026-09-25"),
+            "Decision: the board approved a Q4 marketing budget of $275,000.",
+        );
+        let assumes = (
+            "Message to Ravi",
+            Some("2026-09-30"),
+            "Our current planning assumes a budget of $310,000 for marketing in Q4.",
+        );
+        let f = facts(&context(&[approved, assumes]));
+        let note = f.iter().find(|f| f.title == "Message to Ravi").unwrap();
+        let decision = f.iter().find(|f| f.title == "Q4 budget approved").unwrap();
+        assert_eq!(note.superseded_by, Some(decision.id));
+        assert_eq!(decision.superseded_by, None);
+        // A later note that states, rather than assumes, another figure stays current, and so
+        // does an assumption on another subject.
+        let restated = (
+            "Message to Ravi",
+            Some("2026-09-30"),
+            "The Q4 marketing budget was raised to $290,000 after the review.",
+        );
+        let other = (
+            "Hiring plan",
+            Some("2026-09-30"),
+            "Recruiting assumes 3 new offers for the support team.",
+        );
+        let f = facts(&context(&[approved, restated, other]));
+        assert!(f.iter().all(|f| f.superseded_by.is_none()), "{f:?}");
     }
 
     fn maya() -> ContextResponse {
