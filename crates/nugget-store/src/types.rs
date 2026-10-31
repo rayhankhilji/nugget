@@ -251,6 +251,20 @@ pub struct ItemDates {
     /// usually RFC 3339), when it is a string.
     #[serde(default)]
     pub extracted_date: Option<String>,
+    /// `metadata.extracted.frontmatter.date` (a Markdown note's own date), when a string.
+    #[serde(default)]
+    pub frontmatter_date: Option<String>,
+    /// `metadata.extracted.frontmatter.created`, when a string.
+    #[serde(default)]
+    pub frontmatter_created: Option<String>,
+    /// When the item's event starts: `metadata.extracted.start` (an .ics file's first event),
+    /// else `metadata.source.start.date_time` / `.date` (a calendar connector's event), when a
+    /// string.
+    #[serde(default)]
+    pub event_start: Option<String>,
+    /// The item's title (it may carry a date, like a file name).
+    #[serde(default)]
+    pub title: Option<String>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub source_modified_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]

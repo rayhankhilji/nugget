@@ -276,6 +276,11 @@ pub struct Scenario {
     pub hard_cases: HardCases,
     /// Vault pages that get simulated user edits before the re-render.
     pub user_edit_pages: usize,
+    /// The time the corpus is judged as of: the pipeline's clock
+    /// (`Knowledge::set_clock`), so whether a calendar event already took place (the gold's
+    /// `attended`) does not depend on when the bench runs. `None`: the wall clock.
+    #[serde(default, with = "time::serde::rfc3339::option")]
+    pub as_of: Option<OffsetDateTime>,
     pub mcp_queries: Vec<String>,
 }
 

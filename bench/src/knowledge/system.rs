@@ -37,6 +37,8 @@ pub struct SystemContext {
     pub me_emails: Vec<String>,
     /// Webmail domains of the corpus (`Scenario::webmail_domains`).
     pub webmail_domains: Vec<String>,
+    /// The pipeline's fixed clock (`Scenario::as_of`); `None`: the wall clock.
+    pub as_of: Option<time::OffsetDateTime>,
 }
 
 /// Overrides of `nugget_knowledge::LlmConfig` for a run (the default run sets none).

@@ -216,6 +216,7 @@ fn system_context(
             .map(|i| i.value.clone())
             .collect(),
         webmail_domains: fx.scenario.webmail_domains.clone(),
+        as_of: fx.scenario.as_of,
     })
 }
 
