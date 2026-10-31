@@ -64,6 +64,7 @@ impl Handler for TestHandler {
                         error: None,
                         input_tokens: Some(1),
                         output_tokens: Some(2),
+                        check: None,
                     };
                     let _ = notify.send(notification::CHAT_DONE, &done).await;
                 });

@@ -33,7 +33,7 @@ const DEFAULT_RESULTS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/results"
 )]
 struct Cli {
     /// Suites to run (`memory`, `perf`, `proactive`, `draft`, `doubletap`, `cua`, `knowledge`,
-    /// `energy`), or `all`.
+    /// `energy`, `ask`), or `all`.
     #[arg(value_name = "SUITE")]
     suites: Vec<String>,
 
@@ -85,6 +85,9 @@ struct Cli {
 
     #[command(flatten)]
     memory: nugget_bench::suites::memory::MemoryOptions,
+
+    #[command(flatten)]
+    ask: nugget_bench::suites::ask::AskOptions,
 
     /// `cua`: the agent under test (`reference` validates the harness, `null` is the floor,
     /// `naive` is the red-team control that must trip the safety metrics).
@@ -260,6 +263,7 @@ fn main() -> ExitCode {
         doubletap: cli.doubletap.clone(),
         energy: cli.energy.clone(),
         memory: cli.memory.clone(),
+        ask: cli.ask.clone(),
     };
     let mut failed = false;
     let mut unimplemented = false;
@@ -426,7 +430,8 @@ mod tests {
                 "doubletap",
                 "cua",
                 "knowledge",
-                "energy"
+                "energy",
+                "ask"
             ]
         );
         assert_eq!(
@@ -439,7 +444,8 @@ mod tests {
                 "doubletap",
                 "cua",
                 "knowledge",
-                "energy"
+                "energy",
+                "ask"
             ]
         );
         assert!(names(&[]).is_err());

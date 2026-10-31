@@ -86,6 +86,8 @@ pub struct RunConfig {
     pub energy: suites::energy::EnergyOptions,
     /// `memory` suite options (real embedder prefixes, reranker, query count).
     pub memory: suites::memory::MemoryOptions,
+    /// `ask` suite options (answer prompt arms, judge, question count).
+    pub ask: suites::ask::AskOptions,
 }
 
 impl Default for RunConfig {
@@ -102,6 +104,7 @@ impl Default for RunConfig {
             doubletap: suites::doubletap::DoubletapOptions::default(),
             energy: suites::energy::EnergyOptions::default(),
             memory: suites::memory::MemoryOptions::default(),
+            ask: suites::ask::AskOptions::default(),
         }
     }
 }
@@ -183,6 +186,7 @@ pub fn registry() -> Vec<Box<dyn Benchmark>> {
         Box::new(suites::cua::CuaBench::default()),
         Box::new(suites::knowledge::KnowledgeBench),
         Box::new(suites::energy::EnergyBench),
+        Box::new(suites::ask::AskBench),
     ]
 }
 
@@ -345,10 +349,12 @@ mod tests {
                 "doubletap",
                 "cua",
                 "knowledge",
-                "energy"
+                "energy",
+                "ask"
             ]
         );
         assert!(find("energy").is_some_and(|b| b.implemented()));
+        assert!(find("ask").is_some_and(|b| b.implemented()));
         assert!(find("proactive").is_some_and(|b| b.implemented()));
         assert!(find("knowledge").is_some_and(|b| b.implemented()));
         assert!(find("perf").is_some_and(|b| b.implemented()));

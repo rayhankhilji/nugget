@@ -83,6 +83,8 @@ export interface ChatDone {
   error: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** Post-check of a sourced `retrieve.ask` answer (absent for plain chat and older daemons). */
+  check?: AnswerCheck;
 }
 
 export interface ItemRef {
@@ -292,6 +294,8 @@ export interface AskRequest {
   tier?: Tier;
   /** Earlier turns, oldest first: a follow-up is rewritten for retrieval and they go to the model. */
   history?: ChatMessage[];
+  /** The client's current UTC offset in minutes (east positive): the daemon's "today". */
+  utc_offset_minutes?: number;
 }
 
 /** Answer streaming as `chat.delta` / `chat.done`, plus the context the model was given. */
@@ -2023,6 +2027,7 @@ export function askInConversation(
     provider: route.provider,
     tier: route.tier,
     history: history.filter((m) => m.role !== "system").slice(-CHAT_ASK_HISTORY),
+    utc_offset_minutes: -new Date().getTimezoneOffset(),
   });
 }
 
@@ -2286,3 +2291,34 @@ export const listPluginCatalog = async (): Promise<PluginCatalogResult> => {
     truncated: r?.truncated === true,
   };
 };
+
+// ---- EE3: Ask answer check ----
+
+/** Why the daemon's post-check flagged a claim. Newer daemons may send other values (shown like `unsupported`). */
+export type ClaimFlag = "uncited" | "unsupported";
+
+/** One claim of an answer the post-check could not tie to its sources. */
+export interface FlaggedClaim {
+  /** The sentence exactly as it appears in the streamed answer text. */
+  text: string;
+  /** Kept as sent, so a value this version doesn't know survives a re-save. */
+  reason: ClaimFlag | (string & {});
+}
+
+/** The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`. */
+export interface AnswerCheck {
+  /** The answer says the user's items don't contain what was asked. */
+  not_found: boolean;
+  /** Sentences of the answer that state something. */
+  claims: number;
+  /** Claims to mark, in answer order. */
+  flagged: FlaggedClaim[];
+  /** Citation markers that named a passage the model was not given (removed from the text). */
+  invalid_citations: number;
+}
+
+// Declaration merge: `StoredChatMessage` (chat history) keeps an answer's check.
+export interface StoredChatMessage {
+  /** The answer's post-check, when it came with one (absent from turns saved before EE3). */
+  check?: AnswerCheck | null;
+}

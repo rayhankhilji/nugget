@@ -5,6 +5,7 @@
 //! app over local IPC (`nugget_core::ipc`). The binary (`src/main.rs`) adds the
 //! CLI, signal handling and logging; this library exists so tests can run the daemon in-process.
 
+pub mod ask;
 pub mod cli;
 pub mod config;
 pub mod daemon;

@@ -9,6 +9,7 @@ import {
   errorMessage,
   isCommandMissing,
   isOpenableUrl,
+  type AnswerCheck,
   type AskStarted,
   type ChatDone,
   type ChatMessage,
@@ -48,6 +49,8 @@ interface Turn {
   excludedSensitive?: number;
   /** Sources were on but none matched, so this is a plain chat answer. */
   generalAnswer?: boolean;
+  /** The daemon's post-check of a sourced answer (`chat.done`), when it came with one. */
+  check?: AnswerCheck;
 }
 
 const SOURCES_KEY = "nugget.chat.useSources";
@@ -77,11 +80,48 @@ interface Early {
 
 let nextTurnId = 1;
 
+/**
+ * An answer check as the page uses it, from `chat.done` or a saved turn (which may predate it or
+ * come from another version); `undefined` when there is nothing usable.
+ */
+export function answerCheckOf(v: unknown): AnswerCheck | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const c = v as Partial<Record<keyof AnswerCheck, unknown>>;
+  const count = (n: unknown) => (typeof n === "number" && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0);
+  const flagged = (Array.isArray(c.flagged) ? c.flagged : []).flatMap((f: unknown) => {
+    const x = f as { text?: unknown; reason?: unknown } | null;
+    if (!x || typeof x.text !== "string" || !x.text.trim()) return [];
+    // The reason is kept as sent (a newer one is only labelled like `unsupported`); none at all means `unsupported`.
+    return [{ text: x.text, reason: typeof x.reason === "string" && x.reason ? x.reason : "unsupported" }];
+  });
+  return { not_found: c.not_found === true, claims: count(c.claims), flagged, invalid_citations: count(c.invalid_citations) };
+}
+
 /** Bounds matching `src-tauri/src/history.rs` (chars, so the byte limits always hold). */
 const MAX_SAVED_TEXT = 60_000;
 const MAX_SAVED_ERROR = 1_000;
 const MAX_SAVED_MESSAGES = 200;
 const MAX_TITLE = 80;
+/** Flagged claims saved per answer (`MAX_FLAGGED` in history.rs), and chars kept of each claim and reason. */
+const MAX_SAVED_FLAGGED = 200;
+const MAX_SAVED_CLAIM = 1_000;
+const MAX_SAVED_REASON = 64;
+/** A saved check's JSON size limit (`MAX_MESSAGE_BYTES` in history.rs). */
+const MAX_SAVED_CHECK_BYTES = 256 * 1024;
+
+/**
+ * A check as saved with its (possibly cut) reply text: only claims that are in that text, bounded
+ * so the shell never refuses the conversation; the flagged list goes if it is still too big.
+ */
+export function storedCheck(check: AnswerCheck, text: string): AnswerCheck {
+  const flagged = check.flagged
+    .filter((f) => text.includes(f.text))
+    .slice(0, MAX_SAVED_FLAGGED)
+    .map((f) => ({ text: f.text.slice(0, MAX_SAVED_CLAIM), reason: f.reason.slice(0, MAX_SAVED_REASON) }));
+  const out: AnswerCheck = { ...check, flagged };
+  if (new TextEncoder().encode(JSON.stringify(out)).length > MAX_SAVED_CHECK_BYTES) out.flagged = [];
+  return out;
+}
 
 function newConversationId(): string {
   return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -101,6 +141,7 @@ function toStored(turns: readonly Turn[]): StoredChatMessage[] {
     if (x.tokens?.output != null) m.output_tokens = x.tokens.output;
     if (x.citations?.length) m.citations = x.citations;
     if (x.generalAnswer) m.general_answer = true;
+    if (x.check) m.check = storedCheck(x.check, text);
     return m;
   });
 }
@@ -119,6 +160,7 @@ function fromStored(messages: readonly StoredChatMessage[]): Turn[] {
           tokens: m.output_tokens != null ? { input: null, output: m.output_tokens } : undefined,
           citations: m.citations ?? undefined,
           generalAnswer: m.general_answer === true || undefined,
+          check: answerCheckOf(m.check),
         },
   );
 }
@@ -236,6 +278,7 @@ export function ChatPage() {
     state: done.error ? (/cancel/i.test(done.error) ? "cancelled" : "error") : "done",
     error: done.error ?? undefined,
     tokens: { input: done.input_tokens, output: done.output_tokens },
+    check: done.error ? undefined : answerCheckOf(done.check),
   });
 
   // Stream ids already attached to a turn. Updated synchronously (unlike state), so an event
@@ -279,9 +322,19 @@ export function ChatPage() {
     for (const x of turns) {
       if (isActive(x)) streamed.current.add(x.id);
       else if (streamed.current.delete(x.id) && x.state === "done") {
+        if (x.check?.not_found) {
+          announce(t("chat.notFoundAnnounce"));
+          continue;
+        }
         const citations = x.citations ?? [];
         const cited = citedNumbers(x.text, new Set(citations.map((c) => c.n)));
-        announce(t("announce.answerReady", { count: groupSources(citations, cited).cited.length }));
+        const sources = groupSources(citations, cited).cited.length;
+        const flagged = x.check?.flagged.length ?? 0;
+        announce(
+          flagged > 0
+            ? t("announce.answerFlagged", { sources, flagged })
+            : t("announce.answerReady", { count: sources }),
+        );
       }
     }
   }, [turns, announce, t]);
@@ -638,6 +691,7 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   const opener = onOpenLink;
   const sourcesRef = useRef<HTMLDivElement>(null);
   const [showMore, setShowMore] = useState(false);
+  const [showFlagged, setShowFlagged] = useState(false);
   /** A source to focus once the list that holds it has been expanded. */
   const [pendingFocus, setPendingFocus] = useState<number | null>(null);
 
@@ -692,6 +746,9 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
   }, [turn.citations, opener, t, sources, showMore, focusSource]);
   const withheld = turn.provider ? withheldNotice(turn.excludedSensitive, turn.provider) : null;
   const moreId = `msg-${turn.id}-more-sources`;
+  const flaggedId = `msg-${turn.id}-flagged`;
+  const check = turn.state === "done" ? turn.check : undefined;
+  const flagged = check && !check.not_found ? check.flagged : [];
 
   const sourceItem = (e: SourceEntry<Citation>) => {
     const first = e.citations[0]!;
@@ -747,6 +804,36 @@ function MessageItem({ turn, onOpenLink }: { turn: Turn; onOpenLink: (url: strin
       )}
       {turn.queryRewrite && <p className="muted small chat-rewrite">{t("chat.searchedFor", { query: turn.queryRewrite })}</p>}
       {turn.generalAnswer && <p className="muted small chat-general">{t("chat.generalAnswer")}</p>}
+      {check?.not_found && <p className="muted small chat-not-found">{t("chat.notFound")}</p>}
+      {flagged.length > 0 && (
+        <div className="chat-check">
+          <button
+            type="button"
+            className="btn btn-ghost btn-small chat-check-toggle"
+            aria-expanded={showFlagged}
+            aria-controls={flaggedId}
+            onClick={() => setShowFlagged((v) => !v)}
+          >
+            {t("chat.check.flagged", { count: flagged.length })}
+          </button>
+          {showFlagged && (
+            <ul className="chat-check-list small" id={flaggedId}>
+              {flagged.map((f, i) => (
+                <li key={i} className="chat-check-claim">
+                  <Trans
+                    k={f.reason === "uncited" ? "chat.check.uncited" : "chat.check.unsupported"}
+                    args={{ text: f.text }}
+                    tags={{
+                      reason: (c) => <span className="chat-check-reason muted">{c}</span>,
+                      claim: (c) => <span dir="auto">{c}</span>,
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {withheld && <p className="note small">{withheld}</p>}
       {turn.role === "assistant" && !!turn.citations?.length && (
         <div className="chat-sources" ref={sourcesRef}>

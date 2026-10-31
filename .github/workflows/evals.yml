@@ -165,6 +165,91 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # Ask (chat over your items) answer quality (EE3): the `ask` suite's gold questions answered
+  # through the daemon's own prompt and post-check, the prompt before EE3 (`plain`) and now
+  # (`grounded`) on the same runner, temperature 0, judged by the agentic-tier model in both
+  # orders next to the rule-based scores. One runner per chat model.
+  ask:
+    name: ${{ matrix.suite }} (real model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: ask
+            args: >-
+              ask --local-chat-model qwen3-4b-q4km --ask-prompt both --ask-temperature 0 --ask-judge model
+              --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
+              --ask-dump eval-results/ask-answers.jsonl
+          # The manifest's agentic-tier model answering; it judges itself on the same server.
+          - suite: ask-8b
+            args: >-
+              ask --local-chat-model qwen3-8b-q4km --ask-prompt both --ask-temperature 0
+              --ask-judge model --ask-judge-model qwen3-8b-q4km --ask-judge-timeout-s 240
+              --ask-dump eval-results/ask-answers.jsonl
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: evals
+
+      - name: Cache models and runtime
+        uses: actions/cache@v4
+        with:
+          path: bench/.local-models/data/models
+          key: local-models-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('manifests/default.json') }}
+
+      - name: Build the bench
+        run: cargo build --release --locked -p nugget-bench
+
+      - name: Record hardware
+        run: |
+          mkdir -p "$RESULTS"
+          {
+            echo "suite: ${{ matrix.suite }}"
+            echo "runner: ${{ runner.name }} (${{ runner.os }} ${{ runner.arch }})"
+            echo "commit: ${{ github.sha }}"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            lscpu | grep -E 'Model name|^CPU\(s\)|Thread|Flags' | cut -c1-160
+            free -g
+          } | tee "$RESULTS/hardware-${{ matrix.suite }}.txt"
+
+      - name: Run ${{ matrix.suite }}
+        run: |
+          # Word splitting of the matrix arguments is intended.
+          # shellcheck disable=SC2086
+          ./target/release/nugget-bench ${{ matrix.args }} --local-models --scale "$SCALE" \
+            --out-dir "$RESULTS"
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in "$RESULTS"/*.json; do
+            [ -e "$f" ] || continue
+            echo "== $f"
+            jq -c '{suite, status, message, duration_ms, git: .git_commit,
+                    params: (.config.params | with_entries(select(.key | test("^(local|model|judge|questions|ask|sampling)")))),
+                    metrics: [.metrics[] | {name, value, unit, target, target_met}]}' "$f"
+          done
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-${{ matrix.suite }}
+          path: |
+            ${{ env.RESULTS }}
+            bench/.local-models/data/logs
+          if-no-files-found: warn
+          retention-days: 90
+
   # Double Tap latency where users are: the Linux CPU runner and Apple Silicon (the manifest's
   # Metal llama-server). Each runner runs every configuration one after the other, so all of them
   # share one CPU: the manifest's 4B chat model and the two small models proposed in

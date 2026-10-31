@@ -191,6 +191,45 @@ pub struct ChatDone {
     pub error: Option<String>,
     pub input_tokens: Option<u32>,
     pub output_tokens: Option<u32>,
+    /// What the daemon's post-check found in a sourced `retrieve.ask` answer; absent on plain
+    /// chats, general answers and failed streams.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<AnswerCheck>,
+}
+
+/// The daemon's post-check of a sourced `retrieve.ask` answer, sent on `chat.done`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnswerCheck {
+    /// The answer says the user's items don't contain what was asked.
+    #[serde(default)]
+    pub not_found: bool,
+    /// Sentences of the answer that state something (not counting a "not found" reply).
+    #[serde(default)]
+    pub claims: u32,
+    /// Claims the client should mark, in answer order.
+    #[serde(default)]
+    pub flagged: Vec<FlaggedClaim>,
+    /// Citation markers that named a passage the model was not given; removed from the text.
+    #[serde(default)]
+    pub invalid_citations: u32,
+}
+
+/// One claim of an answer the post-check could not tie to its sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FlaggedClaim {
+    /// The sentence exactly as it appears in the streamed answer text.
+    pub text: String,
+    pub reason: ClaimFlag,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ClaimFlag {
+    /// States something but cites no passage.
+    Uncited,
+    /// Cites passages, but a number, amount or date it states is in none of them.
+    Unsupported,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -507,6 +546,10 @@ pub struct AskRequest {
     /// are forwarded to the answering model. Untrusted text: `System` entries are ignored.
     #[serde(default)]
     pub history: Vec<ChatMessage>,
+    /// The client's current UTC offset, in minutes (clamped to ±18 hours): the daemon dates
+    /// "today" in the answer prompt with it. Without it, the daemon's configured offset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub utc_offset_minutes: Option<i32>,
 }
 
 fn default_ask_tier() -> Tier {

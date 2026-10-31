@@ -270,6 +270,7 @@ fn every_suite_report_conforms() {
     assert_eq!(status("cua"), "ok");
     // Daemon scenarios are skipped (not failed) without a `nuggetd` binary.
     assert_eq!(status("energy"), "ok");
+    assert_eq!(status("ask"), "ok");
     // The real M2 pipeline with the default `pipeline` feature; `not_implemented` without it.
     let expected = if cfg!(feature = "pipeline") {
         "ok"

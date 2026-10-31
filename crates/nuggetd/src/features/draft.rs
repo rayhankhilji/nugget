@@ -742,6 +742,7 @@ async fn run_draft(
         error: None,
         input_tokens: None,
         output_tokens: None,
+        check: None,
     };
     let end = tokio::select! {
         biased;
