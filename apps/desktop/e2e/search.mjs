@@ -32,17 +32,20 @@ export async function searchScenario({ browser, socket, onboarded }) {
   const out = {};
   const main = page.locator("main");
   const results = main.locator("ol.results > li");
-  const heading = main.locator("#search-results-heading");
 
+  // Through the sidebar, like a person would (the app keeps its state; nothing reloads).
   const openPage = async (id) => {
-    await page.evaluate((p) => localStorage.setItem("nugget.page", p), id).catch(() => {});
-    await page.goto(`${bridge.url}index.html`);
+    await page.locator("nav .nav-item", { hasText: t(`app.nav.${id}`) }).first().click();
+    await page.locator(`main[aria-label="${t(`app.nav.${id}`)}"]`).waitFor();
     await page.locator("main h1").first().waitFor();
   };
 
   try {
-    await page.addInitScript(() => localStorage.setItem("nugget.page", "search"));
+    // Start on Search: set the remembered page once, then reload (an init script would run on
+    // every navigation).
     await page.goto(`${bridge.url}index.html`);
+    await page.evaluate(() => localStorage.setItem("nugget.page", "search"));
+    await page.reload();
     const box = page.getByRole("searchbox", { name: t("search.query") });
     await box.waitFor();
 
