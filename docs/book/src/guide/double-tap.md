@@ -171,6 +171,35 @@ What leaves the device depends on the provider used for the draft:
 Text read from other apps is treated as untrusted data in the prompt, never as instructions. Every
 draft is audited without its content.
 
+## Which apps work
+
+<!-- a11y-matrix:guide:start -->
+Double Tap is tested against real apps on GitHub's macOS, Windows and Linux machines: the major
+browsers loading pages that reproduce web mail and chat composers (a plain text box, a Gmail-like
+compose, and the editors behind most chat and mail sites: ProseMirror/TipTap, Quill, Draft.js,
+Lexical, CKEditor), and each OS's own editors. For each, it checks that Nugget finds the field,
+reads its text and the conversation around it, refuses password fields, and inserts six kinds of
+text exactly (line breaks, emoji, right-to-left text, accents, 5000 characters), with one undo
+taking the insertion back out. Latest results (2026-10-31):
+
+| | Works | Known problems |
+|---|---|---|
+| **Windows**: Chrome, Edge | Everything, on all eight page types, mail threads included | |
+| **Windows**: Notepad, WordPad | Reading and inserting | Notepad's undo is one level deep; WordPad undoes right-to-left text in two steps |
+| **Windows**: Firefox | | Not detected yet: Firefox reports no focused field to Nugget |
+| **macOS**: Safari | Everything | Accented letters typed as two characters (e + ´) arrive combined (é): same text, different encoding |
+| **macOS**: Chrome, Edge, Firefox | | Not measured yet (the test machines could not bring them to the front) |
+| **macOS**: TextEdit, Notes | TextEdit's field is found | Inserting not measured yet; Notes not detected |
+| **Linux**: Firefox | Finding, reading and inserting, on all eight page types | Reading the conversation is unreliable |
+| **Linux**: Chrome | With `--force-renderer-accessibility` (checked on a local machine) | Chrome shows web pages to accessibility tools only when started with that flag |
+| **Linux**: gedit | Everything | |
+| **Linux**: LibreOffice Writer | Reading and inserting | Only the paragraphs on screen can be read, so very long text cannot be checked |
+
+In rich editors Nugget inserts by pasting, with your clipboard saved and restored around it,
+because every editor handles a paste as one step that undo takes back whole. Every failing cell,
+with the reason, is in the [benchmark results](https://github.com/rayhankhilji/nugget/blob/main/bench/README.md#double-tap-app-matrix-ff3).
+<!-- a11y-matrix:guide:end -->
+
 ## Permissions per OS
 
 | OS | What to allow |

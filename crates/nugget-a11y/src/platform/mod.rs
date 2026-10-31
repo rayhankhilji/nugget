@@ -7,6 +7,10 @@ pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+// Pure helpers the backends share; not behind `cfg`, so their tests run on every OS.
+pub(crate) mod hints;
+pub(crate) mod text_map;
+
 use nugget_core::Result;
 
 use crate::clipboard::Clipboard;

@@ -1093,6 +1093,429 @@ In one run in two, a click sent to a page that was about to reload was lost
 (`files-delete-backup`, `reference` arm). The stage now records the version each page was served
 at, and the native session acts only on a current page.
 
+## Double Tap app matrix (FF3)
+
+`nugget-a11y` against real apps on GitHub's runners: the major browsers on each OS loading
+local fixture pages, and each OS's native editors. The fixtures
+(`crates/nugget-a11y/tests/fixtures/apps/web/`, written for this project) reproduce the DOM,
+ARIA and input handling of a plain `textarea`, a `contenteditable`, a Gmail-like compose with
+To/Subject, and ProseMirror/TipTap, Quill, Draft.js, Lexical and CKEditor 5 editors, beside a
+chat history (Slack-like grouping) or a mail thread (quoted history), with decoy sidebars and a
+password field. Each page reports its own text model to the harness, so insertion is checked
+by the editor itself, not by accessibility. The contract is
+`crates/nugget-a11y/tests/fixtures/apps/PROTOCOL.md`.
+
+Per cell (`crates/nugget-a11y/tests/apps_matrix.rs`):
+
+- **detect**: `focused()` returns the editor (not another field) and its role;
+- **read**: the field text equals the editor's own text;
+- **thread P/R**: precision and recall of `focused().thread` against the ground truth
+  (`truth.json`), with `from_me` (the user's own messages must be marked), and the mail
+  recipients and subject;
+- **secure**: focus in the password field gives `secure: true`, no value, and `insert()` refuses;
+- **insert**: six payloads (ASCII, newlines with a blank line, emoji with ZWJ and skin tones,
+  RTL, combining marks, 5000 characters), each exact in the editor's own text after a settle
+  time, and the method used;
+- **undo**: one Cmd/Ctrl+Z after each insert restores the text before it;
+- **read**: the median time of five `focused()` calls.
+
+Native editors have no page oracle; their text is read back through accessibility (ᵃ), except
+TextEdit, where AppleScript is tried first. Run it with the `A11y apps` workflow
+(`.github/workflows/a11y-apps.yml`, on dispatch, on pull requests that touch `nugget-a11y` and
+weekly), or locally:
+
+```sh
+cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1
+python3 crates/nugget-a11y/tests/fixtures/apps/render_matrix.py <results.jsonl> --stdout
+```
+
+`crates/nugget-a11y/tests/fixtures/apps/expected.json` is the regression gate: the metrics
+below that passed (except the Linux Firefox thread, which varies between runs) must keep
+passing.
+
+Results, 2026-10-31, run 41190942813 (debug build, head `4f6c35e`). Findings:
+
+- **Windows (Chrome, Edge):** every cell passes on both images, including both mail threads.
+  Insertion into rich editors goes through the clipboard (paste with the clipboard restored),
+  which every editor handles as one undo step.
+- **macOS Safari:** passes except the combining-marks payload: Safari composes pasted text to
+  NFC (`Cafe\u0301` arrives as `Café`), so the text is equivalent but not identical.
+- **macOS Chrome, Edge and Firefox were not measured.** From the runner's background session
+  the browsers could not be brought to the front when started directly (run 41188817747: the
+  window shows but never gets accessibility focus), and through `open -n -a` they never loaded
+  the page (this run). Chrome on macOS is read over AX in the `cua-macos` job, started with
+  `--force-renderer-accessibility`.
+- **Firefox on Windows** is frontmost but reports no focused text field over UI Automation on
+  either image. Not diagnosed yet.
+- **Chrome on Linux** exposes no web content over AT-SPI unless started with
+  `--force-renderer-accessibility` (or toggled in `chrome://accessibility`); nothing a client
+  can do at run time turned it on. With the flag, every cell passed locally except the thread.
+  Edge is not installed on the Ubuntu image.
+- **Firefox on Linux:** detect, read, secure, every insert and every undo pass; the thread
+  varies between runs (the same fixture gave 100% in one run and 12% in another), most likely
+  because the tree is read while Firefox is still building it.
+- **Native editors:** gedit passes everything. LibreOffice Writer exposes only the paragraphs on
+  screen, so the 5000-character insert cannot be read back. Classic Notepad has a single-level
+  undo (a second Ctrl+Z redoes), so only the first undo restores the text; WordPad splits an
+  RTL insertion into two undo steps. TextEdit is detected, but its document could not be
+  reset between payloads from the runner (AppleScript is refused there), so no insert was
+  measured; Notes never focused a note.
+
+<!-- a11y-matrix:bench:start -->
+
+#### macOS `macos-latest` (macOS 26.6.2)
+
+| app | fixture | detect | read | thread P/R | secure | insert | undo | read (median) |
+|---|---|---|---|---|---|---|---|---|
+| chrome 156.0.8078.48 | textarea [1] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | contenteditable [2] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | mail-compose [3] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | prosemirror [4] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | quill [5] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | draftjs [6] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | lexical [7] | — | — | — | — | — | — | — |
+| chrome 156.0.8078.48 | ckeditor [8] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | textarea [9] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | contenteditable [10] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | mail-compose [11] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | prosemirror [12] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | quill [13] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | draftjs [14] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | lexical [15] | — | — | — | — | — | — | — |
+| edge 156.0.4314.42 | ckeditor [16] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | textarea [17] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | contenteditable [18] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | mail-compose [19] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | prosemirror [20] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | quill [21] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | draftjs [22] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | lexical [23] | — | — | — | — | — | — | — |
+| firefox 158.0.1 | ckeditor [24] | — | — | — | — | — | — | — |
+| safari 26.6.2 | textarea [25] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 171 ms |
+| safari 26.6.2 | contenteditable [26] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 115 ms |
+| safari 26.6.2 | mail-compose [27] | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 83 ms |
+| safari 26.6.2 | prosemirror [28] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 91 ms |
+| safari 26.6.2 | quill [29] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 76 ms |
+| safari 26.6.2 | draftjs [30] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 98 ms |
+| safari 26.6.2 | lexical [31] | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 109 ms |
+| safari 26.6.2 | ckeditor [32] | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ❌ 5/6 clipboard ✗ combining | ✅ 6/6 | 122 ms |
+| textedit 1.20 | native [33] | ✅ text_area | ✅ᵃ | — | — | ❌ 0/6 ✗ ascii, newlines, emoji, rtl, combining, long | — | 4 ms |
+| notes 4.13 | native [34] | ❌ | —ᵃ | — | — | — | — | — |
+
+ᵃ the app's text was read back through accessibility itself (no independent oracle).
+
+Failures:
+
+1. **chrome / textarea**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+2. **chrome / contenteditable**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+3. **chrome / mail-compose**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+4. **chrome / prosemirror**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+5. **chrome / quill**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+6. **chrome / draftjs**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+7. **chrome / lexical**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+8. **chrome / ckeditor**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+9. **edge / textarea**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+10. **edge / contenteditable**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+11. **edge / mail-compose**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+12. **edge / prosemirror**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+13. **edge / quill**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+14. **edge / draftjs**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+15. **edge / lexical**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+16. **edge / ckeditor**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+17. **firefox / textarea**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+18. **firefox / contenteditable**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+19. **firefox / mail-compose**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+20. **firefox / prosemirror**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+21. **firefox / quill**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+22. **firefox / draftjs**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+23. **firefox / lexical**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+24. **firefox / ckeditor**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 0, last state: None, app alive: Some(true))
+25. **safari / textarea**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+26. **safari / contenteditable**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+27. **safari / mail-compose**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+28. **safari / prosemirror**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+29. **safari / quill**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+30. **safari / draftjs**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+31. **safari / lexical**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+32. **safari / ckeditor**
+   - insert combining: method clipboard, verified False; first difference at char 10: expected `Draft: Café niño Z̤̈`, got `Draft: Café niño Z̤̈`
+33. **textedit / native**
+   - insert ascii: method None, verified None, error: could not reset the document to the seed (it reads None)
+   - insert newlines: method None, verified None, error: could not reset the document to the seed (it reads None)
+   - insert emoji: method None, verified None, error: could not reset the document to the seed (it reads None)
+   - insert rtl: method None, verified None, error: could not reset the document to the seed (it reads None)
+   - insert combining: method None, verified None, error: could not reset the document to the seed (it reads None)
+   - insert long: method None, verified None, error: could not reset the document to the seed (it reads None)
+34. **notes / native**
+   - error: no focused field with the seed text within 45 s (last: no focused text field; apps: [Notes*, Finder]; windows: ["Notes"])
+   - detect: no focused, non-secure field
+
+#### Windows `windows-2022` (Microsoft Windows [Version 10.0.20348.5761])
+
+| app | fixture | detect | read | thread P/R | secure | insert | undo | read (median) |
+|---|---|---|---|---|---|---|---|---|
+| chrome 156.0.8078.48 | textarea | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 245 ms |
+| chrome 156.0.8078.48 | contenteditable | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 291 ms |
+| chrome 156.0.8078.48 | mail-compose | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 303 ms |
+| chrome 156.0.8078.48 | prosemirror | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 250 ms |
+| chrome 156.0.8078.48 | quill | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 297 ms |
+| chrome 156.0.8078.48 | draftjs | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 305 ms |
+| chrome 156.0.8078.48 | lexical | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 301 ms |
+| chrome 156.0.8078.48 | ckeditor | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 301 ms |
+| edge 156.0.4314.42 | textarea | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 300 ms |
+| edge 156.0.4314.42 | contenteditable | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 282 ms |
+| edge 156.0.4314.42 | mail-compose | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 245 ms |
+| edge 156.0.4314.42 | prosemirror | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 285 ms |
+| edge 156.0.4314.42 | quill | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 281 ms |
+| edge 156.0.4314.42 | draftjs | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 284 ms |
+| edge 156.0.4314.42 | lexical | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 280 ms |
+| edge 156.0.4314.42 | ckeditor | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 255 ms |
+| firefox 158.0.1 | textarea [1] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | contenteditable [2] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | mail-compose [3] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | prosemirror [4] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | quill [5] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | draftjs [6] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | lexical [7] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | ckeditor [8] | ❌ | — | — | — | — | — | — |
+| notepad 10.0.20348.1 | native [9] | ✅ text_area | ✅ᵃ | — | — | ✅ 6/6 clipboard | ❌ 1/6 ✗ newlines, emoji, rtl, combining, long | 71 ms |
+| wordpad 10.0.20348.1 | native [10] | ✅ document | ✅ᵃ | — | — | ✅ 6/6 clipboard | ❌ 5/6 ✗ rtl | 331 ms |
+
+ᵃ the app's text was read back through accessibility itself (no independent oracle).
+
+Failures:
+
+1. **firefox / textarea**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Plain textarea — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified…
+   - detect: no focused, non-secure field
+2. **firefox / contenteditable**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Plain contenteditable — Mozilla Fi…"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecif…
+   - detect: no focused, non-secure field
+3. **firefox / mail-compose**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Mail compose — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified e…
+   - detect: no focused, non-secure field
+4. **firefox / prosemirror**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: ProseMirror (TipTap) — Mozilla Fir…"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecif…
+   - detect: no focused, non-secure field
+5. **firefox / quill**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Quill — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error" }…
+   - detect: no focused, non-secure field
+6. **firefox / draftjs**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Draft.js — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error…
+   - detect: no focused, non-secure field
+7. **firefox / lexical**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: Lexical — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error"…
+   - detect: no focused, non-secure field
+8. **firefox / ckeditor**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, hosted-compute-agent]; windows: ["Nugget fixture: CKEditor 5 — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified err…
+   - detect: no focused, non-secure field
+9. **notepad / native**
+   - undo newlines: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo emoji: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo rtl: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo combining: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo long: after one undo: `Draft: Sounds good, see you at 3.`
+10. **wordpad / native**
+   - undo rtl: after one undo: `Draft: שלום, `
+
+#### Windows `windows-latest` (Microsoft Windows [Version 10.0.26100.33650])
+
+| app | fixture | detect | read | thread P/R | secure | insert | undo | read (median) |
+|---|---|---|---|---|---|---|---|---|
+| chrome 156.0.8078.48 | textarea | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 315 ms |
+| chrome 156.0.8078.48 | contenteditable | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 328 ms |
+| chrome 156.0.8078.48 | mail-compose | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 254 ms |
+| chrome 156.0.8078.48 | prosemirror | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 323 ms |
+| chrome 156.0.8078.48 | quill | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 326 ms |
+| chrome 156.0.8078.48 | draftjs | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 293 ms |
+| chrome 156.0.8078.48 | lexical | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 346 ms |
+| chrome 156.0.8078.48 | ckeditor | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 279 ms |
+| edge 155.0.4283.62 | textarea | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 301 ms |
+| edge 155.0.4283.62 | contenteditable | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 271 ms |
+| edge 155.0.4283.62 | mail-compose | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 238 ms |
+| edge 155.0.4283.62 | prosemirror | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 270 ms |
+| edge 155.0.4283.62 | quill | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 272 ms |
+| edge 155.0.4283.62 | draftjs | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 268 ms |
+| edge 155.0.4283.62 | lexical | ✅ text_area | ✅ | ✅ 100%/100% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 272 ms |
+| edge 155.0.4283.62 | ckeditor | ✅ text_area | ✅ | ✅ 100%/100% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 242 ms |
+| firefox 158.0.1 | textarea [1] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | contenteditable [2] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | mail-compose [3] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | prosemirror [4] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | quill [5] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | draftjs [6] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | lexical [7] | ❌ | — | — | — | — | — | — |
+| firefox 158.0.1 | ckeditor [8] | ❌ | — | — | — | — | — | — |
+| notepad 10.0.26100.32860 | native [9] | ✅ text_area | ✅ᵃ | — | — | ✅ 6/6 clipboard | ❌ 1/6 ✗ newlines, emoji, rtl, combining, long | 88 ms |
+| wordpad | * | not available | — | — | — | — | — | — |
+
+ᵃ the app's text was read back through accessibility itself (no independent oracle).
+
+Failures:
+
+1. **firefox / textarea**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Plain textarea — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified erro…
+   - detect: no focused, non-secure field
+2. **firefox / contenteditable**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Plain contenteditable — Mozilla Fi…"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified e…
+   - detect: no focused, non-secure field
+3. **firefox / mail-compose**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Mail compose — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error"…
+   - detect: no focused, non-secure field
+4. **firefox / prosemirror**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: ProseMirror (TipTap) — Mozilla Fir…"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified e…
+   - detect: no focused, non-secure field
+5. **firefox / quill**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Quill — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error" } \| [E…
+   - detect: no focused, non-secure field
+6. **firefox / draftjs**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Draft.js — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error" } \|…
+   - detect: no focused, non-secure field
+7. **firefox / lexical**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: Lexical — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error" } \| …
+   - detect: no focused, non-secure field
+8. **firefox / ckeditor**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [firefox*, WindowsTerminal]; windows: ["Nugget fixture: CKEditor 5 — Mozilla Firefox"*, "C:\\\\ProgramData\\\\GitHub\\\\HostedComputeAgent\\\\hosted-co…"]) (app log: [ERROR shell_windows::taskbar::shortcut] Error matching shortcut: Error { code: HRESULT(0x80004005), message: "Unspecified error" }…
+   - detect: no focused, non-secure field
+9. **notepad / native**
+   - undo newlines: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo emoji: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo rtl: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo combining: after one undo: `Draft: Sounds good, see you at 3.`
+   - undo long: after one undo: `Draft: Sounds good, see you at 3.`
+
+Not available: wordpad (not installed (looked in standard locations; set NUGGET_A11Y_APPS_EXE_WORDPAD to override): C:\\Program Files\\Windows NT\\…)
+
+#### Linux `ubuntu-24.04` (Ubuntu 24.04.5 LTS)
+
+| app | fixture | detect | read | thread P/R | secure | insert | undo | read (median) |
+|---|---|---|---|---|---|---|---|---|
+| chrome Google Chrome 156.0.8078.47 | textarea [1] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | contenteditable [2] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | mail-compose [3] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | prosemirror [4] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | quill [5] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | draftjs [6] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | lexical [7] | ❌ | — | — | — | — | — | — |
+| chrome Google Chrome 156.0.8078.47 | ckeditor [8] | ❌ | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | textarea [9] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | contenteditable [10] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | mail-compose [11] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | prosemirror [12] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | quill [13] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | draftjs [14] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | lexical [15] | — | — | — | — | — | — | — |
+| edge Microsoft Edge 156.0.4314.42 | ckeditor [16] | — | — | — | — | — | — | — |
+| firefox Mozilla Firefox 158.0.1 | textarea [17] | ✅ text_area | ✅ | ❌ 100%/12% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 710 ms |
+| firefox Mozilla Firefox 158.0.1 | contenteditable [18] | ✅ text_area | ✅ | ❌ 100%/25% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 679 ms |
+| firefox Mozilla Firefox 158.0.1 | mail-compose [19] | ✅ text_area | ✅ | ❌ —/0% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 643 ms |
+| firefox Mozilla Firefox 158.0.1 | prosemirror [20] | ✅ text_area | ✅ | ❌ —/0% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 707 ms |
+| firefox Mozilla Firefox 158.0.1 | quill [21] | ✅ text_area | ✅ | ❌ —/0% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 729 ms |
+| firefox Mozilla Firefox 158.0.1 | draftjs [22] | ✅ text_area | ✅ | ❌ —/0% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 704 ms |
+| firefox Mozilla Firefox 158.0.1 | lexical [23] | ✅ text_field | ✅ | ❌ 100%/38% | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 731 ms |
+| firefox Mozilla Firefox 158.0.1 | ckeditor [24] | ✅ text_field | ✅ | ❌ 0%/0% (to ✅, subj ✅) | ✅ | ✅ 6/6 clipboard | ✅ 6/6 | 723 ms |
+| gedit gedit - Version 46.2 | native | ✅ text_area | ✅ᵃ | — | — | ✅ 6/6 accessibility | ✅ 6/6 | 697 ms |
+| gnome-text-editor | * | not available | — | — | — | — | — | — |
+| writer LibreOffice 24.2.7.2 420(Build:2) | native [25] | ✅ text_area | ✅ᵃ | — | — | ❌ 5/6 accessibility/clipboard ✗ long | ✅ 6/6 | 675 ms |
+
+ᵃ the app's text was read back through accessibility itself (no independent oracle).
+
+Failures:
+
+1. **chrome / textarea**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Plain textarea - Google Chrome"*, "", ""]) (app log: [6711:6711:1031/100159.345120:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.fr…
+   - detect: no focused, non-secure field
+2. **chrome / contenteditable**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Plain contenteditable - Google Chr…"*, "", ""]) (app log: [7260:7260:1031/100226.565311:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: o…
+   - detect: no focused, non-secure field
+3. **chrome / mail-compose**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Mail compose - Google Chrome"*, "", ""]) (app log: [7799:7799:1031/100253.785017:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.free…
+   - detect: no focused, non-secure field
+4. **chrome / prosemirror**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: ProseMirror (TipTap) - Google Chro…"*, "", ""]) (app log: [8368:8368:1031/100320.914632:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: o…
+   - detect: no focused, non-secure field
+5. **chrome / quill**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Quill - Google Chrome"*, "", ""]) (app log: [8907:8907:1031/100348.089738:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesktop…
+   - detect: no focused, non-secure field
+6. **chrome / draftjs**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Draft.js - Google Chrome"*, "", ""]) (app log: [9447:9447:1031/100415.254046:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedesk…
+   - detect: no focused, non-secure field
+7. **chrome / lexical**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: Lexical - Google Chrome"*, "", ""]) (app log: [9990:9990:1031/100442.442539:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.freedeskt…
+   - detect: no focused, non-secure field
+8. **chrome / ckeditor**
+   - error: the editor never had accessibility focus in the fixture window within 25 s (last: no focused text field; apps: [Google Chrome*]; windows: ["Nugget fixture: CKEditor 5 - Google Chrome"*, "", ""]) (app log: [10534:10534:1031/100509.630577:ERROR:dbus/object_proxy.cc:572] Failed to call method: org.freedesktop.DBus.Properties.GetAll: object_path= /org/freedesktop/UPower/devices/DisplayDevice: org.free…
+   - detect: no focused, non-secure field
+9. **edge / textarea**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11082:11082:1031/100538.893444:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+10. **edge / contenteditable**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11293:11293:1031/100707.675009:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+11. **edge / mail-compose**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11343:11343:1031/100838.780121:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+12. **edge / prosemirror**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11452:11452:1031/101009.882059:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+13. **edge / quill**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11512:11512:1031/101140.986247:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+14. **edge / draftjs**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11559:11559:1031/101312.092574:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+15. **edge / lexical**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11601:11601:1031/101443.195230:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+16. **edge / ckeditor**
+   - error: the page never acknowledged reset (index served: false, /cmd polls: 2008, last state: None, app alive: Some(false)) (app log: [11645:11645:1031/101614.308758:FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:172] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /opt/microsoft/msedge/msedg…
+17. **firefox / textarea**
+   - thread: P 100% R 12%; reported ["Maya Chen 10:02 AM Morning! Did anyone hear back from the venue in Lakeside?"]
+18. **firefox / contenteditable**
+   - thread: P 100% R 25%; reported ["Morning! Did anyone hear back from the venue in Lakeside?", "They said they can hold the big room until Friday."]
+19. **firefox / mail-compose**
+   - thread: P — R 0%
+20. **firefox / prosemirror**
+   - thread: P — R 0%
+21. **firefox / quill**
+   - thread: P — R 0%
+22. **firefox / draftjs**
+   - thread: P — R 0%
+23. **firefox / lexical**
+   - thread: P 100% R 38%; reported ["Morning! Did anyone hear back from the venue in Lakeside?", "They said they can hold the big room until Friday.", "Diego Alvarez 10:11 AM Yes, they sent the quote last night. It is within budget …"]
+24. **firefox / ckeditor**
+   - thread: P 0% R 0%; reported ["Jordan Lee", "&lt;jordan.lee@example.com&gt;"]
+25. **writer / native**
+   - insert long: method clipboard, verified False; first difference at char 0: expected `Draft: Draft budget follow team cover draft update`, got `Update cover venue week and schedule next team tea`
+
+Not available: gnome-text-editor (not installed (looked in standard locations; set NUGGET_A11Y_APPS_EXE_GNOME_TEXT_EDITOR to override): )
+
+<!-- a11y-matrix:bench:end -->
+
 ## Results
 
 ### `memory --backend real`, M1 (2026-10-28)
