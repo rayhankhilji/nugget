@@ -823,6 +823,13 @@ When unsure, answer same=false.",
         if !attrs.is_empty() {
             patch.attributes = Some(Value::Object(attrs));
         }
+        if patch.name.is_none()
+            && e.kind == EntityKind::Person
+            && !spec.weak_name
+            && let Some(better) = self.better_person_name(e, spec)?
+        {
+            patch.name = Some(better);
+        }
         if patch != EntityPatch::default() {
             self.graph.update_entity(&e.id, &patch)?;
             changed = true;
@@ -832,6 +839,63 @@ When unsure, answer same=false.",
         } else {
             Vec::new()
         })
+    }
+
+    /// A better display name for person `e` once `spec` has been attached, if there is one
+    /// (GG5-9: a person was named after whichever form came first, "R. Chen" or "Sam"). The
+    /// name is chosen from every name the person has, so it does not depend on the order
+    /// items arrive in: see [`person_name_rank`]; between written-out names of the same rank,
+    /// the one most mentions use. The user's entity, and a name the user chose
+    /// (`attributes.user_named`), are never renamed. Only re-evaluated when `spec` brings a
+    /// name at least as good as the current one, which keeps the mention count off the
+    /// common path.
+    fn better_person_name(&self, e: &Entity, spec: &EntitySpec) -> Result<Option<String>> {
+        if Some(&e.id) == self.me.as_ref()
+            || e.attributes.get("is_me") == Some(&Value::Bool(true))
+            || e.attributes.get("user_named") == Some(&Value::Bool(true))
+        {
+            return Ok(None);
+        }
+        let current = person_name_rank(&e.name);
+        if person_name_rank(&spec.name) < current && spec.aliases.is_empty() {
+            return Ok(None);
+        }
+        let mut names: Vec<&str> = std::iter::once(e.name.as_str())
+            .chain(e.aliases.iter().map(String::as_str))
+            .chain(std::iter::once(spec.name.as_str()))
+            .chain(spec.aliases.iter().map(String::as_str))
+            .filter(|n| !looks_like_address(n) && !n.trim().is_empty())
+            .collect();
+        names.sort();
+        names.dedup_by(|a, b| normalize_name(a) == normalize_name(b));
+        let best_rank = names.iter().map(|n| person_name_rank(n)).max();
+        let Some(best_rank) = best_rank.filter(|r| *r > (0, 0)) else {
+            return Ok(None);
+        };
+        let mut top: Vec<&str> = names
+            .into_iter()
+            .filter(|n| person_name_rank(n) == best_rank)
+            .collect();
+        if top.len() > 1 {
+            // Most used first: count the surfaces of the person's mentions.
+            let mut uses: HashMap<String, usize> = HashMap::new();
+            for m in self.graph.mentions_for(&e.id, 1_000)? {
+                *uses.entry(normalize_name(&m.surface)).or_default() += 1;
+            }
+            let n = normalize_name(&spec.name);
+            *uses.entry(n).or_default() += 1;
+            top.sort_by(|a, b| {
+                let (ua, ub) = (
+                    uses.get(&normalize_name(a)).copied().unwrap_or(0),
+                    uses.get(&normalize_name(b)).copied().unwrap_or(0),
+                );
+                ub.cmp(&ua)
+                    .then_with(|| b.chars().count().cmp(&a.chars().count()))
+                    .then_with(|| a.cmp(b))
+            });
+        }
+        let best = top[0];
+        Ok((normalize_name(best) != normalize_name(&e.name)).then(|| best.to_owned()))
     }
 
     fn create(&self, spec: &EntitySpec) -> Result<EntityId> {
@@ -936,6 +1000,28 @@ fn name_from_domain_of(name: &str, ids: &[Identifier]) -> bool {
 
 fn name_from_domain(e: &Entity) -> bool {
     name_from_domain_of(&e.name, &e.identifiers)
+}
+
+/// How good a person's name is as their display name, higher is better: `(form, given)`.
+/// `form` is 3 for a written-out given name and surname ("Robert Chen"), 2 for a name with an
+/// initial ("R. Chen", "Maggie T"), 1 for one word ("Sam"), 0 for anything else. `given` prefers
+/// the formal given name among equivalents ("Robert Chen" over "Bob Chen", "Rob Chen"): 1 when
+/// the given name is not a known diminutive.
+pub(crate) fn person_name_rank(name: &str) -> (u8, u8) {
+    use crate::names::{Part, PersonName};
+    let Some(p) = PersonName::parse(name) else {
+        return (0, 0);
+    };
+    let form = match (&p.given, &p.surname) {
+        (Part::Full(_), Some(Part::Full(_))) => 3,
+        (_, Some(_)) => 2,
+        (Part::Full(_), None) => 1,
+        (Part::Initial(_), None) => 0,
+    };
+    let formal = p
+        .given_full()
+        .is_some_and(|g| !crate::names::is_diminutive(g));
+    (form, u8::from(formal))
 }
 
 fn known_name(e: &Entity, name: &str) -> bool {
@@ -1754,5 +1840,20 @@ mod tests {
             log.last().unwrap().name,
             format!("n{}", short::MAX_MERGE_LOG + 4)
         );
+    }
+}
+
+#[cfg(test)]
+mod display_name_tests {
+    use super::person_name_rank;
+
+    #[test]
+    fn written_out_formal_names_rank_first() {
+        assert!(person_name_rank("Robert Chen") > person_name_rank("Bob Chen"));
+        assert!(person_name_rank("Bob Chen") > person_name_rank("R. Chen"));
+        assert!(person_name_rank("R. Chen") > person_name_rank("Robert"));
+        assert!(person_name_rank("Sam Okonkwo") > person_name_rank("Sam"));
+        assert!(person_name_rank("Sam") > person_name_rank("sam@x.example"));
+        assert_eq!(person_name_rank("Jack Lee"), person_name_rank("John Lee"));
     }
 }

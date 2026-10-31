@@ -611,3 +611,59 @@ async fn internal_mail_names_a_colleague_by_first_name() {
         "{two:?}"
     );
 }
+
+/// GG5-9: a person is named by their fullest, most used name, whatever form came first.
+#[tokio::test]
+async fn a_person_is_named_by_their_fullest_name_in_any_order() {
+    async fn names(order: &[usize]) -> Vec<String> {
+        let env = Env::new();
+        let cfg = KnowledgeConfig {
+            me: MeConfig {
+                name: Some("Mara Okafor".into()),
+                emails: vec!["mara@lumenfold.example".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let k = env.knowledge(cfg, None);
+        let mails = [
+            ("m1", "R. Chen <robert.chen@lumenfold.example>"),
+            ("m2", "Robert Chen <robert.chen@lumenfold.example>"),
+            ("m3", "Sam <sam.okonkwo@lumenfold.example>"),
+            ("m4", "Robert Chen <robert.chen@lumenfold.example>"),
+            ("m5", "Sam Okonkwo <sam.okonkwo@lumenfold.example>"),
+            ("m6", "Bob Chen <robert.chen@lumenfold.example>"),
+        ];
+        for &i in order {
+            let (key, from) = mails[i];
+            let m = Mail {
+                source: "imap:mara",
+                key,
+                from,
+                to: &["Mara Okafor <mara@lumenfold.example>"],
+                date: "2026-10-01T10:00:00Z",
+                subject: "Hi",
+                body: "See you at the review.",
+                ..Default::default()
+            };
+            env.put(m.item(), &[m.body]);
+            assert_eq!(run(&k).await.items_failed, 0);
+        }
+        let mut out: Vec<String> = env
+            .entities(EntityKind::Person)
+            .into_iter()
+            .filter(|e| e.attributes.get("is_me") != Some(&Value::Bool(true)))
+            .map(|e| e.name)
+            .collect();
+        out.sort();
+        out
+    }
+    let want = ["Robert Chen", "Sam Okonkwo"];
+    for order in [
+        vec![0, 1, 2, 3, 4, 5],
+        vec![5, 4, 3, 2, 1, 0],
+        vec![2, 0, 5, 4, 1, 3],
+    ] {
+        assert_eq!(names(&order).await, want, "{order:?}");
+    }
+}

@@ -203,6 +203,18 @@ pub(crate) fn given_names_equivalent(a: &str, b: &str) -> bool {
     keys(&b).iter().any(|k| ka.contains(k))
 }
 
+/// Whether `given` is only a diminutive in the table ("Bob", "Maggie"), not a formal given
+/// name. Names that are also standalone names ("Jack", "Liam") are not diminutives here.
+pub(crate) fn is_diminutive(given: &str) -> bool {
+    let g = clean_token(given);
+    !g.is_empty()
+        && !STANDALONE.contains(&g.as_str())
+        && !DIMINUTIVES.iter().any(|(c, _)| *c == g)
+        && DIMINUTIVES
+            .iter()
+            .any(|(_, nicks)| nicks.contains(&g.as_str()))
+}
+
 /// Every given name equivalent to `given` (itself included), lower case, sorted.
 pub(crate) fn given_name_variants(given: &str) -> Vec<String> {
     let g = clean_token(given);
