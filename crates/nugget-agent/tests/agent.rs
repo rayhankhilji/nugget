@@ -1262,10 +1262,11 @@ impl nugget_agent::Tool for Refusing {
 async fn erroring_mutations_do_not_count_as_failures_in_a_row() {
     let world = World::new();
     let model = Scripted::new(vec![
-        turn(vec![("c1", "press", json!({}))]),
-        turn(vec![("c2", "press", json!({}))]),
-        turn(vec![("c3", "press", json!({}))]),
-        turn(vec![("c4", "press", json!({}))]),
+        // Different presses each time: the same failing call repeated is no progress (below).
+        turn(vec![("c1", "press", json!({"try": 1}))]),
+        turn(vec![("c2", "press", json!({"try": 2}))]),
+        turn(vec![("c3", "press", json!({"try": 3}))]),
+        turn(vec![("c4", "press", json!({"try": 4}))]),
         turn(vec![("c5", "set_value", json!({"value": 1}))]),
         turn(vec![finish("partial")]),
     ]);
@@ -1381,7 +1382,7 @@ async fn ambiguous_target_holds_the_edit_and_asks_with_candidates() {
     let log = Arc::new(MemoryLog::new());
     let a = agent(&model, inbox_registry(&world, &TWO_SAMS), &gate).with_log(log.clone());
     let (a, events) = events(a, None);
-    let goal = "Reply to Sam's email and say yes";
+    let goal = "Flag Sam's email and say yes";
     let run = a.run(Task::new("t-sam", goal), cfg()).await;
 
     let question = "Your request says “Sam”, and I see more than one: Sam Lee — Lunch on \
@@ -1450,9 +1451,9 @@ async fn ambiguous_target_holds_the_edit_and_asks_with_candidates() {
 #[tokio::test]
 async fn unambiguous_target_never_asks() {
     for (i, goal) in [
-        "Reply to Sam Lee's email",
+        "Flag Sam Lee's email",
         "Tell Priya the numbers are fine",
-        "Reply to Sam about the contract",
+        "Flag the mail from Sam about the contract",
     ]
     .into_iter()
     .enumerate()
@@ -1488,7 +1489,7 @@ async fn clarify_off_never_asks() {
         clarify: false,
         ..cfg()
     };
-    let run = a.run(Task::new("t-off", "Reply to Sam's email"), off).await;
+    let run = a.run(Task::new("t-off", "Flag Sam's email"), off).await;
     assert_eq!(run.outcome, Outcome::Succeeded);
     assert_eq!(world.set_calls.load(Ordering::SeqCst), 1);
     assert!(run.actions.iter().all(|x| !x.held_for_user));
@@ -1496,7 +1497,7 @@ async fn clarify_off_never_asks() {
     // The system prompt is the same either way.
     let on = Scripted::new(vec![turn(vec![finish("done")])]);
     let _ = agent(&on, inbox_registry(&world, &TWO_SAMS), &FakeGate::new())
-        .run(Task::new("t-on", "Reply to Sam's email"), cfg())
+        .run(Task::new("t-on", "Flag Sam's email"), cfg())
         .await;
     assert_eq!(model.requests()[0].system, on.requests()[0].system);
 }
@@ -1515,9 +1516,7 @@ async fn the_models_own_question_gets_the_candidates() {
         agent(&model, inbox_registry(&world, &TWO_SAMS), &FakeGate::new()),
         None,
     );
-    let run = a
-        .run(Task::new("t-own", "Reply to Sam's email"), cfg())
-        .await;
+    let run = a.run(Task::new("t-own", "Flag Sam's email"), cfg()).await;
     assert_eq!(run.outcome, Outcome::NeedsInput("Which Sam?".into()));
     let state = run.suspended.unwrap();
     let pending = state.pending.as_ref().unwrap();
@@ -1530,7 +1529,10 @@ async fn the_models_own_question_gets_the_candidates() {
     assert_eq!(run.outcome, Outcome::Succeeded);
     assert_eq!(world.value(), 2, "resolved: the edit runs");
     let reply = &model.last_results_of(&model.requests()[2])[0].1;
-    assert_eq!(reply, "The user answered: Sam Ortiz");
+    assert_eq!(
+        reply,
+        "The user answered: Sam Ortiz\nThe screen may have changed while you waited: observe again before acting."
+    );
     let asked = suspensions(&events.await.unwrap());
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0].1[1], "Sam Ortiz — Contract draft");
@@ -1583,7 +1585,7 @@ async fn run_state_without_the_clarify_fields_still_loads() {
         turn(vec![("c2", "set_value", json!({"value": 1}))]),
     ]);
     let run = agent(&model, inbox_registry(&world, &TWO_SAMS), &FakeGate::new())
-        .run(Task::new("t-old", "Reply to Sam's email"), cfg())
+        .run(Task::new("t-old", "Flag Sam's email"), cfg())
         .await;
     let mut v = serde_json::to_value(run.suspended.unwrap()).unwrap();
     assert!(v.get("ambiguity").is_some() && v["pending"].get("held").is_some());
@@ -1698,7 +1700,7 @@ async fn a_picked_option_goes_back_fenced() {
         turn(vec![finish("cannot")]),
     ]);
     let a = agent(&model, registry(&World::new()), &FakeGate::new());
-    let run = a.run(Task::new("t-pick", "reply to Sam"), cfg()).await;
+    let run = a.run(Task::new("t-pick", "flag Sam's mail"), cfg()).await;
     a.resume(run.suspended.unwrap(), label, cfg()).await;
     let content = model.requests()[1]
         .messages

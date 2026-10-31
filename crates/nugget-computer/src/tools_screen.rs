@@ -4,7 +4,7 @@
 //!
 //! The fresh snapshot is compared with the cached one (taken by the before-observation or the
 //! last `observe`) and then cached in its place, exactly as `observe` caches it: the unknown-id
-//! rule (an id missing from the cache is Send) is untouched. The rendering is the same compact
+//! rule (an id missing from the cache is never acted on) is untouched. The rendering is the same compact
 //! view `observe` returns, which prints secure values as `value=hidden`.
 
 use nugget_a11y::{ElementId, UiNode, WindowId, WindowSel};

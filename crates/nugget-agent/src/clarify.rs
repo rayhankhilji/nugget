@@ -9,6 +9,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use nugget_policy::RiskClass;
 use serde::{Deserialize, Serialize};
 
 use crate::tool::truncate;
@@ -62,6 +63,7 @@ const STOP_WORDS: &[&str] = &[
     "cancel", "reschedule", "schedule", "book", "set", "change", "update", "edit", "add",
     "create", "make", "find", "show", "read", "mark", "star", "flag", "pin", "call", "accept",
     "decline", "share", "save", "print", "check", "look", "go", "put", "give", "back",
+    "empty", "erase", "clear", "clean", "tidy", "buy", "pay", "purchase",
 ];
 
 /// Words that ask for several items at once: nothing to disambiguate.
@@ -178,6 +180,99 @@ pub fn ambiguity(goal: &str, targets: &[String]) -> Option<Ambiguity> {
         return Some(Ambiguity { term, candidates });
     }
     None
+}
+
+/// Words after which the goal names a place, not the object (`… in Documents`). Not "from",
+/// which as often names a sender ("the spam email from Prize Center").
+const PLACE_WORDS: &[&str] = &["in", "inside", "within", "under", "at"];
+
+/// The words naming what the goal acts on, as written: its content words before a place phrase
+/// ("annual report" in "Delete the annual report in Documents"). `None` when there are none or
+/// the goal asks for several items.
+pub fn goal_object(goal: &str) -> Option<String> {
+    let all = words(goal);
+    if all
+        .iter()
+        .any(|(_, lower)| MANY_WORDS.contains(&lower.as_str()))
+    {
+        return None;
+    }
+    let mut object = Vec::new();
+    for (word, lower) in all {
+        if PLACE_WORDS.contains(&lower.as_str()) {
+            break;
+        }
+        if lower.chars().count() >= 2 && !STOP_WORDS.contains(&lower.as_str()) {
+            object.push(word);
+        }
+    }
+    (!object.is_empty()).then(|| object.join(" "))
+}
+
+/// Whether some target shows a word of the goal's object ([`goal_object`]), singular or plural.
+pub fn shows_object(goal: &str, targets: &[String]) -> bool {
+    let Some(object) = goal_object(goal) else {
+        return true;
+    };
+    let wanted: Vec<String> = words(&object).into_iter().map(|(_, l)| l).collect();
+    targets.iter().any(|t| {
+        words(t).iter().any(|(_, w)| {
+            wanted
+                .iter()
+                .any(|g| w == g || is_plural_of(w, g) || is_plural_of(g, w))
+        })
+    })
+}
+
+/// Labels of steps that destroy data for good.
+const IRREVERSIBLE: &[&str] = &["empty", "erase", "purge", "wipe", "permanently", "shred"];
+
+/// When `label` names an irreversible step (Empty Trash, Erase) that `goal` does not ask for:
+/// the word. Asking for any irreversible step ("empty", "erase", "permanently") allows them.
+pub fn unrequested_irreversible(goal: &str, label: &str) -> Option<&'static str> {
+    let label_words: Vec<String> = words(label).into_iter().map(|(_, l)| l).collect();
+    let word = IRREVERSIBLE
+        .iter()
+        .copied()
+        .find(|w| label_words.iter().any(|l| l == w))?;
+    let goal_words: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
+    let asked = goal_words.iter().any(|g| {
+        IRREVERSIBLE.iter().any(|w| {
+            g == w
+                || g.strip_prefix(w)
+                    .is_some_and(|r| ["s", "ed", "ing"].contains(&r))
+        })
+    });
+    (!asked).then_some(word)
+}
+
+/// Verbs that need a send, a deletion or a payment to have happened before the request is done.
+const SEND_VERBS: &[&str] = &["send", "reply", "forward", "respond"];
+const DESTROY_VERBS: &[&str] = &["delete", "trash", "remove", "erase"];
+const SPEND_VERBS: &[&str] = &["buy", "pay", "purchase"];
+/// Words that say the request stops short of the act ("draft a reply, don't send it").
+const STOP_SHORT: &[&str] = &["dont", "not", "without", "draft", "never"];
+
+/// The least risk class some action must have reached for `goal` to be done: [`RiskClass::Send`]
+/// for "reply", "send", "forward" (or a goal that starts with "email"), [`RiskClass::Destroy`]
+/// for "delete", [`RiskClass::Spend`] for "buy" or "pay". `None` when the goal names none of these
+/// or says it stops short.
+pub fn required_risk(goal: &str) -> Option<RiskClass> {
+    let w: Vec<String> = words(goal).into_iter().map(|(_, l)| l).collect();
+    if w.iter().any(|x| STOP_SHORT.contains(&x.as_str())) {
+        return None;
+    }
+    let has = |verbs: &[&str]| w.iter().any(|x| verbs.contains(&x.as_str()));
+    let first_is_mail = w.first().is_some_and(|x| x == "email" || x == "mail");
+    if has(SEND_VERBS) || first_is_mail {
+        Some(RiskClass::Send)
+    } else if has(DESTROY_VERBS) {
+        Some(RiskClass::Destroy)
+    } else if has(SPEND_VERBS) {
+        Some(RiskClass::Spend)
+    } else {
+        None
+    }
 }
 
 /// `plural` is `singular` with an `s` or `es` ending.
@@ -391,5 +486,68 @@ mod tests {
             ambiguity("Delete the q3 report", &two).map(|a| a.term),
             Some("q3 report".into())
         );
+    }
+
+    #[test]
+    fn goal_objects_and_whether_the_screen_shows_them() {
+        assert_eq!(
+            goal_object("Delete the annual report in Documents").as_deref(),
+            Some("annual report")
+        );
+        assert_eq!(goal_object("Delete all the newsletters"), None);
+        assert_eq!(goal_object("Empty the trash"), None);
+        assert_eq!(
+            goal_object("Delete the spam email from Prize Center").as_deref(),
+            Some("spam Prize Center")
+        );
+        let folders = t(&["Folder Documents", "Folder Downloads"]);
+        assert!(!shows_object(
+            "Delete the annual report in Documents",
+            &folders
+        ));
+        let files = t(&["File annual-report-2023.pdf", "File notes.txt"]);
+        assert!(shows_object(
+            "Delete the annual report in Documents",
+            &files
+        ));
+        assert!(shows_object("Empty the trash", &folders));
+    }
+
+    #[test]
+    fn irreversible_steps_need_asking_for() {
+        let goal = "Delete backup.zip from Downloads";
+        assert_eq!(unrequested_irreversible(goal, "Empty Trash"), Some("empty"));
+        assert_eq!(unrequested_irreversible(goal, "Move to Trash"), None);
+        assert_eq!(
+            unrequested_irreversible("Empty the trash", "Empty Trash"),
+            None
+        );
+        assert_eq!(
+            unrequested_irreversible("Erase this laptop before I sell it", "Erase all content"),
+            None
+        );
+        assert_eq!(
+            unrequested_irreversible("Permanently delete old.txt", "Empty Trash"),
+            None
+        );
+    }
+
+    #[test]
+    fn required_risk_follows_the_verb() {
+        assert_eq!(
+            required_risk("Reply to Sam and tell him yes"),
+            Some(RiskClass::Send)
+        );
+        assert_eq!(required_risk("Email Bob about Q3"), Some(RiskClass::Send));
+        assert_eq!(
+            required_risk("Delete the old newsletter email"),
+            Some(RiskClass::Destroy)
+        );
+        assert_eq!(required_risk("Buy a USB-C cable"), Some(RiskClass::Spend));
+        assert_eq!(
+            required_risk("Draft a reply to Sam but don't send it"),
+            None
+        );
+        assert_eq!(required_risk("Turn on dark mode"), None);
     }
 }
