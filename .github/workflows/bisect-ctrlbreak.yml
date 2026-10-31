@@ -1,9 +1,8 @@
 name: Bisect CTRL_BREAK shutdown (temporary)
 
-# TEMPORARY: the NSIS smoke step fails on eddd716 (nuggetd exits 0xC000013A on CTRL_BREAK) and
-# passes on 13b305b, on the same runner image. A standalone nuggetd from either commit shuts down
-# cleanly. This swaps the daemon between the two installers to tell whether the app or the daemon
-# carries the change. Remove before merging.
+# TEMPORARY diagnostics for the NSIS smoke failure (nuggetd exits 0xC000013A on CTRL_BREAK
+# without logging the signal). Uses the installers of dry runs 40848720974 (13b305b) and
+# 41113647335 (eddd716); nothing is rebuilt. Remove before merging.
 
 on:
   push:
@@ -15,53 +14,104 @@ permissions:
   actions: read # download artifacts from earlier runs
 
 jobs:
-  swap:
-    name: app ${{ matrix.app }} + nuggetd ${{ matrix.daemon }}
+  probe:
+    name: ${{ matrix.bundle }} ${{ matrix.mode }} ${{ matrix.n }}
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { app: "eddd716", app_run: "41113647335", daemon: "13b305b", daemon_run: "40848720974" }
-          - { app: "13b305b", app_run: "40848720974", daemon: "eddd716", daemon_run: "41113647335" }
+          - { bundle: eddd716, run: "41113647335", mode: standalone, n: 1 }
+          - { bundle: eddd716, run: "41113647335", mode: app-running, n: 1 }
+          - { bundle: eddd716, run: "41113647335", mode: app-killed, n: 1 }
+          - { bundle: eddd716, run: "41113647335", mode: app-closed, n: 1 }
+          - { bundle: 13b305b, run: "40848720974", mode: app-closed, n: 1 }
+          - { bundle: 13b305b, run: "40848720974", mode: app-closed, n: 2 }
+          - { bundle: 13b305b, run: "40848720974", mode: app-closed, n: 3 }
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: bundle-x86_64-pc-windows-msvc
-          run-id: ${{ matrix.app_run }}
+          run-id: ${{ matrix.run }}
           github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/app
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
-        with:
-          name: bundle-x86_64-pc-windows-msvc
-          run-id: ${{ matrix.daemon_run }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/daemon
-      - name: Take nuggetd.exe out of the other installer
+          path: ${{ runner.temp }}/bundle
+      - name: Install
         shell: pwsh
         run: |
-          $setup = (Get-ChildItem "$env:RUNNER_TEMP/daemon" -Filter '*-setup.exe')[0].FullName
-          $dir = Join-Path $env:RUNNER_TEMP 'daemon-install'
-          Start-Process -FilePath $setup -ArgumentList '/S', "/D=$dir" -Wait
-          Copy-Item (Join-Path $dir 'nuggetd.exe') (Join-Path $env:RUNNER_TEMP 'swap-nuggetd.exe')
-          Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S', "_?=$dir" -Wait
-          Get-FileHash (Join-Path $env:RUNNER_TEMP 'swap-nuggetd.exe')
-      - name: NSIS smoke with the swapped daemon
-        shell: pwsh
+          $setup = (Get-ChildItem "$env:RUNNER_TEMP/bundle" -Filter '*-setup.exe')[0].FullName
+          Start-Process -FilePath $setup -ArgumentList '/S', "/D=$env:RUNNER_TEMP\inst" -Wait
+          Get-ChildItem "$env:RUNNER_TEMP\inst"
+      - name: Probe (${{ matrix.mode }})
+        shell: bash
         env:
-          SMOKE_ARTIFACTS: ${{ runner.temp }}/smoke
+          MODE: ${{ matrix.mode }}
         run: |
-          $src = Get-Content packaging/scripts/smoke-windows.ps1 -Raw
-          $hook = "`n    Copy-Item -Force (Join-Path `$env:RUNNER_TEMP 'swap-nuggetd.exe') (Join-Path `$installDir 'nuggetd.exe'); Log 'swapped in nuggetd.exe from ${{ matrix.daemon }}'`n"
-          $anchor = 'Log "installed silently in ${tInstalled}s:'
-          $i = $src.IndexOf($anchor)
-          if ($i -lt 0) { throw 'anchor not found' }
-          $eol = $src.IndexOf("`n", $i)
-          $patched = $src.Substring(0, $eol + 1) + $hook + $src.Substring($eol + 1)
-          $script = Join-Path $env:RUNNER_TEMP 'smoke-swapped.ps1'
-          Set-Content -LiteralPath $script -Value $patched -Encoding utf8
-          & $script (Get-ChildItem "$env:RUNNER_TEMP/app" -Filter '*-setup.exe')[0].FullName
+          cat > "$RUNNER_TEMP/probe.py" <<'EOF'
+          import ctypes, glob, os, subprocess, sys, tempfile, time
+          from ctypes import wintypes
+          k = ctypes.windll.kernel32
+          k.OpenProcess.restype = wintypes.HANDLE
+          mode, inst = os.environ["MODE"], sys.argv[1]
+          home = tempfile.mkdtemp(prefix="nugget-probe-")
+          env = dict(os.environ, NUGGET_HOME=home, NUGGET_TRAY="off", NUGGET_LOG="debug")
+          NEWGRP, NOWIN = 0x200, 0x08000000
+
+          def log():
+              t = ""
+              for f in sorted(glob.glob(os.path.join(home, "data", "logs", "nuggetd*.log"))):
+                  t += open(f, encoding="utf-8", errors="replace").read()
+              return t
+
+          def wait(cond, secs, what):
+              end = time.time() + secs
+              while not cond():
+                  if time.time() > end:
+                      print(log()[-4000:]); sys.exit(f"timed out: {what}")
+                  time.sleep(0.5)
+
+          def daemon_pid():
+              out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                  "(Get-CimInstance Win32_Process -Filter \"Name='nuggetd.exe'\").ProcessId"],
+                  capture_output=True, text=True).stdout.split()
+              return int(out[0]) if out else None
+
+          app = None
+          if mode == "standalone":
+              d = subprocess.Popen([os.path.join(inst, "nuggetd.exe")], env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=NEWGRP | NOWIN)
+              pid = d.pid
+          else:
+              app = subprocess.Popen([os.path.join(inst, "nugget-desktop.exe")], env=env, cwd=inst)
+              wait(lambda: daemon_pid() is not None, 90, "nuggetd started by the app")
+              pid = daemon_pid()
+          wait(lambda: "nuggetd ready" in log(), 90, "nuggetd ready")
+          time.sleep(8)
+          h = k.OpenProcess(0x00100000 | 0x1000, False, pid)  # SYNCHRONIZE | QUERY_LIMITED_INFORMATION
+          if mode == "app-killed":
+              app.kill(); app.wait(10); time.sleep(3)
+          elif mode == "app-closed":
+              # Same as the smoke: WM_CLOSE to the main window, then wait for the app to exit.
+              subprocess.run(["powershell", "-NoProfile", "-Command",
+                  "Add-Type -Name W -Namespace U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);';"
+                  f"[U.W]::PostMessage((Get-Process -Id {app.pid}).MainWindowHandle, 0x10, [IntPtr]::Zero, [IntPtr]::Zero)"])
+              app.wait(30); time.sleep(3)
+          alive = k.WaitForSingleObject(h, 0) != 0
+          print(f"mode={mode} daemon pid={pid} alive_before_break={alive}")
+          helper = ("import ctypes,sys,time\nk=ctypes.windll.kernel32\npid=int(sys.argv[1])\nk.FreeConsole()\n"
+                    "a=k.AttachConsole(pid)\nk.SetConsoleCtrlHandler(None,True)\ng=k.GenerateConsoleCtrlEvent(1,pid)\n"
+                    "print('attach',a,'generate',g)\ntime.sleep(3)\n")
+          r = subprocess.run([sys.executable, "-c", helper, str(pid)], creationflags=NOWIN, capture_output=True, text=True)
+          print("helper:", r.stdout.strip(), r.stderr.strip()[-300:])
+          k.WaitForSingleObject(h, 30000)
+          code = wintypes.DWORD()
+          k.GetExitCodeProcess(h, ctypes.byref(code))
+          t = log()
+          sig, stopped = "console control signal received" in t, '"stopped"' in t
+          print(f"exit={hex(code.value)} signal_logged={sig} stopped_logged={stopped}")
+          print("\n".join(t.splitlines()[-12:]))
+          if app and app.poll() is None:
+              app.kill()
+          sys.exit(0 if (code.value == 0 and sig and stopped) else 1)
+          EOF
+          python "$RUNNER_TEMP/probe.py" "$RUNNER_TEMP/inst"
