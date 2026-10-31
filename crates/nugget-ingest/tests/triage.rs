@@ -611,3 +611,58 @@ async fn items_from_before_background_triage_are_relabelled_and_old_junk_reindex
     .await;
     h.ingest.shutdown().await;
 }
+
+#[tokio::test]
+async fn labels_leave_updated_at_alone_and_survive_a_concurrent_metadata_write() {
+    // Review: a triage write-back must not look like a content change to consumers that
+    // fingerprint items by content_hash:updated_at (knowledge extraction), and a label must
+    // not be dropped because another writer (the re-embed job) bumped updated_at meanwhile.
+    let local = local_model();
+    local.block_chat();
+    let h = start(Opts {
+        router: Some(router(&[(
+            local.clone(),
+            vec![Tier::Triage, Tier::Embedding],
+        )])),
+        ..Default::default()
+    })
+    .await;
+    h.factory.state("fake-1").script(vec![
+        Step::Send(text_doc("a", "SPAM alpha offer", Some("1"))),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+    eventually("triage request sent", || local.chats().len() == 1).await;
+
+    // Another writer rewrites the item (same content) while triage waits for the model.
+    let before = h.item("fake-1", "a").unwrap();
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+    let mut meta = before.metadata.clone();
+    meta["other_writer"] = json!(true);
+    let mut new =
+        nugget_store::NewItem::new("fake-1", "a", before.content_hash.clone()).with_metadata(meta);
+    new.title = before.title.clone();
+    new.mime = before.mime.clone();
+    new.text = before.text.clone();
+    new.version = before.version.clone();
+    new.source_modified_at = before.source_modified_at;
+    h.store.upsert_item(&new).unwrap();
+    let bumped = h.item("fake-1", "a").unwrap();
+    assert_ne!(bumped.updated_at, before.updated_at);
+
+    local.unblock_chat();
+    eventually("labelled", || {
+        h.item("fake-1", "a").unwrap().metadata["triage"]["state"] == json!("done")
+    })
+    .await;
+    let after = h.item("fake-1", "a").unwrap();
+    assert_eq!(after.metadata["junk"], json!(true));
+    assert_eq!(after.metadata["other_writer"], json!(true));
+    assert_eq!(
+        after.updated_at, bumped.updated_at,
+        "labels must not bump updated_at"
+    );
+    assert_eq!(local.chats().len(), 1, "labelled once, not retried");
+    h.ingest.shutdown().await;
+}
