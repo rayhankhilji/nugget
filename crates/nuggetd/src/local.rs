@@ -20,10 +20,21 @@
 //!   to it; the draft engine asks for it by id ([`nugget_draft::LocalBudget::provider`]). Once
 //!   ready it has the chat role's capabilities, and like every slot it starts at boot when its
 //!   model is installed, restarts on demand and stops when idle.
-//! - A slot is routable for nothing (empty capabilities) until its server first became ready,
-//!   so neither chat, triage nor embeddings pick it before then. Once ready, the role's known
-//!   capabilities are set (chat streams and follows JSON schemas, embedding embeds) and stay
-//!   set: after an idle stop the next request starts the server again.
+//! - A slot starts out routable for nothing (empty capabilities). The chat slot becomes
+//!   routable as soon as the daemon starts its installed model's server (at
+//!   boot, and after `models.install`; [`RuntimeSlot::starting`]): it then has the chat
+//!   capabilities that do not depend on the server's config (streaming, JSON schemas), so a
+//!   chat sent while the model still loads (seconds to minutes) routes to it and
+//!   [`RuntimeSlot::chat`] waits for the server instead of the router finding no candidate. If
+//!   that start fails before the server was ever ready, the slot is routable for nothing again
+//!   ([`RuntimeSlot::start_failed`]); a request that picked it meanwhile gets a fallback error
+//!   (`Unsupported`, `Network` or `Provider`), so the router tries the next candidate.
+//!   Embedding, draft and rerank slots stay routable for nothing until their server first
+//!   became ready (ingest re-embeds text-only items on readiness, the draft and rerank slots
+//!   are reached by id).
+//! - Once ready, the role's known capabilities are set (chat streams and follows JSON schemas
+//!   and knows its context size, embedding embeds) and stay set: after an idle stop the next
+//!   request starts the server again.
 //!
 //! **Routing order**, per tier: configured providers that are not `Cloud` (config order), then
 //! the runtime slot, then configured `Cloud` providers. Ingest (triage, embeddings) and
@@ -170,6 +181,21 @@ fn known_capabilities(role: RuntimeRole, cfg: &ProviderConfig) -> Capabilities {
     }
 }
 
+/// Capabilities of an installed slot whose server is starting but not ready yet: those of
+/// [`known_capabilities`] that do not depend on the server's config. Only the chat role is
+/// routed before its server is ready (see the module docs).
+fn starting_capabilities(role: RuntimeRole) -> Option<Capabilities> {
+    match role {
+        RuntimeRole::Chat => Some(Capabilities {
+            streaming: true,
+            json_schema: true,
+            context_tokens: None,
+            ..Capabilities::default()
+        }),
+        RuntimeRole::Embedding | RuntimeRole::Draft | RuntimeRole::Rerank => None,
+    }
+}
+
 /// The routing order described in the module docs. `configured` are the built user providers
 /// in config order with their tiers and locality; `local` the runtime slots with their tiers.
 pub(crate) fn tier_map(
@@ -308,14 +334,40 @@ impl RuntimeSlot {
             .runtime
             .ensure(self.role, &self.model)
             .await
-            .map_err(|e| match e {
-                e @ (Error::Network(_) | Error::Provider(_)) => e,
-                other => Error::Unsupported(format!(
-                    "local {} runtime unavailable: {other}",
-                    role_name(self.role)
-                )),
-            })?;
+            .map_err(|e| unavailable(self.role, e))?;
         self.activate(cfg)
+    }
+
+    /// The daemon is starting this installed slot's server (in the background): until it is
+    /// first ready, publish the role's config-independent capabilities so requests route to
+    /// the slot and wait for the server (chat only; see the module docs). No-op once active.
+    pub fn starting(&self) {
+        let Some(caps) = starting_capabilities(self.role) else {
+            return;
+        };
+        let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if active.is_some() || !self.is_installed() {
+            return;
+        }
+        if let Some(router) = self.router.get().and_then(Weak::upgrade) {
+            router.set_capabilities(&self.id, caps);
+        }
+    }
+
+    /// The background start [`RuntimeSlot::starting`] announced failed: unless the server was
+    /// ready before, the slot is routable for nothing again, so requests go straight to the
+    /// next candidate instead of retrying the start each time.
+    pub fn start_failed(&self) {
+        if starting_capabilities(self.role).is_none() {
+            return;
+        }
+        let active = self.active.lock().unwrap_or_else(PoisonError::into_inner);
+        if active.is_some() {
+            return;
+        }
+        if let Some(router) = self.router.get().and_then(Weak::upgrade) {
+            router.set_capabilities(&self.id, Capabilities::default());
+        }
     }
 
     /// Use `cfg` (from `Runtime::ensure`): build its provider unless unchanged, and publish the
@@ -327,7 +379,8 @@ impl RuntimeSlot {
         {
             return Ok(a.provider.clone());
         }
-        let provider = build_provider_with(&cfg, self.egress.clone(), &self.runtime.secrets())?;
+        let provider = build_provider_with(&cfg, self.egress.clone(), &self.runtime.secrets())
+            .map_err(|e| unavailable(self.role, e))?;
         if self.role != RuntimeRole::Rerank {
             if let Some(router) = self.router.get().and_then(Weak::upgrade) {
                 router.set_capabilities(&self.id, known_capabilities(self.role, &cfg));
@@ -414,6 +467,18 @@ impl Provider for RuntimeSlot {
     }
 }
 
+/// A failure to start or reach a role's server, as an error the router falls back on
+/// (`Network`, `Provider` or `Unsupported`), whatever the runtime reported.
+fn unavailable(role: RuntimeRole, e: Error) -> Error {
+    match e {
+        e @ (Error::Network(_) | Error::Provider(_)) => e,
+        other => Error::Unsupported(format!(
+            "local {} runtime unavailable: {other}",
+            role_name(role)
+        )),
+    }
+}
+
 fn role_name(role: RuntimeRole) -> &'static str {
     match role {
         RuntimeRole::Chat => "chat",
@@ -458,7 +523,7 @@ impl LocalRuntime {
     }
 
     /// Let slots publish capabilities to `router` (call once it is built). Until a slot's
-    /// server is first ready it is routable for nothing.
+    /// server is started ([`RuntimeSlot::starting`]) or first ready it is routable for nothing.
     pub fn attach(&self, router: &Arc<Router>) {
         for s in self.routed() {
             let _ = s.router.set(Arc::downgrade(router));
@@ -971,6 +1036,75 @@ mod tests {
     }
 
     const EMBEDDING_ID: &str = nugget_runtime::EMBEDDING_PROVIDER_ID;
+
+    /// Once its server is being started, an installed chat slot is routable for plain chat
+    /// (the request waits for the server); embeddings still wait for readiness. A start that
+    /// fails is a fallback error and makes the slot unroutable again.
+    #[tokio::test]
+    async fn a_starting_chat_slot_is_routable_for_chat_until_its_start_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = nugget_core::paths::Paths::rooted(tmp.path().to_path_buf());
+        let egress: Arc<dyn EgressSink> = Arc::new(NoEgress);
+        let models = Arc::new(nugget_models::ModelStore::open(&paths, egress.clone()).unwrap());
+        let runtime = Runtime::new(&paths, models, egress.clone()).unwrap();
+        let m = manifest();
+        let emb = recommend(&m, &hw(64), Tier::Embedding).unwrap().clone();
+        let local = LocalRuntime::new(
+            runtime,
+            vec![
+                (RuntimeRole::Chat, chat_model(&m)),
+                (RuntimeRole::Embedding, emb),
+            ],
+            &|_| true,
+            egress,
+        );
+        let router = Arc::new(Router::new(
+            as_providers(&local),
+            tier_map(&[], &slot_routes(Some(&local))),
+        ));
+        local.attach(&router);
+        let chat = local.slot(&provider_id(RuntimeRole::Chat)).unwrap();
+        let embedding = local.slot(&pid(EMBEDDING_ID)).unwrap();
+        let plain = Capabilities {
+            streaming: true,
+            ..Default::default()
+        };
+        let need = Capabilities {
+            embeddings: true,
+            ..Default::default()
+        };
+        assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
+
+        chat.starting();
+        embedding.starting();
+        let routed = router.candidates(Tier::Synthesis, &plain);
+        assert_eq!(routed.len(), 1);
+        assert_eq!(routed[0].id(), chat.id());
+        let caps = router.capabilities(chat.id()).unwrap();
+        assert!(caps.json_schema);
+        assert_eq!(caps.context_tokens, None);
+        assert!(router.candidates(Tier::Embedding, &need).is_empty());
+
+        // No runtime build or model file here: the start fails with a fallback error.
+        let err = match chat.chat(ChatRequest::default()).await {
+            Err(e) => e,
+            Ok(_) => panic!("no server can start here"),
+        };
+        assert!(
+            matches!(
+                err,
+                Error::Unsupported(_) | Error::Network(_) | Error::Provider(_)
+            ),
+            "{err:?}"
+        );
+        chat.start_failed();
+        assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
+
+        // Not installed: never routed early.
+        chat.set_installed(false);
+        chat.starting();
+        assert!(router.candidates(Tier::Synthesis, &plain).is_empty());
+    }
 
     #[test]
     fn chat_slot_serves_the_core_chat_tiers() {

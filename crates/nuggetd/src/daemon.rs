@@ -179,6 +179,8 @@ pub(crate) fn spawn_refresh(state: &Arc<State>, slot: Arc<RuntimeSlot>) {
 
 fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
     let stop = state.shutdown.clone();
+    // Route chat to the slot while its model loads (the request waits for the server).
+    slot.starting();
     state.tasks.spawn(async move {
         let model = slot.model().id.clone();
         let start = async {
@@ -192,7 +194,10 @@ fn spawn_start(state: &Arc<State>, slot: Arc<RuntimeSlot>, refresh: bool) {
             () = stop.cancelled() => {}
             r = start => match r {
                 Ok(_) => tracing::info!(provider = %slot.id(), %model, "local runtime ready"),
-                Err(e) => tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start"),
+                Err(e) => {
+                    slot.start_failed();
+                    tracing::warn!(provider = %slot.id(), %model, error = %e, "local runtime did not start");
+                }
             },
         }
     });

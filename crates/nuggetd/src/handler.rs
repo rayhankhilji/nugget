@@ -1242,6 +1242,17 @@ async fn run_install(
         }
     }
 
+    // Route to the new model before the client hears it is installed: a chat sent right after
+    // the final progress (onboarding's first question) must find the slot starting.
+    if let (Some(Ok(_)), Some(local)) = (&result, &state.local) {
+        for slot in local.slots.iter().filter(|s| s.model().id == entry.id) {
+            slot.set_installed(true);
+            // Not `ready()`: a server already running the previous copy of this model
+            // must be restarted on the new one (`ensure` compares the model's SHA-256).
+            spawn_refresh(&state, slot.clone());
+        }
+    }
+
     // The final `installed`/`failed` progress is queued before `install` returns.
     while let Ok(p) = rx.try_recv() {
         if notify
@@ -1256,14 +1267,6 @@ async fn run_install(
     let detail = match (&result, stop_reason) {
         (Some(Ok(m)), _) => {
             tracing::info!(model = %entry.id, sha256 = %m.sha256, "model install finished");
-            if let Some(local) = &state.local {
-                for slot in local.slots.iter().filter(|s| s.model().id == entry.id) {
-                    slot.set_installed(true);
-                    // Not `ready()`: a server already running the previous copy of this model
-                    // must be restarted on the new one (`ensure` compares the model's SHA-256).
-                    spawn_refresh(&state, slot.clone());
-                }
-            }
             json!({"result": "installed", "sha256": m.sha256, "revision": m.revision})
         }
         (Some(Err(e)), _) => {
