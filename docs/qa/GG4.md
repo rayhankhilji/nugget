@@ -94,7 +94,7 @@ python3 qa/GG4/persona/gen.py                                                   
 - **Owner:** `crates/nugget-proactive/src/corpus.rs` (no RRULE handling; the extractor keeps `rrule`).
 - **Fix:** expand RRULE/RDATE/EXDATE within the brief and meeting horizon, in the event's own zone.
 
-### GG4-4 — High — The event's TZID is ignored: event times are read in the user's current UTC offset (V1, V3)
+### GG4-4 — High — The event's TZID is ignored: event times are read in the user's current UTC offset (V1, V3; the trip-mode cases, Foundry in fixed/explicit mode, not re-verified)
 - **Repro:** probe as in GG4-1.
 - **Expected:**
   - Flight BA178 ends `2026-11-04T07:00 Europe/London` (02:00 New York).
@@ -307,7 +307,7 @@ python3 qa/GG4/persona/gen.py                                                   
 - **Owner:** `crates/nuggetd/src/features/mod.rs:139`, `features/proactive/settings.rs`.
 - **Fix:** report a failed feature in `status`; accept IANA zone names.
 
-### GG4-19 — Medium — Brief meetings carry no item ref, uid or url (V3)
+### GG4-19 — Medium (V3: Low–Medium) — Brief meetings carry no item ref, uid or url (V3)
 - **Repro:** any `brief.get`; `BriefMeetingView` (`crates/nugget-core/src/ipc.rs:1660`).
 - **Actual:** 12/12 listed meetings can't be opened or traced to their source. Brief cards, by contrast,
   trace 85/85.
