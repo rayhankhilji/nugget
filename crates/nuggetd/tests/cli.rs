@@ -111,10 +111,8 @@ fn runs_reports_status_and_shuts_down() {
         "{status}"
     );
     assert!(status.contains("store:     0 items, 0 chunks"), "{status}");
-    assert!(
-        status.contains("local  openai_compatible qwen3:4b  on-device  tiers: triage, light, synthesis  not probed"),
-        "{status}"
-    );
+    // The default config routes to no provider of its own (the runtime has no model installed).
+    assert!(status.contains("providers: none configured"), "{status}");
 
     // First run wrote the local-first default config, the key file and JSON logs.
     let config = std::fs::read_to_string(home.join("config/config.toml")).unwrap();
@@ -134,7 +132,7 @@ fn runs_reports_status_and_shuts_down() {
     assert!(json.status.success());
     let v: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
     assert_eq!(v["protocol"], 1);
-    assert_eq!(v["providers"][0]["id"], "local");
+    assert_eq!(v["providers"], serde_json::json!([]));
 
     // A second instance sees the first and exits 0.
     let second = run(home, &[]);

@@ -1,0 +1,22 @@
+[
+ {"id": "Q01", "q": "Summarise last week", "range": ["2026-10-19", "2026-10-26"], "note": "parser: last ISO week"},
+ {"id": "Q02", "q": "What emails did I get last week?", "range": ["2026-10-19", "2026-10-26"]},
+ {"id": "Q03", "q": "What's happening this month?", "range": ["2026-10-01", "2026-11-01"]},
+ {"id": "Q04", "q": "What do I have next week?", "range": ["2026-11-02", "2026-11-09"], "note": "user means events dated next week; parser has no future forms"},
+ {"id": "Q05", "q": "What do I have this week?", "range": ["2026-10-26", "2026-11-02"]},
+ {"id": "Q06", "q": "What happened yesterday?", "range": ["2026-10-29", "2026-10-30"]},
+ {"id": "Q07", "q": "What did I do in October?", "range": ["2026-10-01", "2026-11-01"]},
+ {"id": "Q08", "q": "What do I have tomorrow?", "range": ["2026-10-31", "2026-11-01"], "note": "not a supported phrase"},
+ {"id": "Q09", "q": "What are my upcoming appointments?", "range": null, "note": "not a supported phrase"},
+ {"id": "Q10", "q": "When is my next dentist appointment?", "range": null},
+ {"id": "Q11", "q": "How long until my Kyoto trip?", "range": null},
+ {"id": "Q12", "q": "Which bills are due soon?", "range": null},
+ {"id": "Q13", "q": "What meetings did I have last week?", "range": ["2026-10-19", "2026-10-26"], "note": "calendar: steering was Mon 19 Oct but its .ics mtime is 9 Oct"},
+ {"id": "Q14", "q": "What appointments do I have next week?", "range": ["2026-11-02", "2026-11-09"]},
+ {"id": "Q15", "q": "What events were added last week?", "range": ["2026-10-19", "2026-10-26"], "note": "future events whose .ics was written last week"},
+ {"id": "Q16", "q": "dentist last week", "range": ["2026-10-19", "2026-10-26"], "note": "next dentist appt is 5 Nov, its .ics mtime is 21 Oct"},
+ {"id": "Q17", "q": "What's on my calendar on Thursday 5 November 2026?", "range": ["2026-11-05", "2026-11-06"], "note": "long-form date: not a supported phrase"},
+ {"id": "Q18", "q": "What's on my calendar on 2026-11-05?", "range": ["2026-11-05", "2026-11-06"], "note": "ISO date is supported; future day"},
+ {"id": "Q19", "q": "What did I get in the past week?", "range": ["2026-10-23", "2026-10-31"]},
+ {"id": "Q20", "q": "Any emails from yesterday?", "range": ["2026-10-29", "2026-10-30"]}
+]

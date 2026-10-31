@@ -1,0 +1,5497 @@
+{
+ "snapshots": {
+  "phase1": {
+   "label": "phase1",
+   "knowledge": {
+    "claims": 16,
+    "entities": 20,
+    "extractor_provider": "local-chat",
+    "last_run": "2026-10-30T20:32:39.241543092Z",
+    "mentions": 23,
+    "pending_items": 0,
+    "vault": {
+     "conflicts": [],
+     "invalid": [],
+     "last_render": "2026-10-30T20:32:39.256579436Z",
+     "pages": 14,
+     "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+    }
+   },
+   "entities": [
+    {
+     "key": "mara_okafor",
+     "ids": [
+      "ent_znvqtdxiwjph7abo"
+     ],
+     "names": [
+      "Mara Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "robert_chen",
+     "ids": [
+      "ent_frqdxjn76szsk3l3"
+     ],
+     "names": [
+      "R. Chen"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "dana_whitfield",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "sam_patel",
+     "ids": [
+      "ent_vtsf2khvna7dsozv"
+     ],
+     "names": [
+      "Sam Patel"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "sam_okonkwo",
+     "ids": [
+      "ent_pngkpc2h5tar2jjq"
+     ],
+     "names": [
+      "Sam"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "theo_lindqvist",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "ife_okafor",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "lena_brandt",
+     "ids": [
+      "ent_dtrbfgiuoduvbh47"
+     ],
+     "names": [
+      "Dr. Lena Brandt"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "jonas_albers",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "gus_ferreira",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "priyanka_rao",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "brightwell",
+     "ids": [
+      "ent_r4jw42uwirndqzn2"
+     ],
+     "names": [
+      "Brightwell Analytics"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lumenfold",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "northshore_credit_union",
+     "ids": [
+      "ent_sttsnwekxxjsg56f"
+     ],
+     "names": [
+      "Northshore Credit Union"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay_medical_practice",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay_bouldering",
+     "ids": [
+      "ent_cj3ljhk4ehdz5koi"
+     ],
+     "names": [
+      "Halden Bay Bouldering"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": false
+    },
+    {
+     "key": "harbor",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay",
+     "ids": [
+      "ent_62sdfmmoqnyzcwyl"
+     ],
+     "names": [
+      "Halden Bay"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    },
+    {
+     "key": "port_ellery",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    }
+   ],
+   "entity_ok": 8,
+   "entity_total": 19,
+   "wrong_merges": [],
+   "splits": [],
+   "facts": [
+    {
+     "id": "F3",
+     "desc": "mara_okafor works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 15,
+       "status": "active",
+       "text": "The user works at Brightwell Analytics."
+      }
+     ]
+    },
+    {
+     "id": "F4",
+     "desc": "mara_okafor has_title Staff Engineer",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 16,
+       "status": "active",
+       "text": "The user has title Staff Engineer."
+      }
+     ]
+    },
+    {
+     "id": "F5",
+     "desc": "mara_okafor reports_to robert_chen",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F6",
+     "desc": "robert_chen has_title VP Engineering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F7",
+     "desc": "robert_chen works_at brightwell",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F8",
+     "desc": "mara_okafor leads harbor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F9",
+     "desc": "sam_patel works_on harbor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F10",
+     "desc": "sam_patel works_at brightwell",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F11",
+     "desc": "sam_okonkwo member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F12",
+     "desc": "sam_okonkwo friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F13",
+     "desc": "ife_okafor sibling_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F14",
+     "desc": "ife_okafor has_title Nurse",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F15",
+     "desc": "ife_okafor lives_in port_ellery",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F17",
+     "desc": "gus_ferreira has_title Account Manager",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F21",
+     "desc": "mara_okafor lives_in halden_bay",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F22",
+     "desc": "brightwell client_of lumenfold",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F23",
+     "desc": "mara_okafor member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F25",
+     "desc": "lena_brandt works_at halden_bay_medical_practice",
+     "current": false,
+     "found": false,
+     "claims": []
+    }
+   ],
+   "fact_recall": [
+    2,
+    18
+   ],
+   "stale_current": [],
+   "forbidden_current": [],
+   "active_claims": 16,
+   "uncited": [],
+   "quote_not_in_source": [
+    {
+     "claim": 11,
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 12,
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 13,
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 14,
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 1,
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 5,
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 6,
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 7,
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 8,
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 9,
+     "text": "The user located in Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 2,
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 3,
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 4,
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    }
+   ],
+   "sensitive_hits": [],
+   "vault": {
+    "pages": 14,
+    "conflicts": [],
+    "invalid": [],
+    "files": 15
+   },
+   "entities_without_page": [
+    "ent_62sdfmmoqnyzcwyl",
+    "ent_dly4x22ykr5ud3nq",
+    "ent_dtrbfgiuoduvbh47",
+    "ent_jrur7ojvncr3r2nm",
+    "ent_ntcu6jf67muc6fui",
+    "ent_xtgtxudikpl35kkv"
+   ]
+  },
+  "phase2": {
+   "label": "phase2",
+   "knowledge": {
+    "claims": 36,
+    "entities": 40,
+    "extractor_provider": "local-chat",
+    "last_run": "2026-10-30T20:51:30.734481111Z",
+    "mentions": 81,
+    "pending_items": 0,
+    "vault": {
+     "conflicts": [],
+     "invalid": [],
+     "last_render": "2026-10-30T20:51:30.745028595Z",
+     "pages": 40,
+     "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+    }
+   },
+   "entities": [
+    {
+     "key": "mara_okafor",
+     "ids": [
+      "ent_znvqtdxiwjph7abo"
+     ],
+     "names": [
+      "Mara Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "robert_chen",
+     "ids": [
+      "ent_ke7zqh2wk4uf2rdr",
+      "ent_frqdxjn76szsk3l3"
+     ],
+     "names": [
+      "Bob",
+      "R. Chen"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "dana_whitfield",
+     "ids": [
+      "ent_yo2ejjnk6h53e6s5"
+     ],
+     "names": [
+      "Dana Whitfield"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "sam_patel",
+     "ids": [
+      "ent_nrgwdg6f46vav2yr",
+      "ent_vtsf2khvna7dsozv"
+     ],
+     "names": [
+      "Sam (Patel",
+      "Sam Patel"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "sam_okonkwo",
+     "ids": [
+      "ent_pngkpc2h5tar2jjq"
+     ],
+     "names": [
+      "Sam"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "theo_lindqvist",
+     "ids": [
+      "ent_ayxs6kw2xkodrxw7",
+      "ent_per7ild3yg3ku2a6",
+      "ent_wqpoh3i55cha4dar"
+     ],
+     "names": [
+      "Theo",
+      "Theo",
+      "Theo Lindqvist"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "ife_okafor",
+     "ids": [
+      "ent_c3xdrh4zhy5nseuz"
+     ],
+     "names": [
+      "Ife Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lena_brandt",
+     "ids": [
+      "ent_dtrbfgiuoduvbh47"
+     ],
+     "names": [
+      "Dr. Lena Brandt"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "jonas_albers",
+     "ids": [
+      "ent_gq6eqi65qjcxao2j"
+     ],
+     "names": [
+      "Jonas Albers"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "gus_ferreira",
+     "ids": [
+      "ent_rc6qwgbv4fcchvr2"
+     ],
+     "names": [
+      "Gus Ferreira"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "priyanka_rao",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "brightwell",
+     "ids": [
+      "ent_r4jw42uwirndqzn2"
+     ],
+     "names": [
+      "Brightwell Analytics"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lumenfold",
+     "ids": [
+      "ent_di5mlniwu6rbs3gl"
+     ],
+     "names": [
+      "Tessellate Systems"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "corvid_labs",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "northshore_credit_union",
+     "ids": [
+      "ent_sttsnwekxxjsg56f"
+     ],
+     "names": [
+      "Northshore Credit Union"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay_medical_practice",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay_bouldering",
+     "ids": [
+      "ent_cj3ljhk4ehdz5koi"
+     ],
+     "names": [
+      "Halden Bay Bouldering"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": false
+    },
+    {
+     "key": "harbor",
+     "ids": [
+      "ent_2s25iyw6xz6iavyk"
+     ],
+     "names": [
+      "Harbor"
+     ],
+     "kinds": [
+      "project"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay",
+     "ids": [
+      "ent_62sdfmmoqnyzcwyl"
+     ],
+     "names": [
+      "Halden Bay"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    },
+    {
+     "key": "port_ellery",
+     "ids": [
+      "ent_tybxe6cwntb2mydh"
+     ],
+     "names": [
+      "Port Ellery"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    }
+   ],
+   "entity_ok": 13,
+   "entity_total": 20,
+   "wrong_merges": [],
+   "splits": [],
+   "facts": [
+    {
+     "id": "F1",
+     "desc": "dana_whitfield works_at corvid_labs",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F2",
+     "desc": "dana_whitfield has_title Head of Product",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F3",
+     "desc": "mara_okafor works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 15,
+       "status": "active",
+       "text": "The user works at Brightwell Analytics."
+      }
+     ]
+    },
+    {
+     "id": "F4",
+     "desc": "mara_okafor has_title Staff Engineer",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 16,
+       "status": "active",
+       "text": "The user has title Staff Engineer."
+      }
+     ]
+    },
+    {
+     "id": "F5",
+     "desc": "mara_okafor reports_to robert_chen",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F6",
+     "desc": "robert_chen has_title VP Engineering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F7",
+     "desc": "robert_chen works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 22,
+       "status": "active",
+       "text": "Robert Chen works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F8",
+     "desc": "mara_okafor leads harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 28,
+       "status": "active",
+       "text": "The user leads Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F9",
+     "desc": "sam_patel works_on harbor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F10",
+     "desc": "sam_patel works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 23,
+       "status": "active",
+       "text": "Sam Patel works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F11",
+     "desc": "sam_okonkwo member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F12",
+     "desc": "sam_okonkwo friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F13",
+     "desc": "ife_okafor sibling_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F14",
+     "desc": "ife_okafor has_title Nurse",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F15",
+     "desc": "ife_okafor lives_in port_ellery",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F16",
+     "desc": "gus_ferreira works_at lumenfold",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 31,
+       "status": "active",
+       "text": "Gus Ferreira works at Tessellate (has a tessellate.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F17",
+     "desc": "gus_ferreira has_title Account Manager",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F18",
+     "desc": "harbor due_on 2026-12-03",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F19",
+     "desc": "priyanka_rao has_title HR Business Partner",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F20",
+     "desc": "priyanka_rao works_at brightwell",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F21",
+     "desc": "mara_okafor lives_in halden_bay",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F22",
+     "desc": "brightwell client_of lumenfold",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F23",
+     "desc": "mara_okafor member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F24",
+     "desc": "dana_whitfield friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F25",
+     "desc": "lena_brandt works_at halden_bay_medical_practice",
+     "current": false,
+     "found": false,
+     "claims": []
+    }
+   ],
+   "fact_recall": [
+    6,
+    25
+   ],
+   "stale_current": [
+    {
+     "id": "S1",
+     "claim": 24,
+     "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+     "status": "active"
+    }
+   ],
+   "forbidden_current": [
+    {
+     "desc": "Dana still works at Brightwell",
+     "claim": 24,
+     "text": "Dana Whitfield works at Brightwell (has a brightwell.example address).",
+     "status": "active"
+    }
+   ],
+   "active_claims": 36,
+   "uncited": [],
+   "quote_not_in_source": [
+    {
+     "claim": 11,
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 12,
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 13,
+     "text": "R. Chen attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 14,
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 18,
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 1,
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 5,
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 6,
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 7,
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 8,
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 19,
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 20,
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 21,
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 9,
+     "text": "The user located in Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 2,
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 3,
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 4,
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    }
+   ],
+   "sensitive_hits": [
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Place/Albers Counselling, 3 Quay Lane, Halden Bay (ent_gof42uavyqdrmzv3).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Albers Counselling, 3 Quay Lane, Halden Bay",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Mara Okafor",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    }
+   ],
+   "vault": {
+    "pages": 40,
+    "conflicts": [],
+    "invalid": [],
+    "files": 41
+   },
+   "entities_without_page": []
+  },
+  "edits": {
+   "label": "edits",
+   "knowledge": {
+    "claims": 35,
+    "entities": 40,
+    "extractor_provider": "local-chat",
+    "last_run": "2026-10-30T20:51:30.734481111Z",
+    "mentions": 81,
+    "pending_items": 0,
+    "vault": {
+     "conflicts": [
+      "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+     ],
+     "invalid": [],
+     "last_render": "2026-10-30T20:51:56.903380236Z",
+     "pages": 40,
+     "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+    }
+   },
+   "entities": [
+    {
+     "key": "mara_okafor",
+     "ids": [
+      "ent_znvqtdxiwjph7abo"
+     ],
+     "names": [
+      "Mara Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "robert_chen",
+     "ids": [
+      "ent_ke7zqh2wk4uf2rdr",
+      "ent_frqdxjn76szsk3l3"
+     ],
+     "names": [
+      "Bob",
+      "R. Chen"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "dana_whitfield",
+     "ids": [
+      "ent_yo2ejjnk6h53e6s5"
+     ],
+     "names": [
+      "Dana Whitfield"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "sam_patel",
+     "ids": [
+      "ent_nrgwdg6f46vav2yr",
+      "ent_vtsf2khvna7dsozv"
+     ],
+     "names": [
+      "Sam (Patel",
+      "Sam Patel"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "sam_okonkwo",
+     "ids": [
+      "ent_pngkpc2h5tar2jjq"
+     ],
+     "names": [
+      "Sam"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "theo_lindqvist",
+     "ids": [
+      "ent_ayxs6kw2xkodrxw7",
+      "ent_per7ild3yg3ku2a6",
+      "ent_wqpoh3i55cha4dar"
+     ],
+     "names": [
+      "Theo",
+      "Theo",
+      "Theo Lindqvist"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "ife_okafor",
+     "ids": [
+      "ent_c3xdrh4zhy5nseuz"
+     ],
+     "names": [
+      "Ife Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lena_brandt",
+     "ids": [
+      "ent_dtrbfgiuoduvbh47"
+     ],
+     "names": [
+      "Dr. Lena Brandt"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "jonas_albers",
+     "ids": [
+      "ent_gq6eqi65qjcxao2j"
+     ],
+     "names": [
+      "Jonas Albers"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "gus_ferreira",
+     "ids": [
+      "ent_rc6qwgbv4fcchvr2"
+     ],
+     "names": [
+      "Gus Ferreira"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "priyanka_rao",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "brightwell",
+     "ids": [
+      "ent_r4jw42uwirndqzn2"
+     ],
+     "names": [
+      "Brightwell Analytics"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lumenfold",
+     "ids": [
+      "ent_di5mlniwu6rbs3gl"
+     ],
+     "names": [
+      "Tessellate Systems"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "corvid_labs",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "northshore_credit_union",
+     "ids": [
+      "ent_sttsnwekxxjsg56f"
+     ],
+     "names": [
+      "Northshore Credit Union"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay_medical_practice",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay_bouldering",
+     "ids": [
+      "ent_cj3ljhk4ehdz5koi"
+     ],
+     "names": [
+      "Halden Bay Bouldering"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": false
+    },
+    {
+     "key": "harbor",
+     "ids": [
+      "ent_2s25iyw6xz6iavyk"
+     ],
+     "names": [
+      "Harbor"
+     ],
+     "kinds": [
+      "project"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay",
+     "ids": [
+      "ent_62sdfmmoqnyzcwyl"
+     ],
+     "names": [
+      "Halden Bay"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    },
+    {
+     "key": "port_ellery",
+     "ids": [
+      "ent_tybxe6cwntb2mydh"
+     ],
+     "names": [
+      "Port Ellery"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    }
+   ],
+   "entity_ok": 13,
+   "entity_total": 20,
+   "wrong_merges": [],
+   "splits": [],
+   "facts": [
+    {
+     "id": "F1",
+     "desc": "dana_whitfield works_at corvid_labs",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 38,
+       "status": "user_asserted",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      }
+     ]
+    },
+    {
+     "id": "F2",
+     "desc": "dana_whitfield has_title Head of Product",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F3",
+     "desc": "mara_okafor works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 15,
+       "status": "active",
+       "text": "The user works at Brightwell Analytics."
+      }
+     ]
+    },
+    {
+     "id": "F4",
+     "desc": "mara_okafor has_title Staff Engineer",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 16,
+       "status": "active",
+       "text": "The user has title Staff Engineer."
+      }
+     ]
+    },
+    {
+     "id": "F5",
+     "desc": "mara_okafor reports_to robert_chen",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F6",
+     "desc": "robert_chen has_title VP Engineering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F7",
+     "desc": "robert_chen works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 22,
+       "status": "active",
+       "text": "Robert Chen works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F8",
+     "desc": "mara_okafor leads harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 28,
+       "status": "active",
+       "text": "The user leads Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F9",
+     "desc": "sam_patel works_on harbor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F10",
+     "desc": "sam_patel works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 23,
+       "status": "active",
+       "text": "Sam Patel works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F11",
+     "desc": "sam_okonkwo member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F12",
+     "desc": "sam_okonkwo friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F13",
+     "desc": "ife_okafor sibling_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F14",
+     "desc": "ife_okafor has_title Nurse",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F15",
+     "desc": "ife_okafor lives_in port_ellery",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F16",
+     "desc": "gus_ferreira works_at lumenfold",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 31,
+       "status": "active",
+       "text": "Gus Ferreira works at Tessellate (has a tessellate.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F17",
+     "desc": "gus_ferreira has_title Account Manager",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F18",
+     "desc": "harbor due_on 2026-12-03",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F19",
+     "desc": "priyanka_rao has_title HR Business Partner",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F20",
+     "desc": "priyanka_rao works_at brightwell",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F21",
+     "desc": "mara_okafor lives_in halden_bay",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F22",
+     "desc": "brightwell client_of lumenfold",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F23",
+     "desc": "mara_okafor member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F24",
+     "desc": "dana_whitfield friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F25",
+     "desc": "lena_brandt works_at halden_bay_medical_practice",
+     "current": false,
+     "found": false,
+     "claims": []
+    }
+   ],
+   "fact_recall": [
+    7,
+    25
+   ],
+   "stale_current": [],
+   "forbidden_current": [],
+   "active_claims": 33,
+   "uncited": [],
+   "quote_not_in_source": [
+    {
+     "claim": 11,
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 12,
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 14,
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 3,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-03T09:00:00Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 18,
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 1,
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 5,
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 6,
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 7,
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 8,
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 19,
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 20,
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 21,
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 9,
+     "text": "The user located in Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 2,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-04-16T09:00:00Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 2,
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 3,
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 4,
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    }
+   ],
+   "sensitive_hits": [
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Place/Albers Counselling, 3 Quay Lane, Halden Bay (ent_gof42uavyqdrmzv3).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Albers Counselling, 3 Quay Lane, Halden Bay",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Mara Okafor",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    }
+   ],
+   "vault": {
+    "pages": 40,
+    "conflicts": [
+     "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+    ],
+    "invalid": [],
+    "files": 41
+   },
+   "entities_without_page": []
+  },
+  "reextract": {
+   "label": "reextract",
+   "knowledge": {
+    "claims": 86,
+    "entities": 83,
+    "extractor_provider": "local-chat",
+    "last_run": "2026-10-30T21:27:16.128486088Z",
+    "mentions": 200,
+    "pending_items": 0,
+    "vault": {
+     "conflicts": [
+      "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+     ],
+     "invalid": [],
+     "last_render": "2026-10-30T21:27:16.144939914Z",
+     "pages": 83,
+     "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+    }
+   },
+   "entities": [
+    {
+     "key": "mara_okafor",
+     "ids": [
+      "ent_znvqtdxiwjph7abo"
+     ],
+     "names": [
+      "Mara Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "robert_chen",
+     "ids": [
+      "ent_ke7zqh2wk4uf2rdr",
+      "ent_zk4d4s77vum7v7wa",
+      "ent_frqdxjn76szsk3l3"
+     ],
+     "names": [
+      "Bob",
+      "Bob",
+      "R. Chen"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "dana_whitfield",
+     "ids": [
+      "ent_2kwqotez2j3uvcad",
+      "ent_iq4finfehyy6x4ze",
+      "ent_mts4r4pnqjlho52f",
+      "ent_3a3kbkmedbzwmt4g"
+     ],
+     "names": [
+      "Dana",
+      "Dana",
+      "Dana",
+      "Dana Whitfield"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "sam_patel",
+     "ids": [
+      "ent_nrgwdg6f46vav2yr",
+      "ent_vtsf2khvna7dsozv"
+     ],
+     "names": [
+      "Sam (Patel",
+      "Sam Patel"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "sam_okonkwo",
+     "ids": [
+      "ent_pngkpc2h5tar2jjq"
+     ],
+     "names": [
+      "Sam"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "theo_lindqvist",
+     "ids": [
+      "ent_25vxkubwhyefg4pq",
+      "ent_ayxs6kw2xkodrxw7",
+      "ent_oe5utpocbjkieo5k",
+      "ent_per7ild3yg3ku2a6",
+      "ent_wqpoh3i55cha4dar"
+     ],
+     "names": [
+      "Theo",
+      "Theo",
+      "Theo",
+      "Theo",
+      "Theo Lindqvist"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "ife_okafor",
+     "ids": [
+      "ent_hdz4cm4syyfifg7l",
+      "ent_wxp5kqfrtnwxafef",
+      "ent_c3xdrh4zhy5nseuz"
+     ],
+     "names": [
+      "Ife",
+      "Ife",
+      "Ife Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "lena_brandt",
+     "ids": [
+      "ent_dtrbfgiuoduvbh47"
+     ],
+     "names": [
+      "Dr. Lena Brandt"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "jonas_albers",
+     "ids": [
+      "ent_gq6eqi65qjcxao2j"
+     ],
+     "names": [
+      "Jonas Albers"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "gus_ferreira",
+     "ids": [
+      "ent_rc6qwgbv4fcchvr2",
+      "ent_tuzpoz7jk5fg2bks"
+     ],
+     "names": [
+      "Gus Ferreira",
+      "Gus Ferreira"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "priyanka_rao",
+     "ids": [
+      "ent_7apnujvp5ilhvne7"
+     ],
+     "names": [
+      "Priyanka Rao"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "brightwell",
+     "ids": [
+      "ent_r4jw42uwirndqzn2"
+     ],
+     "names": [
+      "Brightwell Analytics"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lumenfold",
+     "ids": [
+      "ent_jmalfxvhmsgegop5",
+      "ent_di5mlniwu6rbs3gl"
+     ],
+     "names": [
+      "Lumenfold",
+      "Tessellate Systems"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": false
+    },
+    {
+     "key": "corvid_labs",
+     "ids": [
+      "ent_n47dy2b2mslnkeyk"
+     ],
+     "names": [
+      "Corvid Labs"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "northshore_credit_union",
+     "ids": [
+      "ent_sttsnwekxxjsg56f"
+     ],
+     "names": [
+      "Northshore Credit Union"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay_medical_practice",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay_bouldering",
+     "ids": [
+      "ent_cj3ljhk4ehdz5koi"
+     ],
+     "names": [
+      "Halden Bay Bouldering"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": false
+    },
+    {
+     "key": "harbor",
+     "ids": [
+      "ent_2s25iyw6xz6iavyk",
+      "ent_527ct2djt6td7vyw",
+      "ent_l2sj6ff4ngl5tq2r"
+     ],
+     "names": [
+      "Harbor",
+      "harbor",
+      "Harbor"
+     ],
+     "kinds": [
+      "organization",
+      "project",
+      "topic"
+     ],
+     "ok": false
+    },
+    {
+     "key": "halden_bay",
+     "ids": [
+      "ent_62sdfmmoqnyzcwyl"
+     ],
+     "names": [
+      "Halden Bay"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    },
+    {
+     "key": "port_ellery",
+     "ids": [
+      "ent_tybxe6cwntb2mydh"
+     ],
+     "names": [
+      "Port Ellery"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    }
+   ],
+   "entity_ok": 10,
+   "entity_total": 20,
+   "wrong_merges": [],
+   "splits": [],
+   "facts": [
+    {
+     "id": "F1",
+     "desc": "dana_whitfield works_at corvid_labs",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 73,
+       "status": "superseded",
+       "text": "Dana Whitfield works at Corvidlabs (has a corvidlabs.example address)."
+      },
+      {
+       "id": 38,
+       "status": "user_asserted",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      }
+     ]
+    },
+    {
+     "id": "F2",
+     "desc": "dana_whitfield has_title Head of Product",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F3",
+     "desc": "mara_okafor works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 15,
+       "status": "active",
+       "text": "The user works at Brightwell Analytics."
+      }
+     ]
+    },
+    {
+     "id": "F4",
+     "desc": "mara_okafor has_title Staff Engineer",
+     "current": false,
+     "found": true,
+     "claims": [
+      {
+       "id": 16,
+       "status": "superseded",
+       "text": "The user has title Staff Engineer."
+      }
+     ]
+    },
+    {
+     "id": "F5",
+     "desc": "mara_okafor reports_to robert_chen",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F6",
+     "desc": "robert_chen has_title VP Engineering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F7",
+     "desc": "robert_chen works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 22,
+       "status": "active",
+       "text": "Robert Chen works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F8",
+     "desc": "mara_okafor leads harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 28,
+       "status": "active",
+       "text": "The user leads Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F9",
+     "desc": "sam_patel works_on harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 52,
+       "status": "active",
+       "text": "Sam Patel works on Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F10",
+     "desc": "sam_patel works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 23,
+       "status": "active",
+       "text": "Sam Patel works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F11",
+     "desc": "sam_okonkwo member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F12",
+     "desc": "sam_okonkwo friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F13",
+     "desc": "ife_okafor sibling_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F14",
+     "desc": "ife_okafor has_title Nurse",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F15",
+     "desc": "ife_okafor lives_in port_ellery",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F16",
+     "desc": "gus_ferreira works_at lumenfold",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 31,
+       "status": "active",
+       "text": "Gus Ferreira works at Tessellate (has a tessellate.example address)."
+      },
+      {
+       "id": 75,
+       "status": "active",
+       "text": "Gus Ferreira works at Lumenfold (has a lumenfold.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F17",
+     "desc": "gus_ferreira has_title Account Manager",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F18",
+     "desc": "harbor due_on 2026-12-03",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F19",
+     "desc": "priyanka_rao has_title HR Business Partner",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F20",
+     "desc": "priyanka_rao works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 78,
+       "status": "active",
+       "text": "Priyanka Rao works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F21",
+     "desc": "mara_okafor lives_in halden_bay",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F22",
+     "desc": "brightwell client_of lumenfold",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F23",
+     "desc": "mara_okafor member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F24",
+     "desc": "dana_whitfield friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F25",
+     "desc": "lena_brandt works_at halden_bay_medical_practice",
+     "current": false,
+     "found": false,
+     "claims": []
+    }
+   ],
+   "fact_recall": [
+    8,
+    25
+   ],
+   "stale_current": [
+    {
+     "id": "S2",
+     "claim": 85,
+     "text": "Dana Whitfield has title Design Lead.",
+     "status": "active"
+    }
+   ],
+   "forbidden_current": [
+    {
+     "desc": "Dana still Design Lead",
+     "claim": 85,
+     "text": "Dana Whitfield has title Design Lead.",
+     "status": "active"
+    }
+   ],
+   "active_claims": 84,
+   "uncited": [],
+   "quote_not_in_source": [
+    {
+     "claim": 69,
+     "text": "Ife staying (Gull Point Sunday) takes place at 12 Saltmarsh Row, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Location: 12 Saltmarsh Row, Halden Bay",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 11,
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 12,
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 14,
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 18,
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 1,
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 63,
+     "text": "Harbor go/no-go review (launch 3 Dec) takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 5,
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 6,
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      },
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 7,
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 8,
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 10,
+     "text": "The user has title Climbing with Sam.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 19,
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 20,
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 21,
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 53,
+     "text": "Dana Whitfield works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "members: Dana Whitfield",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 62,
+     "text": "Dana Whitfield attended Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Dana Whitfield <dana@corvidlabs.example> (accepted)",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 51,
+     "text": "Harbor is about data-platform.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "tags: data-platform",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 59,
+     "text": "Drinks with Dana (new job!) takes place at The Anchor, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: The Anchor, Halden Bay",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 60,
+     "text": "Mara Okafor organized Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 61,
+     "text": "Mara Okafor attended Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 68,
+     "text": "Gus Ferreira was invited to Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 41,
+     "text": "Robert Chen works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Meetings/2026-06-03-1on1-with-Bob.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959054136Z",
+       "quote": "people: Robert Chen",
+       "title": "2026-06-03-1on1-with-Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Meetings/2026-06-03-1on1-with-Bob.md"
+      }
+     ]
+    },
+    {
+     "claim": 52,
+     "text": "Sam Patel works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "members: Sam Patel",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 64,
+     "text": "Mara Okafor organized Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 65,
+     "text": "Mara Okafor attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 66,
+     "text": "Robert Chen attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 67,
+     "text": "Sam Patel attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 2,
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 3,
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 4,
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 89,
+     "text": "Harbor-launch-plan is about launch.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor-launch-plan.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959695324Z",
+       "quote": "tags: launch",
+       "title": "Harbor-launch-plan",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor-launch-plan.md"
+      }
+     ]
+    },
+    {
+     "claim": 71,
+     "text": "Ife Okafor attended Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Attendees: Ife Okafor <ife.okafor@mailbox.example> (accepted), Sam Okonkwo <sokonkwo@mailbox.example> (tentative)",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 70,
+     "text": "Mara Okafor organized Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 72,
+     "text": "Sam Okonkwo was invited to Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Attendees: Ife Okafor <ife.okafor@mailbox.example> (accepted), Sam Okonkwo <sokonkwo@mailbox.example> (tentative)",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    }
+   ],
+   "sensitive_hits": [
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Place/Albers Counselling, 3 Quay Lane, Halden Bay (ent_gof42uavyqdrmzv3).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Albers Counselling, 3 Quay Lane, Halden Bay",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Mara Okafor",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    }
+   ],
+   "vault": {
+    "pages": 83,
+    "conflicts": [
+     "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+    ],
+    "invalid": [],
+    "files": 85
+   },
+   "entities_without_page": []
+  },
+  "restart": {
+   "label": "restart",
+   "knowledge": {
+    "claims": 74,
+    "entities": 63,
+    "extractor_provider": null,
+    "last_run": "2026-10-30T21:27:42.456649621Z",
+    "mentions": 154,
+    "pending_items": 0,
+    "vault": {
+     "conflicts": [
+      "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+     ],
+     "invalid": [],
+     "last_render": "2026-10-30T21:27:42.524313561Z",
+     "pages": 63,
+     "path": "/home/runner/work/nugget/nugget/qa-home/data/vault"
+    }
+   },
+   "entities": [
+    {
+     "key": "mara_okafor",
+     "ids": [
+      "ent_znvqtdxiwjph7abo"
+     ],
+     "names": [
+      "Mara Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "robert_chen",
+     "ids": [
+      "ent_frqdxjn76szsk3l3"
+     ],
+     "names": [
+      "R. Chen"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "dana_whitfield",
+     "ids": [
+      "ent_iq4finfehyy6x4ze",
+      "ent_mts4r4pnqjlho52f",
+      "ent_3a3kbkmedbzwmt4g"
+     ],
+     "names": [
+      "Dana",
+      "Dana",
+      "Dana Whitfield"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "sam_patel",
+     "ids": [
+      "ent_vtsf2khvna7dsozv"
+     ],
+     "names": [
+      "Sam Patel"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "sam_okonkwo",
+     "ids": [
+      "ent_pngkpc2h5tar2jjq"
+     ],
+     "names": [
+      "Sam"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "theo_lindqvist",
+     "ids": [
+      "ent_25vxkubwhyefg4pq",
+      "ent_wqpoh3i55cha4dar"
+     ],
+     "names": [
+      "Theo",
+      "Theo Lindqvist"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "ife_okafor",
+     "ids": [
+      "ent_hdz4cm4syyfifg7l",
+      "ent_wxp5kqfrtnwxafef",
+      "ent_c3xdrh4zhy5nseuz"
+     ],
+     "names": [
+      "Ife",
+      "Ife",
+      "Ife Okafor"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "lena_brandt",
+     "ids": [
+      "ent_dtrbfgiuoduvbh47"
+     ],
+     "names": [
+      "Dr. Lena Brandt"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "jonas_albers",
+     "ids": [
+      "ent_gq6eqi65qjcxao2j"
+     ],
+     "names": [
+      "Jonas Albers"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "gus_ferreira",
+     "ids": [
+      "ent_rc6qwgbv4fcchvr2",
+      "ent_tuzpoz7jk5fg2bks"
+     ],
+     "names": [
+      "Gus Ferreira",
+      "Gus Ferreira"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": false
+    },
+    {
+     "key": "priyanka_rao",
+     "ids": [
+      "ent_7apnujvp5ilhvne7"
+     ],
+     "names": [
+      "Priyanka Rao"
+     ],
+     "kinds": [
+      "person"
+     ],
+     "ok": true
+    },
+    {
+     "key": "brightwell",
+     "ids": [
+      "ent_r4jw42uwirndqzn2"
+     ],
+     "names": [
+      "Brightwell Analytics"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "lumenfold",
+     "ids": [
+      "ent_jmalfxvhmsgegop5",
+      "ent_di5mlniwu6rbs3gl"
+     ],
+     "names": [
+      "Lumenfold",
+      "Tessellate Systems"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": false
+    },
+    {
+     "key": "corvid_labs",
+     "ids": [
+      "ent_n47dy2b2mslnkeyk"
+     ],
+     "names": [
+      "Corvid Labs"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "northshore_credit_union",
+     "ids": [
+      "ent_sttsnwekxxjsg56f"
+     ],
+     "names": [
+      "Northshore Credit Union"
+     ],
+     "kinds": [
+      "organization"
+     ],
+     "ok": true
+    },
+    {
+     "key": "halden_bay_medical_practice",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    },
+    {
+     "key": "halden_bay_bouldering",
+     "ids": [
+      "ent_cj3ljhk4ehdz5koi"
+     ],
+     "names": [
+      "Halden Bay Bouldering"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": false
+    },
+    {
+     "key": "harbor",
+     "ids": [
+      "ent_2s25iyw6xz6iavyk",
+      "ent_527ct2djt6td7vyw",
+      "ent_l2sj6ff4ngl5tq2r"
+     ],
+     "names": [
+      "Harbor",
+      "harbor",
+      "Harbor"
+     ],
+     "kinds": [
+      "organization",
+      "project",
+      "topic"
+     ],
+     "ok": false
+    },
+    {
+     "key": "halden_bay",
+     "ids": [
+      "ent_62sdfmmoqnyzcwyl"
+     ],
+     "names": [
+      "Halden Bay"
+     ],
+     "kinds": [
+      "place"
+     ],
+     "ok": true
+    },
+    {
+     "key": "port_ellery",
+     "ids": [],
+     "names": [],
+     "kinds": [],
+     "ok": false
+    }
+   ],
+   "entity_ok": 11,
+   "entity_total": 20,
+   "wrong_merges": [],
+   "splits": [],
+   "facts": [
+    {
+     "id": "F1",
+     "desc": "dana_whitfield works_at corvid_labs",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 73,
+       "status": "superseded",
+       "text": "Dana Whitfield works at Corvidlabs (has a corvidlabs.example address)."
+      },
+      {
+       "id": 38,
+       "status": "user_asserted",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      }
+     ]
+    },
+    {
+     "id": "F2",
+     "desc": "dana_whitfield has_title Head of Product",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F3",
+     "desc": "mara_okafor works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 15,
+       "status": "active",
+       "text": "The user works at Brightwell Analytics."
+      }
+     ]
+    },
+    {
+     "id": "F4",
+     "desc": "mara_okafor has_title Staff Engineer",
+     "current": false,
+     "found": true,
+     "claims": [
+      {
+       "id": 16,
+       "status": "superseded",
+       "text": "The user has title Staff Engineer."
+      }
+     ]
+    },
+    {
+     "id": "F5",
+     "desc": "mara_okafor reports_to robert_chen",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F6",
+     "desc": "robert_chen has_title VP Engineering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F7",
+     "desc": "robert_chen works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 22,
+       "status": "active",
+       "text": "Robert Chen works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F8",
+     "desc": "mara_okafor leads harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 28,
+       "status": "active",
+       "text": "The user leads Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F9",
+     "desc": "sam_patel works_on harbor",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 52,
+       "status": "active",
+       "text": "Sam Patel works on Harbor."
+      }
+     ]
+    },
+    {
+     "id": "F10",
+     "desc": "sam_patel works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 23,
+       "status": "active",
+       "text": "Sam Patel works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F11",
+     "desc": "sam_okonkwo member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F12",
+     "desc": "sam_okonkwo friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F13",
+     "desc": "ife_okafor sibling_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F14",
+     "desc": "ife_okafor has_title Nurse",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F15",
+     "desc": "ife_okafor lives_in port_ellery",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F16",
+     "desc": "gus_ferreira works_at lumenfold",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 31,
+       "status": "active",
+       "text": "Gus Ferreira works at Tessellate (has a tessellate.example address)."
+      },
+      {
+       "id": 75,
+       "status": "active",
+       "text": "Gus Ferreira works at Lumenfold (has a lumenfold.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F17",
+     "desc": "gus_ferreira has_title Account Manager",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F18",
+     "desc": "harbor due_on 2026-12-03",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F19",
+     "desc": "priyanka_rao has_title HR Business Partner",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F20",
+     "desc": "priyanka_rao works_at brightwell",
+     "current": true,
+     "found": true,
+     "claims": [
+      {
+       "id": 78,
+       "status": "active",
+       "text": "Priyanka Rao works at Brightwell (has a brightwell.example address)."
+      }
+     ]
+    },
+    {
+     "id": "F21",
+     "desc": "mara_okafor lives_in halden_bay",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F22",
+     "desc": "brightwell client_of lumenfold",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F23",
+     "desc": "mara_okafor member_of halden_bay_bouldering",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F24",
+     "desc": "dana_whitfield friend_of mara_okafor",
+     "current": false,
+     "found": false,
+     "claims": []
+    },
+    {
+     "id": "F25",
+     "desc": "lena_brandt works_at halden_bay_medical_practice",
+     "current": false,
+     "found": false,
+     "claims": []
+    }
+   ],
+   "fact_recall": [
+    8,
+    25
+   ],
+   "stale_current": [
+    {
+     "id": "S2",
+     "claim": 85,
+     "text": "Dana Whitfield has title Design Lead.",
+     "status": "active"
+    }
+   ],
+   "forbidden_current": [
+    {
+     "desc": "Dana still Design Lead",
+     "claim": 85,
+     "text": "Dana Whitfield has title Design Lead.",
+     "status": "active"
+    }
+   ],
+   "active_claims": 72,
+   "uncited": [],
+   "quote_not_in_source": [
+    {
+     "claim": 69,
+     "text": "Ife staying (Gull Point Sunday) takes place at 12 Saltmarsh Row, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Location: 12 Saltmarsh Row, Halden Bay",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 11,
+     "text": "1:1 Mara / Bob takes place at Brightwell HQ, Bob's office.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Brightwell HQ, Bob's office",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 12,
+     "text": "R. Chen organized 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: R. Chen <robert.chen@brightwell.example>",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 14,
+     "text": "Mara Okafor attended 1:1 Mara / Bob on 2026-06-03T13:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 45,
+       "item": {
+        "key": "0:Calendar/2026-06-03-1on1-bob.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: R. Chen <robert.chen@brightwell.example> (accepted), Mara Okafor <mara.okafor@brightwell.example> (accepted)",
+       "title": "1:1 Mara / Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-06-03-1on1-bob.ics"
+      }
+     ]
+    },
+    {
+     "claim": 18,
+     "text": "Counselling session takes place at Albers Counselling, 3 Quay Lane, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Location: Albers Counselling, 3 Quay Lane, Halden Bay",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 1,
+     "text": "Harbor stand-up takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 63,
+     "text": "Harbor go/no-go review (launch 3 Dec) takes place at Brightwell HQ, Room Fathom.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Brightwell HQ, Room Fathom",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 5,
+     "text": "Climbing with Sam takes place at Halden Bay Bouldering.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: Halden Bay Bouldering",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 6,
+     "text": "Mara Okafor organized Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      },
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 7,
+     "text": "Mara Okafor attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 8,
+     "text": "Sam attended Climbing with Sam on 2026-04-16T17:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Sam <sokonkwo@mailbox.example> (accepted)",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 10,
+     "text": "The user has title Climbing with Sam.",
+     "evidence": [
+      {
+       "chunk_id": 44,
+       "item": {
+        "key": "0:Calendar/2026-04-16-climbing.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Event: Climbing with Sam",
+       "title": "Climbing with Sam",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-04-16-climbing.ics"
+      }
+     ]
+    },
+    {
+     "claim": 19,
+     "text": "Jonas Albers organized Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 20,
+     "text": "Jonas Albers attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Organizer: Jonas Albers <jonas@albers-counselling.example>",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 21,
+     "text": "Mara Okafor attended Counselling session on 2026-06-17T17:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 8,
+       "item": {
+        "key": "0:Health/2026-06-17-counselling.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-06-17T09:00:00Z",
+       "quote": "Attendees: Jonas Albers <jonas@albers-counselling.example> (accepted), Mara Okafor <mara.okafor@mailbox.example> (accepted)",
+       "title": "Counselling session",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Health/2026-06-17-counselling.ics"
+      }
+     ]
+    },
+    {
+     "claim": 53,
+     "text": "Dana Whitfield works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "members: Dana Whitfield",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 62,
+     "text": "Dana Whitfield attended Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@mailbox.example> (accepted), Dana Whitfield <dana@corvidlabs.example> (accepted)",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 51,
+     "text": "Harbor is about data-platform.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "tags: data-platform",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 59,
+     "text": "Drinks with Dana (new job!) takes place at The Anchor, Halden Bay.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Location: The Anchor, Halden Bay",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 60,
+     "text": "Mara Okafor organized Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 61,
+     "text": "Mara Okafor attended Drinks with Dana (new job!) on 2026-08-21T18:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 46,
+       "item": {
+        "key": "0:Calendar/2026-08-21-dana-farewell.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Drinks with Dana (new job!)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-08-21-dana-farewell.ics"
+      }
+     ]
+    },
+    {
+     "claim": 68,
+     "text": "Gus Ferreira was invited to Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 41,
+     "text": "Robert Chen works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Meetings/2026-06-03-1on1-with-Bob.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959054136Z",
+       "quote": "people: Robert Chen",
+       "title": "2026-06-03-1on1-with-Bob",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Meetings/2026-06-03-1on1-with-Bob.md"
+      }
+     ]
+    },
+    {
+     "claim": 52,
+     "text": "Sam Patel works on Harbor.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959995536Z",
+       "quote": "members: Sam Patel",
+       "title": "Harbor",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor.md"
+      }
+     ]
+    },
+    {
+     "claim": 64,
+     "text": "Mara Okafor organized Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 65,
+     "text": "Mara Okafor attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 66,
+     "text": "Robert Chen attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 67,
+     "text": "Sam Patel attended Harbor go/no-go review (launch 3 Dec) on 2026-10-14T14:00:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 47,
+       "item": {
+        "key": "0:Calendar/2026-10-14-harbor-go-no-go.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.953168401Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Robert Chen <robert.chen@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted), Gus Ferreira <gus@lumenfold.example> (tentative)",
+       "title": "Harbor go/no-go review (launch 3 Dec)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-14-harbor-go-no-go.ics"
+      }
+     ]
+    },
+    {
+     "claim": 2,
+     "text": "Mara Okafor organized Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 3,
+     "text": "Mara Okafor attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@brightwell.example>",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 4,
+     "text": "Sam Patel attended Harbor stand-up on 2026-03-10T09:30:00Z.",
+     "evidence": [
+      {
+       "chunk_id": 1,
+       "item": {
+        "key": "0:Calendar/2026-03-10-harbor-standup.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-03-10T09:00:00Z",
+       "quote": "Attendees: Mara Okafor <mara.okafor@brightwell.example> (accepted), Sam Patel <sam.patel@brightwell.example> (accepted)",
+       "title": "Harbor stand-up",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-03-10-harbor-standup.ics"
+      }
+     ]
+    },
+    {
+     "claim": 89,
+     "text": "Harbor-launch-plan is about launch.",
+     "evidence": [
+      {
+       "chunk_id": null,
+       "item": {
+        "key": "0:Notes/Projects/Harbor-launch-plan.md",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.959695324Z",
+       "quote": "tags: launch",
+       "title": "Harbor-launch-plan",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Notes/Projects/Harbor-launch-plan.md"
+      }
+     ]
+    },
+    {
+     "claim": 71,
+     "text": "Ife Okafor attended Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Attendees: Ife Okafor <ife.okafor@mailbox.example> (accepted), Sam Okonkwo <sokonkwo@mailbox.example> (tentative)",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 70,
+     "text": "Mara Okafor organized Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Organizer: Mara Okafor <mara.okafor@mailbox.example>",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    },
+    {
+     "claim": 72,
+     "text": "Sam Okonkwo was invited to Ife staying (Gull Point Sunday) on 2026-10-24.",
+     "evidence": [
+      {
+       "chunk_id": 48,
+       "item": {
+        "key": "0:Calendar/2026-10-24-ife-visit.ics",
+        "source": "files-1"
+       },
+       "observed_at": "2026-10-30T20:52:29.954168405Z",
+       "quote": "Attendees: Ife Okafor <ife.okafor@mailbox.example> (accepted), Sam Okonkwo <sokonkwo@mailbox.example> (tentative)",
+       "title": "Ife staying (Gull Point Sunday)",
+       "url": "file:///home/runner/work/nugget/nugget/qa-home/corpus/Calendar/2026-10-24-ife-visit.ics"
+      }
+     ]
+    }
+   ],
+   "sensitive_hits": [
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "README.md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Place/Albers Counselling, 3 Quay Lane, Halden Bay (ent_gof42uavyqdrmzv3).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Event/Counselling session (ent_zkb7gn2ndj7curkv).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Counselling session"
+    },
+    {
+     "where": "vault",
+     "page": "Person/Jonas Albers (ent_gq6eqi65qjcxao2j).md",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Albers Counselling, 3 Quay Lane, Halden Bay",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 18,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Counselling session",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "entity_name",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 19,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "claim",
+     "entity": "Jonas Albers",
+     "claim": 20,
+     "status": "active",
+     "string": "Jonas Albers"
+    },
+    {
+     "where": "claim",
+     "entity": "Mara Okafor",
+     "claim": 21,
+     "status": "active",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_zkb7gn2ndj7curkv",
+     "string": "Counselling session"
+    },
+    {
+     "where": "graph_node",
+     "id": "ent_gq6eqi65qjcxao2j",
+     "string": "Jonas Albers"
+    }
+   ],
+   "vault": {
+    "pages": 63,
+    "conflicts": [
+     "Person/R. Chen (ent_frqdxjn76szsk3l3).md"
+    ],
+    "invalid": [],
+    "files": 85
+   },
+   "entities_without_page": []
+  }
+ },
+ "edits": [
+  {
+   "what": "E1 fix fact (Brightwell -> Corvid Labs)",
+   "page": "Person/Dana Whitfield (ent_yo2ejjnk6h53e6s5).md",
+   "after": {
+    "edits": {
+     "claim 24": "superseded",
+     "added_lines_still_on_page": [
+      "- Dana is Head of Product at Corvid Labs (fixed by me) <!-- c:24 -->"
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "reextract": {
+     "claim 24": "superseded",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "restart": {
+     "claim 24": "superseded",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "what": "E2 delete first fact line (Robert Chen)",
+   "page": "Person/R. Chen (ent_frqdxjn76szsk3l3).md",
+   "after": {
+    "edits": {
+     "claim 13": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "reextract": {
+     "claim 13": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "restart": {
+     "claim 13": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "what": "E3 add fact + note (Sam Okonkwo)",
+   "page": "Person/Sam (ent_pngkpc2h5tar2jjq).md",
+   "after": {
+    "edits": {
+     "added_lines_still_on_page": [
+      "- Sam Okonkwo lives in Halden Bay (added by me)",
+      "Climbs V5, prefers the north wall. My own note, keep it."
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "reextract": {
+     "added_lines_still_on_page": [
+      "- Sam Okonkwo lives in Halden Bay (added by me)",
+      "Climbs V5, prefers the north wall. My own note, keep it."
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "restart": {
+     "added_lines_still_on_page": [
+      "- Sam Okonkwo lives in Halden Bay (added by me)",
+      "Climbs V5, prefers the north wall. My own note, keep it."
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "what": "E4 add alias Bobby (Robert Chen)",
+   "page": "Person/R. Chen (ent_frqdxjn76szsk3l3).md",
+   "after": {
+    "edits": {
+     "added_lines_still_on_page": [
+      "aliases: [\"Robert Chen\", \"Bobby\"]"
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ],
+     "robert_aliases": []
+    },
+    "reextract": {
+     "added_lines_still_on_page": [
+      "aliases: [\"Robert Chen\", \"Bobby\"]"
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ],
+     "robert_aliases": []
+    },
+    "restart": {
+     "added_lines_still_on_page": [
+      "aliases: [\"Robert Chen\", \"Bobby\"]"
+     ],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ],
+     "robert_aliases": []
+    }
+   }
+  },
+  {
+   "what": "E5 delete a fact line naming Theo (Mara Okafor)",
+   "page": "Person/Mara Okafor (ent_znvqtdxiwjph7abo).md",
+   "after": {
+    "edits": {
+     "claim 37": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "reextract": {
+     "claim 37": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    },
+    "restart": {
+     "claim 37": "rejected",
+     "added_lines_still_on_page": [],
+     "removed_lines_back_on_page": [],
+     "user_asserted": [
+      {
+       "id": 38,
+       "subject": "Dana Whitfield",
+       "predicate": "works_at",
+       "text": "Dana is Head of Product at Corvid Labs (fixed by me)"
+      },
+      {
+       "id": 39,
+       "subject": "Sam",
+       "predicate": "attended",
+       "text": "Sam Okonkwo lives in Halden Bay (added by me)"
+      }
+     ]
+    }
+   }
+  }
+ ]
+}

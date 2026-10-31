@@ -1,0 +1,289 @@
+name: A11y apps
+
+# The accessibility app matrix: nugget-a11y against real browsers (Chrome, Edge, Firefox, Safari)
+# on the clean-room web editor fixtures (crates/nugget-a11y/tests/fixtures/apps/web, contract in
+# PROTOCOL.md) and against native editors (TextEdit, Notes, Notepad, WordPad, gedit,
+# LibreOffice Writer). Each cell measures detection, read-back, the thread, secure fields,
+# insertion of six payloads with one undo each, and read time. Results are JSON Lines, rendered
+# into the job summary and a combined Markdown artifact by render_matrix.py.
+#
+# The test fails only when a metric listed in tests/fixtures/apps/expected.json fails (or when
+# the harness cannot start); apps that are not installed are recorded, not failed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: "Comma list of app ids (empty: all available)"
+        required: false
+        default: ""
+      force_a11y:
+        description: "Also pass --force-renderer-accessibility to Chromium (diagnostic)"
+        type: boolean
+        required: false
+        default: false
+  pull_request:
+    paths:
+      - "crates/nugget-a11y/**"
+      - ".github/workflows/a11y-apps.yml"
+  schedule:
+    - cron: "23 5 * * 3"
+
+# Least privilege: every job only reads the repository.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+  NO_COLOR: "1"
+  PYTHONIOENCODING: utf-8
+  NUGGET_A11Y_APPS: ${{ inputs.apps }}
+  NUGGET_A11Y_APPS_FORCE_A11Y: ${{ inputs.force_a11y && '1' || '0' }}
+
+jobs:
+  macos:
+    name: Apps (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-apps-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: TCC evidence (what the runner grants)
+        run: sh tests/fixtures/native/macos/tcc-evidence.sh
+      # No first-run UI and no window restoration between the cells' launches.
+      - name: Quiet the apps
+        run: |
+          defaults write com.apple.Safari ApplePersistenceIgnoreState -bool YES || true
+          defaults write com.apple.TextEdit ApplePersistenceIgnoreState -bool YES || true
+          defaults write com.apple.TextEdit NSShowAppCentricOpenPanelInsteadOfUntitledFile -bool NO || true
+          defaults write com.microsoft.Edge HideFirstRunExperience -bool YES || true
+          defaults write com.google.Chrome DefaultBrowserSettingEnabled -bool NO || true
+          ls -d /Applications/*.app | grep -Ei 'chrome|edge|firefox|safari' || true
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --locked --test apps_matrix --no-run
+      - name: App matrix
+        env:
+          NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
+          NUGGET_A11Y_RUNNER: macos-latest
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-apps"
+          set -o pipefail
+          cargo test -p nugget-a11y --locked --test apps_matrix -- --ignored --nocapture --test-threads=1 2>&1 \
+            | tee "$RUNNER_TEMP/a11y-apps/apps_matrix.log"
+      - name: Summary
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/a11y-apps/results.jsonl"
+          if [ -s "$f" ]; then
+            python3 -I crates/nugget-a11y/tests/fixtures/apps/render_matrix.py "$f" --summary >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No app matrix results (the harness did not start)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-apps/screens"
+          screencapture -x "$RUNNER_TEMP/a11y-apps/screens/final.png"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-apps-macos-latest
+          path: ${{ runner.temp }}/a11y-apps
+          if-no-files-found: ignore
+
+  windows:
+    name: Apps (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        # windows-2022 still ships WordPad; windows-latest (Server 2025) does not.
+        os: [windows-latest, windows-2022]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install stable --profile minimal
+      # nugget-a11y pulls in no OpenSSL or aws-lc, so no Perl or NASM setup is needed.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-apps-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # No first-run pages, sign-in prompts or background browsers on the runner.
+      - name: Quiet the browsers
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $policies = @{
+            'HKLM:\SOFTWARE\Policies\Microsoft\Edge' = @{ HideFirstRunExperience = 1; BrowserSignin = 0; StartupBoostEnabled = 0;
+              BackgroundModeEnabled = 0; DefaultBrowserSettingEnabled = 0; AutoImportAtFirstRun = 4; SyncDisabled = 1;
+              PromotionalTabsEnabled = 0 }
+            'HKLM:\SOFTWARE\Policies\Google\Chrome' = @{ BrowserSignin = 0; BackgroundModeEnabled = 0;
+              DefaultBrowserSettingEnabled = 0; SyncDisabled = 1; PromotionalTabsEnabled = 0 }
+            'HKLM:\SOFTWARE\Policies\Mozilla\Firefox' = @{ DisableTelemetry = 1; DontCheckDefaultBrowser = 1;
+              DisableAppUpdate = 1 }
+          }
+          foreach ($key in $policies.Keys) {
+            try {
+              New-Item -Path $key -Force -ErrorAction Stop | Out-Null
+              foreach ($p in $policies[$key].GetEnumerator()) {
+                New-ItemProperty -Path $key -Name $p.Key -Value $p.Value -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+              }
+            } catch {
+              Write-Warning "policy ${key}: $_"
+            }
+          }
+          cmd /c ver
+          foreach ($exe in "${env:ProgramFiles}\Google\Chrome\Application\chrome.exe",
+                           "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+                           "${env:ProgramFiles}\Mozilla Firefox\firefox.exe",
+                           "${env:ProgramFiles}\Windows NT\Accessories\wordpad.exe",
+                           "${env:SystemRoot}\System32\notepad.exe") {
+            if (Test-Path $exe) { "$exe $((Get-Item $exe).VersionInfo.ProductVersion)" } else { "missing: $exe" }
+          }
+          try { Get-AppxPackage *WindowsNotepad* | Format-List Name,Version } catch { Write-Warning "$_" }
+      - name: Build the tests
+        shell: bash
+        run: cargo test -p nugget-a11y --locked --test apps_matrix --no-run
+      - name: App matrix
+        env:
+          NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
+          NUGGET_A11Y_RUNNER: ${{ matrix.os }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-apps"
+          set -o pipefail
+          cargo test -p nugget-a11y --locked --test apps_matrix -- --ignored --nocapture --test-threads=1 2>&1 \
+            | tee "$RUNNER_TEMP/a11y-apps/apps_matrix.log"
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          f="$RUNNER_TEMP/a11y-apps/results.jsonl"
+          py=$(command -v python3 || command -v python)
+          if [ -s "$f" ]; then
+            "$py" -I crates/nugget-a11y/tests/fixtures/apps/render_matrix.py "$f" --summary >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No app matrix results (the harness did not start)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Screenshot
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          $b = [System.Windows.Forms.SystemInformation]::VirtualScreen
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
+          New-Item -ItemType Directory -Force -Path "$env:RUNNER_TEMP\a11y-apps\screens" | Out-Null
+          $bmp.Save("$env:RUNNER_TEMP\a11y-apps\screens\final.png")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-apps-${{ matrix.os }}
+          path: ${{ runner.temp }}/a11y-apps
+          if-no-files-found: ignore
+
+  linux:
+    name: Apps (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      # The test starts its own Xvfb, session bus (AT-SPI by D-Bus activation) and openbox.
+      # Chrome, Edge and Firefox are preinstalled on the runner image.
+      - name: Install the X session and the native editors
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb dbus dbus-x11 at-spi2-core \
+            libatk-bridge2.0-0t64 openbox gedit libreoffice-writer libreoffice-gtk3 \
+            fonts-noto-color-emoji fonts-dejavu-core
+          for b in google-chrome-stable microsoft-edge-stable firefox gedit soffice; do
+            printf '%s: ' "$b"; (command -v "$b" && "$b" --version 2>/dev/null | head -n 1) || echo missing
+          done
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: a11y-apps-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the tests
+        run: cargo test -p nugget-a11y --locked --test apps_matrix --no-run
+      - name: App matrix
+        env:
+          NUGGET_A11Y_MATRIX_OUT: ${{ runner.temp }}/a11y-apps/results.jsonl
+          NUGGET_A11Y_APPS_RECORD: ${{ runner.temp }}/a11y-apps/trees
+          NUGGET_A11Y_RUNNER: ubuntu-24.04
+        run: |
+          mkdir -p "$RUNNER_TEMP/a11y-apps"
+          unset DISPLAY
+          set -o pipefail
+          cargo test -p nugget-a11y --locked --test apps_matrix -- --ignored --nocapture --test-threads=1 2>&1 \
+            | tee "$RUNNER_TEMP/a11y-apps/apps_matrix.log"
+      - name: Summary
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/a11y-apps/results.jsonl"
+          if [ -s "$f" ]; then
+            python3 -I crates/nugget-a11y/tests/fixtures/apps/render_matrix.py "$f" --summary >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No app matrix results (the harness did not start)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: a11y-apps-ubuntu-24.04
+          path: ${{ runner.temp }}/a11y-apps
+          if-no-files-found: ignore
+
+  combine:
+    name: Combined matrix
+    needs: [macos, windows, linux]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          pattern: a11y-apps-*
+          path: ${{ runner.temp }}/in
+      - name: Render
+        run: |
+          mkdir -p "$RUNNER_TEMP/matrix"
+          shopt -s nullglob
+          files=("$RUNNER_TEMP"/in/*/results.jsonl)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No app matrix results." | tee "$RUNNER_TEMP/matrix/a11y-matrix.md" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cat "${files[@]}" > "$RUNNER_TEMP/matrix/results.jsonl"
+          python3 -I crates/nugget-a11y/tests/fixtures/apps/render_matrix.py "${files[@]}" --stdout > "$RUNNER_TEMP/matrix/a11y-matrix.md"
+          python3 -I crates/nugget-a11y/tests/fixtures/apps/render_matrix.py "${files[@]}" --summary >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: matrix-combined
+          path: ${{ runner.temp }}/matrix
+          if-no-files-found: warn

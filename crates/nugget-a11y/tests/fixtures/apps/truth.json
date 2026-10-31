@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "initial_text": "Draft: ",
+  "editors": [
+    {"id": "textarea", "name": "Plain textarea", "context": "chat", "kind": "plain"},
+    {"id": "contenteditable", "name": "Plain contenteditable", "context": "chat", "kind": "rich"},
+    {"id": "mail-compose", "name": "Mail compose", "context": "mail", "kind": "rich"},
+    {"id": "prosemirror", "name": "ProseMirror (TipTap)", "context": "chat", "kind": "rich"},
+    {"id": "quill", "name": "Quill", "context": "chat", "kind": "rich"},
+    {"id": "draftjs", "name": "Draft.js", "context": "chat", "kind": "rich"},
+    {"id": "lexical", "name": "Lexical", "context": "chat", "kind": "rich"},
+    {"id": "ckeditor", "name": "CKEditor 5", "context": "mail", "kind": "rich"}
+  ],
+  "contexts": {
+    "chat": {
+      "messages": [
+        {"author": "Maya Chen", "time": "10:02 AM", "text": "Morning! Did anyone hear back from the venue in Lakeside?", "from_me": false},
+        {"author": "Maya Chen", "time": "10:03 AM", "text": "They said they can hold the big room until Friday.", "from_me": false},
+        {"author": "Diego Alvarez", "time": "10:11 AM", "text": "Yes, they sent the quote last night. It is within budget 🎉", "from_me": false},
+        {"author": "Diego Alvarez", "time": "10:12 AM", "text": "Notes are here: https://notes.example.com/offsite/venue-quote", "from_me": false},
+        {"author": "You", "time": "10:15 AM", "text": "Great, thanks Diego. I can draft the agenda today.", "from_me": true},
+        {"author": "You", "time": "10:16 AM", "text": "Should we plan one long session or two shorter ones?", "from_me": true},
+        {"author": "Maya Chen", "time": "10:21 AM", "text": "Two shorter ones. Can you also check whether the room has a projector?", "from_me": false},
+        {"author": "Diego Alvarez", "time": "10:24 AM", "text": "I will ask about dietary options too. Let's lock it in by Thursday so we can send invites.", "from_me": false}
+      ],
+      "recipients": [],
+      "subject": null
+    },
+    "mail": {
+      "messages": [
+        {"author": "Jordan Lee", "time": "Mon, Oct 26, 9:14 AM", "text": "Hi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?", "from_me": false},
+        {"author": "Priya Natarajan", "time": "Mon, Oct 26, 11:40 AM", "text": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.", "from_me": false},
+        {"author": "Jordan Lee", "time": "Tue, Oct 27, 8:05 AM", "text": "Thanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?", "from_me": false}
+      ],
+      "recipients": ["Jordan Lee", "Priya Natarajan"],
+      "subject": "Q3 offsite venue"
+    }
+  }
+}

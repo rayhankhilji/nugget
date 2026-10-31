@@ -1,0 +1,32 @@
+{
+  "commit": "0d81796",
+  "runs": [
+    {
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "halted"
+      },
+      "model_calls_after_answer": 0,
+      "acts": 0,
+      "ok": true
+    },
+    {
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "halted"
+      },
+      "model_calls_after_answer": 0,
+      "acts": 0,
+      "ok": true
+    },
+    {
+      "answer_reply": "ok",
+      "finished": {
+        "outcome": "halted"
+      },
+      "model_calls_after_answer": 0,
+      "acts": 0,
+      "ok": true
+    }
+  ]
+}

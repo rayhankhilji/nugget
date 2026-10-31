@@ -1,0 +1,194 @@
+[
+ {
+  "kind": "organization",
+  "name": "Brightwell Analytics",
+  "aliases": [
+   "Brightwell"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "brightwell.example"
+   ]
+  ]
+ },
+ {
+  "kind": "organization",
+  "name": "Corvid Labs",
+  "aliases": [
+   "Corvidlabs"
+  ],
+  "identifiers": [
+   [
+    "domain",
+    "corvidlabs.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Dana Whitfield",
+  "aliases": [
+   "Dana-Whitfield"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "dana.whitfield@brightwell.example"
+   ],
+   [
+    "email",
+    "dana@corvidlabs.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Dr. Lena Brandt",
+  "aliases": [],
+  "identifiers": []
+ },
+ {
+  "kind": "person",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus@lumenfold.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Gus Ferreira",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "gus.ferreira@tessellate.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Ife Okafor",
+  "aliases": [
+   "Ife",
+   "Ifeoma Okafor"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "ife.okafor@mailbox.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Jonas Albers",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "jonas@albers-counselling.example"
+   ]
+  ]
+ },
+ {
+  "kind": "organization",
+  "name": "Lumenfold",
+  "aliases": [],
+  "identifiers": [
+   [
+    "domain",
+    "lumenfold.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Mara Okafor",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "mara.okafor@brightwell.example"
+   ],
+   [
+    "email",
+    "mara.okafor@mailbox.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Priyanka Rao",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "priyanka.rao@brightwell.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Robert Chen",
+  "aliases": [
+   "R. Chen"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "robert.chen@brightwell.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Sam Okonkwo",
+  "aliases": [
+   "Sam"
+  ],
+  "identifiers": [
+   [
+    "email",
+    "sokonkwo@mailbox.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Sam Patel",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "sam.patel@brightwell.example"
+   ]
+  ]
+ },
+ {
+  "kind": "organization",
+  "name": "Tessellate",
+  "aliases": [],
+  "identifiers": [
+   [
+    "domain",
+    "tessellate.example"
+   ]
+  ]
+ },
+ {
+  "kind": "person",
+  "name": "Theo Lindqvist",
+  "aliases": [],
+  "identifiers": [
+   [
+    "email",
+    "theo.lindqvist@mailbox.example"
+   ]
+  ]
+ }
+]

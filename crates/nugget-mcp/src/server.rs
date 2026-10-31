@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::audit::{
     ACTION_RESOURCE, ACTION_TOOL, AuditEntry, AuditSink, CallRecord, Outcome, Transport,
 };
-use crate::auth::ClientRegistry;
+use crate::auth::{ClientRegistry, ServerKey};
 use crate::backend::KnowledgeBackend;
 use crate::rate::{RateLimit, RateLimiter};
 use crate::render::{self, RESULT_PREAMBLE, ResourceUri, SAFETY_NOTE};
@@ -42,6 +42,9 @@ struct Inner {
     backend: Arc<dyn KnowledgeBackend>,
     registry: Option<Arc<ClientRegistry>>,
     audit: Option<AuditSink>,
+    /// Keys the hashes of free-text arguments in audit entries: the registry's key, so they stay
+    /// comparable across restarts, or a per-process one without a registry.
+    audit_key: Option<ServerKey>,
     egress: Option<Arc<dyn EgressSink>>,
     limiter: RateLimiter,
     refusals: RefusalLog,
@@ -146,11 +149,16 @@ impl McpServerBuilder {
     }
 
     pub fn build(self) -> McpServer {
+        let audit_key = match &self.registry {
+            Some(r) => Some(r.key().clone()),
+            None => ServerKey::generate().ok(),
+        };
         McpServer {
             inner: Arc::new(Inner {
                 backend: self.backend,
                 registry: self.registry,
                 audit: self.audit,
+                audit_key,
                 egress: self.egress,
                 limiter: RateLimiter::new(self.config.rate_limit),
                 refusals: RefusalLog::default(),
@@ -231,7 +239,7 @@ impl McpServer {
 
     fn record(&self, rec: CallRecord<'_>) {
         if let Some(sink) = &self.inner.audit {
-            sink(rec.to_entry());
+            sink(rec.to_entry(self.inner.audit_key.as_ref()));
         }
         if rec.transport.is_remote()
             && rec.outcome == Outcome::Ok
@@ -277,7 +285,7 @@ impl McpServer {
             results: 0,
             items: &[],
         }
-        .to_entry();
+        .to_entry(None);
         if let serde_json::Value::Object(d) = &mut entry.detail {
             d.insert("refused_since_last_entry".into(), coalesced.into());
             d.insert(

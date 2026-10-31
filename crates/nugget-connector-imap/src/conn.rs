@@ -125,7 +125,8 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Metered<S> {
 }
 
 /// Reports the bytes counted on a connection to the egress ledger, as deltas. Flushed per folder
-/// batch and once more on drop, so a failed session is still accounted for.
+/// batch, after each connection attempt and once more on drop, so a failed session is still
+/// accounted for, and every connection attempt has a row, even one that exchanged no bytes.
 pub(crate) struct EgressMeter {
     counters: Arc<Counters>,
     egress: Arc<dyn EgressSink>,
@@ -133,6 +134,8 @@ pub(crate) struct EgressMeter {
     feature: &'static str,
     reported_sent: u64,
     reported_received: u64,
+    /// A connection was attempted since the last row.
+    connect_unreported: bool,
 }
 
 impl EgressMeter {
@@ -144,7 +147,13 @@ impl EgressMeter {
             feature,
             reported_sent: 0,
             reported_received: 0,
+            connect_unreported: false,
         }
+    }
+
+    /// A connection is about to be opened: the next flush records a row, bytes or not.
+    pub(crate) fn connecting(&mut self) {
+        self.connect_unreported = true;
     }
 
     pub(crate) fn counters(&self) -> Arc<Counters> {
@@ -155,9 +164,10 @@ impl EgressMeter {
         let sent = self.counters.sent();
         let received = self.counters.received();
         let (ds, dr) = (sent - self.reported_sent, received - self.reported_received);
-        if ds == 0 && dr == 0 {
+        if ds == 0 && dr == 0 && !self.connect_unreported {
             return;
         }
+        self.connect_unreported = false;
         self.reported_sent = sent;
         self.reported_received = received;
         self.egress.record(EgressEvent {

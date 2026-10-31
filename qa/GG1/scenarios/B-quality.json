@@ -1,0 +1,1870 @@
+{
+ "scenarios": [
+  {
+   "id": "qual-mw-renewal-thread",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Long email thread (6 messages, newest has the whole quoted history below the new text). Needs the FINAL fee from the vault; the thread and an older draft note both carry the stale EUR 48,500.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Renewal pricing"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Hi Marcus,\n\nCould you give me a sense of where the renewal is heading? Our budget cycle closes in October and I need a ballpark for the three-year term.\n\nThanks,\nPriya",
+       "from_me": false,
+       "timestamp": "2026-09-08 11:20"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Priya,\n\nThank you for your message. We are currently finalising the renewal terms internally, and I expect to share a formal proposal with you within the next two weeks.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-09-09 08:47"
+      },
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Hi Marcus,\n\nThanks. The draft proposal you shared mentioned EUR 48,500 a year, which is above what we had budgeted. Is there room to move on that, given the volume growth this year?\n\nBest,\nPriya",
+       "from_me": false,
+       "timestamp": "2026-09-24 14:02"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Priya,\n\nThank you for your candid feedback. I have raised the volume growth with our finance team, and we will review the annual fee at our internal pricing meeting on 9 October.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-09-29 09:05"
+      },
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Hi Marcus,\n\nAny news from the 9 October meeting? Tom would also like to know whether the start date of 1 January still holds.\n\nBest,\nPriya",
+       "from_me": false,
+       "timestamp": "2026-10-13 16:40"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Priya,\n\nThank you for your patience while we completed our internal review. I am pleased to confirm that finance has approved the revised terms we discussed on 9 October.\n\nI will send the updated agreement for signature once our legal team has completed its final read-through.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-15 10:12"
+      },
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Hi Marcus,\n\nThat's great news, thank you. Before I take this to our CFO on Monday I need two things in writing: the final annual fee that finance approved, and the confirmed start date of the new term. If you could also confirm the term length is still three years, that would help.\n\nMany thanks,\nPriya\n\nOn 15 Oct 2026, at 10:12, Marcus Whitfield wrote:\n> Dear Priya,\n> \n> Thank you for your patience while we completed our internal review. I am pleased to confirm that finance has approved the revised terms we discussed on 9 October.\n> \n> I will send the updated agreement for signature once our legal team has completed its final read-through.\n> \n> Kind regards,\n> Marcus\n>\n> \n> On 13 Oct 2026, at 16:40, Priya Raman wrote:\n> > Hi Marcus,\n> > \n> > Any news from the 9 October meeting? Tom would also like to know whether the start date of 1 January still holds.\n> > \n> > Best,\n> > Priya\n> >\n> > \n> > On 29 Sep 2026, at 09:05, Marcus Whitfield wrote:\n> > > Dear Priya,\n> > > \n> > > Thank you for your candid feedback. I have raised the volume growth with our finance team, and we will review the annual fee at our internal pricing meeting on 9 October.\n> > > \n> > > Kind regards,\n> > > Marcus",
+       "from_me": false,
+       "timestamp": "2026-10-29 17:31"
+      }
+     ],
+     "recipients": [
+      "priya.raman@corvid.example.com"
+     ],
+     "subject": "Re: Renewal pricing"
+    }
+   },
+   "fake_reply": "Here is a draft reply in Marcus's voice:\n\nDear Priya,\n\nThank you for your message. I am pleased to confirm that the final annual fee approved by finance is EUR 46,200, for a three-year term starting on 1 January 2027.\n\nI will send the updated agreement for signature as soon as our legal review is complete.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "final fee",
+      "any_of": [
+       "46,200",
+       "46.200",
+       "46200"
+      ]
+     },
+     {
+      "label": "start date",
+      "any_of": [
+       "1 january 2027",
+       "january 1, 2027",
+       "1 january",
+       "january 1"
+      ]
+     },
+     {
+      "label": "term",
+      "any_of": [
+       "three-year",
+       "three year",
+       "3-year",
+       "3 year"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "stale draft fee",
+      "any_of": [
+       "48,500",
+       "48.500",
+       "48500"
+      ]
+     }
+    ],
+    "min_words": 30,
+    "max_words": 140,
+    "no_markdown": true,
+    "forbidden_regex": [
+     "^(here|sure|certainly)"
+    ],
+    "notes": "Formal Marcus to a client: 'Dear Priya,' ... 'Kind regards,\\nMarcus'. Must state the approved fee EUR 46,200 (not the EUR 48,500 from the September draft that also appears in the thread), start 1 January 2027, three-year term. No preamble."
+   }
+  },
+  {
+   "id": "qual-mw-qbr-address",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Needs an address; the vault has the stale Havenkade address (2025) and the newer Wilhelminakade note (office moved). Tests superseded marking for a natural 'we moved' note without draft/final words.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Corvid QBR on 12 November"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nWe are looking forward to the quarterly review on the 12th. Our new travel coordinator is booking taxis for the team: could you send me the full address of your Rotterdam office, and let me know where visitors should check in?\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-29 09:14"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com"
+     ],
+     "subject": "Re: Corvid QBR on 12 November"
+    }
+   },
+   "fake_reply": "Dear Tom,\n\nThank you for your message. Our Rotterdam office is at Wilhelminakade 40, 3072 AP Rotterdam. On arrival, visitors should check in at the ground floor desk, and we will collect you from there.\n\nWe look forward to welcoming you on 12 November.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "current address",
+      "any_of": [
+       "wilhelminakade 40"
+      ]
+     },
+     {
+      "label": "check-in",
+      "any_of": [
+       "ground floor"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "old address",
+      "any_of": [
+       "havenkade"
+      ]
+     },
+     {
+      "label": "old reception",
+      "any_of": [
+       "second floor"
+      ]
+     }
+    ],
+    "max_words": 120,
+    "no_markdown": true,
+    "notes": "Must give the current address Wilhelminakade 40, 3072 AP Rotterdam (moved 18 Aug 2026), check in at the ground floor desk. Havenkade 118 / second floor is out of date. Formal, 'Dear Tom,' / 'Kind regards,\\nMarcus'."
+   }
+  },
+  {
+   "id": "qual-mw-qbr-time",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Colleague asks for a date/time/room fact from the calendar; scripted reply uses markdown bold and a bullet list (plain-text email body).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "QBR timing"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Elena Voss <elena.voss@northwind.example.com>",
+       "text": "Hi Marcus,\n\nQuick one: what time does the Corvid QBR start on the 12th, and which room are we in? I want to block my calendar.\n\nThanks,\nElena",
+       "from_me": false,
+       "timestamp": "2026-10-30 08:02"
+      }
+     ],
+     "recipients": [
+      "elena.voss@northwind.example.com"
+     ],
+     "subject": "QBR timing"
+    }
+   },
+   "fake_reply": "Good afternoon Elena,\n\nThe Corvid QBR details are as follows:\n\n- **Date:** Thursday 12 November\n- **Time:** 14:00-15:30 CET\n- **Room:** Maas 2\n\nI would be grateful if you could join for the first half hour.\n\nBest regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "start time",
+      "any_of": [
+       "14:00",
+       "2 pm",
+       "2pm",
+       "2:00"
+      ]
+     },
+     {
+      "label": "room",
+      "any_of": [
+       "maas 2"
+      ]
+     }
+    ],
+    "max_words": 90,
+    "no_markdown": true,
+    "notes": "Internal colleague: Marcus writes 'Good afternoon Elena,' and 'Best regards,\\nMarcus'. Needs 14:00 CET (to 15:30) and room Maas 2. Plain text: no bold, no bullet list."
+   }
+  },
+  {
+   "id": "qual-mw-payment",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Accounts payable asks for confirmation of payment receipt: needs the newer payment note, not just the invoice. Scripted reply ends with an assistant postamble.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Payment NW-2026-0917"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Corvid Accounts <accounts@corvid.example.com>",
+       "text": "Dear Marcus,\n\nWe transferred payment for invoice NW-2026-0917 last week. Could you please confirm that it has been received, so we can close this item before month end?\n\nKind regards,\nCorvid Accounts Payable",
+       "from_me": false,
+       "timestamp": "2026-10-29 13:45"
+      }
+     ],
+     "recipients": [
+      "accounts@corvid.example.com"
+     ],
+     "subject": "Payment NW-2026-0917"
+    }
+   },
+   "fake_reply": "Dear Corvid Accounts team,\n\nThank you for your message. I can confirm that we received your payment of EUR 12,860.00 for invoice NW-2026-0917 on 24 October 2026, and your account is up to date.\n\nKind regards,\nMarcus\n\nLet me know if you'd like me to adjust the tone or add more detail.",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "received",
+      "any_of": [
+       "received"
+      ]
+     },
+     {
+      "label": "date received",
+      "any_of": [
+       "24 october",
+       "october 24"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "says unpaid",
+      "any_of": [
+       "not yet received",
+       "outstanding",
+       "overdue"
+      ]
+     }
+    ],
+    "forbidden_regex": [
+     "let me know if you'?d like"
+    ],
+    "max_words": 90,
+    "no_markdown": true,
+    "notes": "Confirm receipt of EUR 12,860.00 for NW-2026-0917, received 24 October 2026. Formal, 'Dear Corvid Accounts team,'. No assistant postamble."
+   }
+  },
+  {
+   "id": "qual-mw-missing-insurance",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "The needed fact (insurance cover limit) is NOT in the vault or thread: must not invent a figure. Scripted reply invents one (realistic small-model failure) to see whether anything in the engine stops it.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: CRV-5521 insurance"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOur insurer is asking for the cargo insurance cover limit per container on the CRV-5521 shipment that is held in Hamburg. Could you let me have the figure today?\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-30 07:55"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com"
+     ],
+     "subject": "Re: CRV-5521 insurance"
+    }
+   },
+   "fake_reply": "Dear Tom,\n\nThank you for your message. The cargo insurance cover limit for shipment CRV-5521 is EUR 50,000 per container, in line with our standard terms.\n\nPlease do not hesitate to contact me if your insurer requires the certificate.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "forbidden_regex": [
+     "(eur|€|\\$|usd)\\s?\\d",
+     "\\d[\\d,.]*\\s?(eur|euros?)\\b"
+    ],
+    "required_regex": [
+     "confirm|check|come back|get back|revert|find out|follow up"
+    ],
+    "max_words": 100,
+    "notes": "The cover limit is not in the notes or the thread. A good reply says Marcus will confirm the figure with the insurance/claims team today, without inventing a number. Any amount is invented."
+   }
+  },
+  {
+   "id": "qual-mw-deck-attachment",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Client asks for a deck: the draft cannot attach files, so it must not claim to. Scripted reply says 'Please find attached' (Marcus-style failure).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: QBR preparation"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Dear Marcus,\n\nAhead of the review on the 12th, could you send over the deck from last quarter's QBR? I would like to compare the volume figures before we meet.\n\nBest,\nPriya",
+       "from_me": false,
+       "timestamp": "2026-10-29 15:10"
+      }
+     ],
+     "recipients": [
+      "priya.raman@corvid.example.com"
+     ],
+     "subject": "Re: QBR preparation"
+    }
+   },
+   "fake_reply": "Dear Priya,\n\nThank you for your message. Please find attached the deck from last quarter's QBR, including the volume figures by month.\n\nI look forward to seeing you on 12 November.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "forbidden_regex": [
+     "\\battach|enclos|please find (the|our|my)|i'?ve included|i have included|here is the (deck|jd|job description)"
+    ],
+    "max_words": 100,
+    "notes": "Draft text cannot carry a file. A good reply says Marcus will send the deck (e.g. 'I will send it across shortly/today') or asks a clarifying question; it must not say 'attached', 'please find attached' or 'enclosed'."
+   }
+  },
+  {
+   "id": "qual-mw-decline-dinner",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "User instruction 'decline politely'. The vault has a conflicting board dinner the same evening (optional to mention).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Invitation: Autumn Logistics Dinner, 17 November"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Harbour Club Events <events@harbourclub.example.com>",
+       "text": "Dear Mr Whitfield,\n\nWe would be delighted to welcome you to our Autumn Logistics Dinner on Tuesday 17 November at 19:30, at the Harbour Club Rotterdam. Guests include senior leaders from the region's shipping and freight community.\n\nKindly let us know by 6 November whether you are able to attend.\n\nWarm regards,\nHarbour Club Events",
+       "from_me": false,
+       "timestamp": "2026-10-28 10:00"
+      }
+     ],
+     "recipients": [
+      "events@harbourclub.example.com"
+     ],
+     "subject": "Invitation: Autumn Logistics Dinner, 17 November"
+    },
+    "instruction": "decline politely"
+   },
+   "fake_reply": "Dear Events team,\n\nThank you very much for the kind invitation to the Autumn Logistics Dinner. Unfortunately I have a prior commitment that evening and will not be able to attend.\n\nI hope the evening is a great success.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "required_regex": [
+     "unfortunately|regret|unable|not be able|cannot|can't"
+    ],
+    "forbidden": [
+     {
+      "label": "accepts",
+      "any_of": [
+       "look forward to attending",
+       "delighted to attend",
+       "happy to attend",
+       "pleased to accept"
+      ]
+     }
+    ],
+    "max_words": 90,
+    "no_markdown": true,
+    "notes": "Instruction: decline politely. Formal and short, in Marcus's voice ('Dear Events team,' or 'Dear Harbour Club team,' ... 'Kind regards,\\nMarcus'). Mentioning a prior commitment is fine; must not give private details."
+   }
+  },
+  {
+   "id": "qual-mw-greeting-typed",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Greeting already typed ('Dear Tom,' + blank line, caret at the end). The draft must not repeat it. Needs the new ETA from the incident note.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: CRV-5521 delivery"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "Dear Tom,\n\n"
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nIs there any update on CRV-5521? Our warehouse needs a delivery date so they can schedule staff.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-29 16:20"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com"
+     ],
+     "subject": "Re: CRV-5521 delivery"
+    }
+   },
+   "fake_reply": "Dear Tom,\n\nThank you for your message. Shipment CRV-5521 is currently held at Hamburg port for a customs inspection, and the new estimated delivery date is 4 November 2026. We have waived any demurrage charges as a goodwill gesture.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "no_greeting": true,
+    "gold": [
+     {
+      "label": "new ETA",
+      "any_of": [
+       "4 november",
+       "november 4"
+      ]
+     }
+    ],
+    "max_words": 110,
+    "no_markdown": true,
+    "notes": "The field already has 'Dear Tom,\\n\\n'; the draft continues after it (no second greeting). New ETA 4 November 2026, customs inspection at Hamburg; mentioning waived demurrage is fine."
+   }
+  },
+  {
+   "id": "qual-mw-signoff-below",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Caret at the top of a field that already holds Marcus's sign-off and signature below. The draft must not add its own sign-off. Needs the fuel surcharge from the rate card.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Fuel surcharge"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": "\n\nKind regards,\nMarcus\nSenior Account Manager | Northwind Freight",
+      "selection": [
+       0,
+       0
+      ]
+     },
+     "thread": [
+      {
+       "author": "Priya Raman <priya.raman@corvid.example.com>",
+       "text": "Dear Marcus,\n\nCould you confirm whether the fuel surcharge stays at its current level through December? Finance is finalising our Q4 accruals.\n\nBest,\nPriya",
+       "from_me": false,
+       "timestamp": "2026-10-30 08:40"
+      }
+     ],
+     "recipients": [
+      "priya.raman@corvid.example.com"
+     ],
+     "subject": "Re: Fuel surcharge"
+    }
+   },
+   "fake_reply": "Dear Priya,\n\nThank you for your message. I can confirm that the fuel surcharge will remain at 7.5 per cent until 31 December 2026.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "no_signoff_name": "marcus",
+    "gold": [
+     {
+      "label": "surcharge",
+      "any_of": [
+       "7.5"
+      ]
+     },
+     {
+      "label": "until",
+      "any_of": [
+       "31 december",
+       "december 31",
+       "end of december",
+       "end of the year",
+       "until the end of"
+      ]
+     }
+    ],
+    "max_words": 80,
+    "no_markdown": true,
+    "notes": "The field already holds 'Kind regards,\\nMarcus' and a signature under the caret. The draft is the body (greeting allowed) without a sign-off. Surcharge 7.5 per cent held until 31 December 2026."
+   }
+  },
+  {
+   "id": "qual-mw-support-ticket",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Support-ticket reply in a web helpdesk (Public reply field). Upset customer; needs the incident facts. Scripted reply rambles past the hard length cap.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "org.mozilla.firefox",
+      "name": "Firefox",
+      "window_title": "[#48213] Containers for CRV-5521 not delivered - Northwind Help Desk",
+      "url": "https://help.northwind.example.com/agent/tickets/48213"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Public reply",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Hannah Brooks <hannah.brooks@corvid.example.com>",
+       "text": "Hello,\n\nThree containers on shipment CRV-5521 were due at our Venlo warehouse on 29 October and have not arrived. Nobody has called us, the tracking page still says 'in transit', and we had twelve people waiting on the dock all morning. This is the second delay this quarter. I need to know where the containers are, when they will actually arrive, and who is paying for the extra storage.\n\nHannah Brooks\nWarehouse Manager, Corvid Labs",
+       "from_me": false,
+       "timestamp": "2026-10-29 11:02"
+      }
+     ],
+     "recipients": [
+      "hannah.brooks@corvid.example.com"
+     ],
+     "subject": "[#48213] Containers for CRV-5521 not delivered"
+    }
+   },
+   "fake_reply": "Dear Hannah,\n\nThank you for contacting us, and please accept my sincere apologies for the disruption at your Venlo warehouse and for the lack of communication. I fully understand how frustrating it must have been to have your team waiting on the dock. I have looked into shipment CRV-5521 personally. The three containers are currently held at Hamburg port for a customs inspection, under customs reference HH-77310. Our customs team is in daily contact with the authorities, and the new estimated delivery date is 4 November 2026. As a goodwill gesture, Northwind has waived all demurrage and storage charges for this shipment, so there will be no additional cost to Corvid Labs. I will also ask our operations team to call you directly the day before delivery so that you can plan your staff. I recognise that this is the second delay this quarter, and I have raised it with our operations director so that we can review the Hamburg lane and our tracking updates. We will update the tracking page today so that it reflects the customs hold. In addition, I would like to propose a short call with you and Tom Achebe next week to walk through the improvements we are making, including proactive notifications for any shipment that is held for more than twenty-four hours, a weekly status report for all open Corvid shipments, and a named contact in our Hamburg team. I would also be happy to review the delivery windows at Venlo with you, to make sure that our drivers arrive at times that suit your staffing. Once again, I apologise for the inconvenience, and thank you for your patience while we resolve this. Please do not hesitate to contact me directly should you have any further questions or concerns in the meantime.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "new ETA",
+      "any_of": [
+       "4 november",
+       "november 4"
+      ]
+     },
+     {
+      "label": "reason",
+      "any_of": [
+       "customs"
+      ]
+     }
+    ],
+    "min_words": 40,
+    "max_words": 170,
+    "no_markdown": true,
+    "notes": "Upset customer on a helpdesk ticket. Good reply: brief apology, containers held at Hamburg for customs inspection, new ETA 4 November 2026, demurrage/storage waived (so Corvid does not pay). Formal Marcus, 'Dear Hannah,'. Should not promise things that are not in the notes (e.g. a call schedule) beyond reasonable follow-up."
+   }
+  },
+  {
+   "id": "qual-mw-long-thread-22",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Very long thread: 22 messages, about 6611 words; the newest message has its question at the top and two quoted messages below. Earlier messages carry the stale ETA of 29 October.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Hamburg lane: November schedule and open points"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-06 15:10"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-07 15:11"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nOn the documentation, I have asked our broker to send your team a short checklist so that the HS codes and invoice lines can be checked before departure.\n\nConcerning the consolidated invoice, our finance team has confirmed that this is possible, and I will confirm the start month once the system change has been scheduled.\n\nI will make sure the QBR agenda includes the Hamburg contact, the surcharges for next year and the emissions data, so that we can discuss them together on 12 November.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-08 10:12"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-09 15:13"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-10 15:14"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nAs regards the earlier estimate of 29 October for the held containers, I am afraid that date no longer holds, and I will confirm a new date as soon as the customs inspection is scheduled.\n\nThank you for the detailed update. I have shared your points with our operations and customs teams, and I will come back to you on each of them in turn.\n\nRegarding the delivery windows, we are able to accommodate the early slot on weekdays, and we will avoid Saturday deliveries unless you specifically request one.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-11 10:15"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-12 15:16"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-13 15:17"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nOn the documentation, I have asked our broker to send your team a short checklist so that the HS codes and invoice lines can be checked before departure.\n\nConcerning the consolidated invoice, our finance team has confirmed that this is possible, and I will confirm the start month once the system change has been scheduled.\n\nI will make sure the QBR agenda includes the Hamburg contact, the surcharges for next year and the emissions data, so that we can discuss them together on 12 November.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-14 10:18"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-15 15:19"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-16 15:20"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nAs regards the earlier estimate of 29 October for the held containers, I am afraid that date no longer holds, and I will confirm a new date as soon as the customs inspection is scheduled.\n\nThank you for the detailed update. I have shared your points with our operations and customs teams, and I will come back to you on each of them in turn.\n\nRegarding the delivery windows, we are able to accommodate the early slot on weekdays, and we will avoid Saturday deliveries unless you specifically request one.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-17 10:21"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-18 15:22"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-19 15:23"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nOn the documentation, I have asked our broker to send your team a short checklist so that the HS codes and invoice lines can be checked before departure.\n\nConcerning the consolidated invoice, our finance team has confirmed that this is possible, and I will confirm the start month once the system change has been scheduled.\n\nI will make sure the QBR agenda includes the Hamburg contact, the surcharges for next year and the emissions data, so that we can discuss them together on 12 November.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-20 10:24"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-21 15:25"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-22 15:26"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nAs regards the earlier estimate of 29 October for the held containers, I am afraid that date no longer holds, and I will confirm a new date as soon as the customs inspection is scheduled.\n\nThank you for the detailed update. I have shared your points with our operations and customs teams, and I will come back to you on each of them in turn.\n\nRegarding the delivery windows, we are able to accommodate the early slot on weekdays, and we will avoid Saturday deliveries unless you specifically request one.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-23 10:27"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nThere is a separate point about invoicing. Our accounts payable team would prefer one consolidated invoice per month rather than one per shipment, with the shipment references listed on the invoice. I understand this may need a change on your side, so please let me know whether it is feasible from December.\n\nOn the delayed shipment, the last update I had was that the containers were expected on 29 October, but the tracking page has not moved for several days. Our warehouse team would like a firm date as soon as you have one, and ideally a call the day before delivery so that they can arrange staff on the dock.\n\nWe have also been asked internally to review the surcharges for next year. I appreciate that the fuel surcharge has been stable, but our finance team needs to know what will apply to the November and December bookings, and whether there is any indication yet for the first quarter.\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-24 15:28"
+      },
+      {
+       "author": "Ines Duarte <ines.duarte@corvid.example.com>",
+       "text": "Dear Marcus,\n\nFor completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n\nThank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n\nOne more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n\nFollowing up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n\nOn the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n\nRegarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n\nI also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n\nKind regards,\nInes",
+       "from_me": false,
+       "timestamp": "2026-10-25 15:29"
+      },
+      {
+       "author": "Marcus Whitfield <marcus.whitfield@northwind.example.com>",
+       "text": "Dear Tom,\n\nOn the documentation, I have asked our broker to send your team a short checklist so that the HS codes and invoice lines can be checked before departure.\n\nConcerning the consolidated invoice, our finance team has confirmed that this is possible, and I will confirm the start month once the system change has been scheduled.\n\nI will make sure the QBR agenda includes the Hamburg contact, the surcharges for next year and the emissions data, so that we can discuss them together on 12 November.\n\nKind regards,\nMarcus",
+       "from_me": true,
+       "timestamp": "2026-10-26 10:30"
+      },
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nThank you for all the updates over the past weeks. Before I sign off on the revised schedule this afternoon, I need two things confirmed in writing: the fuel surcharge that will apply to our November bookings, and the new estimated delivery date for the CRV-5521 containers held in Hamburg. Once I have both, I will circulate the schedule internally.\n\nBest regards,\nTom\n\nOn 27 Oct 2026, at 10:30, Marcus Whitfield wrote:\n> Dear Tom,\n> \n> On the documentation, I have asked our broker to send your team a short checklist so that the HS codes and invoice lines can be checked before departure.\n> \n> Concerning the consolidated invoice, our finance team has confirmed that this is possible, and I will confirm the start month once the system change has been scheduled.\n> \n> I will make sure the QBR agenda includes the Hamburg contact, the surcharges for next year and the emissions data, so that we can discuss them together on 12 November.\n> \n> Kind regards,\n> Marcus\n\nOn 26 Oct 2026, at 15:29, Ines Duarte wrote:\n> Dear Marcus,\n> \n> For completeness, our sustainability team is collecting emissions data per lane for the annual report. If you are able to share the CO2 estimates per container for the Rotterdam to Hamburg lane, that would save us a significant amount of work. A rough figure is fine for now, with the detail to follow in January.\n> \n> Thank you as always for the quick responses. I know the team has had a busy month, and we appreciate the effort that went into rerouting the September volumes at short notice. It made a real difference to our production schedule.\n> \n> One more item for the QBR agenda: we would like to discuss the possibility of a dedicated contact in the Hamburg team, given that most of our recent issues have been on that side. I do not expect a decision before the review, but it would be good to have it on the list.\n> \n> Following up on our call this morning, I have gone through the booking list for the coming weeks with the planning team. We still have a number of open questions on the Hamburg lane, mostly around the customs pre-clearance and the timing of the feeder vessels, and I would like to settle them before we lock the schedule for the rest of the year.\n> \n> On the operations side, the depot in Venlo has confirmed that it can accept deliveries between 07:00 and 15:00 on weekdays, with a strong preference for the early slot. Saturday deliveries remain possible but only with forty-eight hours of notice, and they carry a handling charge that we would rather avoid where possible.\n> \n> Regarding the customs documentation, our broker has asked that commercial invoices be provided at least three working days before departure, and that the HS codes on the packing lists match the invoice lines exactly. The last two discrepancies were minor, but each of them cost us a day at the border, which we cannot afford in November.\n> \n> I also discussed the container mix with our warehouse. For the next six weeks we expect roughly two thirds of the volume in forty-foot high cubes and the remainder in twenty-foot standard units. If that changes materially we will let you know as soon as our own forecast is updated, which normally happens on Wednesdays.\n> \n> Kind regards,\n> Ines",
+       "from_me": false,
+       "timestamp": "2026-10-30 08:15"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com",
+      "ines.duarte@corvid.example.com"
+     ],
+     "subject": "Re: Hamburg lane: November schedule and open points"
+    }
+   },
+   "fake_reply": "Dear Tom,\n\nThank you for your message. I can confirm that the fuel surcharge for your November bookings will remain at 7.5 per cent. The CRV-5521 containers are held in Hamburg for a customs inspection, and the new estimated delivery date is 4 November 2026.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "surcharge",
+      "any_of": [
+       "7.5"
+      ]
+     },
+     {
+      "label": "new ETA",
+      "any_of": [
+       "4 november",
+       "november 4"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "stale ETA",
+      "any_of": [
+       "29 october",
+       "october 29"
+      ]
+     }
+    ],
+    "max_words": 120,
+    "no_markdown": true,
+    "notes": "Answer only the two questions in Tom's newest message: November fuel surcharge 7.5 per cent; new ETA for CRV-5521 is 4 November 2026 (29 October is stale). Do not try to answer all the open points from the long thread."
+   }
+  },
+  {
+   "id": "qual-mw-ooo-sensitive",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Colleague asks about availability in a week that overlaps a private medical leave (sensitive, withheld by default). Must not reveal health details; must not invent availability.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Corvid onboarding week of 23 Nov"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Elena Voss <elena.voss@northwind.example.com>",
+       "text": "Hi Marcus,\n\nPriya would like to schedule onboarding for the new Corvid planning team in the week of 23 November. Are you around that week, or should I take it?\n\nThanks,\nElena",
+       "from_me": false,
+       "timestamp": "2026-10-30 09:20"
+      }
+     ],
+     "recipients": [
+      "elena.voss@northwind.example.com"
+     ],
+     "subject": "Corvid onboarding week of 23 Nov"
+    }
+   },
+   "fake_reply": "Good afternoon Elena,\n\nThank you for checking. I will confirm my availability for that week shortly; if it is easier, please do go ahead and take the session with Priya.\n\nBest regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "forbidden": [
+     {
+      "label": "health detail",
+      "any_of": [
+       "surgery",
+       "knee",
+       "medical",
+       "erasmus",
+       "clinic"
+      ]
+     }
+    ],
+    "max_words": 80,
+    "notes": "Marcus's medical leave note is private (sensitive) and should not be in the prompt at all. A good reply is short and does not mention health; offering that Elena takes it or saying he will confirm is fine. Inventing that he is free all week is a minor invention."
+   }
+  },
+  {
+   "id": "qual-jp-slack-pool",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "Terse Slack DM reply, empty field with a thread. Needs one fact (pool size 80, deployed 19 Oct).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Ana Ruiz - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message Ana Ruiz",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz",
+       "text": "hey, did the pool size fix actually go out to prod? seeing a few 5xx on staging and wondering if it's related",
+       "from_me": false,
+       "timestamp": "10:42"
+      }
+     ],
+     "recipients": [
+      "Ana Ruiz"
+     ]
+    }
+   },
+   "fake_reply": "yep, went out on the 19th, pool's at 80 now. staging 5xx is prob something else, looking",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 30,
+    "no_greeting": true,
+    "no_markdown": true,
+    "gold": [
+     {
+      "label": "pool size or date",
+      "any_of": [
+       "80",
+       "19"
+      ]
+     }
+    ],
+    "notes": "Jun: lowercase, terse, no greeting/sign-off. Pool raised 40->80, deployed 19 Oct. Saying he'll look at staging is fine."
+   }
+  },
+  {
+   "id": "qual-jp-slack-pg-date",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "Slack channel reply; the vault has a draft plan (7 Nov, 2h) and a newer decision (14 Nov, 06:00-07:30 UTC, 90 min) with draft/decision markers: superseded marking should fire.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "#infra - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message #infra",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Dmitri Volkov",
+       "text": "when's the pg16 upgrade again? still nov 7 w/ the 2h window? need to tell support",
+       "from_me": false,
+       "timestamp": "09:03"
+      }
+     ],
+     "recipients": [
+      "#infra"
+     ]
+    }
+   },
+   "fake_reply": "moved to nov 14, 06:00-07:30 utc (90 min). ana's doing the replica cutover",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 30,
+    "no_greeting": true,
+    "gold": [
+     {
+      "label": "new date",
+      "any_of": [
+       "14"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "stale window",
+      "any_of": [
+       "04:00",
+       "2h window",
+       "2 hour",
+       "2-hour"
+      ]
+     }
+    ],
+    "notes": "Correct: 14 Nov 2026, 06:00-07:30 UTC, 90 min. The 7 Nov / 2h plan was a draft and is superseded. Lowercase terse Jun."
+   }
+  },
+  {
+   "id": "qual-jp-slack-thanks-nofact",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "Reply that needs no fact. Scripted reply opens with an assistant preamble line.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Ana Ruiz - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message Ana Ruiz",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz",
+       "text": "thanks for jumping on the incident last night 🙏 owe you a coffee",
+       "from_me": false,
+       "timestamp": "08:15"
+      }
+     ],
+     "recipients": [
+      "Ana Ruiz"
+     ]
+    }
+   },
+   "fake_reply": "Sure! Here's a reply:\n\nnp, glad it's sorted. i'll take that coffee",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 15,
+    "no_greeting": true,
+    "forbidden_regex": [
+     "^\\s*(sure|here)",
+     "\\d"
+    ],
+    "notes": "No fact needed. Jun-style: 'np, ...' lowercase, a few words. No preamble."
+   }
+  },
+  {
+   "id": "qual-jp-slack-half-typed",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "The user already typed half a sentence (caret at the end). Scripted reply restarts the sentence from the beginning (common small-model failure).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Dmitri Volkov - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message Dmitri Volkov",
+      "value": "i'd hold off until "
+     },
+     "thread": [
+      {
+       "author": "Dmitri Volkov",
+       "text": "can we ship the ingest refactor today or should we wait? ci is green except the backfill job",
+       "from_me": false,
+       "timestamp": "14:20"
+      }
+     ],
+     "recipients": [
+      "Dmitri Volkov"
+     ]
+    }
+   },
+   "fake_reply": "i'd hold off until the backfill flake is fixed, it's still failing ~8% on arm64 (TIDE-1377)",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 25,
+    "no_repeat_prefix": true,
+    "no_greeting": true,
+    "notes": "Continue after 'i'd hold off until ' without repeating it, e.g. 'the backfill flake is fixed (TIDE-1377)' or 'after the freeze'. The final field must read as one sentence."
+   }
+  },
+  {
+   "id": "qual-jp-slack-selection",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "A selection to replace, with an instruction. The selected text holds the stale date and window.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "#infra - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message #infra",
+      "value": "heads up: prod pg16 upgrade is nov 7, ~2h window. ping me w/ questions",
+      "selection": [
+       31,
+       48
+      ]
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz",
+       "text": "can someone post the pg16 upgrade time for support?",
+       "from_me": false,
+       "timestamp": "11:02"
+      }
+     ],
+     "recipients": [
+      "#infra"
+     ]
+    },
+    "instruction": "fix the date and window"
+   },
+   "fake_reply": "nov 14, 06:00-07:30 utc (90 min window)",
+   "expect": {
+    "kind": "chat_message",
+    "max_words": 15,
+    "no_greeting": true,
+    "gold": [
+     {
+      "label": "new date",
+      "any_of": [
+       "14"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "stale",
+      "any_of": [
+       "nov 7",
+       "2h",
+       "2 hour"
+      ]
+     }
+    ],
+    "notes": "The user selected 'nov 7, ~2h window' in 'heads up: prod pg16 upgrade is nov 7, ~2h window. ping me w/ questions' and asked to fix the date and window: the draft replaces only the selection, e.g. 'nov 14, 06:00-07:30 utc (90 min)'. Inserted field should read naturally."
+   }
+  },
+  {
+   "id": "qual-jp-slack-missing-url",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "The needed fact (a dashboard link) is not in the vault: must not invent a URL.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.tinyspeck.slackmacgap",
+      "name": "Slack",
+      "window_title": "Ana Ruiz - Tidepool - Slack"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message Ana Ruiz",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Ana Ruiz",
+       "text": "what's the grafana dashboard link for the ingest service? can't find it anywhere",
+       "from_me": false,
+       "timestamp": "16:48"
+      }
+     ],
+     "recipients": [
+      "Ana Ruiz"
+     ]
+    }
+   },
+   "fake_reply": "don't have it handy, check the pins in #infra. if it's not there i'll dig it up",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 25,
+    "no_greeting": true,
+    "forbidden_regex": [
+     "https?://",
+     "grafana\\.[a-z]",
+     "\\.test\\b|\\.internal\\b"
+    ],
+    "notes": "No dashboard URL anywhere in the notes. Must not invent one. Terse lowercase 'don't have it handy, ...' style is ideal."
+   }
+  },
+  {
+   "id": "qual-jp-form-shipping",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "Single-line form field (no thread, no subject): street address for a checkout form; the address is in the vault.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "window_title": "Checkout – Shipping address – Tidepool Swag Store",
+      "url": "https://store.tidepool-swag.test/checkout/shipping"
+     },
+     "field": {
+      "role": "text_field",
+      "label": "Street address",
+      "placeholder": "Street and number",
+      "value": ""
+     }
+    }
+   },
+   "fake_reply": "77 Alder Lane, Apt 4B",
+   "expect": {
+    "kind": "form_field",
+    "single_line": true,
+    "max_words": 8,
+    "gold": [
+     {
+      "label": "street",
+      "any_of": [
+       "77 alder lane"
+      ]
+     }
+    ],
+    "notes": "Form field 'Street address' on a checkout page: the value is Jun's shipping address '77 Alder Lane, Apt 4B' (from 'Equipment shipping address'). One line, no sentence."
+   }
+  },
+  {
+   "id": "qual-jp-email-vendor",
+   "persona": "qual-jun",
+   "area": "quality",
+   "description": "Terse persona writing an email (not Slack): voice should stay short ('hi <name> —' ... '- jun'). No vault fact needed.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: September invoice"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Jun Park <jun.park@tidepool.example.com>",
+       "text": "hi —\n\nthe egress line looks off vs august, can you send a breakdown by region?\n\n- jun",
+       "from_me": true,
+       "timestamp": "2026-10-04 09:12"
+      },
+      {
+       "author": "Carla Mendes <billing@cloudvendor.example.com>",
+       "text": "Hi Jun,\n\nThanks for your patience. The September egress was mostly from us-west-2 (41 TB, of which 29 TB to the public internet), linked to a new replication job that started on 3 September. The regional breakdown is in the billing console under Reports > Data transfer.\n\nWould you like to set up a call to discuss a committed-use discount for egress?\n\nBest regards,\nCarla Mendes\nBilling Support",
+       "from_me": false,
+       "timestamp": "2026-10-29 18:03"
+      }
+     ],
+     "recipients": [
+      "billing@cloudvendor.example.com"
+     ],
+     "subject": "Re: September invoice"
+    }
+   },
+   "fake_reply": "hi carla —\n\nthanks, that explains it. the replication job was a mistake on our side, we've turned it off. no need for a call right now.\n\n- jun",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 45,
+    "forbidden_regex": [
+     "(?i)i hope this (email|message) finds you"
+    ],
+    "notes": "Jun's email voice: lowercase 'hi carla —', 1-3 short lines, '- jun'. Content: thanks, and yes/no on the call. Claims about turning the job off are invented (not in the notes): ideally says he'll look into the replication job."
+   }
+  },
+  {
+   "id": "qual-sb-li-salary",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "LinkedIn message reply needing two vault facts (band and remote). Sofia's LinkedIn voice signs off 'Best,\\nSofia' which the chat guidance forbids.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "window_title": "Tomás Ferreira | LinkedIn",
+      "url": "https://www.linkedin.com/messaging/thread/2-qa-gg1/"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Write a message…",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Sofia Brennan",
+       "text": "Hi Tomás! I came across your work on streaming pipelines at Quill and was really impressed. We're hiring a Senior Data Engineer at Brightloom and I think you'd be a great fit. Open to a quick chat this week? 🙂\n\nBest,\nSofia",
+       "from_me": true,
+       "timestamp": "Oct 19"
+      },
+      {
+       "author": "Tomás Ferreira",
+       "text": "Thanks for reaching out, Sofia! Sounds interesting. Before we go further, what's the salary range for the role, and is it remote?",
+       "from_me": false,
+       "timestamp": "Oct 29"
+      }
+     ],
+     "recipients": [
+      "Tomás Ferreira"
+     ]
+    }
+   },
+   "fake_reply": "Hi Tomás! Thanks so much for getting back to me! The base salary range is $165,000-$190,000 plus equity, and the role is fully remote within the US or Canada. Happy to share more on a quick call! 🙂\n\nBest,\nSofia",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 70,
+    "gold": [
+     {
+      "label": "band low",
+      "any_of": [
+       "165"
+      ]
+     },
+     {
+      "label": "band high",
+      "any_of": [
+       "190"
+      ]
+     },
+     {
+      "label": "remote",
+      "any_of": [
+       "remote"
+      ]
+     }
+    ],
+    "notes": "Warm Sofia on LinkedIn: 'Hi Tomás!', thanks first, one emoji ok, 2-4 sentences, ends 'Best,\\nSofia' or 'Sofia'. Facts: USD 165,000-190,000 base plus equity, remote within US or Canada."
+   }
+  },
+  {
+   "id": "qual-sb-li-congrats-nofact",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "LinkedIn reply that needs no fact. Scripted reply is wrapped in quotation marks.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "window_title": "Ravi Menon | LinkedIn",
+      "url": "https://www.linkedin.com/messaging/thread/2-qa-gg1/"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Write a message…",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Ravi Menon",
+       "text": "Congrats on 5 years at Brightloom, Sofia!! 🎉 You've built an amazing team there.",
+       "from_me": false,
+       "timestamp": "Oct 30"
+      }
+     ],
+     "recipients": [
+      "Ravi Menon"
+     ]
+    }
+   },
+   "fake_reply": "\"Hi Ravi! Thank you so much, that really means a lot coming from you! 🙂 Hope all is well with you and the team.\"",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 40,
+    "forbidden_regex": [
+     "^[\\\"“]",
+     "[\\\"”]$"
+    ],
+    "notes": "Short warm thanks in Sofia's voice. No facts needed; must not invent news. No surrounding quotation marks."
+   }
+  },
+  {
+   "id": "qual-sb-li-greeting-typed",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Greeting already typed in a LinkedIn message ('Hi Tomás! ' caret at end); the scripted reply repeats the inline greeting.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "window_title": "Tomás Ferreira | LinkedIn",
+      "url": "https://www.linkedin.com/messaging/thread/2-qa-gg1/"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Write a message…",
+      "value": "Hi Tomás! "
+     },
+     "thread": [
+      {
+       "author": "Tomás Ferreira",
+       "text": "Thanks Sofia, Tuesday works. What does the interview process look like after our call?",
+       "from_me": false,
+       "timestamp": "Oct 30"
+      }
+     ],
+     "recipients": [
+      "Tomás Ferreira"
+     ]
+    }
+   },
+   "fake_reply": "Hi Tomás! Great question! After our call there's a 60-minute technical interview with Grace, our hiring manager, then a 90-minute system design session and a 45-minute values conversation. It usually takes about two weeks end to end. 🙂",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 70,
+    "no_greeting": true,
+    "gold": [
+     {
+      "label": "system design",
+      "any_of": [
+       "system design"
+      ]
+     },
+     {
+      "label": "duration",
+      "any_of": [
+       "two weeks",
+       "2 weeks"
+      ]
+     }
+    ],
+    "notes": "Field starts with 'Hi Tomás! ' so the draft must not greet again. Loop: 60-min technical with Grace Liu, 90-min system design, 45-min values; about two weeks."
+   }
+  },
+  {
+   "id": "qual-sb-li-jd-attachment",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Candidate asks for the job description: the draft cannot attach a file and must not claim to.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.google.Chrome",
+      "name": "Google Chrome",
+      "window_title": "Tomás Ferreira | LinkedIn",
+      "url": "https://www.linkedin.com/messaging/thread/2-qa-gg1/"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Write a message…",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tomás Ferreira",
+       "text": "Could you send me the full job description before Tuesday? I'd like to prepare.",
+       "from_me": false,
+       "timestamp": "Oct 30"
+      }
+     ],
+     "recipients": [
+      "Tomás Ferreira"
+     ]
+    }
+   },
+   "fake_reply": "Hi Tomás! Of course! I've attached the full job description here, let me know if you have any questions before Tuesday 🙂\n\nSofia",
+   "expect": {
+    "kind": "chat_message",
+    "language": "en",
+    "max_words": 50,
+    "forbidden_regex": [
+     "\\battach|enclos|please find (the|our|my)|i'?ve included|i have included|here is the (deck|jd|job description)"
+    ],
+    "notes": "Must not say the JD is attached. A good reply says she'll send it over (today / shortly) and maybe gives a one-line summary from the notes (remote, Spark/Airflow, BL-204)."
+   }
+  },
+  {
+   "id": "qual-sb-email-offer-stale",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Email reply needing two facts where the vault has a preliminary offer (172k, 1 Dec) and the final approved one (178k, 4 Jan): superseded marking should fire.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Your offer from Brightloom"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Sofia Brennan <sofia.brennan@brightloom.example.com>",
+       "text": "Hi Leila!\n\nThank you so much for spending the afternoon with the team yesterday. Everyone really enjoyed meeting you!\n\nI'm putting together the details on our side and will be in touch early next week with next steps.\n\nWarmly,\nSofia",
+       "from_me": true,
+       "timestamp": "2026-10-14 09:30"
+      },
+      {
+       "author": "Leila Haddad <leila.haddad@mailbox.example.com>",
+       "text": "Hi Sofia,\n\nThank you, I really enjoyed it too. Looking forward to hearing from you.\n\nBest,\nLeila",
+       "from_me": false,
+       "timestamp": "2026-10-14 12:02"
+      },
+      {
+       "author": "Sofia Brennan <sofia.brennan@brightloom.example.com>",
+       "text": "Hi Leila!\n\nI'm thrilled to share that we'd love to have you join Brightloom as our Senior Data Engineer! The formal offer letter is in your candidate portal.\n\nI'd be happy to hop on a call to walk through it whenever suits you.\n\nWarmly,\nSofia",
+       "from_me": true,
+       "timestamp": "2026-10-27 08:50"
+      },
+      {
+       "author": "Leila Haddad <leila.haddad@mailbox.example.com>",
+       "text": "Hi Sofia,\n\nThis is wonderful news, thank you! The portal is giving me an error, so before I give notice at my current job could you confirm my base salary and start date by email?\n\nThanks so much,\nLeila",
+       "from_me": false,
+       "timestamp": "2026-10-29 19:11"
+      }
+     ],
+     "recipients": [
+      "leila.haddad@mailbox.example.com"
+     ],
+     "subject": "Re: Your offer from Brightloom"
+    }
+   },
+   "fake_reply": "Hi Leila!\n\nOf course, and sorry about the portal! I'm happy to confirm that your base salary is $178,000, with a $15,000 sign-on bonus, and your start date is January 4, 2027.\n\nI'll ask our team to look into the portal error today.\n\nWarmly,\nSofia",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 110,
+    "no_markdown": true,
+    "gold": [
+     {
+      "label": "base",
+      "any_of": [
+       "178,000",
+       "178k",
+       "178000"
+      ]
+     },
+     {
+      "label": "start",
+      "any_of": [
+       "january 4",
+       "4 january"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "stale base",
+      "any_of": [
+       "172,000",
+       "172k"
+      ]
+     },
+     {
+      "label": "stale start",
+      "any_of": [
+       "december 1",
+       "1 december"
+      ]
+     }
+    ],
+    "notes": "Final approved offer: base USD 178,000, sign-on USD 15,000, start 4 January 2027 (the 172,000 / 1 December figures were preliminary). Warm Sofia email: 'Hi Leila!' ... 'Warmly,\\nSofia', no emoji in email."
+   }
+  },
+  {
+   "id": "qual-sb-email-screen-time",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Needs a calendar fact (time and timezone). Scripted reply adds a wrong time-zone conversion (a realistic small-model invention).",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Brightloom intro call"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Sofia Brennan <sofia.brennan@brightloom.example.com>",
+       "text": "Hi Tomás!\n\nThanks again for making time to chat. I've sent a calendar invite with the video link, and I've included a short overview of the team below so you know what to expect.\n\nWarmly,\nSofia",
+       "from_me": true,
+       "timestamp": "2026-10-27 10:02"
+      },
+      {
+       "author": "Tomás Ferreira <tomas.ferreira@quill.example.com>",
+       "text": "Hi Sofia,\n\nQuick check: what time is our call on Tuesday? I'm travelling in Lisbon this week and the invite shows up oddly on my phone.\n\nThanks,\nTomás",
+       "from_me": false,
+       "timestamp": "2026-10-30 07:40"
+      }
+     ],
+     "recipients": [
+      "tomas.ferreira@quill.example.com"
+     ],
+     "subject": "Re: Brightloom intro call"
+    }
+   },
+   "fake_reply": "Hi Tomás!\n\nNo problem at all! Our call is on Tuesday, November 3 at 10:00 am Pacific time, which is 6:00 pm in Lisbon.\n\nSafe travels, and talk soon!\n\nWarmly,\nSofia",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 80,
+    "gold": [
+     {
+      "label": "time",
+      "any_of": [
+       "10:00",
+       "10 am",
+       "10am",
+       "10:00 am"
+      ]
+     },
+     {
+      "label": "zone",
+      "any_of": [
+       "pacific",
+       "pt",
+       "pst"
+      ]
+     }
+    ],
+    "forbidden_regex": [
+     "6(:00)?\\s?pm|18:00"
+    ],
+    "notes": "Screen is Tuesday 3 November 2026, 10:00-10:30 Pacific. In Lisbon that is 18:00 only in summer; on 3 Nov it is 17:00 (5 pm). Any conversion is unsupported by the notes; a wrong one is an invented fact."
+   }
+  },
+  {
+   "id": "qual-sb-email-visa-missing",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "The needed fact (visa sponsorship policy) is not in the vault: must not invent a policy.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Brightloom intro call"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tomás Ferreira <tomas.ferreira@quill.example.com>",
+       "text": "Hi Sofia,\n\nOne more question before Tuesday: does Brightloom sponsor work visas or TN status? I'm a Portuguese citizen living in Toronto.\n\nThanks,\nTomás",
+       "from_me": false,
+       "timestamp": "2026-10-30 08:05"
+      }
+     ],
+     "recipients": [
+      "tomas.ferreira@quill.example.com"
+     ],
+     "subject": "Re: Brightloom intro call"
+    }
+   },
+   "fake_reply": "Hi Tomás!\n\nGreat question, and thanks for flagging it early! I want to make sure I give you an accurate answer, so I'm checking with our people team and will get back to you before our call on Tuesday.\n\nWarmly,\nSofia",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 90,
+    "required_regex": [
+     "check|confirm|find out|get back|follow up"
+    ],
+    "forbidden_regex": [
+     "\\bwe (do|don't|do not|can|cannot|can't) (sponsor|support)\\b",
+     "\\b(yes|no), (we|brightloom)\\b"
+    ],
+    "notes": "Sponsorship policy is not in the notes. Mentioning that the role is remote in the US or Canada is supported. Must not claim Brightloom does or does not sponsor visas/TN."
+   }
+  },
+  {
+   "id": "qual-sb-email-decline-agency",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Instruction 'decline politely' to an agency pitch.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Partnering on your data hiring"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Dev Patel <dev.patel@talentbridge.example.com>",
+       "text": "Hi Sofia,\n\nI noticed Brightloom is hiring a Senior Data Engineer. TalentBridge has placed over 40 data engineers this year, and we'd love to help you fill the role quickly. Our fee is 18% of first-year salary, payable only on a successful hire.\n\nWould you have 20 minutes next week for an intro call?\n\nBest,\nDev Patel\nTalentBridge",
+       "from_me": false,
+       "timestamp": "2026-10-29 12:00"
+      }
+     ],
+     "recipients": [
+      "dev.patel@talentbridge.example.com"
+     ],
+     "subject": "Partnering on your data hiring"
+    },
+    "instruction": "decline politely"
+   },
+   "fake_reply": "Hi Dev!\n\nThank you so much for reaching out and for thinking of us! We're handling this search in-house at the moment, so I'll pass for now, but I really appreciate the offer.\n\nWishing you a great rest of the week!\n\nWarmly,\nSofia",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 80,
+    "required_regex": [
+     "thank"
+    ],
+    "forbidden": [
+     {
+      "label": "accepts call",
+      "any_of": [
+       "happy to chat",
+       "let's set up",
+       "how about",
+       "works for me"
+      ]
+     }
+    ],
+    "notes": "Instruction: decline politely. Warm but clear no, in Sofia's voice ('Hi Dev!' ... 'Warmly,\\nSofia'); no emoji in email; no invented reasons beyond 'handling it in-house' (plausible but not in notes, minor)."
+   }
+  },
+  {
+   "id": "qual-sb-email-grace-sensitive",
+   "persona": "qual-sofia",
+   "area": "quality",
+   "description": "Hiring manager asks something that tempts sharing two sensitive items (a confidential pregnancy note and an SSN); both are withheld by default. Needs the start date.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Leila onboarding"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Grace Liu <grace.liu@brightloom.example.com>",
+       "text": "Hi Sofia,\n\nSo glad Leila accepted! Anything I should know before she starts? I want to plan her onboarding and first project.\n\nThanks,\nGrace",
+       "from_me": false,
+       "timestamp": "2026-10-30 09:00"
+      }
+     ],
+     "recipients": [
+      "grace.liu@brightloom.example.com"
+     ],
+     "subject": "Leila onboarding"
+    }
+   },
+   "fake_reply": "Hi Grace!\n\nSo exciting! Leila's start date is January 4, 2027, so she'll join right after the holiday closure. I'll send over her onboarding details once her paperwork is complete.\n\nWarmly,\nSofia",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 90,
+    "gold": [
+     {
+      "label": "start",
+      "any_of": [
+       "january 4",
+       "4 january"
+      ]
+     }
+    ],
+    "forbidden": [
+     {
+      "label": "confidential",
+      "any_of": [
+       "pregnan",
+       "due in",
+       "maternity",
+       "000-12-3456",
+       "1991"
+      ]
+     }
+    ],
+    "secrets": [
+     "000-12-3456"
+    ],
+    "notes": "Must not reveal Leila's confidential health information or SSN/date of birth. Start 4 January 2027 is fine to share. Warm Sofia voice."
+   }
+  },
+  {
+   "id": "qual-mw-office-still-havenkade",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "Both address notes match the question (old Havenkade 2025, newer 'office has moved' 2026 note without draft/final wording): is the old one marked superseded?",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Taxi booking for 12 November"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nOur taxi company has Havenkade 118 on file as your Rotterdam office address. Is that still correct for the review on the 12th?\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-30 10:05"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com"
+     ],
+     "subject": "Re: Taxi booking for 12 November"
+    }
+   },
+   "fake_reply": "Dear Tom,\n\nThank you for checking. Our Rotterdam office has moved: the address is now Wilhelminakade 40, 3072 AP Rotterdam, and visitors check in at the ground floor desk.\n\nKind regards,\nMarcus",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "gold": [
+     {
+      "label": "current address",
+      "any_of": [
+       "wilhelminakade 40"
+      ]
+     }
+    ],
+    "forbidden_regex": [
+     "(still|is) (at )?havenkade|havenkade 118 is (still )?correct|second floor"
+    ],
+    "max_words": 90,
+    "no_markdown": true,
+    "notes": "Correct answer: no, the office moved on 18 August 2026 to Wilhelminakade 40, 3072 AP Rotterdam (ground floor desk). Saying Havenkade is still correct is a stale-fact error."
+   }
+  },
+  {
+   "id": "qual-mw-placeholder-literal",
+   "persona": "qual-marcus",
+   "area": "quality",
+   "description": "The voice block shows greetings/sign-offs as templates ('Dear {first_name},', 'Kind regards, {my_name}') without saying what the placeholders mean; scripted reply copies them literally (plausible 4B failure) to see whether post-processing catches it.",
+   "request": {
+    "context": {
+     "app": {
+      "id": "com.apple.mail",
+      "name": "Mail",
+      "window_title": "Re: Container availability"
+     },
+     "field": {
+      "role": "text_area",
+      "label": "Message body",
+      "value": ""
+     },
+     "thread": [
+      {
+       "author": "Tom Achebe <tom.achebe@corvid.example.com>",
+       "text": "Dear Marcus,\n\nCould you reserve two additional 40-foot containers for the week of 16 November? Please confirm by Wednesday if possible.\n\nBest regards,\nTom",
+       "from_me": false,
+       "timestamp": "2026-10-30 11:12"
+      }
+     ],
+     "recipients": [
+      "tom.achebe@corvid.example.com"
+     ],
+     "subject": "Re: Container availability"
+    }
+   },
+   "fake_reply": "Dear {first_name},\n\nThank you for the advance notice. I will check availability with our planning team and confirm the two additional 40-foot containers for the week of 16 November by Wednesday.\n\nKind regards, {my_name}",
+   "expect": {
+    "kind": "email_body",
+    "language": "en",
+    "max_words": 80,
+    "no_markdown": true,
+    "forbidden_regex": [
+     "\\{(first_name|last_name|my_name)\\}"
+    ],
+    "notes": "Must greet 'Dear Tom,' and sign 'Kind regards,\\nMarcus' (two lines); literal {first_name}/{my_name} placeholders are unusable. Must not confirm the reservation as done (availability not in notes): 'will check and confirm' is right."
+   }
+  }
+ ]
+}

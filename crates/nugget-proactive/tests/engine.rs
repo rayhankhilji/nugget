@@ -684,6 +684,35 @@ async fn cloud_judge_is_gated() {
 }
 
 #[tokio::test]
+async fn cloud_judge_request_lists_evidence_items() {
+    let f = fixture();
+    let cards = Proactive::new(f.store.clone(), cfg())
+        .candidates(now())
+        .unwrap();
+    let keys: Vec<String> = cards.iter().map(|c| c.dedup_key.clone()).collect();
+    let mut c = cfg();
+    c.judge_allow_cloud = true;
+    let provider = FakeProvider::new(Locality::Cloud, &judge_reply(&keys));
+    let p = Proactive::new(f.store.clone(), c)
+        .with_card_store(Arc::new(MemCardStore::default()))
+        .with_judge(Arc::new(LlmJudge::new(provider.clone())));
+    p.refresh(now()).await.unwrap();
+    let reqs = provider.requests.lock().unwrap();
+    assert_eq!(reqs.len(), 1);
+    // The egress ledger gets the items whose content was sent (GG8-6).
+    assert!(reqs[0].items.contains(&f.unanswered), "{:?}", reqs[0].items);
+    for item in cards
+        .iter()
+        .flat_map(|c| c.evidence.iter().map(|e| &e.item))
+    {
+        assert!(reqs[0].items.contains(item), "{item:?} missing");
+    }
+    // Provenance only: the refs are not part of the model payload.
+    let sent = serde_json::to_string(&reqs[0].messages).unwrap();
+    assert!(!sent.contains("\"items\""), "{sent}");
+}
+
+#[tokio::test]
 async fn judge_failure_falls_back_to_the_model() {
     let f = fixture();
     let provider = FakeProvider::new(Locality::OnDevice, "not json at all");

