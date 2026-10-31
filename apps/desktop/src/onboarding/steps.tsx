@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type Dispatch, type ReactNode, type RefObject } from "react";
-import { api, events, type ConnectorKind, type SourceInfo } from "../api";
+import { api, events, needsFullDiskAccess, type ConnectorKind, type SourceInfo } from "../api";
 import { useEvent } from "../hooks";
 import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
+import { FullDiskAccessSteps } from "../sources/MessagingForm";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { CopyButton } from "../components/CopyButton";
 import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
@@ -212,6 +213,7 @@ function IndexProgress({ added, announce }: { added: SourceInfo[]; announce: (te
           <li key={s.id} className={`note ob-index-${phase}${phase === "failed" ? " note-error" : ""}`} data-phase={phase}>
             {phase !== "ready" && phase !== "failed" && <span className="spinner" aria-hidden="true" />}{" "}
             {t(PHASE_KEY[phase], { name: s.name, count: s.items, error: s.last_error ?? "" })}
+            {phase === "failed" && s.kind === "imessage" && needsFullDiskAccess(s.last_error) && <FullDiskAccessSteps />}
           </li>
         );
       })}

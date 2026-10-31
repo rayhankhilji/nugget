@@ -33,6 +33,7 @@ members = [
     "crates/nugget-connector-microsoft",
     "crates/nugget-connector-saas",
     "crates/nugget-computer",
+    "crates/nugget-connector-messaging",
     "apps/desktop/src-tauri",
     "bench",
 ]
@@ -70,6 +71,7 @@ default-members = [
     "crates/nugget-connector-microsoft",
     "crates/nugget-connector-saas",
     "crates/nugget-computer",
+    "crates/nugget-connector-messaging",
     "bench",
 ]
 
@@ -114,6 +116,7 @@ nugget-plugin = { path = "crates/nugget-plugin", version = "0.0.1" }
 nugget-connector-microsoft = { path = "crates/nugget-connector-microsoft", version = "0.0.1" }
 nugget-connector-saas = { path = "crates/nugget-connector-saas", version = "0.0.1" }
 nugget-computer = { path = "crates/nugget-computer", version = "0.0.1" }
+nugget-connector-messaging = { path = "crates/nugget-connector-messaging", version = "0.0.1" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

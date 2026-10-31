@@ -291,6 +291,62 @@ async fn sensitive_items_never_reach_cloud_providers() {
     h.ingest.shutdown().await;
 }
 
+/// II1: a connector can mark a document sensitive itself (private chats), even without PII.
+#[tokio::test]
+async fn connector_marked_sensitive_items_stay_local() {
+    let cloud = FakeProvider::new("cloud", Locality::Cloud);
+    let local = FakeProvider::new("local", Locality::OnDevice);
+    let r = router(&[
+        (cloud.clone(), vec![Tier::Embedding]),
+        (local.clone(), vec![Tier::Embedding]),
+    ]);
+    let h = start(Opts {
+        cfg: IngestConfig {
+            allow_cloud_embeddings: true,
+            ..cfg()
+        },
+        router: Some(r),
+        ..Default::default()
+    })
+    .await;
+    let with_meta = |key: &str, text: &str, meta: serde_json::Value| {
+        let Change::Upsert(mut d) = text_doc(key, text, Some("1")) else {
+            unreachable!()
+        };
+        d.metadata = meta;
+        Change::Upsert(d)
+    };
+    let private = with_meta(
+        "chat",
+        "see you at the clinic on tuesday",
+        json!({"service": "whatsapp", "sensitive": true}),
+    );
+    let open = with_meta("open", "lunch menu for friday", json!({"sensitive": false}));
+    h.factory.state("fake-1").script(vec![
+        Step::Send(private),
+        Step::Send(open),
+        Step::Return(json!("done")),
+    ]);
+    h.add("fake-1").await;
+    eventually("pass", || h.cursor("fake-1") == Some(json!("done"))).await;
+
+    let cloud_seen = cloud.embedded().join("\n");
+    assert!(
+        !cloud_seen.contains("clinic"),
+        "a private chat reached the cloud"
+    );
+    assert!(cloud_seen.contains("lunch menu"));
+    assert!(local.embedded().join("\n").contains("clinic"));
+    let item = h.item("fake-1", "chat").unwrap();
+    assert_eq!(item.metadata["sensitive"], json!(true));
+    // `sensitive: false` from a connector never overrides the scan.
+    assert_eq!(
+        h.item("fake-1", "open").unwrap().metadata["sensitive"],
+        json!(false)
+    );
+    h.ingest.shutdown().await;
+}
+
 #[tokio::test]
 async fn cloud_embeddings_are_off_by_default() {
     let cloud = FakeProvider::new("cloud", Locality::Cloud);

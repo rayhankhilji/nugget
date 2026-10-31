@@ -516,7 +516,11 @@ async fn prepare(
         }
     }
     let junk = triage.as_ref().is_some_and(Triage::is_junk);
-    let sensitive = !ex.pii.is_empty() || triage.as_ref().is_some_and(|t| t.sensitive);
+    // II1: a connector may mark a document sensitive itself (`metadata.sensitive = true`, e.g.
+    // private chats the user asked to keep on this device).
+    let sensitive = !ex.pii.is_empty()
+        || triage.as_ref().is_some_and(|t| t.sensitive)
+        || source_meta.get("sensitive") == Some(&Value::Bool(true));
     let title = title
         .or_else(|| {
             triage

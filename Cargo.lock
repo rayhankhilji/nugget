@@ -4066,6 +4066,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "nugget-connector-messaging"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "flate2",
+ "notify-debouncer-full",
+ "nugget-connector",
+ "nugget-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "time",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "zip",
+]
+
+[[package]]
 name = "nugget-connector-microsoft"
 version = "0.0.1"
 dependencies = [
@@ -4588,6 +4610,7 @@ dependencies = [
  "nugget-connector-files",
  "nugget-connector-google",
  "nugget-connector-imap",
+ "nugget-connector-messaging",
  "nugget-connector-microsoft",
  "nugget-connector-saas",
  "nugget-core",
