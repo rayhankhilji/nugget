@@ -131,6 +131,7 @@ mod real {
                 Some(router),
                 config,
             );
+            knowledge.set_clock(ctx.as_of);
             let server = McpServer::builder(Arc::new(StoreBackend {
                 store: ctx.store.clone(),
             }))

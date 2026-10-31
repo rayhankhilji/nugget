@@ -102,6 +102,15 @@ impl Inner {
         *cached = Some(s.clone());
         Ok(s)
     }
+
+    /// The time the pipeline judges items against: the fixed clock if one is set
+    /// ([`Knowledge::set_clock`]), else the wall clock.
+    pub fn now(&self) -> time::OffsetDateTime {
+        self.clock
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .unwrap_or_else(time::OffsetDateTime::now_utc)
+    }
 }
 
 pub(crate) struct Inner {
@@ -112,6 +121,8 @@ pub(crate) struct Inner {
     pub emb_cache: Mutex<HashMap<String, Vec<f32>>>,
     /// User splits ([`crate::splits`]), loaded on first use.
     splits: Mutex<Option<Arc<Vec<Split>>>>,
+    /// A fixed "now" ([`Knowledge::set_clock`]); `None`: the wall clock.
+    clock: Mutex<Option<time::OffsetDateTime>>,
     run_lock: tokio::sync::Mutex<()>,
     /// What a budget-cut run left of its plan (and whether the LLM was ready when planning),
     /// picked up by the next run instead of planning again: re-planning diffs every item
@@ -170,6 +181,7 @@ impl Knowledge {
                 cfg: config,
                 emb_cache: Mutex::new(HashMap::new()),
                 splits: Mutex::new(None),
+                clock: Mutex::new(None),
                 run_lock: tokio::sync::Mutex::new(()),
                 carry: Mutex::new(None),
                 status: Mutex::new(status),
@@ -185,6 +197,14 @@ impl Knowledge {
 
     pub fn config(&self) -> &KnowledgeConfig {
         &self.inner.cfg
+    }
+
+    /// Fix the time the pipeline judges items against (`None`: the wall clock, the default):
+    /// whether a calendar event has taken place yet (`attended` or only `invited_to`), and the
+    /// horizon far-future item dates are clamped to. For reproducible runs over a corpus
+    /// written as of a known date (benches, tests); takes effect from the next run.
+    pub fn set_clock(&self, now: Option<time::OffsetDateTime>) {
+        *self.inner.clock.lock().unwrap_or_else(|p| p.into_inner()) = now;
     }
 
     /// Process changed and deleted items within `budget`. Idempotent and resumable: progress

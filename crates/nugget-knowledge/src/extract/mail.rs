@@ -1,5 +1,6 @@
 //! Mail headers (`metadata.extracted` of `message/rfc822` items): people by address,
-//! organisations by corporate domain, `works_at` (penalised) and `corresponded_with`.
+//! organisations by corporate domain, `works_at` (penalised) and `corresponded_with` (with the
+//! people in `From` and `To` only, never someone only in Cc/Bcc).
 
 use nugget_graph::EntityKind;
 use serde_json::Value;
@@ -163,24 +164,26 @@ pub(super) fn extract(ctx: &ItemCtx<'_>, ex: &mut Extraction) {
     }
 
     // corresponded_with: the user and the people on the message.
+    // Only the people the message is from or addressed to correspond with the user: someone
+    // only in Cc/Bcc was copied in and exchanged nothing with the user.
     let me_involved = people.iter().any(|(r, _)| *r == ERef::Me);
     let crowd = parts.len() > ctx.cfg.max_correspondents;
     for (r, p) in &people {
         if *r == ERef::Me {
             continue;
         }
-        let is_sender = p.role == "From";
-        let confidence = if me_involved {
-            if is_sender || !crowd {
-                0.9
-            } else {
-                continue;
-            }
-        } else if is_sender {
+        let confidence = match p.role {
+            "From" if me_involved => 0.9,
+            "To" if me_involved && !crowd => 0.9,
             // The message is in the user's mailbox, so they received it from the sender.
-            if me_known { 0.5 } else { 0.6 }
-        } else {
-            continue;
+            "From" => {
+                if me_known {
+                    0.5
+                } else {
+                    0.6
+                }
+            }
+            _ => continue,
         };
         let who = ex.name_of(*r, ctx.me_label);
         ex.claim(ClaimSpec {

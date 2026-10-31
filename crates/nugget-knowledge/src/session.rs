@@ -503,6 +503,8 @@ pub(crate) struct Session<'a> {
     settle_queue: BTreeSet<(EntityId, String)>,
     /// Multi-valued claims that lost evidence: their start is recomputed.
     redate: BTreeSet<ClaimId>,
+    /// The time items are judged against (`Inner::now`, fixed for the session).
+    now: OffsetDateTime,
     /// Item dates later than this are clamped to it (see [`FUTURE_SLACK`]).
     horizon: OffsetDateTime,
     /// Some item's provenance was retracted during this run (orphans may be left).
@@ -531,6 +533,7 @@ impl<'a> Session<'a> {
         } else {
             inner.cfg.single_valued_predicates.iter().cloned().collect()
         };
+        let now = inner.now();
         Self {
             inner,
             state: plan_state,
@@ -548,7 +551,8 @@ impl<'a> Session<'a> {
             agg: Vec::new(),
             settle_queue: BTreeSet::new(),
             redate: BTreeSet::new(),
-            horizon: OffsetDateTime::now_utc() + FUTURE_SLACK,
+            now,
+            horizon: now + FUTURE_SLACK,
             retracted_any: false,
         }
     }
@@ -984,6 +988,7 @@ impl<'a> Session<'a> {
                 me_emails: &self.me_set,
                 me_label: &label,
                 cfg: &self.inner.cfg,
+                now: self.now,
             };
             crate::extract::deterministic(&ctx)
         };

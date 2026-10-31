@@ -74,51 +74,84 @@ impl Store {
     }
 
     /// The dates of each stored item in `items` (unknown items are left out), without loading
-    /// text or metadata. Looked up in batches of [`LOOKUP_BATCH`] items, one query each, on a
-    /// read connection (so a date-filtered search never waits on, or holds up, ingest).
+    /// text or metadata: the stored times plus the few metadata dates an item's content date is
+    /// read from (see [`ItemDates`]). Looked up in batches of [`LOOKUP_BATCH`] items, one query
+    /// each, on a read connection (so a date-filtered search never waits on, or holds up,
+    /// ingest).
     pub fn item_dates(&self, items: &[ItemRef]) -> Result<HashMap<ItemRef, ItemDates>> {
-        type Row = (usize, Option<String>, Option<String>, String, String);
+        /// A metadata string at `path`; NULL when absent or not a string.
+        fn text(path: &str) -> String {
+            format!(
+                "CASE WHEN json_type(i.metadata, '{path}') = 'text' \
+                 THEN json_extract(i.metadata, '{path}') END"
+            )
+        }
+        let sql = format!(
+            "SELECT want.key, {}, {}, {}, COALESCE({}, {}, {}), i.title,
+                    i.source_modified_at, i.created_at, i.updated_at
+             {WANTED_ITEMS_JOIN}",
+            text("$.extracted.date"),
+            text("$.extracted.frontmatter.date"),
+            text("$.extracted.frontmatter.created"),
+            text("$.extracted.start"),
+            text("$.source.start.date_time"),
+            text("$.source.start.date"),
+        );
         let mut out = HashMap::with_capacity(items.len());
         for batch in items.chunks(LOOKUP_BATCH) {
             let refs = refs_json(batch)?;
-            let rows: Vec<Row> = self.with_read_conn(|c| {
-                let mut stmt = c
-                    .prepare_cached(&format!(
-                        "SELECT want.key,
-                                CASE WHEN json_type(i.metadata, '$.extracted.date') = 'text'
-                                     THEN json_extract(i.metadata, '$.extracted.date') END,
-                                i.source_modified_at, i.created_at, i.updated_at
-                         {WANTED_ITEMS_JOIN}"
-                    ))
-                    .db("prepare item_dates")?;
+            let rows: Vec<(usize, DateRow)> = self.with_read_conn(|c| {
+                let mut stmt = c.prepare_cached(&sql).db("prepare item_dates")?;
                 let rows = stmt
                     .query_map([&refs], |r| {
                         Ok((
                             r.get::<_, i64>(0)? as usize,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
+                            DateRow {
+                                extracted: r.get(1)?,
+                                fm_date: r.get(2)?,
+                                fm_created: r.get(3)?,
+                                event_start: r.get(4)?,
+                                title: r.get(5)?,
+                                modified: r.get(6)?,
+                                created: r.get(7)?,
+                                updated: r.get(8)?,
+                            },
                         ))
                     })
                     .db("query item_dates")?;
                 rows.collect::<rusqlite::Result<_>>().db("read item_dates")
             })?;
-            for (idx, extracted, modified, created, updated) in rows {
+            for (idx, row) in rows {
                 let Some(item) = batch.get(idx) else {
                     continue;
                 };
                 out.insert(
                     item.clone(),
                     ItemDates {
-                        extracted_date: extracted,
-                        source_modified_at: modified.as_deref().map(parse_time).transpose()?,
-                        created_at: parse_time(&created)?,
-                        updated_at: parse_time(&updated)?,
+                        extracted_date: row.extracted,
+                        frontmatter_date: row.fm_date,
+                        frontmatter_created: row.fm_created,
+                        event_start: row.event_start,
+                        title: row.title,
+                        source_modified_at: row.modified.as_deref().map(parse_time).transpose()?,
+                        created_at: parse_time(&row.created)?,
+                        updated_at: parse_time(&row.updated)?,
                     },
                 );
             }
         }
         Ok(out)
     }
+}
+
+/// One row of [`Store::item_dates`].
+struct DateRow {
+    extracted: Option<String>,
+    fm_date: Option<String>,
+    fm_created: Option<String>,
+    event_start: Option<String>,
+    title: Option<String>,
+    modified: Option<String>,
+    created: String,
+    updated: String,
 }
