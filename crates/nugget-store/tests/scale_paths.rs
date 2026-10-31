@@ -61,19 +61,19 @@ fn batch_upsert_is_all_or_nothing() {
     let s = Store::open_in_memory().unwrap();
     let ok = (
         item("files:a", "good", "fine"),
-        vec![NewChunk::embedded("fine".into(), vec![1.0, 0.0])],
+        vec![NewChunk::embedded("fine", vec![1.0, 0.0])],
     );
     // A different dimension in the same batch is refused before anything is written.
     let mixed = (
         item("files:a", "bad", "other"),
-        vec![NewChunk::embedded("other".into(), vec![1.0, 0.0, 0.0])],
+        vec![NewChunk::embedded("other", vec![1.0, 0.0, 0.0])],
     );
     assert!(s.upsert_items_with_chunks(&[ok.clone(), mixed]).is_err());
     assert_eq!(s.counts().unwrap().items, 0);
     // An invalid embedding anywhere fails the whole batch.
     let nan = (
         item("files:a", "nan", "x"),
-        vec![NewChunk::embedded("x".into(), vec![f32::NAN, 0.0])],
+        vec![NewChunk::embedded("x", vec![f32::NAN, 0.0])],
     );
     assert!(s.upsert_items_with_chunks(&[ok.clone(), nan]).is_err());
     assert_eq!(s.counts().unwrap().items, 0);
@@ -92,7 +92,7 @@ fn counts_follow_writes_and_deletes() {
             let body = format!("{src} {i}");
             s.upsert_item_with_chunks(
                 &item(src, &format!("k{i}"), &body),
-                &[NewChunk::text(body.clone()), NewChunk::text("x".into())],
+                &[NewChunk::text(body.clone()), NewChunk::text("x")],
             )
             .unwrap();
         }
@@ -105,7 +105,7 @@ fn counts_follow_writes_and_deletes() {
     // Rewriting an item's chunks keeps the totals exact.
     s.upsert_item_with_chunks(
         &item("files:b", "k1", "changed"),
-        &[NewChunk::text("changed".into())],
+        &[NewChunk::text("changed")],
     )
     .unwrap();
     let c = s.counts().unwrap();

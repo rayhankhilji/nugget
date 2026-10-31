@@ -1033,7 +1033,7 @@ async fn hot_paths(
     time_calls(
         (client, timeout),
         method::KNOWLEDGE_GRAPH,
-        |_| json!({"limit": 100}),
+        |_| json!({"depth": 1, "limit": 100}),
         10,
         (
             "daemon.knowledge.graph.latency",
