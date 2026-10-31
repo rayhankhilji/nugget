@@ -1916,6 +1916,7 @@
   "addSource.imessage.fdaStep3": "شغّل <b>Nugget</b>، وكذلك <b>nuggetd</b> إن كان مدرجًا. إن لم يكن Nugget موجودًا، فاضغط <b>+</b> واختره من التطبيقات.",
   "addSource.imessage.fdaStep4": "إذا طلب macOS ذلك، فأغلق Nugget ثم افتحه من جديد.",
   "addSource.imessage.fdaStep5": "عد إلى هنا واضغط <b>إضافة</b>.",
+  "addSource.imessage.fdaStep5Later": "عد إلى Nugget واضغط <b>زامن الآن</b> في صفحة <b>المصادر</b>.",
   "addSource.imessage.copyNote": "يقرأ Nugget نسخة من قاعدة بيانات الرسائل ولا يغيّرها أبدًا. يقرأ نص الرسائل وأوقاتها والمشاركين وأسماء المرفقات، ولا يقرأ المرفقات نفسها أبدًا.",
   "addSource.imessage.macOnly": "لا يمكن قراءة سجل iMessage إلا على جهاز Mac، لذا لا يمكن إضافة هذا المصدر على هذا الكمبيوتر.",
   "addSource.imessage.macOnlyShort": "متاح على macOS فقط.",

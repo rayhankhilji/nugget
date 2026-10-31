@@ -4,6 +4,7 @@
  * of export files the user saves there.
  */
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { flushSync } from "react-dom";
 import { api, ApiError, errorMessage, needsFullDiskAccess, type MessagingKind } from "../api";
 import { sourceKindLabel } from "../format";
 import { Trans, useT, type MessageKey } from "../i18n";
@@ -16,7 +17,6 @@ const FDA_STEPS: readonly MessageKey[] = [
   "addSource.imessage.fdaStep2",
   "addSource.imessage.fdaStep3",
   "addSource.imessage.fdaStep4",
-  "addSource.imessage.fdaStep5",
 ];
 
 const WHATSAPP_STEPS: readonly MessageKey[] = [
@@ -45,15 +45,18 @@ function Steps({ steps }: { steps: readonly MessageKey[] }) {
   );
 }
 
-/** Plain-language steps to turn on Full Disk Access for Nugget (macOS). Also shown on the Sources page. */
-export function FullDiskAccessSteps() {
+/**
+ * Plain-language steps to turn on Full Disk Access for Nugget (macOS). Also shown on the Sources
+ * page and in onboarding (`inForm` false), where the last step is not "press Add".
+ */
+export function FullDiskAccessSteps({ inForm = false }: { inForm?: boolean }) {
   const t = useT();
   return (
     <div className="messaging-fda">
       <p className="small">
         <b>{t("addSource.imessage.fdaTitle")}</b>
       </p>
-      <Steps steps={FDA_STEPS} />
+      <Steps steps={[...FDA_STEPS, inForm ? "addSource.imessage.fdaStep5" : "addSource.imessage.fdaStep5Later"]} />
     </div>
   );
 }
@@ -66,7 +69,7 @@ function SaveError({ kind, error }: { kind: MessagingKind; error: unknown }) {
     return (
       <div className="note note-error messaging-error" role="alert">
         <p dir="auto">{e.message}</p>
-        <FullDiskAccessSteps />
+        <FullDiskAccessSteps inForm />
       </div>
     );
   }
@@ -114,7 +117,9 @@ export function MessagingForm({ kind, onBack, onClose, onAdded, os }: FormProps<
     e.preventDefault();
     if (unsupported || busy) return;
     const next = messagingErrors(kind, form);
-    setErrs(next);
+    // Render the errors before moving focus, so the field is already invalid and described by its
+    // error when a screen reader announces it.
+    flushSync(() => setErrs(next));
     if (next.path) return pathRef.current?.focus();
     if (next.sinceDays) return sinceRef.current?.focus();
     setBusy(true);
@@ -131,7 +136,6 @@ export function MessagingForm({ kind, onBack, onClose, onAdded, os }: FormProps<
   };
 
   const err = (k: keyof MessagingErrors) => (errs[k] ? t(errs[k]) : null);
-  const pathError = err("path") ?? pickError;
 
   return (
     <form ref={formRef} onSubmit={submit} noValidate className="messaging-form">
@@ -142,7 +146,7 @@ export function MessagingForm({ kind, onBack, onClose, onAdded, os }: FormProps<
           </p>
         ) : (
           <section className="help">
-            <FullDiskAccessSteps />
+            <FullDiskAccessSteps inForm />
             <p className="small muted">{t("addSource.imessage.copyNote")}</p>
           </section>
         ))}
@@ -170,7 +174,7 @@ export function MessagingForm({ kind, onBack, onClose, onAdded, os }: FormProps<
         <Field
           label={kind === "whatsapp" ? t("addSource.whatsapp.folder") : t("addSource.telegram.path")}
           hint={kind === "whatsapp" ? t("addSource.whatsapp.folderHint") : <Trans k="addSource.telegram.pathHint" tags={HELP_TAGS} />}
-          error={pathError}
+          error={err("path")}
         >
           {(a) => (
             <div className="inline-row">
@@ -190,6 +194,11 @@ export function MessagingForm({ kind, onBack, onClose, onAdded, os }: FormProps<
             </div>
           )}
         </Field>
+      )}
+      {pickError && (
+        <p className="note note-error small" role="alert">
+          {pickError}
+        </p>
       )}
 
       {kind === "whatsapp" && (

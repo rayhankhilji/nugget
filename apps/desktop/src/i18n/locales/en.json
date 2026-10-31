@@ -1916,6 +1916,7 @@
   "addSource.imessage.fdaStep3": "Turn on <b>Nugget</b>, and <b>nuggetd</b> too if it is listed. If Nugget isn't there, press <b>+</b> and choose it in Applications.",
   "addSource.imessage.fdaStep4": "If macOS asks, quit and reopen Nugget.",
   "addSource.imessage.fdaStep5": "Come back here and press <b>Add</b>.",
+  "addSource.imessage.fdaStep5Later": "Come back to Nugget and press <b>Sync now</b> on the <b>Sources</b> page.",
   "addSource.imessage.copyNote": "Nugget reads a copy of the Messages database and never changes it. It reads message text, times, participants and attachment names, never the attachments themselves.",
   "addSource.imessage.macOnly": "iMessage history can only be read on a Mac, so this source can't be added on this computer.",
   "addSource.imessage.macOnlyShort": "Only available on macOS.",

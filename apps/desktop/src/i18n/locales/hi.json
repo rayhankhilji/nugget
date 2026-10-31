@@ -1916,6 +1916,7 @@
   "addSource.imessage.fdaStep3": "<b>Nugget</b> को चालू करें, और अगर <b>nuggetd</b> दिखे तो उसे भी। अगर Nugget सूची में नहीं है, तो <b>+</b> दबाकर उसे ऐप्लिकेशन से चुनें।",
   "addSource.imessage.fdaStep4": "अगर macOS कहे, तो Nugget बंद करके फिर से खोलें।",
   "addSource.imessage.fdaStep5": "यहाँ वापस आएँ और <b>जोड़ें</b> दबाएँ।",
+  "addSource.imessage.fdaStep5Later": "Nugget पर वापस आएँ और <b>स्रोत</b> पेज पर <b>अभी सिंक करें</b> दबाएँ।",
   "addSource.imessage.copyNote": "Nugget Messages डेटाबेस की एक कॉपी पढ़ता है और उसे कभी नहीं बदलता। वह संदेश का टेक्स्ट, समय, प्रतिभागी और अटैचमेंट के नाम पढ़ता है, अटैचमेंट ख़ुद कभी नहीं।",
   "addSource.imessage.macOnly": "iMessage इतिहास सिर्फ़ Mac पर पढ़ा जा सकता है, इसलिए यह स्रोत इस कंप्यूटर पर नहीं जोड़ा जा सकता।",
   "addSource.imessage.macOnlyShort": "सिर्फ़ macOS पर उपलब्ध।",

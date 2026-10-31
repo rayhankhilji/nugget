@@ -1916,6 +1916,7 @@
   "addSource.imessage.fdaStep3": "<b>Nugget</b> をオンにします。<b>nuggetd</b> が表示されている場合はそれもオンにします。Nugget がない場合は <b>+</b> を押して「アプリケーション」から選びます。",
   "addSource.imessage.fdaStep4": "macOS に求められたら、Nugget を終了して開き直します。",
   "addSource.imessage.fdaStep5": "ここに戻って<b>追加</b>を押します。",
+  "addSource.imessage.fdaStep5Later": "Nugget に戻り、<b>ソース</b>ページで<b>今すぐ同期</b>を押します。",
   "addSource.imessage.copyNote": "Nugget は「メッセージ」のデータベースのコピーを読み取り、元のデータベースを変更することはありません。読み取るのはメッセージの本文、日時、参加者、添付ファイル名で、添付ファイルそのものは読み取りません。",
   "addSource.imessage.macOnly": "iMessage の履歴は Mac でしか読み取れないため、このコンピュータではこのソースを追加できません。",
   "addSource.imessage.macOnlyShort": "macOS でのみ利用できます。",

@@ -26,8 +26,9 @@ stay on your device:
   see it unless you allow them to see sensitive items. Search and answers about your chats then use
   only on-device models. Turn it off only if you are happy for passages of these chats to reach the
   cloud models you set up.
-- Even with `private` off, every conversation still goes through the local scan for card numbers,
-  bank details, ID numbers and keys, and anything it finds marks that item sensitive.
+- Even with `private` off, every conversation still goes through the local
+  [scan](privacy.md#sensitive-items) for payment card numbers, IBANs, US Social Security numbers and
+  API keys, and anything it finds marks that item sensitive.
 - **Attachments are never opened.** Nugget records only an attachment's file name, type and size, so
   that "the photo Sam sent" can be found. The photo, voice note or document itself is not read.
 - **Nothing is changed.** Nugget never writes to your Messages database or your export files, and it
@@ -111,7 +112,9 @@ working normally while Nugget reads.
 | Keep these chats on this device only | `private` | on | Mark every conversation sensitive (see above) |
 
 Advanced: `db_path` points at a different `chat.db`, for example a copy from another Mac. With
-`db_path` set, the source can be added on any platform.
+`db_path` set, the source can be added on any platform. The desktop app has no field for it: set it
+through the `sources.add` or `sources.update` IPC method (see
+[Without the desktop app](sources.md#without-the-desktop-app)).
 
 iMessage is not available on Windows or Linux, because the Messages database exists only on a Mac.
 
@@ -198,8 +201,8 @@ Signal is not supported, and will not be unless Signal adds a way to export your
   keychain. Reading it would mean taking that key and decrypting Signal's data behind its back. That
   bypasses the encryption model Signal is built on, and we will not do that, even with your consent:
   it would also make Nugget a tool for reading other people's Signal data.
-- **Android backups are encrypted device-transfer backups** in a format that is not documented, meant
-  only for restoring onto another phone.
+- **Its backups are encrypted too** (the on-device backups on Android and Signal's own cloud
+  backups), in a format that is not documented and meant only for restoring into Signal.
 
 If Signal ships a documented export, we will add it.
 

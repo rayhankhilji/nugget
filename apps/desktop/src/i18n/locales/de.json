@@ -1921,6 +1921,7 @@
   "addSource.imessage.fdaStep3": "Schalten Sie <b>Nugget</b> ein, und auch <b>nuggetd</b>, falls aufgeführt. Fehlt Nugget, klicken Sie auf <b>+</b> und wählen es unter Programme aus.",
   "addSource.imessage.fdaStep4": "Wenn macOS danach fragt, beenden Sie Nugget und öffnen es erneut.",
   "addSource.imessage.fdaStep5": "Kommen Sie hierher zurück und klicken Sie auf <b>Hinzufügen</b>.",
+  "addSource.imessage.fdaStep5Later": "Kehren Sie zu Nugget zurück und klicken Sie auf der Seite <b>Quellen</b> auf <b>Jetzt synchronisieren</b>.",
   "addSource.imessage.copyNote": "Nugget liest eine Kopie der Nachrichten-Datenbank und verändert sie nie. Gelesen werden Nachrichtentext, Zeiten, Teilnehmende und Namen von Anhängen, nie die Anhänge selbst.",
   "addSource.imessage.macOnly": "Der iMessage-Verlauf kann nur auf einem Mac gelesen werden, daher lässt sich diese Quelle auf diesem Computer nicht hinzufügen.",
   "addSource.imessage.macOnlyShort": "Nur unter macOS verfügbar.",

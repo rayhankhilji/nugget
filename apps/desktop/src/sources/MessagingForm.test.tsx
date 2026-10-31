@@ -108,15 +108,54 @@ describe("MessagingForm", () => {
     expect(got).toBeNull();
   });
 
+  it("iMessage: after granting access, Add again adds the source", async () => {
+    const message = "Nugget needs Full Disk Access to read your Messages.";
+    const requests: SourceSpec[] = [];
+    mockDaemon({
+      sources_add: (args: unknown) => {
+        const r = (args as { request: SourceSpec }).request;
+        requests.push(r);
+        if (requests.length === 1) throw { kind: "unauthorized", message };
+        return added(r.kind, r.name);
+      },
+    });
+    let got: SourceInfo | null = null;
+    const { container } = await render(<MessagingForm kind="imessage" os="macos" onBack={noop} onClose={noop} onAdded={(s) => (got = s)} />);
+    const steps = container.querySelectorAll(".help .messaging-fda li");
+    expect(steps[steps.length - 1]?.textContent).toBe(t("addSource.imessage.fdaStep5").replace(/<\/?b>/g, ""));
+    await submit();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain(message);
+    await submit();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toEqual(requests[0]);
+    expect(got).not.toBeNull();
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it("a failed folder picker is announced without marking the field invalid", async () => {
+    mockDaemon({
+      pick_folders: () => {
+        throw { kind: "internal", message: "no dialog" };
+      },
+    });
+    const { container } = await render(<MessagingForm kind="telegram" onBack={noop} onClose={noop} onAdded={noop} />);
+    await click(byText(container, "button", t("addSource.messages.browse")));
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("no dialog");
+    expect(field(t("addSource.telegram.path")).getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("WhatsApp: export steps, a folder from the picker, your name, private by default", async () => {
     const { requests, calls } = daemon();
     const { container } = await render(<MessagingForm kind="whatsapp" onBack={noop} onClose={noop} onAdded={noop} />);
     expect(container.querySelectorAll(".help ol li")).toHaveLength(4);
     expect(container.textContent).toContain("Export chat");
 
-    // Adding without a folder points at the field.
-    await submit();
+    // Adding without a folder points at the field, which is already invalid when it gets focus.
     const folder = field(t("addSource.whatsapp.folder"));
+    let invalidOnFocus: string | null = null;
+    folder.addEventListener("focus", () => (invalidOnFocus = folder.getAttribute("aria-invalid")));
+    await submit();
+    expect(invalidOnFocus).toBe("true");
     expect(folder.getAttribute("aria-invalid")).toBe("true");
     expect(document.getElementById(folder.getAttribute("aria-describedby")!.split(" ").pop()!)?.textContent).toBe(
       t("addSource.messages.whatsappFolderMissing"),
@@ -169,7 +208,10 @@ describe("Sources page", () => {
     const rows = Array.from(container.querySelectorAll("li")).filter((li) => li.querySelector("h2"));
     const im = rows.find((li) => li.querySelector("h2")?.textContent === "iMessage")!;
     const wa = rows.find((li) => li.querySelector("h2")?.textContent === "WhatsApp")!;
-    expect(im.querySelectorAll(".messaging-fda li")).toHaveLength(5);
+    const steps = im.querySelectorAll(".messaging-fda li");
+    expect(steps).toHaveLength(5);
+    // Not "press Add": on the Sources page the way back is Sync now.
+    expect(steps[4]?.textContent).toBe(t("addSource.imessage.fdaStep5Later").replace(/<\/?b>/g, ""));
     expect(wa.querySelector(".messaging-fda")).toBeNull();
   });
 });

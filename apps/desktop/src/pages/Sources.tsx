@@ -382,7 +382,7 @@ function SourceRow({
             {!health && isGoogleKind(s.kind) && /^rate limited/i.test(s.last_error ?? "") && <span className="block">{t("sources.googleQuotaHint")}</span>}
           </div>
         )}
-        {s.kind === "imessage" && hasProblem(s) && needsFullDiskAccess(s.last_error ?? s.health?.reason) && (
+        {s.kind === "imessage" && hasProblem(s) && (needsFullDiskAccess(s.last_error) || needsFullDiskAccess(s.health?.reason)) && (
           <div className="note small messaging-error">
             <FullDiskAccessSteps />
           </div>
