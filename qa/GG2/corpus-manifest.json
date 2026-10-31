@@ -1,0 +1,1390 @@
+{
+ "files": {
+  "calendar/atlas-steering.ics": {
+   "tags": [
+    "atlas"
+   ],
+   "when": "2026-10-09T09:00:00+00:00"
+  },
+  "calendar/car-service.ics": {
+   "tags": [
+    "car"
+   ],
+   "when": "2026-10-17T12:00:00+00:00"
+  },
+  "calendar/dentist-last-time.ics": {
+   "tags": [
+    "dentist-old"
+   ],
+   "when": "2026-04-02T09:00:00+00:00"
+  },
+  "calendar/dentist.ics": {
+   "tags": [
+    "dentist"
+   ],
+   "when": "2026-10-21T11:25:00+00:00"
+  },
+  "calendar/misc/01-lunch.ics": {
+   "tags": [],
+   "when": "2026-09-17T09:00:00+00:00"
+  },
+  "calendar/misc/02-haircut.ics": {
+   "tags": [],
+   "when": "2026-09-25T09:00:00+00:00"
+  },
+  "calendar/misc/03-yoga.ics": {
+   "tags": [],
+   "when": "2026-08-30T09:00:00+00:00"
+  },
+  "calendar/misc/04-focus.ics": {
+   "tags": [],
+   "when": "2026-10-02T09:00:00+00:00"
+  },
+  "calendar/misc/05-team.ics": {
+   "tags": [],
+   "when": "2026-10-05T09:00:00+00:00"
+  },
+  "calendar/misc/06-11.ics": {
+   "tags": [],
+   "when": "2026-10-11T09:00:00+00:00"
+  },
+  "calendar/misc/07-yoga.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/08-quarry.ics": {
+   "tags": [],
+   "when": "2026-09-23T09:00:00+00:00"
+  },
+  "calendar/misc/09-team.ics": {
+   "tags": [],
+   "when": "2026-09-19T09:00:00+00:00"
+  },
+  "calendar/misc/10-haircut.ics": {
+   "tags": [],
+   "when": "2026-08-23T09:00:00+00:00"
+  },
+  "calendar/misc/11-team.ics": {
+   "tags": [],
+   "when": "2026-09-01T09:00:00+00:00"
+  },
+  "calendar/misc/12-product.ics": {
+   "tags": [],
+   "when": "2026-08-16T09:00:00+00:00"
+  },
+  "calendar/misc/13-haircut.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/14-yoga.ics": {
+   "tags": [],
+   "when": "2026-10-26T09:00:00+00:00"
+  },
+  "calendar/misc/15-lunch.ics": {
+   "tags": [],
+   "when": "2026-09-15T09:00:00+00:00"
+  },
+  "calendar/misc/16-haircut.ics": {
+   "tags": [],
+   "when": "2026-09-09T09:00:00+00:00"
+  },
+  "calendar/misc/17-focus.ics": {
+   "tags": [],
+   "when": "2026-10-28T09:00:00+00:00"
+  },
+  "calendar/misc/18-product.ics": {
+   "tags": [],
+   "when": "2026-09-21T09:00:00+00:00"
+  },
+  "calendar/misc/19-lunch.ics": {
+   "tags": [],
+   "when": "2026-09-01T09:00:00+00:00"
+  },
+  "calendar/misc/20-lunch.ics": {
+   "tags": [],
+   "when": "2026-10-09T09:00:00+00:00"
+  },
+  "calendar/misc/21-team.ics": {
+   "tags": [],
+   "when": "2026-08-19T09:00:00+00:00"
+  },
+  "calendar/misc/22-yoga.ics": {
+   "tags": [],
+   "when": "2026-09-04T09:00:00+00:00"
+  },
+  "calendar/misc/23-quarry.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/24-quarry.ics": {
+   "tags": [],
+   "when": "2026-08-30T09:00:00+00:00"
+  },
+  "calendar/misc/25-focus.ics": {
+   "tags": [],
+   "when": "2026-08-22T09:00:00+00:00"
+  },
+  "calendar/misc/26-team.ics": {
+   "tags": [],
+   "when": "2026-08-29T09:00:00+00:00"
+  },
+  "calendar/misc/27-yoga.ics": {
+   "tags": [],
+   "when": "2026-10-28T09:00:00+00:00"
+  },
+  "calendar/misc/28-team.ics": {
+   "tags": [],
+   "when": "2026-09-06T09:00:00+00:00"
+  },
+  "calendar/misc/29-quarry.ics": {
+   "tags": [],
+   "when": "2026-09-23T09:00:00+00:00"
+  },
+  "calendar/misc/30-haircut.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/31-haircut.ics": {
+   "tags": [],
+   "when": "2026-08-31T09:00:00+00:00"
+  },
+  "calendar/misc/32-11.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/33-team.ics": {
+   "tags": [],
+   "when": "2026-09-10T09:00:00+00:00"
+  },
+  "calendar/misc/34-haircut.ics": {
+   "tags": [],
+   "when": "2026-09-12T09:00:00+00:00"
+  },
+  "calendar/misc/35-11.ics": {
+   "tags": [],
+   "when": "2026-09-05T09:00:00+00:00"
+  },
+  "calendar/misc/36-haircut.ics": {
+   "tags": [],
+   "when": "2026-08-23T09:00:00+00:00"
+  },
+  "calendar/misc/37-quarry.ics": {
+   "tags": [],
+   "when": "2026-08-28T09:00:00+00:00"
+  },
+  "calendar/misc/38-focus.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/39-haircut.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/40-11.ics": {
+   "tags": [],
+   "when": "2026-10-30T09:00:00+00:00"
+  },
+  "calendar/misc/41-11.ics": {
+   "tags": [],
+   "when": "2026-10-17T09:00:00+00:00"
+  },
+  "calendar/misc/42-team.ics": {
+   "tags": [],
+   "when": "2026-10-20T09:00:00+00:00"
+  },
+  "calendar/misc/43-product.ics": {
+   "tags": [],
+   "when": "2026-10-07T09:00:00+00:00"
+  },
+  "calendar/misc/44-focus.ics": {
+   "tags": [],
+   "when": "2026-09-20T09:00:00+00:00"
+  },
+  "calendar/misc/45-lunch.ics": {
+   "tags": [],
+   "when": "2026-08-26T09:00:00+00:00"
+  },
+  "calendar/onboarding-call.ics": {
+   "tags": [
+    "contract",
+    "injection"
+   ],
+   "when": "2026-10-23T10:00:00+00:00"
+  },
+  "calendar/physio.ics": {
+   "tags": [
+    "physio"
+   ],
+   "when": "2026-10-18T10:05:00+00:00"
+  },
+  "chats/slack-sam-ortega.txt": {
+   "tags": [
+    "budget"
+   ],
+   "when": "2026-10-24T15:42:00+00:00"
+  },
+  "chats/team-product-1.txt": {
+   "tags": [],
+   "when": "2026-07-31T18:00:00+00:00"
+  },
+  "chats/team-product-2.txt": {
+   "tags": [],
+   "when": "2026-08-10T18:00:00+00:00"
+  },
+  "chats/team-product-3.txt": {
+   "tags": [],
+   "when": "2026-08-20T18:00:00+00:00"
+  },
+  "chats/team-product-4.txt": {
+   "tags": [],
+   "when": "2026-08-30T18:00:00+00:00"
+  },
+  "chats/team-product-5.txt": {
+   "tags": [],
+   "when": "2026-09-09T18:00:00+00:00"
+  },
+  "chats/team-product-6.txt": {
+   "tags": [],
+   "when": "2026-09-19T18:00:00+00:00"
+  },
+  "chats/team-product-7.txt": {
+   "tags": [],
+   "when": "2026-09-29T18:00:00+00:00"
+  },
+  "chats/team-product-8.txt": {
+   "tags": [],
+   "when": "2026-10-09T18:00:00+00:00"
+  },
+  "chats/whatsapp-jun.txt": {
+   "tags": [
+    "kyoto"
+   ],
+   "when": "2026-10-25T19:10:00+00:00"
+  },
+  "documents/contracts/Corvid offer letter v1.md": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-09-19T16:10:00+00:00"
+  },
+  "documents/contracts/Corvid offer letter v2.md": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-09-29T11:45:00+00:00"
+  },
+  "documents/contracts/Corvid offer letter v3 FINAL signed.md": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-10-22T21:00:00+00:00"
+  },
+  "documents/finance/rent payments.csv": {
+   "tags": [
+    "rent"
+   ],
+   "when": "2026-10-19T20:00:00+00:00"
+  },
+  "documents/work/Atlas steering notes.md": {
+   "tags": [
+    "atlas"
+   ],
+   "when": "2026-10-19T15:00:00+00:00"
+  },
+  "documents/work/Atlas vendor proposal.md": {
+   "tags": [
+    "atlas",
+    "injection"
+   ],
+   "when": "2026-10-11T14:00:00+00:00"
+  },
+  "documents/work/Bob Lindqvist 1-1 notes.md": {
+   "tags": [
+    "bob"
+   ],
+   "when": "2026-10-13T11:00:00+00:00"
+  },
+  "documents/work/Handover plan.md": {
+   "tags": [
+    "job"
+   ],
+   "when": "2026-10-22T12:00:00+00:00"
+  },
+  "mail/1-fernhill/budget-01.eml": {
+   "tags": [
+    "budget"
+   ],
+   "when": "2026-10-04T10:00:00+00:00"
+  },
+  "mail/1-fernhill/budget-02.eml": {
+   "tags": [
+    "budget"
+   ],
+   "when": "2026-10-05T09:30:00+00:00"
+  },
+  "mail/1-fernhill/budget-03.eml": {
+   "tags": [
+    "budget"
+   ],
+   "when": "2026-10-07T17:45:00+00:00"
+  },
+  "mail/1-fernhill/farewell.eml": {
+   "tags": [
+    "job"
+   ],
+   "when": "2026-10-23T15:30:00+00:00"
+  },
+  "mail/1-fernhill/misc-01.eml": {
+   "tags": [],
+   "when": "2026-09-11T18:48:00+00:00"
+  },
+  "mail/1-fernhill/misc-02.eml": {
+   "tags": [],
+   "when": "2026-07-21T11:35:00+00:00"
+  },
+  "mail/1-fernhill/misc-03.eml": {
+   "tags": [],
+   "when": "2026-08-15T15:09:00+00:00"
+  },
+  "mail/1-fernhill/misc-04.eml": {
+   "tags": [],
+   "when": "2026-09-26T13:33:00+00:00"
+  },
+  "mail/1-fernhill/misc-05.eml": {
+   "tags": [],
+   "when": "2026-07-26T13:12:00+00:00"
+  },
+  "mail/1-fernhill/misc-06.eml": {
+   "tags": [],
+   "when": "2026-07-23T18:18:00+00:00"
+  },
+  "mail/1-fernhill/misc-07.eml": {
+   "tags": [],
+   "when": "2026-10-24T18:37:00+00:00"
+  },
+  "mail/1-fernhill/misc-08.eml": {
+   "tags": [],
+   "when": "2026-08-26T14:34:00+00:00"
+  },
+  "mail/1-fernhill/misc-09.eml": {
+   "tags": [],
+   "when": "2026-08-28T12:47:00+00:00"
+  },
+  "mail/1-fernhill/misc-10.eml": {
+   "tags": [],
+   "when": "2026-09-10T08:23:00+00:00"
+  },
+  "mail/1-fernhill/misc-11.eml": {
+   "tags": [],
+   "when": "2026-07-23T11:18:00+00:00"
+  },
+  "mail/1-fernhill/misc-12.eml": {
+   "tags": [],
+   "when": "2026-09-04T12:31:00+00:00"
+  },
+  "mail/1-fernhill/misc-13.eml": {
+   "tags": [],
+   "when": "2026-07-28T09:50:00+00:00"
+  },
+  "mail/1-fernhill/misc-14.eml": {
+   "tags": [],
+   "when": "2026-09-09T14:13:00+00:00"
+  },
+  "mail/1-fernhill/misc-15.eml": {
+   "tags": [],
+   "when": "2026-07-31T18:00:00+00:00"
+  },
+  "mail/1-fernhill/misc-16.eml": {
+   "tags": [],
+   "when": "2026-10-05T15:08:00+00:00"
+  },
+  "mail/1-fernhill/misc-17.eml": {
+   "tags": [],
+   "when": "2026-08-23T10:57:00+00:00"
+  },
+  "mail/1-fernhill/misc-18.eml": {
+   "tags": [],
+   "when": "2026-09-22T13:02:00+00:00"
+  },
+  "mail/1-fernhill/misc-19.eml": {
+   "tags": [],
+   "when": "2026-08-19T14:06:00+00:00"
+  },
+  "mail/1-fernhill/misc-20.eml": {
+   "tags": [],
+   "when": "2026-08-14T10:38:00+00:00"
+  },
+  "mail/1-fernhill/misc-21.eml": {
+   "tags": [],
+   "when": "2026-09-20T16:25:00+00:00"
+  },
+  "mail/1-fernhill/misc-22.eml": {
+   "tags": [],
+   "when": "2026-09-04T13:22:00+00:00"
+  },
+  "mail/1-fernhill/misc-23.eml": {
+   "tags": [],
+   "when": "2026-10-01T08:40:00+00:00"
+  },
+  "mail/1-fernhill/misc-24.eml": {
+   "tags": [],
+   "when": "2026-08-18T18:40:00+00:00"
+  },
+  "mail/1-fernhill/misc-25.eml": {
+   "tags": [],
+   "when": "2026-08-26T10:39:00+00:00"
+  },
+  "mail/1-fernhill/misc-26.eml": {
+   "tags": [],
+   "when": "2026-08-12T08:16:00+00:00"
+  },
+  "mail/1-fernhill/misc-27.eml": {
+   "tags": [],
+   "when": "2026-07-26T17:13:00+00:00"
+  },
+  "mail/1-fernhill/misc-28.eml": {
+   "tags": [],
+   "when": "2026-08-01T11:09:00+00:00"
+  },
+  "mail/1-fernhill/misc-29.eml": {
+   "tags": [],
+   "when": "2026-07-16T08:34:00+00:00"
+  },
+  "mail/1-fernhill/misc-30.eml": {
+   "tags": [],
+   "when": "2026-10-09T14:21:00+00:00"
+  },
+  "mail/1-fernhill/misc-31.eml": {
+   "tags": [],
+   "when": "2026-09-21T12:33:00+00:00"
+  },
+  "mail/1-fernhill/misc-32.eml": {
+   "tags": [],
+   "when": "2026-07-31T14:37:00+00:00"
+  },
+  "mail/1-fernhill/misc-33.eml": {
+   "tags": [],
+   "when": "2026-10-30T09:06:00+00:00"
+  },
+  "mail/1-fernhill/misc-34.eml": {
+   "tags": [],
+   "when": "2026-10-09T16:22:00+00:00"
+  },
+  "mail/1-fernhill/misc-35.eml": {
+   "tags": [],
+   "when": "2026-08-03T16:15:00+00:00"
+  },
+  "mail/1-fernhill/misc-36.eml": {
+   "tags": [],
+   "when": "2026-08-25T17:13:00+00:00"
+  },
+  "mail/1-fernhill/misc-37.eml": {
+   "tags": [],
+   "when": "2026-10-29T16:23:00+00:00"
+  },
+  "mail/1-fernhill/misc-38.eml": {
+   "tags": [],
+   "when": "2026-08-14T11:31:00+00:00"
+  },
+  "mail/1-fernhill/misc-39.eml": {
+   "tags": [],
+   "when": "2026-09-09T16:49:00+00:00"
+  },
+  "mail/1-fernhill/misc-40.eml": {
+   "tags": [],
+   "when": "2026-10-30T11:46:00+00:00"
+  },
+  "mail/1-fernhill/misc-41.eml": {
+   "tags": [],
+   "when": "2026-07-30T14:50:00+00:00"
+  },
+  "mail/1-fernhill/misc-42.eml": {
+   "tags": [],
+   "when": "2026-08-03T11:35:00+00:00"
+  },
+  "mail/1-fernhill/misc-43.eml": {
+   "tags": [],
+   "when": "2026-10-27T14:47:00+00:00"
+  },
+  "mail/1-fernhill/misc-44.eml": {
+   "tags": [],
+   "when": "2026-08-05T10:17:00+00:00"
+  },
+  "mail/1-fernhill/misc-45.eml": {
+   "tags": [],
+   "when": "2026-07-14T09:25:00+00:00"
+  },
+  "mail/1-fernhill/misc-46.eml": {
+   "tags": [],
+   "when": "2026-09-24T16:38:00+00:00"
+  },
+  "mail/1-fernhill/misc-47.eml": {
+   "tags": [],
+   "when": "2026-08-11T16:20:00+00:00"
+  },
+  "mail/1-fernhill/misc-48.eml": {
+   "tags": [],
+   "when": "2026-08-07T13:43:00+00:00"
+  },
+  "mail/1-fernhill/misc-49.eml": {
+   "tags": [],
+   "when": "2026-08-02T12:23:00+00:00"
+  },
+  "mail/1-fernhill/misc-50.eml": {
+   "tags": [],
+   "when": "2026-10-13T10:43:00+00:00"
+  },
+  "mail/1-fernhill/misc-51.eml": {
+   "tags": [],
+   "when": "2026-09-30T16:23:00+00:00"
+  },
+  "mail/1-fernhill/misc-52.eml": {
+   "tags": [],
+   "when": "2026-10-04T14:56:00+00:00"
+  },
+  "mail/1-fernhill/misc-53.eml": {
+   "tags": [],
+   "when": "2026-07-29T10:02:00+00:00"
+  },
+  "mail/1-fernhill/misc-54.eml": {
+   "tags": [],
+   "when": "2026-10-17T12:10:00+00:00"
+  },
+  "mail/1-fernhill/misc-55.eml": {
+   "tags": [],
+   "when": "2026-08-11T11:46:00+00:00"
+  },
+  "mail/1-fernhill/misc-56.eml": {
+   "tags": [],
+   "when": "2026-07-13T17:50:00+00:00"
+  },
+  "mail/1-fernhill/misc-57.eml": {
+   "tags": [],
+   "when": "2026-09-20T09:52:00+00:00"
+  },
+  "mail/1-fernhill/misc-58.eml": {
+   "tags": [],
+   "when": "2026-09-07T10:47:00+00:00"
+  },
+  "mail/1-fernhill/misc-59.eml": {
+   "tags": [],
+   "when": "2026-08-29T15:04:00+00:00"
+  },
+  "mail/1-fernhill/misc-60.eml": {
+   "tags": [],
+   "when": "2026-10-08T09:32:00+00:00"
+  },
+  "mail/1-fernhill/misc-61.eml": {
+   "tags": [],
+   "when": "2026-10-09T10:17:00+00:00"
+  },
+  "mail/1-fernhill/misc-62.eml": {
+   "tags": [],
+   "when": "2026-08-03T08:32:00+00:00"
+  },
+  "mail/1-fernhill/misc-63.eml": {
+   "tags": [],
+   "when": "2026-08-26T13:55:00+00:00"
+  },
+  "mail/1-fernhill/misc-64.eml": {
+   "tags": [],
+   "when": "2026-08-14T18:51:00+00:00"
+  },
+  "mail/1-fernhill/misc-65.eml": {
+   "tags": [],
+   "when": "2026-10-09T12:28:00+00:00"
+  },
+  "mail/1-fernhill/misc-66.eml": {
+   "tags": [],
+   "when": "2026-09-13T10:47:00+00:00"
+  },
+  "mail/1-fernhill/misc-67.eml": {
+   "tags": [],
+   "when": "2026-08-05T12:50:00+00:00"
+  },
+  "mail/1-fernhill/misc-68.eml": {
+   "tags": [],
+   "when": "2026-08-24T15:37:00+00:00"
+  },
+  "mail/1-fernhill/misc-69.eml": {
+   "tags": [],
+   "when": "2026-08-11T10:28:00+00:00"
+  },
+  "mail/1-fernhill/misc-70.eml": {
+   "tags": [],
+   "when": "2026-10-23T11:55:00+00:00"
+  },
+  "mail/1-fernhill/misc-71.eml": {
+   "tags": [],
+   "when": "2026-09-24T14:11:00+00:00"
+  },
+  "mail/1-fernhill/misc-72.eml": {
+   "tags": [],
+   "when": "2026-08-31T12:45:00+00:00"
+  },
+  "mail/1-fernhill/misc-73.eml": {
+   "tags": [],
+   "when": "2026-09-25T13:49:00+00:00"
+  },
+  "mail/1-fernhill/misc-74.eml": {
+   "tags": [],
+   "when": "2026-10-30T09:37:00+00:00"
+  },
+  "mail/1-fernhill/misc-75.eml": {
+   "tags": [],
+   "when": "2026-08-02T18:05:00+00:00"
+  },
+  "mail/1-fernhill/resignation-reply.eml": {
+   "tags": [
+    "job"
+   ],
+   "when": "2026-10-20T16:02:00+00:00"
+  },
+  "mail/1-fernhill/resignation.eml": {
+   "tags": [
+    "job"
+   ],
+   "when": "2026-10-20T14:30:00+00:00"
+  },
+  "mail/2-corvid/01-offer-v1.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-09-19T16:05:00+00:00"
+  },
+  "mail/2-corvid/02-offer-v2.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-09-29T11:40:00+00:00"
+  },
+  "mail/2-corvid/03-accept.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-10-16T18:20:00+00:00"
+  },
+  "mail/2-corvid/04-offer-v3.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-10-21T10:15:00+00:00"
+  },
+  "mail/2-corvid/05-signed.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-10-22T21:05:00+00:00"
+  },
+  "mail/2-corvid/06-welcome.eml": {
+   "tags": [
+    "contract"
+   ],
+   "when": "2026-10-23T09:02:00+00:00"
+  },
+  "mail/3-home/boiler.eml": {
+   "tags": [
+    "bob"
+   ],
+   "when": "2026-10-24T08:10:00+00:00"
+  },
+  "mail/3-home/lease-renewal.eml": {
+   "tags": [
+    "bob",
+    "rent"
+   ],
+   "when": "2026-10-15T19:00:00+00:00"
+  },
+  "mail/4-health/blood-results.eml": {
+   "tags": [
+    "health"
+   ],
+   "when": "2026-10-23T08:45:00+00:00"
+  },
+  "mail/4-health/dentist-booked.eml": {
+   "tags": [
+    "dentist"
+   ],
+   "when": "2026-09-24T12:00:00+00:00"
+  },
+  "mail/4-health/dentist-rescheduled.eml": {
+   "tags": [
+    "dentist"
+   ],
+   "when": "2026-10-21T11:20:00+00:00"
+  },
+  "mail/4-health/dentist-spoof.eml": {
+   "tags": [
+    "dentist",
+    "injection"
+   ],
+   "when": "2026-10-24T22:40:00+00:00"
+  },
+  "mail/4-health/physio.eml": {
+   "tags": [
+    "physio"
+   ],
+   "when": "2026-10-18T10:00:00+00:00"
+  },
+  "mail/5-bills/citypower-prev.eml": {
+   "tags": [
+    "electricity-old"
+   ],
+   "when": "2026-09-24T06:30:00+00:00"
+  },
+  "mail/5-bills/citypower.eml": {
+   "tags": [
+    "electricity"
+   ],
+   "when": "2026-10-24T06:30:00+00:00"
+  },
+  "mail/5-bills/gym-cancel.eml": {
+   "tags": [
+    "gym"
+   ],
+   "when": "2026-10-14T13:00:00+00:00"
+  },
+  "mail/5-bills/kestrel.eml": {
+   "tags": [
+    "phone"
+   ],
+   "when": "2026-10-16T05:00:00+00:00"
+  },
+  "mail/5-bills/lumen-1.eml": {
+   "tags": [
+    "internet"
+   ],
+   "when": "2026-07-16T07:00:00+00:00"
+  },
+  "mail/5-bills/lumen-2.eml": {
+   "tags": [
+    "internet"
+   ],
+   "when": "2026-08-15T07:00:00+00:00"
+  },
+  "mail/5-bills/lumen-3.eml": {
+   "tags": [
+    "internet"
+   ],
+   "when": "2026-09-14T07:00:00+00:00"
+  },
+  "mail/5-bills/lumen-4.eml": {
+   "tags": [
+    "internet"
+   ],
+   "when": "2026-10-14T07:00:00+00:00"
+  },
+  "mail/5-bills/lumen-phish.eml": {
+   "tags": [
+    "internet",
+    "injection"
+   ],
+   "when": "2026-10-25T23:15:00+00:00"
+  },
+  "mail/6-travel/kyoto-flight.eml": {
+   "tags": [
+    "kyoto"
+   ],
+   "when": "2026-10-13T22:30:00+00:00"
+  },
+  "mail/6-travel/kyoto-ryokan.eml": {
+   "tags": [
+    "kyoto"
+   ],
+   "when": "2026-10-14T08:00:00+00:00"
+  },
+  "mail/6-travel/lisbon-flight.eml": {
+   "tags": [
+    "lisbon"
+   ],
+   "when": "2026-07-11T21:00:00+00:00"
+  },
+  "mail/6-travel/lisbon-hotel.eml": {
+   "tags": [
+    "lisbon"
+   ],
+   "when": "2026-08-14T11:00:00+00:00"
+  },
+  "mail/6-travel/porto-conference.eml": {
+   "tags": [
+    "porto"
+   ],
+   "when": "2026-05-24T09:00:00+00:00"
+  },
+  "mail/7-personal/mom-birthday.eml": {
+   "tags": [
+    "family"
+   ],
+   "when": "2026-10-22T17:00:00+00:00"
+  },
+  "mail/8-receipts/receipt-01.eml": {
+   "tags": [],
+   "when": "2026-10-28T09:40:00+00:00"
+  },
+  "mail/8-receipts/receipt-02.eml": {
+   "tags": [],
+   "when": "2026-09-19T15:35:00+00:00"
+  },
+  "mail/8-receipts/receipt-03.eml": {
+   "tags": [],
+   "when": "2026-10-17T19:19:00+00:00"
+  },
+  "mail/8-receipts/receipt-04.eml": {
+   "tags": [],
+   "when": "2026-09-17T11:47:00+00:00"
+  },
+  "mail/8-receipts/receipt-05.eml": {
+   "tags": [],
+   "when": "2026-10-20T08:52:00+00:00"
+  },
+  "mail/8-receipts/receipt-06.eml": {
+   "tags": [],
+   "when": "2026-09-19T18:15:00+00:00"
+  },
+  "mail/8-receipts/receipt-07.eml": {
+   "tags": [],
+   "when": "2026-07-12T18:43:00+00:00"
+  },
+  "mail/8-receipts/receipt-08.eml": {
+   "tags": [],
+   "when": "2026-10-28T12:18:00+00:00"
+  },
+  "mail/8-receipts/receipt-09.eml": {
+   "tags": [],
+   "when": "2026-10-14T11:02:00+00:00"
+  },
+  "mail/8-receipts/receipt-10.eml": {
+   "tags": [],
+   "when": "2026-09-17T16:23:00+00:00"
+  },
+  "mail/8-receipts/receipt-11.eml": {
+   "tags": [],
+   "when": "2026-09-17T10:51:00+00:00"
+  },
+  "mail/8-receipts/receipt-12.eml": {
+   "tags": [],
+   "when": "2026-08-24T17:36:00+00:00"
+  },
+  "mail/8-receipts/receipt-13.eml": {
+   "tags": [],
+   "when": "2026-10-16T19:45:00+00:00"
+  },
+  "mail/8-receipts/receipt-14.eml": {
+   "tags": [],
+   "when": "2026-10-16T09:59:00+00:00"
+  },
+  "mail/8-receipts/receipt-15.eml": {
+   "tags": [],
+   "when": "2026-07-02T08:17:00+00:00"
+  },
+  "mail/8-receipts/receipt-16.eml": {
+   "tags": [],
+   "when": "2026-07-02T12:05:00+00:00"
+  },
+  "mail/8-receipts/receipt-17.eml": {
+   "tags": [],
+   "when": "2026-09-26T14:46:00+00:00"
+  },
+  "mail/8-receipts/receipt-18.eml": {
+   "tags": [],
+   "when": "2026-10-13T08:54:00+00:00"
+  },
+  "mail/8-receipts/receipt-19.eml": {
+   "tags": [],
+   "when": "2026-08-07T17:52:00+00:00"
+  },
+  "mail/8-receipts/receipt-20.eml": {
+   "tags": [],
+   "when": "2026-10-20T10:25:00+00:00"
+  },
+  "mail/8-receipts/receipt-21.eml": {
+   "tags": [],
+   "when": "2026-09-21T18:18:00+00:00"
+  },
+  "mail/8-receipts/receipt-22.eml": {
+   "tags": [],
+   "when": "2026-07-15T17:52:00+00:00"
+  },
+  "mail/8-receipts/receipt-23.eml": {
+   "tags": [],
+   "when": "2026-10-12T19:02:00+00:00"
+  },
+  "mail/8-receipts/receipt-24.eml": {
+   "tags": [],
+   "when": "2026-10-18T08:47:00+00:00"
+  },
+  "mail/8-receipts/receipt-25.eml": {
+   "tags": [],
+   "when": "2026-07-05T16:10:00+00:00"
+  },
+  "mail/8-receipts/receipt-26.eml": {
+   "tags": [],
+   "when": "2026-08-27T15:23:00+00:00"
+  },
+  "mail/8-receipts/receipt-27.eml": {
+   "tags": [],
+   "when": "2026-09-25T09:34:00+00:00"
+  },
+  "mail/8-receipts/receipt-28.eml": {
+   "tags": [],
+   "when": "2026-10-20T19:01:00+00:00"
+  },
+  "mail/8-receipts/receipt-29.eml": {
+   "tags": [],
+   "when": "2026-08-16T18:27:00+00:00"
+  },
+  "mail/8-receipts/receipt-30.eml": {
+   "tags": [],
+   "when": "2026-10-26T08:58:00+00:00"
+  },
+  "mail/8-receipts/receipt-31.eml": {
+   "tags": [],
+   "when": "2026-09-21T09:49:00+00:00"
+  },
+  "mail/8-receipts/receipt-32.eml": {
+   "tags": [],
+   "when": "2026-09-26T08:14:00+00:00"
+  },
+  "mail/8-receipts/receipt-33.eml": {
+   "tags": [],
+   "when": "2026-07-26T13:19:00+00:00"
+  },
+  "mail/8-receipts/receipt-34.eml": {
+   "tags": [],
+   "when": "2026-09-11T20:55:00+00:00"
+  },
+  "mail/8-receipts/receipt-35.eml": {
+   "tags": [],
+   "when": "2026-07-18T16:31:00+00:00"
+  },
+  "mail/8-receipts/receipt-36.eml": {
+   "tags": [],
+   "when": "2026-07-07T15:31:00+00:00"
+  },
+  "mail/8-receipts/receipt-37.eml": {
+   "tags": [],
+   "when": "2026-07-09T11:14:00+00:00"
+  },
+  "mail/8-receipts/receipt-38.eml": {
+   "tags": [],
+   "when": "2026-08-19T10:54:00+00:00"
+  },
+  "mail/8-receipts/receipt-39.eml": {
+   "tags": [],
+   "when": "2026-08-15T12:21:00+00:00"
+  },
+  "mail/8-receipts/receipt-40.eml": {
+   "tags": [],
+   "when": "2026-09-26T20:19:00+00:00"
+  },
+  "mail/8-receipts/receipt-41.eml": {
+   "tags": [],
+   "when": "2026-07-03T09:26:00+00:00"
+  },
+  "mail/8-receipts/receipt-42.eml": {
+   "tags": [],
+   "when": "2026-07-07T15:11:00+00:00"
+  },
+  "mail/8-receipts/receipt-43.eml": {
+   "tags": [],
+   "when": "2026-10-25T19:42:00+00:00"
+  },
+  "mail/8-receipts/receipt-44.eml": {
+   "tags": [],
+   "when": "2026-07-27T09:58:00+00:00"
+  },
+  "mail/8-receipts/receipt-45.eml": {
+   "tags": [],
+   "when": "2026-10-15T10:49:00+00:00"
+  },
+  "mail/8-receipts/receipt-46.eml": {
+   "tags": [],
+   "when": "2026-10-13T13:59:00+00:00"
+  },
+  "mail/8-receipts/receipt-47.eml": {
+   "tags": [],
+   "when": "2026-10-11T08:31:00+00:00"
+  },
+  "mail/8-receipts/receipt-48.eml": {
+   "tags": [],
+   "when": "2026-10-14T16:09:00+00:00"
+  },
+  "mail/8-receipts/receipt-49.eml": {
+   "tags": [],
+   "when": "2026-07-05T09:20:00+00:00"
+  },
+  "mail/8-receipts/receipt-50.eml": {
+   "tags": [],
+   "when": "2026-08-21T10:35:00+00:00"
+  },
+  "mail/9-newsletters/city-arts-weekly-1.eml": {
+   "tags": [],
+   "when": "2026-08-09T05:12:00+00:00"
+  },
+  "mail/9-newsletters/city-arts-weekly-2.eml": {
+   "tags": [],
+   "when": "2026-07-12T09:48:00+00:00"
+  },
+  "mail/9-newsletters/city-arts-weekly-3.eml": {
+   "tags": [],
+   "when": "2026-08-04T08:47:00+00:00"
+  },
+  "mail/9-newsletters/city-arts-weekly-4.eml": {
+   "tags": [],
+   "when": "2026-09-01T06:15:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-1.eml": {
+   "tags": [],
+   "when": "2026-10-16T08:36:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-2.eml": {
+   "tags": [],
+   "when": "2026-08-11T05:52:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-3.eml": {
+   "tags": [],
+   "when": "2026-10-22T08:31:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-4.eml": {
+   "tags": [],
+   "when": "2026-07-03T05:26:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-5.eml": {
+   "tags": [],
+   "when": "2026-09-24T08:39:00+00:00"
+  },
+  "mail/9-newsletters/garden-notes-6.eml": {
+   "tags": [],
+   "when": "2026-08-28T07:37:00+00:00"
+  },
+  "mail/9-newsletters/pantry-box-1.eml": {
+   "tags": [],
+   "when": "2026-09-15T07:08:00+00:00"
+  },
+  "mail/9-newsletters/pantry-box-2.eml": {
+   "tags": [],
+   "when": "2026-10-14T07:11:00+00:00"
+  },
+  "mail/9-newsletters/pantry-box-3.eml": {
+   "tags": [],
+   "when": "2026-07-13T05:34:00+00:00"
+  },
+  "mail/9-newsletters/pantry-box-4.eml": {
+   "tags": [],
+   "when": "2026-09-24T06:49:00+00:00"
+  },
+  "mail/9-newsletters/riverside-running-club-1.eml": {
+   "tags": [],
+   "when": "2026-08-25T09:34:00+00:00"
+  },
+  "mail/9-newsletters/riverside-running-club-2.eml": {
+   "tags": [],
+   "when": "2026-07-02T05:02:00+00:00"
+  },
+  "mail/9-newsletters/riverside-running-club-3.eml": {
+   "tags": [],
+   "when": "2026-09-23T07:52:00+00:00"
+  },
+  "mail/9-newsletters/riverside-running-club-4.eml": {
+   "tags": [],
+   "when": "2026-06-24T07:45:00+00:00"
+  },
+  "mail/9-newsletters/riverside-running-club-5.eml": {
+   "tags": [],
+   "when": "2026-10-07T06:45:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-1.eml": {
+   "tags": [],
+   "when": "2026-08-16T05:46:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-2.eml": {
+   "tags": [],
+   "when": "2026-08-27T07:26:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-3.eml": {
+   "tags": [],
+   "when": "2026-07-27T05:18:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-4.eml": {
+   "tags": [],
+   "when": "2026-07-27T08:59:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-5.eml": {
+   "tags": [],
+   "when": "2026-09-11T07:25:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-6.eml": {
+   "tags": [],
+   "when": "2026-10-25T07:43:00+00:00"
+  },
+  "mail/9-newsletters/the-weekly-byte-7.eml": {
+   "tags": [],
+   "when": "2026-09-25T06:00:00+00:00"
+  },
+  "notes/book club.md": {
+   "tags": [
+    "bookclub",
+    "injection"
+   ],
+   "when": "2026-10-20T22:00:00+00:00"
+  },
+  "notes/gift ideas.md": {
+   "tags": [
+    "family"
+   ],
+   "when": "2026-09-29T21:00:00+00:00"
+  },
+  "notes/health log.md": {
+   "tags": [
+    "health"
+   ],
+   "when": "2026-10-23T20:00:00+00:00"
+  },
+  "notes/misc/01 reading notes.md": {
+   "tags": [],
+   "when": "2026-07-15T21:00:00+00:00"
+  },
+  "notes/misc/02 journal.md": {
+   "tags": [],
+   "when": "2026-07-06T18:00:00+00:00"
+  },
+  "notes/misc/03 running log.md": {
+   "tags": [],
+   "when": "2026-07-10T12:00:00+00:00"
+  },
+  "notes/misc/04 journal.md": {
+   "tags": [],
+   "when": "2026-06-20T22:00:00+00:00"
+  },
+  "notes/misc/05 podcast notes.md": {
+   "tags": [],
+   "when": "2026-08-09T13:00:00+00:00"
+  },
+  "notes/misc/06 journal.md": {
+   "tags": [],
+   "when": "2026-07-05T16:00:00+00:00"
+  },
+  "notes/misc/07 meeting prep.md": {
+   "tags": [],
+   "when": "2026-10-28T15:00:00+00:00"
+  },
+  "notes/misc/08 running log.md": {
+   "tags": [],
+   "when": "2026-09-18T09:00:00+00:00"
+  },
+  "notes/misc/09 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-06-04T09:00:00+00:00"
+  },
+  "notes/misc/10 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-06-23T07:00:00+00:00"
+  },
+  "notes/misc/11 journal.md": {
+   "tags": [],
+   "when": "2026-06-01T11:00:00+00:00"
+  },
+  "notes/misc/12 journal.md": {
+   "tags": [],
+   "when": "2026-08-21T07:00:00+00:00"
+  },
+  "notes/misc/13 journal.md": {
+   "tags": [],
+   "when": "2026-06-22T12:00:00+00:00"
+  },
+  "notes/misc/14 running log.md": {
+   "tags": [],
+   "when": "2026-07-30T12:00:00+00:00"
+  },
+  "notes/misc/15 meeting prep.md": {
+   "tags": [],
+   "when": "2026-09-06T11:00:00+00:00"
+  },
+  "notes/misc/16 running log.md": {
+   "tags": [],
+   "when": "2026-08-16T18:00:00+00:00"
+  },
+  "notes/misc/17 reading notes.md": {
+   "tags": [],
+   "when": "2026-09-13T17:00:00+00:00"
+  },
+  "notes/misc/18 podcast notes.md": {
+   "tags": [],
+   "when": "2026-08-10T11:00:00+00:00"
+  },
+  "notes/misc/19 reading notes.md": {
+   "tags": [],
+   "when": "2026-08-14T20:00:00+00:00"
+  },
+  "notes/misc/20 journal.md": {
+   "tags": [],
+   "when": "2026-10-10T10:00:00+00:00"
+  },
+  "notes/misc/21 journal.md": {
+   "tags": [],
+   "when": "2026-08-15T11:00:00+00:00"
+  },
+  "notes/misc/22 meeting prep.md": {
+   "tags": [],
+   "when": "2026-09-07T21:00:00+00:00"
+  },
+  "notes/misc/23 podcast notes.md": {
+   "tags": [],
+   "when": "2026-07-21T09:00:00+00:00"
+  },
+  "notes/misc/24 movie list.md": {
+   "tags": [],
+   "when": "2026-08-23T20:00:00+00:00"
+  },
+  "notes/misc/25 reading notes.md": {
+   "tags": [],
+   "when": "2026-07-23T17:00:00+00:00"
+  },
+  "notes/misc/26 meeting prep.md": {
+   "tags": [],
+   "when": "2026-08-31T22:00:00+00:00"
+  },
+  "notes/misc/27 movie list.md": {
+   "tags": [],
+   "when": "2026-09-28T09:00:00+00:00"
+  },
+  "notes/misc/28 podcast notes.md": {
+   "tags": [],
+   "when": "2026-09-17T17:00:00+00:00"
+  },
+  "notes/misc/29 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-06-18T20:00:00+00:00"
+  },
+  "notes/misc/30 running log.md": {
+   "tags": [],
+   "when": "2026-06-02T08:00:00+00:00"
+  },
+  "notes/misc/31 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-07-06T07:00:00+00:00"
+  },
+  "notes/misc/32 meeting prep.md": {
+   "tags": [],
+   "when": "2026-05-29T22:00:00+00:00"
+  },
+  "notes/misc/33 recipe.md": {
+   "tags": [],
+   "when": "2026-06-03T16:00:00+00:00"
+  },
+  "notes/misc/34 meeting prep.md": {
+   "tags": [],
+   "when": "2026-07-27T08:00:00+00:00"
+  },
+  "notes/misc/35 reading notes.md": {
+   "tags": [],
+   "when": "2026-10-01T22:00:00+00:00"
+  },
+  "notes/misc/36 podcast notes.md": {
+   "tags": [],
+   "when": "2026-09-04T07:00:00+00:00"
+  },
+  "notes/misc/37 movie list.md": {
+   "tags": [],
+   "when": "2026-07-24T12:00:00+00:00"
+  },
+  "notes/misc/38 movie list.md": {
+   "tags": [],
+   "when": "2026-10-27T18:00:00+00:00"
+  },
+  "notes/misc/39 running log.md": {
+   "tags": [],
+   "when": "2026-06-08T16:00:00+00:00"
+  },
+  "notes/misc/40 meeting prep.md": {
+   "tags": [],
+   "when": "2026-05-24T14:00:00+00:00"
+  },
+  "notes/misc/41 podcast notes.md": {
+   "tags": [],
+   "when": "2026-07-19T13:00:00+00:00"
+  },
+  "notes/misc/42 journal.md": {
+   "tags": [],
+   "when": "2026-08-22T12:00:00+00:00"
+  },
+  "notes/misc/43 meeting prep.md": {
+   "tags": [],
+   "when": "2026-06-18T22:00:00+00:00"
+  },
+  "notes/misc/44 recipe.md": {
+   "tags": [],
+   "when": "2026-09-14T10:00:00+00:00"
+  },
+  "notes/misc/45 reading notes.md": {
+   "tags": [],
+   "when": "2026-08-09T07:00:00+00:00"
+  },
+  "notes/misc/46 meeting prep.md": {
+   "tags": [],
+   "when": "2026-08-27T18:00:00+00:00"
+  },
+  "notes/misc/47 recipe.md": {
+   "tags": [],
+   "when": "2026-06-27T12:00:00+00:00"
+  },
+  "notes/misc/48 movie list.md": {
+   "tags": [],
+   "when": "2026-06-06T13:00:00+00:00"
+  },
+  "notes/misc/49 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-08-28T22:00:00+00:00"
+  },
+  "notes/misc/50 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-10-23T14:00:00+00:00"
+  },
+  "notes/misc/51 reading notes.md": {
+   "tags": [],
+   "when": "2026-06-25T22:00:00+00:00"
+  },
+  "notes/misc/52 movie list.md": {
+   "tags": [],
+   "when": "2026-07-11T21:00:00+00:00"
+  },
+  "notes/misc/53 podcast notes.md": {
+   "tags": [],
+   "when": "2026-06-24T09:00:00+00:00"
+  },
+  "notes/misc/54 journal.md": {
+   "tags": [],
+   "when": "2026-10-02T09:00:00+00:00"
+  },
+  "notes/misc/55 ideas for side project.md": {
+   "tags": [],
+   "when": "2026-08-23T14:00:00+00:00"
+  },
+  "notes/recipes/lemon cake.md": {
+   "tags": [
+    "recipe",
+    "injection"
+   ],
+   "when": "2026-09-19T18:00:00+00:00"
+  },
+  "notes/trips/Lisbon trip.md": {
+   "tags": [
+    "lisbon"
+   ],
+   "when": "2026-08-15T20:00:00+00:00"
+  },
+  "notes/wifi and home.md": {
+   "tags": [
+    "home"
+   ],
+   "when": "2026-08-30T10:00:00+00:00"
+  }
+ },
+ "meta": {
+  "items": 315,
+  "last_week_monday": "2026-10-19",
+  "questions": 123,
+  "today": "2026-10-30",
+  "turns": 149
+ }
+}

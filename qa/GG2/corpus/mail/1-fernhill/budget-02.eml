@@ -1,0 +1,14 @@
+From: Dana Whitlock <dana.whitlock@example.net>
+To: Sam Ortega <sam.ortega@fernhill.example>
+Date: Mon, 05 Oct 2026 09:30:00 +0000
+Subject: Re: Q4 budget for Atlas
+Message-ID: <gg2-11@example.net>
+In-Reply-To: <gg2-10@fernhill.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Thanks Sam. The plan works if we push the reporting dashboards into Q1. I'll talk to Bob about
+which contractor tasks we can drop. On cloud: we can stay under the cap if we turn off the old
+cluster after cutover.
+
+Dana

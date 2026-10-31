@@ -1,0 +1,11 @@
+From: Nadia Brennan <nadia.brennan@fernhill.example>
+To: Dana Whitlock <dana.whitlock@example.net>
+Date: Mon, 05 Oct 2026 15:08:00 +0000
+Subject: PR review: export CSV
+Message-ID: <gg2-126@fernhill.example>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Left comments on the CSV export PR, mostly naming. Ship after tests pass.
+
+Nadia

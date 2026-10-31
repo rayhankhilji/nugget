@@ -1,0 +1,7 @@
+Team chat export (#product), 2026-09-19
+[2026-09-19 9:11] Dana Whitlock: the Quarry search is slow again
+[2026-09-19 10:49] Dana Whitlock: +1
+[2026-09-19 11:50] Omar Siddiqui: standup moved to 10:15 today
+[2026-09-19 12:26] Omar Siddiqui: lunch?
+[2026-09-19 13:33] Omar Siddiqui: lunch?
+[2026-09-19 14:58] Dana Whitlock: can we push the design review to Thursday?
