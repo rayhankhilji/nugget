@@ -36,6 +36,8 @@ env:
 
 jobs:
   linux:
+    # A push whose message says [gg6-only:<os>] runs only that OS (harness fixes).
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[gg6-only:') || contains(github.event.head_commit.message, '[gg6-only:linux]')
     name: Linux (deb + AppImage, x86_64)
     runs-on: ubuntu-22.04
     timeout-minutes: 300
@@ -129,6 +131,8 @@ jobs:
           retention-days: 30
 
   macos:
+    # A push whose message says [gg6-only:<os>] runs only that OS (harness fixes).
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[gg6-only:') || contains(github.event.head_commit.message, '[gg6-only:macos]')
     name: macOS (dmg, Intel)
     runs-on: macos-15-intel
     timeout-minutes: 300
@@ -209,6 +213,8 @@ jobs:
           retention-days: 30
 
   windows:
+    # A push whose message says [gg6-only:<os>] runs only that OS (harness fixes).
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[gg6-only:') || contains(github.event.head_commit.message, '[gg6-only:windows]')
     name: Windows (NSIS + MSI, x64)
     runs-on: windows-2022
     timeout-minutes: 300

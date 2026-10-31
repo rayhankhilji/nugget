@@ -57,7 +57,7 @@ async function launch(label) {
     async () => {
       const pages = browser.contexts().flatMap((c) => c.pages());
       const main = pages.find((pg) => /tauri\.localhost|^tauri:/.test(pg.url()) && !/overlay/.test(pg.url()));
-      return [main, pages.map((pg) => pg.url())];
+      return [main, main ?? pages.map((pg) => pg.url())];
     },
     120_000,
     500,
