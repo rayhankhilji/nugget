@@ -30,7 +30,9 @@ pub struct Rect {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct PracticeField {
     pub value: String,
-    /// Character offsets; `None` is a caret at the end.
+    /// UTF-16 offsets as the page reports them (`selectionStart`, `selectionEnd`); converted to
+    /// character offsets, as `FieldInfo::selection` wants, by [`PracticeField::validated`].
+    /// `None` is a caret at the end.
     #[serde(default)]
     pub selection: Option<(u32, u32)>,
     pub rect: Rect,
@@ -48,6 +50,19 @@ pub enum Action {
     Focus,
 }
 
+/// The character offset of UTF-16 offset `u` in `s` (clamped to the end; inside a surrogate
+/// pair rounds up).
+fn utf16_to_chars(s: &str, u: u32) -> u32 {
+    let mut units = 0u32;
+    for (i, c) in s.chars().enumerate() {
+        if units >= u {
+            return u32::try_from(i).unwrap_or(u32::MAX);
+        }
+        units = units.saturating_add(u32::try_from(c.len_utf16()).unwrap_or(2));
+    }
+    u32::try_from(s.chars().count()).unwrap_or(u32::MAX)
+}
+
 fn cap(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
@@ -61,10 +76,10 @@ impl PracticeField {
         }
         self.value = cap(&self.value, MAX_VALUE);
         self.sample = cap(self.sample.trim(), MAX_SAMPLE);
-        let len = u32::try_from(self.value.chars().count()).unwrap_or(u32::MAX);
+        let value = &self.value;
         self.selection = self
             .selection
-            .map(|(a, b)| (a.min(len), b.min(len)))
+            .map(|(a, b)| (utf16_to_chars(value, a), utf16_to_chars(value, b)))
             .map(|(a, b)| (a.min(b), a.max(b)));
         Ok(self)
     }
@@ -135,6 +150,9 @@ mod tests {
     fn validation_caps_and_orders_the_selection() {
         let f = field("héllo", Some((9, 2))).validated().unwrap();
         assert_eq!(f.selection, Some((2, 5)));
+        // UTF-16 offsets from the page: the emoji is two units, one character.
+        let f = field("a😀b", Some((3, 4))).validated().unwrap();
+        assert_eq!(f.selection, Some((2, 3)));
         assert_eq!(f.sample, "Can we move our call to Thursday?");
         let long = field(&"x".repeat(MAX_VALUE + 50), None)
             .validated()
