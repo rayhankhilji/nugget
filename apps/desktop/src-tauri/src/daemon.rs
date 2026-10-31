@@ -142,6 +142,9 @@ pub struct Daemon {
     /// connection as down.
     generation: AtomicU64,
     start_lock: Mutex<()>,
+    /// II4: the process id of a `nuggetd` this app started and that still runs (0: none), so a
+    /// quit can stop it when the user chose that ([`Daemon::started_pid`]).
+    started_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Default for Daemon {
@@ -157,7 +160,13 @@ impl Daemon {
             client: Mutex::new(None),
             generation: AtomicU64::new(0),
             start_lock: Mutex::new(()),
+            started_pid: Default::default(),
         }
+    }
+
+    /// The `nuggetd` this app started, while it runs (never one run as a service or by hand).
+    pub fn started_pid(&self) -> Option<u32> {
+        Some(self.started_pid.load(Ordering::SeqCst)).filter(|p| *p != 0)
     }
 
     fn paths(&self) -> Result<&Paths, CmdError> {
@@ -263,9 +272,13 @@ impl Daemon {
                 )));
             }
         };
+        let pid = child.id();
+        self.started_pid.store(pid, Ordering::SeqCst);
+        let started = self.started_pid.clone();
         // Reap the child whenever it exits, without blocking the runtime.
         std::thread::spawn(move || {
             let _ = child.wait();
+            let _ = started.compare_exchange(pid, 0, Ordering::SeqCst, Ordering::SeqCst);
         });
         result
     }

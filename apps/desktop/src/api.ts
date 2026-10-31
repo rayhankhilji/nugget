@@ -2483,3 +2483,96 @@ export async function restoreAndRestart(
   onPhase("done");
   return conn;
 }
+
+// ---- II4: quick ask ----
+
+/** `quickask.json` (see `src-tauri/src/quickask.rs`). */
+export interface QuickAskSettings {
+  enabled: boolean;
+  /** An accelerator such as `Ctrl+Shift+Space`. */
+  shortcut: string;
+}
+
+export type QuickAskState = "listening" | "off" | "error" | "unsupported_wayland";
+
+export interface QuickAskStatus {
+  listening: boolean;
+  error: string | null;
+  /** Wayland: no shortcut is registered; bind a desktop key to {@link QUICK_ASK_COMMAND}. */
+  wayland_fallback: boolean;
+  state?: QuickAskState;
+}
+
+export interface QuickAskView {
+  settings: QuickAskSettings;
+  status: QuickAskStatus;
+}
+
+/** Pages the quick-ask window can open in the main window. */
+export type QuickAskPage = Extract<PageId, "chat" | "search">;
+
+/** The command a desktop key binding runs to toggle quick ask where Nugget can't register one. */
+export const QUICK_ASK_COMMAND = "nugget-desktop --quick-ask";
+/** Text for the question field, sent by the shell; never submitted by itself. */
+export const QUICK_ASK_PREFILL_EVENT = "quickask:prefill";
+
+export const quickAskApi = {
+  settingsGet: () => call<QuickAskView>("quickask_settings_get"),
+  settingsSet: (settings: QuickAskSettings) => call<QuickAskView>("quickask_settings_set", { settings }),
+  hide: () => call<null>("quickask_hide"),
+  openMain: (page: QuickAskPage) => call<null>("quickask_open_main", { page }),
+  onPrefill: (h: (text: string) => void) =>
+    on<unknown>(QUICK_ASK_PREFILL_EVENT, (p) => {
+      if (typeof p === "string") h(p);
+    }),
+};
+
+// ---- II4: platform integration (tray labels, notifications, quit, deep links) ----
+
+/** Quiet hours, in minutes after local midnight; an end before the start spans midnight. */
+export interface QuietHours {
+  start: number;
+  end: number;
+}
+
+/** OS notifications (see `src-tauri/src/notify.rs`). Off until the user opts in. */
+export interface NotifySettings {
+  enabled: boolean;
+  /** The morning brief and due reminders. */
+  brief: boolean;
+  /** An agent waiting for a confirmation or an answer. */
+  agent: boolean;
+  quiet: QuietHours | null;
+}
+
+/** `platform.json` (see `src-tauri/src/platform.rs`). */
+export interface PlatformSettings {
+  notifications: NotifySettings;
+  /** Quitting Nugget also stops a background service the app started. */
+  quit_stops_daemon: boolean;
+  /** Sources the tray's "Pause indexing" turned off (read-only here). */
+  paused_sources: string[];
+}
+
+/** A validated `nugget://` link or opened `.nuggetplugin` file (see `src-tauri/src/deeplink.rs`). */
+export type DeepLink =
+  | { kind: "page"; page: PageId }
+  | { kind: "search"; query: string }
+  | { kind: "item"; source: string; key: string }
+  | { kind: "ask"; question: string }
+  | { kind: "plugin"; path: string };
+
+/** No payload: a link is waiting; take it with {@link platformApi.takeDeepLink}. */
+export const DEEPLINK_EVENT = "nugget:deeplink";
+/** Emitted after the computer wakes from sleep. */
+export const RESUMED_EVENT = "nugget:resumed";
+
+export const platformApi = {
+  settingsGet: () => call<PlatformSettings>("platform_settings_get"),
+  settingsSet: (settings: PlatformSettings) => call<PlatformSettings>("platform_settings_set", { settings }),
+  /** The current locale's strings for the tray and OS notifications (`shell.*` keys). */
+  setShellLabels: (labels: Record<string, string>) => call<number>("shell_labels_set", { labels }),
+  takeDeepLink: () => call<DeepLink | null>("deeplink_take"),
+  onDeepLink: (h: (payload: unknown) => void) => on<unknown>(DEEPLINK_EVENT, h),
+  onResumed: (h: (payload: unknown) => void) => on<unknown>(RESUMED_EVENT, h),
+};

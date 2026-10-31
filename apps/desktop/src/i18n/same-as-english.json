@@ -41,7 +41,8 @@
     "shortcuts.key.esc",
     "status.version",
     "today.actionFullName",
-    "today.learned.line"
+    "today.learned.line",
+    "shell.tray.doubleTap"
   ],
   "ar": [
     "shortcuts.key.enter"
@@ -103,7 +104,9 @@
     "status.vault",
     "today.learning.scope.domain",
     "updates.badge.beta",
-    "updates.title"
+    "updates.title",
+    "shell.tray.status",
+    "shell.tray.updates"
   ],
   "es": [
     "addSource.linear.include",
@@ -170,6 +173,7 @@
     "palette.group.page",
     "plugins.title",
     "plugins.version",
+    "quickAsk.sources",
     "safety.log.chainOk",
     "safety.rule.description",
     "safety.rule.verbs",
@@ -185,7 +189,8 @@
     "status.mentions",
     "today.factor.importance",
     "updates.badge.stable",
-    "updates.channel.stable"
+    "updates.channel.stable",
+    "appSettings.notifyHeading"
   ],
   "hi": [
     "addSource.linear.include",
@@ -228,7 +233,8 @@
     "status.role.chat",
     "status.role.embedding",
     "status.title",
-    "updates.badge.beta"
+    "updates.badge.beta",
+    "shell.tray.status"
   ],
   "zh-CN": [
     "shortcuts.key.enter",

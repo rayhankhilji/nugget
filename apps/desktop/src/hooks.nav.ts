@@ -72,3 +72,17 @@ export function requestPage(id: PageId): void {
 export function usePendingPage(onPage: (id: PageId) => void): void {
   page.usePending(onPage);
 }
+
+// ---- II4: a `.nuggetplugin` file opened from the OS, after the user said to go ahead ----
+
+const pluginInstall = channel<string>();
+
+/** Ask the Plugins page to install the package at `path` (its usual approval flow follows). */
+export function requestPluginInstall(path: string): void {
+  pluginInstall.request(path);
+}
+
+/** Run `onPath` for an install requested before mount and for every later request. */
+export function usePendingPluginInstall(onPath: (path: string) => void): void {
+  pluginInstall.usePending(onPath);
+}

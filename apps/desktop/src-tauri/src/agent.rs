@@ -171,8 +171,19 @@ pub fn tray_clicked<R: Runtime>(app: &AppHandle<R>) {
 
 fn set_tray_label(app: &AppHandle, halted: bool) {
     if let Some(t) = app.try_state::<AgentTray<tauri::Wry>>() {
-        let _ = t.0.set_text(tray_label(halted));
+        // II4: the localized label when the frontend has sent one.
+        let key = if halted {
+            "shell.tray.resumeAgents"
+        } else {
+            "shell.tray.stopAgents"
+        };
+        let _ = t.0.set_text(crate::platform::label(app, key));
     }
+}
+
+/// II4: the tray's labels changed language.
+pub fn relabel_tray(app: &AppHandle) {
+    set_tray_label(app, KillSwitch::global().halted());
 }
 
 /// Start the Escape ×3 listener and keep the app's switch, the daemon and the tray in step.

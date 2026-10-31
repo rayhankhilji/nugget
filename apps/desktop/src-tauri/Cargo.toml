@@ -50,6 +50,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # A second launch focuses the running window. 2.4.5 is the last release that accepts tauri 2.11
 # and Rust 1.88 (MSRV 1.77.2); 2.5+ needs tauri 2.12 and Rust 1.90.
 tauri-plugin-single-instance = "=2.4.5"
+# II4: `nugget://` links. macOS delivers them (and opened `.nuggetplugin` files) as Apple events,
+# which this plugin turns into `on_open_url`; an AppImage registers the scheme at launch with it.
+# Elsewhere links arrive as arguments (deeplink.rs). 2.4.5 accepts tauri 2.11 and Rust 1.88.
+tauri-plugin-deep-link = "=2.4.5"
+# II4: quiet hours for notifications need the local time of day (system time zone).
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
 
 [dev-dependencies]
 # `tauri::test`'s mock runtime: notification click handling against a mock app (notify.rs).
