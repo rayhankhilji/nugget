@@ -95,7 +95,10 @@ async function full() {
 
   const bridge = await startBridge({ socket, pickFolders: [folder] });
   const browser = await chromium.launch();
-  const ctx = await browser.newContext({ viewport: { width: 1080, height: 720 } });
+  const ctx = await browser.newContext({ viewport: { width: 1080, height: 720 }, locale: "en-US" });
+  ctx.setDefaultTimeout(20_000);
+  // The e2e harness's stand-in for the Tauri shell: invoke() goes to the bridge.
+  await ctx.addInitScript({ path: path.resolve(import.meta.dirname, "../../../apps/desktop/e2e/tauri-shim.js") });
   const page = await ctx.newPage();
   bridge.deliverEvents(page);
   await page.goto(`${bridge.url}index.html`);
