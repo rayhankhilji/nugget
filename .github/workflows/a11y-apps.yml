@@ -22,8 +22,6 @@ on:
         type: boolean
         required: false
         default: false
-  push: # TEMP-FF3: remove before final push
-    branches: [ff/a11y-apps]
   pull_request:
     paths:
       - "crates/nugget-a11y/**"

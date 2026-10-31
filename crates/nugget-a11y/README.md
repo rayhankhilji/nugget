@@ -132,7 +132,7 @@ second copies fail.
 | A11y insertion | `EditableText` (multi-line text into web contenteditable or LibreOffice: clipboard) | `AXSelectedText` (multi-line text into web editors: clipboard) | `ValuePattern.SetValue` (single-line plain edits) |
 | Clipboard fallback | X11 selections (INCR) or Wayland data-control; XTest Ctrl+V, `PasteText` | NSPasteboard items × types; CGEvent Cmd+V | all memory formats + EMF; `SendInput` Ctrl+V |
 | Permission | `org.a11y.Status.IsEnabled` (request enables it) | `AXIsProcessTrustedWithOptions` | not required |
-| **Status** | **run and verified** (integration tests) | compile-checked (`aarch64-apple-darwin`) | compile-checked (`x86_64-pc-windows-msvc`) |
+| **Status** | **run and verified** (integration tests, app matrix) | run on real runners (native fixture, app matrix: Safari, TextEdit) | run on real runners (native fixture, app matrix: Chrome, Edge, Notepad, WordPad) |
 
 ### Computer use on Linux (M4)
 
@@ -194,6 +194,17 @@ The thread heuristics are tested on trees in `tests/fixtures/trees/`:
   trees. Replace them with real recordings as they become available: `Backend::snapshot()` →
   `Snapshot::to_json()`, after redacting personal content.
 
+### App matrix (`tests/apps_matrix.rs`)
+
+Real browsers and native editors on each OS against the clean-room fixtures in
+`tests/fixtures/apps/` (contract: `PROTOCOL.md`): detection, read-back, thread precision and
+recall, secure fields, six insert payloads with one undo each, and read time. Run by
+`.github/workflows/a11y-apps.yml`; locally with
+`cargo test -p nugget-a11y --test apps_matrix -- --ignored --nocapture --test-threads=1`
+(`NUGGET_A11Y_APPS=chrome,gedit` to pick apps, `NUGGET_A11Y_MATRIX_OUT`, `NUGGET_A11Y_APPS_RECORD`
+for trees). `tests/fixtures/apps/expected.json` lists the metrics that must keep passing;
+`render_matrix.py` renders the JSON Lines results.
+
 ### Linux integration tests (`NUGGET_A11Y_IT=1`)
 
 The tests do the following:
@@ -238,8 +249,12 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
 
 ## Known gaps
 
-- macOS and Windows have not been run on a real machine yet. Their logic is shared with Linux
-  through `engine`, but the OS calls are compile-checked only.
+- The app matrix (below, results in `bench/README.md`) has not measured Chrome, Edge or Firefox
+  on macOS (the runner could not bring them to the front), and finds no focused field in
+  Firefox on Windows. Chrome on Linux exposes web content only with
+  `--force-renderer-accessibility`. The thread read on Firefox/Linux varies between runs.
+- Safari composes pasted text to NFC, so text with combining marks reads back equivalent but
+  not identical; verification then falls back to counting occurrences.
 - On macOS, rich web editors without `AXValue`/`AXSelectedTextRange` are read through text
   markers; when the selection cannot be placed in the element's marker text it is left unknown
   and verification falls back to counting occurrences.
@@ -273,5 +288,6 @@ NUGGET_A11Y_IT=1 cargo test -p nugget-a11y --test linux_atspi --test linux_atspi
   `PasteText`.
 - The AT-SPI tree walk reads each node with several D-Bus calls. The `Cache.GetItems` bulk read is
   a possible optimisation.
-- The thread heuristics for apps other than the GTK test app are tested on modelled trees, not on
-  recordings.
+- The thread heuristics are tested on recordings from Chrome (Linux, Windows), Safari and
+  Firefox (Linux) of the app-matrix fixtures (`tests/fixtures/trees/web_*`), and on modelled
+  trees for native chat and mail apps.
