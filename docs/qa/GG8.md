@@ -30,7 +30,8 @@ failing check) and `qa/GG8/real/scenarios/` (GitHub runners, release build, real
 workflow is `.github/workflows/qa-GG8.yml` (dispatch only). Run 1 is
 [41117729320](https://github.com/rayhankhilji/nugget/actions/runs/41117729320) on ubuntu-latest (AMD
 EPYC 7763, 4 vCPU, 16 GB) with `qwen3-1.7b-q8` (chat) and `nomic-embed-text-v1.5-q8` (embedding). Run 2
-is [41189149310](https://github.com/rayhankhilji/nugget/actions/runs/41189149310).
+is [41189149310](https://github.com/rayhankhilji/nugget/actions/runs/41189149310) on the same runner
+type with the same models.
 
 Per-area details and evidence:
 
@@ -47,7 +48,7 @@ To run one scenario: `sudo GG8_LAB=<0-3> python3 qa/GG8/harness/lab.py run qa/GG
 | Default install, local only: nothing leaves the device | **Works** | s01, s10: 0 DNS queries, 0 requests and 0 ledger rows over search, Ask, MCP, knowledge, Today, plugins list, 5 min idle and a restart. Runner s61 (real llama-server, 300 s idle): no DNS, no IPv4 packet off the namespace, no new ledger row |
 | Onboarding with local models: downloads only, all ledgered | **Works** | Runner s60: DNS saw exactly `github.com`, `release-assets.githubusercontent.com`, `huggingface.co` and `us.aws.cdn.hf.co`, all with `model_download`/`runtime_download` rows (6 rows, 2.0 GB). s12: failed attempts are ledgered too, and downloads are pinned to a revision |
 | Ledger completeness (every off-device request has a row with the right host and feature) | **Works with caveats** | Across all area-B and area-C runs there were no unledgered HTTP hosts (ask, chat, draft, knowledge, agent 30/30, probe, judge, embed, sync for Slack, Notion, CalDAV, GitHub and Gmail, and OAuth). Caveats: `items` is empty on several feature rows (GG8-6), IMAP STARTTLS attempts have no row (GG8-11), and desktop update checks have no row (GG8-5) |
-| Ask and chat with a cloud model: no sensitive items | **Broken** | Context passages: 4/4 sensitive withheld, `excluded_sensitive` reported, every run. But a follow-up's history is forwarded unscanned (GG8-1): 3/3 local, 1/1 with a real model |
+| Ask and chat with a cloud model: no sensitive items | **Broken** | Context passages: 4/4 sensitive withheld, `excluded_sensitive` reported, every run. But a follow-up's history is forwarded unscanned (GG8-1): 3/3 local, 2/2 with a real model |
 | Double Tap with a cloud model | **Works with caveats** | Sensitive passages withheld; secure fields and password managers refused before anything is sent; screenshots only when allowed. A card number in the thread goes out unscanned (GG8-4); wrong read-ahead status (GG8-10) |
 | Double Tap read-ahead | **Works** | Runner s62: reached only the local server, and was `skipped: "cloud"` when the draft would go to the cloud. Sinkhole s21: nothing sent in 4/4 runs |
 | Knowledge extraction | **Works** | Nothing to the cloud without `cloud_sources`; only non-sensitive items with them (3 runs). Status caveat GG8-12 |
@@ -58,10 +59,11 @@ To run one scenario: `sudo GG8_LAB=<0-3> python3 qa/GG8/harness/lab.py run qa/GG
 | Secrets (API keys, connector tokens, passwords, OAuth codes and client secrets) | **Works** | Each reached only its own host, in all runs; none in logs (info or debug), plaintext files or audit rows; `client_secret` refused in settings |
 | Connectors against mocks (Slack, Notion, CalDAV, IMAP, GitHub, Google OAuth) | **Works** | 147/150 checks over 3 runs (the 3 failures are one non-privacy status check). CalDAV refuses to send credentials to a foreign calendar-home host; OAuth begin contacts nothing |
 | MCP | **Works with caveats** | Listener on loopback only (unreachable from the host side of the veth); no egress; sensitive items hidden by default. But Double Tap's sent texts are visible by default (GG8-3) |
-| Desktop app | **Works with caveats** | Runner s65: the only traffic is an update check on by default and unledgered (GG8-5); with the channel `off` it is silent |
+| Desktop app | **Works with caveats** | Runner s65, 2/2 runs: the only traffic is an update check on by default and unledgered (GG8-5); with the channel `off` it is silent |
 | Logs, audit log, telemetry, crash reports | **Works with caveats** | No telemetry or crash-upload traffic in any run. Info logs are clean. Debug logs hold MCP content (GG8-7); audit holds MCP queries verbatim (GG8-8). The data dir is 0700, and config, store key and IPC are private |
 | Plugins' network access | **Not tested** | No built `.nuggetplugin`; the guests need a `wasm32-wasip2` cargo build |
-| macOS | **Not tested** | The pktap job ran 45 s and uploaded an empty artifact (harness failure, not iterated within the shared usage limit) |
+| macOS | **Not tested** | The pktap job uploaded an empty artifact in both runs (harness failure, not iterated within the shared usage limit) |
+| Agent with local models | **Not tested** | Runner s61: `agent.run` refused with `no provider for the agentic tier can call tools` (the 1.7B chat model is not tool-capable), so no local agent traffic was observed; the cloud agent is covered by s24 |
 
 ## Findings
 
@@ -71,7 +73,7 @@ probe's embeddings check ledgered as `embed`) was dropped.
 
 ### GG8-1 (High): an Ask follow-up sends the earlier answer's sensitive content to the cloud
 
-**Verified**, 3/3 sinkhole, 1/1 real model (runner s62).
+**Verified**, 3/3 sinkhole, 2/2 real model (runner s62 in runs 41117729320 and 41189149310).
 
 **Repro (sinkhole):** `qa/GG8/scenarios/s53_followup_history_to_cloud.py`. The scenario configures an
 `anthropic` provider and the corpus, then calls `retrieve.ask` with:
@@ -188,8 +190,8 @@ privacy.md.
 
 ### GG8-5 (Medium): the desktop app checks for updates on github.com by default, unledgered
 
-**Verified** from the runner log (run 41117729320, job "Desktop app traffic (Linux)") and the code; not
-re-runnable in the container.
+**Verified** from the runner logs (runs 41117729320 and 41189149310, job "Desktop app traffic (Linux)",
+2/2) and the code; not re-runnable in the container.
 
 **Repro:**
 
@@ -325,7 +327,7 @@ cloud.
 
 ### Not privacy, for other teams
 
-- **Onboarding (runner s60, 1/1, not verified):** the first chat right after installing the models
+- **Onboarding (runner s60, 2/2 runs):** the first chat right after installing the models
   failed with `no provider for tier Synthesis has the required capabilities` (for GG6, first week).
 - **CalDAV without a password** shows `idle`/`syncing` instead of `needs_auth` (area C, 3/3).
 
@@ -358,5 +360,5 @@ cloud.
   build.
 - macOS was not covered: the pktap job failed.
 - Windows was out of scope.
-- The real-model runs are one model pair on one runner. Run 2 (41189149310) repeats them.
+- The real-model runs are one model pair (`qwen3-1.7b-q8`, `nomic-embed-text-v1.5-q8`) on ubuntu-latest, two runs.
 - The "user name in paths" part of GG8-9 is inferred: the lab's home has none.

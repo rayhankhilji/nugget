@@ -1,0 +1,50 @@
+[
+ {
+  "at": "2026-10-31T09:46:42.732092315Z",
+  "bytes_received": 22521008,
+  "bytes_sent": 0,
+  "feature": "runtime_download",
+  "host": "release-assets.githubusercontent.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-31T09:46:42.617410136Z",
+  "bytes_received": 1834426017,
+  "bytes_sent": 0,
+  "feature": "model_download",
+  "host": "us.aws.cdn.hf.co",
+  "items": []
+ },
+ {
+  "at": "2026-10-31T09:46:42.548607029Z",
+  "bytes_received": 0,
+  "bytes_sent": 1365,
+  "feature": "model_download",
+  "host": "huggingface.co",
+  "items": []
+ },
+ {
+  "at": "2026-10-31T09:46:42.547464146Z",
+  "bytes_received": 0,
+  "bytes_sent": 514,
+  "feature": "runtime_download",
+  "host": "github.com",
+  "items": []
+ },
+ {
+  "at": "2026-10-31T09:46:41.440564569Z",
+  "bytes_received": 146146433,
+  "bytes_sent": 0,
+  "feature": "model_download",
+  "host": "us.aws.cdn.hf.co",
+  "items": []
+ },
+ {
+  "at": "2026-10-31T09:46:41.23540044Z",
+  "bytes_received": 0,
+  "bytes_sent": 1495,
+  "feature": "model_download",
+  "host": "huggingface.co",
+  "items": []
+ }
+]

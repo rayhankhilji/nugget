@@ -1,0 +1,261 @@
+{
+ "scenario": "s60_onboarding",
+ "mode": "internet",
+ "dns_names": [
+  "github.com",
+  "huggingface.co",
+  "release-assets.githubusercontent.com",
+  "us.aws.cdn.hf.co"
+ ],
+ "flows_off_namespace": [
+  {
+   "src": "203.0.113.2",
+   "dst": "140.82.114.4",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 16
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "185.199.110.133",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 448
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "203.0.113.10",
+   "dport": "53",
+   "proto": "UDP",
+   "packets": 8
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "3.170.185.14",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 36
+  },
+  {
+   "src": "203.0.113.2",
+   "dst": "32.193.91.216",
+   "dport": "443",
+   "proto": "tcp",
+   "packets": 39804
+  },
+  {
+   "src": "::",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:ff9a:76b9",
+   "dport": "ff02::1:ff9a:76b9",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "::",
+   "dst": "ff02::1:fff0:7314",
+   "dport": "ff02::1:fff0:7314",
+   "proto": "ICMP6",
+   "packets": 1
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::90ad:4aff:fe9a:76b9",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 3
+  },
+  {
+   "src": "fe80::c4da:9bff:fef0:7314",
+   "dst": "ff02::16",
+   "dport": "ff02::16",
+   "proto": "HBH",
+   "packets": 2
+  },
+  {
+   "src": "fe80::c4da:9bff:fef0:7314",
+   "dst": "ff02::2",
+   "dport": "ff02::2",
+   "proto": "ICMP6",
+   "packets": 3
+  }
+ ],
+ "observed_hosts": {},
+ "ledger_hosts": {
+  "release-assets.githubusercontent.com": {
+   "rows": 1,
+   "bytes_sent": 0,
+   "features": [
+    "runtime_download"
+   ]
+  },
+  "us.aws.cdn.hf.co": {
+   "rows": 2,
+   "bytes_sent": 0,
+   "features": [
+    "model_download"
+   ]
+  },
+  "huggingface.co": {
+   "rows": 2,
+   "bytes_sent": 2860,
+   "features": [
+    "model_download"
+   ]
+  },
+  "github.com": {
+   "rows": 1,
+   "bytes_sent": 514,
+   "features": [
+    "runtime_download"
+   ]
+  }
+ },
+ "unledgered_hosts": [],
+ "ledger_without_traffic": [],
+ "raw_or_failed_tls": [],
+ "canaries": [],
+ "checks": [
+  {
+   "id": "models.list.offline",
+   "ok": true,
+   "detail": "5 models; DNS after models.list: []",
+   "severity": null,
+   "t": 1793440001.234707
+  },
+  {
+   "id": "install.nomic-embed-text-v1.5-q8",
+   "ok": true,
+   "detail": "{'id': 'nomic-embed-text-v1.5-q8', 'downloaded': 146146432, 'total': 146146432, 'phase': 'installed', 'error': None} in 1s",
+   "severity": null,
+   "t": 1793440002.547669
+  },
+  {
+   "id": "install.qwen3-1.7b-q8",
+   "ok": true,
+   "detail": "{'id': 'qwen3-1.7b-q8', 'downloaded': 1834426016, 'total': 1834426016, 'phase': 'installed', 'error': None} in 12s",
+   "severity": null,
+   "t": 1793440014.7436535
+  },
+  {
+   "id": "first.chat",
+   "ok": false,
+   "detail": "RpcError('-32002: no provider for tier Synthesis has the required capabilities Capabilities { streaming: true, vision: false, tools: false, json_schema: false, embeddings: false, context_tokens: None } (probe providers first)')",
+   "severity": null,
+   "t": 1793440014.7452471
+  },
+  {
+   "id": "runtime.ready",
+   "ok": true,
+   "detail": [
+    {
+     "error": null,
+     "model_id": "qwen3-1.7b-q8",
+     "provider": "local-chat",
+     "role": "chat",
+     "state": "ready"
+    },
+    {
+     "error": null,
+     "model_id": "nomic-embed-text-v1.5-q8",
+     "provider": "local-embedding",
+     "role": "embedding",
+     "state": "ready"
+    }
+   ],
+   "severity": null,
+   "t": 1793440017.7463102
+  },
+  {
+   "id": "ledger.has_model_download",
+   "ok": true,
+   "detail": [
+    "model_download",
+    "runtime_download"
+   ],
+   "severity": null,
+   "t": 1793440022.9253807
+  },
+  {
+   "id": "ledger.has_runtime_download",
+   "ok": true,
+   "detail": [
+    "model_download",
+    "runtime_download"
+   ],
+   "severity": null,
+   "t": 1793440022.9254024
+  },
+  {
+   "id": "ledger.only_download_features",
+   "ok": true,
+   "detail": [
+    "model_download",
+    "runtime_download"
+   ],
+   "severity": null,
+   "t": 1793440022.9254098
+  },
+  {
+   "id": "every_observed_host_ledgered",
+   "ok": true,
+   "detail": {
+    "unledgered": [],
+    "observed": [],
+    "ledger": [
+     "release-assets.githubusercontent.com",
+     "us.aws.cdn.hf.co",
+     "huggingface.co",
+     "github.com"
+    ],
+    "dns": [
+     "github.com",
+     "huggingface.co",
+     "release-assets.githubusercontent.com",
+     "us.aws.cdn.hf.co"
+    ]
+   },
+   "severity": "High",
+   "t": 1793440022.9254158
+  }
+ ],
+ "marks": [
+  {
+   "t": 1793440000.7327433,
+   "label": "daemon.start"
+  },
+  {
+   "t": 1793440001.234344,
+   "label": "daemon.ready"
+  },
+  {
+   "t": 1793440001.2347276,
+   "label": "install nomic-embed-text-v1.5-q8"
+  },
+  {
+   "t": 1793440002.5477426,
+   "label": "install qwen3-1.7b-q8"
+  },
+  {
+   "t": 1793440014.7437296,
+   "label": "runtime start"
+  },
+  {
+   "t": 1793440022.926306,
+   "label": "daemon.stop"
+  }
+ ]
+}
