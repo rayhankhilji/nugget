@@ -162,6 +162,12 @@ def score_draft(d):
     return out
 
 
+def run_langs(d):
+    """The corpus folders this run indexed (from the harness's search/ask/draft rows)."""
+    langs = {r["lang"] for n in ("search", "ask", "draft") for r in rows(d, n)}
+    return sorted(langs) or sorted(p.stem for p in GOLD.glob("*.json"))
+
+
 def score_knowledge(d):
     ks = rows(d, "knowledge")
     if not ks:
@@ -173,7 +179,7 @@ def score_knowledge(d):
         blob_by_name[e.get("id")] = (names, json.dumps(e, ensure_ascii=False))
     all_blob = norm(" ".join(b for _, b in blob_by_name.values()))
     out = []
-    for lang in sorted(p.stem for p in GOLD.glob("*.json")):
+    for lang in run_langs(d):
         g = json.loads((GOLD / f"{lang}.json").read_text(encoding="utf-8")).get("extract", {})
         for p in g.get("people", []):
             cands = [p["name"]] + p.get("aliases", [])
@@ -199,7 +205,7 @@ def score_proactive(d):
     cards = (p.get("cards.list") or {}).get("cards", []) if isinstance(p.get("cards.list"), dict) else []
     blob = [json.dumps(c, ensure_ascii=False) for c in cards]
     out = []
-    for lang in sorted(x.stem for x in GOLD.glob("*.json")):
+    for lang in run_langs(d):
         g = json.loads((GOLD / f"{lang}.json").read_text(encoding="utf-8"))
         for e in g.get("proactive", []):
             stem = Path(e["file"]).name
