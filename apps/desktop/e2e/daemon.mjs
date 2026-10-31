@@ -214,10 +214,12 @@ function readyLine(logDir) {
  * Start `bin` in a fresh temp home. Resolves once its log says "nuggetd ready" and the socket
  * answers `status`. `stderrPath` receives the daemon's stdout and stderr. `config` is the
  * `config/config.toml` to write (default: the all-pages config; `null` writes none). `env` is
- * added to the daemon's environment (e.g. `nuggetd-e2e`'s `NUGGET_E2E_*` overrides).
+ * added to the daemon's environment (e.g. `nuggetd-e2e`'s `NUGGET_E2E_*` overrides). `home` reuses an
+ * existing home instead (a restart; pass `config: null` to keep its config), and `stop()` then
+ * keeps it unless asked with `{ keep: false }`.
  */
-export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, config = CONFIG, env = {} } = {}) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-"));
+export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, config = CONFIG, env = {}, home: reuse = null } = {}) {
+  const home = reuse ?? fs.mkdtempSync(path.join(os.tmpdir(), "nugget-e2e-"));
   fs.mkdirSync(path.join(home, "config"), { recursive: true });
   if (config !== null) fs.writeFileSync(path.join(home, "config", "config.toml"), config);
   const out = stderrPath ? fs.openSync(stderrPath, "w") : "ignore";
@@ -230,7 +232,7 @@ export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, co
   proc.on("exit", (code, signal) => (exited = { code, signal }));
   const logDir = path.join(home, "data", "logs");
 
-  const stop = async ({ keep = false } = {}) => {
+  const stop = async ({ keep = reuse !== null } = {}) => {
     if (!exited) {
       proc.kill("SIGTERM");
       for (let i = 0; i < 100 && !exited; i++) await sleep(100);
@@ -254,7 +256,19 @@ export async function startDaemon(bin, { stderrPath, readyTimeoutMs = 30_000, co
     socket = readyLine(logDir);
     if (!socket) await sleep(100);
   }
-  await rpc(socket, "status");
+  // A reused home's log already has an earlier "nuggetd ready": wait until this daemon answers.
+  for (;;) {
+    try {
+      await rpc(socket, "status");
+      break;
+    } catch (e) {
+      if (exited || Date.now() > deadline) {
+        await stop({ keep: true });
+        throw new Error(`nuggetd did not answer status within ${readyTimeoutMs} ms (${e.message}); logs in ${logDir}`);
+      }
+      await sleep(100);
+    }
+  }
   return { home, socket, logDir, proc, stop, exited: () => exited };
 }
 

@@ -1,0 +1,99 @@
+name: Crash safety
+
+# Hard-kill harnesses (FF1). The store harness kills a worker process doing tight write loops
+# through the store API and checks consistency plus no loss of committed writes; the daemon
+# harness kills the real nuggetd during ingest, re-embedding, knowledge extraction and vault
+# writes, then checks consistency, the vault, and that indexing resumes to the same result as a
+# clean pass. `Child::kill` is SIGKILL on Unix and TerminateProcess on Windows. The plain
+# `cargo test` runs in ci.yml use small iteration counts; this workflow runs hundreds. A failure
+# prints NUGGET_CRASH_SEED, which replays the same corpus and op schedule (kill timing still
+# varies). See crates/nugget-store/tests/crash.rs and crates/nuggetd/tests/crash.rs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      store_iterations:
+        description: "Kills of the store harness"
+        required: false
+        default: "300"
+      daemon_iterations:
+        description: "Kills of the daemon harness"
+        required: false
+        default: "150"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  CARGO_NET_RETRY: "10"
+  RUSTUP_MAX_RETRIES: "10"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  crash:
+    name: Crash harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      STORE_ITERATIONS: ${{ inputs.store_iterations || '300' }}
+      DAEMON_ITERATIONS: ${{ inputs.daemon_iterations || '150' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # SQLCipher's vendored OpenSSL needs a Windows-native Perl; Git's MSYS Perl breaks its build.
+      - name: Use Strawberry Perl for vendored OpenSSL
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $perl = 'C:\Strawberry\perl\bin\perl.exe'
+          if (Test-Path $perl) { "OPENSSL_SRC_PERL=$perl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+
+      - uses: ilammy/setup-nasm@v1
+        if: runner.os == 'Windows'
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v0-rust-crash
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build the harnesses
+        run: cargo test --locked -p nugget-store -p nuggetd --test crash --no-run
+
+      - name: Store harness
+        timeout-minutes: 25
+        shell: bash
+        run: NUGGET_CRASH_ITERATIONS="$STORE_ITERATIONS" cargo test --locked -p nugget-store --test crash -- --nocapture
+
+      - name: Daemon harness
+        timeout-minutes: 45
+        shell: bash
+        run: |
+          mkdir -p crash-logs
+          NUGGET_CRASH_ITERATIONS="$DAEMON_ITERATIONS" NUGGET_CRASH_LOG="$PWD/crash-logs/nuggetd.log" \
+            cargo test --locked -p nuggetd --test crash -- --nocapture
+
+      - name: Upload daemon logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-logs-${{ matrix.os }}
+          path: crash-logs
+          if-no-files-found: ignore

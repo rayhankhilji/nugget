@@ -6,6 +6,7 @@
 //! CLI, signal handling and logging; this library exists so tests can run the daemon in-process.
 
 pub mod ask;
+pub mod backup_cli;
 pub mod cli;
 pub mod config;
 pub mod daemon;

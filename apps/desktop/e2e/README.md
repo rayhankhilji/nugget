@@ -43,6 +43,15 @@ It runs nine scenarios:
 - **visual**: on the indexed home, screenshots of every page and a few views in light and dark are
   compared pixel by pixel with the committed baselines in `e2e/visual-baselines/` (Linux only;
   see "What happens: visual").
+- **backup**: its own home with the corpus indexed. On Status → Backup and export the test sets a
+  backup folder (a temp dir) and a passphrase, clicks Back up now and checks the backup is listed
+  and complete on disk (`manifest.json`, `store.nbk`, `key.json`); exports everything and checks
+  `items.jsonl` has one line per indexed item. Then it stops the daemon, deletes its home, starts a
+  daemon on an empty home (no keychain, so only the passphrase opens the backup), sets the same
+  folder and restores through Restore… with the passphrase. The daemon exits after staging; the
+  bridge's `start_daemon` (given a `startDaemon` hook, it reports the real connection state and
+  restarts nuggetd on the same home, as the shell does) brings it back, and the test checks the
+  item count and that Search finds corpus text again (`NN-backup-*.png`).
 
 ```
 Chromium (dist/ + tauri-shim.js) --POST /invoke--> bridge.mjs --JSON-RPC over the Unix socket--> nuggetd
@@ -72,8 +81,9 @@ built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux an
 | `E2E_BUILD=1` | off | Rebuild the frontend even when `dist/` exists (it may be stale). |
 | `E2E_KEEP=1` | off | Keep the daemon's temp home (database, vault, logs) after the run. |
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
+| `E2E_BACKUP_TIMEOUT_MS` | 120000 | backup: how long one backup, export or restore may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup` | Which scenarios to run, comma-separated. |
 | `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
 | `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |

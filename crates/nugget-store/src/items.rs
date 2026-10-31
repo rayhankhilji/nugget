@@ -191,6 +191,16 @@ fn decode_layout(conn: &Connection, item_id: i64, layout: &[u8]) -> Result<Strin
         .map_err(|e| Error::Integrity(format!("item {item_id}: {e}")))
 }
 
+/// Rebuild item `item_id`'s text from its stored `item_text` layout, looking its chunk texts up
+/// by `ord` (for readers outside this module that fetch the chunks themselves, e.g. export).
+pub(crate) fn decode_text_layout<'a>(
+    item_id: i64,
+    layout: &[u8],
+    chunk: impl Fn(u64) -> Option<&'a str>,
+) -> Result<String> {
+    text_layout::decode(layout, chunk).map_err(|e| Error::Integrity(format!("item {item_id}: {e}")))
+}
+
 impl ItemRow {
     /// The public item for this row, with its (already resolved) text.
     fn into_item(self, item: ItemRef, text: Option<String>) -> Result<Item> {
