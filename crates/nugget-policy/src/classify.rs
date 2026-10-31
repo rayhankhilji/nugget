@@ -185,7 +185,10 @@ impl RiskClassifier {
         let preview = action.text_preview.as_deref();
         // A key press's preview is its keys; anything after a line break is what they send,
         // shown to the user, never parsed as keys (see [`ActionDescriptor::text_preview`]).
-        let keys_preview = preview.map(|p| crate::preview::split_key_preview(p).0);
+        // Read structurally by the verb: a fields preview only counts as one on a click or key
+        // press (whatever typed text or another verb's preview starts with).
+        let parts = preview.map(|p| crate::preview::preview_parts(&action.verb, p));
+        let keys_preview = parts.and_then(|p| p.text);
 
         // 1. The verb itself.
         if kind != VerbKind::Key {
@@ -225,13 +228,9 @@ impl RiskClassifier {
         ) {
             // Only a fields preview is exempt; any other preview (a third-party tool's URL) is
             // still scanned.
-            let preview_counts = preview.is_some_and(|p| !crate::preview::is_fields_preview(p));
-            for text in [
-                action.target_label.as_deref(),
-                preview.filter(|_| preview_counts),
-            ]
-            .into_iter()
-            .flatten()
+            for text in [action.target_label.as_deref(), parts.and_then(|p| p.text)]
+                .into_iter()
+                .flatten()
             {
                 if looks_like_url(text)
                     && let Some((class, word)) = self.keyword_risk(&normalize(text))
@@ -1762,11 +1761,45 @@ const COMPOSE_TITLES: &[&str] = &[
     "편지쓰기",
 ];
 
-/// Labels that name a secret only when they are the whole label ("Token", "Secret:").
-const SECURE_EXACT: &[&str] = &["token", "secret", "key"];
+/// Labels that name a secret only when they are the whole label ("Key").
+const SECURE_EXACT: &[&str] = &["key"];
 
-/// Whether a field label names a secret: [`SECURE_LABELS`] anywhere in it, or a label that is
-/// only one of [`SECURE_EXACT`].
+/// Words that name a secret anywhere in a label ("GitHub token", "Webhook secret", "Token
+/// (required)") unless the label also has one of [`BENIGN_SECRET_WORDS`].
+const SECRET_WORDS: &[&str] = &["token", "tokens", "secret", "secrets"];
+
+/// Words that make "token" or "secret" mean something else: an amount of tokens, a Secret Santa,
+/// a gift or promo token.
+const BENIGN_SECRET_WORDS: &[&str] = &[
+    "amount",
+    "amounts",
+    "santa",
+    "gift",
+    "promo",
+    "promotional",
+    "value",
+    "count",
+    "balance",
+    "price",
+    "reward",
+    "rewards",
+    "quantity",
+    "number of",
+    "sale",
+    "swap",
+    "game",
+    "recipe",
+    "ingredient",
+    "menu",
+    "admirer",
+    "garden",
+    "symbol",
+    "ticker",
+    "supply",
+];
+
+/// Whether a field label names a secret: [`SECURE_LABELS`] anywhere in it, "token" or "secret"
+/// without a benign word, or a label that is only one of [`SECURE_EXACT`].
 pub(crate) fn is_secure_label_text(label: &str) -> bool {
     static KEYWORDS: OnceLock<Vec<Keyword>> = OnceLock::new();
     let kws = KEYWORDS.get_or_init(|| {
@@ -1776,10 +1809,36 @@ pub(crate) fn is_secure_label_text(label: &str) -> bool {
             .map(|k| Keyword::new(k))
             .collect()
     });
+    static SECRETS: OnceLock<(Vec<Keyword>, Vec<Keyword>)> = OnceLock::new();
+    let (secret, benign) = SECRETS.get_or_init(|| {
+        let kw = |l: &[&str]| l.iter().map(|k| Keyword::new(k)).collect::<Vec<_>>();
+        (kw(SECRET_WORDS), kw(BENIGN_SECRET_WORDS))
+    });
     let label = normalize(label);
     let folded = fold_confusables(&label);
-    SECURE_EXACT.contains(&trim_label(&label))
-        || kws.iter().any(|k| k.matches(&label) || k.matches(&folded))
+    let has = |list: &[Keyword]| list.iter().any(|k| k.matches(&label) || k.matches(&folded));
+    SECURE_EXACT.contains(&trim_label(&label)) || has(kws) || (has(secret) && !has(benign))
+}
+
+/// How a descriptor's `text_preview` is to be read, by its verb (see
+/// [`crate::preview::preview_parts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PreviewRole {
+    /// A key press: the keys, then (after a line break) what they send.
+    Keys,
+    /// A click or other activation: a fields preview, or other text.
+    Activation,
+    /// Typed text, a URL, anything else: never a fields preview.
+    Text,
+}
+
+pub(crate) fn preview_role(verb: &str) -> PreviewRole {
+    let verb = normalize(&verb.replace(['_', '-', '.', ':', '/'], " "));
+    match verb_kind(&verb) {
+        VerbKind::Key => PreviewRole::Keys,
+        VerbKind::Activate => PreviewRole::Activation,
+        _ => PreviewRole::Text,
+    }
 }
 
 /// Field labels that name a secret (shared with [`crate::redact::is_secure_label`] and, through
@@ -1817,8 +1876,8 @@ pub(crate) const SECURE_LABELS: &[&str] = &[
     "recovery code",
     "backup code",
     "private key",
-    // "token" and "secret" alone are too common ("Token amount", "Secret Santa"): only these
-    // phrases, or a label that is just the word (see [`SECURE_EXACT`]).
+    // "token" and "secret" also count on their own unless a benign word is present (see
+    // [`SECRET_WORDS`]); these phrases count whatever else the label says.
     "access token",
     "api token",
     "auth token",
@@ -2723,6 +2782,17 @@ mod tests {
             "Secret:",
             "API token",
             "Client secret",
+        ] {
+            assert!(crate::redact::is_secure_label(label), "{label}");
+        }
+        // Second review M2: credentials named by "token" or "secret" stay secret.
+        for label in [
+            "GitHub token",
+            "Bot token",
+            "Webhook secret",
+            "Signing secret",
+            "Your token",
+            "Token (required)",
         ] {
             assert!(crate::redact::is_secure_label(label), "{label}");
         }

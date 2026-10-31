@@ -153,17 +153,24 @@ export function parseHostRequest(raw: unknown): HostRequest {
       };
     }
     case "act": {
-      const e = raw.expect_form;
-      if (e !== undefined && (!isObj(e) || typeof e.form !== "string" || typeof e.digest !== "string")) {
-        throw new ProtocolError("bad_request", "`expect_form` must be {form, digest}");
-      }
+      const expectation = (key: "expect_form" | "expect_scope") => {
+        const e = raw[key];
+        if (e === undefined) return undefined;
+        if (!isObj(e) || typeof e.form !== "string" || typeof e.digest !== "string") {
+          throw new ProtocolError("bad_request", `\`${key}\` must be {form, digest}`);
+        }
+        return { form: e.form, digest: e.digest };
+      };
+      const expect_form = expectation("expect_form");
+      const expect_scope = expectation("expect_scope");
       return {
         id,
         type: "act",
         tab_id,
         snapshot_id: str(raw, "snapshot_id")!,
         action: parseAction(raw.action),
-        ...(e ? { expect_form: { form: e.form as string, digest: e.digest as string } } : {}),
+        ...(expect_form ? { expect_form } : {}),
+        ...(expect_scope ? { expect_scope } : {}),
       };
     }
     case "overlay":

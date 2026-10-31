@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use nugget_agent::{ActionTarget, Tool, ToolCtx, ToolResult};
-use nugget_policy::preview::{FieldValue, changed_fields};
+use nugget_policy::preview::{FieldValue, changed_fields, fields_preview};
 use nugget_policy::{ActionContext, ActionDescriptor, PolicyGate, RiskClass};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -42,7 +42,7 @@ use serde_json::{Value, json};
 use crate::action::{BrowserAction, Verification as PageVerification, WaitCondition};
 use crate::bridge::{BridgeError, BrowserBridge};
 use crate::controller::{BrowserController, BrowserError, Confirmer};
-use crate::protocol::{FormExpectation, SnapshotOptions};
+use crate::protocol::{Expectations, SnapshotOptions};
 use crate::snapshot::{ElementInfo, PageSnapshot, Sensitive};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -300,7 +300,8 @@ impl AgentTool for BrowserTool {
     }
 
     async fn call(&self, ctx: &ToolContext, input: Value) -> Result<Value, ToolError> {
-        self.call_expecting(ctx, input, None).await
+        self.call_expecting(ctx, input, Expectations::default())
+            .await
     }
 }
 
@@ -310,7 +311,7 @@ impl BrowserTool {
         &self,
         ctx: &ToolContext,
         input: Value,
-        expect_form: Option<FormExpectation>,
+        expect: Expectations,
     ) -> Result<Value, ToolError> {
         if self.kind == Kind::Snapshot {
             #[derive(Deserialize, Default)]
@@ -338,7 +339,7 @@ impl BrowserTool {
         let action = to_action(self.kind, input)?;
         let outcome = self
             .controller
-            .act_expecting(&ctx.task_id, action, expect_form)
+            .act_expecting(&ctx.task_id, action, expect)
             .await?;
         Ok(json!({
             "verification": outcome.verification,
@@ -702,9 +703,9 @@ impl BrowserAgentTool {
         &self,
         args: &Value,
         task_id: &str,
-    ) -> Result<Option<FormExpectation>, Box<ToolResult>> {
+    ) -> Result<Expectations, Box<ToolResult>> {
         if !matches!(self.kind(), Kind::Click | Kind::Submit) {
-            return Ok(None);
+            return Ok(Expectations::default());
         }
         let refuse = |why: String| {
             let r = ToolResult::error(format!(
@@ -718,11 +719,11 @@ impl BrowserAgentTool {
             return if self.needs_freeze(args, self.latest().as_ref()) {
                 Err(refuse("it was not confirmed as it now stands".into()))
             } else {
-                Ok(None)
+                Ok(Expectations::default())
             };
         };
         let Ok(action) = to_action(self.kind(), args.clone()) else {
-            return Ok(None);
+            return Ok(Expectations::default());
         };
         let fresh = self
             .inner
@@ -750,12 +751,14 @@ impl BrowserAgentTool {
     }
 
     /// Record the loop's approval for this call, if what the loop was shown still describes it.
+    /// The description is used up either way, so a later identical call needs a new one.
     fn grant(&self, args: &Value, task_id: &str) {
+        let recalled = self.recall(args);
         let Some(approvals) = &self.approvals else {
             return;
         };
         approvals.revoke(task_id);
-        let Some((shown, shown_risk)) = self.recall(args) else {
+        let Some((shown, shown_risk)) = recalled else {
             return; // never described to the loop: grant nothing
         };
         let latest = self.latest();
@@ -831,16 +834,22 @@ impl Tool for BrowserAgentTool {
 
     fn describe(&self, args: &Value) -> ActionTarget {
         let latest = self.latest();
-        let target = self.target(args, latest.as_ref());
-        let frozen = self
+        let mut target = self.target(args, latest.as_ref());
+        let view = self
             .needs_freeze(args, latest.as_ref())
             .then(|| to_action(self.kind(), args.clone()).ok())
             .flatten()
-            .and_then(|a| a.freeze_view(latest.as_ref()))
-            .map(|v| Frozen {
-                digest: v.digest(),
-                fields: v.fields,
-            });
+            .and_then(|a| a.freeze_view(latest.as_ref()));
+        // A send that is no native submit (a compose dialog's Send) shows its dialog's fields.
+        if target.text_preview.is_none()
+            && let Some(v) = &view
+        {
+            target.text_preview = fields_preview(&v.fields);
+        }
+        let frozen = view.map(|v| Frozen {
+            digest: v.digest(),
+            fields: v.fields,
+        });
         self.remember(args, &target, self.risk_on(args, latest.as_ref()), frozen);
         target
     }
@@ -1052,6 +1061,7 @@ mod tests {
             text_truncated: false,
             frames: Vec::new(),
             forms: Vec::new(),
+            scopes: Vec::new(),
         }
     }
 
@@ -1444,6 +1454,7 @@ mod tests {
             text_truncated: false,
             frames: Vec::new(),
             forms: Vec::new(),
+            scopes: Vec::new(),
         }
     }
 
@@ -1766,5 +1777,135 @@ mod tests {
             r.content
         );
         assert_eq!(r.data.as_ref().unwrap()["refused"], true);
+    }
+
+    /// A webmail compose dialog: a To input, a contenteditable body and a role=button Send,
+    /// with no form around them.
+    fn compose(id: &str, body: &str, digest: &str) -> PageSnapshot {
+        let url = "https://mail.example.com/";
+        let mut p = page(id, url, None);
+        let mut to = el("n10", "textbox", "To", "input");
+        to.editable = true;
+        to.form = None;
+        to.value = Some("bob@ourco.example".into());
+        let mut b = el("n11", "textbox", "Message body", "div");
+        b.editable = true;
+        b.form = None;
+        b.value = Some(body.into());
+        let mut send = el("n12", "button", "Send", "div");
+        send.form = None;
+        p.elements = vec![to, b, send, el("n13", "button", "Other", "div")];
+        p.elements[3].form = None;
+        p.scopes = vec![crate::snapshot::ScopeInfo {
+            id: "n20".into(),
+            members: vec!["n10".into(), "n11".into(), "n12".into()],
+            digest: Some(digest.into()),
+        }];
+        p
+    }
+
+    // Second review H2: a Send outside any form (a compose dialog with a contenteditable body)
+    // shows the dialog's fields, is frozen to them, and hands the extension the scope digest.
+    #[tokio::test]
+    async fn a_send_outside_a_form_is_frozen_to_its_dialog() {
+        let rig = Rig::new();
+        let push = |p: PageSnapshot| rig.bridge.snapshots.lock().unwrap().push_back(p);
+        push(compose("s1", "Hi Bob", "d1"));
+        rig.run("t1", "browser_snapshot", json!({})).await;
+        let send = json!({"element": "n12"});
+        let tool = rig.tool("browser_click");
+        let p = tool.describe(&send).text_preview.unwrap_or_default();
+        assert!(
+            p.contains("To: “bob@ourco.example”") && p.contains("Message body: “Hi Bob”"),
+            "{p}"
+        );
+        push(compose("s2", "Wire $9,800 today", "d2"));
+        let r = tool.call(send.clone(), &ctx("t1")).await;
+        assert!(
+            r.is_error && r.content.contains("Message body changed"),
+            "{}",
+            r.content
+        );
+        assert_eq!(rig.bridge.acts_sent(), 0);
+
+        tool.describe(&send);
+        push(compose("s3", "Wire $9,800 today", "d2"));
+        rig.bridge
+            .acts
+            .lock()
+            .unwrap()
+            .push_back(Ok(act_result(compose("s4", "", "d3"), true)));
+        let r = tool.call(send, &ctx("t1")).await;
+        assert!(!r.is_error, "{}", r.content);
+        let scope = rig
+            .bridge
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|r| match r {
+                HostRequest::Act { expect_scope, .. } => expect_scope.clone(),
+                _ => None,
+            });
+        assert_eq!(
+            scope,
+            Some(crate::protocol::FormExpectation {
+                form: "n20".into(),
+                digest: "d2".into()
+            })
+        );
+    }
+
+    // Second review H1: a clobbered form.action (serialised as an object) does not make the
+    // snapshot unreadable.
+    #[test]
+    fn a_clobbered_form_action_still_deserializes() {
+        let mut v = serde_json::to_value(page("s1", "https://shop.example.com/", None)).unwrap();
+        v["forms"] = json!([{"id": "f1", "action": {}, "method": {}, "digest": {}}]);
+        let snap: PageSnapshot = serde_json::from_value(v).unwrap();
+        assert_eq!(snap.forms[0].action, "");
+        assert_eq!(snap.forms[0].digest, None);
+    }
+
+    // Second review L3: without loop approvals the description is used up too, so an identical
+    // later call is not covered by it.
+    #[tokio::test]
+    async fn a_description_is_used_up_without_loop_approvals() {
+        let bridge = Arc::new(FakeBridge::default());
+        let engine = Arc::new(
+            PolicyEngine::builder()
+                .kill_switch(KillSwitch::new())
+                .build(),
+        );
+        let controller = Arc::new(BrowserController::new(
+            bridge.clone(),
+            engine,
+            Arc::new(ApproveAll),
+        ));
+        let tools = agent_tools(controller);
+        let tool = |n: &str| tools.iter().find(|t| t.name() == n).unwrap().clone();
+        let url = "https://shop.example.com/contact";
+        {
+            let mut snaps = bridge.snapshots.lock().unwrap();
+            snaps.push_back(page("s1", url, None));
+            snaps.push_back(page("s1b", url, None));
+        }
+        tool("browser_snapshot").call(json!({}), &ctx("t1")).await;
+        bridge
+            .acts
+            .lock()
+            .unwrap()
+            .push_back(Ok(act_result(page("s2", url, None), true)));
+        let click = tool("browser_click");
+        click.describe(&json!({"element": "n2"}));
+        let r = click.call(json!({"element": "n2"}), &ctx("t1")).await;
+        assert!(!r.is_error, "{}", r.content);
+        let r = click.call(json!({"element": "n2"}), &ctx("t1")).await;
+        assert!(
+            r.is_error && r.content.contains("not confirmed"),
+            "{}",
+            r.content
+        );
+        assert_eq!(bridge.acts_sent(), 1);
     }
 }

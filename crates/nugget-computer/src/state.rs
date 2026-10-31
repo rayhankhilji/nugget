@@ -39,6 +39,8 @@ pub(crate) struct Frozen {
     pub fields: Vec<FieldValue>,
     /// [`FreezeView::digest`] at describe time.
     pub digest: String,
+    /// The digest binds the item the action applies to (a Delete).
+    pub with_subject: bool,
 }
 
 /// An element found in a cached snapshot.
@@ -90,10 +92,14 @@ impl Shared {
     }
 
     /// The [`FreezeView`] of `id`, from the cached snapshots.
-    pub fn freeze_view(&self, id: &ElementId) -> Option<(WindowId, FreezeView)> {
+    pub fn freeze_view(
+        &self,
+        id: &ElementId,
+        with_subject: bool,
+    ) -> Option<(WindowId, FreezeView)> {
         let c = self.cache();
         c.iter()
-            .find_map(|t| freeze_view(t, id).map(|v| (t.window.id.clone(), v)))
+            .find_map(|t| freeze_view(t, id, with_subject).map(|v| (t.window.id.clone(), v)))
     }
 
     /// The item an action on `id` applies to (see [`subject_item`]), from the cached snapshots.
@@ -306,9 +312,12 @@ impl FreezeView {
 }
 
 /// The [`FreezeView`] of `id` in `tree`, `None` when it is not there.
-pub(crate) fn freeze_view(tree: &UiTree, id: &ElementId) -> Option<FreezeView> {
+/// `with_subject` also binds the item the action applies to ([`subject_item`]), for a Delete.
+pub(crate) fn freeze_view(tree: &UiTree, id: &ElementId, with_subject: bool) -> Option<FreezeView> {
     let node = tree.find(id)?;
-    let subject = subject_item(tree, id)
+    let subject = with_subject
+        .then(|| subject_item(tree, id))
+        .flatten()
         .map(|(how, item)| format!("{how}: {item}"))
         .unwrap_or_default();
     Some(FreezeView {

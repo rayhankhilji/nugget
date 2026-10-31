@@ -3,6 +3,7 @@
 import { LIMITS, ProtocolError, type BrowserAction, type ElementInfo, type PageSnapshot, type WaitCondition } from "./protocol";
 import type { ElementRegistry } from "./registry";
 import { accessibleName, roleOf, sensitivity } from "./snapshot";
+import { closestOf } from "./digest";
 
 /** URL schemes `navigate` accepts. Everything else (javascript:, data:, file:, chrome:, ...) is refused. */
 export function checkNavigateUrl(raw: string, base?: string): URL {
@@ -131,13 +132,23 @@ function scrollIntoViewIfPossible(el: Element): void {
   }
 }
 
-/** Perform an already validated action. `navigate` is handled by the background worker. */
-export async function performAction(registry: ElementRegistry, doc: Document, action: BrowserAction): Promise<void> {
+/**
+ * Perform an already validated action. `navigate` is handled by the background worker.
+ * `beforeDispatch` runs synchronously at the last moment before a click or submit is
+ * dispatched (after focusing, whose handlers run synchronously); it throws to refuse.
+ */
+export async function performAction(
+  registry: ElementRegistry,
+  doc: Document,
+  action: BrowserAction,
+  beforeDispatch?: () => void,
+): Promise<void> {
   switch (action.kind) {
     case "click": {
       const el = live(registry, action.element) as HTMLElement;
       scrollIntoViewIfPossible(el);
       el.focus?.();
+      beforeDispatch?.();
       el.click();
       return;
     }
@@ -188,14 +199,17 @@ export async function performAction(registry: ElementRegistry, doc: Document, ac
     }
     case "submit": {
       const el = live(registry, action.element);
-      const form = (el as HTMLInputElement).form ?? el.closest("form");
+      const form = ((el as HTMLInputElement).form ?? closestOf(el, "form")) as HTMLFormElement | null;
       if (!form) throw new ProtocolError("not_editable", "element is not inside a form");
       const submitter =
         el.tagName === "BUTTON" || (el.tagName === "INPUT" && ["submit", "image"].includes((el as HTMLInputElement).type))
           ? (el as HTMLButtonElement)
           : undefined;
-      if (typeof form.requestSubmit === "function") form.requestSubmit(submitter);
-      else form.submit();
+      // Through the prototype: a control named `requestSubmit` or `submit` shadows the method.
+      const proto = (doc.defaultView ?? globalThis).HTMLFormElement.prototype;
+      beforeDispatch?.();
+      if (typeof proto.requestSubmit === "function") proto.requestSubmit.call(form, submitter);
+      else proto.submit.call(form);
       return;
     }
     case "wait_for":

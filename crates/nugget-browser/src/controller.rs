@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{BrowserAction, ValidationError, Verification, verify};
 use crate::bridge::{BridgeError, BrowserBridge};
-use crate::protocol::{ActResult, ErrorCode, FormExpectation, HostRequest, SnapshotOptions};
+use crate::protocol::{ActResult, ErrorCode, Expectations, HostRequest, SnapshotOptions};
 use crate::snapshot::{PageSnapshot, SnapshotDiff};
 use crate::tool::action_context;
 
@@ -205,16 +205,17 @@ impl BrowserController {
         task_id: &str,
         action: BrowserAction,
     ) -> Result<ActionOutcome, BrowserError> {
-        self.act_expecting(task_id, action, None).await
+        self.act_expecting(task_id, action, Expectations::default())
+            .await
     }
 
-    /// [`BrowserController::act`] for a confirmed submit: the extension dispatches it only while
-    /// the form still has the digest the user confirmed (see [`FormExpectation`]).
+    /// [`BrowserController::act`] for a confirmed send: the extension dispatches it only while
+    /// the form or the send's dialog still has the digest the user confirmed.
     pub async fn act_expecting(
         &self,
         task_id: &str,
         action: BrowserAction,
-        expect_form: Option<FormExpectation>,
+        expect: Expectations,
     ) -> Result<ActionOutcome, BrowserError> {
         self.check_halt().await?;
         let latest = self.latest_snapshot();
@@ -239,7 +240,8 @@ impl BrowserController {
                     .map(|s| s.snapshot_id.clone())
                     .unwrap_or_default(),
                 action: action.clone(),
-                expect_form,
+                expect_form: expect.form,
+                expect_scope: expect.scope,
             })
             .await;
         let value = match value {

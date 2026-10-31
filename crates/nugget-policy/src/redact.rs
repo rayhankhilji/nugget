@@ -38,10 +38,14 @@ impl RedactedAction {
                 .target_label
                 .as_deref()
                 .map(|l| cap(&mask_digits(l), LABEL_CAP)),
-            text_preview: action
-                .text_preview
-                .as_deref()
-                .map(|p| redact_action_preview(p, secure, PREVIEW_CAP)),
+            text_preview: action.text_preview.as_deref().map(|p| {
+                match redact_action_preview(&action.verb, p, secure, PREVIEW_CAP) {
+                    (Some(t), Some(f)) => format!("{t} — {f}"),
+                    (Some(t), None) => t,
+                    (None, Some(f)) => f,
+                    (None, None) => String::new(),
+                }
+            }),
             declared_risk: action.declared_risk,
             task_id: cap(&action.task_id, LABEL_CAP),
         }
@@ -64,25 +68,28 @@ pub fn redact_preview(preview: &str, secure: bool) -> String {
 /// submit sends (see [`crate::preview`]).
 pub const CONFIRM_PREVIEW_CAP: usize = crate::preview::FIELDS_PREVIEW_MAX + 40;
 
-/// A descriptor's preview made safe to log or show, capped at `max`.
+/// A descriptor's preview made safe to log or show, as its text part and its fields part
+/// ([`crate::preview::preview_parts`], read by `verb`), each capped on its own.
 ///
-/// A fields preview ([`crate::preview::fields_preview`]) lists values the executor has already
-/// masked field by field (secrets as `••••`): it is never redacted as a whole because of the
-/// target's label ("Send verification code", "Reset password"); digit runs are still masked.
-/// A key press's preview (keys, a line break, the fields) is shown as `keys — fields`, each part
-/// capped on its own so the fields keep their `+N more fields` tail. Anything else is
-/// [`redact_preview_capped`].
-pub fn redact_action_preview(preview: &str, secure: bool, max: usize) -> String {
-    use crate::preview::{is_fields_preview, split_key_preview};
-    match split_key_preview(preview) {
-        (keys, Some(sent)) if is_fields_preview(sent) => format!(
-            "{} — {}",
-            redact_preview_capped(keys, false, 60),
-            cap(&mask_digits(sent), max)
-        ),
-        _ if is_fields_preview(preview) => cap(&mask_digits(preview), max),
-        _ => redact_preview_capped(preview, secure, max),
-    }
+/// The fields part lists values the executor has already masked field by field (secrets as
+/// `••••`): it is never redacted as a whole because of the target's label ("Send verification
+/// code", "Reset password"); digit runs are still masked, and its `+N more fields` tail is kept.
+/// The text part (typed text, keys, anything else) is [`redact_preview_capped`], `[redacted]`
+/// for a secure target.
+pub fn redact_action_preview(
+    verb: &str,
+    preview: &str,
+    secure: bool,
+    max: usize,
+) -> (Option<String>, Option<String>) {
+    let parts = crate::preview::preview_parts(verb, preview);
+    let text_max = if parts.fields.is_some() { 60 } else { max };
+    (
+        parts
+            .text
+            .map(|t| redact_preview_capped(t, secure, text_max)),
+        parts.fields.map(|f| cap(&mask_digits(f), max)),
+    )
 }
 
 /// [`redact_preview`] with its own cap.

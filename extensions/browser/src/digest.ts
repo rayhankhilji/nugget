@@ -63,44 +63,124 @@ export function sha256Hex(data: Uint8Array): string {
   return Array.from(h, (x) => x.toString(16).padStart(8, "0")).join("");
 }
 
+/** The page's own window classes for `el` (the content script's isolated world shares the DOM). */
+function win(el: Element): typeof globalThis & Window {
+  return (el.ownerDocument.defaultView ?? globalThis) as typeof globalThis & Window;
+}
+
 /**
- * Digest of everything `form` would send and where: its action, method, encoding and target,
- * and for every control (hidden ones, ones past the snapshot's caps and values longer than the
- * snapshot keeps included) its tag, type, name, id, disabled flag, override attributes
- * (`formaction`, ...) and full current value, checked state, selected options or chosen files.
- * Salted with a per-document secret, so the digest says nothing about the values (a PIN) to
- * whoever reads the snapshot; only equality is meaningful.
+ * A form property read through `HTMLFormElement.prototype`, never through the instance: a
+ * control named `action`, `elements` or `getAttribute` shadows the instance property ("DOM
+ * clobbering", in the isolated world too).
  */
-export function formDigest(form: HTMLFormElement, salt: string): string {
-  const parts: string[] = [
-    salt,
-    form.action,
-    (form.getAttribute("method") ?? "get").toLowerCase(),
-    form.enctype ?? "",
-    form.target ?? "",
-  ];
-  for (const el of Array.from(form.elements)) {
-    const input = el as HTMLInputElement;
-    const type = (input.type ?? "").toLowerCase();
-    parts.push(el.tagName, type, input.name ?? "", el.id, String(Boolean(input.disabled)));
-    for (const attr of ["formaction", "formmethod", "formenctype", "formtarget", "form"]) {
-      parts.push(el.getAttribute(attr) ?? "");
-    }
-    if (el.tagName === "SELECT") {
-      parts.push(
-        Array.from((el as HTMLSelectElement).options)
-          .filter((o) => o.selected)
-          .map((o) => o.value)
-          .join("\u0000"),
-      );
-    } else if (type === "checkbox" || type === "radio") {
-      parts.push(String(input.checked), input.value);
-    } else if (type === "file") {
-      parts.push(Array.from(input.files ?? [], (f) => `${f.name}:${f.size}`).join("\u0000"));
-    } else if ("value" in input) {
-      parts.push(String(input.value));
-    }
+export function formProperty<T>(form: HTMLFormElement, name: string): T | undefined {
+  const d = Object.getOwnPropertyDescriptor(win(form).HTMLFormElement.prototype, name);
+  return d?.get?.call(form) as T | undefined;
+}
+
+/** `Element.prototype` of `el`'s window, looked up once per document. */
+const protos = new WeakMap<Document, Element>();
+function elementProto(el: Element): Element {
+  const doc = el.ownerDocument;
+  let p = protos.get(doc);
+  if (!p) {
+    p = win(el).Element.prototype;
+    protos.set(doc, p);
   }
+  return p;
+}
+
+/** `el.getAttribute(name)` through `Element.prototype`. */
+export function attr(el: Element, name: string): string | null {
+  return elementProto(el).getAttribute.call(el, name);
+}
+
+/** `el.hasAttribute(name)` through `Element.prototype`. */
+export function hasAttr(el: Element, name: string): boolean {
+  return elementProto(el).hasAttribute.call(el, name);
+}
+
+/** `el.closest(selector)` through `Element.prototype`. */
+export function closestOf(el: Element | null, selector: string): Element | null {
+  return el ? elementProto(el).closest.call(el, selector) : null;
+}
+
+function controlParts(el: Element, parts: string[]): void {
+  const input = el as HTMLInputElement;
+  const type = String(input.type ?? attr(el, "type") ?? "").toLowerCase();
+  parts.push(el.tagName, type, String(input.name ?? ""), String(attr(el, "id") ?? ""), String(Boolean(input.disabled)));
+  for (const a of ["formaction", "formmethod", "formenctype", "formtarget", "form"]) {
+    parts.push(attr(el, a) ?? "");
+  }
+  if (el.tagName === "SELECT") {
+    parts.push(
+      Array.from((el as HTMLSelectElement).options ?? [])
+        .filter((o) => o.selected)
+        .map((o) => o.value)
+        .join("\u0000"),
+    );
+  } else if (type === "checkbox" || type === "radio") {
+    parts.push(String(input.checked), String(input.value));
+  } else if (type === "file") {
+    parts.push(Array.from(input.files ?? [], (f) => `${f.name}:${f.size}`).join("\u0000"));
+  } else if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+    parts.push(String(input.value));
+  } else {
+    // A contenteditable region or role=textbox: its text is what it sends.
+    parts.push(el.textContent ?? "");
+  }
+}
+
+function hashParts(parts: string[]): string {
   const text = parts.map((p) => `${p.length}:${p}`).join("|");
   return sha256Hex(new TextEncoder().encode(text));
+}
+
+/**
+ * Digest of everything `form` would send and where: its action, method, encoding and target,
+ * and for every control in `form.elements` (hidden ones, ones past the snapshot's caps and
+ * values longer than the snapshot keeps included) its tag, type, name, id, disabled flag,
+ * override attributes (`formaction`, ...) and full current value, checked state, selected
+ * options or chosen files. Read through the prototypes, so controls named like form properties
+ * cannot hide anything. Salted with a per-document secret, so the digest says nothing about the
+ * values (a PIN) to whoever reads the snapshot; only equality is meaningful. Throws if the form
+ * cannot be read; callers treat that as "no digest" (snapshot) or "changed" (act).
+ *
+ * Not covered: `<input type=image>` (never in `form.elements`; it sends only click
+ * coordinates) and form-associated custom elements, whose submitted value is not readable.
+ */
+export function formDigest(form: HTMLFormElement, salt: string): string {
+  const elements = formProperty<HTMLFormControlsCollection>(form, "elements");
+  if (!elements) throw new Error("the form's controls cannot be read");
+  const parts: string[] = [
+    salt,
+    String(formProperty<string>(form, "action") ?? ""),
+    (attr(form, "method") ?? "get").toLowerCase(),
+    String(formProperty<string>(form, "enctype") ?? ""),
+    String(formProperty<string>(form, "target") ?? ""),
+  ];
+  for (const el of Array.from(elements)) controlParts(el, parts);
+  return hashParts(parts);
+}
+
+/** What a send outside a native form submit carries: the nearest dialog, form or region. */
+export const SCOPE_SELECTOR =
+  'dialog, [role="dialog"], [role="alertdialog"], form, [role="form"], [role="region"], section[aria-label], section[aria-labelledby]';
+
+const SCOPE_FIELDS = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]';
+
+/**
+ * Digest of the editable contents of a send scope (a compose dialog, a region): every input,
+ * text area, select, contenteditable region and role=textbox inside it, with full values and
+ * text. Same salting and caveats as [`formDigest`].
+ */
+export function scopeDigest(scope: Element, salt: string): string {
+  const parts: string[] = [salt, scope.tagName, attr(scope, "role") ?? ""];
+  const all = win(scope).Element.prototype.querySelectorAll.call(scope, SCOPE_FIELDS);
+  for (const el of Array.from(all)) {
+    // A contenteditable inside another counts once, with the outer one's text.
+    if (el.parentElement && closestOf(el.parentElement, '[contenteditable]:not([contenteditable="false"])')) continue;
+    controlParts(el, parts);
+  }
+  return hashParts(parts);
 }

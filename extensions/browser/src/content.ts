@@ -7,7 +7,7 @@ import { ProtocolError, type BrowserAction, type FormExpectation, type SnapshotO
 
 export type ContentRequest =
   | { nugget: "snapshot"; options?: SnapshotOptions }
-  | { nugget: "act"; snapshot_id: string; action: BrowserAction; expect_form?: FormExpectation }
+  | { nugget: "act"; snapshot_id: string; action: BrowserAction; expect_form?: FormExpectation; expect_scope?: FormExpectation }
   | { nugget: "overlay"; active: boolean; label?: string }
   | { nugget: "halt" }
   | { nugget: "resume" }
@@ -37,7 +37,7 @@ if (!window.__nuggetAgent) {
       case "snapshot":
         return agent.snapshot(req.options);
       case "act":
-        return agent.act(req.snapshot_id, req.action, req.expect_form);
+        return agent.act(req.snapshot_id, req.action, req.expect_form, req.expect_scope);
       case "overlay":
         if (req.active) overlay.show(req.label);
         else overlay.hide();

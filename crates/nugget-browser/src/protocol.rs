@@ -41,6 +41,10 @@ pub enum HostRequest {
         /// and refuses (`form_changed`) if it differs. Older extensions ignore it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expect_form: Option<FormExpectation>,
+        /// A confirmed send outside a native form submit: the same, over the dialog or region
+        /// its content lives in (`form` names that container).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expect_scope: Option<FormExpectation>,
     },
     Overlay {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -60,6 +64,13 @@ pub enum HostRequest {
 pub struct FormExpectation {
     pub form: String,
     pub digest: String,
+}
+
+/// What the extension must still see right before dispatching a confirmed action.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Expectations {
+    pub form: Option<FormExpectation>,
+    pub scope: Option<FormExpectation>,
 }
 
 /// A request with its correlation id, as framed to the extension.

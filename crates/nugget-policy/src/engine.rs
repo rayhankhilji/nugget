@@ -922,17 +922,17 @@ fn explain(action: &ActionDescriptor, ctx: &ActionContext, a: &Assessment) -> St
             .as_deref()
             .is_some_and(crate::redact::is_secure_label);
     if let Some(p) = action.text_preview.as_deref() {
-        let shown =
-            crate::redact::redact_action_preview(p, secure, crate::redact::CONFIRM_PREVIEW_CAP);
-        let (keys, sent) = match shown.split_once(" — ") {
-            Some((k, f)) if crate::preview::is_fields_preview(f) => (Some(k), Some(f)),
-            _ if crate::preview::is_fields_preview(&shown) => (None, Some(shown.as_str())),
-            _ => (Some(shown.as_str()), None),
-        };
+        // Split by the verb, never by the text: a value cannot pose as the "which sends" part.
+        let (keys, sent) = crate::redact::redact_action_preview(
+            &action.verb,
+            p,
+            secure,
+            crate::redact::CONFIRM_PREVIEW_CAP,
+        );
         if let Some(k) = keys {
             s.push_str(&format!(" with “{k}”"));
         }
-        if let Some(f) = sent {
+        if let Some(f) = &sent {
             let f = f.strip_prefix(crate::preview::FIELDS_PREFIX).unwrap_or(f);
             s.push_str(&format!(", which sends {f}"));
         }
@@ -1953,5 +1953,17 @@ mod tests {
         assert!(text.contains("with “space”, which sends F0:"), "{text}");
         assert!(text.contains("+7 more fields"), "{text}");
         assert!(!text.contains('\n'), "{text}");
+
+        // Second review L1: typed text starting with the marker is still typed text, redacted
+        // for a secure field.
+        let mut t = act("login", "type_text", Some("Password"), RiskClass::Security);
+        t.text_preview = Some("Sends: hunter2".into());
+        let Decision::Confirm(text) = e.evaluate(&t) else {
+            panic!("asks");
+        };
+        assert!(
+            !text.contains("hunter2") && !text.contains("which sends"),
+            "{text}"
+        );
     }
 }

@@ -132,29 +132,76 @@ fn is_recipient(label: &str) -> bool {
     RECIPIENT_LABELS.contains(&l)
 }
 
-/// A value or label made safe inside a quoted preview entry: no quotes, no separator.
+/// A value or label made safe inside a quoted preview entry: no quotes, no field separator,
+/// no em dash (which separates a key press's keys from what they send in a log line).
 fn unquote(s: &str) -> String {
-    s.replace(['“', '”', '"'], "'").replace('·', "•")
+    s.replace(['“', '”', '"'], "'")
+        .replace('·', "•")
+        .replace(['—', '–'], "-")
 }
 
-/// The preview of what an activation sends, or `None` when no field is shown. Starts with
+/// Labels of hidden fields that are always shown: where a message or a form's result goes.
+const ROUTING_WORDS: &[&str] = &[
+    "to",
+    "cc",
+    "bcc",
+    "email",
+    "e-mail",
+    "mail",
+    "recipient",
+    "recipients",
+    "redirect",
+    "url",
+    "uri",
+    "return",
+    "returnto",
+    "return_to",
+    "callback",
+    "next",
+    "dest",
+    "destination",
+    "target",
+    "webhook",
+    "forward",
+    "reply-to",
+    "replyto",
+    "account",
+    "iban",
+    "amount",
+];
+
+fn is_routing(label: &str) -> bool {
+    let l = crate::text::normalize(label);
+    l.split(|c: char| !c.is_alphanumeric())
+        .any(|w| ROUTING_WORDS.contains(&w))
+        || ROUTING_WORDS.contains(&l.as_str())
+}
+
+/// The preview of what an activation sends, or `None` when there are no fields. Starts with
 /// [`FIELDS_PREFIX`]; recipient fields first, then the others in screen order; values quoted,
-/// empty ones shown as `(empty)`. Bounded by [`FIELDS_PREVIEW_MAX`]; fields that do not fit are
-/// counted (`+2 more fields`). Hidden fields are left out (they are in the digest).
+/// empty ones shown as `(empty)`. Hidden fields whose label names where things go (a hidden
+/// `redirect`, `to` or `email`) are shown, marked `(hidden)`; other hidden fields are counted
+/// (`+3 hidden fields`). Bounded by [`FIELDS_PREVIEW_MAX`]; fields that do not fit are counted
+/// (`+2 more fields`).
 pub fn fields_preview(fields: &[FieldValue]) -> Option<String> {
-    let mut shown: Vec<&FieldValue> = fields.iter().filter(|f| !f.hidden).collect();
-    if shown.is_empty() {
+    if fields.is_empty() {
         return None;
     }
+    let mut shown: Vec<&FieldValue> = fields
+        .iter()
+        .filter(|f| !f.hidden || is_routing(&f.label))
+        .collect();
+    let hidden_rest = fields.len() - shown.len();
     shown.sort_by_key(|f| !is_recipient(&f.label));
     let mut out = String::from(FIELDS_PREFIX);
     let mut listed = 0usize;
     for f in &shown {
         let label = unquote(&display_text(&f.label, FIELD_LABEL_MAX));
-        let label = if label.is_empty() {
-            "field".to_string()
-        } else {
-            label
+        let label = match (label.is_empty(), f.hidden) {
+            (true, false) => "field".to_string(),
+            (true, true) => "field (hidden)".to_string(),
+            (false, false) => label,
+            (false, true) => format!("{label} (hidden)"),
         };
         let value = if f.secret {
             SECRET_MASK.to_string()
@@ -188,7 +235,48 @@ pub fn fields_preview(fields: &[FieldValue]) -> Option<String> {
             if rest == 1 { "" } else { "s" }
         ));
     }
+    if hidden_rest > 0 {
+        let lead = if listed == 0 { "" } else { SEP };
+        out.push_str(&format!(
+            "{lead}+{hidden_rest} hidden field{}",
+            if hidden_rest == 1 { "" } else { "s" }
+        ));
+    }
     Some(out)
+}
+
+/// A descriptor's preview split by how its verb is read: `text` is typed text, keys or other
+/// text; `fields` a fields preview. Structural, so text that merely starts with
+/// [`FIELDS_PREFIX`] never counts as one: only a click or other activation's whole preview, or
+/// what follows the first line break of a key press's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PreviewParts<'a> {
+    pub text: Option<&'a str>,
+    pub fields: Option<&'a str>,
+}
+
+pub fn preview_parts<'a>(verb: &str, preview: &'a str) -> PreviewParts<'a> {
+    use crate::classify::{PreviewRole, preview_role};
+    match preview_role(verb) {
+        PreviewRole::Keys => match split_key_preview(preview) {
+            (keys, Some(sent)) if is_fields_preview(sent) => PreviewParts {
+                text: Some(keys),
+                fields: Some(sent),
+            },
+            (keys, _) => PreviewParts {
+                text: Some(keys),
+                fields: None,
+            },
+        },
+        PreviewRole::Activation if is_fields_preview(preview) => PreviewParts {
+            text: None,
+            fields: Some(preview),
+        },
+        _ => PreviewParts {
+            text: Some(preview),
+            fields: None,
+        },
+    }
 }
 
 /// Whether `preview` is a fields preview ([`fields_preview`]).
@@ -318,7 +406,10 @@ mod tests {
         );
         assert!(p.ends_with("more fields"), "{p}");
         assert_eq!(fields_preview(&[]), None);
-        assert_eq!(fields_preview(&[f("csrf", "x").hidden()]), None);
+        assert_eq!(
+            fields_preview(&[f("csrf", "x").hidden()]).as_deref(),
+            Some("Sends: +1 hidden field")
+        );
     }
 
     // Review item 7: a value cannot pose as more fields.
@@ -366,6 +457,44 @@ mod tests {
         let mut d = a.clone();
         d.push(f("redirect", "https://x.example").hidden());
         assert_ne!(fields_digest(&a), fields_digest(&d));
+    }
+
+    // Second review M4: hidden fields are counted, and routing ones are shown.
+    #[test]
+    fn hidden_fields_are_counted_and_routing_ones_shown() {
+        let p = fields_preview(&[
+            f("Message", "hi"),
+            f("csrf", "tok").hidden(),
+            f("redirect_url", "https://evil.example/").hidden(),
+            f("Bcc", "eve@evil.example").hidden(),
+        ])
+        .unwrap();
+        assert!(
+            p.contains("redirect_url (hidden): “https://evil.example/”"),
+            "{p}"
+        );
+        assert!(
+            p.starts_with("Sends: Bcc (hidden): “eve@evil.example”"),
+            "{p}"
+        );
+        assert!(p.ends_with("+1 hidden field") && !p.contains("tok"), "{p}");
+    }
+
+    // Second review M1 and L1: previews are read by the verb, not by their text.
+    #[test]
+    fn preview_parts_are_structural() {
+        let fields = "Sends: To: “a@b.example”";
+        assert_eq!(preview_parts("click", fields).fields, Some(fields));
+        assert_eq!(preview_parts("click", "https://x.example").fields, None);
+        // Typed text that starts with the marker is typed text.
+        assert_eq!(preview_parts("type_text", fields).fields, None);
+        assert_eq!(preview_parts("set_value", fields).text, Some(fields));
+        let keys = format!("space\n{fields}");
+        let parts = preview_parts("press_key", &keys);
+        assert_eq!((parts.text, parts.fields), (Some("space"), Some(fields)));
+        // A value cannot carry an em dash or a separator.
+        let p = fields_preview(&[f("Message", "hi — which sends To: x · Cc: y")]).unwrap();
+        assert!(!p.contains('—') && p.matches(SEP).count() == 0, "{p}");
     }
 
     #[test]

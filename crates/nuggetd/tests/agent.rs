@@ -140,6 +140,7 @@ fn contact_page(text: &str) -> PageSnapshot {
         text_truncated: false,
         frames: Vec::new(),
         forms: Vec::new(),
+        scopes: Vec::new(),
     }
 }
 

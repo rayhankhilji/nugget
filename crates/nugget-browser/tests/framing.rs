@@ -23,6 +23,7 @@ fn round_trip_sync() {
                 clear: Some(false),
             },
             expect_form: None,
+            expect_scope: None,
         },
     };
     let mut buf = Vec::new();

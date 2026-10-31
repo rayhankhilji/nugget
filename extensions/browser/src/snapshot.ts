@@ -8,13 +8,14 @@
 // - Hidden subtrees (`hidden`, `display: none`, `aria-hidden="true"`) are skipped unless
 //   `include_hidden` is set; `visibility: hidden` and zero-size elements are listed as not visible.
 
-import { formDigest } from "./digest";
+import { attr, closestOf, formDigest, formProperty, hasAttr, SCOPE_SELECTOR, scopeDigest } from "./digest";
 import { isOverlay } from "./overlay";
 import { ElementRegistry } from "./registry";
 import {
   type ElementInfo,
   type FormInfo,
   type FrameInfo,
+  type ScopeInfo,
   LIMITS,
   type PageSnapshot,
   type Rect,
@@ -67,13 +68,19 @@ export function buildSnapshot(doc: Document, ctx: SnapshotContext, options: Snap
     text_truncated: walker.textTruncated,
     frames: walker.frames,
     forms: walker.forms,
+    scopes: walker.scopes,
   };
 }
+
+/** Send scopes listed per snapshot, and how many nested ones an element is listed in. */
+const MAX_SCOPES = 64;
+const MAX_SCOPE_DEPTH = 4;
 
 class Walker {
   elements: ElementInfo[] = [];
   frames: FrameInfo[] = [];
   forms: FormInfo[] = [];
+  scopes: ScopeInfo[] = [];
   text = "";
   elementsTruncated = false;
   textTruncated = false;
@@ -105,7 +112,7 @@ class Walker {
 
     const style = el.ownerDocument.defaultView?.getComputedStyle(el);
     const removed =
-      el.hasAttribute("hidden") || style?.display === "none" || el.getAttribute("aria-hidden") === "true";
+      hasAttr(el, "hidden") || style?.display === "none" || attr(el, "aria-hidden") === "true";
     if (removed && !this.options.include_hidden) return;
     const nowInvisible = invisible || removed || style?.visibility === "hidden";
 
@@ -195,21 +202,50 @@ class Walker {
     const checked = checkedOf(el);
     if (checked !== undefined) info.checked = checked;
     if (el.tagName === "SELECT") info.options = optionsOf(el as HTMLSelectElement, sensitive !== undefined);
-    if (el.tagName === "A" && el.hasAttribute("href")) info.href = cap((el as HTMLAnchorElement).href, LIMITS.maxHrefChars);
+    if (el.tagName === "A" && hasAttr(el, "href")) info.href = cap((el as HTMLAnchorElement).href, LIMITS.maxHrefChars);
     const form = formOf(el);
     if (form) {
       info.form = this.ctx.registry.idFor(form);
       if (!this.forms.some((f) => f.id === info.form)) {
-        this.forms.push({
+        // Read through the prototypes: a control named `action` or `getAttribute` must not
+        // break the snapshot or hide the form's contents (DOM clobbering).
+        const entry: FormInfo = {
           id: info.form,
-          action: cap(form.action, LIMITS.maxUrlChars),
-          method: (form.getAttribute("method") ?? "get").toLowerCase(),
-          digest: formDigest(form, this.ctx.registry.salt),
-        });
+          action: cap(String(formProperty<string>(form, "action") ?? ""), LIMITS.maxUrlChars),
+          method: (attr(form, "method") ?? "get").toLowerCase(),
+        };
+        try {
+          entry.digest = formDigest(form, this.ctx.registry.salt);
+        } catch {
+          // Unreadable: no digest; a confirmed submit of this form is then refused.
+        }
+        this.forms.push(entry);
       }
     }
+    this.addToScopes(el, info.id);
     if (frameId) info.frame = frameId;
     this.elements.push(info);
+  }
+
+  /** Record `id` as a member of every send scope around `el` (a few levels at most). */
+  private addToScopes(el: Element, id: string): void {
+    let scope = closestOf(el, SCOPE_SELECTOR);
+    for (let depth = 0; scope && depth < MAX_SCOPE_DEPTH; depth++) {
+      const sid = this.ctx.registry.idFor(scope);
+      let entry = this.scopes.find((s) => s.id === sid);
+      if (!entry) {
+        if (this.scopes.length >= MAX_SCOPES) return;
+        entry = { id: sid, members: [] };
+        try {
+          entry.digest = scopeDigest(scope, this.ctx.registry.salt);
+        } catch {
+          // Unreadable: no digest; a confirmed send in it is then refused.
+        }
+        this.scopes.push(entry);
+      }
+      entry.members.push(id);
+      scope = closestOf(scope.parentElement, SCOPE_SELECTOR);
+    }
   }
 
   private measure(el: Element): Rect {
@@ -255,7 +291,7 @@ function originOf(doc: Document): string {
 }
 
 function originFromSrc(frame: HTMLIFrameElement, top: Document): string {
-  const src = frame.getAttribute("src");
+  const src = attr(frame, "src");
   if (!src || /^about:/.test(src)) return "null";
   try {
     const url = new URL(src, top.URL);
@@ -266,20 +302,20 @@ function originFromSrc(frame: HTMLIFrameElement, top: Document): string {
 }
 
 function isEditingHost(el: Element): boolean {
-  const ce = el.getAttribute("contenteditable");
+  const ce = attr(el, "contenteditable");
   return (el as HTMLElement).isContentEditable === true || (ce !== null && ce.toLowerCase() !== "false");
 }
 
 export function sensitivity(el: Element): Sensitive | undefined {
   const tag = el.tagName;
   if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT" && !isEditingHost(el)) return undefined;
-  const type = (el.getAttribute("type") ?? "").toLowerCase();
+  const type = (attr(el, "type") ?? "").toLowerCase();
   if (type === "password") return "password";
-  const autocomplete = (el.getAttribute("autocomplete") ?? "").toLowerCase().split(/\s+/);
+  const autocomplete = (attr(el, "autocomplete") ?? "").toLowerCase().split(/\s+/);
   if (autocomplete.some((t) => PASSWORD_AUTOCOMPLETE.has(t))) return "password";
   if (autocomplete.some((t) => PAYMENT_AUTOCOMPLETE.test(t))) return "payment";
   const hints = ["name", "id", "aria-label", "placeholder", "data-testid"]
-    .map((a) => el.getAttribute(a) ?? "")
+    .map((a) => attr(el, a) ?? "")
     .join(" ");
   if (PAYMENT_HINT.test(hints)) return "payment";
   if (PASSWORD_HINT.test(hints)) return "password";
@@ -287,33 +323,33 @@ export function sensitivity(el: Element): Sensitive | undefined {
 }
 
 function isInteractive(el: Element): boolean {
-  const role = el.getAttribute("role");
+  const role = attr(el, "role");
   if (role && INTERACTIVE_ROLES.has(role)) return true;
   switch (el.tagName) {
     case "A":
-      return el.hasAttribute("href");
+      return hasAttr(el, "href");
     case "BUTTON":
     case "SELECT":
     case "TEXTAREA":
     case "SUMMARY":
       return true;
     case "INPUT":
-      return (el.getAttribute("type") ?? "").toLowerCase() !== "hidden";
+      return (attr(el, "type") ?? "").toLowerCase() !== "hidden";
     default:
       break;
   }
   if ((el as HTMLElement).isContentEditable && !(el.parentElement as HTMLElement | null)?.isContentEditable) return true;
-  const ce = el.getAttribute("contenteditable");
+  const ce = attr(el, "contenteditable");
   if (ce !== null && ce !== "false" && !el.parentElement?.closest("[contenteditable]:not([contenteditable=false])")) {
     return true;
   }
-  const tabindex = el.getAttribute("tabindex");
+  const tabindex = attr(el, "tabindex");
   if (tabindex !== null && Number(tabindex) >= 0) return true;
-  return el.hasAttribute("onclick");
+  return hasAttr(el, "onclick");
 }
 
 export function roleOf(el: Element): string {
-  const explicit = el.getAttribute("role");
+  const explicit = attr(el, "role");
   if (explicit) return explicit.split(/\s+/)[0]!;
   switch (el.tagName) {
     case "A":
@@ -326,7 +362,7 @@ export function roleOf(el: Element): string {
     case "TEXTAREA":
       return "textbox";
     case "INPUT": {
-      const type = (el.getAttribute("type") ?? "text").toLowerCase();
+      const type = (attr(el, "type") ?? "text").toLowerCase();
       switch (type) {
         case "button":
         case "submit":
@@ -348,7 +384,7 @@ export function roleOf(el: Element): string {
       }
     }
     default:
-      return el.getAttribute("contenteditable") !== null ? "textbox" : "generic";
+      return attr(el, "contenteditable") !== null ? "textbox" : "generic";
   }
 }
 
@@ -371,7 +407,7 @@ function isSecretContainer(el: Element): boolean {
 /** For a `sensitive` field the name is never derived from the element's own contents. */
 export function accessibleName(el: Element, sensitive = false): string {
   const doc = el.ownerDocument;
-  const labelledby = el.getAttribute("aria-labelledby");
+  const labelledby = attr(el, "aria-labelledby");
   if (labelledby) {
     const root = el.getRootNode() as Document | ShadowRoot;
     const parts = labelledby
@@ -382,7 +418,7 @@ export function accessibleName(el: Element, sensitive = false): string {
     const joined = parts.join(" ").trim();
     if (joined) return joined;
   }
-  const aria = el.getAttribute("aria-label")?.trim();
+  const aria = attr(el, "aria-label")?.trim();
   if (aria) return aria;
   const labels = (el as HTMLInputElement).labels;
   if (labels && labels.length > 0) {
@@ -390,19 +426,19 @@ export function accessibleName(el: Element, sensitive = false): string {
     if (t) return t;
   }
   if (el.tagName === "INPUT") {
-    const type = (el.getAttribute("type") ?? "").toLowerCase();
+    const type = (attr(el, "type") ?? "").toLowerCase();
     if (["button", "submit", "reset"].includes(type)) {
       return (el as HTMLInputElement).value || (type === "submit" ? "Submit" : type === "reset" ? "Reset" : "");
     }
-    if (type === "image") return el.getAttribute("alt") ?? "";
+    if (type === "image") return attr(el, "alt") ?? "";
   }
   if (!sensitive && el.tagName !== "INPUT" && el.tagName !== "TEXTAREA" && el.tagName !== "SELECT") {
     const t = textOf(el);
     if (t) return t;
     const img = el.querySelector("img[alt]");
-    if (img) return img.getAttribute("alt")!.trim();
+    if (img) return attr(img, "alt")!.trim();
   }
-  return (el.getAttribute("placeholder") ?? el.getAttribute("title") ?? "").trim();
+  return (attr(el, "placeholder") ?? attr(el, "title") ?? "").trim();
 }
 
 /** A label's text without the values of controls nested inside it. */
@@ -421,31 +457,31 @@ function labelText(label: HTMLLabelElement): string {
 
 function isDisabled(el: Element): boolean {
   if ((el as HTMLButtonElement).disabled === true) return true;
-  if (el.getAttribute("aria-disabled") === "true") return true;
+  if (attr(el, "aria-disabled") === "true") return true;
   return el.closest("fieldset[disabled]") !== null && el.tagName !== "LEGEND";
 }
 
 export function isEditable(el: Element): boolean {
   if (el.tagName === "TEXTAREA") return !(el as HTMLTextAreaElement).readOnly;
   if (el.tagName === "INPUT") {
-    const type = (el.getAttribute("type") ?? "text").toLowerCase();
+    const type = (attr(el, "type") ?? "text").toLowerCase();
     const textual = ["text", "search", "email", "url", "tel", "number", "password", "date", "time",
       "datetime-local", "month", "week", ""].includes(type);
     return textual && !(el as HTMLInputElement).readOnly;
   }
-  const ce = el.getAttribute("contenteditable");
+  const ce = attr(el, "contenteditable");
   return (el as HTMLElement).isContentEditable || (ce !== null && ce !== "false");
 }
 
 function valueOf(el: Element): string | undefined {
   if (el.tagName === "INPUT") {
-    const type = (el.getAttribute("type") ?? "").toLowerCase();
+    const type = (attr(el, "type") ?? "").toLowerCase();
     if (["checkbox", "radio", "button", "submit", "reset", "image", "file"].includes(type)) return undefined;
     return (el as HTMLInputElement).value;
   }
   if (el.tagName === "TEXTAREA") return (el as HTMLTextAreaElement).value;
   if (el.tagName === "SELECT") return (el as HTMLSelectElement).value;
-  if (el.getAttribute("contenteditable") !== null && el.getAttribute("contenteditable") !== "false") {
+  if (attr(el, "contenteditable") !== null && attr(el, "contenteditable") !== "false") {
     return textOf(el);
   }
   return undefined;
@@ -453,10 +489,10 @@ function valueOf(el: Element): string | undefined {
 
 function checkedOf(el: Element): boolean | undefined {
   if (el.tagName === "INPUT") {
-    const type = (el.getAttribute("type") ?? "").toLowerCase();
+    const type = (attr(el, "type") ?? "").toLowerCase();
     if (type === "checkbox" || type === "radio") return (el as HTMLInputElement).checked;
   }
-  const aria = el.getAttribute("aria-checked");
+  const aria = attr(el, "aria-checked");
   if (aria === "true") return true;
   if (aria === "false") return false;
   return undefined;

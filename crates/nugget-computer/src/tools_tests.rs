@@ -1005,6 +1005,100 @@ async fn keys_follow_the_confirmed_focus() {
     );
 }
 
+// Second review H3: no focus reported in the fresh snapshot (Nugget's own window had focus
+// while the user approved) is not a refusal; the key goes to the confirmed control by id.
+#[tokio::test]
+async fn keys_with_no_reported_focus_go_to_the_confirmed_control() {
+    let kit = send_kit();
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws[0].focused = Some(ElementId("c-send".into()));
+    }
+    kit.call("observe", json!({})).await;
+    let keys = json!({"keys": "enter"});
+    kit.tool("press_key").describe(&keys);
+    {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        ws[0].focused = None;
+    }
+    let r = kit.call("press_key", keys).await;
+    assert!(!r.is_error, "{}", r.content);
+    assert_eq!(
+        kit.fake.inputs.lock().unwrap().clone(),
+        vec!["keys:c-send:enter".to_string()]
+    );
+}
+
+// Second review M3: a press on a control Nugget has not read is refused, not run unchecked.
+#[tokio::test]
+async fn a_press_on_an_unknown_control_is_refused() {
+    let kit = send_kit();
+    let r = kit.call("click", json!({"element": "c-send"})).await;
+    assert!(
+        r.is_error && r.content.contains("Observe first"),
+        "{}",
+        r.content
+    );
+    let r = kit.call("press_key", json!({"keys": "enter"})).await;
+    assert!(
+        r.is_error && r.content.contains("Observe first"),
+        "{}",
+        r.content
+    );
+    assert!(kit.acts().is_empty() && kit.fake.inputs.lock().unwrap().is_empty());
+    // Keys that press nothing are not held up.
+    kit.call("observe", json!({})).await;
+    let r = kit
+        .call("press_key", json!({"element": "c-to", "keys": "end"}))
+        .await;
+    assert!(!r.is_error, "{}", r.content);
+}
+
+// Second review M5: a send is not bound to the list row or heading around it (a chat row's
+// preview may change while the user reads); a Delete is.
+#[tokio::test]
+async fn only_a_delete_is_bound_to_its_item() {
+    let mut heading = node("h", Role::Heading, "Chat with Ana");
+    heading.actions.clear();
+    let mut body = node("b", Role::TextField, "Message");
+    body.value = Some("hi".into());
+    let w = window(
+        "w2",
+        "Chat",
+        vec![
+            heading,
+            body,
+            node("send", Role::Button, "Send"),
+            node("del", Role::Button, "Delete chat"),
+        ],
+    );
+    let kit = Kit::with(vec![w], Vec::new());
+    kit.call("observe", json!({})).await;
+    let retitle = |t: &str| {
+        let mut ws = kit.fake.windows.lock().unwrap();
+        node_mut(&mut ws[0].root, &ElementId("h".into()))
+            .unwrap()
+            .name = Some(t.into());
+    };
+    kit.tool("click").describe(&json!({"element": "send"}));
+    retitle("Chat with Ana · typing…");
+    let r = kit.call("click", json!({"element": "send"})).await;
+    assert!(!r.is_error, "{}", r.content);
+    kit.call("observe", json!({})).await;
+    let d = kit.tool("click").describe(&json!({"element": "del"}));
+    assert_eq!(
+        d.target_label.as_deref(),
+        Some("Delete chat (open: Chat with Ana · typing…)")
+    );
+    retitle("Chat with Bo");
+    let r = kit.call("click", json!({"element": "del"})).await;
+    assert!(
+        r.is_error && r.content.contains("item it acts on"),
+        "{}",
+        r.content
+    );
+}
+
 // Review item 7: the fields are those of the control's own pane, not the whole window.
 #[tokio::test]
 async fn the_preview_is_scoped_to_the_controls_pane() {
@@ -1060,6 +1154,7 @@ async fn gg3_6_keys_on_a_button_are_a_click() {
     );
     // Review item 6: Tab, a type-ahead letter, Escape, F6 or Alt+letter before Space/Enter.
     for keys in [
+        "ctrl+t enter",
         "tab space",
         "d enter",
         "escape enter",
@@ -1072,6 +1167,15 @@ async fn gg3_6_keys_on_a_button_are_a_click() {
                 "press_key",
                 json!({"element": "mail-compose", "keys": keys})
             ),
+            RiskClass::Send,
+            "{keys}"
+        );
+    }
+    // In a text field, Ctrl+T, Ctrl+W and Meta+` leave it: a Space after them presses something
+    // unknown.
+    for keys in ["ctrl+t space", "ctrl+w space", "meta+` space"] {
+        assert_eq!(
+            kit.risk("press_key", json!({"element": "mail-to", "keys": keys})),
             RiskClass::Send,
             "{keys}"
         );

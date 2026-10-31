@@ -954,6 +954,15 @@ impl ComputerTool {
         (class, activating)
     }
 
+    /// Whether this call presses whatever it goes to: a click, or keys with Space or Enter.
+    fn presses(&self, args: &Value) -> bool {
+        match self.kind {
+            Kind::Click => true,
+            Kind::PressKey => parse_keys(args).ok().as_deref().is_some_and(activates),
+            _ => false,
+        }
+    }
+
     /// Whether this call must have been frozen at describe time: it presses a control whose
     /// activation is Send or above.
     fn needs_freeze(&self, args: &Value, f: &Found) -> bool {
@@ -981,7 +990,10 @@ impl ComputerTool {
         if !(activating && class >= RiskClass::Send) {
             return;
         }
-        let Some((window, view)) = self.shared.freeze_view(&f.node.id) else {
+        // The item a Delete applies to is bound too; for a send it is not (a list row's preview
+        // or relative time may change while the user reads the confirmation).
+        let with_subject = class == RiskClass::Destroy;
+        let Some((window, view)) = self.shared.freeze_view(&f.node.id, with_subject) else {
             return;
         };
         if let Some(shown) = fields_preview(&view.fields) {
@@ -1008,6 +1020,7 @@ impl ComputerTool {
                 window,
                 fields: view.fields,
                 digest,
+                with_subject,
             },
         );
     }
@@ -1032,20 +1045,37 @@ impl ComputerTool {
                 Some(f) if self.needs_freeze(args, &f) => {
                     Err(refuse("it was not confirmed as it now stands".into()))
                 }
-                _ => Ok(None),
+                Some(_) => Ok(None),
+                // A press on a control Nugget has not read (an id not in the last snapshot, or
+                // keys with focus unknown) is judged Send and nothing could be frozen: refuse
+                // rather than press something unchecked.
+                None if self.presses(args) => {
+                    let mut r = fail(
+                        "The control is not on the screen Nugget last read, so what this would \
+                         send cannot be checked; nothing was done. Observe first, then use an \
+                         id from it.",
+                    );
+                    r.data = Some(json!({"refused": true, "unknown_target": true}));
+                    Err(Box::new(r))
+                }
+                None => Ok(None),
             };
         };
         let explicit = element_arg(args).ok().flatten();
         let window = fz.window.clone();
         let el = fz.element.clone();
+        let with_subject = fz.with_subject;
         let fresh = blocking(&self.shared, move |s| {
             let tree = s.snapshot(&WindowSel::Id(window))?;
-            Ok((tree.focused.clone(), freeze_view(&tree, &el)))
+            Ok((tree.focused.clone(), freeze_view(&tree, &el, with_subject)))
         })
         .await;
         let why = match fresh {
             Err(e) => format!("the window could not be read again: {e}"),
-            Ok((focus, _)) if explicit.is_none() && focus.as_ref() != Some(&fz.element) => {
+            // Focus on another control: refuse. No focus reported at all is normal right after
+            // the user answered in Nugget's own window (UIA's focus is global; AT-SPI clears it
+            // in inactive windows): the first key then goes to the confirmed control by id.
+            Ok((Some(focus), _)) if explicit.is_none() && focus != fz.element => {
                 "keyboard focus moved to another control".into()
             }
             Ok((_, None)) => "the control is no longer there".into(),

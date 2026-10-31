@@ -511,7 +511,10 @@ fn moves_focus_from_text(c: &KeyChord) -> bool {
         )
     ) || c.modifiers.alt
         || ((c.modifiers.ctrl || c.modifiers.meta)
-            && matches!(c.key, Key::Char('f' | 'F' | 'l' | 'L' | 'k' | 'K')))
+            && matches!(
+                c.key,
+                Key::Char('f' | 'F' | 'l' | 'L' | 'k' | 'K' | 't' | 'T' | 'w' | 'W' | '`')
+            ))
 }
 
 /// Does `chords` press or submit what it goes to: a Space without Ctrl, Alt or Meta, or an

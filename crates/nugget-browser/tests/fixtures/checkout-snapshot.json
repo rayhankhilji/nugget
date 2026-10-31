@@ -158,7 +158,22 @@
       "id": "n2",
       "action": "https://shop.example/page",
       "method": "get",
-      "digest": "01f96b30a3288e8310f0171b7827858aa8f8c1e08913c6f11396e42efeff7107"
+      "digest": "1421fb821ef0aafed71b69fcfd843e85dc13a8b82b90634aef71ecc26086519d"
+    }
+  ],
+  "scopes": [
+    {
+      "id": "n2",
+      "members": [
+        "n1",
+        "n3",
+        "n4",
+        "n5",
+        "n6",
+        "n7",
+        "n8"
+      ],
+      "digest": "3baa8eb09de27ed61c72ed6da5454a307ad3b81d39f08c4e17ea9358a961444a"
     }
   ]
 }

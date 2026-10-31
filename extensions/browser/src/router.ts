@@ -128,6 +128,7 @@ export class Router {
           snapshot_id: req.snapshot_id,
           action: req.action,
           ...(req.expect_form ? { expect_form: req.expect_form } : {}),
+          ...(req.expect_scope ? { expect_scope: req.expect_scope } : {}),
         })) as ActResult;
         await this.checkSnapshotOrigin(result.snapshot);
         this.latest.set(tab.id, result.snapshot);
