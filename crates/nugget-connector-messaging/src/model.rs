@@ -1,6 +1,6 @@
 //! The normalised chat model every reader produces, and small helpers shared by the readers.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 
 use time::OffsetDateTime;
 
@@ -92,6 +92,7 @@ impl Conversation {
     /// The participant index for `name` (and handle), adding it when new. Participants are
     /// matched by handle when both have one, else by name.
     pub fn participant(&mut self, name: &str, handle: Option<&str>, me: bool) -> usize {
+        let name = clean_name(name);
         let found = self.participants.iter().position(|p| {
             if me {
                 return p.me;
@@ -108,7 +109,7 @@ impl Conversation {
             return i;
         }
         let mut p = Participant {
-            name: clean_name(name),
+            name,
             handle: handle.map(str::to_owned),
             me,
             ..Default::default()
@@ -131,35 +132,52 @@ impl Conversation {
         self.participants.len() - 1
     }
 
-    /// Sort messages by time (stable, so same-instant messages keep their order), drop empty
-    /// ones and exact duplicates (same time, author and text), as when two exports overlap.
+    /// Sort messages by time (stable, so same-instant messages keep their order) and drop empty
+    /// ones. Identical messages within one export are kept: two photos (or two "ok"s) sent in
+    /// the same minute are distinct messages in a minute-resolution WhatsApp export.
     pub fn normalise(&mut self) {
         self.messages.retain(|m| !m.is_empty());
         self.messages.sort_by_key(|m| m.at);
-        let parts = &self.participants;
-        let mut seen: HashSet<(OffsetDateTime, Option<String>, String, bool)> = HashSet::new();
-        self.messages.retain(|m| {
-            let who = m.author.and_then(|i| parts.get(i)).map(|p| {
-                if p.me {
-                    "\u{0}me".to_owned()
-                } else {
-                    p.name.clone()
-                }
-            });
-            seen.insert((m.at, who, m.text.clone(), m.system))
-        });
     }
 
-    /// Merge `other` (the same conversation from another export) into `self`.
+    /// What makes two messages from overlapping exports "the same message".
+    fn dedupe_key(&self, m: &Message) -> MessageKey {
+        let who = m.author.and_then(|i| self.participants.get(i)).map(|p| {
+            if p.me {
+                "\u{0}me".to_owned()
+            } else {
+                p.name.clone()
+            }
+        });
+        let files = m
+            .attachments
+            .iter()
+            .map(|a| a.name.clone().unwrap_or_default())
+            .collect();
+        (m.at, who, m.text.clone(), m.system, m.deleted, files)
+    }
+
+    /// Merge `other` (the same conversation from another export) into `self`. Overlapping
+    /// exports are combined as multisets: a message that occurs `n` times in one export and
+    /// `k` times in the other ends up `max(n, k)` times, so the overlap is not duplicated and
+    /// repeated identical messages are not collapsed.
     pub fn merge(&mut self, other: Conversation) {
         let mut map = BTreeMap::new();
         for (i, p) in other.participants.iter().enumerate() {
             let j = self.participant(&p.name, p.handle.as_deref(), p.me);
             map.insert(i, j);
         }
+        let mut have: HashMap<MessageKey, usize> = HashMap::new();
+        for m in &self.messages {
+            *have.entry(self.dedupe_key(m)).or_default() += 1;
+        }
         for mut m in other.messages {
             m.author = m.author.and_then(|i| map.get(&i).copied());
-            self.messages.push(m);
+            let key = self.dedupe_key(&m);
+            match have.get_mut(&key) {
+                Some(n) if *n > 0 => *n -= 1,
+                _ => self.messages.push(m),
+            }
         }
         self.is_group |= other.is_group;
         if self.url.is_none() {
@@ -169,9 +187,24 @@ impl Conversation {
     }
 }
 
+type MessageKey = (
+    OffsetDateTime,
+    Option<String>,
+    String,
+    bool,
+    bool,
+    Vec<String>,
+);
+
 /// A display name on one line: control characters and line breaks become spaces, runs of
 /// whitespace collapse, and very long names are cut.
 pub fn clean_name(s: &str) -> String {
+    truncate_chars(&one_line(s), 200)
+}
+
+/// `s` on one line: control characters and line breaks become spaces, runs of whitespace
+/// collapse, invisible format characters are dropped. Unlike [`clean_name`], never cut.
+pub fn one_line(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut space = false;
     for c in s.chars() {
@@ -188,7 +221,7 @@ pub fn clean_name(s: &str) -> String {
         space = false;
         out.push(c);
     }
-    truncate_chars(&out, 200)
+    out
 }
 
 /// Bidi marks, zero-width no-break space (BOM) and similar format characters exports sprinkle
@@ -340,6 +373,36 @@ mod tests {
         a.merge(b);
         assert_eq!(a.messages.len(), 2);
         assert_eq!(a.participants.len(), 2);
+    }
+
+    /// Regression: identical messages in one export (two photos in the same minute) were
+    /// collapsed into one; overlapping exports must still not duplicate them.
+    #[test]
+    fn repeated_identical_messages_survive_normalise_and_merge() {
+        let at = datetime!(2024-05-01 9:00 UTC);
+        let export = || {
+            let mut c = Conversation::new("wa:x", "X");
+            let alice = c.participant("Alice", None, false);
+            for _ in 0..3 {
+                let mut m = Message::new(at, Some(alice), "");
+                m.attachments.push(Attachment::default());
+                c.messages.push(m);
+            }
+            c.messages.push(Message::new(at, Some(alice), "ok"));
+            c.messages.push(Message::new(at, Some(alice), "ok"));
+            c.normalise();
+            c
+        };
+        let mut a = export();
+        assert_eq!(a.messages.len(), 5);
+        a.merge(export());
+        assert_eq!(a.messages.len(), 5, "the overlap is not duplicated");
+        let mut longer = export();
+        longer
+            .messages
+            .push(Message::new(at, longer.messages[0].author, "ok"));
+        a.merge(longer);
+        assert_eq!(a.messages.len(), 6, "max of the two counts");
     }
 
     #[test]

@@ -59,29 +59,62 @@ fn ext_is(name: &str, ext: &str) -> bool {
         .is_some_and(|(_, e)| e.eq_ignore_ascii_case(ext))
 }
 
-fn list_dir(dir: &Path) -> std::io::Result<Vec<(PathBuf, String, bool)>> {
-    let mut out = Vec::new();
+/// What a folder listing found: entries `(path, name, is_dir)`, and whether some entry could
+/// not be inspected (so the listing may be missing exports).
+struct Listing {
+    entries: Vec<(PathBuf, String, bool)>,
+    incomplete: bool,
+}
+
+/// List `dir`: regular files and folders only (no FIFOs, devices or sockets, which could block
+/// a read forever), and symlinks only when they resolve inside `root` (the watched folder).
+fn list_dir(dir: &Path, root: &Path) -> std::io::Result<Listing> {
+    let mut out = Listing {
+        entries: Vec::new(),
+        incomplete: false,
+    };
     for e in std::fs::read_dir(dir)? {
-        let Ok(e) = e else { continue };
+        let Ok(e) = e else {
+            out.incomplete = true;
+            continue;
+        };
         let name = e.file_name().to_string_lossy().into_owned();
         if is_hidden(&name) {
             continue;
         }
-        let Ok(ft) = e.file_type() else { continue };
-        let is_dir = if ft.is_symlink() {
-            std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir())
-        } else {
-            ft.is_dir()
+        let Ok(ft) = e.file_type() else {
+            out.incomplete = true;
+            continue;
         };
-        out.push((e.path(), name, is_dir));
+        let path = e.path();
+        let (is_dir, is_file) = if ft.is_symlink() {
+            match std::fs::canonicalize(&path) {
+                Ok(target) if target.starts_with(root) => match std::fs::metadata(&target) {
+                    Ok(m) => (m.is_dir(), m.is_file()),
+                    Err(_) => continue,
+                },
+                Ok(_) => {
+                    tracing::debug!(link = %path.display(), "symlink leaves the export folder; skipped");
+                    continue;
+                }
+                // Dangling link.
+                Err(_) => continue,
+            }
+        } else {
+            (ft.is_dir(), ft.is_file())
+        };
+        if is_dir || is_file {
+            out.entries.push((path, name, is_dir));
+        }
     }
-    out.sort();
+    out.entries.sort();
     Ok(out)
 }
 
-/// `.zip` / `.txt` files in `folder` and its direct subfolders, sorted by path.
-fn find_exports(folder: &Path) -> Result<Vec<ExportFile>> {
-    let top = list_dir(folder).map_err(|e| {
+/// `.zip` / `.txt` files in `folder` and its direct subfolders, sorted by path, and whether
+/// the listing is incomplete (some subfolder or entry could not be read).
+fn find_exports(folder: &Path) -> Result<(Vec<ExportFile>, bool)> {
+    let not_found = |e: std::io::Error| {
         if e.kind() == std::io::ErrorKind::NotFound {
             Error::NotFound(format!(
                 "WhatsApp export folder {} does not exist",
@@ -90,7 +123,10 @@ fn find_exports(folder: &Path) -> Result<Vec<ExportFile>> {
         } else {
             Error::Io(e)
         }
-    })?;
+    };
+    let root = std::fs::canonicalize(folder).map_err(not_found)?;
+    let top = list_dir(folder, &root).map_err(not_found)?;
+    let mut incomplete = top.incomplete;
     let mut out = Vec::new();
     let mut take = |path: PathBuf, name: &str, parent: Option<&str>| {
         if !(ext_is(name, "zip") || ext_is(name, "txt")) {
@@ -107,23 +143,27 @@ fn find_exports(folder: &Path) -> Result<Vec<ExportFile>> {
             name: chat_name(chat),
         });
     };
-    for (path, name, is_dir) in top {
+    for (path, name, is_dir) in top.entries {
         if is_dir {
-            match list_dir(&path) {
+            match list_dir(&path, &root) {
                 Ok(children) => {
-                    for (p, n, d) in children {
+                    incomplete |= children.incomplete;
+                    for (p, n, d) in children.entries {
                         if !d {
                             take(p, &n, Some(&name));
                         }
                     }
                 }
-                Err(e) => tracing::warn!(dir = %path.display(), error = %e, "cannot list folder"),
+                Err(e) => {
+                    tracing::warn!(dir = %path.display(), error = %e, "cannot list folder; keeping what was imported");
+                    incomplete = true;
+                }
             }
         } else {
             take(path, &name, None);
         }
     }
-    Ok(out)
+    Ok((out, incomplete))
 }
 
 /// The chat name from an export's file name (`WhatsApp Chat with Alice (1)` → `Alice`).
@@ -684,15 +724,23 @@ const GROUP_HINTS: &[&str] = &[
     "criou o grupo",
 ];
 
+/// Whether `name` (the text before the first `: `) can be an author. A system line that quotes
+/// a group subject containing `: ` (`Alice changed the subject to "a: b"`) splits inside the
+/// quotes, leaving an unbalanced quote; a contact name with balanced quotes (`Mike "Ace" Li`)
+/// is a real author.
 fn valid_author(name: &str) -> bool {
     let n = name.trim();
-    !n.is_empty() && n.chars().count() <= 80 && !n.contains(['"', '“', '”', '\u{201E}'])
+    let straight = n.matches('"').count().is_multiple_of(2);
+    let curly = n.matches('“').count() == n.matches('”').count();
+    !n.is_empty() && n.chars().count() <= 80 && straight && curly && !n.contains('\u{201E}')
 }
 
 struct Entry<'a> {
     stamp: Stamp,
     rest: &'a str,
     ios: bool,
+    /// The whole header line, kept for when its timestamp turns out not to be a date.
+    line: &'a str,
     more: Vec<&'a str>,
 }
 
@@ -704,14 +752,33 @@ pub fn parse_chat(
     me: Option<&str>,
     media_sizes: &HashMap<String, u64>,
 ) -> Option<Conversation> {
+    let lines: Vec<(&str, Option<Header<'_>>)> = text
+        .split('\n')
+        .map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            (line, parse_header(line))
+        })
+        .collect();
+    // One export is written by one phone, so all its headers share one style (`[...] ` on iOS,
+    // `... - ` on Android). A line of the other style is message text that merely looks like a
+    // header (a pasted message), not a new message.
+    let ios = lines
+        .iter()
+        .filter(|(_, h)| h.as_ref().is_some_and(|h| h.ios))
+        .count();
+    let android = lines
+        .iter()
+        .filter(|(_, h)| h.as_ref().is_some_and(|h| !h.ios))
+        .count();
+    let ios_file = ios >= android;
     let mut entries: Vec<Entry<'_>> = Vec::new();
-    for line in text.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        match parse_header(line) {
+    for (line, header) in lines {
+        match header.filter(|h| h.ios == ios_file) {
             Some(h) => entries.push(Entry {
                 stamp: h.stamp,
                 rest: h.rest,
                 ios: h.ios,
+                line,
                 more: Vec::new(),
             }),
             None => {
@@ -737,11 +804,12 @@ pub fn parse_chat(
             if let Some(i) = last {
                 let m = &mut conv.messages[i];
                 m.text.push('\n');
-                m.text.push_str(&strip_invisible(e.rest));
+                m.text.push_str(&strip_invisible(e.line));
                 for l in e.more {
                     m.text.push('\n');
-                    m.text.push_str(l);
+                    m.text.push_str(&strip_invisible(l));
                 }
+                m.text.truncate(m.text.trim_end().len());
             }
             continue;
         };
@@ -832,7 +900,11 @@ impl Reader for WhatsAppReader {
     }
 
     fn read(&self, cancel: &CancellationToken, found: &mut dyn FnMut(Found) -> bool) -> Result<()> {
-        let files = find_exports(&self.folder)?;
+        let (files, incomplete) = find_exports(&self.folder)?;
+        // Exports in an unreadable subfolder are unknown: do not delete anything this pass.
+        if incomplete && !found(Found::Keep(String::new())) {
+            return Ok(());
+        }
         let mut convs: BTreeMap<String, Conversation> = BTreeMap::new();
         for f in files {
             if cancel.is_cancelled() {
@@ -1022,6 +1094,105 @@ mod tests {
         assert_eq!(c.messages.len(), 2);
         assert_eq!(c.messages[0].text, "a\nb");
         assert_eq!(c.messages[1].text, "c");
+    }
+
+    /// Regression: in an iOS export, a message line pasted from an Android export (or vice
+    /// versa) started a new message with the wrong author.
+    #[test]
+    fn other_style_header_lines_are_message_text() {
+        let text = "[31/12/2023, 21:15:42] Alice: forwarding this\n\
+31/12/2023, 20:00 - Bob: original\n\
+[31/12/2023, 21:16:00] Zo: ok\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        assert_eq!(c.messages.len(), 2);
+        assert_eq!(
+            c.messages[0].text,
+            "forwarding this\n31/12/2023, 20:00 - Bob: original"
+        );
+        assert_eq!(c.participants.len(), 2);
+    }
+
+    /// Regression: a continuation line that parsed as a header with an impossible date lost
+    /// its timestamp part when folded back into the previous message.
+    #[test]
+    fn impossible_date_lines_keep_their_full_text() {
+        let text = "31/12/2023, 21:15 - Alice: plan\n30/02/2024, 10:00 - pay rent\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        assert_eq!(c.messages.len(), 1);
+        assert_eq!(c.messages[0].text, "plan\n30/02/2024, 10:00 - pay rent");
+    }
+
+    /// Regression: a FIFO named `*.txt` blocked the reader forever, and a symlink could pull
+    /// files from outside the watched folder into the index.
+    #[cfg(unix)]
+    #[test]
+    fn listing_skips_special_files_and_escaping_symlinks() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("WhatsApp Chat with Eve.txt");
+        std::fs::write(&secret, "31/12/2023, 21:15 - Eve: secret\n").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let inside = root.path().join("WhatsApp Chat with Ann.txt");
+        std::fs::write(&inside, "31/12/2023, 21:15 - Ann: hi\n").unwrap();
+        std::os::unix::fs::symlink(&secret, root.path().join("WhatsApp Chat with Eve.txt"))
+            .unwrap();
+        std::os::unix::fs::symlink(&inside, root.path().join("WhatsApp Chat with Ann2.txt"))
+            .unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+        let fifo = root.path().join("WhatsApp Chat with Pipe.txt");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .is_ok_and(|s| s.success());
+        let (files, incomplete) = find_exports(root.path()).unwrap();
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["Ann", "Ann2"]);
+        assert!(!incomplete);
+        if made {
+            assert!(fifo.exists());
+        }
+    }
+
+    /// Regression: an unreadable subfolder was skipped silently, so the exports in it looked
+    /// removed and their documents were deleted.
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_subfolder_marks_the_listing_incomplete() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let sub = root.path().join("old");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("WhatsApp Chat with Ann.txt"), "x").unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable_anyway = std::fs::read_dir(&sub).is_ok(); // running as root
+        let (_, incomplete) = find_exports(root.path()).unwrap();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !readable_anyway {
+            assert!(incomplete);
+        }
+    }
+
+    /// Regression: a contact name with quotes turned every message of that person into a
+    /// one-line system line; subject changes quoting `: ` must stay system lines.
+    #[test]
+    fn quoted_names_are_authors_quoted_subjects_are_not() {
+        let text = "31/12/2023, 21:15 - Mike \"Ace\" Li: line one\nline two\n\
+31/12/2023, 21:16 - Alice changed the subject to \"plans: 2024\"\n\
+31/12/2023, 21:17 - Bob changed the subject from “a” to “b: c”\n\
+31/12/2023, 21:18 - Mike \"Ace\" Li: <Media omitted>\n\
+31/12/2023, 21:18 - Mike \"Ace\" Li: <Media omitted>\n";
+        let c = parse_chat(text, "wa:x", "X", None, &HashMap::new()).unwrap();
+        assert_eq!(c.messages.len(), 5);
+        assert!(!c.messages[0].system);
+        assert_eq!(
+            c.participants[c.messages[0].author.unwrap()].name,
+            "Mike \"Ace\" Li"
+        );
+        assert_eq!(c.messages[0].text, "line one\nline two");
+        assert!(c.messages[1].system);
+        assert!(c.messages[2].system);
+        // Two photos in the same minute are two messages (regression: deduplicated to one).
+        assert_eq!(c.messages[3].attachments.len(), 1);
+        assert_eq!(c.messages[4].attachments.len(), 1);
     }
 
     #[test]

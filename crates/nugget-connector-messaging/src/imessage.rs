@@ -542,6 +542,37 @@ pub fn read_conversations(
     Ok(out)
 }
 
+/// A per-pass temp dir older than this was left behind by a crashed process.
+const STALE_COPY_AGE: Duration = Duration::from_secs(6 * 3600);
+
+/// Remove `imessage-*` temp dirs a killed process left in `scratch`: each holds a full copy of
+/// the user's Messages database. Recent ones may belong to a pass still running (another
+/// iMessage source shares the scratch dir), so only old ones go.
+pub fn remove_stale_copies(scratch: &Path) {
+    let Ok(rd) = std::fs::read_dir(scratch) else {
+        return;
+    };
+    for e in rd.flatten() {
+        if !e.file_name().to_string_lossy().starts_with("imessage-") {
+            continue;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(e.path()) else {
+            continue;
+        };
+        let old = meta
+            .modified()
+            .ok()
+            .and_then(|m| m.elapsed().ok())
+            .is_some_and(|age| age > STALE_COPY_AGE);
+        if meta.is_dir()
+            && old
+            && let Err(err) = std::fs::remove_dir_all(e.path())
+        {
+            tracing::warn!(dir = %e.path().display(), error = %err, "cannot remove a stale Messages copy");
+        }
+    }
+}
+
 pub(crate) struct IMessageReader {
     pub db: PathBuf,
     pub contacts_dir: Option<PathBuf>,
@@ -561,6 +592,7 @@ impl Reader for IMessageReader {
     fn read(&self, cancel: &CancellationToken, found: &mut dyn FnMut(Found) -> bool) -> Result<()> {
         crate::settings::check_db_readable(&self.db)?;
         std::fs::create_dir_all(&self.scratch)?;
+        remove_stale_copies(&self.scratch);
         // Removed (with the copies) when dropped, also on errors.
         let tmp = tempfile::Builder::new()
             .prefix("imessage-")
@@ -606,6 +638,30 @@ mod tests {
         let t = apple_time(ns).unwrap();
         assert_eq!(t.unix_timestamp(), APPLE_EPOCH + secs);
         assert_eq!(t.nanosecond(), 5);
+    }
+
+    /// Regression: a pass killed mid-read left a full copy of chat.db in the cache forever.
+    #[test]
+    fn stale_copies_are_removed_recent_ones_kept() {
+        let scratch = tempfile::tempdir().unwrap();
+        let old = scratch.path().join("imessage-old");
+        let fresh = scratch.path().join("imessage-fresh");
+        let other = scratch.path().join("unrelated");
+        for d in [&old, &fresh, &other] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join("chat.db"), b"x").unwrap();
+        }
+        let day_ago = std::time::SystemTime::now() - Duration::from_secs(24 * 3600);
+        for d in [&old, &other] {
+            std::fs::File::open(d)
+                .unwrap()
+                .set_modified(day_ago)
+                .unwrap();
+        }
+        remove_stale_copies(scratch.path());
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        assert!(other.exists());
     }
 
     #[test]

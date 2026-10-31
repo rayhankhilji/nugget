@@ -5,7 +5,7 @@
 //! Media files are never read; their names, types and sizes become attachment metadata.
 
 use std::collections::BTreeMap;
-use std::io::BufReader;
+use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -28,6 +28,7 @@ pub struct Export {
     #[serde(rename = "type")]
     pub kind: Option<String>,
     pub id: Option<Value>,
+    #[serde(deserialize_with = "lenient_messages")]
     pub messages: Vec<TgMessage>,
     pub personal_information: Option<PersonalInfo>,
     pub chats: Option<ChatList>,
@@ -55,7 +56,33 @@ pub struct TgChat {
     #[serde(rename = "type")]
     pub kind: Option<String>,
     pub id: Option<Value>,
+    #[serde(deserialize_with = "lenient_messages")]
     pub messages: Vec<TgMessage>,
+}
+
+/// `result.json` files larger than this are not read (the whole file is parsed in memory).
+pub const MAX_RESULT_JSON_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// A message list where one message of an unexpected shape (a field of another type in a newer
+/// export version) is skipped instead of failing the whole export. The skipped message's
+/// content never reaches an error message or the log.
+fn lenient_messages<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Vec<TgMessage>, D::Error> {
+    let raw: Option<Vec<Value>> = Deserialize::deserialize(d)?;
+    let raw = raw.unwrap_or_default();
+    let total = raw.len();
+    let out: Vec<TgMessage> = raw
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect();
+    if out.len() < total {
+        tracing::warn!(
+            skipped = total - out.len(),
+            "Telegram messages of an unknown shape skipped"
+        );
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -330,8 +357,25 @@ fn find_results(path: &Path) -> Result<Vec<PathBuf>> {
 
 pub fn parse_export(path: &Path) -> Result<Export> {
     let f = std::fs::File::open(path)?;
-    serde_json::from_reader(BufReader::new(f))
-        .map_err(|e| Error::Invalid(format!("cannot read {}: {e}", path.display())))
+    let len = f.metadata()?.len();
+    if len > MAX_RESULT_JSON_BYTES {
+        return Err(Error::Invalid(format!(
+            "{} is too large ({len} bytes)",
+            path.display()
+        )));
+    }
+    // `take` bounds a file that grows while it is read.
+    serde_json::from_reader(BufReader::new(f.take(MAX_RESULT_JSON_BYTES)))
+        // Only the position: serde's message can quote values from the file (message text).
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "cannot read {}: invalid JSON ({:?}) at line {} column {}",
+                path.display(),
+                e.classify(),
+                e.line(),
+                e.column()
+            ))
+        })
 }
 
 /// Every chat of one export.
@@ -458,6 +502,35 @@ mod tests {
             message_time(&m).unwrap(),
             time::macros::datetime!(2024-05-01 12:00 UTC)
         );
+    }
+
+    /// Regression: one message of an unexpected shape failed the whole export (so it was
+    /// never imported), and the error quoted values from the file into the log.
+    #[test]
+    fn odd_messages_are_skipped_and_errors_do_not_quote_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("result.json");
+        std::fs::write(
+            &p,
+            json!({
+                "name": "Alice", "type": "personal_chat", "id": 42,
+                "messages": [
+                    {"id": 1, "type": "message", "date_unixtime": "1714557600", "from": "Alice", "from_id": "user42", "text": "kept"},
+                    {"id": 2, "type": "message", "date_unixtime": "1714557660", "from": {"secret": "SECRET TEXT"}, "text": "odd"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let convs = conversations(parse_export(&p).unwrap(), None);
+        assert_eq!(convs.len(), 1);
+        assert_eq!(convs[0].messages.len(), 1);
+        assert_eq!(convs[0].messages[0].text, "kept");
+
+        std::fs::write(&p, r#"{"name": "x", "chats": "SECRET TEXT"}"#).unwrap();
+        let err = parse_export(&p).unwrap_err().to_string();
+        assert!(!err.contains("SECRET"), "{err}");
+        assert!(err.contains("line 1"), "{err}");
     }
 
     #[test]

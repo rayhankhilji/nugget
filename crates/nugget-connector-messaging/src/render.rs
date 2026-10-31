@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::model::{Attachment, Conversation, Message, Participant, clean_name};
+use crate::model::{Attachment, Conversation, Message, Participant, clean_name, one_line};
 
 /// A single message's text is cut beyond this many bytes (with a note).
 pub const MAX_MESSAGE_BYTES: usize = 64 * 1024;
@@ -62,7 +62,13 @@ pub fn yaml_quote(s: &str) -> String {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if c.is_control() || matches!(c, '\u{2028}' | '\u{2029}' | '\u{85}' | '\u{FEFF}') => {
+            // Controls, Unicode line separators and the non-characters YAML refuses to read.
+            c if c.is_control()
+                || matches!(
+                    c,
+                    '\u{2028}' | '\u{2029}' | '\u{85}' | '\u{FEFF}' | '\u{FFFE}' | '\u{FFFF}'
+                ) =>
+            {
                 let _ = write!(out, "\\u{:04X}", c as u32);
             }
             c => out.push(c),
@@ -74,9 +80,10 @@ pub fn yaml_quote(s: &str) -> String {
 
 /// Inline Markdown text on one line, with emphasis/link/HTML characters escaped.
 pub fn md_inline(s: &str) -> String {
-    let one_line = clean_name(&s.replace(['\n', '\r'], " "));
-    let mut out = String::with_capacity(one_line.len());
-    for c in one_line.chars() {
+    // Not cut: system lines can be long; names are already cut by `clean_name`.
+    let line = one_line(s);
+    let mut out = String::with_capacity(line.len());
+    for c in line.chars() {
         if matches!(
             c,
             '\\' | '*' | '_' | '`' | '[' | ']' | '<' | '>' | '#' | '|' | '~'
@@ -516,5 +523,28 @@ participants: [\"Alice Smith\"]\nperiod: 2024-05\n---\n# Family — May 2024\n\n
             yaml_quote("a\"b\\c\u{1}\u{2028}"),
             "\"a\\\"b\\\\c\\u0001\\u2028\""
         );
+    }
+
+    /// Regression: U+FFFE / U+FFFF are not allowed in YAML, so an untrusted name holding one
+    /// made the whole frontmatter unreadable.
+    #[test]
+    fn yaml_quoting_escapes_non_characters() {
+        assert_eq!(yaml_quote("a\u{FFFE}b\u{FFFF}"), "\"a\\uFFFEb\\uFFFF\"");
+    }
+
+    /// Regression: system lines were cut to 200 characters by the name cleaner.
+    #[test]
+    fn long_system_lines_are_not_cut() {
+        let mut c = Conversation::new("tg:1", "X");
+        let long = format!("Alice changed the group description: {}", "d".repeat(500));
+        c.messages.push(Message::system(
+            datetime!(2024-01-01 0:00 UTC),
+            long.clone(),
+        ));
+        let docs = conversation_docs(&c, OPTS);
+        let Content::Text(t) = &docs[0].content else {
+            panic!()
+        };
+        assert!(t.contains(&long), "{t}");
     }
 }
