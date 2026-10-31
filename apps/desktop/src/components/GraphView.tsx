@@ -35,14 +35,16 @@ export function GraphPanel({
   const [source, setSource] = useState<string | null>(null);
   const sourceId = useId();
   const [kinds, setKinds] = useState<EntityKind[]>([]);
+  // Entities and facts known only from sensitive items stay out unless asked for.
+  const [includeSensitive, setIncludeSensitive] = useState(false);
   const [mode, setMode] = useState<"canvas" | "list">("canvas");
   const [focused, setFocused] = useState<string | null>(null);
   const depthId = useId();
   const kindsKey = kinds.join(",");
 
   const loaded = useAsync<GraphData>(
-    () => api.knowledgeGraph({ center, depth, limit: REQUEST_LIMIT, kinds, source }),
-    [center, depth, kindsKey, source],
+    () => api.knowledgeGraph({ center, depth, limit: REQUEST_LIMIT, kinds, source, include_sensitive: includeSensitive }),
+    [center, depth, kindsKey, source, includeSensitive],
   );
   const graph = useMemo<PreparedGraph | null>(
     () => (loaded.data ? prepareGraph(loaded.data, { center, maxNodes: MAX_RENDER_NODES }) : null),
@@ -101,6 +103,10 @@ export function GraphPanel({
             </select>
           </label>
         )}
+        <label className="field-inline">
+          <input type="checkbox" checked={includeSensitive} onChange={(e) => setIncludeSensitive(e.target.checked)} />
+          {t("graph.showSensitive")}
+        </label>
         <div className="segmented" role="group" aria-label={t("graph.displayLabel")}>
           <button type="button" aria-pressed={mode === "canvas"} onClick={() => setMode("canvas")}>
             {t("graph.modeGraph")}

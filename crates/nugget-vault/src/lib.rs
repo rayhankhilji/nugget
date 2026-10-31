@@ -50,6 +50,18 @@
 //! Links name the target page by its path stem, which ends in the entity's stable short id; they
 //! are regenerated on every render, and links in user text are rewritten when a page moves.
 //!
+//! # Sensitive items
+//! The vault is plain text the user may sync, so it never carries what Nugget keeps from
+//! default-scope MCP clients. With sensitivity from [`ItemLookup`] (for the store:
+//! `nugget_retrieve::is_sensitive`, and a missing item counts as sensitive):
+//! - a fact whose evidence all comes from sensitive items is not rendered (no line, no footnote);
+//!   a fact the user wrote (no evidence) always is;
+//! - a footnote never cites or quotes a sensitive item, even for a fact that also has other
+//!   evidence (only that other evidence is cited);
+//! - an entity with at least one active fact or mention, all of them from sensitive items, gets
+//!   no page and no index entry; a page rendered before becomes a "no longer in your knowledge
+//!   graph" stub (keeping the user's notes), and other pages name it without a link.
+//!
 //! # Merging
 //! See [`merge`](crate::merge) for the three-way merge and [`edits`](crate::edits) for how edits
 //! to fact lines become graph changes. A page is never written from stale input: the user's file
@@ -392,10 +404,16 @@ impl Vault {
         Ok(self.run(&mut st, Some(ids))?.edits)
     }
 
-    /// Absolute path of the page for `id` (following merges), if it has been rendered.
+    /// Absolute path of the page for `id` (following merges), if it has been rendered. A live
+    /// entity whose page is a stub (it is sensitive-only, see the crate docs) has none.
     pub fn page_path(&self, id: &EntityId) -> Result<Option<PathBuf>> {
         let st = self.lock();
         let live = self.graph.get_entity(id)?.map(|e| e.id);
+        if let Some(p) = live.as_ref().and_then(|l| st.pages.get(l))
+            && p.stub.is_some()
+        {
+            return Ok(None);
+        }
         let page = live
             .as_ref()
             .and_then(|l| st.pages.get(l))
@@ -593,6 +611,25 @@ impl Vault {
                         tombs.push((id, None));
                     }
                 }
+            }
+        }
+        // Sensitive-only entities get no page: one rendered before becomes a "no longer in your
+        // knowledge graph" stub (keeping the user's notes, none of the generated text), and a
+        // page merged into one is treated the same way instead of pointing at it.
+        let mut shown = Vec::with_capacity(live.len());
+        for e in live {
+            if !ctx.entity_sensitive(&e.id)? {
+                shown.push(e);
+            } else if st.pages.contains_key(&e.id) && tomb_seen.insert(e.id.clone()) {
+                tombs.push((e.id, None));
+            }
+        }
+        let live = shown;
+        for (_, target) in &mut tombs {
+            if let Some(t) = target
+                && ctx.entity_sensitive(&t.id)?
+            {
+                *target = None;
             }
         }
 

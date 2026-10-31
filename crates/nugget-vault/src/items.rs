@@ -1,4 +1,4 @@
-//! Source lookups for citation footnotes.
+//! Source lookups for citation footnotes and sensitivity.
 
 use nugget_core::Result;
 use nugget_core::ids::ItemRef;
@@ -9,12 +9,24 @@ pub struct SourceInfo {
     pub title: Option<String>,
     /// The item's own url (`metadata.url`), if it has one.
     pub url: Option<String>,
+    /// The item is sensitive (`nugget_retrieve::is_sensitive` for store items). The vault never
+    /// quotes or cites a sensitive item, and leaves out facts and entities supported only by
+    /// sensitive items (see the crate docs).
+    pub sensitive: bool,
 }
 
-/// Resolves evidence items to titles and urls. Implemented for `nugget_store::Store` (feature
-/// `store`, on by default); tests and tools can use [`NoItems`] or their own map.
+/// Resolves evidence items to titles, urls and sensitivity. Implemented for
+/// `nugget_store::Store` (feature `store`, on by default); tests and tools can use [`NoItems`]
+/// or their own map.
 pub trait ItemLookup: Send + Sync {
     fn source_info(&self, item: &ItemRef) -> Result<Option<SourceInfo>>;
+
+    /// Whether an item this lookup does not know (`source_info` is `None`) counts as sensitive.
+    /// `false` by default (a lookup that knows no items); the store says `true`, since an item
+    /// missing from the store cannot be shown to be safe.
+    fn missing_is_sensitive(&self) -> bool {
+        false
+    }
 }
 
 /// A lookup that knows no items: citations fall back to the item key and a `nugget://` link.
@@ -40,6 +52,7 @@ where
 impl ItemLookup for nugget_store::Store {
     fn source_info(&self, item: &ItemRef) -> Result<Option<SourceInfo>> {
         Ok(self.get_item(item)?.map(|it| SourceInfo {
+            sensitive: nugget_retrieve::is_sensitive(&it.metadata),
             title: it.title,
             url: it
                 .metadata
@@ -47,5 +60,9 @@ impl ItemLookup for nugget_store::Store {
                 .and_then(|u| u.as_str())
                 .map(str::to_owned),
         }))
+    }
+
+    fn missing_is_sensitive(&self) -> bool {
+        true
     }
 }

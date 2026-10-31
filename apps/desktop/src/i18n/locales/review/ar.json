@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2 and BB1; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1 and GG5; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.caldav",
     "addSource.addTitle.files",
@@ -1798,6 +1798,10 @@
     "updates.unconfigured",
     "updates.upToDate",
     "updates.whatsNew",
-    "updates.working"
+    "updates.working",
+    "entity.sensitive",
+    "entity.sensitiveEntityTitle",
+    "entity.sensitiveFactTitle",
+    "graph.showSensitive"
   ]
 }

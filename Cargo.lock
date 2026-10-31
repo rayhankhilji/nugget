@@ -4501,6 +4501,7 @@ dependencies = [
  "notify-debouncer-full",
  "nugget-core",
  "nugget-graph",
+ "nugget-retrieve",
  "nugget-store",
  "serde",
  "serde_json",

@@ -86,7 +86,11 @@ treated as sensitive. Sensitive items:
 - are never sent to a cloud model for triage, embedding or knowledge extraction, nor for Double Tap
   drafts or the Today judge;
 - are left out of the context when Ask uses a cloud model (the answer says how many were withheld);
-- are hidden from MCP clients unless a client is explicitly allowed to see them.
+- are hidden from MCP clients unless a client is explicitly allowed to see them;
+- never reach the [Markdown vault](knowledge.md#sensitive-items-and-the-vault): a fact known only
+  from sensitive items is not written there, a citation never quotes a sensitive item, and an entity
+  known only from sensitive items gets no page. The graph view leaves such entities out unless you
+  turn on **Show sensitive**, and the entity view marks them, and their facts, **Sensitive**.
 
 ## What leaves for each feature
 

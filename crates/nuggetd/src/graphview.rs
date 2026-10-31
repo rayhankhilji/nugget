@@ -1,7 +1,7 @@
 //! Graph types → IPC views and MCP records, with evidence titles, urls and sensitivity read from
 //! the store. Everything here is synchronous (run it on the blocking pool).
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use nugget_core::ids::{EntityId, ItemRef, SourceId};
 use nugget_core::ipc::{
@@ -146,6 +146,63 @@ impl<'a> Lookups<'a> {
     }
 }
 
+/// Whether an evidence or mention item is sensitive. [`Lookups`] answers from the store
+/// (`nugget_retrieve::is_sensitive`; a missing item counts as sensitive).
+pub(crate) trait ItemSensitivity {
+    fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool>;
+}
+
+impl ItemSensitivity for Lookups<'_> {
+    fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool> {
+        Ok(self.item(item)?.sensitive)
+    }
+}
+
+/// How the graph views treat sensitive-only entities and claims: left out, unless `include`
+/// (then nodes are marked).
+pub(crate) struct Sensitivity<'a> {
+    pub items: &'a mut dyn ItemSensitivity,
+    pub include: bool,
+}
+
+/// Sensitive-only claim: it has evidence and every piece of it is from a sensitive item. A claim
+/// without evidence (the user's own) is not.
+pub(crate) fn claim_sensitive(sens: &mut dyn ItemSensitivity, c: &Claim) -> Result<bool> {
+    if c.evidence.is_empty() {
+        return Ok(false);
+    }
+    for ev in &c.evidence {
+        if !sens.item_sensitive(&ev.item)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Sensitive-only entity: at least one active claim (as subject or object) or mention, every
+/// such claim sensitive-only and every mention from a sensitive item. The vault gives such an
+/// entity no page and default-scope MCP clients cannot see it (same rule as
+/// [`Lookups::entity_origins`]).
+pub(crate) fn entity_sensitive(
+    graph: &dyn GraphStore,
+    sens: &mut dyn ItemSensitivity,
+    id: &EntityId,
+) -> Result<bool> {
+    let claims = graph.claims_for(id, false)?;
+    for c in &claims {
+        if !claim_sensitive(sens, c)? {
+            return Ok(false);
+        }
+    }
+    let mentions = graph.mentions_for(id, ORIGIN_MENTIONS)?;
+    for m in &mentions {
+        if !sens.item_sensitive(&m.item)? {
+            return Ok(false);
+        }
+    }
+    Ok(!claims.is_empty() || !mentions.is_empty())
+}
+
 /// The item's `url` metadata, if it is a sane single-line string.
 pub(crate) fn item_url(metadata: &Value) -> Option<String> {
     let url = metadata.get("url")?.as_str()?.trim();
@@ -185,8 +242,10 @@ pub(crate) fn summary_view(s: EntitySummary) -> EntitySummaryView {
 
 pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
     let mut evidence = Vec::with_capacity(c.evidence.len());
+    let mut sensitive = !c.evidence.is_empty();
     for ev in &c.evidence {
         let info = lk.item(&ev.item)?;
+        sensitive &= info.sensitive;
         evidence.push(EvidenceView {
             item: ev.item.clone(),
             chunk_id: ev.chunk_id,
@@ -206,6 +265,7 @@ pub(crate) fn claim_view(lk: &mut Lookups<'_>, c: &Claim) -> Result<ClaimView> {
         status: status_str(c.status),
         evidence,
         updated_at: Some(c.updated_at),
+        sensitive,
     })
 }
 
@@ -255,13 +315,20 @@ pub(crate) fn scan_entities(
 }
 
 /// Graph overview: the `limit` most connected entities (by facts, then mentions) of `kinds`,
-/// with the active entity-to-entity claims between them.
+/// with the active entity-to-entity claims between them. Without `include_sensitive`,
+/// sensitive-only entities and claims (see [`entity_sensitive`]) are left out; with it, nodes
+/// are marked.
 pub(crate) fn overview(
     graph: &dyn GraphStore,
     kinds: &[EntityKind],
     limit: usize,
     source: Option<&SourceId>,
+    sensitivity: Sensitivity<'_>,
 ) -> Result<GraphViewIpc> {
+    let Sensitivity {
+        items: sens,
+        include: include_sensitive,
+    } = sensitivity;
     let (mut all, scan_cut) = scan_entities(graph, None, kinds)?;
     all.sort_by(|a, b| {
         b.claims
@@ -269,27 +336,30 @@ pub(crate) fn overview(
             .then(b.mentions.cmp(&a.mentions))
             .then(a.name.cmp(&b.name))
     });
-    let truncated = match source {
-        None => {
-            let cut = all.len() > limit;
-            all.truncate(limit);
-            scan_cut || cut
+    if let Some(src) = source {
+        // One query for the supported set.
+        let supported: HashSet<EntityId> = graph.entities_supported_by(src)?.into_iter().collect();
+        all.retain(|e| supported.contains(&e.id));
+    }
+    // Most connected first, so stop once `limit` shown entities are found.
+    let mut kept = Vec::with_capacity(limit.min(all.len()));
+    let mut cut = false;
+    for e in all {
+        if kept.len() >= limit {
+            cut = true;
+            break;
         }
-        // One query for the supported set; most connected first, so stop once `limit`
-        // supported entities are found.
-        Some(src) => {
-            let supported: HashSet<EntityId> =
-                graph.entities_supported_by(src)?.into_iter().collect();
-            all.retain(|e| supported.contains(&e.id));
-            let cut = all.len() > limit;
-            all.truncate(limit);
-            scan_cut || cut
+        let sensitive = entity_sensitive(graph, sens, &e.id)?;
+        if sensitive && !include_sensitive {
+            continue;
         }
-    };
-    let ids: HashSet<EntityId> = all.iter().map(|e| e.id.clone()).collect();
+        kept.push((e, sensitive));
+    }
+    let truncated = scan_cut || cut;
+    let ids: HashSet<EntityId> = kept.iter().map(|(e, _)| e.id.clone()).collect();
     let mut seen = HashSet::new();
     let mut edges = Vec::new();
-    for e in &all {
+    for (e, _) in &kept {
         for c in graph.claims_for(&e.id, false)? {
             let ClaimObject::Entity(to) = &c.object else {
                 continue;
@@ -297,7 +367,13 @@ pub(crate) fn overview(
             if source.is_some_and(|s| !claim_from(&c, s)) {
                 continue;
             }
-            if ids.contains(&c.subject) && ids.contains(to) && seen.insert(c.id) {
+            if !(ids.contains(&c.subject) && ids.contains(to)) || seen.contains(&c.id) {
+                continue;
+            }
+            if !include_sensitive && claim_sensitive(sens, &c)? {
+                continue;
+            }
+            if seen.insert(c.id) {
                 edges.push(GraphEdgeView {
                     claim: c.id,
                     from: c.subject.clone(),
@@ -309,13 +385,14 @@ pub(crate) fn overview(
     }
     edges.sort_by_key(|e| e.claim);
     Ok(GraphViewIpc {
-        nodes: all
+        nodes: kept
             .into_iter()
-            .map(|e| GraphNodeView {
+            .map(|(e, sensitive)| GraphNodeView {
                 id: e.id,
                 kind: e.kind.as_str().to_owned(),
                 name: e.name,
                 depth: 0,
+                sensitive,
             })
             .collect(),
         edges,
@@ -350,7 +427,9 @@ pub(crate) fn supported_by(
 
 /// Neighbourhood of `center`, keeping only nodes of `kinds` (and, with `source`, nodes supported
 /// by that source; the centre always stays) and the edges between kept nodes (with `source`,
-/// only edges whose claim has evidence from it).
+/// only edges whose claim has evidence from it). Without `include_sensitive`, sensitive-only
+/// entities (except the centre, which is marked) and claims are left out, and so is whatever
+/// was reachable only through them; with it, nodes are marked.
 pub(crate) fn neighbourhood(
     graph: &dyn GraphStore,
     center: &EntityId,
@@ -358,14 +437,26 @@ pub(crate) fn neighbourhood(
     limit: usize,
     kinds: &[EntityKind],
     source: Option<&SourceId>,
+    sensitivity: Sensitivity<'_>,
 ) -> Result<GraphViewIpc> {
+    let Sensitivity {
+        items: sens,
+        include: include_sensitive,
+    } = sensitivity;
     let center = graph
         .get_entity(center)?
         .ok_or_else(|| Error::NotFound(format!("entity {center}")))?
         .id;
     let mut view = graph.neighbourhood(&center, depth, limit)?;
-    let mut keep: HashSet<EntityId> = HashSet::new();
+    let mut keep: HashMap<EntityId, bool> = HashMap::new();
+    // Sensitive-only nodes (never the centre) and claims left out.
+    let mut hidden: HashSet<EntityId> = HashSet::new();
     for n in &view.nodes {
+        let sensitive = entity_sensitive(graph, sens, &n.id)?;
+        if sensitive && !include_sensitive && n.id != center {
+            hidden.insert(n.id.clone());
+            continue;
+        }
         let wanted = n.id == center
             || ((kinds.is_empty() || kinds.contains(&n.kind))
                 && match source {
@@ -373,7 +464,46 @@ pub(crate) fn neighbourhood(
                     None => true,
                 });
         if wanted {
-            keep.insert(n.id.clone());
+            keep.insert(n.id.clone(), sensitive);
+        }
+    }
+    let mut hidden_claims = HashSet::new();
+    if !include_sensitive {
+        for e in &view.edges {
+            if let Some(c) = graph.get_claim(e.claim)?
+                && claim_sensitive(sens, &c)?
+            {
+                hidden_claims.insert(e.claim);
+            }
+        }
+    }
+    if !hidden.is_empty() || !hidden_claims.is_empty() {
+        // Re-walk from the centre without what is hidden, so nothing reachable only through a
+        // sensitive node or claim stays, and recompute depths.
+        view.edges.retain(|e| !hidden_claims.contains(&e.claim));
+        let mut depths: HashMap<EntityId, u32> = HashMap::from([(center.clone(), 0)]);
+        let mut queue = VecDeque::from([center.clone()]);
+        while let Some(id) = queue.pop_front() {
+            let d = depths[&id];
+            for e in &view.edges {
+                let other = if e.from == id {
+                    &e.to
+                } else if e.to == id {
+                    &e.from
+                } else {
+                    continue;
+                };
+                if !hidden.contains(other) && !depths.contains_key(other) {
+                    depths.insert(other.clone(), d + 1);
+                    queue.push_back(other.clone());
+                }
+            }
+        }
+        keep.retain(|id, _| depths.contains_key(id));
+        for n in &mut view.nodes {
+            if let Some(d) = depths.get(&n.id) {
+                n.depth = *d;
+            }
         }
     }
     if let Some(s) = source {
@@ -389,18 +519,21 @@ pub(crate) fn neighbourhood(
         nodes: view
             .nodes
             .into_iter()
-            .filter(|n| keep.contains(&n.id))
-            .map(|n| GraphNodeView {
-                id: n.id,
-                kind: n.kind.as_str().to_owned(),
-                name: n.name,
-                depth: n.depth,
+            .filter_map(|n| {
+                let sensitive = *keep.get(&n.id)?;
+                Some(GraphNodeView {
+                    id: n.id,
+                    kind: n.kind.as_str().to_owned(),
+                    name: n.name,
+                    depth: n.depth,
+                    sensitive,
+                })
             })
             .collect(),
         edges: view
             .edges
             .into_iter()
-            .filter(|e| keep.contains(&e.from) && keep.contains(&e.to))
+            .filter(|e| keep.contains_key(&e.from) && keep.contains_key(&e.to))
             .map(|e| GraphEdgeView {
                 claim: e.claim,
                 from: e.from,
@@ -415,6 +548,21 @@ pub(crate) fn neighbourhood(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Items in the set are sensitive.
+    struct Sens(HashSet<ItemRef>);
+
+    impl Sens {
+        fn none() -> Self {
+            Self(HashSet::new())
+        }
+    }
+
+    impl ItemSensitivity for Sens {
+        fn item_sensitive(&mut self, item: &ItemRef) -> Result<bool> {
+            Ok(self.0.contains(item))
+        }
+    }
 
     #[test]
     fn statuses_and_kinds_round_trip_by_name() {
@@ -486,9 +634,29 @@ mod tests {
         let works_on = link(&g, &alice, &apollo, "works_on", &notes);
         let mail_src = SourceId::new("mail");
 
-        let all = overview(&g, &[], 10, None).unwrap();
+        let all = overview(
+            &g,
+            &[],
+            10,
+            None,
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         assert_eq!((all.nodes.len(), all.edges.len()), (3, 2));
-        let only = overview(&g, &[], 10, Some(&mail_src)).unwrap();
+        let only = overview(
+            &g,
+            &[],
+            10,
+            Some(&mail_src),
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         let names: BTreeSet<&str> = only.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, BTreeSet::from(["Acme", "Alice"]));
         assert_eq!(
@@ -496,11 +664,33 @@ mod tests {
             [works_at]
         );
         assert!(!only.truncated);
-        let one = overview(&g, &[], 1, Some(&mail_src)).unwrap();
+        let one = overview(
+            &g,
+            &[],
+            1,
+            Some(&mail_src),
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         assert_eq!(one.nodes.len(), 1);
         assert!(one.truncated);
 
-        let n = neighbourhood(&g, &apollo, 2, 10, &[], Some(&mail_src)).unwrap();
+        let n = neighbourhood(
+            &g,
+            &apollo,
+            2,
+            10,
+            &[],
+            Some(&mail_src),
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         // The centre stays even when the source does not support it.
         let names: BTreeSet<&str> = n.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, BTreeSet::from(["Acme", "Alice", "Apollo"]));
@@ -508,7 +698,19 @@ mod tests {
             n.edges.iter().map(|e| e.claim).collect::<Vec<_>>(),
             [works_at]
         );
-        let n = neighbourhood(&g, &alice, 1, 10, &[], Some(&SourceId::new("notes"))).unwrap();
+        let n = neighbourhood(
+            &g,
+            &alice,
+            1,
+            10,
+            &[],
+            Some(&SourceId::new("notes")),
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         let names: BTreeSet<&str> = n.nodes.iter().map(|n| n.name.as_str()).collect();
         assert_eq!(names, BTreeSet::from(["Alice", "Apollo"]));
         assert_eq!(
@@ -524,8 +726,176 @@ mod tests {
             confidence: 1.0,
         })
         .unwrap();
-        let cal = overview(&g, &[], 10, Some(&SourceId::new("cal"))).unwrap();
+        let cal = overview(
+            &g,
+            &[],
+            10,
+            Some(&SourceId::new("cal")),
+            Sensitivity {
+                items: &mut Sens::none(),
+                include: false,
+            },
+        )
+        .unwrap();
         assert_eq!(cal.nodes.len(), 1);
         assert!(cal.edges.is_empty());
+    }
+
+    #[test]
+    fn sensitive_only_nodes_and_edges_are_hidden_unless_asked_for() {
+        use nugget_graph::{MemGraph, NewEntity};
+        let g = MemGraph::new();
+        let mara = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Mara"))
+            .unwrap();
+        let acme = g
+            .create_entity(&NewEntity::new(EntityKind::Organization, "Acme"))
+            .unwrap();
+        let session = g
+            .create_entity(&NewEntity::new(EntityKind::Event, "Counselling session"))
+            .unwrap();
+        let clinic = g
+            .create_entity(&NewEntity::new(EntityKind::Place, "Clinic"))
+            .unwrap();
+        let bob = g
+            .create_entity(&NewEntity::new(EntityKind::Person, "Bob"))
+            .unwrap();
+        let (mail, invite) = (item("mail", "m1"), item("files", "invite.ics"));
+        let works_at = link(&g, &mara, &acme, "works_at", &mail);
+        link(&g, &mara, &session, "attended", &invite);
+        link(&g, &session, &clinic, "located_at", &invite);
+        // A sensitive-only edge between two entities that stay visible.
+        link(&g, &mara, &bob, "knows", &invite);
+        link(&g, &bob, &acme, "works_at", &mail);
+        let mut sens = Sens(HashSet::from([invite.clone()]));
+        let names = |v: &GraphViewIpc| -> BTreeSet<String> {
+            v.nodes.iter().map(|n| n.name.clone()).collect()
+        };
+
+        let hidden = overview(
+            &g,
+            &[],
+            10,
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            names(&hidden),
+            BTreeSet::from(["Acme".into(), "Bob".into(), "Mara".into()])
+        );
+        assert!(hidden.nodes.iter().all(|n| !n.sensitive));
+        assert_eq!(hidden.edges.len(), 2, "{:?}", hidden.edges);
+        assert!(hidden.edges.iter().all(|e| e.predicate == "works_at"));
+        let all = overview(
+            &g,
+            &[],
+            10,
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(all.nodes.len(), 5);
+        assert_eq!(all.edges.len(), 5);
+        let marked: BTreeSet<String> = all
+            .nodes
+            .iter()
+            .filter(|n| n.sensitive)
+            .map(|n| n.name.clone())
+            .collect();
+        assert_eq!(
+            marked,
+            BTreeSet::from(["Clinic".into(), "Counselling session".into()])
+        );
+        // `limit` counts shown nodes only.
+        let two = overview(
+            &g,
+            &[],
+            2,
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(two.nodes.len(), 2);
+        assert!(two.nodes.iter().all(|n| !n.sensitive));
+
+        let n = neighbourhood(
+            &g,
+            &mara,
+            2,
+            50,
+            &[],
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            names(&n),
+            BTreeSet::from(["Acme".into(), "Bob".into(), "Mara".into()])
+        );
+        // Bob is now two hops away (through Acme), not one (through the hidden edge).
+        let bob_depth = n.nodes.iter().find(|x| x.id == bob).unwrap().depth;
+        assert_eq!(bob_depth, 2);
+        assert!(n.edges.iter().any(|e| e.claim == works_at));
+        assert!(n.edges.iter().all(|e| e.predicate == "works_at"));
+        let n = neighbourhood(
+            &g,
+            &mara,
+            2,
+            50,
+            &[],
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(n.nodes.len(), 5);
+        // A sensitive centre stays, marked, alone.
+        let c = neighbourhood(
+            &g,
+            &session,
+            2,
+            50,
+            &[],
+            None,
+            Sensitivity {
+                items: &mut sens,
+                include: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(c.nodes.len(), 1);
+        assert!(c.nodes[0].sensitive && c.nodes[0].id == session);
+        assert!(c.edges.is_empty());
+
+        // The rule: an evidence-free (user) claim is not sensitive; a mention counts.
+        assert!(entity_sensitive(&g, &mut sens, &clinic).unwrap());
+        g.add_mention(&Mention {
+            entity: clinic.clone(),
+            item: mail.clone(),
+            chunk_id: None,
+            surface: "Clinic".into(),
+            confidence: 1.0,
+        })
+        .unwrap();
+        assert!(!entity_sensitive(&g, &mut sens, &clinic).unwrap());
+        let lonely = g
+            .create_entity(&NewEntity::new(EntityKind::Topic, "Nothing yet"))
+            .unwrap();
+        assert!(!entity_sensitive(&g, &mut sens, &lonely).unwrap());
     }
 }

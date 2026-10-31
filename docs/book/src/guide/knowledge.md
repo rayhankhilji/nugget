@@ -92,6 +92,24 @@ Links include the entity's short id, so renaming a person does not break links t
 addresses and phone numbers are kept out of the pages by default, because the vault is plain text you
 may sync elsewhere.
 
+### Sensitive items and the vault
+
+For the same reason, nothing from a [sensitive item](privacy.md#sensitive-items) is written to the
+vault (an item whose sensitivity is unknown counts as sensitive):
+
+- A fact whose sources are all sensitive is left out: no fact line, no footnote, nothing in
+  `README.md`. Facts you wrote yourself have no sources and are always shown.
+- A footnote never cites or quotes a sensitive item. A fact that also has a non-sensitive source is
+  shown, citing only that source.
+- An entity known only from sensitive items (all of its facts and mentions) gets no page, and other
+  pages name it without a link. If it had a page before (for example, the item was marked sensitive
+  later), the page becomes a "no longer in your knowledge graph" stub; your own notes on it are kept.
+  When a non-sensitive source supports it again, the page comes back.
+
+The facts are still in the encrypted store. On the **Knowledge** page such entities and facts carry
+a **Sensitive** badge, and the graph view leaves them out unless you turn on **Show sensitive**. MCP
+clients see them only if you allowed sensitive items for that client.
+
 ## Editing the vault
 
 The vault is yours to edit. The encrypted store stays the source of truth, and your edits are merged

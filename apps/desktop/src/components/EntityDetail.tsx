@@ -300,6 +300,14 @@ function Header({ detail: d, headingId, onClose }: { detail: EntityDetail; headi
           </h2>
           <p className="entity-sub">
             <Badge tone="accent">{kindLabel(d.kind)}</Badge>
+            {d.sensitive && (
+              <>
+                {" "}
+                <span title={t("entity.sensitiveEntityTitle")}>
+                  <Badge tone="warn">{t("entity.sensitive")}</Badge>
+                </span>
+              </>
+            )}
           </p>
         </div>
         {onClose && <CloseButton onClose={onClose} />}
@@ -499,6 +507,11 @@ function Fact({
         )}
         {!isCurrentStatus(c.status) && (
           <Badge tone={retracted ? "bad" : "neutral"}>{claimStatusLabel(c.status)}</Badge>
+        )}
+        {c.sensitive && (
+          <span title={t("entity.sensitiveFactTitle")}>
+            <Badge tone="warn">{t("entity.sensitive")}</Badge>
+          </span>
         )}
         {seen && (
           <span className="muted small fact-seen">

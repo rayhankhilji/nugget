@@ -136,6 +136,7 @@ impl RpcHandler {
             for m in k.graph.mentions_for(&e.id, DETAIL_MENTIONS)? {
                 mentions.push(graphview::mention_view(&mut lk, &m)?);
             }
+            let sensitive = graphview::entity_sensitive(k.graph.as_ref(), &mut lk, &e.id)?;
             let vault_path = match &k.vault {
                 Some(v) => v.page_path(&e.id)?.and_then(|p| {
                     p.strip_prefix(v.root())
@@ -158,6 +159,7 @@ impl RpcHandler {
                 claims: claim_views,
                 mentions,
                 vault_path,
+                sensitive,
             })
         })
         .await?;
@@ -171,14 +173,35 @@ impl RpcHandler {
             n => (n as usize).min(nugget_store::MAX_NEIGHBOURHOOD_NODES),
         };
         let depth = req.depth.min(MAX_GRAPH_DEPTH);
-        let graph = self.state.knowledge.graph.clone();
+        let k = self.state.knowledge.clone();
         let view = blocking(move || {
             let source = req.source.as_ref();
+            let graph = k.graph.as_ref();
+            let mut lk = Lookups::new(&k.store, graph);
+            let all = req.include_sensitive;
             match &req.center {
-                Some(c) => {
-                    graphview::neighbourhood(graph.as_ref(), c, depth, limit, &kinds, source)
-                }
-                None => graphview::overview(graph.as_ref(), &kinds, limit, source),
+                Some(c) => graphview::neighbourhood(
+                    graph,
+                    c,
+                    depth,
+                    limit,
+                    &kinds,
+                    source,
+                    graphview::Sensitivity {
+                        items: &mut lk,
+                        include: all,
+                    },
+                ),
+                None => graphview::overview(
+                    graph,
+                    &kinds,
+                    limit,
+                    source,
+                    graphview::Sensitivity {
+                        items: &mut lk,
+                        include: all,
+                    },
+                ),
             }
         })
         .await?;

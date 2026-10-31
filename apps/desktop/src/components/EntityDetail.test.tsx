@@ -102,6 +102,27 @@ describe("EntityDetailPanel facts", () => {
     expect(detail.claims[0]!.text).toBe(stored);
   });
 
+  it("badges an entity and facts known only from sensitive items", async () => {
+    const detail: EntityDetail = {
+      ...timed,
+      sensitive: true,
+      claims: [{ ...timed.claims[0]!, sensitive: true }, timed.claims[1]!],
+    };
+    mockDaemon({ knowledge_entity: detail });
+    const { container } = await render(panel());
+    const head = container.querySelector(".entity-sub")!;
+    expect(head.textContent).toContain("Sensitive");
+    expect(head.querySelector("[title]")!.getAttribute("title")).toMatch(/no vault page/);
+    const facts = Array.from(container.querySelectorAll("li.fact"));
+    expect(facts.map((f) => f.querySelector(".fact-meta")!.textContent!.includes("Sensitive"))).toEqual([true, false]);
+
+    cleanup();
+    installDomShims();
+    mockDaemon({ knowledge_entity: timed });
+    const plain = await render(panel());
+    expect(plain.container.textContent).not.toContain("Sensitive");
+  });
+
   it("falls back to grouping by predicate when the daemon sends no timestamps", async () => {
     mockDaemon({ knowledge_entity: entityDetail });
     const { container } = await render(panel());

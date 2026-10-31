@@ -24,7 +24,13 @@ pub(crate) struct Ctx<'a> {
     pub cfg: &'a VaultConfig,
     sources: RefCell<HashMap<ItemRef, SourceInfo>>,
     entities: RefCell<HashMap<EntityId, Option<Entity>>>,
+    /// [`Ctx::entity_sensitive`] per entity (for this pass).
+    sensitive: RefCell<HashMap<EntityId, bool>>,
 }
+
+/// Mentions read per entity to decide whether it is sensitive-only (as `nuggetd`'s graph views
+/// and MCP do).
+const SENSITIVE_MENTIONS: usize = 5000;
 
 pub(crate) struct Rendered {
     pub doc: Doc,
@@ -146,6 +152,7 @@ impl<'a> Ctx<'a> {
             cfg,
             sources: RefCell::default(),
             entities: RefCell::default(),
+            sensitive: RefCell::default(),
         }
     }
 
@@ -174,6 +181,39 @@ impl<'a> Ctx<'a> {
     /// Forget cached entities (after the graph changed under us).
     pub fn forget(&self) {
         self.entities.borrow_mut().clear();
+        self.sensitive.borrow_mut().clear();
+    }
+
+    /// Whether the item is sensitive. An item the lookup does not know counts as sensitive when
+    /// the lookup says so ([`ItemLookup::missing_is_sensitive`]); a failed lookup always does.
+    pub fn item_sensitive(&self, item: &ItemRef) -> bool {
+        self.source(item).sensitive
+    }
+
+    /// A claim is sensitive-only when it has evidence and every piece of it is from a sensitive
+    /// item. A claim without evidence (the user's own) is not.
+    pub fn claim_sensitive(&self, c: &Claim) -> bool {
+        !c.evidence.is_empty() && c.evidence.iter().all(|ev| self.item_sensitive(&ev.item))
+    }
+
+    /// An entity is sensitive-only when it has at least one active claim or mention, every
+    /// active claim (as subject or object) is sensitive-only and every mention is from a
+    /// sensitive item. Such an entity gets no page.
+    pub fn entity_sensitive(&self, id: &EntityId) -> Result<bool> {
+        if let Some(s) = self.sensitive.borrow().get(id) {
+            return Ok(*s);
+        }
+        let claims = self.graph.claims_for(id, false)?;
+        let mut any = !claims.is_empty();
+        let mut sensitive = claims.iter().all(|c| self.claim_sensitive(c));
+        if sensitive {
+            let mentions = self.graph.mentions_for(id, SENSITIVE_MENTIONS)?;
+            any |= !mentions.is_empty();
+            sensitive = mentions.iter().all(|m| self.item_sensitive(&m.item));
+        }
+        let out = any && sensitive;
+        self.sensitive.borrow_mut().insert(id.clone(), out);
+        Ok(out)
     }
 
     fn source(&self, item: &ItemRef) -> SourceInfo {
@@ -181,10 +221,17 @@ impl<'a> Ctx<'a> {
             return s.clone();
         }
         let info = match self.items.source_info(item) {
-            Ok(i) => i.unwrap_or_default(),
+            Ok(Some(i)) => i,
+            Ok(None) => SourceInfo {
+                sensitive: self.items.missing_is_sensitive(),
+                ..SourceInfo::default()
+            },
             Err(e) => {
                 tracing::warn!(error = %e, "vault: source lookup failed");
-                SourceInfo::default()
+                SourceInfo {
+                    sensitive: true,
+                    ..SourceInfo::default()
+                }
             }
         };
         self.sources.borrow_mut().insert(item.clone(), info.clone());
@@ -215,8 +262,13 @@ impl<'a> Ctx<'a> {
 
         // ---- facts ----
         let mut groups: BTreeMap<&str, Vec<&Claim>> = BTreeMap::new();
-        for c in claims {
-            if c.subject == e.id && c.status.is_active() {
+        // Facts supported only by sensitive items are left out (and so are their footnotes).
+        let claims: Vec<&Claim> = claims
+            .iter()
+            .filter(|c| c.status.is_active() && !self.claim_sensitive(c))
+            .collect();
+        for &c in &claims {
+            if c.subject == e.id {
                 groups.entry(c.predicate.as_str()).or_default().push(c);
             }
         }
@@ -243,7 +295,7 @@ impl<'a> Ctx<'a> {
 
         // ---- related ----
         let mut nb: BTreeMap<EntityId, (BTreeSet<&str>, BTreeSet<&str>)> = BTreeMap::new();
-        for c in claims.iter().filter(|c| c.status.is_active()) {
+        for c in &claims {
             let ClaimObject::Entity(o) = &c.object else {
                 continue;
             };
@@ -274,11 +326,14 @@ impl<'a> Ctx<'a> {
                 other.name.to_lowercase(),
                 other.id.clone(),
             );
-            links.insert(other.id.clone());
-            rows.push((
-                key,
-                format!("- {}: {}", self.link(&other), preds.join(", ")),
-            ));
+            // A sensitive-only entity has no page: name it without a link.
+            let name = if self.entity_sensitive(&other.id)? {
+                display(&other.name)
+            } else {
+                links.insert(other.id.clone());
+                self.link(&other)
+            };
+            rows.push((key, format!("- {name}: {}", preds.join(", "))));
         }
         rows.sort();
         rows.dedup_by(|a, b| a.1 == b.1);
@@ -339,7 +394,17 @@ impl<'a> Ctx<'a> {
                 .trim()
                 .to_owned();
         }
-        if let Some(o) = object {
+        let object_has_page = match &object {
+            Some(o) => !self.entity_sensitive(&o.id)?,
+            None => false,
+        };
+        if let Some(o) = object.as_ref().filter(|_| !object_has_page) {
+            // A sensitive-only entity has no page to link to: keep the sentence, and add the
+            // name as plain text when the sentence lacks it.
+            if find_word(&body, &inline(&o.name)).is_none() {
+                body = format!("{body} ({})", display(&o.name));
+            }
+        } else if let Some(o) = object {
             links.insert(o.id.clone());
             // Link the entity where the sentence names it (by name, else by its longest alias).
             let mut names: Vec<String> = o.aliases.iter().map(|a| inline(a)).collect();
@@ -358,7 +423,12 @@ impl<'a> Ctx<'a> {
             }
         }
         let mut cites = String::new();
-        for ev in &c.evidence {
+        // Never cite (or quote) a sensitive item, even next to other evidence.
+        for ev in c
+            .evidence
+            .iter()
+            .filter(|ev| !self.item_sensitive(&ev.item))
+        {
             let key = (ev.item.clone(), ev.quote.clone());
             let n = match note_ids.get(&key) {
                 Some(n) => *n,

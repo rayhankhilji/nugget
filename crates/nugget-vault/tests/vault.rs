@@ -57,10 +57,17 @@ fn lookup(it: &ItemRef) -> Option<SourceInfo> {
         "msg-1" => Some(SourceInfo {
             title: Some("Lunch on Friday".into()),
             url: Some("https://mail.example/msg-1".into()),
+            sensitive: false,
         }),
         "notes.md" => Some(SourceInfo {
             title: Some("Notes".into()),
             url: None,
+            sensitive: false,
+        }),
+        "counselling.ics" => Some(SourceInfo {
+            title: Some("Counselling session".into()),
+            url: None,
+            sensitive: true,
         }),
         _ => None,
     }
@@ -848,8 +855,13 @@ fn citations_use_store_titles_and_urls() {
     let store = nugget_store::Store::open_in_memory().unwrap();
     let mut it = nugget_store::NewItem::new("mail", "msg-1", "h1");
     it.title = Some("Quarterly [draft]".into());
-    it.metadata = serde_json::json!({"url": "https://mail.example/m?id=1 (x)"});
+    it.metadata = serde_json::json!({"url": "https://mail.example/m?id=1 (x)", "sensitive": false});
     store.upsert_item(&it).unwrap();
+    // Sensitivity unknown: counts as sensitive (`nugget_retrieve::is_sensitive`), so the note is
+    // never cited.
+    let mut note = nugget_store::NewItem::new("files", "notes.md", "h2");
+    note.title = Some("Notes".into());
+    store.upsert_item(&note).unwrap();
     let g = Arc::new(MemGraph::new());
     let (sam, ..) = populate(&g);
     let dir = tempfile::tempdir().unwrap();
@@ -857,7 +869,12 @@ fn citations_use_store_titles_and_urls() {
     v.render_all().unwrap();
     let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
     assert!(
-        t.contains("[^2]: [Quarterly (draft)](https://mail.example/m?id=1%20%28x%29): \"Sam from Acme here\""),
+        t.contains("[^1]: [Quarterly (draft)](https://mail.example/m?id=1%20%28x%29): \"Sam from Acme here\""),
+        "{t}"
+    );
+    assert!(t.contains("- Prefers oat milk in coffee. [^1] <!--"), "{t}");
+    assert!(
+        !t.contains("notes.md") && !t.contains("oat milk please"),
         "{t}"
     );
 }
@@ -928,4 +945,246 @@ fn notes_are_written_inside_the_vault_and_never_overwrite() {
     v.render_all().unwrap();
     assert!(a.exists() && b.exists());
     assert!(v.validate().unwrap().is_ok());
+}
+
+// ---- sensitive items (GG5-3) ----
+
+/// Every file under `dir` (pages, index and `.nugget/` bases), as `(path, text)`.
+fn all_files(dir: &Path) -> Vec<(std::path::PathBuf, String)> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let p = e.unwrap().path();
+        if p.is_dir() {
+            out.extend(all_files(&p));
+        } else {
+            out.push((p.clone(), std::fs::read_to_string(&p).unwrap_or_default()));
+        }
+    }
+    out
+}
+
+fn assert_nowhere(root: &Path, needles: &[&str]) {
+    for (p, text) in all_files(root) {
+        for n in needles {
+            assert!(!text.contains(n), "{n:?} in {}:\n{text}", p.display());
+            assert!(
+                !p.to_string_lossy().contains(n),
+                "{n:?} in path {}",
+                p.display()
+            );
+        }
+    }
+}
+
+/// The counselling invite: Jonas organised a session Sam attended. Every fact about the session
+/// and Jonas comes from the (sensitive) invite only; Sam's "likes" fact has evidence from both
+/// the invite and a non-sensitive note. Returns (jonas, session, place, likes).
+fn add_counselling(g: &MemGraph, sam: &EntityId) -> (EntityId, EntityId, EntityId, ClaimId) {
+    let jonas = g
+        .create_entity(&NewEntity::new(EntityKind::Person, "Jonas Albers"))
+        .unwrap();
+    let session = g
+        .create_entity(&NewEntity::new(EntityKind::Event, "Counselling session"))
+        .unwrap();
+    let place = g
+        .create_entity(&NewEntity::new(EntityKind::Place, "Quay Lane clinic"))
+        .unwrap();
+    let invite = |q: &str| ev("files", "counselling.ics", q);
+    g.add_claim(&claim(
+        &jonas,
+        "organized",
+        ClaimObject::Entity(session.clone()),
+        "Jonas Albers organized Counselling session.",
+        vec![invite("Organizer: Jonas Albers <jonas@albers.example>")],
+    ))
+    .unwrap();
+    g.add_claim(&claim(
+        sam,
+        "attended",
+        ClaimObject::Entity(session.clone()),
+        "Samantha attended Counselling session.",
+        vec![invite("Attendee: Samantha Lee")],
+    ))
+    .unwrap();
+    let likes = g
+        .add_claim(&claim(
+            sam,
+            "likes",
+            ClaimObject::Literal("long walks".into()),
+            "Likes long walks.",
+            vec![
+                ev("files", "notes.md", "Sam: long walks"),
+                invite("SECRET: walks help with the sleep diary"),
+            ],
+        ))
+        .unwrap();
+    // An entity known only from a mention in the invite.
+    g.add_mention(&Mention {
+        entity: place.clone(),
+        item: item("files", "counselling.ics"),
+        chunk_id: None,
+        surface: "Quay Lane".into(),
+        confidence: 1.0,
+    })
+    .unwrap();
+    (jonas, session, place, likes)
+}
+
+#[test]
+fn sensitive_only_entities_and_facts_stay_out_of_the_vault() {
+    let f = fixture();
+    let (jonas, session, place, likes) = add_counselling(&f.graph, &f.sam);
+    f.vault.render_all().unwrap();
+    for id in [&jonas, &session, &place] {
+        assert_eq!(f.vault.page_path(id).unwrap(), None, "{id}");
+    }
+    // Not a line, footnote, link, index entry or merge base anywhere in the vault.
+    assert_nowhere(
+        &f.root,
+        &[
+            "Jonas",
+            "Counselling",
+            "Quay Lane",
+            "counselling.ics",
+            "SECRET",
+            "attended",
+        ],
+    );
+    // The mixed fact stays, citing only the non-sensitive note.
+    let sam = f.read(&f.sam);
+    let line = sam
+        .lines()
+        .find(|l| l.contains(&format!("<!-- c:{likes} -->")))
+        .unwrap_or_else(|| panic!("no line for the mixed fact:\n{sam}"));
+    assert!(line.starts_with("- Likes long walks. [^"), "{line}");
+    assert!(sam.contains("[Notes](nugget://item/files/notes.md): \"Sam: long walks\""));
+    assert_eq!(f.vault.status().pages, 2);
+    let report = f.vault.validate().unwrap();
+    assert!(report.is_ok(), "{report:?}");
+}
+
+/// A lookup whose invite turns sensitive (or back) at runtime, and that may count unknown items
+/// as sensitive, as the store does.
+struct Switch {
+    invite_sensitive: std::sync::atomic::AtomicBool,
+    missing_sensitive: bool,
+}
+
+impl ItemLookup for Switch {
+    fn source_info(&self, it: &ItemRef) -> nugget_core::Result<Option<SourceInfo>> {
+        Ok(match it.key.as_str() {
+            "counselling.ics" => Some(SourceInfo {
+                title: Some("Counselling session".into()),
+                url: None,
+                sensitive: self
+                    .invite_sensitive
+                    .load(std::sync::atomic::Ordering::SeqCst),
+            }),
+            _ => lookup(it),
+        })
+    }
+
+    fn missing_is_sensitive(&self) -> bool {
+        self.missing_sensitive
+    }
+}
+
+#[test]
+fn a_page_whose_sources_turn_sensitive_becomes_a_stub_and_comes_back() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let (sam, ..) = populate(&g);
+    let (jonas, session, ..) = add_counselling(&g, &sam);
+    let items = Arc::new(Switch {
+        invite_sensitive: false.into(),
+        missing_sensitive: false,
+    });
+    let v = Vault::new(dir.path().join("v"), g.clone(), items.clone(), config()).unwrap();
+    let root = v.root().to_path_buf();
+    v.render_all().unwrap();
+    let page = v
+        .page_path(&jonas)
+        .unwrap()
+        .expect("page while not sensitive");
+    let text = std::fs::read_to_string(&page).unwrap();
+    assert!(text.contains("Organizer: Jonas Albers"), "{text}");
+    std::fs::write(&page, format!("{text}my own note\n")).unwrap();
+    v.apply_pending_edits().unwrap();
+
+    items.invite_sensitive.store(true, Ordering::SeqCst);
+    v.render_all().unwrap();
+    let stub = std::fs::read_to_string(&page).unwrap();
+    assert!(stub.contains("no longer in your knowledge graph"), "{stub}");
+    assert!(stub.contains("my own note"), "{stub}");
+    for leak in ["Organizer", "Counselling", "albers.example", "SECRET"] {
+        assert!(!stub.contains(leak), "{leak} in stub:\n{stub}");
+    }
+    assert_eq!(v.page_path(&jonas).unwrap(), None);
+    let readme = std::fs::read_to_string(root.join("README.md")).unwrap();
+    assert!(
+        !readme.contains("Jonas") && !readme.contains("Counselling"),
+        "{readme}"
+    );
+    let sam_page = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    assert!(
+        !sam_page.contains("Counselling") && !sam_page.contains("SECRET"),
+        "{sam_page}"
+    );
+    assert!(sam_page.contains("Likes long walks."), "{sam_page}");
+    // No live page links to the stubs (validation would flag a dangling link).
+    assert!(v.validate().unwrap().is_ok());
+    assert_eq!(v.status().pages, 2);
+
+    // Not sensitive any more: the pages come back.
+    items.invite_sensitive.store(false, Ordering::SeqCst);
+    v.render_all().unwrap();
+    let back = std::fs::read_to_string(v.page_path(&jonas).unwrap().expect("page back")).unwrap();
+    assert!(back.contains("Organizer: Jonas Albers"), "{back}");
+    assert!(v.page_path(&session).unwrap().is_some());
+}
+
+#[test]
+fn unknown_items_count_as_sensitive_when_the_lookup_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let g = Arc::new(MemGraph::new());
+    let sam = g
+        .create_entity(&NewEntity::new(EntityKind::Person, "Sam Lee"))
+        .unwrap();
+    let ghost = g
+        .create_entity(&NewEntity::new(EntityKind::Person, "Ghost Person"))
+        .unwrap();
+    g.add_claim(&claim(
+        &sam,
+        "prefers",
+        ClaimObject::Literal("tea".into()),
+        "Prefers tea.",
+        vec![
+            ev("files", "notes.md", "Sam: tea"),
+            ev("files", "gone.md", "gone quote"),
+        ],
+    ))
+    .unwrap();
+    g.add_claim(&claim(
+        &ghost,
+        "likes",
+        ClaimObject::Literal("chess".into()),
+        "Likes chess.",
+        vec![ev("files", "gone.md", "gone quote")],
+    ))
+    .unwrap();
+    let items = Arc::new(Switch {
+        invite_sensitive: true.into(),
+        missing_sensitive: true,
+    });
+    let v = Vault::new(dir.path().join("v"), g, items, config()).unwrap();
+    v.render_all().unwrap();
+    assert_eq!(v.page_path(&ghost).unwrap(), None);
+    let root = v.root().to_path_buf();
+    assert_nowhere(&root, &["Ghost", "gone.md", "gone quote", "chess"]);
+    let t = std::fs::read_to_string(v.page_path(&sam).unwrap().unwrap()).unwrap();
+    assert!(
+        t.contains("Prefers tea. [^1]") && t.contains("\"Sam: tea\""),
+        "{t}"
+    );
 }

@@ -696,6 +696,10 @@ pub struct ClaimView {
     pub evidence: Vec<EvidenceView>,
     #[serde(with = "time::serde::rfc3339::option", default)]
     pub updated_at: Option<time::OffsetDateTime>,
+    /// Sensitive-only: the claim has evidence and all of it is from sensitive items (missing
+    /// items count as sensitive). Such claims are not in the vault or default-scope MCP.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -724,6 +728,11 @@ pub struct EntityDetail {
     /// The entity's vault page, relative to the vault root.
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// Sensitive-only: the entity has at least one active claim or mention, and all of them
+    /// come from sensitive items. It has no vault page and is left out of `knowledge.graph`
+    /// unless `include_sensitive` is set.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -739,6 +748,10 @@ pub struct GraphRequest {
     /// from it, a node with a mention or an active claim backed by it (the centre always stays).
     #[serde(default)]
     pub source: Option<SourceId>,
+    /// Also show sensitive-only entities (see [`EntityDetail::sensitive`]) and claims. Off by
+    /// default: they and their edges are left out (the centre always stays, marked).
+    #[serde(default)]
+    pub include_sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -747,6 +760,9 @@ pub struct GraphNodeView {
     pub kind: String,
     pub name: String,
     pub depth: u32,
+    /// Sensitive-only entity (see [`EntityDetail::sensitive`]).
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
