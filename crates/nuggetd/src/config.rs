@@ -18,9 +18,8 @@ use serde::{Deserialize, Serialize};
 /// Written to `Paths::config_file()` when no config exists.
 pub const DEFAULT_CONFIG: &str = r#"# Nugget daemon (nuggetd) configuration.
 #
-# Nugget is local-first. Out of the box every tier below is served by a model running on this
-# machine, behind an OpenAI-compatible server (Ollama on its default port), so nothing leaves the
-# device until you add a cloud provider.
+# Nugget is local-first. Out of the box every tier below is served by the on-device runtime
+# (a model running on this machine), so nothing leaves the device until you add a cloud provider.
 #
 # Never put secrets in this file. Providers reference API keys as "env:VAR" (an environment
 # variable) or "keychain:NAME" (an OS keychain entry).
@@ -47,8 +46,9 @@ download_parts = 4
 # --- On-device runtime (llama.cpp llama-server, managed by nuggetd) ------------------------------
 # When a selected model is installed (Models page), nuggetd runs it on 127.0.0.1 and routes to it
 # as `local-chat` (triage, light, synthesis) and `local-embedding` (embedding). Providers you
-# configure below that run on this device or your network are tried first; cloud providers come
-# after the runtime and are never used for triage or (by default) embeddings.
+# configure below that run on your network, or on this device once probed successfully, are tried
+# first; unprobed on-device providers come after the runtime. Cloud providers come last and are
+# never used for triage or (by default) embeddings.
 [runtime]
 enabled = true
 # Manifest model ids. Unset: [models.selected], then the recommendation for this machine.
@@ -95,14 +95,14 @@ port = 7319
 # header_timeout_ms = 10000
 # body_timeout_ms = 30000
 
-# --- On-device: Ollama ---------------------------------------------------------------------------
+# --- On-device: Ollama (uncomment to use) --------------------------------------------------------
 # Install Ollama (https://ollama.com), then pull the model, e.g. `ollama pull qwen3:4b`.
-[[providers]]
-id = "local"
-kind = "openai_compatible"
-base_url = "http://127.0.0.1:11434/v1"
-model = "qwen3:4b"
-tiers = ["triage", "light", "synthesis"]
+# [[providers]]
+# id = "local"
+# kind = "openai_compatible"
+# base_url = "http://127.0.0.1:11434/v1"
+# model = "qwen3:4b"
+# tiers = ["triage", "light", "synthesis"]
 
 # --- Cloud: Anthropic (uncomment to use; requests are recorded in the egress ledger) -------------
 # Set the key in your environment, or store it in the OS keychain and use "keychain:anthropic".
@@ -551,13 +551,8 @@ mod tests {
         assert_eq!(cfg.models, ModelsConfig::default());
         assert_eq!(cfg.runtime, RuntimeConfig::default());
         assert!(cfg.runtime.enabled);
-        assert_eq!(cfg.providers.len(), 1);
-        let p = &cfg.providers[0];
-        assert_eq!(p.kind, ProviderKind::OpenaiCompatible);
-        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
-        assert_eq!(p.effective_locality().unwrap(), Locality::OnDevice);
-        assert_eq!(p.tiers, vec![Tier::Triage, Tier::Light, Tier::Synthesis]);
-        assert!(p.api_key.is_none());
+        // The runtime serves everything; no provider is routed to until the user adds one.
+        assert!(cfg.providers.is_empty());
     }
 
     #[test]
@@ -575,7 +570,7 @@ mod tests {
         assert!(!DEFAULT_CONFIG.contains("sk-"));
     }
 
-    /// The commented-out cloud examples are valid once uncommented.
+    /// The commented-out provider examples are valid once uncommented.
     #[test]
     fn commented_examples_parse_when_uncommented() {
         let start = DEFAULT_CONFIG.find("# [[providers]]").unwrap();
@@ -598,6 +593,12 @@ mod tests {
                 ProviderKind::OpenaiResponses
             ]
         );
+        // The commented on-device example.
+        let p = &cfg.providers[0];
+        assert_eq!(p.base_url.as_deref(), Some("http://127.0.0.1:11434/v1"));
+        assert_eq!(p.effective_locality().unwrap(), Locality::OnDevice);
+        assert_eq!(p.tiers, vec![Tier::Triage, Tier::Light, Tier::Synthesis]);
+        assert!(p.api_key.is_none());
         for p in &cfg.providers[1..] {
             assert_eq!(p.effective_locality().unwrap(), Locality::Cloud);
             assert!(p.api_key.is_some());
