@@ -5,6 +5,7 @@ import { formatList, Trans, useT, type MessageKey } from "../i18n";
 import { AddSourceWizard } from "../components/AddSourceWizard";
 import { Announce, useAnnouncer } from "../components/Announce";
 import { CopyButton } from "../components/CopyButton";
+import { UpdateQuestion } from "../components/UpdateChoice";
 import { legacyDone, pendingSteps, type Action, type OnboardingState, type StepId } from "./machine";
 import { detectOs, type Os } from "./platform";
 import { TriggerKeys } from "./TriggerStep";
@@ -60,6 +61,7 @@ export function WelcomeStep({ headingRef }: StepProps) {
             <li>{t("onboarding.welcome.leaves1")}</li>
             <li>{t("onboarding.welcome.leaves2")}</li>
             <li>{t("onboarding.welcome.leaves3")}</li>
+            <li>{t("onboarding.welcome.leaves4")}</li>
           </ul>
         </section>
       </div>
@@ -429,6 +431,7 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
       ) : (
         <p>{t("onboarding.done.allDone")}</p>
       )}
+      <UpdateQuestion />
       <p className="muted">{t("onboarding.done.again")}</p>
     </>
   );

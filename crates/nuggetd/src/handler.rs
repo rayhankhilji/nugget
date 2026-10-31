@@ -10,10 +10,10 @@ use nugget_core::capability::{Capabilities, Locality, Tier};
 use nugget_core::ids::ProviderId;
 use nugget_core::ipc::{
     self, AskRequest, AskStarted, AuthBegin, ChatCancel, ChatDelta, ChatDone, ChatStarted,
-    ContextRequest, ContextResponse, EgressRecentRequest, ModelInfo, ModelInstallRequest,
-    ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo, Role as IpcRole,
-    RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret, SourceSpec,
-    SourceSync, SourceUpdate, StatusResponse, method, notification,
+    ContextRequest, ContextResponse, EgressRecentRequest, EgressRecordRequest, ModelInfo,
+    ModelInstallRequest, ModelPhase, ModelProgress, PROTOCOL_VERSION, ProbeRequest, ProviderInfo,
+    Role as IpcRole, RuntimeRole, SearchHit, SearchRequest, SourceRef, SourceRemove, SourceSecret,
+    SourceSpec, SourceSync, SourceUpdate, StatusResponse, method, notification,
 };
 use nugget_core::{Error, Result};
 use nugget_infer::{
@@ -74,6 +74,7 @@ impl Handler for RpcHandler {
             method::MODELS_LIST => self.models_list().await,
             method::MODELS_INSTALL => self.models_install(parse_params(params)?, notify).await,
             method::EGRESS_RECENT => self.egress_recent(parse_params(params)?).await,
+            method::EGRESS_RECORD => self.egress_record(parse_params(params)?).await,
             method::SOURCES_LIST => to_result(self.state.ingest.list().await?),
             method::SOURCES_ADD => self.sources_add(parse_params(params)?).await,
             method::SOURCES_UPDATE => self.sources_update(parse_params(params)?).await,
@@ -747,6 +748,15 @@ impl RpcHandler {
         to_result(events)
     }
 
+    /// A request the desktop app made itself (update checks), written to the ledger and
+    /// flushed before answering, so `egress.recent` shows it right away.
+    async fn egress_record(&self, req: EgressRecordRequest) -> Result<Value, RpcError> {
+        let event = client_egress_event(req, time::OffsetDateTime::now_utc())?;
+        let store = self.state.store.clone();
+        blocking(move || store.record_egress(&event)).await?;
+        Ok(Value::Null)
+    }
+
     // ---- models ----
 
     async fn models_list(&self) -> Result<Value, RpcError> {
@@ -1294,6 +1304,49 @@ async fn run_install(
     append_audit(&state, "model.install.result", &entry.id, detail).await;
 }
 
+/// Longest host `egress.record` accepts (a DNS name is at most 253, plus `:port`).
+const MAX_EGRESS_HOST: usize = 260;
+/// How far ahead of the daemon's clock a recorded time may be (clock skew between processes).
+const EGRESS_FUTURE_SLACK: time::Duration = time::Duration::minutes(5);
+
+/// Validate an `egress.record` request: a known client feature, a bare `host[:port]` (no scheme,
+/// path, credentials or spaces) and a time not in the future. The row never lists items.
+fn client_egress_event(
+    req: EgressRecordRequest,
+    now: time::OffsetDateTime,
+) -> Result<nugget_core::egress::EgressEvent, RpcError> {
+    if !ipc::CLIENT_EGRESS_FEATURES.contains(&req.feature.as_str()) {
+        return Err(RpcError::invalid_params(format!(
+            "unknown feature {:?}; egress.record takes one of {:?}",
+            req.feature,
+            ipc::CLIENT_EGRESS_FEATURES
+        )));
+    }
+    let host = req.host.trim().to_ascii_lowercase();
+    let host_ok = !host.is_empty()
+        && host.len() <= MAX_EGRESS_HOST
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
+    if !host_ok {
+        return Err(RpcError::invalid_params(
+            "host must be a bare host name or address, with an optional :port",
+        ));
+    }
+    let at = req.at.unwrap_or(now);
+    if at > now + EGRESS_FUTURE_SLACK {
+        return Err(RpcError::invalid_params("at is in the future"));
+    }
+    Ok(nugget_core::egress::EgressEvent {
+        at,
+        host,
+        feature: req.feature,
+        bytes_sent: req.bytes_sent,
+        bytes_received: req.bytes_received,
+        items: Vec::new(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1304,6 +1357,72 @@ mod tests {
             role,
             text: text.into(),
         }
+    }
+
+    fn record(host: &str, feature: &str, at: Option<time::OffsetDateTime>) -> EgressRecordRequest {
+        EgressRecordRequest {
+            at,
+            host: host.into(),
+            feature: feature.into(),
+            bytes_sent: 0,
+            bytes_received: 512,
+        }
+    }
+
+    #[test]
+    fn client_egress_takes_only_known_features_and_bare_hosts() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let ev = client_egress_event(record(" GitHub.com ", "update_check", None), now).unwrap();
+        assert_eq!(
+            (
+                ev.host.as_str(),
+                ev.feature.as_str(),
+                ev.at,
+                ev.bytes_received
+            ),
+            ("github.com", "update_check", now, 512)
+        );
+        assert!(ev.items.is_empty());
+        for host in ["objects.example.com:443", "192.168.1.2:8080", "[::1]:80"] {
+            assert!(
+                client_egress_event(record(host, "update_download", None), now).is_ok(),
+                "{host}"
+            );
+        }
+        // A daemon feature, or anything made up, is refused: the app can't write rows that look
+        // like the daemon's own traffic.
+        for feature in ["chat", "ask", "model_download", "", "update-check"] {
+            let e = client_egress_event(record("github.com", feature, None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{feature}");
+        }
+        for host in [
+            "",
+            " ",
+            "https://github.com",
+            "github.com/x",
+            "user@github.com",
+            "a b",
+        ] {
+            let e = client_egress_event(record(host, "update_check", None), now).unwrap_err();
+            assert_eq!(e.code, code::INVALID_PARAMS, "{host:?}");
+        }
+        let long = "a".repeat(MAX_EGRESS_HOST + 1);
+        assert!(client_egress_event(record(&long, "update_check", None), now).is_err());
+    }
+
+    #[test]
+    fn client_egress_keeps_a_past_time_and_refuses_a_future_one() {
+        let now = time::OffsetDateTime::from_unix_timestamp(1_790_000_000).unwrap();
+        let queued = now - time::Duration::hours(3);
+        let ev =
+            client_egress_event(record("github.com", "update_check", Some(queued)), now).unwrap();
+        assert_eq!(ev.at, queued);
+        let skew = now + time::Duration::minutes(1);
+        assert!(client_egress_event(record("github.com", "update_check", Some(skew)), now).is_ok());
+        let ahead = now + time::Duration::hours(1);
+        assert!(
+            client_egress_event(record("github.com", "update_check", Some(ahead)), now).is_err()
+        );
     }
 
     #[test]

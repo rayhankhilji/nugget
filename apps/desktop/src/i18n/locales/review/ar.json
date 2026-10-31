@@ -1798,6 +1798,11 @@
     "updates.unconfigured",
     "updates.upToDate",
     "updates.whatsNew",
-    "updates.working"
+    "updates.working",
+    "onboarding.welcome.leaves4",
+    "updates.ask.title",
+    "updates.ask.body",
+    "updates.ask.stable",
+    "updates.ask.chosen"
   ]
 }

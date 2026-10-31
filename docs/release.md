@@ -907,12 +907,26 @@ menu has an *Updates…* item that changes to *Update available: vX…*.
 
 | Setting | Default | Effect |
 |---|---|---|
-| Channel | **Stable** | `stable.json` from the `updater-feed` release. **Beta** follows `beta.json` (prereleases as well as stable). **Off** never contacts the server. |
+| Channel | **not chosen** | Until the user picks one, nothing contacts the server. **Stable** follows `stable.json` from the `updater-feed` release (the recommended answer). **Beta** follows `beta.json` (prereleases as well as stable). **Off** never contacts the server. |
 | Auto-install | **off** | Off means **notify only**: the app shows the version and its release notes, and nothing is downloaded until the user clicks *Install vX and restart*. On means the update is downloaded and verified in the background, its notes are shown, and it installs **when the user quits Nugget**. |
 
-- Checks run 60 s after launch and then every 24 h, plus *Check now*. A check fetches static
-  files only (the channel's JSON feed and its `.sig`, then the feed again through the updater
-  plugin), with no identifiers beyond what any HTTPS request carries.
+- **Opt-in.** `settings.json` has `channel_chosen`; while it is false, no check runs (background
+  or *Check now*). Setup's last step and the *Updates* card ask once: "Check for updates
+  automatically?" (Stable, recommended / Beta / Off), with a line on what a check sends. Builds
+  without an updater key never ask. A settings file from before the flag counts as chosen only
+  for Beta or Off, which were never defaults; Stable there was the old default, so it counts as
+  not chosen and the user is asked.
+- Once a channel is chosen, a check runs right away, then 60 s after each launch and every 24 h,
+  plus *Check now*. A check fetches static files only (the channel's JSON feed and its `.sig`,
+  then the feed again through the updater plugin), with no identifiers beyond what any HTTPS
+  request carries.
+- **Every request is in the egress ledger.** The app sends each one to `nuggetd` with
+  `egress.record`: feature `update_check` for the feed, the `.sig` and the plugin's feed fetch
+  (one row per host, so a redirect to GitHub's content host has its own row), `update_download`
+  for a package. Rows wait in memory while the daemon is not running and are written when it
+  connects; rows still queued when the app quits are lost. The plugin's own requests are recorded
+  with the bytes of the app's verified fetch of the same feed, and a download under the host the
+  feed names (the plugin doesn't report redirects).
 - **The feed is verified before it is used.** The app downloads `<channel>.json` and
   `<channel>.json.sig` and checks the minisign signature over the exact bytes against the
   built-in updater key (`apps/desktop/src-tauri/src/updater/feed.rs`). Nothing in the feed is
@@ -1045,8 +1059,8 @@ gaps: [security/reproducible-builds.md](security/reproducible-builds.md).
   relying on this, or upgrade.)
 - Linux packages aren't GPG-signed, and there's no apt/rpm repository yet; users get updates
   through the in-app updater or by downloading again.
-- Update checks aren't recorded in the daemon's egress ledger (the desktop app makes them, not
-  `nuggetd`).
+- Update rows are written after each request, not before it: an app crash mid-request, or quitting
+  while the daemon is down, leaves no row.
 - The `updater-feed` manifests are signed (§5), but the signature covers only the bytes, not the
   channel name or a date: someone who controls the feed URL can still replay an older signed feed
   or serve the beta feed to stable users (a signed prerelease), and can always withhold the feed.

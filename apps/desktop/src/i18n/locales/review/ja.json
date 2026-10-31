@@ -393,6 +393,11 @@
     "today.learning.unnamedThread",
     "today.noFeedback",
     "today.noSourcesBody",
-    "today.noSourcesTitle"
+    "today.noSourcesTitle",
+    "onboarding.welcome.leaves4",
+    "updates.ask.title",
+    "updates.ask.body",
+    "updates.ask.stable",
+    "updates.ask.chosen"
   ]
 }
