@@ -542,7 +542,10 @@ pub(crate) fn assemble<T>(
     limit: usize,
     offset: UtcOffset,
 ) -> TimelineCut<T> {
-    let mut kept: Vec<Dated<T>> = events.into_iter().filter(|e| range.contains(e.at)).collect();
+    let mut kept: Vec<Dated<T>> = events
+        .into_iter()
+        .filter(|e| range.contains(e.at))
+        .collect();
     kept.sort_by(timeline_order);
     let total = kept.len();
     let months = month_counts(kept.iter().map(|e| e.at), offset);
@@ -607,7 +610,10 @@ mod tests {
     #[test]
     fn kind_prefers_metadata_then_mime_then_source() {
         let none = json!({});
-        assert_eq!(classify_kind(&json!({"kind": "email"}), None, None), ItemKind::Mail);
+        assert_eq!(
+            classify_kind(&json!({"kind": "email"}), None, None),
+            ItemKind::Mail
+        );
         assert_eq!(
             classify_kind(&json!({"kind": "Calendar"}), Some("message/rfc822"), None),
             ItemKind::Event
@@ -625,17 +631,26 @@ mod tests {
             classify_kind(&json!({"kind": "note"}), Some("message/rfc822"), None),
             ItemKind::Mail
         );
-        assert_eq!(classify_kind(&none, Some("message/partial"), None), ItemKind::Mail);
+        assert_eq!(
+            classify_kind(&none, Some("message/partial"), None),
+            ItemKind::Mail
+        );
         assert_eq!(
             classify_kind(&none, Some("text/calendar; charset=utf-8"), None),
             ItemKind::Event
         );
-        assert_eq!(classify_kind(&none, Some("application/ics"), None), ItemKind::Event);
+        assert_eq!(
+            classify_kind(&none, Some("application/ics"), None),
+            ItemKind::Event
+        );
         assert_eq!(
             classify_kind(&none, Some("application/x-slack-chat+json"), None),
             ItemKind::Chat
         );
-        assert_eq!(classify_kind(&none, Some("text/plain"), Some("gmail")), ItemKind::Mail);
+        assert_eq!(
+            classify_kind(&none, Some("text/plain"), Some("gmail")),
+            ItemKind::Mail
+        );
         for (src, want) in [
             ("imap", ItemKind::Mail),
             ("outlook", ItemKind::Mail),
@@ -655,16 +670,28 @@ mod tests {
         }
         assert_eq!(classify_kind(&none, None, None), ItemKind::File);
         // Non-string kinds are ignored.
-        assert_eq!(classify_kind(&json!({"kind": 3}), None, None), ItemKind::File);
+        assert_eq!(
+            classify_kind(&json!({"kind": 3}), None, None),
+            ItemKind::File
+        );
     }
 
     #[test]
     fn kind_names_round_trip() {
-        for k in [ItemKind::Mail, ItemKind::Event, ItemKind::Chat, ItemKind::File] {
+        for k in [
+            ItemKind::Mail,
+            ItemKind::Event,
+            ItemKind::Chat,
+            ItemKind::File,
+        ] {
             assert_eq!(ItemKind::parse(k.as_str()), Some(k));
             assert_eq!(serde_json::to_value(k).unwrap(), k.as_str());
         }
-        assert_eq!(ItemKind::parse("email"), None, "filters take the four names only");
+        assert_eq!(
+            ItemKind::parse("email"),
+            None,
+            "filters take the four names only"
+        );
     }
 
     #[test]
@@ -677,7 +704,10 @@ mod tests {
             parse_lenient("Sat, 02 Mar 2024 10:00:00 +0000"),
             Some(dt("2024-03-02T10:00:00Z"))
         );
-        assert_eq!(parse_lenient(" 2024-03-02 "), Some(dt("2024-03-02T00:00:00Z")));
+        assert_eq!(
+            parse_lenient(" 2024-03-02 "),
+            Some(dt("2024-03-02T00:00:00Z"))
+        );
         assert_eq!(
             parse_lenient("2024-03-02T10:30"),
             Some(dt("2024-03-02T10:30:00Z"))
@@ -686,7 +716,15 @@ mod tests {
             parse_lenient("2024-03-02 10:30:15.25Z"),
             Some(dt("2024-03-02T10:30:15Z"))
         );
-        for bad in ["", "soon", "2024-13-01", "2024-02-30", "24-03-02", "2024-03-02T25:00", "2024-03-02T1:00"] {
+        for bad in [
+            "",
+            "soon",
+            "2024-13-01",
+            "2024-02-30",
+            "24-03-02",
+            "2024-03-02T25:00",
+            "2024-03-02T1:00",
+        ] {
             assert_eq!(parse_lenient(bad), None, "{bad}");
         }
     }
@@ -699,9 +737,15 @@ mod tests {
             own_date(Some("2023-12-24"), Some(m), c),
             (dt("2023-12-24T00:00:00Z"), DateSource::Extracted)
         );
-        assert_eq!(own_date(Some("garbage"), Some(m), c), (m, DateSource::Modified));
+        assert_eq!(
+            own_date(Some("garbage"), Some(m), c),
+            (m, DateSource::Modified)
+        );
         assert_eq!(own_date(None, None, c), (c, DateSource::Indexed));
-        assert_eq!(serde_json::to_value(DateSource::Indexed).unwrap(), "indexed");
+        assert_eq!(
+            serde_json::to_value(DateSource::Indexed).unwrap(),
+            "indexed"
+        );
     }
 
     #[test]
@@ -713,7 +757,10 @@ mod tests {
         assert_eq!(fact_date(Some(v), [e1], c), (v, FactDateSource::ValidFrom));
         assert_eq!(fact_date(None, [e1, e2], c), (e2, FactDateSource::Evidence));
         assert_eq!(fact_date(None, [], c), (c, FactDateSource::Recorded));
-        assert_eq!(serde_json::to_value(FactDateSource::ValidFrom).unwrap(), "valid_from");
+        assert_eq!(
+            serde_json::to_value(FactDateSource::ValidFrom).unwrap(),
+            "valid_from"
+        );
     }
 
     #[test]
@@ -721,7 +768,10 @@ mod tests {
         let r = day_range("", Some("2024-03-01"), Some("2024-03-31"), off(60)).unwrap();
         assert_eq!(r.start, Some(dt("2024-02-29T23:00:00Z")));
         assert_eq!(r.end, Some(dt("2024-03-31T23:00:00Z")));
-        assert!(r.contains(dt("2024-02-29T23:30:00Z")), "00:30 local on the 1st");
+        assert!(
+            r.contains(dt("2024-02-29T23:30:00Z")),
+            "00:30 local on the 1st"
+        );
         assert!(!r.contains(dt("2024-02-29T22:59:00Z")));
         assert!(r.contains(dt("2024-03-31T22:59:00Z")));
         assert!(!r.contains(dt("2024-03-31T23:00:00Z")));
@@ -739,7 +789,10 @@ mod tests {
         let err = day_range("", Some("2024-02-02"), Some("2024-02-01"), off(0)).unwrap_err();
         assert!(err.to_string().contains("after"), "{err}");
         assert!(matches!(err, Error::Invalid(_)));
-        assert_eq!(parse_day("x", "2024-02-29").unwrap(), Date::from_calendar_date(2024, Month::February, 29).unwrap());
+        assert_eq!(
+            parse_day("x", "2024-02-29").unwrap(),
+            Date::from_calendar_date(2024, Month::February, 29).unwrap()
+        );
     }
 
     #[test]
@@ -767,8 +820,14 @@ mod tests {
         assert_eq!(
             counts,
             vec![
-                FacetCount { value: "2023-12".into(), count: 1 },
-                FacetCount { value: "2024-05".into(), count: 2 },
+                FacetCount {
+                    value: "2023-12".into(),
+                    count: 1
+                },
+                FacetCount {
+                    value: "2024-05".into(),
+                    count: 2
+                },
             ]
         );
     }
@@ -788,10 +847,25 @@ mod tests {
 
     fn pool() -> Vec<Candidate> {
         vec![
-            cand("mail", ItemKind::Mail, &["sam", "acme"], dt("2024-03-02T10:00:00Z")),
+            cand(
+                "mail",
+                ItemKind::Mail,
+                &["sam", "acme"],
+                dt("2024-03-02T10:00:00Z"),
+            ),
             cand("mail", ItemKind::Mail, &["sam"], dt("2024-04-02T10:00:00Z")),
-            cand("cal", ItemKind::Event, &["sam", "sam"], dt("2024-03-10T10:00:00Z")),
-            cand("files", ItemKind::File, &["acme"], dt("2023-11-02T10:00:00Z")),
+            cand(
+                "cal",
+                ItemKind::Event,
+                &["sam", "sam"],
+                dt("2024-03-10T10:00:00Z"),
+            ),
+            cand(
+                "files",
+                ItemKind::File,
+                &["acme"],
+                dt("2023-11-02T10:00:00Z"),
+            ),
             cand("files", ItemKind::File, &[], dt("2024-03-31T23:30:00Z")),
         ]
     }
@@ -804,10 +878,16 @@ mod tests {
         assert_eq!(counts(&t.kinds), [("file", 2), ("mail", 2), ("event", 1)]);
         // A repeated id in one item counts once.
         assert_eq!(counts(&t.people), [("sam", 3), ("acme", 2)]);
-        assert_eq!(counts(&t.months), [("2023-11", 1), ("2024-03", 3), ("2024-04", 1)]);
+        assert_eq!(
+            counts(&t.months),
+            [("2023-11", 1), ("2024-03", 3), ("2024-04", 1)]
+        );
         // At +01:00 the late-March file moves to April.
         let (_, t) = facet(&pool(), &FacetFilters::default(), off(60));
-        assert_eq!(counts(&t.months), [("2023-11", 1), ("2024-03", 2), ("2024-04", 2)]);
+        assert_eq!(
+            counts(&t.months),
+            [("2023-11", 1), ("2024-03", 2), ("2024-04", 2)]
+        );
     }
 
     #[test]
@@ -847,7 +927,10 @@ mod tests {
         let (hits, t) = facet(&pool(), &f, off(0));
         assert_eq!(hits, [0, 2, 4]);
         // Months ignore the date range (so the client can widen it).
-        assert_eq!(counts(&t.months), [("2023-11", 1), ("2024-03", 3), ("2024-04", 1)]);
+        assert_eq!(
+            counts(&t.months),
+            [("2023-11", 1), ("2024-03", 3), ("2024-04", 1)]
+        );
         assert_eq!(counts(&t.kinds), [("event", 1), ("file", 1), ("mail", 1)]);
         // At +01:00 the March range ends earlier and excludes the late file.
         let f = FacetFilters {
@@ -859,7 +942,10 @@ mod tests {
 
     #[test]
     fn selected_values_always_appear() {
-        let c = vec![FacetCount { value: "mail".into(), count: 2 }];
+        let c = vec![FacetCount {
+            value: "mail".into(),
+            count: 2,
+        }];
         let out = with_selected(c, &["mail".into(), "slack".into()]);
         assert_eq!(counts(&out), [("mail", 2), ("slack", 0)]);
     }
@@ -867,25 +953,40 @@ mod tests {
     #[test]
     fn people_facet_tops_names_and_keeps_selections() {
         let tally = vec![
-            FacetCount { value: "ent_a".into(), count: 5 },
-            FacetCount { value: "ent_b".into(), count: 3 },
-            FacetCount { value: "ent_c".into(), count: 1 },
+            FacetCount {
+                value: "ent_a".into(),
+                count: 5,
+            },
+            FacetCount {
+                value: "ent_b".into(),
+                count: 3,
+            },
+            FacetCount {
+                value: "ent_c".into(),
+                count: 1,
+            },
         ];
-        let names: HashMap<String, (String, String)> = [
-            ("ent_a", "Ann"),
-            ("ent_b", "Bob"),
-            ("ent_c", "Cy"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_owned(), (v.to_owned(), "person".to_owned())))
-        .collect();
+        let names: HashMap<String, (String, String)> =
+            [("ent_a", "Ann"), ("ent_b", "Bob"), ("ent_c", "Cy")]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), (v.to_owned(), "person".to_owned())))
+                .collect();
         let selected = vec![
             // A merged-away id resolving to ent_b: shown under the given id, once.
-            SelectedPerson { given: "ent_old".into(), live: Some("ent_b".into()) },
+            SelectedPerson {
+                given: "ent_old".into(),
+                live: Some("ent_b".into()),
+            },
             // Below the top: appended with its count.
-            SelectedPerson { given: "ent_c".into(), live: Some("ent_c".into()) },
+            SelectedPerson {
+                given: "ent_c".into(),
+                live: Some("ent_c".into()),
+            },
             // Unknown: count 0, its id as name.
-            SelectedPerson { given: "ent_zz".into(), live: None },
+            SelectedPerson {
+                given: "ent_zz".into(),
+                live: None,
+            },
         ];
         let out = people_facet(&tally, &selected, &names, 2);
         let got: Vec<(&str, &str, &str, u32)> = out
@@ -928,10 +1029,16 @@ mod tests {
             ev(t0, false, "item a"),
         ];
         let all = assemble(events.clone(), &DayRange::default(), 10, off(0));
-        assert_eq!(names(&all), ["old", "item a", "item z", "fact a", "fact b", "may"]);
+        assert_eq!(
+            names(&all),
+            ["old", "item a", "item z", "fact a", "fact b", "may"]
+        );
         assert_eq!(all.total, 6);
         assert!(!all.truncated);
-        assert_eq!(counts(&all.months), [("2023-01", 1), ("2024-03", 4), ("2024-05", 1)]);
+        assert_eq!(
+            counts(&all.months),
+            [("2023-01", 1), ("2024-03", 4), ("2024-05", 1)]
+        );
 
         let cut = assemble(events.clone(), &DayRange::default(), 2, off(0));
         assert_eq!(names(&cut), ["fact b", "may"]);

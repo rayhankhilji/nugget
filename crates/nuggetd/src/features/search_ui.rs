@@ -32,7 +32,7 @@ use crate::graphview::{item_url, status_str};
 mod logic;
 
 use logic::{
-    Candidate, DateSource, DayRange, Dated, FacetCount, FacetFilters, FactDateSource, ItemKind,
+    Candidate, DateSource, Dated, DayRange, FacetCount, FacetFilters, FactDateSource, ItemKind,
     PersonFacet, SelectedPerson,
 };
 
@@ -162,7 +162,9 @@ fn check_list(field: &str, list: &[String]) -> Result<()> {
 
 fn check_item(field: &str, item: &ItemRef) -> Result<()> {
     if item.source.as_str().is_empty() || item.key.as_str().is_empty() {
-        return Err(Error::Invalid(format!("{field}: source and key are required")));
+        return Err(Error::Invalid(format!(
+            "{field}: source and key are required"
+        )));
     }
     check_len(field, item.source.as_str())?;
     check_len(field, item.key.as_str())
@@ -322,7 +324,8 @@ impl SearchUi {
 
         let retriever = self.state.retriever.clone();
         let query = p.query.clone();
-        let results = on_blocking_thread(async move { retriever.search(&query, POOL).await }).await?;
+        let results =
+            on_blocking_thread(async move { retriever.search(&query, POOL).await }).await?;
         let pool_limited = results.items.len() >= POOL;
         let hits = results.hits();
         let source_kinds = self.source_kinds().await;
@@ -431,7 +434,9 @@ fn load_pool(
         let kind = logic::classify_kind(
             &item.metadata,
             item.mime.as_deref(),
-            source_kinds.get(hit.item.source.as_str()).map(String::as_str),
+            source_kinds
+                .get(hit.item.source.as_str())
+                .map(String::as_str),
         );
         out.push(PoolItem {
             people: people.remove(&hit.item).unwrap_or_default(),
@@ -796,10 +801,7 @@ struct PreviewResult {
 impl SearchUi {
     async fn preview(&self, p: PreviewParams) -> Result<PreviewResult> {
         check_item("item", &p.item)?;
-        let source_kind = self
-            .source_kinds()
-            .await
-            .remove(p.item.source.as_str());
+        let source_kind = self.source_kinds().await.remove(p.item.source.as_str());
         let store = self.state.store.clone();
         let graph = self.state.knowledge.graph.clone();
         blocking(move || build_preview(&store, graph.as_ref(), p, source_kind.as_deref())).await
@@ -906,7 +908,9 @@ mod tests {
     #[test]
     fn lists_and_values_are_bounded() {
         let many: Vec<String> = (0..=MAX_FILTER_VALUES).map(|i| i.to_string()).collect();
-        let err = check_list("filters.sources", &many).unwrap_err().to_string();
+        let err = check_list("filters.sources", &many)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("filters.sources"), "{err}");
         assert!(check_list("x", &many[..MAX_FILTER_VALUES]).is_ok());
         let long = vec!["a".repeat(MAX_VALUE_LEN + 1)];

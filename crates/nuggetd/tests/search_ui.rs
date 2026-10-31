@@ -359,7 +359,10 @@ async fn faceted_search_filters_and_counts_disjunctively() {
         .map(|p| p["name"].as_str().unwrap())
         .collect();
     assert_eq!(names.len(), 2);
-    assert!(names.contains(&"Sam Lee") && names.contains(&"Acme"), "{names:?}");
+    assert!(
+        names.contains(&"Sam Lee") && names.contains(&"Acme"),
+        "{names:?}"
+    );
     // RFC 2822 extracted date, kind from metadata synonym.
     let m2 = hit("m2");
     assert_eq!(m2["date"], "2024-04-10T09:00:00Z");
@@ -578,7 +581,12 @@ async fn timeline_orders_truncates_and_resolves_merged_ids() {
     assert_eq!(events[4]["kind"], "event");
     assert_eq!(
         values(&t["months"]),
-        pairs(&[("2022-07", 1), ("2022-08", 1), ("2024-03", 3), ("2024-04", 1)])
+        pairs(&[
+            ("2022-07", 1),
+            ("2022-08", 1),
+            ("2024-03", 3),
+            ("2024-04", 1)
+        ])
     );
 
     // The newest `limit` are kept; months still cover everything.

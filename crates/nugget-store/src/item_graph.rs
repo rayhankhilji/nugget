@@ -32,7 +32,8 @@ pub struct EntityLinkRow {
 /// `CROSS JOIN`s fix the join order (refs, then mentions, then entities by primary key), so
 /// each ref is a `mentions_item` range and the planner never scans `entities`; a
 /// mention of a merged-away id resolves to its survivor (merges keep chains one hop long).
-pub(crate) const ENTITIES_IN_ITEMS_SQL: &str = "SELECT want.key, l.id, l.name, l.kind, count(*) AS n
+pub(crate) const ENTITIES_IN_ITEMS_SQL: &str =
+    "SELECT want.key, l.id, l.name, l.kind, count(*) AS n
      FROM json_each(?1) AS want
      CROSS JOIN mentions m ON m.source = json_extract(want.value, '$[0]')
                           AND m.key = json_extract(want.value, '$[1]')
