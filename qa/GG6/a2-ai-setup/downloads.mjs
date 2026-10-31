@@ -55,11 +55,12 @@ async function setup(name, { size = 8 * MiB, bps = 2 * MiB, fault, home, minRam 
   const files = {};
   const srv = await startFaultServer(files, { bps, fault });
   const dir = fs.mkdtempSync(path.join(SCRATCH, `dl-${name}-`));
-  const s = signManifest(dir, [{ id: `qa-${name}`, bytes, minRam, port: srv.port }]);
-  files[s.paths[`qa-${name}`]] = bytes;
+  const mid = `qa-${name.toLowerCase()}`;
+  const s = signManifest(dir, [{ id: mid, bytes, minRam, port: srv.port }]);
+  files[s.paths[mid]] = bytes;
   const env = { ...s.env, NUGGET_E2E_LLAMA_SERVER: BIN.fake, NUGGET_E2E_RAM_GB: "16", NUGGET_E2E_GPU: "unknown" };
   const d = await startHome(BIN.e2e, { home, config, env });
-  return { id: `qa-${name}`, bytes, srv, d, env, dir };
+  return { id: mid, bytes, srv, d, env, dir };
 }
 
 const stagingOf = (home) => {

@@ -164,6 +164,7 @@ export const NO_RT_CONFIG = `[runtime]\nenabled = false\n\n[mcp]\nhttp = false\n
 function readyLine(logDir) {
   if (!fs.existsSync(logDir)) return null;
   for (const f of fs.readdirSync(logDir)) {
+    if (f.includes(".prev-")) continue;
     for (const line of fs.readFileSync(path.join(logDir, f), "utf8").split("\n")) {
       if (!line.includes("nuggetd ready")) continue;
       const m = line.match(/"socket":"([^"]+)"/);

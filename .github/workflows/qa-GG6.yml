@@ -8,6 +8,11 @@ name: QA GG6 (first week, three OSes)
 # recording timings, screenshots and what is left behind. Scripts: qa/GG6/real-os/.
 
 on:
+  # TEMPORARY (removed before the final push): a workflow that is not on the default branch can't be
+  # dispatched, so pushes to the QA branch that touch the harness run it.
+  push:
+    branches: [qa/first-week]
+    paths: [".github/workflows/qa-GG6.yml", "qa/GG6/real-os/**"]
   workflow_dispatch:
     inputs:
       release_run:
@@ -24,8 +29,8 @@ permissions:
   actions: read # download the bundles from the release dry run
 
 env:
-  RELEASE_RUN: ${{ inputs.release_run }}
-  SOAK_MIN: ${{ inputs.soak_minutes || '40' }}
+  RELEASE_RUN: ${{ inputs.release_run || '41073117904' }}
+  SOAK_MIN: ${{ inputs.soak_minutes || '5' }}
   GG6_OUT: ${{ github.workspace }}/gg6-out
   NO_COLOR: "1"
 
