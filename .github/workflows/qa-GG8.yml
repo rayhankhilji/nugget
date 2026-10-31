@@ -12,10 +12,6 @@ name: QA GG8 (privacy and egress, real models)
 # Dispatch only; the results are uploaded as artifacts and summarised in the log.
 
 on:
-  # TEMPORARY while iterating; removed in the final commit.
-  push:
-    branches: [qa/privacy]
-    paths: ["qa/GG8/real/**", ".github/workflows/qa-GG8.yml"]
   workflow_dispatch:
     inputs:
       idle_secs:
