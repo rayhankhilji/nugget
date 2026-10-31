@@ -61,6 +61,7 @@
   "common.next": "التالي",
   "common.done": "تم",
   "common.loading": "جارٍ التحميل",
+  "list.loadingMore": "جارٍ تحميل المزيد…",
   "common.details": "التفاصيل",
   "common.offlineHint": "يتعذر الوصول إلى Nugget الآن.",
   "common.errorCode": "(الرمز {code})",

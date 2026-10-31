@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2, BB1 and FF1; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1, FF1 and II5; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.gdrive",
     "addSource.blurb.gcal",
@@ -485,6 +485,7 @@
     "today.notify.briefTitle",
     "updates.intro",
     "updates.login.ask",
-    "updates.upToDate"
+    "updates.upToDate",
+    "list.loadingMore"
   ]
 }

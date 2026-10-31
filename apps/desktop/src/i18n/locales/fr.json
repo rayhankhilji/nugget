@@ -61,6 +61,7 @@
   "common.next": "Suivant",
   "common.done": "Terminé",
   "common.loading": "Chargement",
+  "list.loadingMore": "Chargement de la suite…",
   "common.details": "Détails",
   "common.offlineHint": "Nugget est injoignable pour le moment.",
   "common.errorCode": "(code {code})",

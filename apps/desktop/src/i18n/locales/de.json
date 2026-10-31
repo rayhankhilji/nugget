@@ -61,6 +61,7 @@
   "common.next": "Weiter",
   "common.done": "Fertig",
   "common.loading": "Wird geladen",
+  "list.loadingMore": "Weitere werden geladen…",
   "common.details": "Details",
   "common.offlineHint": "Nugget ist gerade nicht erreichbar.",
   "common.errorCode": "(Code {code})",

@@ -61,6 +61,7 @@
   "common.next": "आगे",
   "common.done": "हो गया",
   "common.loading": "लोड हो रहा है",
+  "list.loadingMore": "और लोड हो रहे हैं…",
   "common.details": "विवरण",
   "common.offlineHint": "अभी Nugget तक पहुँचा नहीं जा सकता।",
   "common.errorCode": "(कोड {code})",

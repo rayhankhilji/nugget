@@ -20,9 +20,12 @@ import { GoToPage } from "../components/GoToPage";
 import { Highlight, itemFileName, plainSnippet, SourceBadge } from "../components/Provenance";
 import { sourceKindOf } from "../recency";
 import { EmptyState, ErrorNote, Loading, NotAvailable, PageHeader, Spinner } from "../components/ui";
+import { VirtualList } from "../components/VirtualList";
 import { formatNumber, useT } from "../i18n";
 
 const LIMITS = [10, 25, 50];
+/** Hits can repeat an item (several passages): the position keeps keys unique. */
+const hitKey = (h: SearchHit, i: number) => `${h.item.source}\u0000${h.item.key}\u0000${i}`;
 const BUDGETS = [1000, 2000, 4000, 8000];
 
 export function SearchPage() {
@@ -138,12 +141,20 @@ export function SearchPage() {
         </EmptyState>
       )}
       {hits && hits.length > 0 && (
-        <ol className={busy ? "results pg-stale" : "results"} aria-labelledby="search-results-heading" aria-busy={busy}>
-          {hits.map((h, i) => {
+        <VirtualList
+          as="ol"
+          className={busy ? "results pg-stale" : "results"}
+          aria-labelledby="search-results-heading"
+          aria-busy={busy}
+          items={hits}
+          itemKey={hitKey}
+          estimateSize={110}
+          rowClassName="result"
+          renderItem={(h) => {
             const source = byId.get(h.item.source);
             const title = h.title || itemFileName(h.item.key, source?.kind ?? sourceKindOf(h.item.source)) || t("search.untitled");
             return (
-              <li key={`${h.item.source}\u0000${h.item.key}\u0000${i}`} className="result">
+              <>
                 <div className="result-head">
                   <span className="result-title" dir="auto">
                     {title}
@@ -162,10 +173,10 @@ export function SearchPage() {
                 <p className="muted small result-meta">
                   <SourceBadge sourceId={h.item.source} name={source?.name} kind={source?.kind} itemKey={h.item.key} title={h.title} />
                 </p>
-              </li>
+              </>
             );
-          })}
-        </ol>
+          }}
+        />
       )}
       {!hits && !busy && !error &&
         (nothingIndexed ? (

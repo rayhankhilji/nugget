@@ -1,6 +1,6 @@
 {
   "wave": "Z2",
-  "note": "Machine-translated in waves Z2 and BB1; a native speaker should review these keys.",
+  "note": "Machine-translated in waves Z2, BB1 and II5; a native speaker should review these keys.",
   "keys": [
     "addSource.addTitle.caldav",
     "addSource.addTitle.files",
@@ -899,6 +899,7 @@
     "knowledge.tab.graph",
     "knowledge.tabsLabel",
     "knowledge.title",
+    "list.loadingMore",
     "mcp.app.generic-http",
     "mcp.app.generic-stdio",
     "mcp.error.name",

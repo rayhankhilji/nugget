@@ -61,6 +61,7 @@
   "common.next": "Next",
   "common.done": "Done",
   "common.loading": "Loading",
+  "list.loadingMore": "Loading more…",
   "common.details": "Details",
   "common.offlineHint": "Nugget isn't reachable right now.",
   "common.errorCode": "(code {code})",

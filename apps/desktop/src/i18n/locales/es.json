@@ -61,6 +61,7 @@
   "common.next": "Siguiente",
   "common.done": "Listo",
   "common.loading": "Cargando",
+  "list.loadingMore": "Cargando más…",
   "common.details": "Detalles",
   "common.offlineHint": "No se puede conectar con Nugget en este momento.",
   "common.errorCode": "(código {code})",
