@@ -1185,7 +1185,11 @@ impl Drafter {
         let q = query.to_owned();
         let fut = async move {
             let started = Instant::now();
-            let opts = ContextOptions { exclude_sensitive };
+            // The query is thread text: its date phrases describe events, not the facts' dates.
+            let opts = ContextOptions {
+                exclude_sensitive,
+                ignore_dates: true,
+            };
             let job = async move { retriever.pack_context_with(&q, budget, opts).await }.boxed();
             let packed = match runner {
                 Some(r) => r.run(job).await,

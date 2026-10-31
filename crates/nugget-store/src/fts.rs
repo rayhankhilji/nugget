@@ -19,6 +19,19 @@
 //! `*`) is inert: every token emitted is a double-quoted FTS5 string (inner `"` doubled), so
 //! nothing a user types can become FTS5 syntax. At most [`MAX_QUERY_TERMS`] words are used,
 //! counting each word of a phrase.
+//!
+//! **CJK and Thai.** `unicode61` does not split scripts written without spaces (Han, kana,
+//! Thai) or with particles attached (Hangul), so a whole sentence would be one token. Both the
+//! indexed text (through the `fts_segment` SQL function, called by the FTS triggers) and the
+//! query (here) go through [`segment`], which rewrites each run of such characters as its
+//! overlapping bigrams (`星商事` → `星商 商事`). A query word becomes the phrase of its bigrams, so
+//! character order matters; a lone character matches as a bigram prefix. Other text is unchanged.
+
+use std::borrow::Cow;
+
+use rusqlite::Connection;
+use rusqlite::functions::FunctionFlags;
+use rusqlite::types::{Value, ValueRef};
 
 /// Most words used from a query (each word of a phrase counts).
 pub(crate) const MAX_QUERY_TERMS: usize = 32;
@@ -45,6 +58,97 @@ fn is_quote(c: char) -> bool {
     matches!(c, '"' | '“' | '”')
 }
 
+/// Characters [`segment`] splits into bigrams: Han, kana, Hangul and Thai letters.
+fn is_segmented(c: char) -> bool {
+    matches!(c,
+        '\u{0E01}'..='\u{0E30}' | '\u{0E32}'..='\u{0E33}' | '\u{0E40}'..='\u{0E46}' // Thai
+        | '\u{1100}'..='\u{11FF}' // Hangul Jamo
+        | '\u{3005}'..='\u{3007}' // 々 〆 〇
+        | '\u{3041}'..='\u{3096}' | '\u{309D}'..='\u{309F}' // Hiragana
+        | '\u{30A1}'..='\u{30FA}' | '\u{30FC}'..='\u{30FF}' | '\u{31F0}'..='\u{31FF}' // Katakana
+        | '\u{3130}'..='\u{318F}' | '\u{A960}'..='\u{A97F}' // Hangul compatibility jamo
+        | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}' | '\u{F900}'..='\u{FAFF}' // Han
+        | '\u{AC00}'..='\u{D7FF}' // Hangul syllables, Jamo Extended-B
+        | '\u{FF66}'..='\u{FF9F}' | '\u{FFA0}'..='\u{FFDC}' // halfwidth kana and Hangul
+        | '\u{20000}'..='\u{3134F}' // Han extensions B-G
+    )
+}
+
+/// Combining marks inside a segmented run (Thai vowel and tone marks, kana voicing marks).
+/// `unicode61` treats them as separators, so [`segment`] drops them to keep a word in one run.
+fn is_run_mark(c: char) -> bool {
+    matches!(c,
+        '\u{0E31}' | '\u{0E34}'..='\u{0E3A}' | '\u{0E47}'..='\u{0E4E}' | '\u{3099}' | '\u{309A}'
+    )
+}
+
+/// Whether `text` holds characters that [`segment`] rewrites.
+pub(crate) fn has_segmented(text: &str) -> bool {
+    text.chars().any(is_segmented)
+}
+
+/// `text` with each run of [`is_segmented`] characters replaced by its overlapping bigrams (a
+/// one-character run stays as is), set off by spaces. Text without such characters is returned
+/// unchanged.
+pub(crate) fn segment(text: &str) -> Cow<'_, str> {
+    if !has_segmented(text) {
+        return Cow::Borrowed(text);
+    }
+    fn flush(run: &mut Vec<char>, out: &mut String) {
+        match run.as_slice() {
+            [] => return,
+            [c] => {
+                out.push(' ');
+                out.push(*c);
+            }
+            _ => {
+                for w in run.windows(2) {
+                    out.push(' ');
+                    out.push(w[0]);
+                    out.push(w[1]);
+                }
+            }
+        }
+        out.push(' ');
+        run.clear();
+    }
+    let mut out = String::with_capacity(text.len() * 3);
+    let mut run = Vec::new();
+    for c in text.chars() {
+        if is_segmented(c) {
+            run.push(c);
+        } else if !(is_run_mark(c) && !run.is_empty()) {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    Cow::Owned(out)
+}
+
+/// Register `fts_segment(text)` ([`segment`] as SQL; non-text values pass through) on `conn`.
+/// The FTS triggers call it, so every connection that writes items or chunks needs it.
+pub(crate) fn register_functions(conn: &Connection) -> rusqlite::Result<()> {
+    conn.create_scalar_function(
+        "fts_segment",
+        1,
+        FunctionFlags::SQLITE_UTF8
+            | FunctionFlags::SQLITE_DETERMINISTIC
+            | FunctionFlags::SQLITE_INNOCUOUS,
+        |ctx| {
+            Ok(match ctx.get_raw(0) {
+                ValueRef::Text(b) => Value::Text(segment(&String::from_utf8_lossy(b)).into_owned()),
+                raw => Value::try_from(raw)?,
+            })
+        },
+    )
+}
+
+/// Characters that continue a word: alphanumerics, and marks inside a segmented run.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || is_run_mark(c)
+}
+
 /// Parse `query` into terms (see the module docs).
 fn parse(query: &str) -> Vec<Term> {
     let cs: Vec<char> = query.chars().collect();
@@ -67,7 +171,7 @@ fn parse(query: &str) -> Vec<Term> {
                 Some(len) => {
                     let end = start + 1 + len;
                     let words: Vec<String> = cs[start + 1..end]
-                        .split(|c| !c.is_alphanumeric())
+                        .split(|&c| !is_word_char(c))
                         .filter(|w| !w.is_empty())
                         .take(budget)
                         .map(|w| w.iter().collect())
@@ -88,7 +192,7 @@ fn parse(query: &str) -> Vec<Term> {
         }
         if c.is_alphanumeric() {
             let mut end = start;
-            while end < n && cs[end].is_alphanumeric() {
+            while end < n && is_word_char(cs[end]) {
                 end += 1;
             }
             let word: String = cs[start..end].iter().collect();
@@ -110,6 +214,11 @@ fn parse(query: &str) -> Vec<Term> {
     terms
 }
 
+/// A segmented word of at most this many bigrams (five characters) is matched as a phrase...
+const MAX_PHRASE_BIGRAMS: usize = 4;
+/// ...a longer one by any of its first this many distinct bigrams.
+const MAX_RUN_BIGRAMS: usize = 64;
+
 /// `s` as an FTS5 string literal.
 fn quoted(s: &str) -> String {
     format!("\"{}\"", s.replace('"', "\"\""))
@@ -117,9 +226,57 @@ fn quoted(s: &str) -> String {
 
 fn render(atom: &Atom) -> String {
     match atom {
-        Atom::Words(words) => quoted(&words.join(" ")),
-        Atom::Prefix(word) => format!("{} *", quoted(word)),
+        Atom::Words(words) => {
+            let text = words
+                .iter()
+                .flat_map(|w| {
+                    segment(w)
+                        .split_whitespace()
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            // A lone segmented character is only indexed inside bigrams: match their prefix.
+            let mut cs = text.chars();
+            match (cs.next(), cs.next()) {
+                (Some(c), None) if is_segmented(c) => format!("{} *", quoted(&text)),
+                // A long unspaced run (a CJK sentence, as in a thread a draft replies to) as one
+                // phrase would only match itself verbatim: any of its bigrams, so bm25 ranks
+                // chunks by how many they share, as it does for spaced words.
+                _ if words.len() == 1 && text.split(' ').count() > MAX_PHRASE_BIGRAMS => {
+                    let mut seen = std::collections::HashSet::new();
+                    text.split(' ')
+                        .filter(|b| seen.insert(*b))
+                        .take(MAX_RUN_BIGRAMS)
+                        .map(quoted)
+                        .collect::<Vec<_>>()
+                        .join(" OR ")
+                }
+                _ => quoted(&text),
+            }
+        }
+        Atom::Prefix(word) => {
+            let text = segment(word)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            format!("{} *", quoted(&text))
+        }
     }
+}
+
+/// The positive words of `query`, lowercased: what a hit's text should contain.
+pub(crate) fn needles(query: &str) -> Vec<String> {
+    parse(query)
+        .into_iter()
+        .filter(|t| !t.exclude)
+        .flat_map(|t| match t.atom {
+            Atom::Words(words) => words,
+            Atom::Prefix(word) => vec![word],
+        })
+        .map(|w| w.to_lowercase())
+        .collect()
 }
 
 /// The FTS5 `MATCH` expression for user text, or `None` if it has no positive term.
@@ -160,6 +317,29 @@ mod tests {
         assert_eq!(q("rust tokio"), Some(r#""rust" OR "tokio""#.into()));
         assert_eq!(q("café über"), Some(r#""café" OR "über""#.into()));
         assert_eq!(q("F28 (ignition)"), Some(r#""F28" OR "ignition""#.into()));
+    }
+
+    #[test]
+    fn segment_splits_cjk_and_thai_runs_into_bigrams() {
+        assert!(matches!(segment("café über 120"), Cow::Borrowed(_)));
+        assert_eq!(segment("星商事ロゴ"), " 星商 商事 事ロ ロゴ ");
+        assert_eq!(segment("ABC星商(金)"), "ABC 星商 ( 金 )");
+        assert_eq!(segment("다음 주"), " 다음   주 ");
+        // Thai vowel and tone marks are dropped inside a run.
+        assert_eq!(segment("ประชุม"), " ปร ระ ะช ชม ");
+    }
+
+    #[test]
+    fn cjk_query_words_become_bigram_phrases() {
+        assert_eq!(q("星商事"), Some(r#""星商 商事""#.into()));
+        assert_eq!(q("Hoshi 見積り"), Some(r#""Hoshi" OR "見積 積り""#.into()));
+        assert_eq!(q("金"), Some(r#""金" *"#.into()));
+        assert_eq!(q("お見積*"), Some(r#""お見 見積" *"#.into()));
+        assert_eq!(q(r#""星商事 ロゴ""#), Some(r#""星商 商事 ロゴ""#.into()));
+        assert_eq!(q("x -上海"), Some(r#"("x") NOT ("上海")"#.into()));
+        // Thai marks do not split a query word.
+        assert_eq!(q("ประชุม"), Some(r#""ปร ระ ะช ชม""#.into()));
+        assert_eq!(needles("Hoshi -x 見積り"), ["hoshi", "見積り"]);
     }
 
     #[test]

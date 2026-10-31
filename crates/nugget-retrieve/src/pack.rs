@@ -33,6 +33,9 @@ pub(crate) struct PackItem {
     pub sensitive: bool,
     /// The item's date (`YYYY-MM-DD`), for `Citation::date`.
     pub date: Option<String>,
+    /// The item lacks a key term of the query (see `Retriever::partial_matches`); reported as
+    /// [`PackedPassage::partial`] so a prompt can tell a near miss from an answer.
+    pub partial: bool,
     pub primary: Chunk,
     /// Chunks at `ord - 1` and `ord + 1` that exist.
     pub neighbours: Vec<Chunk>,
@@ -123,7 +126,7 @@ fn fits(blocks: &[Block], items: &[PackItem], budget: usize) -> bool {
 }
 
 /// The first `chars` characters of `text`, cut back to a word boundary when there is one, plus `…`.
-fn cut(text: &str, chars: usize) -> String {
+pub(crate) fn cut(text: &str, chars: usize) -> String {
     let end = text
         .char_indices()
         .nth(chars)
@@ -267,6 +270,7 @@ pub(crate) fn pack(items: &[PackItem], opts: PackOptions) -> (ContextResponse, V
             chunk_ids: b.pieces.values().map(|p| p.id).collect(),
             truncated: b.truncated,
             text: body(b),
+            partial: items[b.idx].partial,
         })
         .collect();
     (
@@ -308,6 +312,7 @@ mod tests {
             url: None,
             sensitive: false,
             date: None,
+            partial: false,
             primary,
             neighbours,
             secondary,

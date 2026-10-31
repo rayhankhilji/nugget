@@ -279,6 +279,11 @@ impl Router {
             .remove(id);
     }
 
+    /// Whether `id` failed within the cooldown (it is then routed after healthy providers).
+    pub fn in_cooldown(&self, id: &ProviderId) -> bool {
+        self.cooling(id)
+    }
+
     fn cooling(&self, id: &ProviderId) -> bool {
         self.failed_at
             .lock()

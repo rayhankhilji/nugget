@@ -373,6 +373,7 @@ impl Daemon {
         };
 
         let localities = local::localities(&providers);
+        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
         let configured: Vec<_> = built
             .iter()
             .map(|c| {
@@ -380,7 +381,7 @@ impl Daemon {
                     .get(&c.id)
                     .copied()
                     .unwrap_or(nugget_core::capability::Locality::Cloud);
-                (c.id.clone(), c.tiers.clone(), loc)
+                (c.id.clone(), c.tiers.clone(), loc, probes.get(c).is_some())
             })
             .collect();
         let tier_map = local::tier_map(&configured, &local::slot_routes(local.as_deref()));
@@ -392,7 +393,6 @@ impl Daemon {
         if let Some(l) = &local {
             l.attach(&router);
         }
-        let probes = ProbeCache::load(ProbeCache::path_for(&paths));
         for cfg in &built {
             if let Some(caps) = probes.get(cfg) {
                 router.set_capabilities(&cfg.id, caps.clone());
