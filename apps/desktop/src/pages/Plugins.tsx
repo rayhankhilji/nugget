@@ -3,14 +3,18 @@ import {
   approvePlugin,
   installPlugin,
   isMethodNotFound,
+  listPluginCatalog,
   listPlugins,
   newPluginCapabilities,
+  newPluginFileRoots,
   parsePluginHost,
   pickPluginFile,
   pluginCapabilitiesEmpty,
+  pluginFileRoots,
   removePlugin,
   setPluginEnabled,
   type PluginCapabilities,
+  type PluginCatalogEntry,
   type PluginInfo,
   type PluginInstallResult,
   type PluginSignature,
@@ -44,6 +48,7 @@ export function capabilityLines(caps: PluginCapabilities, t: TFunction): string[
   });
   for (const name of caps.secrets) lines.push(t("plugins.cap.secret", { name }));
   if (caps.kv_max_bytes > 0) lines.push(t("plugins.cap.kv", { size: formatBytes(caps.kv_max_bytes) }));
+  if (pluginFileRoots(caps).length > 0) lines.push(t("plugins.cap.fileRoots"));
   return lines;
 }
 
@@ -51,6 +56,7 @@ export function capabilityLines(caps: PluginCapabilities, t: TFunction): string[
 export function PluginsPage() {
   const t = useT();
   const loaded = useAsync(listPlugins);
+  const catalog = useAsync(listPluginCatalog);
   const [plugins, setPlugins] = useState<PluginInfo[] | null>(null);
   const [staged, setStaged] = useState<PluginInstallResult | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -71,12 +77,13 @@ export function PluginsPage() {
     setNotice(kinds.includes("connector") ? t("plugins.notice.connectorRestart", { name }) : null);
   };
 
-  const installFromFile = async () => {
+  /** Install a package file (picked, or from the catalog): staged for approval, or committed at once. */
+  const installFrom = async (pick: () => Promise<string | null>) => {
     setInstallError(null);
     setNotice(null);
     setInstalling(true);
     try {
-      const path = await pickPluginFile();
+      const path = await pick();
       if (!path) return;
       const r = await installPlugin(path);
       if (r.needs_approval || !r.installed) {
@@ -85,6 +92,7 @@ export function PluginsPage() {
         // An update that asks for nothing new is committed at once.
         installed(r.name, r.version, r.kinds, true);
         loaded.reload();
+        catalog.reload();
       }
     } catch (e) {
       setInstallError(e);
@@ -92,6 +100,8 @@ export function PluginsPage() {
       setInstalling(false);
     }
   };
+  const installFromFile = () => installFrom(pickPluginFile);
+  const installFromCatalog = (entry: PluginCatalogEntry) => installFrom(async () => entry.path);
 
   const unavailable = isMethodNotFound(loaded.error);
   const list = [...(plugins ?? [])].sort((a, b) => a.name.localeCompare(b.name));
@@ -141,6 +151,18 @@ export function PluginsPage() {
               ))}
             </ul>
           )}
+          {!isMethodNotFound(catalog.error) && (
+            <AvailablePlugins
+              entries={catalog.data?.entries ?? null}
+              truncated={catalog.data?.truncated === true}
+              loading={catalog.loading}
+              error={catalog.error}
+              onRetry={catalog.reload}
+              installedIds={new Set((plugins ?? []).map((p) => p.id))}
+              busy={installing}
+              onInstall={(e) => void installFromCatalog(e)}
+            />
+          )}
           <details className="help" open={plugins !== null && list.length === 0}>
             <summary>{t("plugins.help.summary")}</summary>
             <ul>
@@ -161,6 +183,7 @@ export function PluginsPage() {
             if (plugin) {
               replace(plugin);
               installed(plugin.name, plugin.version, plugin.kinds, Boolean(s.installed_version));
+              catalog.reload();
             } else {
               setAnnounce(t("plugins.announce.cancelled", { name: s.name }));
             }
@@ -173,6 +196,7 @@ export function PluginsPage() {
           onClose={() => setRemoving(null)}
           onRemoved={() => {
             setPlugins((l) => (l ?? []).filter((x) => x.id !== removing.id));
+            catalog.reload();
             setAnnounce(t("plugins.announce.removed", { name: removing.name }));
             setRemoving(null);
           }}
@@ -180,6 +204,147 @@ export function PluginsPage() {
       )}
     </div>
   );
+}
+
+/** Signed packages found in the plugin catalog folders, installed through the same approval flow. */
+function AvailablePlugins({
+  entries,
+  truncated,
+  loading,
+  error,
+  onRetry,
+  installedIds,
+  busy,
+  onInstall,
+}: {
+  entries: PluginCatalogEntry[] | null;
+  truncated: boolean;
+  loading: boolean;
+  error: unknown;
+  onRetry: () => void;
+  installedIds: Set<string>;
+  busy: boolean;
+  onInstall: (entry: PluginCatalogEntry) => void;
+}) {
+  const t = useT();
+  const sorted = [...(entries ?? [])].sort((a, b) => catalogName(a).localeCompare(catalogName(b)));
+  return (
+    <section aria-labelledby="plugins-available-title">
+      <h2 id="plugins-available-title">{t("plugins.available.title")}</h2>
+      <p className="muted small">{t("plugins.available.description")}</p>
+      <ErrorNote error={error} onRetry={onRetry} />
+      {loading && !entries && <Loading label={t("plugins.available.loading")} />}
+      {entries && sorted.length === 0 && <p className="muted small">{t("plugins.available.empty")}</p>}
+      {sorted.length > 0 && (
+        <ul className="source-list" aria-label={t("plugins.available.listLabel")}>
+          {sorted.map((e) => (
+            <CatalogRow
+              key={e.path}
+              entry={e}
+              installed={installedIds.has(e.id) && Boolean(e.installed_version)}
+              busy={busy}
+              onInstall={() => onInstall(e)}
+            />
+          ))}
+        </ul>
+      )}
+      {truncated && <p className="muted small">{t("plugins.available.truncated", { count: sorted.length })}</p>}
+    </section>
+  );
+}
+
+function CatalogRow({
+  entry: e,
+  installed,
+  busy,
+  onInstall,
+}: {
+  entry: PluginCatalogEntry;
+  installed: boolean;
+  busy: boolean;
+  onInstall: () => void;
+}) {
+  const t = useT();
+  const name = catalogName(e);
+  const access = capabilityLines(e.requested, t);
+  const upToDate = installed && !e.update_available;
+
+  return (
+    <li className="source">
+      <div className="source-icon-wrap">
+        <PluginIcon />
+      </div>
+      <div className="source-body">
+        <div className="source-head">
+          <h3 className="source-name">
+            {name}
+          </h3>
+          {/* Without a verified signer (unreadable, unsigned, untrusted) the error says why. */}
+          {!(e.error && !e.signer) && <Badge tone={SIGNATURE_TONE[e.signature]}>{t(SIGNATURE_LABEL[e.signature])}</Badge>}
+          {upToDate && <Badge tone="good">{t("plugins.available.installed")}</Badge>}
+          {e.update_available && !e.error && <Badge tone="accent">{t("plugins.available.updateAvailable")}</Badge>}
+        </div>
+        {e.description && <p className="small source-meta">{e.description}</p>}
+        {!e.error && (
+          <p className="muted small source-meta">
+            <span>
+              {e.update_available && e.installed_version
+                ? t("plugins.approve.versionUpdate", { from: e.installed_version, to: e.version })
+                : t("plugins.version", { version: e.version })}
+            </span>
+            <span>{e.kinds.map((k) => kindLabel(k, t)).join(t("common.listSeparator"))}</span>
+            <code>{e.id}</code>
+          </p>
+        )}
+        {e.error ? (
+          <p className="note note-error small">
+            {t("plugins.available.cannotInstall", { file: e.file_name || e.path, error: e.error })}
+          </p>
+        ) : (
+          <details className="help">
+            <summary>{t("plugins.available.access")}</summary>
+            {access.length === 0 ? (
+              <p className="small muted">{t("plugins.cap.none")}</p>
+            ) : (
+              <ul className="small">
+                {access.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            )}
+          </details>
+        )}
+        {!e.error && !upToDate && (
+          <div className="source-actions">
+            <button
+              type="button"
+              className={e.update_available ? "btn btn-small" : "btn btn-small btn-primary"}
+              onClick={onInstall}
+              disabled={busy}
+              aria-label={
+                e.update_available
+                  ? t("plugins.available.updateLabel", { name, version: e.version })
+                  : t("plugins.available.installLabel", { name })
+              }
+            >
+              {e.update_available ? t("plugins.available.update") : t("plugins.available.install")}
+            </button>
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** Last segment of a `/` or `\\` path (the whole path when it has none). */
+function baseName(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
+}
+
+/** What a catalog entry is called: its name, else its file (or unreadable folder) name. */
+function catalogName(e: PluginCatalogEntry): string {
+  return e.name || e.file_name || baseName(e.path);
 }
 
 function PluginIcon() {
@@ -310,9 +475,11 @@ function ApprovalDialog({ staged, onClose }: { staged: PluginInstallResult; onCl
   const [error, setError] = useState<unknown>(null);
   const update = Boolean(staged.installed_version);
   const fresh = newPluginCapabilities(staged.requested, staged.previously_approved);
-  const freshLines = new Set(capabilityLines(fresh, t));
+  const freshLines = new Set(
+    capabilityLines({ ...fresh, file_roots: newPluginFileRoots(staged.requested, staged.previously_approved) }, t),
+  );
   const lines = capabilityLines(staged.requested, t);
-  const empty = pluginCapabilitiesEmpty(staged.requested);
+  const empty = pluginCapabilitiesEmpty(staged.requested) && pluginFileRoots(staged.requested).length === 0;
 
   const cancel = () => {
     if (busy) return;

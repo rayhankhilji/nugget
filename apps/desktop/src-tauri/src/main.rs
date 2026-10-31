@@ -113,6 +113,7 @@ fn main() {
             commands::plugins_approve,
             commands::plugins_remove,
             commands::plugins_enable,
+            commands::plugins_catalog,
             commands::pick_plugin_file,
             history::chat_history_load,
             history::chat_history_save,

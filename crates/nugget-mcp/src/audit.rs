@@ -1,7 +1,13 @@
 //! Audit entries for MCP calls and the egress rule.
 //!
-//! Every `tools/call` and `resources/read` produces one [`AuditEntry`] through the server's audit
-//! callback (the daemon appends it to the store's hash-chained audit log). An entry names the
+//! Every `tools/call` and `resources/read` that reaches a tool produces one [`AuditEntry`] through
+//! the server's audit callback. Calls refused before they run (rate limited, revoked client) are
+//! audited too, coalesced to at most one entry per client and outcome per minute, carrying the
+//! number of refusals coalesced since the previous one (`refused_since_last_entry`). Over HTTP a
+//! rate-limited request is refused before its body (and so its method) is read, and is recorded
+//! as [`ACTION_REFUSED`]; an HTTP request with a missing, wrong or revoked token names no client
+//! and is not audited (it is answered 401). The daemon appends entries to the store's
+//! hash-chained audit log. An entry names the
 //! client, the tool, a **summary** of the arguments (short strings clipped, numbers as is), the
 //! outcome and which items were returned (references only). It never contains returned content.
 //!
@@ -35,6 +41,9 @@ pub type AuditSink = Arc<dyn Fn(AuditEntry) + Send + Sync>;
 pub const ACTION_TOOL: &str = "mcp.tool_call";
 /// `action` of resource-read entries.
 pub const ACTION_RESOURCE: &str = "mcp.resource_read";
+/// `action` of an HTTP request refused at the gate before its method was read (rate limited);
+/// the target is `"http"`. Coalesced like every refusal entry.
+pub const ACTION_REFUSED: &str = "mcp.request_refused";
 
 const MAX_ARG_CHARS: usize = 80;
 const MAX_AUDITED_ITEMS: usize = 50;
@@ -65,7 +74,7 @@ impl Transport {
 }
 
 /// Outcome recorded in an audit entry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Outcome {
     Ok,
     /// Not allowed by the client's scopes.
@@ -73,6 +82,12 @@ pub enum Outcome {
     /// Bad arguments or not found.
     Rejected,
     Error,
+    /// Stopped before it finished: the client sent `notifications/cancelled`, or the session
+    /// ended (end of input, disconnect, shutdown).
+    Cancelled,
+    /// Refused by the per-client rate limit before it ran (coalesced, see
+    /// `server::REFUSAL_AUDIT_WINDOW`).
+    RateLimited,
 }
 
 impl Outcome {
@@ -82,6 +97,8 @@ impl Outcome {
             Self::Denied => "denied",
             Self::Rejected => "rejected",
             Self::Error => "error",
+            Self::Cancelled => "cancelled",
+            Self::RateLimited => "rate_limited",
         }
     }
 }

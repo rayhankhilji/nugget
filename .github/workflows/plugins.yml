@@ -2,18 +2,24 @@ name: Plugins
 
 # Builds the plugin SDK workspace (crates/nugget-plugin/sdk: the SDK, the example plugins and the
 # hostile test plugin) for wasm32-wasip2, then runs the nugget-plugin host tests with the guests
-# required, so a missing target cannot turn the guest tests into silent skips.
+# required, so a missing target cannot turn the guest tests into silent skips. Then builds the
+# first-party plugins (plugins/build.sh), signs them with a throwaway key made in the job, installs
+# them through the daemon's catalog and install flow, and uploads the signed packages.
 
 on:
   push:
     branches: [main]
     paths:
       - "crates/nugget-plugin/**"
+      - "crates/nuggetd/src/features/plugins.rs"
+      - "plugins/**"
       - ".github/workflows/plugins.yml"
       - "Cargo.lock"
   pull_request:
     paths:
       - "crates/nugget-plugin/**"
+      - "crates/nuggetd/src/features/plugins.rs"
+      - "plugins/**"
       - ".github/workflows/plugins.yml"
       - "Cargo.lock"
   workflow_dispatch:
@@ -43,7 +49,7 @@ jobs:
       # crates/nugget-plugin/src/tests/mod.rs); building them there first makes that a no-op.
       GUEST_TARGET_DIR: ${{ github.workspace }}/target/plugin-guests
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
@@ -53,11 +59,12 @@ jobs:
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup target add wasm32-wasip2
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
         with:
           workspaces: |
             . -> target
             crates/nugget-plugin/sdk -> ../../../target/plugin-guests
+            plugins -> ../target/plugins
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The SDK workspace is separate from the root one, so the root fmt/clippy runs miss it.
@@ -83,3 +90,66 @@ jobs:
         env:
           NUGGET_PLUGIN_REQUIRE_GUESTS: "1"
         run: cargo test --locked -p nugget-plugin
+
+      # No key here: build.sh stages unsigned package dirs (<out>/<id>/), and the signer is built
+      # ahead so the signing step runs nothing but it.
+      - name: Build the first-party plugins (unsigned) and the signer
+        env:
+          OUT_DIR: ${{ github.workspace }}/target/first-party-plugins
+        run: |
+          set -euo pipefail
+          rm -rf "$OUT_DIR"
+          # The SDK examples and plugins/{rss,obsidian,read-later}.
+          CARGO_FLAGS=--locked bash plugins/build.sh --out "$OUT_DIR"
+          cargo build --locked -p nugget-plugin --example sign-plugin
+
+      # Sync each first-party plugin under the real wasm host (crates/nugget-plugin/src/tests/
+      # first_party.rs): build.sh left their wasm in target/plugins.
+      - name: First-party plugins on the real host
+        env:
+          NUGGET_FIRST_PARTY_WASM_DIR: ${{ github.workspace }}/target/plugins/wasm32-wasip2/release
+        run: cargo test --locked -p nugget-plugin first_party
+
+      # The throwaway key exists only in this step's shell: masked, never written to disk, to
+      # $GITHUB_ENV or to an output, and gone with the step. Only its public half leaves the step.
+      # The packages are for CI only; a user trusts them only by adding that public key to
+      # [plugins] trusted_keys.
+      - name: Sign the first-party plugins (throwaway key)
+        id: sign
+        env:
+          OUT_DIR: ${{ github.workspace }}/target/first-party-plugins
+        run: |
+          set -euo pipefail
+          NUGGET_PLUGIN_SIGNING_KEY="$(openssl rand -hex 32)"
+          echo "::add-mask::$NUGGET_PLUGIN_SIGNING_KEY"
+          export NUGGET_PLUGIN_SIGNING_KEY
+          public=""
+          for dir in "$OUT_DIR"/*/; do
+            id="$(basename "$dir")"
+            out="$(target/debug/examples/sign-plugin "$dir" --out "$OUT_DIR/$id.nuggetplugin")"
+            echo "$out"
+            public="$(sed -n 's/.* with public key \([0-9a-f]*\)$/\1/p' <<<"$out")"
+          done
+          unset NUGGET_PLUGIN_SIGNING_KEY
+          [[ "$public" =~ ^[0-9a-f]{64}$ ]] || { echo "no public key in the signer output" >&2; exit 1; }
+          echo "public_key=$public" >> "$GITHUB_OUTPUT"
+          ls -l "$OUT_DIR"/*.nuggetplugin
+
+      # Installs every signed package from a catalog dir through plugins.catalog, plugins.install
+      # and plugins.approve, with only the public key trusted.
+      - name: Install the signed plugins through the daemon's catalog
+        env:
+          NUGGET_FIRST_PARTY_PLUGINS: ${{ github.workspace }}/target/first-party-plugins
+          NUGGET_FIRST_PARTY_PLUGINS_PUBKEY: ${{ steps.sign.outputs.public_key }}
+        run: >-
+          cargo test --locked -p nuggetd --lib
+          features::plugins::tests::first_party_plugins_install_from_the_catalog
+          -- --exact --nocapture
+
+      - name: Upload the signed first-party plugins
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: first-party-plugins
+          path: target/first-party-plugins/*.nuggetplugin
+          if-no-files-found: error
+          retention-days: 14

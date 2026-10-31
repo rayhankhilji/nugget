@@ -2,6 +2,7 @@
 
 use nugget_core::egress::EgressEvent;
 use nugget_core::ids::ProviderId;
+use nugget_core::ipc::PluginCatalogResult;
 use nugget_core::ipc::{
     AskRequest, AskStarted, AuthBegin, ChatCancel, ChatRequest, ChatStarted, ClaimStatusRequest,
     ContextRequest, ContextResponse, EgressRecentRequest, EntitiesRequest, EntityDetail, EntityRef,
@@ -656,6 +657,16 @@ pub async fn plugins_enable(
 ) -> Result<PluginInfo> {
     check_plugin_field("id", &request.id)?;
     daemon.call(&app, plugin_method::ENABLE, &request).await
+}
+
+/// Signed packages in the plugin catalog folders, verified but not installed; each entry's path
+/// goes to `plugins_install`.
+#[tauri::command]
+pub async fn plugins_catalog(
+    app: AppHandle,
+    daemon: State<'_, Daemon>,
+) -> Result<PluginCatalogResult> {
+    daemon.call(&app, plugin_method::CATALOG, &()).await
 }
 
 // ---- shell helpers ----

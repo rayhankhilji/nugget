@@ -991,6 +991,7 @@ pub mod plugin_method {
     pub const APPROVE: &str = "plugins.approve";
     pub const REMOVE: &str = "plugins.remove";
     pub const ENABLE: &str = "plugins.enable";
+    pub const CATALOG: &str = "plugins.catalog";
 }
 
 /// Capabilities a plugin requests or the user approved.
@@ -1005,6 +1006,9 @@ pub struct PluginCapabilities {
     /// Size of the plugin's key-value store in bytes (`0` = none).
     #[serde(default)]
     pub kv_max_bytes: u64,
+    /// Settings fields of a connector source that hold a folder or file the plugin may read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_roots: Vec<String>,
 }
 
 /// Who signed a plugin, as far as this daemon trusts it.
@@ -1118,6 +1122,59 @@ pub struct PluginRemoveResult {
 pub struct PluginEnableParams {
     pub id: String,
     pub enabled: bool,
+}
+
+/// One `.nuggetplugin` file found in a catalog directory (`plugins.catalog`). Verified as
+/// `plugins.install` would, but not installed. When `error` is set the package cannot be
+/// installed and only `path` and `file_name` are reliable.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogEntry {
+    /// Absolute path to pass to `plugins.install`.
+    pub path: String,
+    pub file_name: String,
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub kinds: Vec<String>,
+    /// What the package's manifest requests.
+    #[serde(default)]
+    pub requested: PluginCapabilities,
+    #[serde(default)]
+    pub connector_display_name: Option<String>,
+    #[serde(default)]
+    pub signature: PluginSignature,
+    /// Hex ed25519 public key that signed the package (empty when unknown or unsigned).
+    #[serde(default)]
+    pub signer: String,
+    /// The installed version of this plugin, if any.
+    #[serde(default)]
+    pub installed_version: Option<String>,
+    /// Installed at an older version than this package.
+    #[serde(default)]
+    pub update_available: bool,
+    /// Installing it would ask for approval (a new install, or an update asking for more).
+    #[serde(default)]
+    pub needs_approval: bool,
+    /// Why it cannot be installed (unreadable, unsigned, untrusted signer, ...).
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PluginCatalogResult {
+    pub entries: Vec<PluginCatalogEntry>,
+    /// The directories that were searched.
+    #[serde(default)]
+    pub dirs: Vec<String>,
+    /// More packages were found than are listed.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 // ---- Agent (M4) ----

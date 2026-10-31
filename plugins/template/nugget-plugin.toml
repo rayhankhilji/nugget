@@ -1,0 +1,25 @@
+# The plugin's manifest. The host grants exactly what is declared here (and what the user
+# approves): change `id` before you ship, and list only the hosts you really call.
+id = "dev.example.my-plugin"
+name = "My plugin"
+version = "0.1.0"
+description = "Indexes items from a JSON API and offers a word-count tool."
+kind = ["connector", "tool"]
+
+[capabilities]
+hosts = ["api.example.com"]
+secrets = ["api_token"]
+
+[connector]
+display_name = "My JSON API"
+poll_interval_secs = 1800
+
+[connector.settings_schema]
+type = "object"
+required = ["endpoint"]
+
+[connector.settings_schema.properties.endpoint]
+type = "string"
+format = "uri"
+title = "Items endpoint"
+description = "For example https://api.example.com/items"

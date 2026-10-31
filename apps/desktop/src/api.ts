@@ -2202,3 +2202,87 @@ export const learningApi = {
   /** Audited; the daemon then emits `cards.changed` with reason `reset_learning`. */
   resetLearning: (request: ResetLearningRequest) => call<ResetLearningResult>("proactive_reset_learning", { request }),
 };
+
+// ---- FF4 plugins ----
+// Mirrors `PluginCatalogEntry` / `PluginCatalogResult` and the `file_roots` capability in the
+// `// ---- Plugins (M6) ----` block of `nugget_core::ipc`.
+
+// Declaration merge: `PluginCapabilities` (W6 block) gains file access.
+export interface PluginCapabilities {
+  /** Source settings fields holding a folder or file the plugin may read (absent from older daemons). */
+  file_roots?: string[];
+}
+
+/** `capabilities.file_roots`, empty when absent. */
+export function pluginFileRoots(c: PluginCapabilities | null | undefined): string[] {
+  return Array.isArray(c?.file_roots) ? c.file_roots.filter((f): f is string => typeof f === "string") : [];
+}
+
+/** File roots in `requested` that `previous` did not have (all of them for a new install). */
+export function newPluginFileRoots(requested: PluginCapabilities, previous: PluginCapabilities | null | undefined): string[] {
+  const old = previous ? pluginFileRoots(previous) : [];
+  return pluginFileRoots(requested).filter((f) => !old.includes(f));
+}
+
+/** A `.nuggetplugin` package found in a catalog folder, verified but not installed. */
+export interface PluginCatalogEntry {
+  /** Absolute path; pass it to `installPlugin`. */
+  path: string;
+  file_name: string;
+  /** Empty when `error` is set. */
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  kinds: string[];
+  requested: PluginCapabilities;
+  connector_display_name?: string | null;
+  signature: PluginSignature;
+  signer: string;
+  installed_version?: string | null;
+  /** Installed at an older version. */
+  update_available: boolean;
+  /** Installing asks for approval (new install, or an update asking for more access). */
+  needs_approval: boolean;
+  /** Why it can't be installed. */
+  error?: string | null;
+}
+
+export interface PluginCatalogResult {
+  entries: PluginCatalogEntry[];
+  dirs?: string[];
+  truncated?: boolean;
+}
+
+function isPluginCapabilities(v: unknown): v is PluginCapabilities {
+  if (typeof v !== "object" || v === null) return false;
+  const c = v as Record<string, unknown>;
+  return Array.isArray(c.hosts) && Array.isArray(c.secrets) && typeof c.kv_max_bytes === "number";
+}
+
+export function isPluginCatalogEntry(v: unknown): v is PluginCatalogEntry {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (
+    typeof e.path === "string" &&
+    typeof e.file_name === "string" &&
+    typeof e.id === "string" &&
+    typeof e.name === "string" &&
+    typeof e.version === "string" &&
+    Array.isArray(e.kinds) &&
+    isPluginCapabilities(e.requested) &&
+    (PLUGIN_SIGNATURES as readonly unknown[]).includes(e.signature) &&
+    typeof e.update_available === "boolean" &&
+    (e.error === undefined || e.error === null || typeof e.error === "string")
+  );
+}
+
+/** Plugins available to install from the catalog folders (`plugins.catalog`). Older daemons answer "method not found". */
+export const listPluginCatalog = async (): Promise<PluginCatalogResult> => {
+  const r = await call<PluginCatalogResult>("plugins_catalog");
+  return {
+    entries: Array.isArray(r?.entries) ? r.entries.filter(isPluginCatalogEntry) : [],
+    dirs: Array.isArray(r?.dirs) ? r.dirs.filter((d): d is string => typeof d === "string") : [],
+    truncated: r?.truncated === true,
+  };
+};

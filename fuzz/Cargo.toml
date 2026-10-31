@@ -27,6 +27,10 @@ nugget-models = { path = "../crates/nugget-models" }
 nugget-plugin = { path = "../crates/nugget-plugin" }
 nugget-voice = { path = "../crates/nugget-voice" }
 url = "2"
+# plugin_package: restates the package hashes; plugin_caps: writes manifest TOML strings.
+hex = "0.4"
+serde_json = "1"
+sha2 = "0.11"
 
 # Run with `cargo fuzz run -O` (see README.md): without `-O`, cargo-fuzz adds `-Cdebug-assertions`
 # to RUSTFLAGS for every crate. Debug assertions and overflow checks catch more bugs, but only in
@@ -107,6 +111,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "plugin_package"
+path = "fuzz_targets/plugin_package.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "secret_stream"
 path = "fuzz_targets/secret_stream.rs"
 test = false
@@ -114,8 +125,22 @@ doc = false
 bench = false
 
 [[bin]]
+name = "plugin_caps"
+path = "fuzz_targets/plugin_caps.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "drive_export"
 path = "fuzz_targets/drive_export.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plugin_fs_path"
+path = "fuzz_targets/plugin_fs_path.rs"
 test = false
 doc = false
 bench = false

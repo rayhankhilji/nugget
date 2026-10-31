@@ -19,6 +19,8 @@ pub const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 pub const MAX_KV_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_HOSTS: usize = 64;
 const MAX_SECRETS: usize = 16;
+/// Most `capabilities.file_roots` a plugin may declare.
+pub const MAX_FILE_ROOTS: usize = 8;
 
 /// What a plugin provides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -70,6 +72,14 @@ pub struct Capabilities {
     /// Maximum size of the plugin's key-value store, in bytes. `0` means no key-value store.
     #[serde(default)]
     pub kv_max_bytes: u64,
+    /// Names of connector settings fields (`[a-z0-9_]`, 1 to 64 characters, at most
+    /// [`MAX_FILE_ROOTS`]) that hold a path the user chose: a folder or a single file. The
+    /// connector may read, through `nugget:plugin/fs`, only below those paths. Connectors only.
+    ///
+    /// Left out of the serialized form when empty, so approvals recorded before the field existed
+    /// keep the same canonical JSON (and approval seal).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_roots: Vec<String>,
 }
 
 impl Capabilities {
@@ -88,6 +98,7 @@ impl Capabilities {
         norm(&self.hosts).is_subset(&norm(&other.hosts))
             && self.secrets.iter().all(|s| other.secrets.contains(s))
             && self.kv_max_bytes <= other.kv_max_bytes
+            && self.file_roots.iter().all(|r| other.file_roots.contains(r))
     }
 
     /// The parsed host rules. Fails on any malformed entry.
@@ -115,6 +126,16 @@ impl Capabilities {
                 "kv_max_bytes {} exceeds the limit of {MAX_KV_BYTES}",
                 self.kv_max_bytes
             )));
+        }
+        if self.file_roots.len() > MAX_FILE_ROOTS {
+            return Err(invalid(format!("more than {MAX_FILE_ROOTS} file_roots")));
+        }
+        let mut seen = BTreeSet::new();
+        for r in &self.file_roots {
+            validate_file_root_name(r)?;
+            if !seen.insert(r) {
+                return Err(invalid(format!("file root `{r}` listed twice")));
+            }
         }
         Ok(())
     }
@@ -173,6 +194,11 @@ impl Manifest {
         self.capabilities.validate()?;
         match (&self.connector, self.provides(PluginKind::Connector)) {
             (None, true) => return Err(invalid("a connector plugin needs a [connector] section")),
+            (_, false) if !self.capabilities.file_roots.is_empty() => {
+                return Err(invalid(
+                    "capabilities.file_roots is only allowed when kind has connector",
+                ));
+            }
             (Some(_), false) => {
                 return Err(invalid(
                     "[connector] is only allowed when kind has connector",
@@ -184,6 +210,21 @@ impl Manifest {
                     && !schema.is_object()
                 {
                     return Err(invalid("connector.settings_schema must be a table"));
+                }
+                if let Some(props) = c.settings_schema.as_ref().and_then(|s| s.get("properties")) {
+                    let props = props.as_object().ok_or_else(|| {
+                        invalid("connector.settings_schema.properties must be a table")
+                    })?;
+                    if let Some(r) = self
+                        .capabilities
+                        .file_roots
+                        .iter()
+                        .find(|r| !props.contains_key(r.as_str()))
+                    {
+                        return Err(invalid(format!(
+                            "file root `{r}` is not a property of connector.settings_schema"
+                        )));
+                    }
                 }
                 if c.auth == ConnectorAuth::Password && self.capabilities.secrets.is_empty() {
                     return Err(invalid(
@@ -222,7 +263,7 @@ impl HostRule {
         if scheme != "https" && scheme != "http" {
             return Err(bad("scheme must be https or http"));
         }
-        if rest.is_empty() || rest.contains(['/', '@', '?', '#', '\\', ' ']) {
+        if rest.is_empty() || rest.contains(['/', '@', '?', '#', '\\', ' ', '%']) {
             return Err(bad(
                 "must be a bare host[:port] without path or credentials",
             ));
@@ -236,7 +277,31 @@ impl HostRule {
         }
         let url = Url::parse(&format!("{scheme}://{rest}/")).map_err(|e| bad(&e.to_string()))?;
         let host = match url.host() {
-            Some(url::Host::Domain(d)) => d.to_string(),
+            // `matches` ignores a URL's trailing dot, so the rule must too or it never matches.
+            // `matches` ignores one trailing dot on a URL's host, so the rule drops it too. A
+            // name that is not a plain domain without it (`2..` would read as an IPv4 address,
+            // `a..b` has an empty label) is refused rather than silently changing kind.
+            Some(url::Host::Domain(d)) => {
+                let d = d.strip_suffix('.').unwrap_or(d);
+                if d.is_empty() || d.split('.').any(str::is_empty) {
+                    return Err(bad("empty label in host name"));
+                }
+                // After IDNA and percent-decoding (`ex%2ample` becomes `ex*ample`), only plain
+                // DNS characters may remain, so the rule round-trips through its own spelling.
+                if !d
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+                {
+                    return Err(bad("host name has characters DNS does not allow"));
+                }
+                match Url::parse(&format!("{scheme}://{d}/"))
+                    .ok()
+                    .and_then(|u| u.host().map(|h| matches!(h, url::Host::Domain(_))))
+                {
+                    Some(true) => d.to_string(),
+                    _ => return Err(bad("host name is not a domain without its trailing dot")),
+                }
+            }
             Some(url::Host::Ipv4(ip)) if !wildcard => ip.to_string(),
             Some(url::Host::Ipv6(ip)) if !wildcard => ip.to_string(),
             Some(_) => return Err(bad("a wildcard needs a domain name")),
@@ -321,6 +386,21 @@ pub(crate) fn validate_secret_name(name: &str) -> Result<()> {
     {
         return Err(invalid(format!(
             "secret name `{name}` must be 1-64 chars of [a-z0-9_-]"
+        )));
+    }
+    Ok(())
+}
+
+/// File root names: `[a-z0-9_]`, 1 to 64 characters.
+fn validate_file_root_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+    {
+        return Err(invalid(format!(
+            "file root `{name}` must be 1-64 chars of [a-z0-9_]"
         )));
     }
     Ok(())

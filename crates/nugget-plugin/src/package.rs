@@ -94,15 +94,34 @@ impl PluginPackage {
         }
     }
 
-    /// Read a single-file package. The size is checked before the file is read.
+    /// Read a single-file package. The file is opened once; it must be a regular file, and at
+    /// most [`MAX_PACKAGE_BYTES`] are read from it (so a file that grows after the size check, or
+    /// a device that reports no size, cannot make this read without bound).
     pub fn from_file(path: &Path) -> Result<Self> {
-        let len = std::fs::metadata(path)?.len();
-        if len > MAX_PACKAGE_BYTES as u64 {
-            return Err(Error::Invalid(format!(
+        use std::io::Read;
+        let too_large = || {
+            Error::Invalid(format!(
                 "plugin package is larger than {MAX_PACKAGE_BYTES} bytes"
+            ))
+        };
+        let file = std::fs::File::open(path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(Error::Invalid(format!(
+                "plugin package is not a regular file: {}",
+                path.display()
             )));
         }
-        Self::from_bytes(&std::fs::read(path)?)
+        if meta.len() > MAX_PACKAGE_BYTES as u64 {
+            return Err(too_large());
+        }
+        let mut bytes = Vec::with_capacity(meta.len() as usize);
+        file.take(MAX_PACKAGE_BYTES as u64 + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() > MAX_PACKAGE_BYTES {
+            return Err(too_large());
+        }
+        Self::from_bytes(&bytes)
     }
 
     /// Write the package as a single `.nuggetplugin` file.
@@ -289,4 +308,30 @@ fn check_component_header(wasm: &[u8]) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod from_file_tests {
+    use super::*;
+
+    #[test]
+    fn from_file_refuses_oversize_files_and_non_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Sparse: costs no disk, and is refused before anything is read.
+        let big = tmp.path().join(format!("big.{PACKAGE_EXTENSION}"));
+        std::fs::File::create(&big)
+            .unwrap()
+            .set_len(MAX_PACKAGE_BYTES as u64 + 1)
+            .unwrap();
+        let err = PluginPackage::from_file(&big).unwrap_err().to_string();
+        assert!(err.contains("larger than"), "{err}");
+        let err = PluginPackage::from_file(tmp.path()).unwrap_err();
+        assert!(!err.to_string().is_empty());
+        let small = tmp.path().join(format!("small.{PACKAGE_EXTENSION}"));
+        std::fs::write(&small, b"junk").unwrap();
+        assert!(matches!(
+            PluginPackage::from_file(&small),
+            Err(Error::Invalid(_))
+        ));
+    }
 }

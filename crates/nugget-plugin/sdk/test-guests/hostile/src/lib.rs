@@ -2,8 +2,8 @@
 //! to check that every capability is denied by default and every resource limit holds.
 
 use nugget_plugin_sdk::{
-    Connector, Document, Error, Result, Tool, Tools, Value, export_plugin, http, json, kv, secrets,
-    sink,
+    Connector, Document, Error, Result, Tool, Tools, Value, export_plugin, fs, http, json, kv,
+    secrets, sink,
 };
 
 struct Hostile;
@@ -12,7 +12,7 @@ impl Tools for Hostile {
     fn tools() -> Vec<Tool> {
         [
             "spin", "alloc", "fetch", "secret", "kv_set", "kv_get", "env", "fs", "clock", "sink",
-            "echo", "panic",
+            "echo", "panic", "file",
         ]
         .into_iter()
         .map(|n| Tool::new(n, format!("hostile: {n}"), json!({ "type": "object" })))
@@ -74,6 +74,8 @@ impl Tools for Hostile {
             }
             "echo" => Ok(input),
             "panic" => panic!("deliberate"),
+            // `nugget:plugin/fs` from a tool: always denied.
+            "file" => fs_op(&input),
             other => Err(Error::NotFound(other.to_string())),
         }
     }
@@ -86,6 +88,14 @@ impl Connector for Hostile {
                 std::hint::black_box(());
             }
         }
+        // `{"fs": {...}}`: the same file operations as `sync` mode `fs`, during validate.
+        if let Some(op) = settings.get("fs") {
+            let mut op = op.clone();
+            if let (Some(o), Some(all)) = (op.as_object_mut(), settings.as_object()) {
+                o.extend(all.iter().map(|(k, v)| (k.clone(), v.clone())));
+            }
+            return fs_op(&op).map(|_| ());
+        }
         if settings.get("ok").is_none() {
             return Err(Error::invalid("missing `ok`"));
         }
@@ -93,7 +103,7 @@ impl Connector for Hostile {
     }
 
     /// Settings pick a misbehaviour: `{"mode": "huge_doc" | "bad_metadata" | "kv" | "secret" |
-    /// "wait_cancel" | "count"}`.
+    /// "wait_cancel" | "spin" | "alloc" | "fs" | "count"}`.
     fn sync(settings: &Value, _cursor: Option<Value>) -> Result<Value> {
         match settings["mode"].as_str().unwrap_or("count") {
             "huge_doc" => {
@@ -119,6 +129,19 @@ impl Connector for Hostile {
                     v.unwrap_or_default(),
                 ))?;
             }
+            "spin" => loop {
+                std::hint::black_box(());
+            },
+            "alloc" => {
+                let mib = settings["mib"].as_u64().unwrap_or(1024) as usize;
+                let chunks: Vec<Vec<u8>> = (0..mib).map(|_| vec![1u8; 1024 * 1024]).collect();
+                std::hint::black_box(&chunks);
+            }
+            // One or more file operations; the result goes out as one text document.
+            "fs" => {
+                let out = fs_op(settings)?;
+                sink::upsert(Document::text("fs", "application/json", out.to_string()))?;
+            }
             "wait_cancel" => {
                 // Keep emitting until the host cancels.
                 let mut i = 0u64;
@@ -142,6 +165,41 @@ impl Connector for Hostile {
             }
         }
         Ok(json!({ "done": true }))
+    }
+}
+
+/// `{"op": "read" | "list" | "list_loop" | "stat" | "read_many", "root": "<file root>", "path": "<rel>",
+/// "paths": [...]}`. `read` returns the length and (UTF-8 lossy) text of the file; `read_many`
+/// reads every path in turn and returns the total length.
+fn fs_op(args: &Value) -> Result<Value> {
+    let root = args["root"].as_str().unwrap_or_default();
+    let path = args["path"].as_str().unwrap_or_default();
+    let entry = |e: fs::DirEntry| json!({ "name": e.name, "is_dir": e.is_dir, "size": e.size });
+    match args["op"].as_str().unwrap_or("read") {
+        "read" => {
+            let bytes = fs::read_file(root, path)?;
+            Ok(json!({ "len": bytes.len(), "text": String::from_utf8_lossy(&bytes) }))
+        }
+        "read_many" => {
+            let mut total = 0usize;
+            for p in args["paths"].as_array().cloned().unwrap_or_default() {
+                total += fs::read_file(root, p.as_str().unwrap_or_default())?.len();
+            }
+            Ok(json!({ "len": total }))
+        }
+        // List the same folder `times` times (the op budget must stop it).
+        "list_loop" => {
+            let times = args["times"].as_u64().unwrap_or(1_000_000);
+            for _ in 0..times {
+                fs::read_dir(root, path)?;
+            }
+            Ok(json!({ "times": times }))
+        }
+        "list" => Ok(Value::Array(
+            fs::read_dir(root, path)?.into_iter().map(entry).collect(),
+        )),
+        "stat" => Ok(entry(fs::stat(root, path)?)),
+        other => Err(Error::invalid(format!("unknown op `{other}`"))),
     }
 }
 
