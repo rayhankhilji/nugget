@@ -14,7 +14,8 @@ fs.mkdirSync(SCRATCH, { recursive: true });
 // startDaemon() makes its temp home with os.tmpdir(): keep it in our scratch dir.
 process.env.TMPDIR = SCRATCH;
 process.env.E2E_ARTIFACTS = process.env.E2E_ARTIFACTS || path.join(SCRATCH, "artifacts");
-export const SHOTS = path.join(HERE, "shots");
+// PNGs go to the scratch dir (the repo keeps only a few hand-picked small JPEGs in shots/).
+export const SHOTS = path.join(SCRATCH, "shots");
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const { startBridge } = await import(path.join(E2E, "bridge.mjs"));
@@ -121,5 +122,5 @@ export function progressRows(page) {
 }
 
 export function writeJson(file, v) {
-  fs.writeFileSync(path.join(HERE, file), JSON.stringify(v, null, 1) + "\n");
+  fs.writeFileSync(path.join(HERE, file), JSON.stringify(v) + "\n");
 }

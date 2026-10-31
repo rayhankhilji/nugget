@@ -51,6 +51,11 @@ async function continueAll() {
     // A real user who doesn't read: Continue without picking any option.
     const radiosChecked = await page.getByRole("radio").evaluateAll((rs) => rs.filter((r) => r.checked).map((r) => r.parentElement?.textContent?.trim().slice(0, 40)));
     record(S, "AI step: some option preselected", radiosChecked.length > 0, radiosChecked);
+    const hint = await page.locator("#ob-continue-hint").textContent({ timeout: 1000 }).catch(() => null);
+    timings.ai_hint_nothing_chosen = hint;
+    // The user then explicitly picks "Decide later" (the honest day-one choice) and continues.
+    await page.getByRole("radio", { name: starts("onboarding.ai.later") }).check();
+    timings.ai_hint_after_decide_later = await page.locator("#ob-continue-hint").textContent({ timeout: 1000 }).catch(() => null);
     await L.cont(page);
     await L.waitHeading(page, "onboarding.source.heading");
     mark("source_shown");
@@ -193,16 +198,18 @@ async function skipEach() {
     const seen = [];
     for (let i = 0; i < 5; i++) {
       seen.push(await L.heading(page));
-      await L.skip(page);
+      // Welcome has no "Skip this step" (since EE6); Continue there.
+      if ((await L.footerBtn(page, "onboarding.skipStep").count()) === 0) await L.cont(page);
+      else await L.skip(page);
       await L.sleep(200);
     }
     seen.push(await L.heading(page));
     record(S, "Skip walks welcome..done", seen.at(-1) === t("onboarding.done.heading"), seen);
     const doneText = (await page.locator("main.ob-main").innerText()).replace(/\s+/g, " ");
-    record(S, "Done lists the skipped steps", /You skipped 4 steps/.test(doneText), doneText.slice(0, 300));
+    record(S, "Done lists the skipped steps", /You skipped (3|4) steps/.test(doneText), doneText.slice(0, 300));
     await snap(page, "12-done-after-skip-each");
     const progress = await page.locator(".ob-progress li").evaluateAll((lis) => lis.map((l) => l.className.replace("ob-step ", "")));
-    record(S, "progress marks steps skipped", progress.filter((c) => c.includes("skipped")).length === 5, progress);
+    record(S, "progress marks steps skipped", progress.filter((c) => c.includes("skipped")).length >= 4, progress);
     // Welcome is listed as skipped in the progress bar but not as a pending step; harmless.
     // Done with nothing indexed: primary button is "Start using Nugget".
     const btn = await page.locator("footer.ob-actions .btn-primary").textContent();

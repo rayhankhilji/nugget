@@ -121,7 +121,7 @@ async function runCase(name, c) {
     r.finalText = row?.text;
     r.settleMs = Date.now() - t0;
     const list = await L.rpc(env.daemon.socket, "sources.list");
-    r.source = list.map((s) => ({ name: s.name, state: s.state, items: s.items, last_error: s.last_error }));
+    r.source = list.map((s) => ({ name: s.name, state: s.state, items: s.items, last_error: s.last_error, health: s.health ?? null }));
     r.errors = await L.visibleErrors(page);
     r.shot = await snap(page, `20-src-${name}`);
     if (c.search) {

@@ -51,7 +51,8 @@ function readyInfo(logDir) {
 export async function startAt({ home, bin = BIN.nuggetd, config, env = {}, out, readyTimeoutMs = 120_000, wrap = null }) {
   fs.mkdirSync(path.join(home, "config"), { recursive: true });
   const cfgPath = path.join(home, "config", "config.toml");
-  if (config !== undefined && config !== null) fs.writeFileSync(cfgPath, config);
+  if (config === false) { /* leave config.toml absent: the daemon writes its first-run default */ }
+  else if (config !== undefined && config !== null) fs.writeFileSync(cfgPath, config);
   else if (!fs.existsSync(cfgPath)) fs.writeFileSync(cfgPath, BASE_CONFIG);
   const logDir = path.join(home, "data", "logs");
   const before = readyInfo(logDir).n;

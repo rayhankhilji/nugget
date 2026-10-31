@@ -1,0 +1,56 @@
+{
+  "files": 5000,
+  "build": "debug",
+  "D": {
+    "label": "D",
+    "result": {
+      "items": 5000,
+      "chunks": 8000,
+      "queue": 0,
+      "states": "files-1:watching:5000",
+      "errors": [],
+      "ms": 25104
+    },
+    "curve": [
+      {
+        "ms": 2,
+        "items": 0,
+        "queue": 0,
+        "states": "files-1:syncing:0"
+      },
+      {
+        "ms": 10038,
+        "items": 2456,
+        "queue": 43,
+        "states": "files-1:syncing:2457"
+      },
+      {
+        "ms": 20083,
+        "items": 4568,
+        "queue": 66,
+        "states": "files-1:syncing:4569"
+      }
+    ],
+    "knowledge": {
+      "claims": 393,
+      "entities": 147,
+      "extractor_provider": null,
+      "last_run": "2026-10-31T22:16:15.448435451Z",
+      "mentions": 512,
+      "pending_items": 0,
+      "vault": {
+        "conflicts": [],
+        "invalid": [],
+        "last_render": null,
+        "pages": 0,
+        "path": "/tmp/claude-0/-home-user-nugget/35de668b-6103-5633-811a-58fa1eb0313a/scratchpad/a3/s9/homeD/data/vault"
+      }
+    },
+    "sync_pass_done": [
+      "\"fields\":{\"message\":\"sync pass done\",\"kind\":\"files\",\"files\":5000,\"upserts\":5000,\"deletes\":0},\"target\":\"nugget_connector_files::connector\"}"
+    ],
+    "warn": [],
+    "rss_mb": 190,
+    "cpu_s": 25.12
+  }
+}
