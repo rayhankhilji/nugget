@@ -46,6 +46,9 @@ pub enum HostRequest {
         label: Option<String>,
     },
     Halt,
+    /// The user resumed agents from the daemon (the desktop's Resume): lift a halt the host
+    /// sent. An extension that does not know it answers `bad_request`; that is harmless.
+    Resume,
 }
 
 /// A request with its correlation id, as framed to the extension.

@@ -1083,7 +1083,12 @@ impl Agent {
         }
         let result = match leg.stop.guard(tool.call(args.clone(), &ctx)).await {
             Ok(r) => r,
-            Err(s) => return self.interrupted(st, step, &aid, &call.name, s, leg.cfg, t1),
+            // The action was already handed to the app, OS or browser: it may have finished
+            // there, so the log must not claim it was stopped (GG3-11).
+            Err(s) => {
+                let note = "the action had already started and may have completed";
+                return self.interrupted_note(st, step, &aid, &call.name, s, leg.cfg, t1, note);
+            }
         };
         let verification = if mutating {
             let after = match leg.stop.guard(tool.observe(&args, &ctx)).await {
@@ -1093,7 +1098,8 @@ impl Agent {
                     let v =
                         Verification::Failed("interrupted before the result was observed".into());
                     self.ledger.complete(&aid, &result, Some(&v));
-                    return self.interrupted(st, step, &aid, &call.name, s, leg.cfg, t1);
+                    let note = "the action ran; its result was not checked";
+                    return self.interrupted_note(st, step, &aid, &call.name, s, leg.cfg, t1, note);
                 }
             };
             Some(tool.verify(&args, &before, &after, &result))
@@ -1429,13 +1435,30 @@ impl Agent {
         cfg: &AgentConfig,
         t1: Instant,
     ) -> Act {
+        let note = "before the action started";
+        self.interrupted_note(st, step, aid, tool, s, cfg, t1, note)
+    }
+
+    /// [`Self::interrupted`] with what is known about the action (started or not).
+    #[allow(clippy::too_many_arguments)]
+    fn interrupted_note(
+        &self,
+        st: &mut RunState,
+        step: u32,
+        aid: &str,
+        tool: &str,
+        s: Stop,
+        cfg: &AgentConfig,
+        t1: Instant,
+        note: &str,
+    ) -> Act {
         let o = stop_outcome(s, cfg);
         let record = Record::Executed {
             step,
             action_id: aid.to_string(),
             tool: tool.to_string(),
             is_error: true,
-            result: format!("interrupted ({})", o.label()),
+            result: format!("interrupted ({}): {note}", o.label()),
             verification: None,
             interrupted: true,
             duration_ms: ms(t1.elapsed()),

@@ -122,6 +122,16 @@ describe("router", () => {
     expect((await call({ id: 5, type: "act", snapshot_id: again.snapshot_id, action: { kind: "scroll" } })).result).toBeDefined();
   });
 
+  it("lifts a halt when the host relays the desktop's Resume", async () => {
+    fake.granted.add("https://shop.example");
+    await call({ id: 1, type: "halt" });
+    expect(router.isHalted).toBe(true);
+    expect(await call({ id: 2, type: "snapshot" })).toMatchObject({ error: { code: "halted" } });
+    expect(await call({ id: 3, type: "resume" })).toMatchObject({ id: 3, result: {} });
+    expect(router.isHalted).toBe(false);
+    expect((await call({ id: 4, type: "snapshot" })).result).toBeDefined();
+  });
+
   it("replies with an error to malformed and oversized requests", async () => {
     expect(await call({ id: 9, type: "nope" })).toMatchObject({ id: 9, error: { code: "bad_request" } });
     expect(await call("garbage")).toMatchObject({ id: 0, error: { code: "bad_request" } });

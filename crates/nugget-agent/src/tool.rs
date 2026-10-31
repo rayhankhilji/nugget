@@ -379,7 +379,7 @@ impl Tool for AskUserTool {
         json!({
             "type": "object",
             "properties": {
-                "question": {"type": "string"},
+                "question": {"type": "string", "minLength": 1},
                 "options": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -394,7 +394,14 @@ impl Tool for AskUserTool {
         RiskClass::Observe
     }
     async fn call(&self, args: Value, _ctx: &ToolCtx) -> ToolResult {
-        let question = args["question"].as_str().unwrap_or_default().to_string();
+        let question = args["question"].as_str().unwrap_or_default().trim().to_string();
+        // An empty question leaves the user nothing to answer (GG3-23); whitespace passes the
+        // schema's `minLength`, so check here too.
+        if question.is_empty() {
+            return ToolResult::error(
+                "ask_user needs a question for the user. Nothing was asked.",
+            );
+        }
         let options = args["options"]
             .as_array()
             .into_iter()
@@ -523,6 +530,23 @@ mod tests {
         let r = ToolRegistry::new();
         let names: Vec<_> = r.specs().into_iter().map(|s| s.name).collect();
         assert_eq!(names, vec!["ask_user", "finish", "note"]);
+    }
+
+    /// GG3-23: an empty or blank question is refused, never suspends the run.
+    #[tokio::test]
+    async fn ask_user_refuses_an_empty_question() {
+        let schema = AskUserTool.schema();
+        assert!(nugget_infer::schema::validate(&schema, &json!({"question": ""})).is_err());
+        let ctx = ToolCtx {
+            task_id: "t".into(),
+            action_id: "a".into(),
+            step: 1,
+            cancel: CancellationToken::new(),
+        };
+        let r = AskUserTool.call(json!({"question": "  "}), &ctx).await;
+        assert!(r.is_error && r.control.is_none());
+        let ok = AskUserTool.call(json!({"question": "Which one?"}), &ctx).await;
+        assert!(matches!(ok.control, Some(Control::AskUser { .. })));
     }
 
     #[test]

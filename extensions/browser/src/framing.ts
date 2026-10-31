@@ -159,6 +159,8 @@ export function parseHostRequest(raw: unknown): HostRequest {
       return { id, type: "overlay", tab_id, active: raw.active, label: str(raw, "label", true) };
     case "halt":
       return { id, type: "halt" };
+    case "resume":
+      return { id, type: "resume" };
     default:
       throw new ProtocolError("bad_request", `unknown request type \`${String(raw.type)}\``);
   }

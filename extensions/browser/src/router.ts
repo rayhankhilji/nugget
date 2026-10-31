@@ -51,7 +51,7 @@ export class Router {
     if (tab) await this.deps.sendToTab(tab.id, { nugget: "halt" }).catch(() => undefined);
   }
 
-  /** Only the user can resume, from the popup. */
+  /** Only the user can resume: from the popup, or from the desktop's Resume (sent by the host). */
   async resume(): Promise<void> {
     this.halted = false;
     const tab = await this.deps.activeTab();
@@ -97,6 +97,11 @@ export class Router {
         } satisfies HelloResult;
       case "halt":
         await this.halt();
+        return {};
+      case "resume":
+        // The user pressed Resume in the desktop app; the daemon relays it. A page cannot send
+        // this: host requests come only over the native-messaging port.
+        await this.resume();
         return {};
       case "snapshot": {
         // Stop means stop: no reading pages either until the user resumes from the popup.

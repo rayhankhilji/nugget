@@ -108,6 +108,7 @@ impl FakeBridge {
                 HostRequest::Overlay { active: true, .. } => "overlay_on",
                 HostRequest::Overlay { .. } => "overlay_off",
                 HostRequest::Halt => "halt",
+                HostRequest::Resume => "resume",
             })
             .collect()
     }

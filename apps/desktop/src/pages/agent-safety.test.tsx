@@ -114,6 +114,42 @@ describe("Agent page", () => {
     expect(await violations()).toEqual([]);
   });
 
+  it("disables approval in an open confirmation once all agents are stopped (GG3-21)", async () => {
+    mockDaemon({ agent_list: history, policy_get: policy, agent_run: { task_id: "t1", tools: ["mail.send"] } });
+    const { container } = await render(<AgentPage />);
+    const goal = container.querySelector("textarea")!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(goal, "Reply to Sam");
+      goal.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await click(byText(container, "button", "Run"));
+    await agentEvent({ event: "confirmation_needed", task_id: "t1", request: approvals.pending[0]! });
+    const dialog = document.querySelector("dialog")!;
+    expect(dialog.textContent).toContain("This is exactly what will be sent.");
+    expect(byText(dialog, "button", "Approve once")?.hasAttribute("disabled")).toBe(false);
+    await act(async () => {
+      await emit(EVENT.notification, { method: "policy.kill.changed", params: { halted: true } });
+    });
+    await flush(2);
+    expect(dialog.textContent).toContain("Stopped agents can't be approved.");
+    expect(byText(dialog, "button", "Approve once")?.hasAttribute("disabled")).toBe(true);
+    expect(byText(dialog, "button", "Approve for this task")?.hasAttribute("disabled")).toBe(true);
+    expect(byText(dialog, "button", "Deny")?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("shows an answer box even for an empty question (GG3-23)", async () => {
+    mockDaemon({
+      agent_list: [{ ...history[0]!, task_id: "t4", state: "needs_input", outcome: null }],
+      policy_get: policy,
+      agent_get: { summary: { ...history[0]!, task_id: "t4", state: "needs_input", outcome: null }, entries: [], explain: "", pending: [], question: "" },
+    });
+    const { container } = await render(<AgentPage />);
+    await flush(5);
+    expect(container.textContent).toContain("The agent is waiting for your answer.");
+    expect(container.querySelector(".agent-answer textarea")).not.toBeNull();
+    expect(container.querySelector(".agent-working")).toBeNull();
+  });
+
   it("shows the halted banner and blocks new runs", async () => {
     mockDaemon({ agent_list: [], policy_get: { ...policy, halted: true }, agent_run: { task_id: "t2", tools: [] } });
     const { container } = await render(<AgentPage />);

@@ -17,10 +17,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use nugget_browser::{BridgeHub, HubHandler, loop_gated_tools};
+use nugget_browser::{BridgeHub, BrowserController, HubHandler, loop_gated_tools};
 use nugget_core::Result;
 use nugget_core::ipc::{BrowserStatus, agent_method as m};
 use nugget_ipc::{Notifier, RpcError, to_result};
+use nugget_policy::kill::HookGuard;
 use nugget_policy::{KillSwitch, RecheckGate};
 use serde::Deserialize;
 use serde_json::Value;
@@ -35,6 +36,8 @@ pub(crate) struct Browser {
         reason = "seam for the agent feature (events, status); not read yet"
     )]
     pub hub: Arc<BridgeHub>,
+    /// The tools' controller (when enabled): the agent feature hides the overlay when tasks end.
+    pub controller: Option<Arc<BrowserController>>,
     /// Browser tools for the agent's registry (empty when `[browser] enabled = false`).
     pub tools: Vec<Arc<dyn nugget_agent::Tool>>,
     pub feature: Arc<dyn Feature>,
@@ -71,23 +74,41 @@ fn build(enabled: bool, safety: &Arc<Safety>) -> Browser {
     let hub = Arc::new(BridgeHub::new(Some(Arc::new(StopHalts(
         safety.kill.clone(),
     )))));
-    let tools = if enabled {
+    let (controller, tools) = if enabled {
         let gate = Arc::new(RecheckGate(safety.engine.clone()));
-        loop_gated_tools(hub.clone(), gate).1
+        let (c, tools) = loop_gated_tools(hub.clone(), gate);
+        (Some(c), tools)
     } else {
-        Vec::new()
+        (None, Vec::new())
     };
+    let kill_hook = controller
+        .as_ref()
+        .map(|c| relay_kill_switch(&safety.kill, c.clone()));
     let feature = Arc::new(BrowserFeature {
         hub: hub.clone(),
         handler: HubHandler::new(hub.clone()),
         enabled,
         tool_names: tools.iter().map(|t| t.name().to_owned()).collect(),
+        _kill_hook: kill_hook,
     });
     Browser {
         hub,
+        controller,
         tools,
         feature,
     }
+}
+
+/// Stop all agents (desktop, tray, hotkey, the page's own Stop) reaches the extension: Halt on
+/// engage, Resume on release (GG3-12). The hook runs where the switch flipped, so the request is
+/// spawned on the runtime; outside one (unit tests) there is no extension to tell.
+fn relay_kill_switch(kill: &KillSwitch, controller: Arc<BrowserController>) -> HookGuard {
+    kill.on_change(move |halted| {
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            let c = controller.clone();
+            rt.spawn(async move { c.kill_changed(halted).await });
+        }
+    })
 }
 
 const METHODS: &[&str] = &[
@@ -102,6 +123,8 @@ struct BrowserFeature {
     handler: HubHandler,
     enabled: bool,
     tool_names: Vec<String>,
+    /// Keeps the kill-switch relay registered for the daemon's lifetime.
+    _kill_hook: Option<HookGuard>,
 }
 
 impl BrowserFeature {
@@ -163,6 +186,7 @@ mod tests {
             handler: HubHandler::new(b.hub.clone()),
             enabled: true,
             tool_names: names.iter().map(|s| s.to_string()).collect(),
+            _kill_hook: None,
         };
         assert!(!f.status().connected);
         let (_gen, _rx) = b.hub.attach(AttachInfo {
@@ -182,6 +206,34 @@ mod tests {
             }));
         assert!(safety.engine.halted());
         assert!(!nugget_policy::KillSwitch::global().halted());
+    }
+
+    /// GG3-12: Stop all agents is relayed to an attached extension as Halt, Resume as Resume.
+    #[tokio::test]
+    async fn kill_switch_is_relayed_to_the_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let safety = Safety::open_in(dir.path()).unwrap();
+        let b = build(true, &safety);
+        let (_gen, mut rx) = b.hub.attach(AttachInfo {
+            origin: "chrome-extension://abc/".into(),
+            host_version: "1.0".into(),
+        });
+        let next = async |rx: &mut tokio::sync::mpsc::Receiver<nugget_browser::HostMessage>| {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+                .await
+                .expect("a request reaches the extension")
+                .expect("still attached");
+            b.hub.deliver(ExtensionMessage::Reply {
+                id: msg.id,
+                result: None,
+                error: None,
+            });
+            msg.request
+        };
+        safety.kill.halt();
+        assert_eq!(next(&mut rx).await, nugget_browser::HostRequest::Halt);
+        safety.kill.resume();
+        assert_eq!(next(&mut rx).await, nugget_browser::HostRequest::Resume);
     }
 
     #[test]

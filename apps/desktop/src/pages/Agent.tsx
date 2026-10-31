@@ -176,15 +176,15 @@ export function AgentPage() {
               )}
             </div>
           </div>
-          {live && !run.question && !run.pending.length && (
+          {live && run.question === null && !run.pending.length && (
             <p className="muted small agent-working">
               <Spinner label={t("agent.run.working")} /> {t("agent.run.working")}
             </p>
           )}
           <Timeline run={run} onReview={(id) => setLater((l) => l.filter((x) => x !== id))} />
-          {run.question && (
+          {run.question !== null && (
             <AnswerForm
-              key={run.question}
+              key={run.question || "(no question)"}
               taskId={run.taskId}
               question={run.question}
               options={run.options}
@@ -217,6 +217,7 @@ export function AgentPage() {
           key={shown.request.request_id}
           pending={shown}
           taskId={run.taskId}
+          halted={halted}
           onLater={() => setLater((l) => [...l, shown.request.request_id])}
         />
       )}
@@ -440,7 +441,7 @@ function AnswerForm({ taskId, question, options, onAnswered }: { taskId: string;
       <div className="field">
         {hasOptions ? <span className="tl-label">{t("agent.question.label")}</span> : <label htmlFor={id}>{t("agent.question.label")}</label>}
         <p className="tl-text" id={questionId}>
-          {question}
+          {question.trim() || t("agent.question.empty")}
         </p>
         {hasOptions && (
           <>
@@ -514,7 +515,7 @@ function VerificationStats({ counts, injections }: { counts: AgentVerificationCo
   );
 }
 
-function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmation; taskId: string; onLater: () => void }) {
+function ConfirmDialog({ pending, taskId, halted, onLater }: { pending: PendingConfirmation; taskId: string; halted: boolean; onLater: () => void }) {
   const t = useT();
   const now = useNow(1000);
   const [busy, setBusy] = useState(false);
@@ -522,6 +523,9 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
   const r = pending.request;
   const a = r.action;
   const left = secondsLeft(pending, now);
+  // After Stop all agents nothing can be approved (the daemon refuses it too); Deny stays.
+  const closed = busy || left === 0;
+  const noApprove = closed || halted;
 
   const choose = async (choice: ConfirmChoice) => {
     setBusy(true);
@@ -540,6 +544,13 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
         <div className="note note-warn" role="note">
           <span>
             <strong>{t("agent.confirm.injectionTitle")}</strong> {t("agent.confirm.injectionBody")}
+          </span>
+        </div>
+      )}
+      {halted && (
+        <div className="note note-warn" role="alert">
+          <span>
+            <strong>{t("agent.halted.title")}</strong> {t("agent.confirm.haltedBody")}
           </span>
         </div>
       )}
@@ -571,6 +582,7 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
             <dt>{t("agent.field.preview")}</dt>
             <dd>
               <pre className="confirm-preview">{a.text_preview}</pre>
+              {(a.declared_risk === "send" || a.declared_risk === "destroy") && <p className="small muted">{t("agent.confirm.exactly")}</p>}
             </dd>
           </div>
         )}
@@ -583,15 +595,15 @@ function ConfirmDialog({ pending, taskId, onLater }: { pending: PendingConfirmat
         <button type="button" className="btn btn-ghost" onClick={onLater} disabled={busy}>
           {t("agent.confirm.later")}
         </button>
-        <button type="button" className="btn btn-danger" onClick={() => void choose("deny")} disabled={busy || left === 0} data-autofocus="">
+        <button type="button" className="btn btn-danger" onClick={() => void choose("deny")} disabled={closed} data-autofocus="">
           {t("agent.confirm.deny")}
         </button>
         {canApproveForTask(a.declared_risk) && (
-          <button type="button" className="btn" onClick={() => void choose("task")} disabled={busy || left === 0}>
+          <button type="button" className="btn" onClick={() => void choose("task")} disabled={noApprove}>
             {t("agent.confirm.approveTask")}
           </button>
         )}
-        <button type="button" className="btn btn-primary" onClick={() => void choose("once")} disabled={busy || left === 0}>
+        <button type="button" className="btn btn-primary" onClick={() => void choose("once")} disabled={noApprove}>
           {t("agent.confirm.approveOnce")}
         </button>
       </div>

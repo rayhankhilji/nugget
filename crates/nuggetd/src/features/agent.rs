@@ -45,6 +45,7 @@ use nugget_core::ipc::{
 use nugget_core::{Error, Result};
 use nugget_infer::Router;
 use nugget_ipc::{Notifier, RpcError, parse_params, to_result};
+use nugget_policy::kill::HookGuard;
 use nugget_policy::{ActionContext, PolicyGate, TaskApproval};
 use serde::Deserialize;
 use serde_json::Value;
@@ -87,7 +88,12 @@ pub(crate) async fn register(
     tools.extend(computer_tools(cx));
     // Plugin tools come from the plugins feature, which `features::build` starts first.
     tools.extend(super::plugins::agent_tools(&cx.state.paths).await);
-    start(list, "agent", self::start_agent(cx, &safety, tools).await);
+    let browser_controller = browser.as_ref().and_then(|b| b.controller.clone());
+    start(
+        list,
+        "agent",
+        self::start_agent(cx, &safety, tools, browser_controller).await,
+    );
     Some(safety)
 }
 
@@ -107,6 +113,7 @@ async fn start_agent(
     cx: &FeatureContext<'_>,
     safety: &Arc<Safety>,
     tools: Vec<Arc<dyn nugget_agent::Tool>>,
+    browser: Option<Arc<nugget_browser::BrowserController>>,
 ) -> Result<Arc<dyn Feature>> {
     let settings: AgentSettings = section("agent", &cx.config.agent)?;
     let state = cx.state;
@@ -125,8 +132,16 @@ async fn start_agent(
         hub: state.hub.clone(),
         safety: safety.clone(),
         tasks: Mutex::new(HashMap::new()),
+        browser,
     });
+    let kill_hook = stop_all_hook(
+        &safety.kill,
+        runs.clone(),
+        state.tasks.clone(),
+        state.shutdown.clone(),
+    );
     Ok(Arc::new(AgentFeature {
+        _kill_hook: kill_hook,
         settings,
         router: state.router.clone(),
         safety: safety.clone(),
@@ -194,6 +209,90 @@ struct AgentFeature {
     runs: Arc<Runs>,
     spawner: TaskTracker,
     shutdown: CancellationToken,
+    /// Ends tasks waiting on `ask_user` when every agent is stopped (see [`stop_all_hook`]).
+    _kill_hook: HookGuard,
+}
+
+/// "Stop all agents" ends everything, not only the loops that are running (GG3-10): a task
+/// waiting on `ask_user` has no loop to see the switch, so it is resumed halted and cancelled,
+/// and ends (and is logged) like a run stopped mid-step. It can never act after a later Resume:
+/// its token is cancelled and its question is gone, so `agent.answer` has nothing to answer.
+fn stop_all_hook(
+    kill: &nugget_policy::KillSwitch,
+    runs: Arc<Runs>,
+    spawner: TaskTracker,
+    shutdown: CancellationToken,
+) -> HookGuard {
+    let rt = tokio::runtime::Handle::try_current().ok();
+    kill.on_change(move |halted| {
+        if halted {
+            stop_suspended(&runs, &spawner, &shutdown, rt.as_ref());
+        }
+    })
+}
+
+fn stop_suspended(
+    runs: &Arc<Runs>,
+    spawner: &TaskTracker,
+    shutdown: &CancellationToken,
+    rt: Option<&tokio::runtime::Handle>,
+) {
+    let stopped: Vec<_> = {
+        let mut tasks = runs.lock();
+        tasks
+            .iter_mut()
+            .filter_map(|(id, t)| {
+                let st = t.suspended.take()?;
+                t.cancel.cancel();
+                t.state = AgentTaskState::Running;
+                t.question = None;
+                t.options.clear();
+                let cfg = t.cfg(shutdown.child_token());
+                cfg.cancel.cancel();
+                Some((id.clone(), t.agent.clone(), st, cfg))
+            })
+            .collect()
+    };
+    for (id, agent, st, cfg) in stopped {
+        let answer = "(all agents were stopped by the user)".to_string();
+        spawn_resume(runs, spawner, rt, &id, agent, st, answer, cfg);
+    }
+}
+
+/// Resume a suspended run on the daemon's task tracker.
+#[allow(clippy::too_many_arguments)]
+fn spawn_resume(
+    runs: &Arc<Runs>,
+    spawner: &TaskTracker,
+    rt: Option<&tokio::runtime::Handle>,
+    task_id: &str,
+    agent: Arc<Agent>,
+    st: RunState,
+    answer: String,
+    cfg: AgentConfig,
+) {
+    let runs = runs.clone();
+    let engine = runs.safety.engine.clone();
+    let id = task_id.to_string();
+    let fut = async move {
+        let run = agent.resume(st, &answer, cfg).await;
+        runs.after_run(&id, run, &engine);
+    };
+    match rt {
+        Some(rt) => drop(spawner.spawn_on(fut, rt)),
+        None => drop(spawner.spawn(fut)),
+    }
+}
+
+/// Refuse a user's answer while every agent is stopped: nothing the user says between Stop and
+/// Resume may set an agent going (GG3-21).
+fn refuse_while_halted(engine: &nugget_policy::PolicyEngine, what: &str) -> Result<()> {
+    if engine.halted() {
+        return Err(Error::Invalid(format!(
+            "all agents are stopped; the {what} was not accepted. Resume first."
+        )));
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -418,6 +517,9 @@ impl AgentFeature {
     }
 
     fn confirm(&self, c: AgentConfirm) -> Result<()> {
+        if c.choice != ConfirmChoice::Deny {
+            refuse_while_halted(&self.safety.engine, "approval")?;
+        }
         let (request, confirmations) = {
             let tasks = self.runs.lock();
             let t = tasks
@@ -460,6 +562,7 @@ impl AgentFeature {
     }
 
     fn answer(&self, task_id: &str, answer: &str) -> Result<()> {
+        refuse_while_halted(&self.safety.engine, "answer")?;
         let (st, agent, cfg) = {
             let mut tasks = self.runs.lock();
             let t = tasks
@@ -489,13 +592,16 @@ impl AgentFeature {
         answer: String,
         cfg: AgentConfig,
     ) {
-        let runs = self.runs.clone();
-        let engine = self.safety.engine.clone();
-        let id = task_id.to_string();
-        self.spawner.spawn(async move {
-            let run = agent.resume(st, &answer, cfg).await;
-            runs.after_run(&id, run, &engine);
-        });
+        spawn_resume(
+            &self.runs,
+            &self.spawner,
+            None,
+            task_id,
+            agent,
+            st,
+            answer,
+            cfg,
+        );
     }
 
     fn list(&self, limit: usize) -> Vec<AgentTaskSummary> {
@@ -730,6 +836,9 @@ struct Runs {
     hub: Arc<Hub>,
     safety: Arc<Safety>,
     tasks: Mutex<HashMap<String, TaskEntry>>,
+    /// The browser tools' controller: its "Nugget is acting" overlay is hidden once no task is
+    /// running (GG3-12).
+    browser: Option<Arc<nugget_browser::BrowserController>>,
 }
 
 impl Runs {
@@ -872,12 +981,25 @@ fn event_task(event: &AgentEvent) -> &str {
 impl EventSink for Runs {
     fn emit(&self, event: AgentEvent) {
         let task_id = event_task(&event).to_string();
-        let send = match self.lock().get_mut(&task_id) {
-            Some(t) => self.track(t, &event),
-            None => true,
+        let (send, idle) = {
+            let mut tasks = self.lock();
+            let send = match tasks.get_mut(&task_id) {
+                Some(t) => self.track(t, &event),
+                None => true,
+            };
+            let idle = matches!(event, AgentEvent::Finished { .. })
+                && tasks.values().all(|t| !t.active());
+            (send, idle)
         };
         if send {
             self.broadcast(&task_id, &event);
+        }
+        if idle
+            && let Some(c) = &self.browser
+            && let Ok(rt) = tokio::runtime::Handle::try_current()
+        {
+            let c = c.clone();
+            rt.spawn(async move { c.finish().await });
         }
     }
 }
@@ -1027,6 +1149,7 @@ mod tests {
             hub: Arc::new(Hub::default()),
             safety: safety.clone(),
             tasks: Mutex::new(HashMap::new()),
+            browser: None,
         });
         let router = Arc::new(Router::new(Vec::new(), Default::default()));
         let gate: Arc<dyn PolicyGate> = safety.engine.clone();

@@ -267,6 +267,19 @@ impl BrowserController {
         self.lock().overlay_on = shown;
     }
 
+    /// The daemon's kill switch changed. Engaged: tell the extension to halt (it stops acting,
+    /// refuses reads and swaps "Nugget is acting" for "stopped"), and forget the overlay so the
+    /// next task shows it again. Lifted: tell the extension the user resumed. Best effort: the
+    /// controller refuses every action while halted whatever the extension says.
+    pub async fn kill_changed(&self, halted: bool) {
+        if halted {
+            self.lock().overlay_on = false;
+            let _ = self.bridge.request(HostRequest::Halt).await;
+        } else {
+            let _ = self.bridge.request(HostRequest::Resume).await;
+        }
+    }
+
     /// End of a task: hide the overlay. Best effort.
     pub async fn finish(&self) {
         let was_on = std::mem::take(&mut self.lock().overlay_on);

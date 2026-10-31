@@ -407,3 +407,48 @@ async fn controller_context_matches_what_the_agent_tools_give_the_loop() {
         &("click".to_owned(), loop_context)
     );
 }
+
+/// GG3-12: the daemon's Stop reaches the extension (and Resume lifts it); the overlay shows again
+/// on the next task.
+#[tokio::test]
+async fn kill_switch_changes_are_relayed_to_the_extension() {
+    let (_gate, bridge, c) = setup(FakeGate::new(), None);
+    let s = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    c.act(
+        "t",
+        BrowserAction::Scroll {
+            element: None,
+            dx: None,
+            dy: Some(10.0),
+        },
+    )
+    .await
+    .unwrap();
+    c.kill_changed(true).await;
+    c.kill_changed(false).await;
+    let s2 = c.snapshot("t", SnapshotOptions::default()).await.unwrap();
+    assert_eq!(s.url, s2.url);
+    c.act(
+        "t",
+        BrowserAction::Scroll {
+            element: None,
+            dx: None,
+            dy: Some(10.0),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        bridge.kinds(),
+        [
+            "snapshot",
+            "overlay_on",
+            "act",
+            "halt",
+            "resume",
+            "snapshot",
+            "overlay_on",
+            "act"
+        ]
+    );
+}

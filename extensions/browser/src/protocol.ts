@@ -135,7 +135,8 @@ export type HostRequest =
   | { id: number; type: "snapshot"; tab_id?: number; options?: SnapshotOptions }
   | { id: number; type: "act"; tab_id?: number; snapshot_id: string; action: BrowserAction }
   | { id: number; type: "overlay"; tab_id?: number; active: boolean; label?: string }
-  | { id: number; type: "halt" };
+  | { id: number; type: "halt" }
+  | { id: number; type: "resume" };
 
 export interface ActResult {
   before_snapshot_id: string;

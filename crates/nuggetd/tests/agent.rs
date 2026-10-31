@@ -170,6 +170,22 @@ impl FakeBrowser {
             .collect()
     }
 
+    /// Halt, Resume and overlay requests, in order (`halt`, `resume`, `overlay_on`, `overlay_off`).
+    fn controls(&self) -> Vec<&'static str> {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|r| match r {
+                HostRequest::Halt => Some("halt"),
+                HostRequest::Resume => Some("resume"),
+                HostRequest::Overlay { active: true, .. } => Some("overlay_on"),
+                HostRequest::Overlay { .. } => Some("overlay_off"),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn snapshots(&self) -> usize {
         self.requests
             .lock()
@@ -230,12 +246,14 @@ impl FakeBrowser {
                 "extension_version": "0.0.1",
                 "browser": "test",
             })),
-            // Overlay on/off and Halt: acknowledged.
-            HostRequest::Overlay { .. } | HostRequest::Halt => ExtensionMessage::Reply {
-                id,
-                result: None,
-                error: None,
-            },
+            // Overlay on/off, Halt and Resume: acknowledged.
+            HostRequest::Overlay { .. } | HostRequest::Halt | HostRequest::Resume => {
+                ExtensionMessage::Reply {
+                    id,
+                    result: None,
+                    error: None,
+                }
+            }
         }
     }
 }
@@ -708,6 +726,104 @@ async fn the_kill_switch_halts_a_task_waiting_on_a_confirmation() {
     assert_eq!(events.finished(&task2).await, Outcome::Succeeded);
     assert_eq!(rig.browser.snapshots(), snapshots + 1);
 
+    rig.stop().await;
+}
+
+/// GG3-10: a task waiting on `ask_user` does not survive Stop all agents: it ends halted, its
+/// question can no longer be answered, and after Resume it never acts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_all_agents_ends_a_task_waiting_on_ask_user() {
+    let mut rig = start(contact_page("Write to us using the form below.")).await;
+    rig.script.push("ask_user", json!({"question": "Which form?"}));
+    rig.script
+        .push("browser_type", json!({"element": "n1", "text": "after Stop"}));
+    let mut events = Events::new(&rig.client);
+    let task = rig.run("Fill in the form").await.task_id;
+    events
+        .until(&task, |e| matches!(e, AgentEvent::Suspended { .. }).then_some(()))
+        .await;
+    let calls = rig.model_requests().await.len();
+
+    let _: KillState = rig.call(m::POLICY_KILL, json!({})).await;
+    assert_eq!(events.finished(&task).await, Outcome::Halted);
+    let detail = rig.get(&task).await;
+    assert_eq!(detail.summary.state, AgentTaskState::Finished);
+    assert!(detail.question.is_none());
+    // Answering while stopped is refused...
+    let answer = json!({"task_id": task, "answer": "the contact form"});
+    assert!(
+        rig.client
+            .call_value(m::AGENT_ANSWER, answer.clone())
+            .await
+            .is_err()
+    );
+    // ...and after Resume there is nothing left to answer.
+    let _: KillState = rig.call(m::POLICY_RESUME, json!({})).await;
+    assert!(rig.client.call_value(m::AGENT_ANSWER, answer).await.is_err());
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(rig.browser.acts().is_empty());
+    assert_eq!(rig.model_requests().await.len(), calls);
+    rig.stop().await;
+}
+
+/// GG3-21: an approval that arrives after Stop all agents is refused, even if the loop has not
+/// closed the confirmation yet; a denial is still accepted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_approval_after_stop_is_refused() {
+    let mut rig = start(contact_page("Write to us using the form below.")).await;
+    rig.script.push("browser_snapshot", json!({}));
+    rig.script.push("browser_submit", json!({"element": "n2"}));
+    let mut events = Events::new(&rig.client);
+    let task = rig.run("Send the contact form").await.task_id;
+    let req = events.confirmation(&task).await;
+    let _: KillState = rig.call(m::POLICY_KILL, json!({})).await;
+    let approve = rig
+        .client
+        .call_value(
+            m::AGENT_CONFIRM,
+            json!({"task_id": task, "request_id": req.request_id, "choice": "once"}),
+        )
+        .await;
+    let err = approve.expect_err("approval refused while stopped");
+    assert!(err.to_string().contains("stopped"), "{err}");
+    assert_eq!(events.finished(&task).await, Outcome::Halted);
+    assert!(rig.browser.acts().is_empty());
+    rig.stop().await;
+}
+
+/// GG3-12: Stop all agents reaches the browser extension (Halt), Resume lifts it, and the
+/// "Nugget is acting" overlay is hidden when the last task ends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_and_resume_reach_the_extension_and_the_overlay_is_hidden_after_a_task() {
+    let mut rig = start(contact_page("Hello")).await;
+    rig.script.push("browser_snapshot", json!({}));
+    rig.script.push(
+        "browser_scroll",
+        json!({"dy": 100}),
+    );
+    rig.script.push(
+        "finish",
+        json!({"summary": "Scrolled.", "outcome": "done"}),
+    );
+    let mut events = Events::new(&rig.client);
+    let task = rig.run("Scroll the page").await.task_id;
+    events.finished(&task).await;
+    let wait_for = async |want: &[&str]| {
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let got = rig.browser.controls();
+            if got.ends_with(want) {
+                return got;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{got:?}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    };
+    wait_for(&["overlay_on", "overlay_off"]).await;
+    let _: KillState = rig.call(m::POLICY_KILL, json!({})).await;
+    wait_for(&["halt"]).await;
+    let _: KillState = rig.call(m::POLICY_RESUME, json!({})).await;
+    wait_for(&["halt", "resume"]).await;
     rig.stop().await;
 }
 
