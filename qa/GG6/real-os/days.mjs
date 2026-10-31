@@ -12,15 +12,15 @@ const days = (results.days ??= {});
 const LLAMA = /llama-server/i;
 const NUGGETD = /^nuggetd(\.exe)?$/i;
 
-/** One chat turn through the daemon (tier routing, like Chat). Returns timings and text. */
+/** One grounded question through the daemon (retrieve.ask, like Ask / Chat with "Use my sources"). */
 export async function ask(socket, text, timeoutMs = 300_000) {
   const t0 = Date.now();
   let first = null;
   try {
     const { result, notes } = await rpcStream(
       socket,
-      "chat",
-      { provider: null, tier: "synthesis", messages: [{ role: "user", text }], items: [] },
+      "retrieve.ask",
+      { query: text, budget_tokens: 3000, provider: null, tier: "synthesis", history: [] },
       (_r, notes) => {
         if (first === null && notes.some((n) => n.method === "chat.delta")) first = Date.now() - t0;
         return notes.some((n) => n.method === "chat.done");
@@ -137,6 +137,7 @@ export async function daySleep(ctx, secs = 180) {
 export async function daySoak(ctx, minutes = 40, everySecs = 30) {
   await check(`day 5: idle for ${minutes} min, CPU and memory sampled every ${everySecs}s`, async () => {
     const samples = [];
+    const bg0 = { ingest: await rpc(ctx.socket(), "ingest.status", {}).catch((e) => e.message), knowledge: await rpc(ctx.socket(), "knowledge.status", {}).catch((e) => e.message) };
     const end = Date.now() + minutes * 60_000;
     let prev = null;
     while (Date.now() < end) {
@@ -176,6 +177,8 @@ export async function daySoak(ctx, minutes = 40, everySecs = 30) {
       llama_rss_last_mb: l[l.length - 1] ?? 0,
       llama_cpu_avg_pct: avg(pick("llama_cpu_pct")),
       llama_running_at_end: procs(LLAMA).length > 0,
+      background_start: bg0,
+      background_end: { ingest: await rpc(ctx.socket(), "ingest.status", {}).catch((e) => e.message), knowledge: await rpc(ctx.socket(), "knowledge.status", {}).catch((e) => e.message) },
     };
     log(`soak: ${JSON.stringify(days.soak)}`);
     if (days.soak.llama_running_at_end && days.soak.llama_rss_last_mb > 1000) friction(`after ${minutes} idle minutes the local model server still holds ${days.soak.llama_rss_last_mb} MB of memory`, days.soak);
@@ -185,7 +188,7 @@ export async function daySoak(ctx, minutes = 40, everySecs = 30) {
 }
 
 /** A big folder added on day 6: many files, deep nesting, a big binary. */
-export async function dayBigFolder(ctx, { files = 20000, timeoutMs = 60 * 60_000 } = {}) {
+export async function dayBigFolder(ctx, { files = 20000, timeoutMs = 30 * 60_000 } = {}) {
   await check(`day 6: add a folder of ${files} files; time to searchable, peak memory, search latency while indexing`, async () => {
     const root = path.join(ctx.workDir, "big-folder");
     const t0 = Date.now();
@@ -198,6 +201,7 @@ export async function dayBigFolder(ctx, { files = 20000, timeoutMs = 60 * 60_000
     const lat = [];
     let st;
     let stable = 0;
+    const trace = [];
     let last = -1;
     while (Date.now() - add0 < timeoutMs) {
       await sleep(5000);
@@ -206,6 +210,12 @@ export async function dayBigFolder(ctx, { files = 20000, timeoutMs = 60 * 60_000
       await rpc(ctx.socket(), "search", { query: "dentist appointment", limit: 5 }, 60_000).catch(() => {});
       lat.push(Date.now() - q0);
       st = await rpc(ctx.socket(), "status", {});
+      if (trace.length === 0 || Date.now() - trace[trace.length - 1].at > 60_000) {
+        const ing = await rpc(ctx.socket(), "ingest.status", {}).catch((e) => ({ error: e.message }));
+        const kn = await rpc(ctx.socket(), "knowledge.status", {}).catch((e) => ({ error: e.message }));
+        const cpu = procs(LLAMA).reduce((n, p) => n + p.cpu_s, 0);
+        trace.push({ at: Date.now(), min: Math.round((Date.now() - add0) / 60000), items: st.items, queue_depth: ing.queue_depth, sources: (ing.sources ?? []).map((x) => ({ id: x.id ?? x.source, state: x.state, items: x.items, phase: x.phase })), knowledge: kn.error ? kn : { pending: kn.pending ?? kn.pending_items, entities: kn.entities }, llama_cpu_s: cpu });
+      }
       if (st.items === last && st.items >= before.items + files * 0.9) stable++;
       else stable = 0;
       last = st.items;
@@ -213,7 +223,7 @@ export async function dayBigFolder(ctx, { files = 20000, timeoutMs = 60 * 60_000
     }
     const took = Date.now() - add0;
     lat.sort((a, b) => a - b);
-    days.big_folder = { files, gen_ms, items_before: before.items, items_after: st?.items, index_ms: took, peak_rss_mb: peak, search_p50_ms: lat[Math.floor(lat.length / 2)], search_p95_ms: lat[Math.floor(lat.length * 0.95)], search_max_ms: lat[lat.length - 1], data_mb: ctx.dataDir ? Math.round(du(ctx.dataDir) / 2 ** 20) : null };
+    days.big_folder = { files, gen_ms, items_before: before.items, items_after: st?.items, index_ms: took, peak_rss_mb: peak, search_p50_ms: lat[Math.floor(lat.length / 2)], search_p95_ms: lat[Math.floor(lat.length * 0.95)], search_max_ms: lat[lat.length - 1], items_per_min: +(((st?.items ?? 0) - before.items) / (took / 60000)).toFixed(1), trace: trace.map(({ at, ...r }) => r), data_mb: ctx.dataDir ? Math.round(du(ctx.dataDir) / 2 ** 20) : null };
     log(`big folder: ${JSON.stringify(days.big_folder)}`);
     if (stable < 3) throw new Error(`not indexed within ${timeoutMs / 60000} min: ${st?.items} items`);
     return days.big_folder;

@@ -30,6 +30,12 @@ const { values: args } = parseArgs({
   },
 });
 const BIN = path.resolve(args.nuggetd);
+
+// The e2e bridge (a test stand-in for the Tauri shell) gives every daemon call 60 s and then shows
+// "lost the connection to Nugget". The real shell has no such limit, and a CPU-only 4B model can
+// take longer than that to answer, so its exact 60 000 ms timer is stretched to 10 minutes here.
+const realSetTimeout = globalThis.setTimeout;
+globalThis.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, ms === 60_000 ? 600_000 : ms, ...rest);
 const work = fs.mkdtempSync(path.join(os.tmpdir(), "gg6-"));
 const home = args.home ? path.resolve(args.home) : path.join(work, "nugget-home");
 fs.mkdirSync(home, { recursive: true });

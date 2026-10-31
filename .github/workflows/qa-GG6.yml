@@ -29,8 +29,8 @@ permissions:
   actions: read # download the bundles from the release dry run
 
 env:
-  RELEASE_RUN: ${{ inputs.release_run || '41073117904' }}
-  SOAK_MIN: ${{ inputs.soak_minutes || '5' }}
+  RELEASE_RUN: ${{ inputs.release_run || '41236770656' }}
+  SOAK_MIN: ${{ inputs.soak_minutes || '40' }}
   GG6_OUT: ${{ github.workspace }}/gg6-out
   NO_COLOR: "1"
 
@@ -129,8 +129,8 @@ jobs:
           retention-days: 30
 
   macos:
-    name: macOS (dmg, Apple Silicon)
-    runs-on: macos-14
+    name: macOS (dmg, Intel)
+    runs-on: macos-15-intel
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v5
@@ -138,7 +138,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: bundle-aarch64-apple-darwin
+          name: bundle-x86_64-apple-darwin
           path: ${{ runner.temp }}/bundle
           run-id: ${{ env.RELEASE_RUN }}
           github-token: ${{ github.token }}
@@ -248,15 +248,28 @@ jobs:
           $t = [Diagnostics.Stopwatch]::StartNew()
           Start-Process -Wait -FilePath $setup -ArgumentList '/S'
           "install_s=$($t.Elapsed.TotalSeconds)" | Tee-Object -FilePath "$env:GG6_OUT/native/timings.txt" -Append
-          $app = Get-ChildItem "$env:LOCALAPPDATA\Nugget" -Recurse -Filter 'nugget-desktop.exe' | Select-Object -First 1
-          if (-not $app) { $app = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter 'nugget-desktop.exe' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          # Where NSIS put it: the uninstall entry it registers (per-user install).
+          $entry = Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { $_.GetValue('DisplayName') -like '*Nugget*' } | Select-Object -First 1
+          $un = $entry.GetValue('UninstallString') -replace '"', ''
+          $dir = Split-Path $un
+          "uninstall entry: $($entry.Name) -> $un" | Tee-Object -FilePath "$env:GG6_OUT/native/install-location.txt"
+          $app = Get-ChildItem $dir -Filter '*.exe' | Where-Object { $_.Name -notin @('nuggetd.exe', 'uninstall.exe') } | Select-Object -First 1
+          if (-not $app) { Get-ChildItem $dir | Out-String | Write-Host; throw "no app executable in $dir" }
           "APP=$($app.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "app: $($app.FullName)" | Tee-Object -FilePath "$env:GG6_OUT/native/install-location.txt" -Append
           Get-ChildItem (Split-Path $app.FullName) | Format-Table Name,Length | Out-String | Tee-Object -FilePath "$env:GG6_OUT/native/install-dir.txt"
           Get-ChildItem 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' | Where-Object { $_.GetValue('DisplayName') -like '*Nugget*' } |
             ForEach-Object { $_.GetValue('DisplayName') + ' | ' + $_.GetValue('UninstallString') } | Tee-Object -FilePath "$env:GG6_OUT/native/uninstall-entry.txt"
       - name: First week in the installed app (real model)
         shell: pwsh
+        timeout-minutes: 200
         run: node qa/GG6/real-os/run-win-app.mjs --app "$env:APP" --soak-min "$env:SOAK_MIN"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gg6-windows-journey
+          path: ${{ env.GG6_OUT }}
+          retention-days: 30
       - name: Screenshot of the desktop (tray area)
         if: always()
         shell: pwsh
@@ -268,6 +281,7 @@ jobs:
           $bmp.Save("$env:GG6_OUT/native/desktop.png")
       - name: Uninstall (NSIS, silent) and list what is left
         if: always()
+        timeout-minutes: 10
         shell: pwsh
         run: |
           $o = "$env:GG6_OUT/native/uninstall.txt"
@@ -292,6 +306,7 @@ jobs:
           (cmdkey /list | Select-String -Pattern nugget | Out-String) | Tee-Object -FilePath $o -Append
       - name: MSI install, launch, uninstall (what the MSI leaves)
         if: always()
+        timeout-minutes: 15
         shell: pwsh
         run: |
           $o = "$env:GG6_OUT/native/msi.txt"
