@@ -49,6 +49,9 @@ use crate::runner::{BenchError, RunContext, Scale};
 use crate::suites::perf::{latency_metrics, us};
 use crate::suites::{SYNTHETIC_SOURCE, doc_text, item_ref};
 
+/// Set (to anything) to keep the profile's temporary home instead of deleting it.
+pub const KEEP_HOME_ENV: &str = "NUGGET_BENCH_KEEP_HOME";
+
 /// Environment variable naming the `nuggetd` binary to profile.
 pub const NUGGETD_ENV: &str = "NUGGET_BENCH_NUGGETD";
 
@@ -224,7 +227,13 @@ pub fn run_with(
         timeout: Duration::from_secs_f64(p.timeout_s),
     };
     rt.block_on(profile(&env, p, &corpus, seed, &mut out))?;
-    drop(tmp);
+    if std::env::var_os(KEEP_HOME_ENV).is_some() {
+        // For looking into a run by hand: the home stays, fully built (store, graph, vault).
+        let kept = tmp.keep();
+        eprintln!("note: kept the daemon home at {}", kept.display());
+    } else {
+        drop(tmp);
+    }
     Ok(out)
 }
 

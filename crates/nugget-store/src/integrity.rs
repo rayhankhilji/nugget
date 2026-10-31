@@ -5,6 +5,9 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use nugget_core::{Error, Result};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
@@ -58,6 +61,16 @@ pub enum FileHealth {
 /// Errors (rather than a [`FileHealth`]) are for problems unrelated to the file's content, such
 /// as a busy database or an unreadable directory.
 pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth> {
+    let pragma = if full {
+        "PRAGMA integrity_check"
+    } else {
+        "PRAGMA quick_check"
+    };
+    check_with(path, key, Some(pragma))
+}
+
+/// [`check_file`] with SQLite's page check `pragma`, or only the cheap checks when `None`.
+fn check_with(path: &Path, key: &StoreKey, pragma: Option<&str>) -> Result<FileHealth> {
     let meta = match fs::metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(FileHealth::Missing),
@@ -90,10 +103,8 @@ pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth>
         Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
         Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
     }
-    let pragma = if full {
-        "PRAGMA integrity_check"
-    } else {
-        "PRAGMA quick_check"
+    let Some(pragma) = pragma else {
+        return Ok(FileHealth::Healthy);
     };
     match check_rows(&db.conn, pragma) {
         Ok(rows) if rows == ["ok"] => {}
@@ -102,6 +113,124 @@ pub fn check_file(path: &Path, key: &StoreKey, full: bool) -> Result<FileHealth>
         Err(e) => return Ok(FileHealth::Corrupt(e.to_string())),
     }
     Ok(FileHealth::Healthy)
+}
+
+/// Beside the database: when SQLite's full check last passed (Unix seconds, written by
+/// [`check_file_in_background`]).
+const CHECKED_SUFFIX: &str = ".checked";
+/// Beside the database: a background check found damage, so the next open checks in full.
+const CHECK_FAILED_SUFFIX: &str = ".check-failed";
+/// How often [`check_file_in_background`] re-runs SQLite's full check.
+pub const BACKGROUND_CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// What [`check_file_on_open`] decided about SQLite's page-by-page check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenCheck {
+    /// It ran before opening (the result is in the [`FileHealth`]).
+    Ran,
+    /// Skipped at open and due in the background ([`check_file_in_background`]): the last one
+    /// is older than [`BACKGROUND_CHECK_INTERVAL`], or there was none.
+    Due,
+    /// Skipped: it passed within [`BACKGROUND_CHECK_INTERVAL`].
+    Recent,
+}
+
+/// [`check_file`] for opening the store at startup, which must not grow with the database.
+///
+/// `PRAGMA quick_check` reads and decrypts every page: ~5 s per GB, so 10–20 s at startup for
+/// a 500k-item store. It runs here, before opening, only when damage is likely: the last
+/// handle on the file did not close cleanly (a crash or a kill left its owner lock file behind)
+/// or a background check found damage. Otherwise every cheap check still runs (header, whole
+/// pages, the WAL scan, decrypting the first page with `key`), and the full check is left to
+/// [`check_file_in_background`] (at most once per [`BACKGROUND_CHECK_INTERVAL`]), whose
+/// failure makes the next open check in full (and so refuse a damaged file).
+pub fn check_file_on_open(path: &Path, key: &StoreKey) -> Result<(FileHealth, OpenCheck)> {
+    let suspect =
+        crate::egress::unclean_close_left(path) || sidecar(path, CHECK_FAILED_SUFFIX).exists();
+    if suspect {
+        let health = check_file(path, key, false)?;
+        if health == FileHealth::Healthy {
+            record_check(path, true);
+        }
+        return Ok((health, OpenCheck::Ran));
+    }
+    let health = check_with(path, key, None)?;
+    let recent = last_check(path).is_some_and(|t| {
+        SystemTime::now()
+            .duration_since(t)
+            .is_ok_and(|age| age < BACKGROUND_CHECK_INTERVAL)
+    });
+    Ok((
+        health,
+        if recent {
+            OpenCheck::Recent
+        } else {
+            OpenCheck::Due
+        },
+    ))
+}
+
+/// SQLite's `quick_check` of the database at `path` while a store has it open (on its own
+/// read-only connection with a small page cache, so it neither blocks writers nor grows the
+/// process), stopping early with `Ok(None)` once `cancel` is set. Records the outcome beside
+/// the database: a pass is remembered for [`BACKGROUND_CHECK_INTERVAL`]; damage makes the next
+/// [`check_file_on_open`] run the full check before opening.
+pub fn check_file_in_background(
+    path: &Path,
+    key: &StoreKey,
+    cancel: &Arc<AtomicBool>,
+) -> Result<Option<FileHealth>> {
+    let conn = crate::store::open_keyed(path, key, OpenFlags::empty())?;
+    conn.execute_batch(
+        "PRAGMA query_only = ON; PRAGMA temp_store = MEMORY; PRAGMA cache_size = -2048;
+         PRAGMA busy_timeout = 5000;",
+    )
+    .db("configure check connection")?;
+    let stop = cancel.clone();
+    conn.progress_handler(10_000, Some(move || stop.load(Ordering::Relaxed)))
+        .db("set check progress handler")?;
+    let rows = check_rows(&conn, "PRAGMA quick_check");
+    drop(conn);
+    if cancel.load(Ordering::Relaxed) {
+        return Ok(None);
+    }
+    let health = match rows {
+        Ok(rows) if rows == ["ok"] => FileHealth::Healthy,
+        Ok(rows) => FileHealth::Corrupt(rows.join("; ")),
+        Err(e) if is_transient(&e) => return Err(Error::Storage(format!("check store: {e}"))),
+        Err(e) => FileHealth::Corrupt(e.to_string()),
+    };
+    record_check(path, health == FileHealth::Healthy);
+    Ok(Some(health))
+}
+
+/// When SQLite's full check last passed, if recorded.
+fn last_check(path: &Path) -> Option<SystemTime> {
+    let text = fs::read_to_string(sidecar(path, CHECKED_SUFFIX)).ok()?;
+    let secs: u64 = text.trim().parse().ok()?;
+    Some(UNIX_EPOCH + Duration::from_secs(secs))
+}
+
+/// Remember a full check's outcome beside the database. Best effort: a missing record only
+/// makes a later check run sooner.
+fn record_check(path: &Path, healthy: bool) {
+    let checked = sidecar(path, CHECKED_SUFFIX);
+    let failed = sidecar(path, CHECK_FAILED_SUFFIX);
+    let result = if healthy {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        fs::write(&checked, now.to_string()).and_then(|()| match fs::remove_file(&failed) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        })
+    } else {
+        let _ = fs::remove_file(&checked);
+        fs::write(&failed, b"damage found by the background check\n")
+    };
+    if let Err(e) = result {
+        tracing::warn!(db = %path.display(), error = %e, "cannot record the store check");
+    }
 }
 
 fn starts_with_plaintext_header(path: &Path) -> Result<bool> {
@@ -1036,6 +1165,92 @@ mod tests {
         assert_eq!(snapshot(&path)[..2], before[..]);
         put_item(&s, 99);
         assert!(s.check_consistency().unwrap().ok);
+    }
+
+    #[test]
+    fn open_check_runs_in_full_only_when_damage_is_likely() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        // Closed cleanly, never checked: cheap checks only, the full check is due.
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+        // The cheap checks still catch a wrong key and a truncated file.
+        assert_eq!(
+            check_file_on_open(&path, &StoreKey::from_bytes([8; 32]))
+                .unwrap()
+                .0,
+            FileHealth::WrongKey
+        );
+        let short = dir.path().join("short.db");
+        fs::write(&short, &fs::read(&path).unwrap()[..5000]).unwrap();
+        assert!(matches!(
+            check_file_on_open(&short, &key()).unwrap().0,
+            FileHealth::Corrupt(m) if m.contains("truncated")
+        ));
+
+        // A background pass is remembered: the next open skips the full check.
+        let live = Store::open(&path, &key()).unwrap();
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert_eq!(
+            check_file_in_background(&path, &key(), &cancel).unwrap(),
+            Some(FileHealth::Healthy)
+        );
+        drop(live);
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Recent)
+        );
+        // Cancelled before it starts: no verdict, nothing recorded.
+        cancel.store(true, Ordering::Relaxed);
+        assert_eq!(
+            check_file_in_background(&path, &key(), &cancel).unwrap(),
+            None
+        );
+
+        // An owner lock left behind by a handle that did not close (a crash): full check.
+        let stale = sidecar(&path, ".egress-00ff00ff.lock");
+        fs::write(&stale, b"").unwrap();
+        assert_eq!(
+            check_file_on_open(&path, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Ran)
+        );
+        fs::remove_file(&stale).unwrap();
+
+        // A held lock (a live handle elsewhere) is not a crash.
+        let held = Store::open(&path, &key()).unwrap();
+        assert!(!crate::egress::unclean_close_left(&path));
+        drop(held);
+    }
+
+    #[test]
+    fn background_damage_makes_the_next_open_check_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = closed_store(dir.path());
+        let bad = dir.path().join("bad.db");
+        let mut bytes = fs::read(&path).unwrap();
+        let mid = bytes.len() / 2;
+        for b in &mut bytes[mid..mid + 64] {
+            *b ^= 0x5a;
+        }
+        fs::write(&bad, &bytes).unwrap();
+        // The cheap checks at open cannot see damage in the middle of the file...
+        assert_eq!(
+            check_file_on_open(&bad, &key()).unwrap(),
+            (FileHealth::Healthy, OpenCheck::Due)
+        );
+        // ...the background check does, and records it.
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert!(matches!(
+            check_file_in_background(&bad, &key(), &cancel).unwrap(),
+            Some(FileHealth::Corrupt(_))
+        ));
+        assert!(sidecar(&bad, CHECK_FAILED_SUFFIX).exists());
+        // So the next open runs the full check and refuses the file.
+        let (health, check) = check_file_on_open(&bad, &key()).unwrap();
+        assert_eq!(check, OpenCheck::Ran);
+        assert!(matches!(health, FileHealth::Corrupt(_)), "{health:?}");
     }
 
     #[test]

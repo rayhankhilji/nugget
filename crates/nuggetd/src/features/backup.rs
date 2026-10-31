@@ -19,9 +19,14 @@
 //!
 //! **Before the store opens** ([`open_store`], called by the daemon): an interrupted staging
 //! folder is removed, a staged restore is applied, otherwise the database is checked read-only
-//! with [`nugget_store::check_file`]. A database that is damaged, or that this home's key does
-//! not open (a damaged first page, or a file from another install), is never opened or
-//! written: the daemon runs on an empty in-memory store in *recovery mode*
+//! with [`nugget_store::check_file_on_open`]. SQLite's page-by-page check reads the whole file
+//! (~5 s per GB), so it runs before opening only after an unclean shutdown or a failed
+//! background check; otherwise the cheap checks run (header, whole pages, the WAL, the key) and
+//! the full check runs in the background 20 s after startup, at most daily (II5). Damage it
+//! finds there is logged and recorded, so the next start refuses the file. A database found
+//! damaged before opening, or that this home's key does not open (a damaged first page, or a
+//! file from another install), is never opened or written: the daemon runs on an empty
+//! in-memory store in *recovery mode*
 //! (`backup.status.recovery`). Then:
 //! - knowledge extraction and the vault are off ([`prepare_config`]), so the empty graph can
 //!   never re-render or prune the user's vault pages;
@@ -123,7 +128,13 @@ struct Boot {
     vault_root: Option<PathBuf>,
     /// The vault directory used when `[vault] path` is unset.
     default_vault: Option<PathBuf>,
+    /// SQLite's full check was skipped at open and is due in the background.
+    check_due: bool,
 }
+
+/// Wait after startup before the background store check, so it never competes with startup
+/// work (the knowledge run, the first searches).
+const BACKGROUND_CHECK_DELAY: Duration = Duration::from_secs(20);
 
 fn boots() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Boot>> {
     static BOOTS: OnceLock<Mutex<HashMap<PathBuf, Boot>>> = OnceLock::new();
@@ -137,7 +148,7 @@ fn boots() -> std::sync::MutexGuard<'static, HashMap<PathBuf, Boot>> {
 /// A damaged database is left untouched and an empty in-memory store is returned instead
 /// (recovery mode, see the module docs). Blocking.
 pub(crate) fn open_store(paths: &Paths, key: StoreKey) -> Result<Store> {
-    let (store, key, recovery) = open_checked(paths, key)?;
+    let (store, key, recovery, check_due) = open_checked(paths, key)?;
     boots().insert(
         paths.data.clone(),
         Boot {
@@ -145,12 +156,16 @@ pub(crate) fn open_store(paths: &Paths, key: StoreKey) -> Result<Store> {
             recovery,
             vault_root: None,
             default_vault: None,
+            check_due,
         },
     );
     Ok(store)
 }
 
-fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option<Recovery>)> {
+/// The store, its key, recovery mode (if damaged) and whether a background check is due.
+type Opened = (Store, StoreKey, Option<Recovery>, bool);
+
+fn open_checked(paths: &Paths, key: StoreKey) -> Result<Opened> {
     let db = paths.db_file();
     // The daemon holds its socket here, so no restore can be staging meanwhile.
     restore::sweep_partial(paths);
@@ -168,17 +183,22 @@ fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option
     if let Some((key, applied)) = applied {
         let store = Store::open(&db, &key)?;
         restore::finish_applied(paths, &store, Some(&applied))?;
-        return Ok((store, key, None));
+        return Ok((store, key, None, false));
     }
     if restore::has_applied(paths) {
         let store = Store::open(&db, &key)?;
         restore::finish_applied(paths, &store, None)?;
-        return Ok((store, key, None));
+        return Ok((store, key, None, false));
     }
-    match nugget_store::check_file(&db, &key, false)? {
-        FileHealth::Missing | FileHealth::Healthy => {
+    let (health, check) = nugget_store::check_file_on_open(&db, &key)?;
+    match health {
+        FileHealth::Missing => {
             let store = Store::open(&db, &key)?;
-            Ok((store, key, None))
+            Ok((store, key, None, false))
+        }
+        FileHealth::Healthy => {
+            let store = Store::open(&db, &key)?;
+            Ok((store, key, None, check == nugget_store::OpenCheck::Due))
         }
         health @ (FileHealth::Corrupt(_) | FileHealth::WrongKey) => {
             let reason = match health {
@@ -193,8 +213,51 @@ fn open_checked(paths: &Paths, key: StoreKey) -> Result<(Store, StoreKey, Option
                 moved_to: None,
                 latest_backup: None,
             };
-            Ok((Store::open_in_memory()?, key, Some(recovery)))
+            Ok((Store::open_in_memory()?, key, Some(recovery), false))
         }
+    }
+}
+
+/// SQLite's full check of the open store, `delay` after startup, on its own connection;
+/// cancelled at shutdown. Damage is logged loudly and recorded beside the database, so the next
+/// start checks before opening and runs in recovery mode.
+async fn background_check(
+    db: PathBuf,
+    key: StoreKey,
+    stop: tokio_util::sync::CancellationToken,
+    delay: Duration,
+) {
+    tokio::select! {
+        () = stop.cancelled() => return,
+        () = tokio::time::sleep(delay) => {}
+    }
+    let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = cancel.clone();
+    let check = tokio::task::spawn_blocking(move || {
+        let t = std::time::Instant::now();
+        let r = nugget_store::check_file_in_background(&db, &key, &flag);
+        (db, r, t.elapsed())
+    });
+    tokio::pin!(check);
+    let done = tokio::select! {
+        r = &mut check => r,
+        () = stop.cancelled() => {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            check.await
+        }
+    };
+    match done {
+        Ok((_, Ok(Some(FileHealth::Healthy)), took)) => {
+            tracing::info!(took_ms = took.as_millis() as u64, "store check passed");
+        }
+        Ok((_, Ok(None), _)) => tracing::debug!("store check cancelled at shutdown"),
+        Ok((db, Ok(Some(health)), _)) => tracing::error!(db = %db.display(), ?health,
+            "DATABASE DAMAGED (background check): the next start checks it before opening and \
+             runs in recovery mode if it is still damaged; restore from a backup"),
+        Ok((db, Err(e), _)) => {
+            tracing::warn!(db = %db.display(), error = %e, "store check could not run");
+        }
+        Err(e) => tracing::warn!(error = %e, "store check task failed"),
     }
 }
 
@@ -257,6 +320,15 @@ pub(crate) fn start(cx: &FeatureContext<'_>) -> Result<Arc<dyn Feature>> {
     state
         .tasks
         .spawn(async move { inner.scheduler(stop).await });
+    if boot.check_due
+        && let Some(key) = f.inner.key.clone()
+    {
+        let db = state.paths.db_file();
+        let stop = state.shutdown.clone();
+        state
+            .tasks
+            .spawn(background_check(db, key, stop, BACKGROUND_CHECK_DELAY));
+    }
     Ok(f)
 }
 

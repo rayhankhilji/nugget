@@ -480,6 +480,48 @@ fn mark_interrupted(db: &Db, path: Option<&Path>, me: &str) -> Result<()> {
     Ok(())
 }
 
+/// Whether a handle on the database at `db` ended without closing: a lock file is left beside
+/// it whose owner is gone (a crash or a kill leaves its file behind; a clean close removes it).
+/// Read-only: unlike opening a store, this removes nothing. When in doubt (an I/O error), the
+/// owner counts as alive.
+pub(crate) fn unclean_close_left(db: &Path) -> bool {
+    let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
+        return false;
+    };
+    let mut prefix = name.to_owned();
+    prefix.push(LOCK_INFIX);
+    let Some(prefix) = prefix.to_str().map(str::to_owned) else {
+        return false;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let file_name = entry.file_name();
+        let owned = file_name
+            .to_str()
+            .and_then(|n| n.strip_prefix(&prefix))
+            .and_then(|n| n.strip_suffix(LOCK_SUFFIX))
+            .is_some_and(valid_owner);
+        owned && !lock_held(&entry.path())
+    })
+}
+
+/// Whether someone holds the lock on `path` (no side effects; an I/O error reads as held).
+fn lock_held(path: &Path) -> bool {
+    let file = match OpenOptions::new().write(true).open(path) {
+        Ok(f) => f,
+        Err(e) => return e.kind() != ErrorKind::NotFound,
+    };
+    match fs4::FileExt::try_lock(&file) {
+        Ok(()) => {
+            let _ = fs4::FileExt::unlock(&file);
+            false
+        }
+        Err(_) => true,
+    }
+}
+
 /// Remove lock files of owners that are gone (a crash leaves its file behind). Best effort.
 fn sweep_stale_locks(db: &Path, me: &str) {
     let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {

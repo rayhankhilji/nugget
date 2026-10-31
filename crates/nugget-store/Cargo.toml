@@ -16,7 +16,7 @@ time.workspace = true
 tracing.workspace = true
 # SQLCipher (SQLite + AES-256) built from source with a vendored OpenSSL, so every OS gets the same,
 # encrypted engine. The bundled build enables FTS5; `functions` registers `fts_segment`.
-rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl", "functions"] }
+rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl", "functions", "hooks"] }
 sqlite-vec = "0.1.6"
 sha2 = "0.10"
 hmac = "0.12"
