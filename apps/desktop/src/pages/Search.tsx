@@ -66,6 +66,8 @@ export function SearchPage() {
   const stateRef = useRef<SearchState>(EMPTY_STATE);
   /** The encoded search (without timeline) the shown results answer. */
   const shownKey = useRef<string | null>(null);
+  /** Said by a filter control just before its search; repeated with the result count. */
+  const lead = useRef("");
   /** The result whose preview is open, to hand focus back when it closes. */
   const returnFocus = useRef<HTMLElement | null>(null);
   const opener = useOpener();
@@ -137,7 +139,10 @@ export function SearchPage() {
         if (record) addRecent(encode(next));
         const n = result ? result.total : (plain?.length ?? 0);
         const active = activeFilters(next);
-        announce(active > 0 ? t("searchui.resultsFiltered", { n, query: q, filters: active }) : t("search.resultsFor", { n, query: q }));
+        const said = active > 0 ? t("searchui.resultsFiltered", { n, query: q, filters: active }) : t("search.resultsFor", { n, query: q });
+        // Keep what a control said as it cleared itself ("Filters cleared") in front of the count.
+        announce(lead.current ? `${lead.current} ${said}` : said);
+        lead.current = "";
       }
     } catch (err) {
       if (mine === seq.current) setError(err);
@@ -320,7 +325,10 @@ export function SearchPage() {
             onChange={(update) => void runState(update(stateRef.current))}
             onTimeline={openTimeline}
             poolLimited={poolLimited}
-            announce={announce}
+            announce={(text) => {
+              lead.current = text;
+              announce(text);
+            }}
           />
         )}
         <div className="sr-results">

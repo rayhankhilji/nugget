@@ -348,6 +348,7 @@ async function setValue(el: HTMLInputElement, value: string) {
 }
 
 const liveText = () => Array.from(document.querySelectorAll('[role="status"][aria-live="polite"]')).map((e) => e.textContent?.trim() ?? "");
+const said = (text: string) => liveText().some((l) => l.includes(text));
 
 describe("review fixes", () => {
   it("two quick toggles both reach the final request, and a late older answer doesn't win", async () => {
@@ -447,23 +448,23 @@ describe("review fixes", () => {
     await click(within(filters()).getByRole("button", { name: t("searchui.monthPick", { month: "March 2024", count: 4 }) }));
     await click(within(filters()).getByRole("button", { name: t("searchui.clearDates") }));
     expect(document.activeElement?.textContent).toBe(t("searchui.filters"));
-    expect(liveText()).toContain(t("searchui.datesCleared"));
+    expect(said(t("searchui.datesCleared"))).toBe(true);
     await click(within(filters()).getByRole("checkbox", { name: /^Mail/ }));
     await click(within(filters()).getByRole("button", { name: t("searchui.clearFilters") }));
     expect(document.activeElement?.textContent).toBe(t("searchui.filters"));
-    expect(liveText()).toContain(t("searchui.filtersCleared"));
+    expect(said(t("searchui.filtersCleared"))).toBe(true);
     expect(d.count("search_faceted")).toBeGreaterThan(1);
 
     await click(within(main()).getByRole("button", { name: t("searchui.deleteSaved", { name: "A" }) }));
     expect(document.activeElement?.getAttribute("aria-label")).toBe(t("searchui.runSaved", { name: "B" }));
-    expect(liveText()).toContain(t("searchui.savedDeleted", { name: "A" }));
+    expect(said(t("searchui.savedDeleted", { name: "A" }))).toBe(true);
     await click(within(main()).getByRole("button", { name: t("searchui.deleteSaved", { name: "B" }) }));
     expect(document.activeElement).toBe(searchBox());
 
     await type(searchBox(), "");
     await click(within(getByRole("region", { name: t("searchui.recent") })).getByRole("button", { name: t("searchui.clearRecent") }));
     expect(document.activeElement).toBe(searchBox());
-    expect(liveText()).toContain(t("searchui.recentCleared"));
+    expect(said(t("searchui.recentCleared"))).toBe(true);
   });
 
   it("records recents only for explicit runs and labels filtered ones", async () => {
