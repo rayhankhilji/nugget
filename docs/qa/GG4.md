@@ -9,9 +9,13 @@ learning from Accept/Dismiss (BB2) and the optional LLM judge work for a real us
 - Real local models: `qwen3-1.7b-q8` (chat, judge, drafting) and `nomic-embed-text-v1.5-q8`, from the
   signed manifest, on GitHub `ubuntu-latest` runners (4 vCPU Xeon Platinum 8573C, 16 GB, CPU only).
   - Run 3, [41115038648](https://github.com/rayhankhilji/nugget/actions/runs/41115038648): replay and judge.
-  - Run 4, [41116756315](https://github.com/rayhankhilji/nugget/actions/runs/41116756315): replay, judge,
-    actions, brief and learning.
-  - The final run on the head commit is linked in the orchestrator message.
+  - Run 4, [41116756315](https://github.com/rayhankhilji/nugget/actions/runs/41116756315): replay, judge
+    and learning confirmed (judge temporal failures repeat; learning 37/50 as locally). Its actions and
+    brief outputs were not examined.
+  - Run 5, [41189114332](https://github.com/rayhankhilji/nugget/actions/runs/41189114332), on `728f199`:
+    every suite including real-model drafts. It was still running when this report was written, so the
+    real-model card-action results (draft quality) are **not in this report**; card actions were judged
+    with the fake drafting server only.
 - Everything else ran locally with no model: judge off, or a fake OpenAI-compatible server for drafts.
 - Every finding below was reproduced by a second, fresh verifier subagent from the written repro alone,
   unless marked otherwise. The verifier reports are `qa/GG4/out/verify/V1.md`–`V3.md`.
