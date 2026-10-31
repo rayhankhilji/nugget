@@ -1,0 +1,1906 @@
+{
+  "root": {
+    "role": "window",
+    "raw_role": "AXWindow/AXStandardWindow",
+    "name": "Nugget fixture: Mail compose",
+    "bounds": [
+      0.0,
+      31.0,
+      1024.0,
+      680.0
+    ],
+    "attrs": {
+      "identifier": "SafariWindow?IsSecure=false&UUID=63553FE1-8662-47BC-8857-C66EAF284865"
+    },
+    "children": [
+      {
+        "role": "group",
+        "raw_role": "AXSplitGroup",
+        "bounds": [
+          0.0,
+          31.0,
+          1024.0,
+          680.0
+        ],
+        "children": [
+          {
+            "role": "toolbar",
+            "raw_role": "AXTabGroup",
+            "bounds": [
+              0.0,
+              31.0,
+              1024.0,
+              680.0
+            ],
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                  0.0,
+                  31.0,
+                  1024.0,
+                  680.0
+                ],
+                "attrs": {
+                  "identifier": "BrowserView?IsPageLoaded=true&WebViewProcessID=25465"
+                },
+                "children": [
+                  {
+                    "role": "group",
+                    "raw_role": "AXGroup",
+                    "bounds": [
+                      0.0,
+                      31.0,
+                      1024.0,
+                      680.0
+                    ],
+                    "children": [
+                      {
+                        "role": "scroll_area",
+                        "raw_role": "AXScrollArea",
+                        "states": {
+                          "focused": true,
+                          "expanded": false
+                        },
+                        "bounds": [
+                          0.0,
+                          83.0,
+                          1024.0,
+                          628.0
+                        ],
+                        "children": [
+                          {
+                            "role": "web_area",
+                            "raw_role": "AXWebArea",
+                            "description": "Nugget fixture: Mail compose",
+                            "states": {
+                              "focused": true,
+                              "expanded": false
+                            },
+                            "bounds": [
+                              0.0,
+                              83.0,
+                              1024.0,
+                              628.0
+                            ],
+                            "attrs": {
+                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose"
+                            },
+                            "children": [
+                              {
+                                "role": "group",
+                                "raw_role": "AXGroup/AXLandmarkNavigation",
+                                "name": "Mail folders",
+                                "description": "Mail folders",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  0.0,
+                                  83.0,
+                                  220.0,
+                                  628.0
+                                ],
+                                "attrs": {
+                                  "dom_classes": "mail-nav"
+                                },
+                                "children": [
+                                  {
+                                    "role": "group",
+                                    "raw_role": "AXGroup",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      12.0,
+                                      95.0,
+                                      196.0,
+                                      29.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "brand"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "AXStaticText",
+                                        "value": "Fernmail",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          98.0,
+                                          80.0,
+                                          23.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "button",
+                                    "raw_role": "AXButton",
+                                    "name": "Compose",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      12.0,
+                                      136.0,
+                                      106.0,
+                                      44.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "compose-btn"
+                                    }
+                                  },
+                                  {
+                                    "role": "list",
+                                    "raw_role": "AXList/AXContentList",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      12.0,
+                                      192.0,
+                                      196.0,
+                                      168.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "folders"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          192.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Inbox 12",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              192.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Inbox",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  197.0,
+                                                  38.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "12",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  180.0,
+                                                  197.0,
+                                                  16.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          220.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Starred",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              220.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Starred",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  225.0,
+                                                  48.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          248.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Snoozed",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              248.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Snoozed",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  253.0,
+                                                  57.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          276.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Sent",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              276.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Sent",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  281.0,
+                                                  30.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          304.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Drafts 2",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              304.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Drafts",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  309.0,
+                                                  40.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "2",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  187.0,
+                                                  309.0,
+                                                  9.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          12.0,
+                                          332.0,
+                                          196.0,
+                                          28.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "AXLink",
+                                            "name": "Offsite 3",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              12.0,
+                                              332.0,
+                                              196.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "url": "http://127.0.0.1:49171/index.html?editor=mail-compose#"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Offsite",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  24.0,
+                                                  337.0,
+                                                  44.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "3",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  187.0,
+                                                  337.0,
+                                                  9.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "AXGroup/AXLandmarkBanner",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  220.0,
+                                  83.0,
+                                  804.0,
+                                  52.0
+                                ],
+                                "attrs": {
+                                  "dom_classes": "mail-top"
+                                },
+                                "children": [
+                                  {
+                                    "role": "search_field",
+                                    "raw_role": "AXTextField/AXSearchField",
+                                    "name": "Search mail",
+                                    "description": "Search mail",
+                                    "placeholder": "Search mail",
+                                    "states": {
+                                      "editable": true,
+                                      "multiline": false,
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      236.0,
+                                      94.0,
+                                      326.0,
+                                      30.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "mail-search"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "editable": true,
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          250.0,
+                                          102.0,
+                                          287.0,
+                                          14.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Search mail",
+                                            "states": {
+                                              "editable": true,
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              250.0,
+                                              102.0,
+                                              61.0,
+                                              14.0
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "toolbar",
+                                    "raw_role": "AXToolbar",
+                                    "name": "Thread actions",
+                                    "description": "Thread actions",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      574.0,
+                                      96.0,
+                                      435.0,
+                                      26.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "toolbar"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Archive",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          578.0,
+                                          96.0,
+                                          67.0,
+                                          26.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Report spam",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          648.0,
+                                          96.0,
+                                          101.0,
+                                          26.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Delete",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          753.0,
+                                          96.0,
+                                          60.0,
+                                          26.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Mark as unread",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          816.0,
+                                          96.0,
+                                          119.0,
+                                          26.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Move to",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          938.0,
+                                          96.0,
+                                          71.0,
+                                          26.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "AXGroup/AXLandmarkMain",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  232.0,
+                                  135.0,
+                                  780.0,
+                                  556.0
+                                ],
+                                "attrs": {
+                                  "dom_classes": "mail-main"
+                                },
+                                "children": [
+                                  {
+                                    "role": "heading",
+                                    "raw_role": "AXHeading",
+                                    "name": "Q3 offsite venue",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      252.0,
+                                      98.0,
+                                      144.0,
+                                      29.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "subject"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "AXStaticText",
+                                        "value": "Q3 offsite venue",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          252.0,
+                                          101.0,
+                                          145.0,
+                                          23.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "AXStaticText",
+                                    "value": "Inbox",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      410.0,
+                                      105.0,
+                                      31.0,
+                                      15.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "list",
+                                    "raw_role": "AXList/AXContentList",
+                                    "name": "Conversation",
+                                    "description": "Conversation",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      252.0,
+                                      133.0,
+                                      723.0,
+                                      356.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "thread"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          252.0,
+                                          133.0,
+                                          723.0,
+                                          110.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "mail-msg"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "heading",
+                                            "raw_role": "AXHeading",
+                                            "name": "Jordan Lee",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              147.0,
+                                              76.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "sender"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Jordan Lee",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  148.0,
+                                                  76.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "<jordan.lee@example.com>",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              375.0,
+                                              149.0,
+                                              158.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Mon, Oct 26, 9:14 AM",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              851.0,
+                                              149.0,
+                                              124.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              173.0,
+                                              683.0,
+                                              17.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "mail-to"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "to me, Priya Natarajan",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  174.0,
+                                                  125.0,
+                                                  15.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              194.0,
+                                              683.0,
+                                              40.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Hi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  195.0,
+                                                  640.0,
+                                                  37.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          252.0,
+                                          243.0,
+                                          723.0,
+                                          90.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "mail-msg"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "heading",
+                                            "raw_role": "AXHeading",
+                                            "name": "Priya Natarajan",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              257.0,
+                                              106.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "sender"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Priya Natarajan",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  258.0,
+                                                  106.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "<priya.natarajan@example.com>",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              405.0,
+                                              259.0,
+                                              186.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Mon, Oct 26, 11:40 AM",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              846.0,
+                                              259.0,
+                                              129.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              283.0,
+                                              683.0,
+                                              17.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "mail-to"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "to me, Jordan Lee",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  284.0,
+                                                  102.0,
+                                                  15.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              304.0,
+                                              683.0,
+                                              20.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  305.0,
+                                                  639.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          252.0,
+                                          333.0,
+                                          723.0,
+                                          156.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "mail-msg latest"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "heading",
+                                            "raw_role": "AXHeading",
+                                            "name": "Jordan Lee",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              347.0,
+                                              76.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "sender"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Jordan Lee",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  348.0,
+                                                  76.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "<jordan.lee@example.com>",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              375.0,
+                                              349.0,
+                                              158.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Tue, Oct 27, 8:05 AM",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              855.0,
+                                              349.0,
+                                              120.0,
+                                              16.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              373.0,
+                                              683.0,
+                                              17.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "mail-to"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "to me, Priya Natarajan",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  374.0,
+                                                  125.0,
+                                                  15.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              394.0,
+                                              683.0,
+                                              40.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Thanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  395.0,
+                                                  678.0,
+                                                  37.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              292.0,
+                                              440.0,
+                                              683.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "gmail_attr"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "On Mon, Oct 26, 11:40 AM Priya Natarajan <priya.natarajan@example.com> wrote:",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  292.0,
+                                                  441.0,
+                                                  531.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              297.0,
+                                              460.0,
+                                              678.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "gmail_quote"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  306.0,
+                                                  461.0,
+                                                  640.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "group",
+                                    "raw_role": "AXGroup/AXLandmarkRegion",
+                                    "name": "Reply",
+                                    "description": "Reply",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      252.0,
+                                      503.0,
+                                      740.0,
+                                      180.0
+                                    ],
+                                    "attrs": {
+                                      "dom_classes": "compose"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "AXStaticText",
+                                        "value": "To",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          263.0,
+                                          513.0,
+                                          16.0,
+                                          18.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "list",
+                                        "raw_role": "AXList",
+                                        "name": "To",
+                                        "description": "To",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          284.0,
+                                          513.0,
+                                          196.0,
+                                          19.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "chips"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "name": "Jordan Lee",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              284.0,
+                                              513.0,
+                                              84.0,
+                                              19.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "chip"
+                                            }
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "name": "Priya Natarajan",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              371.0,
+                                              513.0,
+                                              109.0,
+                                              19.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "chip"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "text_field",
+                                        "raw_role": "AXTextField",
+                                        "name": "To recipients",
+                                        "description": "To recipients",
+                                        "states": {
+                                          "editable": true,
+                                          "multiline": false,
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          485.0,
+                                          508.0,
+                                          497.0,
+                                          29.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "to-input"
+                                        }
+                                      },
+                                      {
+                                        "role": "text_field",
+                                        "raw_role": "AXTextField",
+                                        "name": "Subject",
+                                        "description": "Subject",
+                                        "value": "Re: Q3 offsite venue",
+                                        "placeholder": "Subject",
+                                        "states": {
+                                          "editable": true,
+                                          "multiline": false,
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          263.0,
+                                          538.0,
+                                          718.0,
+                                          29.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "subject-input"
+                                        }
+                                      },
+                                      {
+                                        "role": "text_area",
+                                        "raw_role": "AXTextArea",
+                                        "name": "Message Body",
+                                        "description": "Message Body",
+                                        "value": "Draft:",
+                                        "states": {
+                                          "focused": true,
+                                          "editable": true,
+                                          "multiline": true,
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          263.0,
+                                          568.0,
+                                          718.0,
+                                          70.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "Am aiL Al editable LW-avf tS-tW"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Draft:",
+                                            "states": {
+                                              "editable": true,
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              263.0,
+                                              575.0,
+                                              41.0,
+                                              17.0
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "AXButton",
+                                        "name": "Send",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          263.0,
+                                          642.0,
+                                          69.0,
+                                          32.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "send"
+                                        }
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup/AXLandmarkForm",
+                                        "name": "Re-enter password to send",
+                                        "description": "Re-enter password to send",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          342.0,
+                                          644.0,
+                                          385.0,
+                                          28.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "reauth"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "group",
+                                            "raw_role": "AXGroup",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              351.0,
+                                              649.0,
+                                              160.0,
+                                              18.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "reauth-title"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Re-enter password to send",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  351.0,
+                                                  650.0,
+                                                  160.0,
+                                                  16.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Password",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              516.0,
+                                              649.0,
+                                              55.0,
+                                              18.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "AXStaticText",
+                                                "value": "Password",
+                                                "states": {
+                                                  "expanded": false
+                                                },
+                                                "bounds": [
+                                                  516.0,
+                                                  650.0,
+                                                  55.0,
+                                                  16.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "text_field",
+                                            "raw_role": "AXTextField/AXSecureTextField",
+                                            "name": "Password",
+                                            "states": {
+                                              "editable": true,
+                                              "secure": true,
+                                              "multiline": false,
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              576.0,
+                                              647.0,
+                                              141.0,
+                                              22.0
+                                            ],
+                                            "attrs": {
+                                              "dom_classes": "reauth-input"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "AXGroup/AXApplicationStatus",
+                                        "states": {
+                                          "expanded": false
+                                        },
+                                        "bounds": [
+                                          915.0,
+                                          649.0,
+                                          66.0,
+                                          18.0
+                                        ],
+                                        "attrs": {
+                                          "dom_classes": "draft-status"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "AXStaticText",
+                                            "value": "Draft saved",
+                                            "states": {
+                                              "expanded": false
+                                            },
+                                            "bounds": [
+                                              915.0,
+                                              650.0,
+                                              66.0,
+                                              16.0
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "AXGroup/AXApplicationStatus",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  220.0,
+                                  691.0,
+                                  804.0,
+                                  20.0
+                                ],
+                                "attrs": {
+                                  "dom_classes": "mail-status"
+                                },
+                                "children": [
+                                  {
+                                    "role": "static_text",
+                                    "raw_role": "AXStaticText",
+                                    "value": "Last account activity: 12 minutes ago",
+                                    "states": {
+                                      "expanded": false
+                                    },
+                                    "bounds": [
+                                      236.0,
+                                      694.0,
+                                      210.0,
+                                      15.0
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "image",
+        "raw_role": "AXImage",
+        "bounds": [
+          -2.0,
+          29.0,
+          102.0,
+          56.0
+        ],
+        "attrs": {
+          "identifier": "WindowControlShadowView._shadowImageView"
+        }
+      },
+      {
+        "role": "toolbar",
+        "raw_role": "AXToolbar",
+        "bounds": [
+          0.0,
+          31.0,
+          1024.0,
+          52.0
+        ],
+        "children": [
+          {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+              92.0,
+              31.0,
+              75.0,
+              52.0
+            ],
+            "children": [
+              {
+                "role": "button",
+                "raw_role": "AXButton",
+                "description": "show sidebar",
+                "bounds": [
+                  95.0,
+                  38.0,
+                  42.0,
+                  38.0
+                ],
+                "attrs": {
+                  "identifier": "SidebarButton"
+                }
+              },
+              {
+                "role": "button",
+                "raw_role": "AXMenuButton",
+                "description": "Tab Group picker",
+                "bounds": [
+                  135.0,
+                  38.0,
+                  20.0,
+                  38.0
+                ],
+                "attrs": {
+                  "identifier": "TabGroupPickerButton?TabGroup="
+                }
+              }
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+              167.0,
+              31.0,
+              81.0,
+              52.0
+            ],
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "AXGroup",
+                "bounds": [
+                  170.0,
+                  38.0,
+                  75.0,
+                  38.0
+                ],
+                "attrs": {
+                  "identifier": "BackForwardSegmentedControl"
+                },
+                "children": [
+                  {
+                    "role": "button",
+                    "raw_role": "AXButton/AXSegment",
+                    "description": "Go back",
+                    "states": {
+                      "disabled": true
+                    },
+                    "bounds": [
+                      171.0,
+                      39.0,
+                      36.0,
+                      36.0
+                    ],
+                    "attrs": {
+                      "identifier": "BackButton"
+                    }
+                  },
+                  {
+                    "role": "button",
+                    "raw_role": "AXButton/AXSegment",
+                    "description": "Go forward",
+                    "states": {
+                      "disabled": true
+                    },
+                    "bounds": [
+                      208.0,
+                      39.0,
+                      36.0,
+                      36.0
+                    ],
+                    "attrs": {
+                      "identifier": "ForwardButton"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+              302.0,
+              31.0,
+              420.0,
+              52.0
+            ],
+            "children": [
+              {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Page Menu",
+                "description": "Page Menu",
+                "bounds": [
+                  306.0,
+                  43.0,
+                  31.0,
+                  29.0
+                ],
+                "attrs": {
+                  "identifier": "AssistantButton"
+                }
+              },
+              {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Add page to Reading List",
+                "description": "Add page to Reading List",
+                "states": {
+                  "disabled": true
+                },
+                "bounds": [
+                  328.0,
+                  42.0,
+                  24.0,
+                  30.0
+                ],
+                "attrs": {
+                  "identifier": "OneStepBookmarkingButton"
+                }
+              },
+              {
+                "role": "text_field",
+                "raw_role": "AXTextField",
+                "description": "smart search field",
+                "value": "127.0.0.1:49171/index.html?editor=mail-compose",
+                "states": {
+                  "editable": true,
+                  "multiline": false
+                },
+                "bounds": [
+                  329.0,
+                  49.0,
+                  358.0,
+                  31.0
+                ],
+                "attrs": {
+                  "identifier": "WEB_BROWSER_ADDRESS_AND_SEARCH_FIELD"
+                }
+              },
+              {
+                "role": "button",
+                "raw_role": "AXButton",
+                "name": "Reload this page",
+                "description": "Reload this page",
+                "bounds": [
+                  693.0,
+                  44.0,
+                  24.0,
+                  29.0
+                ],
+                "attrs": {
+                  "identifier": "ReloadButton"
+                }
+              }
+            ]
+          },
+          {
+            "role": "button",
+            "raw_role": "AXButton",
+            "description": "Share",
+            "bounds": [
+              899.0,
+              31.0,
+              41.0,
+              52.0
+            ],
+            "attrs": {
+              "identifier": "ShareButton"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "AXButton",
+            "description": "New Tab",
+            "bounds": [
+              940.0,
+              31.0,
+              37.0,
+              52.0
+            ],
+            "attrs": {
+              "identifier": "NewTabButton"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "AXButton",
+            "description": "Tab Overview",
+            "bounds": [
+              977.0,
+              31.0,
+              43.0,
+              52.0
+            ],
+            "attrs": {
+              "identifier": "TabOverviewButton"
+            }
+          }
+        ]
+      },
+      {
+        "role": "button",
+        "raw_role": "AXButton/AXCloseButton",
+        "bounds": [
+          18.0,
+          49.0,
+          16.0,
+          16.0
+        ]
+      },
+      {
+        "role": "button",
+        "raw_role": "AXButton/AXFullScreenButton",
+        "bounds": [
+          64.0,
+          49.0,
+          16.0,
+          16.0
+        ],
+        "children": [
+          {
+            "role": "group",
+            "raw_role": "AXGroup",
+            "bounds": [
+              65.0,
+              50.0,
+              14.0,
+              14.0
+            ]
+          }
+        ]
+      },
+      {
+        "role": "button",
+        "raw_role": "AXButton/AXMinimizeButton",
+        "bounds": [
+          41.0,
+          49.0,
+          16.0,
+          16.0
+        ]
+      }
+    ]
+  },
+  "focus_path": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    3,
+    4
+  ],
+  "truncated": false
+}

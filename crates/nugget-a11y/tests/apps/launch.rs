@@ -664,6 +664,24 @@ fn spawn_open(app: &Path, args: &[&str]) -> Result<Child, String> {
         .map_err(|e| format!("cannot run open -a {}: {e}", app.display()))
 }
 
+/// macOS: a new instance of `app` through LaunchServices with `args` passed to it (`open -n -a
+/// <app> --args ...`), not waited for. A browser started as a child of this background test
+/// process is not allowed to become frontmost; one started by LaunchServices is, as for a user.
+/// The browser is found again by its profile path (the run's marker) when it is killed.
+fn spawn_open_new(app: &Path, args: &[String]) -> Result<Child, String> {
+    Command::new("/usr/bin/open")
+        .arg("-n")
+        .arg("-a")
+        .arg(app)
+        .arg("--args")
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("cannot run open -n -a {}: {e}", app.display()))
+}
+
 /// Start a browser on `url` with a fresh profile under `dir`.
 pub fn launch_browser(
     spec: AppSpec,
@@ -689,16 +707,15 @@ pub fn launch_browser(
     match b {
         Browser::Chrome | Browser::Edge => {
             let args = chromium_args(b == Browser::Edge, url, &profile, force_a11y);
-            let bin = if cfg!(target_os = "macos") {
-                bundle_exe(exe)
+            if cfg!(target_os = "macos") {
+                run.child = Some(spawn_open_new(exe, &args)?);
             } else {
-                exe.to_path_buf()
-            };
-            let mut cmd = Command::new(bin);
-            cmd.args(&args);
-            let (c, log) = spawn(cmd, dir, spec.id)?;
-            run.child = Some(c);
-            run.log = Some(log);
+                let mut cmd = Command::new(exe);
+                cmd.args(&args);
+                let (c, log) = spawn(cmd, dir, spec.id)?;
+                run.child = Some(c);
+                run.log = Some(log);
+            }
         }
         Browser::Firefox => {
             std::fs::write(profile.join("user.js"), FIREFOX_USER_JS)
@@ -716,12 +733,11 @@ pub fn launch_browser(
                 run.images = vec!["firefox.exe"];
             }
             args.push(url.into());
-            let bin = if cfg!(target_os = "macos") {
-                bundle_exe(exe)
-            } else {
-                exe.to_path_buf()
-            };
-            let mut cmd = Command::new(bin);
+            if cfg!(target_os = "macos") {
+                run.child = Some(spawn_open_new(exe, &args)?);
+                return Ok(run);
+            }
+            let mut cmd = Command::new(exe);
             cmd.args(&args)
                 .env("MOZ_CRASHREPORTER_DISABLE", "1")
                 .env("MOZ_DISABLE_AUTO_SAFE_MODE", "1");

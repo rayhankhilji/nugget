@@ -1,0 +1,1460 @@
+{
+  "root": {
+    "role": "window",
+    "raw_role": "50032",
+    "name": "Nugget fixture: Mail compose - Google Chrome",
+    "states": {
+      "focused": true
+    },
+    "bounds": [
+      40.0,
+      40.0,
+      1044.0,
+      788.0
+    ],
+    "attrs": {
+      "class": "Chrome_WidgetWin_1"
+    },
+    "children": [
+      {
+        "role": "scroll_area",
+        "raw_role": "50033",
+        "states": {
+          "disabled": true
+        },
+        "bounds": [
+          48.0,
+          40.0,
+          1028.0,
+          780.0
+        ],
+        "attrs": {
+          "class": "Intermediate D3D Window"
+        }
+      },
+      {
+        "role": "section",
+        "raw_role": "50033",
+        "name": "Nugget fixture: Mail compose - Google Chrome",
+        "bounds": [
+          48.0,
+          40.0,
+          1028.0,
+          780.0
+        ],
+        "attrs": {
+          "class": "BrowserRootView"
+        },
+        "children": [
+          {
+            "role": "section",
+            "raw_role": "50033",
+            "bounds": [
+              48.0,
+              40.0,
+              1028.0,
+              780.0
+            ],
+            "attrs": {
+              "class": "NonClientView"
+            },
+            "children": [
+              {
+                "role": "section",
+                "raw_role": "50033",
+                "bounds": [
+                  48.0,
+                  40.0,
+                  1028.0,
+                  780.0
+                ],
+                "attrs": {
+                  "class": "BrowserFrameViewWin"
+                },
+                "children": [
+                  {
+                    "role": "section",
+                    "raw_role": "50033",
+                    "bounds": [
+                      939.0,
+                      41.0,
+                      137.0,
+                      39.0
+                    ],
+                    "attrs": {
+                      "class": "BrowserCaptionButtonContainer"
+                    },
+                    "children": [
+                      {
+                        "role": "button",
+                        "raw_role": "50000",
+                        "name": "Minimize",
+                        "bounds": [
+                          939.0,
+                          41.0,
+                          45.0,
+                          39.0
+                        ],
+                        "attrs": {
+                          "class": "WindowsCaptionButton",
+                          "identifier": "view_1"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "raw_role": "50000",
+                        "name": "Maximize",
+                        "bounds": [
+                          984.0,
+                          41.0,
+                          46.0,
+                          39.0
+                        ],
+                        "attrs": {
+                          "class": "WindowsCaptionButton",
+                          "identifier": "view_2"
+                        }
+                      },
+                      {
+                        "role": "button",
+                        "raw_role": "50000",
+                        "name": "Close",
+                        "bounds": [
+                          1030.0,
+                          41.0,
+                          46.0,
+                          39.0
+                        ],
+                        "attrs": {
+                          "class": "WindowsCaptionButton",
+                          "identifier": "view_4"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "role": "section",
+                    "raw_role": "50033",
+                    "bounds": [
+                      48.0,
+                      40.0,
+                      1028.0,
+                      780.0
+                    ],
+                    "attrs": {
+                      "class": "BrowserView"
+                    },
+                    "children": [
+                      {
+                        "role": "section",
+                        "raw_role": "50033",
+                        "bounds": [
+                          48.0,
+                          80.0,
+                          1028.0,
+                          46.0
+                        ],
+                        "attrs": {
+                          "class": "TopContainerView"
+                        },
+                        "children": [
+                          {
+                            "role": "toolbar",
+                            "raw_role": "50021",
+                            "bounds": [
+                              48.0,
+                              80.0,
+                              1028.0,
+                              46.0
+                            ],
+                            "attrs": {
+                              "class": "ToolbarView",
+                              "identifier": "view_1000"
+                            },
+                            "children": [
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "Back",
+                                "states": {
+                                  "disabled": true
+                                },
+                                "bounds": [
+                                  54.0,
+                                  86.0,
+                                  34.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "BackForwardButton",
+                                  "identifier": "view_1001"
+                                }
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "Forward",
+                                "states": {
+                                  "disabled": true
+                                },
+                                "bounds": [
+                                  90.0,
+                                  86.0,
+                                  34.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "BackForwardButton",
+                                  "identifier": "view_1002"
+                                }
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "Reload",
+                                "bounds": [
+                                  126.0,
+                                  86.0,
+                                  34.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "ReloadButton",
+                                  "identifier": "view_1003"
+                                }
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "50026",
+                                "bounds": [
+                                  169.0,
+                                  86.0,
+                                  822.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "LocationBarView"
+                                },
+                                "children": [
+                                  {
+                                    "role": "button",
+                                    "raw_role": "50000",
+                                    "name": "View site information",
+                                    "bounds": [
+                                      174.0,
+                                      91.0,
+                                      24.0,
+                                      24.0
+                                    ],
+                                    "attrs": {
+                                      "class": "LocationIconView",
+                                      "identifier": "view_1011"
+                                    }
+                                  },
+                                  {
+                                    "role": "text_area",
+                                    "raw_role": "50004",
+                                    "name": "Address and search bar",
+                                    "value": "127.0.0.1:53769/index.html?editor=mail-compose",
+                                    "placeholder": "Search Google or type a URL",
+                                    "states": {
+                                      "editable": true,
+                                      "multiline": false
+                                    },
+                                    "bounds": [
+                                      206.0,
+                                      91.0,
+                                      741.0,
+                                      24.0
+                                    ],
+                                    "attrs": {
+                                      "class": "OmniboxViewViews",
+                                      "identifier": "view_1012"
+                                    }
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "50033",
+                                    "bounds": [
+                                      955.0,
+                                      91.0,
+                                      24.0,
+                                      24.0
+                                    ],
+                                    "attrs": {
+                                      "class": "PageActionContainerView"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "button",
+                                        "raw_role": "50000",
+                                        "name": "Bookmark this tab",
+                                        "bounds": [
+                                          955.0,
+                                          91.0,
+                                          24.0,
+                                          24.0
+                                        ],
+                                        "attrs": {
+                                          "class": "PageActionView"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "You",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  1000.0,
+                                  86.0,
+                                  34.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "AvatarToolbarButton",
+                                  "identifier": "view_1018"
+                                }
+                              },
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "Chrome",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  1036.0,
+                                  86.0,
+                                  34.0,
+                                  34.0
+                                ],
+                                "attrs": {
+                                  "class": "BrowserAppMenuButton",
+                                  "identifier": "view_1007"
+                                }
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "role": "section",
+                        "raw_role": "50033",
+                        "bounds": [
+                          48.0,
+                          126.0,
+                          1028.0,
+                          694.0
+                        ],
+                        "attrs": {
+                          "class": "MultiContentsView"
+                        },
+                        "children": [
+                          {
+                            "role": "section",
+                            "raw_role": "50033",
+                            "bounds": [
+                              48.0,
+                              127.0,
+                              1028.0,
+                              693.0
+                            ],
+                            "attrs": {
+                              "class": "Chrome_WidgetWin_1"
+                            },
+                            "children": [
+                              {
+                                "role": "section",
+                                "raw_role": "50033",
+                                "attrs": {
+                                  "class": "View"
+                                }
+                              },
+                              {
+                                "role": "document",
+                                "raw_role": "50030",
+                                "name": "Nugget fixture: Mail compose",
+                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose",
+                                "states": {
+                                  "multiline": true
+                                },
+                                "bounds": [
+                                  48.0,
+                                  127.0,
+                                  1028.0,
+                                  693.0
+                                ],
+                                "attrs": {
+                                  "identifier": "RootWebArea"
+                                },
+                                "children": [
+                                  {
+                                    "role": "section",
+                                    "raw_role": "50026",
+                                    "name": "Mail folders",
+                                    "bounds": [
+                                      48.0,
+                                      127.0,
+                                      220.0,
+                                      693.0
+                                    ],
+                                    "attrs": {
+                                      "class": "mail-nav"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "50020",
+                                        "name": "Fernmail",
+                                        "bounds": [
+                                          60.0,
+                                          140.0,
+                                          79.0,
+                                          27.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "50000",
+                                        "name": "Compose",
+                                        "bounds": [
+                                          60.0,
+                                          180.0,
+                                          103.0,
+                                          45.0
+                                        ],
+                                        "attrs": {
+                                          "class": "compose-btn"
+                                        }
+                                      },
+                                      {
+                                        "role": "list",
+                                        "raw_role": "50008",
+                                        "bounds": [
+                                          60.0,
+                                          236.0,
+                                          196.0,
+                                          171.0
+                                        ],
+                                        "attrs": {
+                                          "class": "folders"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Inbox12",
+                                            "bounds": [
+                                              60.0,
+                                              236.0,
+                                              196.0,
+                                              29.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Inbox 12",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  236.0,
+                                                  196.0,
+                                                  29.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Starred",
+                                            "bounds": [
+                                              60.0,
+                                              264.0,
+                                              196.0,
+                                              29.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Starred",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  264.0,
+                                                  196.0,
+                                                  29.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Snoozed",
+                                            "bounds": [
+                                              60.0,
+                                              292.0,
+                                              196.0,
+                                              30.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Snoozed",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  292.0,
+                                                  196.0,
+                                                  30.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Sent",
+                                            "bounds": [
+                                              60.0,
+                                              321.0,
+                                              196.0,
+                                              29.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Sent",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  321.0,
+                                                  196.0,
+                                                  29.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Drafts2",
+                                            "bounds": [
+                                              60.0,
+                                              349.0,
+                                              196.0,
+                                              29.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Drafts 2",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  349.0,
+                                                  196.0,
+                                                  29.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Offsite3",
+                                            "bounds": [
+                                              60.0,
+                                              377.0,
+                                              196.0,
+                                              30.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "link",
+                                                "raw_role": "50005",
+                                                "name": "Offsite 3",
+                                                "value": "http://127.0.0.1:53769/index.html?editor=mail-compose#",
+                                                "bounds": [
+                                                  60.0,
+                                                  377.0,
+                                                  196.0,
+                                                  30.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "group",
+                                    "raw_role": "50026",
+                                    "bounds": [
+                                      268.0,
+                                      127.0,
+                                      808.0,
+                                      52.0
+                                    ],
+                                    "attrs": {
+                                      "class": "mail-top"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "search_field",
+                                        "raw_role": "50004",
+                                        "name": "Search mail",
+                                        "placeholder": "Search mail",
+                                        "states": {
+                                          "editable": true,
+                                          "multiline": false
+                                        },
+                                        "bounds": [
+                                          284.0,
+                                          137.0,
+                                          343.0,
+                                          32.0
+                                        ],
+                                        "attrs": {
+                                          "class": "mail-search"
+                                        }
+                                      },
+                                      {
+                                        "role": "toolbar",
+                                        "raw_role": "50021",
+                                        "name": "Thread actions",
+                                        "bounds": [
+                                          638.0,
+                                          139.0,
+                                          422.0,
+                                          28.0
+                                        ],
+                                        "attrs": {
+                                          "class": "toolbar"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Archive",
+                                            "bounds": [
+                                              642.0,
+                                              139.0,
+                                              65.0,
+                                              28.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Report spam",
+                                            "bounds": [
+                                              710.0,
+                                              139.0,
+                                              97.0,
+                                              28.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Delete",
+                                            "bounds": [
+                                              810.0,
+                                              139.0,
+                                              59.0,
+                                              28.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Mark as unread",
+                                            "bounds": [
+                                              872.0,
+                                              139.0,
+                                              115.0,
+                                              28.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Move to",
+                                            "bounds": [
+                                              990.0,
+                                              139.0,
+                                              70.0,
+                                              28.0
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "50026",
+                                    "bounds": [
+                                      280.0,
+                                      179.0,
+                                      784.0,
+                                      621.0
+                                    ],
+                                    "attrs": {
+                                      "class": "mail-main"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "heading",
+                                        "raw_role": "50020",
+                                        "name": "Q3 offsite venue",
+                                        "bounds": [
+                                          300.0,
+                                          193.0,
+                                          145.0,
+                                          29.0
+                                        ],
+                                        "attrs": {
+                                          "class": "subject"
+                                        }
+                                      },
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "50020",
+                                        "name": "Inbox",
+                                        "bounds": [
+                                          458.0,
+                                          198.0,
+                                          31.0,
+                                          17.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "list",
+                                        "raw_role": "50008",
+                                        "name": "Conversation",
+                                        "bounds": [
+                                          300.0,
+                                          228.0,
+                                          744.0,
+                                          360.0
+                                        ],
+                                        "attrs": {
+                                          "class": "thread"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Jordan Lee<jordan.lee@example.com>Mon, Oct 26, 9:14 AMto me, Priya NatarajanHi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?",
+                                            "bounds": [
+                                              300.0,
+                                              228.0,
+                                              744.0,
+                                              111.0
+                                            ],
+                                            "attrs": {
+                                              "class": "mail-msg"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "heading",
+                                                "raw_role": "50020",
+                                                "name": "Jordan Lee",
+                                                "bounds": [
+                                                  340.0,
+                                                  241.0,
+                                                  72.0,
+                                                  22.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "sender"
+                                                }
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Mon, Oct 26, 9:14 AM",
+                                                "bounds": [
+                                                  928.0,
+                                                  243.0,
+                                                  116.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "to me, Priya Natarajan",
+                                                "bounds": [
+                                                  340.0,
+                                                  268.0,
+                                                  118.0,
+                                                  16.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Hi all, I shortlisted two venues for the Q3 offsite: Lakeside Lodge and Harbor Loft. Both can host 40 people. Which one do you prefer?",
+                                                "bounds": [
+                                                  340.0,
+                                                  289.0,
+                                                  701.0,
+                                                  40.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Priya Natarajan<priya.natarajan@example.com>Mon, Oct 26, 11:40 AMto me, Jordan LeeLakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                            "bounds": [
+                                              300.0,
+                                              338.0,
+                                              744.0,
+                                              92.0
+                                            ],
+                                            "attrs": {
+                                              "class": "mail-msg"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "heading",
+                                                "raw_role": "50020",
+                                                "name": "Priya Natarajan",
+                                                "bounds": [
+                                                  340.0,
+                                                  352.0,
+                                                  102.0,
+                                                  22.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "sender"
+                                                }
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Mon, Oct 26, 11:40 AM",
+                                                "bounds": [
+                                                  922.0,
+                                                  354.0,
+                                                  122.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "to me, Jordan Lee",
+                                                "bounds": [
+                                                  340.0,
+                                                  378.0,
+                                                  94.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                                "bounds": [
+                                                  340.0,
+                                                  400.0,
+                                                  615.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "50007",
+                                            "name": "Jordan Lee<jordan.lee@example.com>Tue, Oct 27, 8:05 AMto me, Priya NatarajanThanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?On Mon, Oct 26, 11:40 AM Priya Natarajan <priya.natarajan@example.com> wrote:Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                            "bounds": [
+                                              300.0,
+                                              429.0,
+                                              744.0,
+                                              159.0
+                                            ],
+                                            "attrs": {
+                                              "class": "mail-msg latest"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "heading",
+                                                "raw_role": "50020",
+                                                "name": "Jordan Lee",
+                                                "bounds": [
+                                                  340.0,
+                                                  443.0,
+                                                  72.0,
+                                                  21.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "sender"
+                                                }
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Tue, Oct 27, 8:05 AM",
+                                                "bounds": [
+                                                  934.0,
+                                                  444.0,
+                                                  110.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "to me, Priya Natarajan",
+                                                "bounds": [
+                                                  340.0,
+                                                  469.0,
+                                                  118.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Thanks Priya. Lakeside quoted 18,500 for two days including lunch. Can everyone confirm the dates work for your team before I sign?",
+                                                "bounds": [
+                                                  340.0,
+                                                  491.0,
+                                                  699.0,
+                                                  40.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "On Mon, Oct 26, 11:40 AM Priya Natarajan <priya.natarajan@example.com> wrote:",
+                                                "bounds": [
+                                                  340.0,
+                                                  537.0,
+                                                  513.0,
+                                                  20.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "group",
+                                                "raw_role": "50026",
+                                                "bounds": [
+                                                  345.0,
+                                                  557.0,
+                                                  699.0,
+                                                  22.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "gmail_quote"
+                                                },
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "50020",
+                                                    "name": "Lakeside Lodge gets my vote. It has breakout rooms and the train station is a ten minute walk away.",
+                                                    "bounds": [
+                                                      353.0,
+                                                      557.0,
+                                                      616.0,
+                                                      20.0
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "section",
+                                        "raw_role": "50026",
+                                        "name": "Reply",
+                                        "bounds": [
+                                          300.0,
+                                          611.0,
+                                          744.0,
+                                          181.0
+                                        ],
+                                        "attrs": {
+                                          "class": "compose"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "50020",
+                                            "name": "To",
+                                            "bounds": [
+                                              311.0,
+                                              621.0,
+                                              15.0,
+                                              20.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "list",
+                                            "raw_role": "50008",
+                                            "name": "To",
+                                            "bounds": [
+                                              331.0,
+                                              621.0,
+                                              185.0,
+                                              20.0
+                                            ],
+                                            "attrs": {
+                                              "class": "chips"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "list_item",
+                                                "raw_role": "50007",
+                                                "name": "Jordan Lee",
+                                                "description": "jordan.lee@example.com",
+                                                "bounds": [
+                                                  331.0,
+                                                  621.0,
+                                                  78.0,
+                                                  20.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "chip"
+                                                }
+                                              },
+                                              {
+                                                "role": "list_item",
+                                                "raw_role": "50007",
+                                                "name": "Priya Natarajan",
+                                                "description": "priya.natarajan@example.com",
+                                                "bounds": [
+                                                  412.0,
+                                                  621.0,
+                                                  104.0,
+                                                  20.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "chip"
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "text_area",
+                                            "raw_role": "50004",
+                                            "name": "To recipients",
+                                            "states": {
+                                              "editable": true,
+                                              "multiline": false
+                                            },
+                                            "bounds": [
+                                              521.0,
+                                              617.0,
+                                              512.0,
+                                              29.0
+                                            ],
+                                            "attrs": {
+                                              "class": "to-input"
+                                            }
+                                          },
+                                          {
+                                            "role": "text_area",
+                                            "raw_role": "50004",
+                                            "name": "Subject",
+                                            "value": "Re: Q3 offsite venue",
+                                            "placeholder": "Subject",
+                                            "states": {
+                                              "editable": true,
+                                              "multiline": false
+                                            },
+                                            "bounds": [
+                                              311.0,
+                                              647.0,
+                                              722.0,
+                                              29.0
+                                            ],
+                                            "attrs": {
+                                              "class": "subject-input"
+                                            }
+                                          },
+                                          {
+                                            "role": "text_area",
+                                            "raw_role": "50004",
+                                            "name": "Message Body",
+                                            "value": "Draft:",
+                                            "states": {
+                                              "focused": true,
+                                              "editable": true,
+                                              "multiline": true
+                                            },
+                                            "bounds": [
+                                              311.0,
+                                              676.0,
+                                              722.0,
+                                              71.0
+                                            ],
+                                            "attrs": {
+                                              "class": "Am aiL Al editable LW-avf tS-tW",
+                                              "identifier": ":r7"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Draft:",
+                                                "bounds": [
+                                                  311.0,
+                                                  682.0,
+                                                  38.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "50000",
+                                            "name": "Send",
+                                            "bounds": [
+                                              311.0,
+                                              750.0,
+                                              67.0,
+                                              33.0
+                                            ],
+                                            "attrs": {
+                                              "class": "send"
+                                            }
+                                          },
+                                          {
+                                            "role": "group",
+                                            "raw_role": "50026",
+                                            "name": "Re-enter password to send",
+                                            "bounds": [
+                                              387.0,
+                                              753.0,
+                                              366.0,
+                                              28.0
+                                            ],
+                                            "attrs": {
+                                              "class": "reauth"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Re-enter password to send",
+                                                "bounds": [
+                                                  396.0,
+                                                  758.0,
+                                                  147.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Password",
+                                                "bounds": [
+                                                  548.0,
+                                                  758.0,
+                                                  50.0,
+                                                  17.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "text_area",
+                                                "raw_role": "50004",
+                                                "name": "Password",
+                                                "states": {
+                                                  "editable": true,
+                                                  "secure": true,
+                                                  "multiline": false
+                                                },
+                                                "bounds": [
+                                                  603.0,
+                                                  756.0,
+                                                  141.0,
+                                                  22.0
+                                                ],
+                                                "attrs": {
+                                                  "class": "reauth-input",
+                                                  "identifier": "reauth-password"
+                                                }
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "unknown",
+                                            "raw_role": "50017",
+                                            "bounds": [
+                                              972.0,
+                                              758.0,
+                                              61.0,
+                                              18.0
+                                            ],
+                                            "attrs": {
+                                              "class": "draft-status"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "static_text",
+                                                "raw_role": "50020",
+                                                "name": "Draft saved",
+                                                "bounds": [
+                                                  972.0,
+                                                  758.0,
+                                                  61.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "unknown",
+                                    "raw_role": "50017",
+                                    "bounds": [
+                                      268.0,
+                                      800.0,
+                                      808.0,
+                                      20.0
+                                    ],
+                                    "attrs": {
+                                      "class": "mail-status"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "static_text",
+                                        "raw_role": "50020",
+                                        "name": "Last account activity: 12 minutes ago",
+                                        "bounds": [
+                                          284.0,
+                                          802.0,
+                                          195.0,
+                                          16.0
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "role": "section",
+                            "raw_role": "50033",
+                            "bounds": [
+                              48.0,
+                              126.0,
+                              1028.0,
+                              1.0
+                            ],
+                            "attrs": {
+                              "class": "ContentsSeparator"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "role": "section",
+                        "raw_role": "50033",
+                        "bounds": [
+                          48.0,
+                          40.0,
+                          891.0,
+                          41.0
+                        ],
+                        "attrs": {
+                          "class": "HorizontalTabStripRegionViewOld"
+                        },
+                        "children": [
+                          {
+                            "role": "section",
+                            "raw_role": "50033",
+                            "bounds": [
+                              54.0,
+                              40.0,
+                              28.0,
+                              41.0
+                            ],
+                            "attrs": {
+                              "class": "TabStripComboButton"
+                            },
+                            "children": [
+                              {
+                                "role": "button",
+                                "raw_role": "50000",
+                                "name": "Tab search",
+                                "states": {
+                                  "expanded": false
+                                },
+                                "bounds": [
+                                  54.0,
+                                  46.0,
+                                  28.0,
+                                  28.0
+                                ],
+                                "attrs": {
+                                  "class": "TabStripFlatEdgeButton"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "role": "section",
+                            "raw_role": "50033",
+                            "bounds": [
+                              76.0,
+                              40.0,
+                              256.0,
+                              41.0
+                            ],
+                            "attrs": {
+                              "class": "TabStrip",
+                              "identifier": "view_21"
+                            },
+                            "children": [
+                              {
+                                "role": "toolbar",
+                                "raw_role": "50018",
+                                "bounds": [
+                                  76.0,
+                                  40.0,
+                                  256.0,
+                                  41.0
+                                ],
+                                "attrs": {
+                                  "class": "TabContainerImpl"
+                                },
+                                "children": [
+                                  {
+                                    "role": "tab",
+                                    "raw_role": "50019",
+                                    "name": "Nugget fixture: Mail compose",
+                                    "states": {
+                                      "selected": true
+                                    },
+                                    "bounds": [
+                                      76.0,
+                                      40.0,
+                                      256.0,
+                                      41.0
+                                    ],
+                                    "attrs": {
+                                      "class": "Tab",
+                                      "identifier": "view_20"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "button",
+                                        "raw_role": "50000",
+                                        "name": "Close",
+                                        "bounds": [
+                                          290.0,
+                                          46.0,
+                                          28.0,
+                                          28.0
+                                        ],
+                                        "attrs": {
+                                          "class": "TabCloseButton"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "section",
+                                "raw_role": "50033",
+                                "bounds": [
+                                  76.0,
+                                  40.0,
+                                  256.0,
+                                  41.0
+                                ],
+                                "attrs": {
+                                  "class": "TabStrip::TabDragContextImpl"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "role": "button",
+                            "raw_role": "50000",
+                            "name": "New Tab",
+                            "bounds": [
+                              326.0,
+                              40.0,
+                              28.0,
+                              41.0
+                            ],
+                            "attrs": {
+                              "class": "TabStripControlButton"
+                            }
+                          },
+                          {
+                            "role": "section",
+                            "raw_role": "50033",
+                            "bounds": [
+                              366.0,
+                              40.0,
+                              573.0,
+                              41.0
+                            ],
+                            "attrs": {
+                              "class": "FrameGrabHandle"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "role": "section",
+                        "raw_role": "50033",
+                        "attrs": {
+                          "class": "View"
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "focus_path": [
+    1,
+    0,
+    0,
+    1,
+    1,
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "truncated": false
+}

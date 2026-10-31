@@ -1,0 +1,2022 @@
+{
+  "root": {
+    "role": "window",
+    "raw_role": "frame",
+    "name": "Nugget fixture: Quill — Mozilla Firefox",
+    "bounds": [
+      160.0,
+      87.0,
+      1280.0,
+      1040.0
+    ],
+    "attrs": {
+      "identifier": "main-window"
+    },
+    "children": [
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "tabContextMenu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "open-tab-group-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "saved-tab-group-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "backForwardMenu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "new-tab-button-popup"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-history-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-history-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-synced-tabs-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-opentabs-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-opentabs-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "sidebar-bookmarks-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "split-view-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "toolbar-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "blockedPopupOptions"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "contentAreaContextMenu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "pictureInPictureToggleContextMenu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "placesContext"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "pageActionContextMenu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "userContext-indicator-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "SyncedTabsSidebarContext"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "SyncedTabsSidebarTabsFilterContext"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "unified-extensions-context-menu"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "full-page-translations-panel-settings-menupopup"
+        }
+      },
+      {
+        "role": "menu",
+        "raw_role": "menu",
+        "states": {
+          "offscreen": true
+        },
+        "attrs": {
+          "identifier": "select-translations-panel-settings-menupopup"
+        }
+      },
+      {
+        "role": "toolbar",
+        "raw_role": "tool bar",
+        "name": "Menu Bar",
+        "attrs": {
+          "identifier": "toolbar-menubar"
+        },
+        "children": [
+          {
+            "role": "toolbar",
+            "raw_role": "menu bar",
+            "name": "Application",
+            "states": {
+              "offscreen": true
+            },
+            "bounds": [
+              160.0,
+              87.0,
+              358.0,
+              24.0
+            ],
+            "attrs": {
+              "identifier": "main-menubar"
+            },
+            "children": [
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "File",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  160.0,
+                  87.0,
+                  36.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "file-menu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Edit",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  196.0,
+                  87.0,
+                  39.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "edit-menu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "View",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  235.0,
+                  87.0,
+                  45.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "view-menu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "History",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  280.0,
+                  87.0,
+                  60.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "history-menu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Bookmarks",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  340.0,
+                  87.0,
+                  88.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "bookmarksMenu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Tools",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  428.0,
+                  87.0,
+                  46.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "tools-menu"
+                }
+              },
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Help",
+                "states": {
+                  "offscreen": true,
+                  "expanded": false
+                },
+                "bounds": [
+                  474.0,
+                  87.0,
+                  44.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "helpMenu"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "toolbar",
+        "raw_role": "tool bar",
+        "name": "Browser tabs",
+        "bounds": [
+          160.0,
+          87.0,
+          1280.0,
+          44.0
+        ],
+        "attrs": {
+          "identifier": "TabsToolbar"
+        },
+        "children": [
+          {
+            "role": "scroll_area",
+            "raw_role": "page tab list",
+            "bounds": [
+              160.0,
+              87.0,
+              1216.0,
+              44.0
+            ],
+            "attrs": {
+              "identifier": "tabbrowser-tabs"
+            },
+            "children": [
+              {
+                "role": "tab",
+                "raw_role": "page tab",
+                "name": "Nugget fixture: Quill",
+                "states": {
+                  "selected": true
+                },
+                "bounds": [
+                  160.0,
+                  87.0,
+                  225.0,
+                  44.0
+                ],
+                "children": [
+                  {
+                    "role": "button",
+                    "raw_role": "push button",
+                    "name": "Close tab",
+                    "bounds": [
+                      359.0,
+                      99.0,
+                      20.0,
+                      20.0
+                    ],
+                    "attrs": {
+                      "xml_roles": "button"
+                    }
+                  }
+                ]
+              },
+              {
+                "role": "button",
+                "raw_role": "push button",
+                "name": "Open a new tab (Ctrl+T)",
+                "bounds": [
+                  385.0,
+                  87.0,
+                  36.0,
+                  44.0
+                ],
+                "attrs": {
+                  "identifier": "tabs-newtab-button"
+                },
+                "children": [
+                  {
+                    "role": "menu",
+                    "raw_role": "menu",
+                    "name": "New Tab",
+                    "states": {
+                      "offscreen": true
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "role": "separator",
+            "raw_role": "separator",
+            "bounds": [
+              1376.0,
+              87.0,
+              28.0,
+              44.0
+            ],
+            "attrs": {
+              "identifier": "customizableui-special-spring3"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "List all tabs",
+            "bounds": [
+              1404.0,
+              87.0,
+              36.0,
+              44.0
+            ],
+            "attrs": {
+              "identifier": "alltabs-button"
+            }
+          }
+        ]
+      },
+      {
+        "role": "toolbar",
+        "raw_role": "tool bar",
+        "name": "Navigation",
+        "bounds": [
+          160.0,
+          131.0,
+          1280.0,
+          40.0
+        ],
+        "attrs": {
+          "identifier": "nav-bar"
+        },
+        "children": [
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Sidebars",
+            "bounds": [
+              160.0,
+              131.0,
+              40.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "sidebar-button"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Back",
+            "states": {
+              "disabled": true
+            },
+            "bounds": [
+              200.0,
+              131.0,
+              36.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "back-button"
+            },
+            "children": [
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Back",
+                "states": {
+                  "offscreen": true
+                }
+              }
+            ]
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Forward",
+            "states": {
+              "disabled": true
+            },
+            "bounds": [
+              236.0,
+              131.0,
+              36.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "forward-button"
+            },
+            "children": [
+              {
+                "role": "menu",
+                "raw_role": "menu",
+                "name": "Forward",
+                "states": {
+                  "offscreen": true
+                }
+              }
+            ]
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Reload",
+            "bounds": [
+              272.0,
+              131.0,
+              36.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "reload-button"
+            }
+          },
+          {
+            "role": "separator",
+            "raw_role": "separator",
+            "bounds": [
+              308.0,
+              131.0,
+              99.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "customizableui-special-spring1"
+            }
+          },
+          {
+            "role": "group",
+            "raw_role": "panel",
+            "bounds": [
+              412.0,
+              135.0,
+              812.0,
+              32.0
+            ],
+            "attrs": {
+              "identifier": "urlbar",
+              "xml_roles": "group"
+            },
+            "children": [
+              {
+                "role": "button",
+                "raw_role": "push button",
+                "name": "View site information",
+                "bounds": [
+                  416.0,
+                  139.0,
+                  24.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "trust-icon-container",
+                  "xml_roles": "button"
+                }
+              },
+              {
+                "role": "combo_box",
+                "raw_role": "combo box",
+                "name": "Search with Google or enter address",
+                "value": "http://127.0.0.1:39141/index.html?editor=quill",
+                "states": {
+                  "editable": true,
+                  "multiline": false,
+                  "expanded": false
+                },
+                "bounds": [
+                  447.0,
+                  135.0,
+                  742.0,
+                  32.0
+                ],
+                "attrs": {
+                  "identifier": "urlbar-input",
+                  "xml_roles": "combobox"
+                }
+              },
+              {
+                "role": "button",
+                "raw_role": "push button",
+                "name": "Bookmark this page (Ctrl+D)",
+                "bounds": [
+                  1196.0,
+                  139.0,
+                  24.0,
+                  24.0
+                ],
+                "attrs": {
+                  "identifier": "star-button-box",
+                  "xml_roles": "button"
+                }
+              }
+            ]
+          },
+          {
+            "role": "separator",
+            "raw_role": "separator",
+            "bounds": [
+              1229.0,
+              131.0,
+              99.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "customizableui-special-spring2"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Account",
+            "bounds": [
+              1328.0,
+              131.0,
+              36.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "fxa-toolbar-menu-button"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Extensions",
+            "bounds": [
+              1364.0,
+              131.0,
+              36.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "unified-extensions-button"
+            }
+          },
+          {
+            "role": "button",
+            "raw_role": "push button",
+            "name": "Firefox",
+            "bounds": [
+              1400.0,
+              131.0,
+              40.0,
+              40.0
+            ],
+            "attrs": {
+              "identifier": "PanelUI-menu-button"
+            }
+          }
+        ]
+      },
+      {
+        "role": "toolbar",
+        "raw_role": "tool bar",
+        "attrs": {
+          "identifier": "notifications-toolbar"
+        }
+      },
+      {
+        "role": "group",
+        "raw_role": "panel",
+        "bounds": [
+          160.0,
+          171.0,
+          1280.0,
+          956.0
+        ],
+        "attrs": {
+          "identifier": "tabbrowser-tabpanels"
+        },
+        "children": [
+          {
+            "role": "scroll_area",
+            "raw_role": "scroll pane",
+            "bounds": [
+              160.0,
+              171.0,
+              1280.0,
+              956.0
+            ],
+            "attrs": {
+              "identifier": "panel-1-1"
+            },
+            "children": [
+              {
+                "role": "group",
+                "raw_role": "internal frame",
+                "bounds": [
+                  160.0,
+                  172.0,
+                  1280.0,
+                  955.0
+                ],
+                "children": [
+                  {
+                    "role": "web_area",
+                    "raw_role": "document web",
+                    "name": "Nugget fixture: Quill",
+                    "bounds": [
+                      160.0,
+                      172.0,
+                      1280.0,
+                      955.0
+                    ],
+                    "attrs": {
+                      "url": "http://127.0.0.1:39141/index.html?editor=quill"
+                    },
+                    "children": [
+                      {
+                        "role": "section",
+                        "raw_role": "section",
+                        "bounds": [
+                          160.0,
+                          172.0,
+                          1280.0,
+                          955.0
+                        ],
+                        "children": [
+                          {
+                            "role": "section",
+                            "raw_role": "section",
+                            "bounds": [
+                              160.0,
+                              172.0,
+                              1280.0,
+                              955.0
+                            ],
+                            "attrs": {
+                              "identifier": "app"
+                            },
+                            "children": [
+                              {
+                                "role": "group",
+                                "raw_role": "landmark",
+                                "name": "Conversations",
+                                "bounds": [
+                                  160.0,
+                                  172.0,
+                                  250.0,
+                                  955.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "navigation"
+                                },
+                                "children": [
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "value": "Northwind Studio",
+                                    "bounds": [
+                                      170.0,
+                                      184.0,
+                                      230.0,
+                                      23.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "text_field",
+                                    "raw_role": "entry",
+                                    "name": "Search conversations",
+                                    "placeholder": "Search Northwind Studio",
+                                    "states": {
+                                      "editable": true,
+                                      "multiline": false
+                                    },
+                                    "bounds": [
+                                      170.0,
+                                      217.0,
+                                      230.0,
+                                      27.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "value": "CHANNELS",
+                                    "bounds": [
+                                      174.0,
+                                      264.0,
+                                      222.0,
+                                      18.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "list",
+                                    "raw_role": "list",
+                                    "bounds": [
+                                      170.0,
+                                      286.0,
+                                      230.0,
+                                      137.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "list_item",
+                                        "raw_role": "list item",
+                                        "name": "#general 2 unread Rina Okafor: Reminder, the all-hands moved to 3pm",
+                                        "bounds": [
+                                          170.0,
+                                          286.0,
+                                          230.0,
+                                          45.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "link",
+                                            "name": "#general 2 unread Rina Okafor: Reminder, the all-hands moved to 3pm",
+                                            "value": "#general",
+                                            "bounds": [
+                                              170.0,
+                                              286.0,
+                                              230.0,
+                                              45.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "name": "2 unread",
+                                                "value": "2",
+                                                "bounds": [
+                                                  375.0,
+                                                  290.0,
+                                                  19.0,
+                                                  16.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Rina Okafor: Reminder, the all-hands moved to 3pm",
+                                                "bounds": [
+                                                  176.0,
+                                                  310.0,
+                                                  218.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "list_item",
+                                        "raw_role": "list item",
+                                        "name": "#design-crit Tomas Ruiz: New mocks are up on the board",
+                                        "bounds": [
+                                          170.0,
+                                          331.0,
+                                          230.0,
+                                          46.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "link",
+                                            "name": "#design-crit Tomas Ruiz: New mocks are up on the board",
+                                            "value": "#design-crit",
+                                            "bounds": [
+                                              170.0,
+                                              331.0,
+                                              230.0,
+                                              46.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Tomas Ruiz: New mocks are up on the board",
+                                                "bounds": [
+                                                  176.0,
+                                                  356.0,
+                                                  218.0,
+                                                  17.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "list_item",
+                                        "raw_role": "list item",
+                                        "name": "#offsite-planning Diego Alvarez: I will ask about dietary options too. Le…",
+                                        "bounds": [
+                                          170.0,
+                                          377.0,
+                                          230.0,
+                                          46.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "link",
+                                            "name": "#offsite-planning Diego Alvarez: I will ask about dietary options too. Le…",
+                                            "value": "#offsite-planning",
+                                            "bounds": [
+                                              170.0,
+                                              377.0,
+                                              230.0,
+                                              46.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Diego Alvarez: I will ask about dietary options too. Le…",
+                                                "bounds": [
+                                                  176.0,
+                                                  401.0,
+                                                  218.0,
+                                                  18.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "value": "DIRECT MESSAGES",
+                                    "bounds": [
+                                      174.0,
+                                      433.0,
+                                      222.0,
+                                      17.0
+                                    ]
+                                  },
+                                  {
+                                    "role": "list",
+                                    "raw_role": "list",
+                                    "bounds": [
+                                      170.0,
+                                      454.0,
+                                      230.0,
+                                      92.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "list_item",
+                                        "raw_role": "list item",
+                                        "name": "Priya Natarajan 1 unread Can you review my slides before lunch?",
+                                        "bounds": [
+                                          170.0,
+                                          454.0,
+                                          230.0,
+                                          46.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "link",
+                                            "name": "Priya Natarajan 1 unread Can you review my slides before lunch?",
+                                            "value": "Priya Natarajan",
+                                            "bounds": [
+                                              170.0,
+                                              454.0,
+                                              230.0,
+                                              46.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "name": "1 unread",
+                                                "value": "1",
+                                                "bounds": [
+                                                  375.0,
+                                                  458.0,
+                                                  19.0,
+                                                  16.0
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Can you review my slides before lunch?",
+                                                "bounds": [
+                                                  176.0,
+                                                  478.0,
+                                                  218.0,
+                                                  18.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "list_item",
+                                        "raw_role": "list item",
+                                        "name": "Diego Alvarez Sent you the quote as a PDF",
+                                        "bounds": [
+                                          170.0,
+                                          500.0,
+                                          230.0,
+                                          46.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "link",
+                                            "raw_role": "link",
+                                            "name": "Diego Alvarez Sent you the quote as a PDF",
+                                            "value": "Diego Alvarez",
+                                            "bounds": [
+                                              170.0,
+                                              500.0,
+                                              230.0,
+                                              46.0
+                                            ],
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Sent you the quote as a PDF",
+                                                "bounds": [
+                                                  176.0,
+                                                  524.0,
+                                                  218.0,
+                                                  18.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "role": "group",
+                                "raw_role": "landmark",
+                                "bounds": [
+                                  410.0,
+                                  172.0,
+                                  1030.0,
+                                  955.0
+                                ],
+                                "attrs": {
+                                  "xml_roles": "main"
+                                },
+                                "children": [
+                                  {
+                                    "role": "section",
+                                    "raw_role": "section",
+                                    "bounds": [
+                                      410.0,
+                                      172.0,
+                                      1030.0,
+                                      50.0
+                                    ],
+                                    "children": [
+                                      {
+                                        "role": "heading",
+                                        "raw_role": "heading",
+                                        "name": "#offsite-planning",
+                                        "bounds": [
+                                          426.0,
+                                          183.0,
+                                          176.0,
+                                          27.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "section",
+                                        "raw_role": "section",
+                                        "value": "Planning the Q3 team offsite",
+                                        "bounds": [
+                                          614.0,
+                                          186.0,
+                                          529.0,
+                                          21.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "toolbar",
+                                        "raw_role": "tool bar",
+                                        "name": "Channel actions",
+                                        "bounds": [
+                                          1155.0,
+                                          183.0,
+                                          269.0,
+                                          27.0
+                                        ],
+                                        "attrs": {
+                                          "xml_roles": "toolbar"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Huddle",
+                                            "bounds": [
+                                              1159.0,
+                                              183.0,
+                                              68.0,
+                                              27.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Pins",
+                                            "bounds": [
+                                              1231.0,
+                                              183.0,
+                                              46.0,
+                                              27.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Search in channel",
+                                            "bounds": [
+                                              1281.0,
+                                              183.0,
+                                              143.0,
+                                              27.0
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "unknown",
+                                    "raw_role": "statusbar",
+                                    "value": "Maya Chen and Diego Alvarez are active",
+                                    "bounds": [
+                                      410.0,
+                                      222.0,
+                                      1030.0,
+                                      20.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "status"
+                                    }
+                                  },
+                                  {
+                                    "role": "group",
+                                    "raw_role": "landmark",
+                                    "name": "Message history",
+                                    "bounds": [
+                                      410.0,
+                                      242.0,
+                                      1030.0,
+                                      757.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "region"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "separator",
+                                        "raw_role": "separator",
+                                        "name": "Today",
+                                        "bounds": [
+                                          426.0,
+                                          254.0,
+                                          998.0,
+                                          18.0
+                                        ],
+                                        "attrs": {
+                                          "xml_roles": "separator"
+                                        }
+                                      },
+                                      {
+                                        "role": "list",
+                                        "raw_role": "list",
+                                        "name": "Messages",
+                                        "bounds": [
+                                          410.0,
+                                          280.0,
+                                          1030.0,
+                                          328.0
+                                        ],
+                                        "attrs": {
+                                          "xml_roles": "list"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "Maya Chen 10:02 AM Morning! Did anyone hear back from the venue in Lakeside?",
+                                            "bounds": [
+                                              410.0,
+                                              280.0,
+                                              1030.0,
+                                              45.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  282.0,
+                                                  423.0,
+                                                  21.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:02 AM",
+                                                    "bounds": [
+                                                      561.0,
+                                                      285.0,
+                                                      57.0,
+                                                      15.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Morning! Did anyone hear back from the venue in Lakeside?",
+                                                "bounds": [
+                                                  470.0,
+                                                  303.0,
+                                                  423.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "10:03 AM They said they can hold the big room until Friday.",
+                                            "bounds": [
+                                              410.0,
+                                              325.0,
+                                              1030.0,
+                                              24.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  426.0,
+                                                  327.0,
+                                                  40.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:03 AM",
+                                                    "bounds": [
+                                                      426.0,
+                                                      333.0,
+                                                      43.0,
+                                                      12.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "They said they can hold the big room until Friday.",
+                                                "bounds": [
+                                                  470.0,
+                                                  327.0,
+                                                  346.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "Diego Alvarez 10:11 AM Yes, they sent the quote last night. It is within budget 🎉",
+                                            "bounds": [
+                                              410.0,
+                                              357.0,
+                                              1030.0,
+                                              45.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  359.0,
+                                                  396.0,
+                                                  21.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:11 AM",
+                                                    "bounds": [
+                                                      584.0,
+                                                      362.0,
+                                                      57.0,
+                                                      15.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Yes, they sent the quote last night. It is within budget 🎉",
+                                                "bounds": [
+                                                  470.0,
+                                                  380.0,
+                                                  396.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "10:12 AM Notes are here: https://notes.example.com/offsite/venue-quote",
+                                            "bounds": [
+                                              410.0,
+                                              402.0,
+                                              1030.0,
+                                              24.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  426.0,
+                                                  404.0,
+                                                  40.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:12 AM",
+                                                    "bounds": [
+                                                      426.0,
+                                                      410.0,
+                                                      43.0,
+                                                      12.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  404.0,
+                                                  442.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "link",
+                                                    "raw_role": "link",
+                                                    "name": "https://notes.example.com/offsite/venue-quote",
+                                                    "bounds": [
+                                                      583.0,
+                                                      406.0,
+                                                      329.0,
+                                                      17.0
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "You 10:15 AM Great, thanks Diego. I can draft the agenda today.",
+                                            "bounds": [
+                                              410.0,
+                                              434.0,
+                                              1030.0,
+                                              45.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  436.0,
+                                                  351.0,
+                                                  21.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:15 AM",
+                                                    "bounds": [
+                                                      503.0,
+                                                      439.0,
+                                                      57.0,
+                                                      15.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Great, thanks Diego. I can draft the agenda today.",
+                                                "bounds": [
+                                                  470.0,
+                                                  457.0,
+                                                  351.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "10:16 AM Should we plan one long session or two shorter ones?",
+                                            "bounds": [
+                                              410.0,
+                                              479.0,
+                                              1030.0,
+                                              24.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  426.0,
+                                                  481.0,
+                                                  40.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:16 AM",
+                                                    "bounds": [
+                                                      426.0,
+                                                      486.0,
+                                                      43.0,
+                                                      12.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Should we plan one long session or two shorter ones?",
+                                                "bounds": [
+                                                  470.0,
+                                                  481.0,
+                                                  377.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "Maya Chen 10:21 AM Two shorter ones. Can you also check whether the room has a projector?",
+                                            "bounds": [
+                                              410.0,
+                                              511.0,
+                                              1030.0,
+                                              45.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  513.0,
+                                                  511.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:21 AM",
+                                                    "bounds": [
+                                                      561.0,
+                                                      516.0,
+                                                      57.0,
+                                                      15.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "Two shorter ones. Can you also check whether the room has a projector?",
+                                                "bounds": [
+                                                  470.0,
+                                                  533.0,
+                                                  511.0,
+                                                  21.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "list_item",
+                                            "raw_role": "list item",
+                                            "name": "Diego Alvarez 10:24 AM I will ask about dietary options too. Let's lock it in by Thursday so we can send invites.",
+                                            "bounds": [
+                                              410.0,
+                                              564.0,
+                                              1030.0,
+                                              44.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "listitem"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "bounds": [
+                                                  470.0,
+                                                  566.0,
+                                                  606.0,
+                                                  20.0
+                                                ],
+                                                "children": [
+                                                  {
+                                                    "role": "static_text",
+                                                    "raw_role": "static",
+                                                    "value": "10:24 AM",
+                                                    "bounds": [
+                                                      584.0,
+                                                      568.0,
+                                                      57.0,
+                                                      15.0
+                                                    ],
+                                                    "attrs": {
+                                                      "xml_roles": "time"
+                                                    }
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "role": "section",
+                                                "raw_role": "section",
+                                                "value": "I will ask about dietary options too. Let's lock it in by Thursday so we can send invites.",
+                                                "bounds": [
+                                                  470.0,
+                                                  586.0,
+                                                  606.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "group",
+                                    "raw_role": "panel",
+                                    "name": "Message composer",
+                                    "bounds": [
+                                      426.0,
+                                      999.0,
+                                      998.0,
+                                      108.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "group"
+                                    },
+                                    "children": [
+                                      {
+                                        "role": "toolbar",
+                                        "raw_role": "tool bar",
+                                        "name": "Formatting",
+                                        "bounds": [
+                                          435.0,
+                                          1004.0,
+                                          980.0,
+                                          24.0
+                                        ],
+                                        "attrs": {
+                                          "xml_roles": "toolbar"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Bold",
+                                            "value": "B",
+                                            "bounds": [
+                                              435.0,
+                                              1004.0,
+                                              22.0,
+                                              24.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Italic",
+                                            "value": "I",
+                                            "bounds": [
+                                              457.0,
+                                              1004.0,
+                                              16.0,
+                                              24.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Strikethrough",
+                                            "value": "S",
+                                            "bounds": [
+                                              473.0,
+                                              1004.0,
+                                              21.0,
+                                              24.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Link",
+                                            "value": "L",
+                                            "bounds": [
+                                              494.0,
+                                              1004.0,
+                                              19.0,
+                                              24.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "button",
+                                            "raw_role": "push button",
+                                            "name": "Bulleted list",
+                                            "value": "B",
+                                            "bounds": [
+                                              513.0,
+                                              1004.0,
+                                              22.0,
+                                              24.0
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "section",
+                                        "raw_role": "section",
+                                        "bounds": [
+                                          435.0,
+                                          1028.0,
+                                          980.0,
+                                          40.0
+                                        ],
+                                        "children": [
+                                          {
+                                            "role": "text_field",
+                                            "raw_role": "entry",
+                                            "name": "Message #offsite-planning",
+                                            "states": {
+                                              "focused": true,
+                                              "editable": true,
+                                              "multiline": true
+                                            },
+                                            "bounds": [
+                                              435.0,
+                                              1028.0,
+                                              980.0,
+                                              40.0
+                                            ],
+                                            "attrs": {
+                                              "xml_roles": "textbox"
+                                            },
+                                            "children": [
+                                              {
+                                                "role": "paragraph",
+                                                "raw_role": "paragraph",
+                                                "value": "Draft:",
+                                                "states": {
+                                                  "editable": true
+                                                },
+                                                "bounds": [
+                                                  437.0,
+                                                  1034.0,
+                                                  976.0,
+                                                  20.0
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "role": "section",
+                                            "raw_role": "section",
+                                            "states": {
+                                              "editable": true,
+                                              "multiline": true,
+                                              "offscreen": true
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "push button",
+                                        "name": "Attach",
+                                        "bounds": [
+                                          435.0,
+                                          1075.0,
+                                          55.0,
+                                          25.0
+                                        ]
+                                      },
+                                      {
+                                        "role": "group",
+                                        "raw_role": "landmark",
+                                        "name": "Re-enter password to send",
+                                        "bounds": [
+                                          500.0,
+                                          1073.0,
+                                          409.0,
+                                          29.0
+                                        ],
+                                        "attrs": {
+                                          "xml_roles": "form"
+                                        },
+                                        "children": [
+                                          {
+                                            "role": "section",
+                                            "raw_role": "section",
+                                            "value": "Re-enter password to send",
+                                            "bounds": [
+                                              509.0,
+                                              1079.0,
+                                              183.0,
+                                              17.0
+                                            ],
+                                            "attrs": {
+                                              "identifier": "reauth-title"
+                                            }
+                                          },
+                                          {
+                                            "role": "static_text",
+                                            "raw_role": "label",
+                                            "name": "Password",
+                                            "bounds": [
+                                              698.0,
+                                              1079.0,
+                                              56.0,
+                                              17.0
+                                            ]
+                                          },
+                                          {
+                                            "role": "text_field",
+                                            "raw_role": "password text",
+                                            "name": "Password",
+                                            "states": {
+                                              "editable": true,
+                                              "secure": true,
+                                              "multiline": false
+                                            },
+                                            "bounds": [
+                                              760.0,
+                                              1076.0,
+                                              140.0,
+                                              23.0
+                                            ],
+                                            "attrs": {
+                                              "identifier": "reauth-password"
+                                            }
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "role": "button",
+                                        "raw_role": "push button",
+                                        "name": "Send now",
+                                        "bounds": [
+                                          1322.0,
+                                          1073.0,
+                                          93.0,
+                                          29.0
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "role": "unknown",
+                                    "raw_role": "statusbar",
+                                    "value": "Diego Alvarez is typing…",
+                                    "bounds": [
+                                      410.0,
+                                      1107.0,
+                                      1030.0,
+                                      20.0
+                                    ],
+                                    "attrs": {
+                                      "xml_roles": "status"
+                                    }
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "role": "dialog",
+        "raw_role": "alert",
+        "attrs": {
+          "identifier": "a11y-announcement",
+          "xml_roles": "alert"
+        }
+      }
+    ]
+  },
+  "focus_path": [
+    29,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    3,
+    1,
+    0
+  ],
+  "truncated": false
+}
