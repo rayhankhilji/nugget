@@ -2927,8 +2927,8 @@ only on the same control, which made a refused click on a disabled button fail t
 then finished; a call the tool refused now never fails a task (a send or delete that never
 happened still does).
 
-**8B on a 4-vCPU CPU (GG3-20).** The 8B model's turns took 15–60 s here; in GG3's runs it hit the
-300 s limit on 27 of 81 tasks. Recommendation: on CPU-only machines run computer use on the 4B
+**8B on a 4-vCPU CPU (GG3-20).** In GG3's runs the 8B model's turns took 21 s at p50 and 64 s at
+p95, and it hit the 300 s limit on 27 of 81 tasks. Recommendation: on CPU-only machines run computer use on the 4B
 model, and offer the 8B (agentic tier) only where a measured prompt rate clears about 60
 tokens/s, with the task's progress shown and a longer budget; the triage, when turned on, runs
 on the small model either way (`[agent] triage`, the light tier).
