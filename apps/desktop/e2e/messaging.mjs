@@ -4,8 +4,9 @@
 //    (Android format, multi-line message, a system line and a media placeholder).
 // 2. Through the UI: Sources → Add source → WhatsApp → Next, Choose… (the bridge's folder picker
 //    returns the temp folder), keep "on this device only" checked, Add.
-// 3. The source syncs: its conversation month is indexed as one item with its participants and
-//    marked sensitive (private chats never go to cloud models).
+// 3. The source syncs: its conversation month is indexed as one item named after the chat. (That
+//    the item is marked sensitive is covered by the connector's and ingest's own tests: search
+//    hits carry no item metadata.)
 // 4. Search finds a phrase from the chat in the UI.
 // 5. A second export dropped into the watched folder is picked up without pressing anything.
 import fs from "node:fs";
@@ -41,7 +42,7 @@ export async function messagingScenario({ browser, bin }) {
   const exports = path.join(work, "WhatsApp exports");
   fs.mkdirSync(exports);
   fs.writeFileSync(path.join(exports, "WhatsApp Chat with Ben Marlow.txt"), CHAT_1);
-  const summary = { items: null, sensitive: null, watched: false };
+  const summary = { items: null, watched: false };
 
   const daemon = await startDaemon(bin, { stderrPath: path.join(OUT, "messaging-nuggetd.out.log") });
   log(`messaging: daemon home ${daemon.home}`);
@@ -91,7 +92,7 @@ export async function messagingScenario({ browser, bin }) {
       }
     });
 
-    await check("messaging: the chat is indexed as a private conversation", async () => {
+    await check("messaging: the chat is indexed as one conversation", async () => {
       const n = await until("the WhatsApp source indexes its conversation", async () => {
         const { items } = await whatsappItems();
         return [items >= 1, items];
@@ -101,14 +102,8 @@ export async function messagingScenario({ browser, bin }) {
         const r = await rpc(daemon.socket, "search", { query: PHRASE, limit: 5 });
         return [Array.isArray(r) && r.length > 0, r];
       }, INDEX_TIMEOUT_MS);
-      const hit = hits[0];
-      const text = JSON.stringify(hit);
+      const text = JSON.stringify(hits[0]);
       expect(/Ben Marlow/.test(text), `the hit should name the conversation: ${text.slice(0, 400)}`);
-      const meta = hit.metadata ?? hit.item?.metadata;
-      if (meta) {
-        summary.sensitive = meta.sensitive;
-        expect(meta.sensitive === true, `the chat should be marked sensitive: ${JSON.stringify(meta).slice(0, 400)}`);
-      }
     });
 
     await check("messaging: Search in the UI finds a phrase from the chat", async () => {

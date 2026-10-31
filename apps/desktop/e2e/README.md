@@ -54,7 +54,7 @@ It runs ten scenarios:
   item count and that Search finds corpus text again (`NN-backup-*.png`).
 - **messaging**: its own empty home and a temp folder with a synthetic WhatsApp chat export.
   Through Sources → Add source → WhatsApp the test chooses the folder (the bridge's picker), keeps
-  "on this device only" on and adds it; the chat is indexed, marked sensitive and found by Search
+  "on this device only" on and adds it; the chat is indexed and found by Search
   in the UI, and a second export dropped into the folder is picked up by the watcher
   (`messaging-*.png`).
 
@@ -88,7 +88,7 @@ built, plus about 60 s for the i18n scenario and about 40 s for visual. Linux an
 | `E2E_INDEX_TIMEOUT_MS` | 180000 | How long indexing and extraction may take. |
 | `E2E_BACKUP_TIMEOUT_MS` | 120000 | backup: how long one backup, export or restore may take. |
 | `E2E_STEP_TIMEOUT_MS` | 15000 | How long each UI expectation waits. |
-| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup` | Which scenarios to run, comma-separated. |
+| `E2E_SCENARIOS` | `pages,i18n,first-run,ai-setup,byok,a11y,prefs,keyboard,visual,backup,messaging` | Which scenarios to run, comma-separated. |
 | `E2E_VISUAL_UPDATE=1` | off | visual: write the screenshots as the new baselines instead of comparing (on Linux). |
 | `E2E_VISUAL_TOLERANCE` | 0.005 | visual: the largest fraction of differing pixels a screen may have (0.005 = 0.5%). |
 | `E2E_I18N_LOCALES` | `en-XA,de,ja,ar` | i18n: which locales to check, comma-separated (any code in `LOCALES`). |
