@@ -160,6 +160,8 @@ def config_toml(a):
             "",
             "[proactive]",
             "enabled = true",
+            "[proactive.engine]",
+            f'user_addresses = ["{ME[1]}"]',
             "",
         ]
     )
@@ -180,7 +182,13 @@ def start_daemon(a):
     logf = open(Path(a.out) / "nuggetd.log", "ab")
     proc = subprocess.Popen([a.nuggetd, "--home", str(home)], env=env, stdout=logf, stderr=logf)
     sock = home / "data" / "ipc" / "nuggetd.sock"
-    for _ in range(600):
+    for i in range(600):
+        if i == 20 and not sock.exists():
+            # A long --home puts the socket in a short private directory; ask the daemon.
+            st = subprocess.run([a.nuggetd, "--home", str(home), "status"], capture_output=True, text=True, env=env, timeout=10)
+            for line in st.stdout.splitlines():
+                if line.startswith("socket:"):
+                    sock = Path(line.split(":", 1)[1].strip())
         if proc.poll() is not None:
             raise SystemExit(f"nuggetd exited with {proc.returncode}; see {logf.name}")
         if sock.exists():

@@ -211,7 +211,11 @@ def score_proactive(d):
             stem = Path(e["file"]).name
             hits = [c for c, b in zip(cards, blob) if stem in unicodedata.normalize("NFC", b)]
             due_ok = any(e.get("due", "\0") in json.dumps(c) for c in hits) if e.get("due") else None
-            out.append({"lang": lang, **e, "surfaced": bool(hits), "due_ok": due_ok,
+            # A reply_needed situation wants an unanswered-thread card; any other one (commitment,
+            # payment_due, event) wants a card of another kind, not just a "Reply to" card.
+            want_reply = e.get("expect") == "reply_needed"
+            kind_ok = any((c.get("kind") == "unanswered_thread") == want_reply for c in hits)
+            out.append({"lang": lang, **e, "surfaced": bool(hits), "kind_ok": kind_ok, "due_ok": due_ok,
                         "card_kinds": [c.get("kind") for c in hits], "titles": [c.get("title") for c in hits]})
     return out
 
@@ -265,13 +269,20 @@ def main():
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
     p = score_proactive(d)
     if p:
-        by = defaultdict(lambda: [0, 0])
+        by = defaultdict(lambda: [0, 0, 0, 0, 0])
         for r in p:
-            by[r["lang"]][0] += r["surfaced"]
-            by[r["lang"]][1] += 1
-        print("## Proactive (gold situation surfaced as a card)\n\n| lang | surfaced |\n|---|---|")
+            b = by[r["lang"]]
+            b[0] += r["surfaced"]
+            b[1] += r["kind_ok"]
+            b[2] += 1
+            if r.get("expect") == "reply_needed":
+                b[3] += r["kind_ok"]
+                b[4] += 1
+        print("## Proactive (gold situation surfaced as a card)\n")
+        print("| lang | any card | card of the right kind | reply_needed rows |\n|---|---|---|---|")
         for lang in sorted(by):
-            print(f"| {lang} | {pct(*by[lang])} |")
+            b = by[lang]
+            print(f"| {lang} | {pct(b[0], b[2])} | {pct(b[1], b[2])} | {pct(b[3], b[4])} |")
         with open(Path(d) / "scored-proactive.jsonl", "w", encoding="utf-8") as f:
             for r in p:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
