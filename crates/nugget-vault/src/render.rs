@@ -122,6 +122,58 @@ fn safe_url(url: &str) -> Option<String> {
     Some(out)
 }
 
+/// `text` with email addresses replaced by "(address)" and phone numbers (9 or more digits,
+/// with spaces, dots, dashes, parentheses or a leading "+") by "(phone)". Dates, times and
+/// amounts have fewer digits or other separators and are kept.
+pub(crate) fn redact_contacts(text: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split(' ') {
+        let core = w.trim_matches(|c: char| "<>()[]{},;:'\"".contains(c));
+        let at = core.find('@');
+        if let Some(i) = at
+            && i > 0
+            && core[i + 1..].contains('.')
+        {
+            out.push(w.replace(core, "(address)"));
+        } else {
+            out.push(w.to_owned());
+        }
+    }
+    let joined = out.join(" ");
+    // Phone numbers: runs of digits and separators holding 9+ digits.
+    let chars: Vec<char> = joined.chars().collect();
+    let mut res = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let starts = chars[i].is_ascii_digit()
+            || (chars[i] == '+' && chars.get(i + 1).is_some_and(char::is_ascii_digit))
+            || (chars[i] == '(' && chars.get(i + 1).is_some_and(char::is_ascii_digit));
+        if starts && !(i > 0 && chars[i - 1].is_alphanumeric()) {
+            let mut j = i;
+            let mut digits = 0;
+            let mut last_digit = i;
+            while j < chars.len() && (chars[j].is_ascii_digit() || " .-()+".contains(chars[j])) {
+                if chars[j].is_ascii_digit() {
+                    digits += 1;
+                    last_digit = j;
+                }
+                j += 1;
+            }
+            let after_ok = !chars
+                .get(last_digit + 1)
+                .is_some_and(|c| c.is_alphanumeric());
+            if digits >= 9 && after_ok {
+                res.push_str("(phone)");
+                i = last_digit + 1;
+                continue;
+            }
+        }
+        res.push(chars[i]);
+        i += 1;
+    }
+    res
+}
+
 /// First occurrence of `word` in `hay` on word boundaries.
 fn find_word(hay: &str, word: &str) -> Option<usize> {
     if word.is_empty() {
@@ -457,6 +509,18 @@ impl<'a> Ctx<'a> {
             ClaimObject::Entity(o) if *o != e.id => self.entity(o)?,
             _ => None,
         };
+        // A sentence written at extraction goes stale when its object is merged, split or
+        // renamed (GG5-10: "works at Tessellate" after Tessellate was merged into Lumenfold,
+        // "corresponded with Sam Patel" linking another Sam). Unless the user wrote it, it is
+        // re-generated from the triple when it no longer names the object by its current name.
+        if !body.is_empty()
+            && c.status != ClaimStatus::UserAsserted
+            && object
+                .as_ref()
+                .is_some_and(|o| find_word(&body, &inline(&o.name)).is_none())
+        {
+            body.clear();
+        }
         if body.is_empty() {
             let obj = match (&c.object, &object) {
                 (_, Some(o)) => inline(&o.name),
@@ -587,6 +651,13 @@ impl<'a> Ctx<'a> {
         if let Some(q) = quote.map(|q| inline(q).replace('"', "'"))
             && !q.is_empty()
         {
+            // Addresses and phone numbers stay out of the vault unless identifiers are shown
+            // (GG5-17: a calendar footnote listed every invitee's address).
+            let q = if self.cfg.include_identifiers {
+                q
+            } else {
+                redact_contacts(&q)
+            };
             line.push_str(&format!(": \"{}\"", truncate(&q, 300)));
         }
         line
@@ -707,5 +778,22 @@ mod tests {
             "[click] (javascript:x) [a] ((b)"
         );
         assert_eq!(find_word("Alan met Al", "Al"), Some(9));
+    }
+
+    #[test]
+    fn contacts_are_redacted_from_quotes() {
+        use super::redact_contacts;
+        assert_eq!(
+            redact_contacts("Organizer: Ana <ana.ruiz@lumenfold.example>, call +44 20 7946 0958."),
+            "Organizer: Ana <(address)>, call (phone)."
+        );
+        assert_eq!(
+            redact_contacts("Due 2026-10-30 at 10:00, budget $40,000, ref 12345."),
+            "Due 2026-10-30 at 10:00, budget $40,000, ref 12345."
+        );
+        assert_eq!(
+            redact_contacts("Ring 07700 900123 today"),
+            "Ring (phone) today"
+        );
     }
 }

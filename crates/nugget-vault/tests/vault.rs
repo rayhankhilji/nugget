@@ -607,9 +607,13 @@ fn rename_moves_the_page_and_keeps_links() {
     assert_eq!(r.moved.len(), 1);
     assert!(f.read(&f.acme).contains("Acme notes stay with Acme."));
     let sam = f.read(&f.sam);
-    assert!(sam.contains(
-        "- Samantha works at [[Organization/Acme Corp (ent_000002)|Acme]]. [^2] <!-- c:1 -->"
-    ));
+    // The sentence named the old name: it is re-generated with the new one (GG5-10).
+    assert!(
+        sam.contains(
+            "- Works at [[Organization/Acme Corp (ent_000002)|Acme Corp]] [^2] <!-- c:1 -->"
+        ),
+        "{sam}"
+    );
     assert!(sam.contains("- [[Organization/Acme Corp (ent_000002)|Acme Corp]]: works at"));
     assert!(sam.contains(
         "Follow up with [[Organization/Acme Corp (ent_000002)|them]] and [[Acme Corp (ent_000002)]]."
