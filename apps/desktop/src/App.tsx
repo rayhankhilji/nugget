@@ -27,6 +27,8 @@ import { Onboarding } from "./onboarding/Onboarding";
 import { SidebarSettings } from "./onboarding/SidebarSettings";
 import { restartOnboarding, shouldShowOnboarding } from "./onboarding/machine";
 import { migrateTriggerOnce } from "./onboarding/trigger";
+import { DeepLinks } from "./platform/DeepLinks";
+import { useShellLabels } from "./platform/shellLabels";
 
 export interface PageDef {
   id: PageId;
@@ -66,6 +68,7 @@ export const PAGES: readonly PageDef[] = [
  * page on, setup and settings. Order, ids and shortcuts don't change.
  */
 const FIRST_SETTINGS_PAGE: PageId = "apps";
+const PAGE_IDS: readonly PageId[] = PAGES.map((p) => p.id);
 
 const PAGE_KEY = "nugget.page";
 const PALETTE: Combo = { mod: true, key: "K" };
@@ -149,6 +152,7 @@ export function App() {
   }, [conn?.connected, refreshConnection]);
 
   useEffect(() => startProactiveNotifications(), []);
+  useShellLabels();
 
   // Apply a Double Tap trigger an older onboarding only kept locally (once; never throws).
   useEffect(() => {
@@ -349,6 +353,7 @@ export function App() {
           </>
         )}
       </main>
+      <DeepLinks pages={PAGE_IDS} go={jump} />
       {palette && <CommandPalette items={paletteItems} queryItem={searchItem} onClose={() => setPalette(false)} />}
       {help && <ShortcutsHelp rows={shortcutRows} onClose={() => setHelp(false)} />}
     </div>

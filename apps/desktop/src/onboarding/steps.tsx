@@ -10,6 +10,7 @@ import { detectOs, type Os } from "./platform";
 import { TriggerKeys } from "./TriggerStep";
 import { loadTrigger, readTrigger } from "./trigger";
 import { detectAiSetup } from "./detect";
+import { DesktopOptIns } from "../platform/DesktopOptIns";
 
 export interface StepProps {
   state: OnboardingState;
@@ -413,6 +414,7 @@ export function DoneStep({ headingRef, state, dispatch, connected, searchable = 
           </dd>
         </div>
       </dl>
+      <DesktopOptIns />
       {pending.length > 0 ? (
         <>
           <p>{t("onboarding.done.pending", { count: pending.length })}</p>

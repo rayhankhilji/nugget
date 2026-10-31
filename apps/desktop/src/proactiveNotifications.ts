@@ -26,10 +26,12 @@ export function briefNotification(brief: BriefView): { title: string; body: stri
   return { title: t("today.notify.briefTitle", { n: items }), body };
 }
 
-/** One line of untrusted reminder text, kept short. */
-export function reminderNotification(reminder: ReminderView): { title: string; body: string } {
-  const text = reminder.text.replace(/\s+/g, " ").trim().slice(0, 300);
-  return { title: t("today.notify.reminderTitle"), body: text || t("today.notify.reminderEmpty") };
+/**
+ * II4: a reminder's own text never goes into an OS notification (lock screens, notification
+ * history and mirrored phones show it): a fixed line instead; clicking opens Today, where it is.
+ */
+export function reminderNotification(_reminder: ReminderView): { title: string; body: string } {
+  return { title: t("today.notify.reminderTitle"), body: t("today.notify.reminderEmpty") };
 }
 
 /** Subscribe; returns a function that unsubscribes. */

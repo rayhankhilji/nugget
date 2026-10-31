@@ -18,6 +18,7 @@
 - [Search and Ask, with citations](guide/search-ask.md)
 - [The knowledge graph and vault](guide/knowledge.md)
 - [Connecting AI apps over MCP](guide/mcp.md)
+- [The desktop app on your computer](guide/desktop.md)
 - [Double Tap: drafting in your voice](guide/double-tap.md)
 - [The agent and computer use](guide/agent.md)
 - [Safety: rules, confirmations and the kill switch](guide/safety.md)
