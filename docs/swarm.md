@@ -148,7 +148,7 @@ Briefs in `docs/waves/wave-gg/`. QA leads explore with subagents and have every 
 | GG2 | `qa/ask` | session_01CTjRSsqzVXFPgqGksu9bV6 | Ask and Chat over a realistic persona corpus, 100+ questions (merged) |
 | GG3 | `qa/agent` | session_01CTjRStQCE4cZD93QkhUFM6 | computer-use agent, 50+ tasks incl. injection, kill switch, confirmations (merged) |
 | GG4 | `qa/proactive` | session_01CTjRSs4jvVBSuALYkXyaPB | proactive cards and morning brief over two simulated weeks (merged) |
-| GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases |
+| GG5 | `qa/knowledge` | session_01CTjRStixqfmN8YjP6FXqRq | knowledge graph and vault on hard real-life cases (merged) |
 | GG6 | `qa/first-week` | session_01CTjRSsqNHZBx8FKRogmMJe | a new user's first week on macOS, Windows and Linux |
 | GG7 | `qa/multilingual` | session_01CTjRSuVMK4RoFUCfw3YT7S | AI features in all 9 UI languages |
 | GG8 | `qa/privacy` | session_01CTjRSt3BBwCh15spCoLbbe | privacy and egress verified from captured network traffic (merged) |

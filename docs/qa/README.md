@@ -89,3 +89,18 @@ Raw model outputs over 300 KB from GG1–GG3 (and GG3's copy of the desktop app 
 | GG4-8 Scoped learning resets leave the shared part | High | BB2 follow-up | routed |
 | GG4-9 to GG4-19 | Medium | BB2 follow-up | routed |
 | GG4-20 to GG4-33 | Low | see report | open |
+
+## GG5: knowledge graph and vault ([report](GG5.md)), real models
+
+| Finding | Severity | Owner | State |
+|---|---|---|---|
+| GG5-1 4B model writes card/account numbers, salary, diagnosis into vault pages as title facts | **Blocker** | EE1 follow-up | routed |
+| GG5-2 Health/finance items not sensitive without triage; unknown written as not sensitive | High | HH2 (with GG4-6) | routed |
+| GG5-3 Vault and graph ignore sensitivity | High | HH3 | routed |
+| GG5-4 Re-saving a source revives a fact the user edited | High | HH3 | routed |
+| GG5-5 Retyped fact line loses the user's wording | High | HH3 | routed |
+| GG5-6 Notes and .ics dated by mtime: wrong current employer | High | EE1 follow-up (DD4 fixing retrieval dates) | routed |
+| GG5-7 New files never planned during a carried run; pending count wrong | High | HH3 | routed |
+| GG5-8 Restart re-extracts before the model is ready and replaces model facts | High | HH3 | routed |
+| GG5-9 People named by the first display name seen, never renamed | High | EE1 follow-up | routed |
+| GG5-10 and later | Medium/Low | knowledge side EE1, vault/worker side HH3 | routed |
