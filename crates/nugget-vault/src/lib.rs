@@ -74,6 +74,7 @@ mod items;
 mod merge;
 mod paths;
 mod render;
+mod restore;
 mod validate;
 mod watch;
 
@@ -825,7 +826,8 @@ impl Vault {
                 }
             };
             if c.status.is_active() {
-                g.set_claim_status(*id, ClaimStatus::Superseded)?;
+                // A user decision: re-extracting the same source does not bring it back.
+                g.supersede_by_user(*id)?;
                 rep.superseded.push(*id);
                 touch(pass, &c.object);
             }
@@ -872,8 +874,19 @@ impl Vault {
                 }
                 None => None,
             };
-            let base = self.read_base(&id).map(|b| Doc::parse(&b));
-            let user = user_text.as_deref().map(Doc::parse);
+            let base_text = self.read_base(&id);
+            let base = base_text.as_deref().map(Doc::parse);
+            // A page saved by an editor that drops HTML comments gets its markers back, so the
+            // user's edits are read as edits (and the page is not duplicated).
+            let user = user_text.as_deref().map(|u| {
+                match base_text
+                    .as_deref()
+                    .and_then(|b| restore::restore_markers(b, u))
+                {
+                    Some(restored) => Doc::parse(&restored),
+                    None => Doc::parse(u),
+                }
+            });
 
             if let (Some(b), Some(u)) = (&base, &user)
                 && prev.as_ref().is_none_or(|p| p.stub.is_none())

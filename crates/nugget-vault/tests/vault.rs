@@ -1188,3 +1188,207 @@ fn unknown_items_count_as_sensitive_when_the_lookup_says_so() {
         "{t}"
     );
 }
+
+// ---------------------------------------------------------------- GG5 regressions
+
+fn replace_line(t: &str, marker: &str, with: &str) -> String {
+    t.lines()
+        .map(|l| {
+            if l.contains(marker) {
+                with.to_string()
+            } else {
+                l.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+fn works_at_again(f: &Fixture, quote: &str) -> ClaimId {
+    f.graph.retract_item(&item("mail", "msg-1")).unwrap();
+    f.graph
+        .add_claim(&claim(
+            &f.sam,
+            "works_at",
+            ClaimObject::Entity(f.acme.clone()),
+            "Samantha works at Acme.",
+            vec![ev("mail", "msg-1", quote)],
+        ))
+        .unwrap()
+}
+
+/// GG5-4: an edited fact line stays edited when its unchanged source is extracted again; a
+/// source that now says it differently is a new fact.
+#[test]
+fn edited_fact_is_not_revived_by_re_extracting_its_unchanged_source() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        replace_line(
+            &t,
+            "<!-- c:1 -->",
+            "- Samantha is an Acme engineer (fixed by me) <!-- c:1 -->",
+        )
+    });
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.superseded, vec![f.works_at]);
+    let user = r.edits.asserted[0];
+
+    // Re-extraction, both ways the extractor writes it (a new claim, or evidence on the
+    // retracted one).
+    assert_eq!(works_at_again(&f, "Sam from Acme here"), f.works_at);
+    assert_eq!(f.status(f.works_at), ClaimStatus::Superseded);
+    f.graph.retract_item(&item("mail", "msg-1")).unwrap();
+    f.graph
+        .add_evidence(f.works_at, &ev("mail", "msg-1", "Sam from Acme here"))
+        .unwrap();
+    assert_eq!(f.status(f.works_at), ClaimStatus::Superseded);
+    f.vault.render_all().unwrap();
+    let t = f.read(&f.sam);
+    assert!(!t.contains("Samantha works at"), "{t}");
+    assert!(
+        t.contains("- Samantha is an Acme engineer (fixed by me) (you)"),
+        "{t}"
+    );
+    assert_eq!(f.status(user), ClaimStatus::UserAsserted);
+
+    // The source changes what it says about the fact: normal rules again.
+    let changed = works_at_again(&f, "Sam from Acme here, now its CTO");
+    assert_eq!(f.status(changed), ClaimStatus::Active);
+    f.vault.render_all().unwrap();
+    assert!(f.read(&f.sam).contains("Samantha works at"));
+}
+
+/// GG5-5: a fact line retyped without its marker but with the same link keeps the user's words.
+#[test]
+fn retyped_fact_line_without_marker_keeps_the_users_text() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        replace_line(
+            &t,
+            "<!-- c:1 -->",
+            "- Samantha works at [[Organization/Acme (ent_000002)|Acme]] (retyped by me, no marker)",
+        )
+    });
+    f.vault.render_all().unwrap();
+    let c = f.graph.get_claim(f.works_at).unwrap().unwrap();
+    assert_eq!(c.status, ClaimStatus::UserAsserted);
+    assert_eq!(c.text, "Samantha works at Acme (retyped by me, no marker)");
+    let t = f.read(&f.sam);
+    assert!(t.contains("(retyped by me, no marker)"), "{t}");
+    assert!(
+        !t.contains("Samantha works at [[Organization/Acme (ent_000002)|Acme]]. "),
+        "{t}"
+    );
+    // Re-extraction keeps the user's text and status.
+    works_at_again(&f, "Sam from Acme here");
+    let c = f.graph.get_claim(f.works_at).unwrap().unwrap();
+    assert_eq!(c.status, ClaimStatus::UserAsserted);
+    assert_eq!(c.text, "Samantha works at Acme (retyped by me, no marker)");
+    f.vault.render_all().unwrap();
+    assert!(f.read(&f.sam).contains("(retyped by me, no marker)"));
+}
+
+/// GG5-21: an editor that strips every HTML comment. The reworded line is an edit, the page is
+/// not duplicated.
+#[test]
+fn page_without_markers_is_merged_not_duplicated() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        let mut s = String::new();
+        let mut rest = t.as_str();
+        while let Some(i) = rest.find("<!--") {
+            let j = rest[i..].find("-->").unwrap() + i + 3;
+            s.push_str(rest[..i].strip_suffix(' ').unwrap_or(&rest[..i]));
+            rest = &rest[j..];
+        }
+        s.push_str(rest);
+        s.replace("Prefers oat milk", "Prefers soy milk") + "\nMy note on Sam.\n"
+    });
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.superseded, vec![f.prefers]);
+    assert_eq!(r.edits.asserted.len(), 1);
+    assert!(r.edits.retracted.is_empty());
+    let t = f.read(&f.sam);
+    assert_eq!(t.matches("# Samantha Lee").count(), 1, "{t}");
+    assert_eq!(t.matches("## Facts").count(), 1, "{t}");
+    assert!(t.contains("<!-- nugget:begin facts -->"), "{t}");
+    assert!(t.contains("Prefers soy milk in coffee. (you)"), "{t}");
+    assert!(!t.contains("oat milk"), "{t}");
+    assert!(t.contains("My note on Sam."), "{t}");
+    assert!(f.vault.validate().unwrap().is_ok());
+    // Stable afterwards.
+    f.vault.render_all().unwrap();
+    assert_eq!(f.read(&f.sam), t);
+}
+
+/// GG5-20: an alias added with YAML spacing is no conflict, and later aliases are written.
+#[test]
+fn alias_added_with_yaml_spacing_is_not_a_conflict() {
+    let f = fixture();
+    f.vault.render_all().unwrap();
+    f.edit(&f.sam, |t| {
+        t.replace("aliases: [\"Sam\"]", "aliases: [\"Sam\", \"Sammy\"]")
+    });
+    let r = f.vault.render_all().unwrap();
+    assert_eq!(r.edits.aliases_added, vec!["Sammy".to_string()]);
+    assert!(r.conflicts.is_empty(), "{r:?}");
+    assert!(f.read(&f.sam).contains("aliases: [\"Sam\",\"Sammy\"]"));
+    f.graph.add_alias(&f.sam, "Samuel").unwrap();
+    let r = f.vault.render_all().unwrap();
+    assert!(r.conflicts.is_empty(), "{r:?}");
+    assert!(
+        f.read(&f.sam)
+            .contains("aliases: [\"Sam\",\"Sammy\",\"Samuel\"]"),
+        "{}",
+        f.read(&f.sam)
+    );
+}
+
+/// GG5-12: splitting a wrongly merged entity back out redirects its old id and page to the
+/// split-off entity, not to the one it was split from.
+#[test]
+fn split_after_a_mistaken_merge_redirects_the_old_page_to_the_split_off_entity() {
+    let f = fixture();
+    let dup = f
+        .graph
+        .create_entity(&NewEntity::new(EntityKind::Person, "S. Lee"))
+        .unwrap();
+    let lives = f
+        .graph
+        .add_claim(&claim(
+            &dup,
+            "lives_in",
+            ClaimObject::Literal("Lisbon".into()),
+            "Lives in Lisbon.",
+            vec![ev("mail", "msg-4", "back in Lisbon")],
+        ))
+        .unwrap();
+    let seq = f.vault.render_changed(0).unwrap().high_water;
+    let dup_path = f.page(&dup);
+    f.graph.merge(&f.sam, &dup).unwrap();
+    let seq = f.vault.render_changed(seq).unwrap().high_water;
+    assert!(
+        std::fs::read_to_string(&dup_path)
+            .unwrap()
+            .contains("Samantha Lee")
+    );
+    let mut spec = NewEntity::new(EntityKind::Person, "S. Lee");
+    spec.aliases = vec!["S. Lee".into()];
+    let back = f.graph.split(&f.sam, &[lives], &spec).unwrap();
+    assert_eq!(f.graph.get_entity(&dup).unwrap().unwrap().id, back);
+    f.vault.render_changed(seq).unwrap();
+    let page = f.read(&back);
+    assert!(page.contains("# S. Lee"), "{page}");
+    assert!(page.contains("Lives in Lisbon."), "{page}");
+    assert!(!page.contains("merged_into"), "a real page: {page}");
+    let stub = std::fs::read_to_string(&dup_path).unwrap();
+    assert!(!stub.contains("Samantha Lee"), "{stub}");
+    assert!(stub.contains(back.as_str()), "{stub}");
+    assert_eq!(f.vault.page_path(&dup).unwrap().unwrap(), f.page(&back));
+    assert!(!f.read(&f.sam).contains("Lisbon"));
+    assert!(f.vault.validate().unwrap().is_ok());
+}
