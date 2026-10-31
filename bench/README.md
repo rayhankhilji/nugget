@@ -2680,11 +2680,36 @@ only as far as the time per passage requires.
 
 #### Full scale
 
-**Running** ([41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865), hash and
-nomic on one runner, 20,000 files and 1,000 queries). The first attempt (run 41027473994) stopped at
-the bench's one-hour limit on the initial ingest with 7,713 of 20,000 files embedded (2.1 files/s on
-an EPYC 9V74); the limit is now five hours for local embedders. Its hash arm finished: hybrid R@10
-0.877 vs the fake index's 0.874 (met), freshness p95 0.69 s.
+Run [41070097865](https://github.com/rayhankhilji/nugget/actions/runs/41070097865) at `71dc0bb`
+(2026-10-30), reports in [`results/real-models/run-41070097865/`](results/real-models/run-41070097865/).
+One runner: **AMD EPYC 7763**, 4 vCPUs (the slowest CPU of these runs). 20,000 files, 1,000
+known-item queries. (The first attempt, run 41027473994, stopped at the bench's then one-hour limit
+on the initial ingest with 7,713 of 20,000 files embedded; the limit is now five hours for local
+embedders.)
+
+| | hash | **nomic** (app default) |
+|---|---|---|
+| **Gate: hybrid R@10 ≥ fake index (0.874)** | 0.877 **met** | **0.892 met** |
+| hybrid R@1 / R@5 / MRR@10 / nDCG@10 | 0.285 / 0.771 / 0.482 / 0.578 | 0.227 / 0.832 / 0.479 / 0.582 |
+| hybrid + MMR (the default search) R@10 / MRR@10 | 0.821 / 0.431 | **0.893** / 0.483 |
+| convex fusion, hybrid R@10 / MRR@10 (not the default) | 0.918 / 0.827 | 0.916 / 0.826 |
+| bm25 R@10 / MRR@10 | 0.916 / 0.827 | same |
+| vector R@10 / MRR@10 | 0.170 / 0.071 | 0.010 / 0.003 |
+| Eval set hybrid R@1 / MRR@10 / nDCG@10 (R@10 1.000) | 0.714 / 0.895 / 0.917 | 0.774 / 0.931 / 0.946 |
+| Query latency, default search p50 / p95 | 19 / 31 ms | 109 / 131 ms |
+| Query embedding p50 / p95 | 0.01 ms | 38 / 45 ms |
+| Initial ingest; embedding per 1k items | 29 s (695 files/s); 0.04 s | **4.0 h** (14,528 s, 1.38 files/s); 724 s |
+| Freshness p50 / p95 / max (target p95 ≤ 60 s); propagation | 0.56 / 0.70 / 0.81 s; all 1.0 | 1.50 / 3.37 / 5.19 s; all 1.0 |
+| Peak RSS: bench / embedding server; DB at the end | 210 MiB / –; 81 MB | 307 / 195 MiB; 295 MB |
+
+**Reading these.** With the real embedder the M1 gate passes at every scale (quick 0.970, standard
+0.938 as a tie, full 0.892, against 0.930 / 0.938 / 0.874), and the default search (hybrid + MMR)
+gains 7–9 points of recall@10 over the hash embedder at standard and full scale. The vector leg
+still has no signal on this made-up-word corpus, so hybrid recall@1 and MRR stay below bm25 alone
+(rank fusion, see above). The cost is time: on a 2-core CPU, embedding a fresh 20,000-file corpus
+takes 4 hours (1.4–3.1 files/s depending on the CPU), queries take 30–110 ms instead of 5–20 ms, and
+a single change takes 1.5–3.4 s to become searchable instead of 0.6 s, still far inside the 60 s
+target.
 
 ### Ask answer quality (EE3)
 

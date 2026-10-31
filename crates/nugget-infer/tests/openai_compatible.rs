@@ -229,6 +229,36 @@ async fn embeddings_batch_and_keep_order() {
     assert!(p.embed(&[]).await.unwrap().is_empty());
 }
 
+/// GG8-6: each embeddings request's ledger row lists the items its texts came from.
+#[tokio::test]
+async fn embedding_ledger_rows_list_their_items() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/embeddings"))
+        .respond_with(EmbedResponder)
+        .mount(&server)
+        .await;
+    let (p, sink) = provider(
+        &format!("{LOCAL}\nembed_batch_size = 2\nlocality = \"local_network\""),
+        &format!("{}/v1", server.uri()),
+    );
+    let item = |k: &str| nugget_core::ids::ItemRef {
+        source: nugget_core::ids::SourceId::new("notes"),
+        key: nugget_core::ids::ItemKey::new(k),
+    };
+    let texts: Vec<String> = ["a1", "a2", "b1"].iter().map(|s| s.to_string()).collect();
+    p.embed_items(&texts, &[item("a"), item("a"), item("b")])
+        .await
+        .unwrap();
+    let rows: Vec<_> = sink
+        .events()
+        .into_iter()
+        .filter(|e| e.feature == "embed")
+        .map(|e| e.items)
+        .collect();
+    assert_eq!(rows, vec![vec![item("a")], vec![item("b")]]);
+}
+
 /// The `input` arrays of every embeddings request `server` received, in order.
 async fn embed_inputs(server: &MockServer) -> Vec<Vec<String>> {
     server
